@@ -2,6 +2,8 @@ Flux is a mix of C++, Zig, and Python.
 
 Whitespace is ignored, and semicolons **must** follow `code_braces{};` or `state = ments;`
 
+This makes the position of semicolons ***extremely*** predictable, and easy to debug.
+
 All Flux code and examples will be written with Allman style braces.
 
 Flux has literal ***object*-oriented programming** by having an `object` keyword.
