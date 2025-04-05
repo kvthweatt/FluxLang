@@ -1,0 +1,84 @@
+%YAML 1.2
+---
+name: Flux
+file_extensions: [fx]
+scope: source.flux
+
+variables:
+  isuffix: '(?="|;)'
+
+contexts:
+  main:
+    # Comments (must come first)
+    - match: '//.*$\n?'
+      scope: comment.line.double-slash.flux
+
+    - match: '/\*'
+      scope: punctuation.definition.comment.begin.flux
+      push:
+        - meta_scope: comment.block.flux
+        - match: '\*/'
+          scope: punctuation.definition.comment.end.flux
+          pop: true
+
+    # i-strings (fixed)
+    - match: 'i"'
+      scope: string.quoted.double.flux punctuation.definition.string.begin.flux
+      push:
+        - meta_scope: string.quoted.double.flux
+        - match: '"'
+          scope: punctuation.definition.string.end.flux
+          pop: true
+        - match: '\{'
+          scope: punctuation.section.interpolation.begin.flux
+          push: interpolation_scope
+        - match: '[^"{]+'
+          scope: string.quoted.double.flux
+
+    # Regular strings
+    - match: '"'
+      scope: string.quoted.double.flux punctuation.definition.string.begin.flux
+      push:
+        - meta_scope: string.quoted.double.flux
+        - match: '"'
+          scope: punctuation.definition.string.end.flux
+          pop: true
+        - match: '\\[\\"nrt]'
+          scope: constant.character.escape.flux
+
+    # Keywords
+    - match: '\b(as|asm|and|break|case|catch|class|const|continue|data|def|default|do|else|enum|false|for|if|import|in|is|namespace|not|object|op|operator|or|return|signed|sizeof|struct|super|switch|template|this|throw|true|try|typeof|unsigned|using|void|while|xor)\b'
+      scope: keyword.control.flux
+
+    # Types
+    - match: '\b(i32|ui32|i64|ui64|float|ufloat|string|bit|bool|void|data|dict|list|type|const)\b'
+      scope: storage.type.flux
+
+    # Functions
+    - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()'
+      scope: entity.name.function.flux
+
+    # Special methods
+    - match: '__[a-z]+__'
+      scope: keyword.operator.special-method.flux
+
+    # Numbers
+    - match: '\b\d+(\.\d+)?([eE][+-]?\d+)?\b'
+      scope: constant.numeric.flux
+
+    # Hex/Binary
+    - match: '\b0x[0-9a-fA-F]+\b'
+      scope: constant.numeric.hex.flux
+    - match: '\b0b[01]+\b'
+      scope: constant.numeric.binary.flux
+
+    # Operators
+    - match: '(\+|\-|\*|\/|\%|\=\=|\!\=|\>\=|\<\=|\>\>|\<\<|\&\&|\|\||\&|\||\^|\~|\!\=|\=|\+|\-|\*\*|\:)'
+      scope: keyword.operator.flux
+
+  interpolation_scope:
+    - match: '\}'
+      scope: punctuation.section.interpolation.end.flux
+      pop: true
+    - match: '[^\}]+'
+      scope: source.flux
