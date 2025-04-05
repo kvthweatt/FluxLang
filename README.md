@@ -4,6 +4,8 @@ Whitespace is ignored, and semicolons **must** follow `code_braces{};` or `state
 
 This makes the position of semicolons ***extremely*** predictable, and easy to debug.
 
+An exception would be compound statements such as `if () {} else () {};`, note the `if` code braces do not have a semicolon because it's not the end of the statement.
+
 All Flux code and examples will be written with Allman style braces.
 
 Flux has literal ***object*-oriented programming** by having an `object` keyword.
