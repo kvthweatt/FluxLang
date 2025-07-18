@@ -4,7 +4,7 @@ Flux is a systems programming language resembling C++ and Python.
 
 This is the *reduced* language specification.
 
-The purpose of this reduced specification is to make Flux write an AST and parser for, and is less to integrate with LLVM.
+The purpose of this reduced specification is to make Flux easier to write an AST and parser for, and less work to integrate with LLVM.
 
 The goal is to create a version 1 of Flux which can be used to rewrite itself.
 
