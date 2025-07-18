@@ -12,6 +12,8 @@ Python makes dealing with arrays simplistic, but doesn't have pointers natively.
 
 If you like Flux, please consider contributing to the project or joining the [Flux Discord server](https://discord.gg/RAHjbYuNUc) where you can ask questions, provide feedback, and talk with other Flux enjoyers!
 
+**Note:** There are inconsistencies in this specification which are being fixed. Please be patient while we address them. We will not be accepting "corrections" to this specification.
+
 
 **Function definition:**
 ```
