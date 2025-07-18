@@ -569,19 +569,19 @@ def len(int[] array) -> int
 **Array comprehension:**
 ```
 // Python-style comprehension
-int[] squares = [x ^ 2 for (int x in 1..10)];
+int[10] squares = [x ^ 2 for (int x in 1..10)];
 
 // With condition
-int[] evens = [x for (int x in 1..20) if (x % 2 == 0)];
+int[20] evens = [x for (int x in 1..20) if (x % 2 == 0)];
 
 // With type conversion
-float[] floats = [(float)x for (int x in int_array)];
+float[sizeof(int_array)] floats = [(float)x for (int x in int_array)];
 
 // C++-style comprehension
-int[] squares = [x ^ 2 for (int x = 1; x <= 10; x++)];
+int[10] squares = [x ^ 2 for (int x = 1; x <= 10; x++)];
 
 // With condition
-int[] events = [x for (int x= 1; x <= 20; x++) if (x % 2 == 0)];
+int[20] events = [x for (int x= 1; x <= 20; x++) if (x % 2 == 0)];
 ```
 
 ---
