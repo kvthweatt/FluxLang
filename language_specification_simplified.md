@@ -463,32 +463,30 @@ using standard::io, standard::types;          // Only use `io` and `types` names
 **The `data` keyword:**
 //
 // Data is a variable bit width, primitive binary data type. Anything can cast to it,
-// and it can cast to any literal Flux type like char, int, or float.
+// and it can cast to any primitive like char, int, float.
 // It is intended to allow Flux programmers to build complex flexible custom types to fit their needs.
-// Data types use big-endian byte order by default.
-// Use bit manipulation operators to reorder as needed.
+// Data types use big-endian byte order by default. Manipulate bits as needed.
+// Bit-width bust always be specified.
 //
 // Syntax for declaring a datatype:
 //
-//    (const) (signed | unsigned) data {bit-width:alignment:endianness} as your_new_type
+//    (const) (signed | unsigned) data {bit-width:alignment} as your_new_type
 //
 //    Example of a non-OOP string:
 //
-//        unsigned data {8:8:1}[] as noopstr;    // Unsigned byte array
+//        unsigned data {8}[] as noopstr;    // Unsigned byte array, default alignment
 //
 // This allows the creation of primitive, non-OOP types that can construct other types.
 // `data` creates types, and types create types until an assignment occurs.
 //
-// For example, you can just keep inventing types until you assign a value like so:
+// For example, you can just keep type-chaining:
 //
 // `unsigned data{16} as dbyte;`
 // `dbyte as xbyte;`      // Type-definition with as
-// `xbyte ybyte = 0xFF;`  // ybyte is now a variable because it is assigned the value 0xFF, not a type like xbyte
+// `xbyte as ybyte;`
+// `ybyte as zbyte = 0xFF;` // zbyte = 0xFF and is type unsigned data{16}
 //
-// The endianness value can be 0 or 1 for little or big respectively.
-// Therefore `unsigned data{13:16:1} mytype;` makes an unsigned 13-bit wide, 16 bit aligned, big endian type called mytype
-// If alignment isn't specified, it is packed tightly in memory. If endianness is not specified it is big endian.
-// Bit-width must always be specified.
+// Data decays to an integer type under the hood. All data is binary, and is therefore an integer.
 ```
 import "standard.fx";
 
@@ -644,7 +642,7 @@ def main() -> int {
 ```
 
 
-**The void literal and void keywords:**
+**`void` as a literal and a keyword:**
 ```
 if (x == void) {...code...};    // If it's nothing, do something
 void x;
@@ -823,82 +821,6 @@ switch (e)
 ```
 
 
-**Compile-Time with `compt`:**
-compt is used to create anonymous blocks that are inline executed.
-Any variable declarations become global definitions in the resulting program.
-compt blocks can only be declared in global scope, never inside a function or namespace or anywhere else.
-You cannot use compt as part of grammar like `compt def x()` or `compt if()`, but you can put functions and if-statements inside your compt block.
-The Flux compiler will have the runtime built into it allowing for full Flux capabilities during comptime.
-compt blocks act as guard rails that guarantees everything inside is resolvable at compile time.
-```
-compt {
-	// This anonymous compt block will execute in-line at compile time.
-	def test1() -> void
-	{
-		global def MY_MACRO 1;
-	    return;
-	};
-
-	if (!def(MY_MACRO))
-	{
-	    test1();
-	};
-};
-```
-
-
-**Macros:**
-The `def` keyword has two abilities, making functions, and making macros. Example:
-```
-def SOME_MACRO 0x4000000;
-
-def myFunc() -> int
-{
-	if (MY_CONST_MACRO < 10)                         // Replaced with 5 at compile time
-	{
-		return -1;
-	};
-	return 0;
-};
-
-// You can also macro operators like so:
-
-def MASK_SET `&       // Set bits with mask
-def MASK_CLEAR `!&    // Clear bits with mask  
-def TOGGLE `^^        // Toggle bits
-
-// Usage becomes incredibly clean
-gpio_control MASK_SET 0x0F;     // Set lower 4 bits
-status_reg MASK_CLEAR 0xF0;     // Clear upper 4 bits
-led_state TOGGLE 0x01;          // Toggle LED bit
-```
-
-You can get C++-like `#ifdef` and `#ifndef` functionality in Flux you do `if(def)` and `if(!def)` inside a compt block:
-
-```
-compt
-{
-	if (def(MY_CONST_MACRO))
-	{
-		// Do something ...
-	}
-	elif (!def(MY_CONST_MACRO))
-	{
-		global def MY_CONST_MACRO 1;
-	};
-};
-```
-
-Macro definitions are the only thing that become global and therefore are persistent after exiting the scope of a compt function or anonymous block.
-If you define a macro inside a function, it will not be global because it is locally scoped to the function. You must use `global` to make the macro global.
-
-This means if you want pre-processor behavior, just wrap all your behavior inside an anonymous block marked `compt` anywhere in your code.
-This also means you can write entire compile-time programs, the Flux runtime is built into the compiler for this purpose.
-`compt` gives you more access to zero-cost abstractions and build time validation to catch errors before deployment.
-Bad comptime code will result in slow compile times, example writing an infinite loop in a `compt` block that doesn't resolve means it never compiles.
-If you want to write an entire Bitcoin miner in compile time, that's up to you. Your miner will run, but it will never compile unless a natural program end is reached.
-
-
 **Assertion:**
 `assert` automatically performs `throw` if the condition is false if it's inside a try/catch block,
 otherwise it automatically writes to standard error output.
@@ -918,33 +840,6 @@ def main() -> int
 	return x;
 };
 ```
-
-
-**External FFI:**
-Flux will support FFI with C to make adoption easier.
-You may only place extern blocks globally.
-```
-extern("C")
-{
-    // Memory management
-    def malloc(ui64 size) -> void*;
-    def free(void* ptr) -> void;
-    def memcpy(void* dest, void* src, ui64 n) -> void*;
-    def memset(void* s, int c, ui64 n) -> void*;
-    
-    // File I/O
-    def fopen(string filename, string mode) -> void*;
-    def fclose(void* stream) -> int;
-    def fread(void* ptr, ui64 size, ui64 count, void* stream) -> ui64;
-    def fwrite(void* ptr, ui64 size, ui64 count, void* stream) -> ui64;
-    
-    // String operations
-    def strlen(string s) -> ui64;
-    def strcpy(string dest, string src) -> string;
-    def strcmp(string s1, string s2) -> int;
-};
-```
-extern will make these definitions global. You can only prototype functions inside extern blocks, nothing else.
 
 
 **Runtime type-checking:**
@@ -971,232 +866,11 @@ int* ptr = new int;  // Allocate
 (void) casting works on both stack and heap allocated items. It can be used like `delete` or `free()`.
 
 
-**Contracts:**
-Contracts are a collection of assertion statements. They can only be attached to functions, structs, and objects since they are assertions on data.
-Contracts must refer to valid members of the function, struct, or object they are contracting.
-
-Pre-contracts must refer to valid parameters being passed.
-Post-contracts must refer to valid members of the function at the time of contract execution.
-
-Example, if you void cast anything and a contract refers to it, that will result in a use-after-free bug.
-```
-// Prototype
-contract MyContract;
-
-// Definition
-contract PreContract
-{
-	assert(typeof(a) == int, f"Invalid type passed to {this}.");
-	assert(a != 0, "Parameter must be non-zero.");
-};
-
-contract Inheritable
-{
-	assert(b != 0);
-};
-
-contract PostContract : Inheritable  // Can perform contract inheritance
-{
-	assert(typeof(a) == int, f"Invalid type passed to {this}.");
-	assert(a != 10);  // Automatically raises ContractError
-	assert(b == 5);   // ''
-};
-
-// Implementation
-def foo(int a) -> int : PreContract // Checks parameters
-{
-	int b = 5;
-	return a * 10;
-} : PostContract;   // Check just before the return
-
-// Example
-def bar(int a) -> int
-{
-	return foo(a);
-};
-
-int x = bar(1);   // Fails PostContract in foo()
-
-contract BasicContract
-{
-	assert(a != 0, "Value must be non-zero.");
-};
-
-// Contracts for structs or objects go after the definition, because : after the name is for inheritance.
-// Contracts for structs or objects only apply AFTER instantiation. They are always considered post-contracts.
-
-struct MyStruct
-{
-	int a = 0;
-} : BasicContract; // Valid until instanced.
-
-object MyObject
-{
-	int a = 0;
-
-	def __init() -> this
-	{
-		return this;
-	};
-} : BasicContract;  // Valid until instanced.
-
-MyObject someObj(); // ContractError: Object instantiation prevented.
-```
-
-
-**Operator Overloading:**
-```
-object myObj
-{
-	int x;
-
-	def __init(int a) -> this
-	{
-		this.x = a;
-	};
-
-	def __exit() -> void
-	{
-		return (void)this;
-	};
-};
-
-myObj j(1), k(2);
-
-operator (myObj a, myObj b)[+] -> myObj
-{
-	myObj newObj(a.x + b.x);
-	return newObj;
-};
-
-print(j + k);   // 3
-
-// This allows you to create operators like a chain operator:
-
-operator (int a, int b)[<-] -> int()
-{
-	return a(b());
-};
-
-// You can now do `a() <- b();` if both are integer type functions.
-
-// Valid operator characters:    `~!@#$%%^&*-+=|<>
-
-// You can do operator contracts as well
-contract opAddNonZeroInts
-{
-	assert(a != 0);
-	assert(b != 0);
-}
-
-operator (int a, int b)[+] -> int
-{
-	return a + b;
-} : opAddNonZeroInts;
-
-// Now + will only add non-zero integers in the case of two integer operand addition.
-```
-
-
-If you don't have a good reason to use contracts, you should avoid doing so.
-Contracts in compt blocks behave identically to runtime contracts, but since compt executes at compile time, a contract failure halts compilation.
-Use this for compile-time validation without runtime cost.
-
-
-**Templates:**
-<> is used after a function, object, struct, or operator name to make a template.
-```
-def myMax<T>(T x, T y) -> T
-{
-    return (x > y) ? x : y;
-};
-
-// Usage
-int k = myMax<int>(5,10);                  // 10
-
-// Multiple parameters
-def convert<V,K,R>(V x, K y) -> R
-{
-	return (R)x*y;
-};
-
-// Usage
-char n = convert<int,int,char>(5,13);     // 65 == 'A'
-```
-
-
-There is no template shadowing. Any inner T refers to the outermost T.
-You do not need to use `super.T` as this means nothing to the compiler in this context, and will be an error.
-
-
-**Custom Smart Pointers:**
-```
-object unique_ptr<T> {
-    T* ptr;
-    
-    def __init(T* p) -> this {
-        this.ptr = p;
-        return this;
-    };
-    
-    def __exit() -> void {
-        if (this.ptr == !void) {
-            (void)this.ptr;  // Explicit deallocation
-        };
-    };
-    
-    def __eq(unique_ptr<T> other) -> this {
-        if (this.ptr == !void) { (void)this.ptr; };
-        this.ptr = other.ptr;  // Transfer ownership
-        (void)other.ptr;       // Clean up
-        return this;
-    };
-};
-
-int x = 5;
-
-unique_ptr<int> a(@x);   // Alternatively `a(@new int);`
-unique_ptr<int> b;
-
-b = a;         // Ownership moved to b, a.ptr is now void
-
-doThing(a);    // Use-after-free, a no longer exists.
-```
-
-
-**Enhanced unique pointer with operators and contracts:**
-```
-contract notSame {
-	assert(@a != @b, "Cannot assign unique_ptr to itself.");
-}
-
-contract canMove : notSame {
-	assert(a.ptr != void, "Cannot move from empty unique_ptr.");
-	assert(b.ptr == void, "Destination must be void.")
-};
-
-contract didMove {
-	assert(a.ptr == void, "Move must invalidate source.");
-	assert(b.ptr != void, "Destination must now own the resource.");
-};
-
-operator (unique_ptr<int> a, unique_ptr<int> b)[=] -> unique_ptr<int> : canMove
-{
-	b.ptr = a.ptr;    // Transfer
-	a.ptr = void;     // Invalidate source
-	return b;
-} : didMove;
-```
-
-In the context of developing smart pointers and unique pointers, operators combined with contracts shine.
-This creates a selective runtime pseudo-borrow-checker. You borrow check what you want borrow checked.
-
-
 Keyword list:
 ```
-alignof, and, as, asm, assert, auto, break, bool, case, catch, compt, const, continue, contract, data,
-def, default, do, elif, else, extern, false, float, for, global, if, import, in, is, int, local,
-namespace, nand, new, nor, not, object, operator, or, private, public, return, signed, sizeof, struct,
+alignof, and, as, asm, assert, auto, break, bool, case, catch, const, continue, data,
+def, default, do, elif, else, false, float, for, global, if, import, in, is, int, local,
+namespace, nand, new, nor, not, object, or, private, public, return, signed, sizeof, struct,
 super, switch, this, throw, true, try, typeof, unsigned, using, virtual, void, volatile, while, xor
 ```
 
