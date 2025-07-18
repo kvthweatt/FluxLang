@@ -1,10 +1,16 @@
 # Flux
 
-Flux is a systems programming language mix of C++, Zig, and Python, and has a slightly more strict syntax than either of them.
+Flux is a systems programming language resembling C++ and Python.
 
-It has a steeper learning curve than either.
+This is the *reduced* language specification.
 
-Semicolons end every statement, no matter what.  You wouldn't put a semicolon after an elif{}; because 1: there must be an else, and 2: else would be the end with the semicolon.
+The purpose of this reduced specification is to make Flux write an AST and parser for, and is less to integrate with LLVM.
+
+The goal is to create a version 1 of Flux which can be used to rewrite itself.
+
+Python makes dealing with arrays simplistic, but doesn't have pointers natively. Flux solves this problem.
+
+If you like Flux, please consider contributing to the project or joining the [Flux Discord server](https://discord.gg/RAHjbYuNUc) where you can ask questions, provide feedback, and talk with other Flux enjoyers!
 
 
 **Function definition:**
