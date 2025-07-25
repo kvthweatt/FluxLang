@@ -1,19 +1,11 @@
 	.text
-	.file	"output.ll"
+	.file	"test.ll"
 	.globl	main                            # -- Begin function main
 	.p2align	4, 0x90
 	.type	main,@function
 main:                                   # @main
 	.cfi_startproc
 # %bb.0:                                # %entry
-	movl	$0, -4(%rsp)
-	movl	-4(%rsp), %eax
-	.p2align	4, 0x90
-.LBB0_1:                                # %while.cond
-                                        # =>This Inner Loop Header: Depth=1
-	cmpl	$1000000000, %eax               # imm = 0x3B9ACA00
-	jge	.LBB0_1
-# %bb.2:                                # %while.end
 	xorl	%eax, %eax
 	retq
 .Lfunc_end0:

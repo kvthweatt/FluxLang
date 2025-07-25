@@ -108,6 +108,8 @@ class FluxParser:
         """
         if self.expect(TokenType.IMPORT):
             return self.import_statement()
+        elif self.expect(TokenType.USING):
+            return self.using_statement()
         elif self.expect(TokenType.DEF):
             return self.function_def()
         elif self.expect(TokenType.UNION):
@@ -177,6 +179,24 @@ class FluxParser:
         module_name = self.consume(TokenType.STRING_LITERAL).value
         self.consume(TokenType.SEMICOLON)
         return ImportStatement(module_name)
+    
+    def using_statement(self) -> UsingStatement:
+        """
+        using_statement -> 'using' namespace_path (',' namespace_path)* ';'
+        namespace_path -> IDENTIFIER ('::' IDENTIFIER)*
+        """
+        self.consume(TokenType.USING)
+        
+        # Parse namespace path (e.g., "standard::io")
+        namespace_path = self.consume(TokenType.IDENTIFIER).value
+        while self.expect(TokenType.SCOPE):  # ::
+            self.advance()
+            namespace_path += "::" + self.consume(TokenType.IDENTIFIER).value
+        
+        # For now, handle only single namespace per statement
+        # TODO: Add support for comma-separated namespaces
+        self.consume(TokenType.SEMICOLON)
+        return UsingStatement(namespace_path)
     
     def function_def(self) -> FunctionDef:
         """
@@ -528,11 +548,11 @@ class FluxParser:
         
         if base_type == DataType.DATA and self.expect(TokenType.LEFT_BRACE):
             self.advance()
-            bit_width = int(self.consume(TokenType.INTEGER).value)
+            bit_width = int(self.consume(TokenType.INTEGER).value, 0)
             
             if self.expect(TokenType.COLON):
                 self.advance()
-                alignment = int(self.consume(TokenType.INTEGER).value)
+                alignment = int(self.consume(TokenType.INTEGER).value, 0)
             
             self.consume(TokenType.RIGHT_BRACE)
         
@@ -544,7 +564,7 @@ class FluxParser:
             is_array = True
             self.advance()
             if not self.expect(TokenType.RIGHT_BRACKET):
-                array_size = int(self.consume(TokenType.INTEGER).value)
+                array_size = int(self.consume(TokenType.INTEGER).value, 0)
             self.consume(TokenType.RIGHT_BRACKET)
         
         # Pointer specification
@@ -581,6 +601,31 @@ class FluxParser:
         elif self.expect(TokenType.THIS):
             self.advance()
             return DataType.THIS
+        # Fixed-width integer types
+#        elif self.expect(TokenType.UINT8):
+#            self.advance()
+#            return DataType.UINT8
+#        elif self.expect(TokenType.UINT16):
+#            self.advance()
+#            return DataType.UINT16
+#        elif self.expect(TokenType.UINT32):
+#            self.advance()
+#            return DataType.UINT32
+#        elif self.expect(TokenType.UINT64):
+#            self.advance()
+#            return DataType.UINT64
+#        elif self.expect(TokenType.INT8):
+#            self.advance()
+#            return DataType.INT8
+#        elif self.expect(TokenType.INT16):
+#            self.advance()
+#            return DataType.INT16
+#        elif self.expect(TokenType.INT32):
+#            self.advance()
+#            return DataType.INT32
+#        elif self.expect(TokenType.INT64):
+#            self.advance()
+#            return DataType.INT64
         elif self.expect(TokenType.IDENTIFIER):
             # Custom type - for now treat as DATA
             self.advance()
@@ -603,7 +648,9 @@ class FluxParser:
             # Must have a base type
             if not self.expect(TokenType.INT, TokenType.FLOAT_KW, TokenType.CHAR, 
                              TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
-                             TokenType.IDENTIFIER):
+                             TokenType.IDENTIFIER):#, TokenType.UINT8, TokenType.UINT16,
+                             #TokenType.UINT32, TokenType.UINT64, TokenType.INT8,
+                             #TokenType.INT16, TokenType.INT32, TokenType.INT64):
                 return False
             
             self.advance()
@@ -1299,7 +1346,7 @@ class FluxParser:
             self.consume(TokenType.RIGHT_PAREN)
             return FunctionCall("xor", args)
         elif self.expect(TokenType.INTEGER):
-            value = int(self.current_token.value)
+            value = int(self.current_token.value, 0)
             self.advance()
             return Literal(value, DataType.INT)
         elif self.expect(TokenType.FLOAT):

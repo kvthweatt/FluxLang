@@ -15,7 +15,20 @@ class FluxCompiler:
     def __init__(self, /, verbosity: int = None):
         self.verbosity = int(verbosity) if verbosity != None else None
         self.module = ir.Module(name="flux_module")
-        self.module.triple = "x86_64-pc-linux-gnu"
+        import platform
+        if platform.system() == "Darwin":  # macOS
+            # Detect macOS architecture
+            import subprocess
+            try:
+                arch = subprocess.check_output(["uname", "-m"], text=True).strip()
+                if arch == "arm64":
+                    self.module.triple = "arm64-apple-macosx11.0.0"
+                else:
+                    self.module.triple = "x86_64-apple-macosx10.15.0"
+            except:
+                self.module.triple = "arm64-apple-macosx11.0.0"  # Default to ARM64
+        else:  # Linux and others
+            self.module.triple = "x86_64-pc-linux-gnu"
         #self.module.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
         self.temp_files = []
 
@@ -46,7 +59,7 @@ class FluxCompiler:
             
             # Create temp directory
             base_name = Path(filename).stem
-            temp_dir = Path(f"flux_build_{base_name}")
+            temp_dir = Path(f"build/{base_name}")
             temp_dir.mkdir(exist_ok=True)
             
             # 2. Generate LLVM IR file
@@ -55,29 +68,37 @@ class FluxCompiler:
                 f.write(llvm_ir)
             self.temp_files.append(ll_file)
             
-            # 3. Compile to assembly
-            asm_file = temp_dir / f"{base_name}.s"
-            subprocess.run([
-                "llc",
-                "-O2",               # Enable optimizations
-                str(ll_file),
-                "-o", str(asm_file)
-            ], check=True)
-            self.temp_files.append(asm_file)
-
-            if self.verbosity == 3:
-                with open(asm_file, "r") as f:
-                    f.seek(0)
-                    print(f.read())
-            
-            # 4. Assemble to object file
+            # 3. Compile directly to object file (skip assembly step on macOS)
             obj_file = temp_dir / f"{base_name}.o"
-            subprocess.run([
-                "as",
-                "--64",              # Force 64-bit mode
-                str(asm_file),
-                "-o", str(obj_file)
-            ], check=True)
+            import platform
+            if platform.system() == "Darwin":  # macOS
+                # Compile directly to object file to avoid assembly issues
+                subprocess.run([
+                    "llc",
+                    "-O2",               # Enable optimizations  
+                    "-filetype=obj",     # Output object file directly
+                    str(ll_file),
+                    "-o", str(obj_file)
+                ], check=True)
+            else:  # Linux - use traditional assembly step
+                asm_file = temp_dir / f"{base_name}.s"
+                subprocess.run([
+                    "llc",
+                    "-O2",               # Enable optimizations
+                    str(ll_file),
+                    "-o", str(asm_file)
+                ], check=True)
+                self.temp_files.append(asm_file)
+
+                if self.verbosity == 3:
+                    with open(asm_file, "r") as f:
+                        f.seek(0)
+                        print(f.read())
+                
+                subprocess.run([
+                    "as", "--64", str(asm_file), "-o", str(obj_file)
+                ], check=True)
+            
             self.temp_files.append(obj_file)
 
             if self.verbosity == 4:
@@ -90,12 +111,13 @@ class FluxCompiler:
             
             # 5. Link executable
             output_bin = output_bin or f"./{base_name}"
-            subprocess.run([
-                "gcc",
-                "-no-pie",          # Disable position-independent executable
-                str(obj_file),
-                "-o", output_bin
-            ], check=True)
+            link_args = [str(obj_file), "-o", output_bin]
+            
+            if platform.system() == "Darwin":  # macOS
+                # Use clang for linking on macOS
+                subprocess.run(["clang"] + link_args, check=True)
+            else:  # Linux
+                subprocess.run(["gcc", "-no-pie"] + link_args, check=True)
             
             print(f"Successfully built: {output_bin}")
             return output_bin
@@ -139,20 +161,10 @@ def main():
         input_file = sys.argv[1]
         output_bin = sys.argv[2] if len(sys.argv) > 2 else None
         for arg in sys.argv:
-            match (arg.lower()[0:2]):
-                case ("-v"):
-                    match (arg.lower()[2:]):
-                        case ("0"):
-                            verbosity = int(arg[2:])
-                        case ("1"):
-                            verbosity = int(arg[2:])
-                        case ("2"):
-                            verbosity = int(arg[2:])
-                        case ("3"):
-                            verbosity = int(arg[2:])
-                        case ("4"):
-                            verbosity = int(arg[2:])
-                case ("-o"):
+            if arg.lower().startswith("-v"):
+                if len(arg) > 2 and arg[2:].isdigit():
+                    verbosity = int(arg[2:])
+            elif arg.lower() == "-o":
                     with open(input_file, 'r') as f:
                         source = f.read()
                     lexer = FluxLexer(source)

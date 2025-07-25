@@ -87,6 +87,16 @@ class TokenType(Enum):
     WHILE = auto()
     XOR = auto()
     
+    # Fixed-width integer types
+#    UINT8 = auto()
+#    UINT16 = auto()
+#    UINT32 = auto()
+#    UINT64 = auto()
+#    INT8 = auto()
+#    INT16 = auto()
+#    INT32 = auto()
+#    INT64 = auto()
+    
     # Operators
     PLUS = auto()           # +
     MINUS = auto()          # -
@@ -219,7 +229,16 @@ class FluxLexer:
             'void': TokenType.VOID,
             'volatile': TokenType.VOLATILE,
             'while': TokenType.WHILE,
-            'xor': TokenType.XOR
+            'xor': TokenType.XOR,
+            # Fixed-width integer types
+            #'uint8': TokenType.UINT8,
+            #'uint16': TokenType.UINT16,
+            #'uint32': TokenType.UINT32,
+            #'uint64': TokenType.UINT64,
+            #'int8': TokenType.INT8,
+            #'int16': TokenType.INT16,
+            #'int32': TokenType.INT32,
+            #'int64': TokenType.INT64
         }
     
     def current_char(self) -> Optional[str]:
