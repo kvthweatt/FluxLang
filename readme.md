@@ -54,7 +54,7 @@ object unique_ptr<T>
 
 operator (unique_ptr<T> L, unique_ptr<T> R)[=] -> unique_ptr<T>
 {
-    if (L.ptr == !void) { (void)L.ptr; };
+    if (L.ptr != void) { L.ptr = void; };
     L.ptr = R.ptr;  // Transfer ownership
     (void)R.ptr;    // Clean up
     return L;
