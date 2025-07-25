@@ -351,7 +351,7 @@ For example, you can just keep type-chaining:
 `unsigned data{16} as dbyte;`  
 `dbyte as xbyte;`  
 `xbyte as ybyte;`  
-`ybyte as zbyte = 0xFF;`
+`ybyte zbyte = 0xFF;`
 
 Data decays to an integer type under the hood. All data is binary, and is therefore an integer.
 
@@ -1123,13 +1123,38 @@ operator (unique_ptr<int> a, unique_ptr<int> b)[=] -> unique_ptr<int> : canMove
 In the context of developing smart pointers and unique pointers, operators combined with contracts shine.
 This creates a selective runtime pseudo-borrow-checker. You borrow check what you want borrow checked.
 
+---
+
+## Traits
+Traits are contracts imposed on objects dictating they __must__ implement the defined prototypes.
+```
+trait Drawable
+{
+	def draw() -> void;
+};
+
+
+// Implementation
+Drawable object myObj
+{
+	def draw() -> void
+	{
+		// Implementation code, if the block is empty the compiler throws an error.
+	};
+
+	// ... other methods ...
+};
+```
+
+---
+
 Keyword list:
 
 ```
 alignof, and, as, asm, assert, auto, break, bool, case, catch, compt, const, continue, data, def, default, do,
 elif, else, extern, false, float, for, from, global, if, import, in, is, int, namespace, new, not, object, operator,
-private, public, return, signed, sizeof, struct, super, switch, this, throw, true, try, typeof, union, unsigned,
-void, volatile, while, xor
+private, public, return, signed, sizeof, struct, super, switch, this, throw, true, try, trait, typeof, union,
+unsigned, using, void, volatile, while, xor
 ```
 
 Literal types:

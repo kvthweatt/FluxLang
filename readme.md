@@ -4,7 +4,7 @@
 
 Flux is a systems programming language, visually resembling C++, Rust, and Python.
 
-For the full specification, go [here](https://github.com/kvthweatt/FluxLang/blob/main/docs/lang_spec.md).
+For the full specification, go [here](https://github.com/kvthweatt/FluxLang/blob/main/docs/lang_spec_full.md).
 
 ---
 
