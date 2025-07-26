@@ -1,18 +1,7 @@
-int a = 0;
+unsigned data{8}[] as noopstr;
 
 def main() -> int
 {
-    switch (a)
-    {
-        case (0)
-        {
-            a = 1;
-        }
-        default
-        {
-            a = -1;
-        };
-    };
-
-	return a;
+    noopstr str = "Test";
+    return 0;
 };

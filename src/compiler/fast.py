@@ -539,8 +539,28 @@ class VariableDeclaration(ASTNode):
 		# Handle local variables
 		alloca = builder.alloca(llvm_type, name=self.name)
 		if self.initial_value:
-			init_val = self.initial_value.codegen(builder, module)
-			builder.store(init_val, alloca)
+			# Handle string literals specially
+			if (isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR):
+				if isinstance(llvm_type, ir.PointerType):
+					# Create global string constant
+					str_val = ir.Constant(ir.ArrayType(ir.IntType(8)), bytearray(self.initial_value.value.encode('utf-8') + b'\0'))
+					gv = ir.GlobalVariable(module, str_val.type, name=f".str.{self.name}")
+					gv.linkage = 'internal'
+					gv.global_constant = True
+					gv.initializer = str_val
+					
+					# Get pointer to the string
+					zero = ir.Constant(ir.IntType(32), 0)
+					str_ptr = builder.gep(gv, [zero, zero], name=f"{self.name}.ptr")
+					builder.store(str_ptr, alloca)
+				else:
+					# For non-pointer data types, just store the first character
+					char_val = ir.Constant(ir.IntType(8), ord(self.initial_value.value[0]))
+					builder.store(char_val, alloca)
+			else:
+				# Regular initialization
+				init_val = self.initial_value.codegen(builder, module)
+				builder.store(init_val, alloca)
 		
 		builder.scope[self.name] = alloca
 		return alloca

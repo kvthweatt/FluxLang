@@ -13,25 +13,31 @@ A Flux program must have a main() function, and must be defined in global scope.
 
 ---
 
-## **Function definition:**
+## **Functions:**
+**Syntax:**
 ```
 def name (parameters) -> return_type
 {
 	return return_value;
 };
+```
 
-// Example function
+**Example:**
+```
 def myAdd(int x, int y) -> int
 {
 	return x + y;
 };
+```
 
-// Overloading
+**Overloading:**
+```
 def myAdd(float x, float y) -> float
 {
 	return x + y;
 };
 ```
+
 **Recursion:**
 ```
 def rsub(int x, int y) -> int
@@ -57,12 +63,15 @@ import "types.fx", "binops.fx";
 **types.fx module:**  
 The standard types found in Flux that are not included keywords.  
 This is an excerpt and not a complete list of all types defined in the standard library of types.
+
+**32-bit wide types**
 ```
-// 32-bit wide types
 signed   data{32} as  i32;
 unsigned data{32} as ui32;
+```
 
-// 64-bit wide types
+**64-bit wide types**
+```
 signed   data{64} as  i64;
 unsigned data{64} as ui64;
 ```
@@ -114,8 +123,6 @@ __init()       -> this               Example: thisObj newObj();            // Co
 __exit()       -> void               Example: newObj.__exit();             // Destructor
 ```
 
-Objects and structs cannot be defined inside of a function, they must be within a namespace, another object, or global scope.  
-This is to make functions easier to read.  
 `__init` is always called on object instantiation.  
 `__exit` is always called on object destruction, or called manually to destroy the object.  
 
@@ -213,6 +220,8 @@ Structs are non-executable.
 Structs cannot contain function definitions, or object definitions, or anonymous blocks because structs are data-only with no behavior.  
 Objects are functional with behavior and are executable.  
 Structs cannot contain objects, but objects can contain structs. This means struct template parameters cannot be objects.  
+Objects and structs cannot be defined inside of a function, they must be within a namespace, another object, or global scope.  
+This is to make functions easier to read.
 
 ---
 
@@ -466,30 +475,41 @@ string a = "Test";
 string* pa = @a;
 *pa += "ing!";
 print(a);
-// Result: "Testing!"
+```
+Result: "Testing!"
 
 
-// Pointers to variables:
+**Pointers to variables:**
+```
 int idata = 0;
 int *p_idata = @idata;
 
 *p_idata += 3;
-print(idata);  // 3
+print(idata);
+```
+Result: 3
 
-
-// Pointers to functions:
+**Pointers to functions:**
+```
 def add(int x, int y) -> int { return x + y; };
 def sub(int x, int y) -> int { return x - y; };
 
 // Function pointer declarations
 int *p_add(int,int) = @add;
 int *p_sub(int,int) = @sub;
+```
 
-// Must dereference to call
-print(*p_add(0,3)); // 3
-print(*p_sub(5,2)); // 3
+**Must dereference to call**
+```
+print(*p_add(0,3));
+print(*p_sub(5,2));
+```
+Result:  
+3  
+3
 
-// Pointers to objects, structs, arrays:
+**Pointers to objects, structs, arrays:**
+```
 object    myObj {};                 // Definition
 object* p_myObj = @myObj;           // Pointer
 
@@ -498,8 +518,10 @@ struct* p_myStruct = @myStruct;     // Pointer
 
 int[]   i_array;                    // Definition
 int[]* pi_array = @i_array;         // Pointer
+```
 
-// Pointer Arithmetic:
+**Pointer Arithmetic:**
+```
 import "standard.fx";
 
 using standard::io, standard::types;
@@ -522,28 +544,6 @@ def main() -> int
 
     return 0;
 };
-```
-
-**Array and pointer operations based on data types:**
-```
-unsigned data{16::0}[] as larray3 little_array[3] = {0x1234, 0x5678, 0x9ABC};
-// Memory: [34 12] [78 56] [BC 9A]
-
-unsigned data{16::0}* as ptr myptr = @little_array;
-*myptr;     // 0x1234 (correct little-endian interpretation)
-myptr++;    // Advances 2 bytes
-*myptr;     // 0x5678 (correct little-endian interpretation)
-
-// But if you reinterpret...
-unsigned data{16::1}* as big_ptr mybigptr = (unsigned data{16::1}*)myptr;
-*mybigptr; // 0x7856 (raw bytes [78 56] interpreted as big-endian)
-
-// Reading network data (big-endian protocol)
-unsigned data{16::1} as word network_port = {0x1F90};
-// Gets 0x1F90 from network bytes [1F 90]
-
-// Need to store in little-endian local format?
-word local_port = (unsigned data{16::0})((network_port >> 8) | (network_port << 8)); // Explicit byte swap - you write exactly what you want
 ```
 ---
 
@@ -573,12 +573,12 @@ You can also write volatile constant expressions like so,
 ## **alignof, sizeof, typeof:**  
 All of these can be performed at comptime or runtime.
 ```
-unsigned data{8:8}[] as string;
+unsigned data{8:8}[] as noopstr;
 signed data{13:16} as strange;
 
-sizeof(string);   // 8
-alignof(string);  // 8
-typeof(string);   // unsigned data{8:8}*
+sizeof(noopstr);   // 8
+alignof(noopstr);  // 8
+typeof(noopstr);   // unsigned data{8:8}*
 
 sizeof(strange);  // 13
 alignof(strange); // 16
@@ -672,7 +672,7 @@ Point1 newPoint1 = serialized from myPoint1;  // Deserialize
 Since deserialization only cares that the size of the serialized data equals the size of the struct.  
 For example, struct `Point2` has the same size as `Point1`, but the internal datatypes are different.
 ```
-struct Point2 { i16 a, b, c, d; }; // Still 64 bits wide
+struct Point2 { i16 a, b, c, d; };             // Still 64 bits wide
 
 Point2 myPoint2 = {a = 5, b = 10, c = 20, d = 40};
 
@@ -792,12 +792,13 @@ def myFunc() -> int
 	};
 	return 0;
 };
+```
 
-// You can also macro operators like so:
-
-def MASK_SET `&       // Set bits with mask
-def MASK_CLEAR `!&    // Clear bits with mask
-def TOGGLE `^^        // Toggle bits
+**You can also macro operators like so:**
+```
+def MASK_SET `&;       // Set bits with mask
+def MASK_CLEAR `!&;    // Clear bits with mask
+def TOGGLE `^^;        // Toggle bits
 
 // Usage becomes incredibly clean
 gpio_control MASK_SET 0x0F;     // Set lower 4 bits
@@ -805,23 +806,18 @@ status_reg MASK_CLEAR 0xF0;     // Clear upper 4 bits
 led_state TOGGLE 0x01;          // Toggle LED bit
 
 // Network byte order operations
-def HTONSL <<8
-def HTONSR >>8    // Host to network short
-def ROTL <<       // Rotate left
-def ROTR >>       // Rotate right
-def SBOX `^       // S-box substitution
-def PERMUTE `!&   // Bit permutation
-def NTOHSR >>8    // Network to host short
-def NTOHSL <<8    // Network to host short
+def HTONSL <<8;
+def HTONSR >>8;    // Host to network short
+def ROTL <<;       // Rotate left
+def ROTR >>;       // Rotate right
+def SBOX `^;       // S-box substitution
+def PERMUTE `!&;   // Bit permutation
+def NTOHSR >>8;    // Network to host short
+def NTOHSL <<8;    // Network to host short
 
 // Checksum operations
-def CHECKSUM_ADD `+
-def CHECKSUM_XOR `^^
-
-def ROTL <<         // Rotate left
-def ROTR >>         // Rotate right
-def SBOX `^          // S-box substitution
-def PERMUTE `!&      // Bit permutation
+def CHECKSUM_ADD `+;
+def CHECKSUM_XOR `^^;
 ```
 
 It can also work to act like C++'s `#ifdef` and `#ifndef`, in Flux you do `if(def)` and `if(!def)` inside a compt block:
