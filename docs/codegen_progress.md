@@ -55,3 +55,6 @@
 - **VariableDeclaration**
 - **WhileLoop**
 - **XorStatement**
+## AST classes without codegen() methods:
+- **DataType**
+- **Operator**
