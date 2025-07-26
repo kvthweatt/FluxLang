@@ -1,12 +1,18 @@
-//import "types.fx";
-
-union myU
-{
-    int x;
-    bool y;
-};
+int a = 0;
 
 def main() -> int
 {
-    return 0;
+    switch (a)
+    {
+        case (0)
+        {
+            a = 1;
+        }
+        default
+        {
+            a = -1;
+        };
+    };
+
+	return a;
 };

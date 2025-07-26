@@ -929,14 +929,14 @@ class FluxParser:
             self.consume(TokenType.LEFT_PAREN)
             value = self.expression()
             self.consume(TokenType.RIGHT_PAREN)
+            body = self.block()
         elif self.expect(TokenType.DEFAULT):
             self.advance()
+            body = self.block()
+            self.consume(TokenType.SEMICOLON)
             value = None
         else:
             self.error("Expected 'case' or 'default'")
-        
-        body = self.block()
-        self.consume(TokenType.SEMICOLON)
         return Case(value, body)
     
     def try_statement(self) -> TryBlock:

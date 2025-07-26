@@ -121,16 +121,19 @@ class Identifier(ASTNode):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Look up the name in the current scope
-        if self.name in builder.scope:
+        if builder.scope is not None and self.name in builder.scope:
             ptr = builder.scope[self.name]
             # Load the value if it's a pointer type
             if isinstance(ptr.type, ir.PointerType):
                 return builder.load(ptr, name=self.name)
             return ptr
         
-        # Check for global variables
+        # Check for global variables - need to load their value
         if self.name in module.globals:
-            return module.globals[self.name]
+            gvar = module.globals[self.name]
+            if isinstance(gvar.type, ir.PointerType):
+                return builder.load(gvar, name=self.name)
+            return gvar
         
         # Check if this is a custom type
         if hasattr(module, '_type_aliases') and self.name in module._type_aliases:
@@ -604,6 +607,74 @@ class Assignment(Statement):
     target: Expression
     value: Expression
 
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Generate code for the value to be assigned
+        val = self.value.codegen(builder, module)
+        
+        # Handle different types of targets
+        if isinstance(self.target, Identifier):
+            # Simple variable assignment
+            if builder.scope is not None and self.target.name in builder.scope:
+                # Local variable
+                ptr = builder.scope[self.target.name]
+            elif self.target.name in module.globals:
+                # Global variable
+                ptr = module.globals[self.target.name]
+            else:
+                raise NameError(f"Unknown variable: {self.target.name}")
+            
+            builder.store(val, ptr)
+            return val
+            
+        elif isinstance(self.target, MemberAccess):
+            # Struct/object member assignment
+            obj = self.target.object.codegen(builder, module)
+            member_name = self.target.member
+            
+            if isinstance(obj.type, ir.PointerType) and isinstance(obj.type.pointee, ir.LiteralStructType):
+                struct_type = obj.type.pointee
+                if hasattr(struct_type, 'names'):
+                    try:
+                        idx = struct_type.names.index(member_name)
+                        member_ptr = builder.gep(
+                            obj,
+                            [ir.Constant(ir.IntType(32), 0),
+                             ir.Constant(ir.IntType(32), idx)],
+                            inbounds=True
+                        )
+                        builder.store(val, member_ptr)
+                        return val
+                    except ValueError:
+                        raise ValueError(f"Member '{member_name}' not found in struct")
+            
+            raise ValueError(f"Cannot assign to member '{member_name}' of non-struct type")
+            
+        elif isinstance(self.target, ArrayAccess):
+            # Array element assignment
+            array = self.target.array.codegen(builder, module)
+            index = self.target.index.codegen(builder, module)
+            
+            if isinstance(array.type, ir.PointerType) and isinstance(array.type.pointee, ir.ArrayType):
+                # Calculate element pointer
+                zero = ir.Constant(ir.IntType(32), 0)
+                elem_ptr = builder.gep(array, [zero, index], inbounds=True)
+                builder.store(val, elem_ptr)
+                return val
+            else:
+                raise ValueError("Cannot index non-array type")
+                
+        elif isinstance(self.target, PointerDeref):
+            # Pointer dereference assignment (*ptr = val)
+            ptr = self.target.pointer.codegen(builder, module)
+            if isinstance(ptr.type, ir.PointerType):
+                builder.store(val, ptr)
+                return val
+            else:
+                raise ValueError("Cannot dereference non-pointer type")
+                
+        else:
+            raise ValueError(f"Cannot assign to {type(self.target).__name__}")
+
 @dataclass
 class Block(Statement):
     statements: List[Statement] = field(default_factory=list)
@@ -736,10 +807,62 @@ class Case(ASTNode):
     value: Optional[Expression]  # None for default case
     body: Block
 
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Generate code for the case body
+        return self.body.codegen(builder, module)
+
 @dataclass
 class SwitchStatement(Statement):
     expression: Expression
     cases: List[Case] = field(default_factory=list)
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        switch_val = self.expression.codegen(builder, module)
+        
+        # Create basic blocks for each case (including default)
+        func = builder.block.function
+        case_blocks = []
+        default_block = None
+        
+        # Create blocks for all cases first
+        for case in self.cases:
+            if case.value is None:  # Default case
+                default_block = func.append_basic_block("switch_default")
+                case_blocks.append((None, default_block))
+            else:
+                case_block = func.append_basic_block(f"case_{len(case_blocks)}")
+                case_blocks.append((case.value, case_block))
+        
+        # Create the switch instruction
+        switch = builder.switch(switch_val, default_block)
+        
+        # Add all cases to the switch
+        for value, block in case_blocks:
+            if value is not None:
+                case_const = value.codegen(builder, module)
+                switch.add_case(case_const, block)
+        
+        # Generate code for each case block
+        for i, (value, case_block) in enumerate(case_blocks):
+            builder.position_at_start(case_block)
+            self.cases[i].body.codegen(builder, module)
+            
+            # Add terminator if not already present
+            if not builder.block.is_terminated:
+                if default_block:
+                    builder.branch(default_block)
+                else:
+                    # If no default, branch to function return
+                    if isinstance(func.return_type, ir.VoidType):
+                        builder.ret_void()
+                    else:
+                        builder.ret(ir.Constant(func.return_type, 0))
+        
+        # Position builder after the switch
+        merge_block = func.append_basic_block("switch_merge")
+        builder.position_at_start(merge_block)
+        
+        return None
 
 @dataclass
 class TryBlock(Statement):
