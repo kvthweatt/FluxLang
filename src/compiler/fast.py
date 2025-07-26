@@ -766,6 +766,64 @@ class DoWhileLoop(Statement):
     body: Block
     condition: Expression
 
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Get the current function or create a temporary one if in global scope
+        if builder.block is None:
+            # For global scope, create a temporary function and builder
+            func_type = ir.FunctionType(ir.VoidType(), [])
+            temp_func = ir.Function(module, func_type, name="__dowhile_temp")
+            temp_block = temp_func.append_basic_block("entry")
+            temp_builder = ir.IRBuilder(temp_block)
+            
+            # Generate the loop using the temporary builder
+            self._generate_loop(temp_builder, module)
+            
+            # Terminate the temporary function
+            temp_builder.ret_void()
+            return None
+        else:
+            # Normal case - we're inside a function
+            return self._generate_loop(builder, module)
+
+    def _generate_loop(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Internal method that generates the actual loop structure"""
+        func = builder.block.function
+        
+        # Create blocks for the loop
+        body_block = func.append_basic_block('dowhile.body')
+        cond_block = func.append_basic_block('dowhile.cond')
+        end_block = func.append_basic_block('dowhile.end')
+        
+        # Save current break/continue targets
+        old_break = getattr(builder, 'break_block', None)
+        old_continue = getattr(builder, 'continue_block', None)
+        builder.break_block = end_block
+        builder.continue_block = cond_block
+        
+        # Jump to the body block (do-while always executes body first)
+        builder.branch(body_block)
+        
+        # Generate the body
+        builder.position_at_start(body_block)
+        self.body.codegen(builder, module)
+        
+        # If body didn't terminate, branch to condition
+        if not builder.block.is_terminated:
+            builder.branch(cond_block)
+        
+        # Generate the condition
+        builder.position_at_start(cond_block)
+        cond_val = self.condition.codegen(builder, module)
+        builder.cbranch(cond_val, body_block, end_block)
+        
+        # Restore break/continue targets
+        builder.break_block = old_break
+        builder.continue_block = old_continue
+        
+        # Position builder at end block
+        builder.position_at_start(end_block)
+        return None
+
 @dataclass
 class ForLoop(Statement):
     init: Optional[Statement]

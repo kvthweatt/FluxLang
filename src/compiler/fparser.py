@@ -122,6 +122,8 @@ class FluxParser:
             return self.namespace_def()
         elif self.expect(TokenType.IF):
             return self.if_statement()
+        elif self.expect(TokenType.DO):
+            return self.do_while_statement()
         elif self.expect(TokenType.WHILE):
             return self.while_statement()
         elif self.expect(TokenType.FOR):
