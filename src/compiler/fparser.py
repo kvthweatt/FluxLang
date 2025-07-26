@@ -160,6 +160,10 @@ class FluxParser:
                     return self.function_def()
                 else:
                     return self.variable_declaration_statement()
+        elif self.expect(TokenType.VOLATILE):
+            self.advance()
+            if self.expect(TokenType.ASM):
+                return self.asm_statement()
         elif self.expect(TokenType.SEMICOLON):
             self.advance()
             return None
