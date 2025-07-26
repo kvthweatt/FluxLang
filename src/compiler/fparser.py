@@ -2,6 +2,12 @@
 """
 Flux Language Parser
 
+Copyright (C) 2025 Karac Thweatt
+
+Contributors:
+
+    Piotr Bednarski
+
 A recursive descent parser for the Flux programming language.
 Converts tokens from the lexer into an Abstract Syntax Tree (AST).
 

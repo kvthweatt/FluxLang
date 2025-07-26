@@ -1,5 +1,12 @@
+#!/usr/bin/env python3
 """
 Flux Compiler with Full Toolchain Integration
+
+Copyright (C) 2025 Karac Thweatt
+
+Contributors:
+
+    Piotr Bednarski
 """
 
 import sys

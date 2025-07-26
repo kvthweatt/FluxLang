@@ -1,3 +1,14 @@
+#!/usr/bin/env python3
+"""
+Flux Abstract Syntax Tree
+
+Copyright (C) 2025 Karac Thweatt
+
+Contributors:
+
+    Piotr Bednarski
+"""
+
 from dataclasses import dataclass, field
 from typing import List, Any, Optional, Union, Tuple, ClassVar
 from enum import Enum

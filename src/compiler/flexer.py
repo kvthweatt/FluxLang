@@ -2,6 +2,13 @@
 """
 Flux Language Lexer - Command Line Tool
 
+Copyright (C) 2025 Karac Thweatt
+
+Contributors:
+
+    Piotr Bednarski
+
+
 Usage:
     python3 flexer.py file.fx          # Basic token output
     python3 flexer.py file.fx -v       # Verbose output with token positions
