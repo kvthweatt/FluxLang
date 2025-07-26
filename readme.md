@@ -78,16 +78,7 @@ doThing(a);    // Use-after-free, a no longer exists.
 
 ## Implemented Keywords
 
-This is a list of keywords which do have LLVM `codegen()` methods attached to their AST counterparts.
-
-i. All primitive types: `int`, `float`, `bool`, `char`, `data`  
-ii. `Type` types: `union`, `struct`, `object` - and instances of each  
-iii. Namespaces  
-iv. Functions  
-v. Prototypes / Forward Declarations  
-vi. `if/elif/else`
-vii. `while`
-viii. `asm`
+[This is a list](https://github.com/kvthweatt/FluxLang/blob/main/docs/codegen_progress.md) of AST classes that have LLVM `codegen()` methods.
 
 By using assembly you can do system calls.  
 `extern` for FFI is planned. Please be patient.
