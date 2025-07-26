@@ -80,6 +80,8 @@ doThing(a);    // Use-after-free, a no longer exists.
 
 [This is a list](https://github.com/kvthweatt/FluxLang/blob/main/docs/codegen_progress.md) of AST classes that have LLVM `codegen()` methods.
 
+[This is a table](https://github.com/kvthweatt/FluxLang/blob/main/docs/keyword_progress.md) of keywords showing their implementation status.
+
 By using assembly you can do system calls.  
 `extern` for FFI is planned. Please be patient.
 
