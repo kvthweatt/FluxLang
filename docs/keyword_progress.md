@@ -19,15 +19,18 @@
   </tr>
   <tr>
     <td>asm</td>
-    <td>Partially Implemented ⚠️</td>
+    <td>Partially Implemented ⚠️<br><br>
+        Causes functions to not compile.</td>
   </tr>
   <tr>
     <td>assert</td>
-    <td>Implemented ✅</td>
+    <td>Partially Implemented ⚠️<br><br>
+        `codegen` missing.</td>
   </tr>
   <tr>
     <td>auto</td>
-    <td>Not Implemented ❌</td>
+    <td>Partially Implemented ⚠️<br><br>
+        Parser needs to support auto in `statement()`.</td>
   </tr>
   <tr>
     <td>bool</td>
@@ -35,7 +38,7 @@
   </tr>
   <tr>
     <td>break</td>
-    <td>Implemented ✅</td>
+    <td>Not Implemented ❌</td>
   </tr>
   <tr>
     <td>case</td>
@@ -43,7 +46,7 @@
   </tr>
   <tr>
     <td>catch</td>
-    <td>Implemented ✅</td>
+    <td>Not Implemented ❌</td>
   </tr>
   <tr>
     <td>const</td>
@@ -51,7 +54,7 @@
   </tr>
   <tr>
     <td>continue</td>
-    <td>Implemented ✅</td>
+    <td>Not Implemented ❌</td>
   </tr>
   <tr>
     <td>data</td>
@@ -95,7 +98,8 @@
   </tr>
   <tr>
     <td>in</td>
-    <td>Implemented ✅</td>
+    <td>Not Implemented ❌
+        Parser needs to recognize `if (x in y)`</td>
   </tr>
   <tr>
     <td>int</td>
@@ -151,11 +155,12 @@
   </tr>
   <tr>
     <td>throw</td>
-    <td>Implemented ✅</td>
+    <td>Not Implemented ❌
+        `codegen` missing.</td>
   </tr>
   <tr>
     <td>try</td>
-    <td>Implemented ✅</td>
+    <td>Not Implemented ❌</td>
   </tr>
   <tr>
     <td>union</td>
@@ -183,6 +188,8 @@
   </tr>
   <tr>
     <td>xor</td>
-    <td>Implemented ✅</td>
+    <td>Partially Implemented ⚠️<br><br>
+        Recent changes now cause issue.<br><br>
+        `while(true)` not working, "Unexpected token: BOOL"</td>
   </tr>
 </table>
