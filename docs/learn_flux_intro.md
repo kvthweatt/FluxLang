@@ -516,3 +516,84 @@ def main() -> int
 ```
 That's better. Here we see a string `"\nHello, {s}!"` but it is prefixed with an `f`. This makes this string an `f-string`. Flux also has something called an `i-string` but those are more advanced, we'll save them for later.
 
+---
+
+## String Manipulation
+We will now learn different ways we can play with strings, starting by slicing them up.
+#### 4.1 Slices
+```
+import "io.fx", "types.fx";
+
+using io::output::print, io::input::input;
+using types::string;
+
+def main() -> int
+{
+    string s();
+    s = "Testing!";
+    print(s[0:3]);
+    return 0;
+};
+```
+Result:  
+`Test`
+
+What did we just do? What is that `[0:3]` notation?  
+This is known as array slice notation.  
+It translates to "start at position 0, end at position 3". That totals 4 bytes, or `"Test"`.  
+- `[x:y]`  
+**x** is the starting point, and **y** is the ending point.
+
+#### 4.2 Reverse a String
+```
+import "io.fx", "types.fx";
+
+using io::output::print, io::input::input;
+using types::string;
+
+def main() -> int
+{
+    string s();
+    s = "Testing!";
+    len = (sizeof(s) / 8) - 1;
+    print(s[len:0]);
+    return 0;
+};
+```
+Result:  
+`!gnitseT`
+
+To reverse an array, which is what a string is, we do `[len - 1:0]`.
+If the first parameter is larger than the second, it means we're traversing the array in descending order.
+
+- **Why do we subtract 1 from the length of the string?**  
+Computers count starting at 0, meaning 9 is the 10th number when computers count. If my string length is 10, that means the last element is at position 9. Position 10 is outside of the array, and as far as the computer is concerned, position 10 is undefined. It's like saying:  
+**[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]** 10  
+You can do this, but it may result in a crash or undefined behavior.  
+This is why we must always be aware of our data types, sizes, and array lengths.
+
+#### 4.3 The `sizeof()` Keyword
+Characters are one byte in size. Strings are an array of bytes, interpreted as characters.  
+If I have 40 characters, that's 40 bytes.  
+`sizeof()` returns the size of something in bits, not bytes.  
+This means we must be aware of the bit length of our types.
+```
+import "io.fx", "types.fx";
+
+using io::output::print, io::input::input;
+using types::string;
+
+def main() -> int
+{
+    string s();
+    s = "Testing!";
+    len = sizeof(s) / 8;
+    print(f"The size of s is {len} bytes long.");
+    return 0;
+};
+```
+Result:  
+`The size of s is 8 bytes long.`
+
+Why didn't we subtract 1 from `len` this time? Because we're not using `len` to index the string.
+Why did we divide by 8? Because if the size of a byte is 8 bits, and our data length is 80 bits, that means there are 10 bytes.
