@@ -36,7 +36,7 @@ All of this information will become useful later. For now, let's begin learning 
 
 ---
 
-## Fundamentals  
+## 1 - Fundamentals  
 Flux sits broadly between high and low level. What is that you ask?  
 High level languages are languages that are very close to human language. A good example is Python.  
 While Python isn't compiled, it still creates programs.
@@ -222,7 +222,7 @@ We're going to start off doing something very simple. We're not going to see any
 Flux program have a `main()` function. `main()` is called by your operating system automatically.  
 Not having a `main()` function will result in a compilation error. Compiling programs without a `main()` function is how we create libraries. As far as we're concerned - and until we get to libraries - all programs we write **must** have a `main()` function.
 
-#### Code:
+#### f1.1:
 ```
 def main() -> int
 {
@@ -234,8 +234,29 @@ This program does nothing. It will start and immediately stop. If you compile an
 This is what you could call the skeleton of a Flux program. Any program you compile into an executable must have a main function defined in **global scope**.
 
 - **What are *global* and *scope*? What is *global scope*?**  
-A global is something that can be referred to anywhere in the program. It exists so long as it isn't destroyed or invalidated in some way. Scope is like visibility, imagine it like a one-way mirror. I can look one way, but not the other. Here's an example:
-#### Code
+A global is something that can be referred to anywhere in the program. It exists so long as it isn't destroyed or invalidated in some way. Imagine a tree:
+ <ul id="myUL">
+  <li><span class="caret">Program</span>
+    <ul class="nested">
+      <li>int a = 1</li>
+      <li><span class="caret">myFunction()</span>
+        <ul class="nested">
+          <li>int b = 0</li>
+        </ul>
+      </li>
+      <li><span class="caret">main()</span>
+        <ul class="nested">
+          <li>int c = a + b</li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+
+If we look at this tree, we can see `int a`, `myFunction()` and `main()` exist at the same level as each other.  
+Figure 2.2 demonstrates this program.
+
+#### f1.2
 ```
 // Double slashes are comments, the compiler ignores this as if it doesn't exist
 
@@ -257,7 +278,7 @@ def main() -> int
 If we try to compile this program, we will get an unknown identifier error at line 13 column 16. The unknown identifier is `b`.  
 Why is `b` unknown? As far as `main()` is aware, the only things that exist to it are `a` and `myFunction`.  
 `myFunction` is totally aware of `b` because it's in scope. How would we fix this? Like so,
-#### Code
+#### f1.3
 ```
 int a = 1;
 
@@ -273,3 +294,225 @@ def main() -> int
     return c;
 };
 ```
+
+- **What exactly is a function?**  
+A function is a section of your program which does something. A function might check if two things are equal to each other, or it might handle authorization. It does whatever you write the function to do. Algorithms are a collection of functions that when executed in a specific order achieve a desired result.
+
+In figure 1.3 we see two functions, `main()` and `myFunction()`.
+
+Program execution always begins at `main()`. The first thing that happens is we create a new integer variable named `c` and assign it the value `a + myFunction()`. In order to evaluate this, we need to know what `myFunction()` equals, so we call the function (execute it), and it returns the value `0`. Then `a + 0` is evaluated as `1 + 0` and becomes `1`. After evaluating everything to the right of the `=`, we assign the result to `c`.
+
+Take the time to make your own functions, play around and name them whatever you like, then compile your program.
+
+---
+
+## 2 - Simple Functions
+
+### Temperature Conversion (C / F)
+We're going to write a program to convert centigrade to fahrenheit.  
+The formula for fahrenheit is °F = (°C * 9/5) + 32  
+The formula for centigrade is °C = (°F - 32) * 9/5
+
+Here's how we implement this:
+#### f2.1
+```
+def c_to_f(float temp) -> float
+{
+    return (temp * (9/5)) + 32;
+};
+
+def f_to_c(float temp) -> float
+{
+    return (temp - 32) * (9/5);
+};
+
+def main() -> int
+{
+    c = -40;
+    f = c_to_f(c);  // -40 °C == -40 °F
+    return 0;
+};
+```
+
+### Calculating distance
+#### f2.2
+```
+def get_distance(float speed, float time) -> float
+{
+    return speed * time;
+};
+
+def to_meters(float distance) -> float
+{
+    return distance / 3.28084;
+};
+
+def main() -> int
+{
+    float speed = 88;    // Calculating in feet per second
+    float time = 60;     // 1 second
+    float d = get_distance(speed, time);  // 5,280 feet = 1 mile
+    float m = to_meters(d);               // 1,609.34 meters
+    return 0;
+};
+```
+
+### Performing logic
+#### f2.3
+```
+int a = 0;
+int b = 100;
+
+def main() -> int
+{
+    if (a < b)
+    {
+        a = b;
+    };
+
+    return 0;
+}
+```
+
+`if` statements evaluate truth. All that is really happening is the expression inside of the parenthesis is evaluated, and if it's true, we do the code inside the `if` block.
+- Blocks are `{}` and the code within it. In figure 2.3 there are 2 blocks.  
+
+### Logically performing logic
+#### f2.4
+```
+int a = 0;
+int b = 100;
+int c = 1000;
+
+def main() -> int
+{
+    if (a < b)
+    {
+        a = b;
+    }
+    elif (a < c)
+    {
+        a = c;
+    };
+
+    return 0;
+}
+```
+#### f2.5
+```
+int a = 0;
+int b = 100;
+int c = 1000;
+
+def main() -> int
+{
+    if (a < b)
+    {
+        a = b;
+    };
+    if (a < c)
+    {
+        a = c;
+    };
+
+    return 0;
+}
+```
+- **Figures 2.4 and 2.5 are identical as far as their result, but their execution is  different, and the assembly (machine code) resulting from these figures also differs.**
+
+Our goal is to make `a` equal to `b`. Here's how we do that:
+#### f2.6
+```
+int a = 0;
+int b = 100;
+int c = 1000;
+
+def main() -> int
+{
+    if (a < b)               // Condition 1 (true) (completely true)
+    {
+        a = b;
+    }
+    elif (a >= b and a < c)  // Condition 2 (false and true) (not completely true)
+    {
+        a = c;
+    };
+
+    return 0;
+}
+```
+Now execution won't continue into the `elif` block, because only one of the two conditions are completely true.
+
+---
+
+## 3 - Hello World
+We now have a basic understanding of functions, and logical operations. Now it's time we see something happen on the screen.
+
+#### f3.1 Hello World
+```
+import "io.fx";
+
+using io::output::print;
+
+def main() -> int
+{
+    print("Hello World!");
+    return 0;
+};
+```
+Result:  
+`Hello World!`
+
+The `print()` function will output a string to standard output. It takes 1 argument, the type of the argument is `unsigned data{8}[]` which is an unsigned byte array.
+
+- **What's the difference between `signed` and `unsigned`?**  
+Signed integers can have a positive or negative value. The *sign* is 0 for positive, 1 for negative. Typically the most significant bit (largest value) represent the signedness of an integer.  
+Example if we have a binary value `10000000` and we treat it as signed it equals `-128`.  
+If this value was unsigned, it would equal `128`.  
+This means if we tried to interpret a character like the capital letter `A` as signed, we would still get A, but as soon as we go higher than `127` the value wraps around to the negatives and counts upwards towards zero. The ASCII table does not have negative values, only `0-255`.
+
+#### f3.2 What's your name?
+```
+import "io.fx";
+import "types.fx";
+
+using io::output::print, io::input::input;
+using types::string;
+
+def main() -> int
+{
+    string s();
+    s = input("What's your name? ");
+    print("\n");
+    print("Hello, ); print(s); print("!")
+    return 0;
+};
+```
+Result:
+```
+What's your name? John
+Hello, John!
+```
+
+That code was a little ugly, don't you think? Hard to read unless you take the time to look.  
+Also, what was that `\n` thing we printed? That is called an escape character. We "escape" the string with the backslash (`\`). There are a few escape characters to go over, but for now, `\n` is all we need.  
+This character represents a new line, or "carriage return". In reality, no text file you have ever read actually breaks words onto a new line  
+like this.  
+What's actually happening is there is an invisible character which instructs a text editor to move to a new line. In memory, the file spans linearly, it doesn't break into lines. We write programs to show these line breaks.
+#### f3.3 Introducing `f-strings`:
+```
+import "io.fx", "types.fx";  // You can do multiple imports on one line.
+
+using io::output::print, io::input::input;
+using types::string;
+
+def main() -> int
+{
+    string s();
+    s = input("What's your name? ");
+    print(f"\nHello, {s}!");
+    return 0;
+};
+```
+That's better. Here we see a string `"\nHello, {s}!"` but it is prefixed with an `f`. This makes this string an `f-string`. Flux also has something called an `i-string` but those are more advanced, we'll save them for later.
+
