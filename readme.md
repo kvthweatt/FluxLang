@@ -87,6 +87,14 @@ By using assembly you can do system calls.
 
 ---
 
+## Learn Flux
+
+[Intro Level](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_intro.md) (in-development)
+Adept Level (planned)
+Experienced Level (planned)
+
+---
+
 ## Compiling Flux
 
 **Linux instructions:**  
