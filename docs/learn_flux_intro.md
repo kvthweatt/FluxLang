@@ -66,7 +66,7 @@ We're going to start from the smallest unit and work our way up.
 The smallest unit of memory (or data) is a bit. A bit is a single digit, 1 or 0.  
 A group of 8 bits is called a byte. An example: `01000001` equals 65. Here's an example of a memory segment that is 8 bits long:
 
-<table>
+<table align="center">
   <tr>
     <th>2 ^ 8 (128)</th>
     <th>2 ^ 6 (64)</th>
@@ -123,7 +123,7 @@ It's dangerous  to go alone, take this. Generally speaking you will not be needi
 - **Diving into memory:**  
 You can imagine computer memory to be linear. Whether you want to visualize it horizontally or vertically, it doesn't matter. What matters is understanding memory is made up of bits. If I have 1 GB of memory, that's 1 billion bytes; multiplied by 8 and you get 8 billion bits. We always count in bytes (groups of 8) when we count memory spaces.
 
-<table>
+<table align="center">
   <tr>
     <th>Address</th>
     <th>0</th>
@@ -150,7 +150,7 @@ You can imagine computer memory to be linear. Whether you want to visualize it h
 
 - **Data types:**  
 There is 1 byte per address. So now, say I want to get the value of some bytes. Welcome to data types.  
-Integers (`int`) types in Flux are 32 bits by default. 32 divided by 8 equals 4, so an `int`  is 4 bytes long. Let's start at address 2 and read an integer, we get `0xBEEFDEAD`.  
+Integer (`int`) types in Flux are 32 bits by default. 32 divided by 8 equals 4, so an `int`  is 4 bytes long. Let's start at address 2 and read an integer, we get `0xBEEFDEAD`.  
 When we convert to base 10 (what we can read) we get: **3,203,391,149**.  
 Let's say we're using a half-sized `int` that is only 2 bytes, starting at address 2, we get `0xBEEF`.  
 Converted to base 10: **48,879**. A much smaller number.
