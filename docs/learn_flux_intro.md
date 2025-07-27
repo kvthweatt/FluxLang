@@ -155,6 +155,53 @@ When we convert to base 10 (what we can read) we get: **3,203,391,149**.
 Let's say we're using a half-sized `int` that is only 2 bytes, starting at address 2, we get `0xBEEF`.  
 Converted to base 10: **48,879**. A much smaller number.
 
+- **How did we convert 0xBEEFDEAD to a number? What even is that?**  
+A value like 0x5A206AE0 (**0x** prefix) is known as a hexidecimal number, or base 16. Humans read numbers in decimal or base 10. Binary is base 2. The base number represents how many numbers are available to make other numbers. Binary has 2 numbers available, 0 and 1. Decimal has 10 numbers, 0 through 9. Hexadecimal uses 6 more values, we call them A, B, C, D, E and F. This means hexadecimal ranges from 0-F, or 0 1 2 3 4 5 6 7 8 9 A B C D E F. This is essentially 0-15 which if you include the 0, is 16 numbers. **The value 10 in any numbering system is equal to the base of the numbering system.** In binary, 10 equals 2, there's a 1 in the 2's place. In hexadecimal the number 10 equals 16, here's how:
+
+<table align="center">
+  <tr>
+    <th>16 ^ 3 = <br>(4096)</th>
+    <th>16 ^ 2 = <br>(256)</th>
+    <th>16 ^ 1 = <br>(16)</th>
+    <th>16 ^ 0 = <br>(1)</th>
+  </tr>
+  <tr>
+    <td></td>
+    <td></td>
+    <td>1</td>
+    <td>0</td>
+  </tr>
+  <tr>
+    <td></td>
+    <td></td>
+    <td>1 * 16<br>= 16</td>
+    <td>0 * 1<br>= 0</td>
+  </tr>
+</table>
+Another example using 0xFF:
+<table align="center">
+  <tr>
+    <th>16 ^ 3 = <br>(4096)</th>
+    <th>16 ^ 2 = <br>(256)</th>
+    <th>16 ^ 1 = <br>(16)</th>
+    <th>16 ^ 0 = <br>(1)</th>
+  </tr>
+  <tr>
+    <td></td>
+    <td></td>
+    <td>F</td>
+    <td>F</td>
+  </tr>
+  <tr>
+    <td></td>
+    <td></td>
+    <td>F * 16<br>=<br>15 * 16<br>= 240</td>
+    <td>F * 1<br>=<br>15 * 1<br>= 15</td>
+  </tr>
+</table>
+
+240 + 15 = 255, or the max value of a byte. Bytes in hexadecimal have 2 digits, like 0xFF or 0xA3.
+
 In Flux there are 3 primitive types known as `int`, `float`, and `char`.  
 - `int` types are 32 bits long (4 bytes)
 - `float` types are 64 bits long (8 bytes)
@@ -165,3 +212,64 @@ We will go over the `data` keyword in depth later in this guide.
 
 This is the fundamental understanding of data required going into Flux.   
 If you're still following, congratulations. Now we get to actually learn to code.
+
+---
+
+## Your first program.
+
+We're going to start off doing something very simple. We're not going to see anything happen, but the purpose of this excercise is to familiarize you with the process of compilation.
+
+Flux program have a `main()` function. `main()` is called by your operating system automatically.  
+Not having a `main()` function will result in a compilation error. Compiling programs without a `main()` function is how we create libraries. As far as we're concerned - and until we get to libraries - all programs we write **must** have a `main()` function.
+
+#### Code:
+```
+def main() -> int
+{
+    return 0;
+};
+```
+This program does nothing. It will start and immediately stop. If you compile and run this, you will think something is broken, or did not work. This is actually expected behavior, we shouldn't see anything because the program didn't do anything.
+
+This is what you could call the skeleton of a Flux program. Any program you compile into an executable must have a main function defined in **global scope**.
+
+- **What are *global* and *scope*? What is *global scope*?**  
+A global is something that can be referred to anywhere in the program. It exists so long as it isn't destroyed or invalidated in some way. Scope is like visibility, imagine it like a one-way mirror. I can look one way, but not the other. Here's an example:
+#### Code
+```
+// Double slashes are comments, the compiler ignores this as if it doesn't exist
+
+int a = 1;      // This is in global scope.
+
+def myFunction() -> int
+{
+    int b = 0;  // This is in myFunction's scope.
+    return b;
+};
+
+def main() -> int
+{
+    int c = a + b;  // Error here
+    return c;
+};
+```
+
+If we try to compile this program, we will get an unknown identifier error at line 13 column 16. The unknown identifier is `b`.  
+Why is `b` unknown? As far as `main()` is aware, the only things that exist to it are `a` and `myFunction`.  
+`myFunction` is totally aware of `b` because it's in scope. How would we fix this? Like so,
+#### Code
+```
+int a = 1;
+
+def myFunction() -> int
+{
+    int b = 0;
+    return b;
+};
+
+def main() -> int
+{
+    int c = a + myFunction();  // myFunction returns the value of b
+    return c;
+};
+```
