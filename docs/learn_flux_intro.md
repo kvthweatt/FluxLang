@@ -704,7 +704,7 @@ This has to do with how programs compile. In other languages, structs have a lot
 
 #### f5.3 Modelling a File Format Header with `struct`
 For this example we will be modeling the [Bitmap File Format](https://www.ece.ualberta.ca/~elliott/ee552/studentAppNotes/2003_w/misc/bmp_file_format/bmp_file_format.htm).
-#### f5.3.1
+##### f5.3.1
 <p align="center">
 <img src="https://upload.wikimedia.org/wikipedia/commons/7/75/BMPfileFormat.svg">
 </p>
@@ -881,3 +881,97 @@ Here's what the value 10 looks like in 32 bits:
 What we're doing is splitting one 32 bit integer into two 16 bit integers.  
 The first 16 bits of the array above are 0. The last are `0000000000001010`.  
 So `v2.a` which is `i16` type (16 bits wide) gets all zeros, `v2.b` gets the remainder `0000000000001010`.
+
+Say we use `Values16` to create a new instance called `v3`, and we swap the order of `a` and `b`. Then we cast it to a new instance `v4` which is type `Values32`.
+```
+import "types.fx", "io.fx";
+
+using io::output::print;
+using types::string;
+
+struct Values32
+{
+    i32 a, b, c, d;
+};
+
+struct Values16
+{
+  i16 a, b, c, d, e, f, g, h;
+}
+
+def main() -> int
+{
+    Values32 v1 = {a=10, b=20, c=30, d=40};
+    Values16 v2 = (Values16)v1;    // Restructure
+    Values16 v3 = {a=v2.b, b=v2.a, c=v2.c, d=v2.d, e=v2.e, f=v2.f, g=v2.g, h=v2.h};
+    Values32 v4 = (Values32)v3;    // Restructure
+
+    print(f"v4.a = {v4.a}\n");
+    return 0;
+};
+```
+Result:  
+`1084227584`
+
+- **Why is the value 100,000,000x larger than 10?**  
+We swapped the order of the bits, essentially rotating them left 16 spaces.
+
+#### f5.5 Time to `switch` over.
+Logical flow can be handled two ways. The slow way, or the fast way.  
+What's the difference?
+
+- `if` statements are extremely slow.  
+Every condition of an `if/elif/else` chain needs to be evaluated. If there are 10 conditions, that requires 10 additional evaluations which consume CPU cycles. If you have some heavy duty algorithm, you should opt for `switch` statements.
+
+- `switch` statements are extremely fast.  
+Every condition is known at compile time, so a more optimized jump table can be created.
+```
+import "types.fx", "io.fx", "random.fx";
+
+using io::output::print;
+using types::string;
+using random::rand_int;
+
+def main() -> int
+{
+    string s();
+    int value;
+    int rand;
+
+    while (true)
+    {
+        s = input("Enter a value from 0-10: ");
+        value = s.as_int();
+        rand = rand_int(0,10);
+
+        switch (value)
+        {
+            case (rand)
+            {
+                print("You win! Keep going!");
+                continue;
+            }
+            default
+            {
+                print(f"You lose! The value was {rand}. Game over.");
+                return 0;
+            };
+        };
+    };
+    return 0;
+};
+```
+Result:  
+```
+Enter a value from 0-10: 7
+You win! Keep going!
+Enter a value from 0-10: 9
+You lose! The value was 2. Game over.
+```
+
+Here we're introduced to 2 new keywords, `switch` and `while`.
+
+`while` is a keyword that means while the condition is true, execute this block repeatedly.
+
+`switch` statements have 2 sub-keywords, called `case` and `default`.  
+All switches **must** have a default, the default branch executes when no cases match the condition.
