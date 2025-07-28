@@ -880,4 +880,4 @@ Here's what the value 10 looks like in 32 bits:
 
 What we're doing is splitting one 32 bit integer into two 16 bit integers.  
 The first 16 bits of the array above are 0. The last are `0000000000001010`.  
-So when `v2.a` which is `i16` type (16 bits wide), `v2.a` gets all zeros, `v2.b` becomes `0000000000001010`.
+So `v2.a` which is `i16` type (16 bits wide) gets all zeros, `v2.b` gets the remainder `0000000000001010`.
