@@ -916,7 +916,7 @@ Result:
 - **Why is the value 100,000,000x larger than 10?**  
 We swapped the order of the bits, essentially rotating them left 16 spaces.
 
-#### f5.5 Time to `switch` over.
+## 6 - Warming Up
 Logical flow can be handled two ways. The slow way, or the fast way.  
 What's the difference?
 
@@ -924,7 +924,8 @@ What's the difference?
 Every condition of an `if/elif/else` chain needs to be evaluated. If there are 10 conditions, that requires 10 additional evaluations which consume CPU cycles. If you have some heavy duty algorithm, you should opt for `switch` statements.
 
 - `switch` statements are extremely fast.  
-Every condition is known at compile time, so a more optimized jump table can be created.
+Every condition is known at compile time, so a more optimized jump table can be created.  
+#### f6.1 A little game.
 ```
 import "types.fx", "io.fx", "random.fx";
 
@@ -975,3 +976,83 @@ Here we're introduced to 2 new keywords, `switch` and `while`.
 
 `switch` statements have 2 sub-keywords, called `case` and `default`.  
 All switches **must** have a default, the default branch executes when no cases match the condition.
+
+#### f6.2 `for`, `do`, `while`, and `do`-`while` loops
+We can do loops a few different ways. Loops repeat themselves until a condition is met.  
+
+`while` is like an `if` statement + a loop, they continue to loop while the condition is true.  
+A `while` loop will check the condition first, and if it's true it will execute the block.
+
+A `do`-`while` loop will execute its block before checking the condition. Here's an example of the difference.
+
+#### f6.2.1 `do`-`while`
+```
+import "types.fx", "io.fx";
+
+using types::string;
+using io::output::print, io::input::input;
+
+def main() -> int
+{
+    int start = 0;
+    int end = 3;
+
+    do
+    {
+        if (start >= end)
+        {
+            print("You fell off the cliff!");
+            break;
+        };
+        print("You take a step.")
+        start++;
+    }
+    while (start < end);
+
+    return 0;
+};
+```
+Result:
+```
+You take a step.
+You take a step.
+You take a step.
+You fell off the cliff!
+```
+
+#### f6.2.2 `while` without `do`
+```
+import "types.fx", "io.fx";
+
+using types::string;
+using io::output::print, io::input::input;
+
+def main() -> int
+{
+    int start = 0;
+    int end = 3;
+
+    while (start < end)
+    {
+        if (start >= end)
+        {
+            print("You fell off the cliff!");
+            break;
+        };
+        print("You take a step.")
+        start++;
+    };
+
+    return 0;
+};
+```
+Result:
+```
+You take a step.
+You take a step.
+You take a step.
+```
+
+As you can see, there's a difference in the output of these two programs.  
+In figure 6.2.1 we go past the end and fall off the imaginary cliff.  
+In figure 6.2.2 we make sure we're not at the end before taking a step
