@@ -567,7 +567,7 @@ To reverse an array, which is what a string is, we do `[len - 1:0]`.
 If the first parameter is larger than the second, it means we're traversing the array in descending order.
 
 - **Why do we subtract 1 from the length of the string?**  
-Computers count starting at 0, meaning 9 is the 10th number when computers count. If our string length is 10, that means the last element is at position 9. Position 10 is outside of the array, and as far as the computer is concerned, position 10 is undefined. It's like saying:  
+Computers count starting at 0, meaning 9 is the 10th number when computers count. If my string length is 10, that means the last element is at position 9. Position 10 is outside of the array, and as far as the computer is concerned, position 10 is undefined. It's like saying:  
 **[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]** 10  
 You can do this, but it may result in a crash or undefined behavior.  
 This is why we must always be aware of our data types, sizes, and array lengths.
@@ -627,6 +627,7 @@ unsigned data{32} as u32;
 ```
 This new `u32` type is unsigned, and 32 bits wide.  
 `data` is used to create new data types. These types are primitives, and are not functional.  
+We'll expand more about `data` after you learn about structures.
 
 - **What exactly is a `struct`?**  
 "struct" is short for structure. In other OOP languages, structs can be functional. In Flux, this is not the case. Structs are strictly data-only containers, bringing us back to the land of pure data structures.
@@ -644,15 +645,22 @@ struct Point
 
 def main() -> int
 {
-    size = sizeof(Point) / sizeof(float);
-    print(f"The size of the Point structure is {size}.");
+    sizeitems = sizeof(Point) / sizeof(float);
+    sizebytes = (sizeof(Point) / sizeof(float)) * (sizeof(float) / 8);
+    print(f"The size of the Point structure in bytes is {sizebytes}.");
+    print(f"The size of the Point structure is {sizeitems} items.");
     return 0;
 };
 ```
 Result:  
-`The size of the Point structure is 3.`
+```
+The size of the Point structure in bytes is 24.
+The size of the Point structure is 3 items.
+```
 
-Here we have a basic structure representing 3D point.
+Here we have a basic structure representing 3D point. We create 3 floats, `x`,`y`, and `z`.  
+You do not need to initialize or create an instance of a struct to yield information about it.  
+Struct sizes cannot be modified, meaning once we declare the struct we cannot add new members to it.
 
 #### f5.2 Calculating the distance between two 3D points
 ```
@@ -688,3 +696,60 @@ def main() -> int
 ```
 Result:  
 `The distance between p1 and p2 is 14.977142584618734`
+
+Here we take `Point` and *instance* (*create*) two independent copies of it called `p1` and `p2`. Whenever we refer to an instance of something, we are talking about an independent copy that has the same attributes as the `struct` or `object` it was made from. Objects are too advanced yet, so let's continue with structures.
+
+- **Why can't structures have new members added to them?**  
+This has to do with how programs compile. In other languages, structs have a lot of functionality which makes them very similar to classes with some key changes. However, structs having functionality requires the compiler to generate **virtual call tables** or `vtables` for them. This increases complexity for the resulting executable. Flux's goal is to create fast, small executables; to do this, we made structures non-flexible data-only containers.
+
+#### f5.3 Modelling a File Format Header with `struct`
+For this example we will be modeling the [Bitmap File Format](https://www.ece.ualberta.ca/~elliott/ee552/studentAppNotes/2003_w/misc/bmp_file_format/bmp_file_format.htm).
+#### f5.3.1
+<p align="center">
+<img src="https://upload.wikimedia.org/wikipedia/commons/7/75/BMPfileFormat.svg">
+</p>
+
+Using this schematic we will capture the header of a `.bmp` image but not the color table.
+```
+import "types.fx", "io.fx", "fio.fx";
+
+using fio::input::open, io::output::print;
+using types::string;
+
+struct Header
+{
+    unsigned data{2} sig;  // Not a type declaration, sig is a variable of this type
+    unsigned data{4} filesize, reserved, dataoffset;  // Structured in the order they appear
+};
+
+struct InfoHeader
+{
+    unsigned data{4} size, width, height;
+    unsigned data{2} planes, bitsperpixel;
+    unsigned data{4} compression, imagesize, xpixelsperm, ypixelsperm, colorsused, importantcolors;
+};
+
+struct BMP
+{
+    Header header;
+    InfoHeader infoheader;
+    // If we create this structure after opening the file, we can get the colorspace properly.
+};
+
+def main() -> int
+{
+    file = open("image.bmp", "r");
+    file.seek(0);
+    unsigned data{8}[sizeof(file.bytes)] buffer = file.readall();
+
+    // We now have the file in the buffer. Time to capture that data.
+    Header hdata;
+    int hdlen = sizeof(hdata) / ( 2 + (4 * 3) );  // 2 bytes + 4x3 bytes
+    InfoHeader ihdata;
+    int ihdlen = sizeof(ihdata) / ( (4 * 9) + (2 * 2) ); // 9x4 bytes + 2x2 bytes
+
+    hdata = (Header)buffer[0:hdlen - 1];      // Capture header
+    ihdata = (InfoHeader)[hdlen:ihdlen - 1];  // Capture info header
+    return 0;
+};
+```
