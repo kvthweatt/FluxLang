@@ -518,7 +518,7 @@ That's better. Here we see a string `"\nHello, {s}!"` but it is prefixed with an
 
 ---
 
-## String Manipulation
+## 4 - String Manipulation
 We will now learn different ways we can play with strings, starting by slicing them up.
 #### f4.1 Slices
 ```
@@ -620,7 +620,7 @@ def main() -> int
 ```
 ---
 
-## `data` and `struct`
+## 5 - `data` and `struct`
 Remember that `data` keyword from a few segments ago? Here's what it looks like:
 ```
 unsigned data{32} as u32;
