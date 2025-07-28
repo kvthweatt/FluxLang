@@ -678,7 +678,7 @@ def sqrt(float x) -> float
     return x ^ 0.5;
 };
 
-def distance(struct a, struct b) -> float
+def distance(Point a, Point b) -> float
 {
     return sqrt( ((b.x - a.x) ^ 2) + ((b.y - a.y) ^ 2) + ((b.z - a.z) ^ 2) );
 };
