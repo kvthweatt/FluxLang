@@ -520,7 +520,7 @@ That's better. Here we see a string `"\nHello, {s}!"` but it is prefixed with an
 
 ## String Manipulation
 We will now learn different ways we can play with strings, starting by slicing them up.
-#### 4.1 Slices
+#### f4.1 Slices
 ```
 import "io.fx", "types.fx";
 
@@ -544,7 +544,7 @@ It translates to "start at position 0, end at position 3". That totals 4 bytes, 
 - `[x:y]`  
 **x** is the starting point, and **y** is the ending point.
 
-#### 4.2 Reverse a String
+#### f4.2 Reverse a String
 ```
 import "io.fx", "types.fx";
 
@@ -572,7 +572,7 @@ Computers count starting at 0, meaning 9 is the 10th number when computers count
 You can do this, but it may result in a crash or undefined behavior.  
 This is why we must always be aware of our data types, sizes, and array lengths.
 
-#### 4.3 The `sizeof()` Keyword
+#### f4.3 The `sizeof()` Keyword
 Characters are one byte in size. Strings are an array of bytes, interpreted as characters.  
 If I have 40 characters, that's 40 bytes.  
 `sizeof()` returns the size of something in bits, not bytes.  
@@ -595,5 +595,96 @@ def main() -> int
 Result:  
 `The size of s is 8 bytes long.`
 
-Why didn't we subtract 1 from `len` this time? Because we're not using `len` to index the string.
+Why didn't we subtract 1 from `len` this time?  
+Because we're not using `len` to index the string.  
 Why did we divide by 8? Because if the size of a byte is 8 bits, and our data length is 80 bits, that means there are 10 bytes.
+
+#### f4.4 Constant Values
+Sometimes we want to make sure there's no possible way a value can change.  
+We do that by using the `const` keyword, like so:
+```
+const int myAge = 21;  // Forever 21!
+```
+If we try to change the value of `myAge` we will get a runtime error. Example:
+```
+const bool authorized = false;
+
+def main() -> int
+{
+    if (!authorized)    // false == false, therefore true
+    {
+        authorized = true;  // Runtime error.
+    };
+    return 0;
+};
+```
+---
+
+## `data` and `struct`
+Remember that `data` keyword from a few segments ago? Here's what it looks like:
+```
+unsigned data{32} as u32;
+```
+This new `u32` type is unsigned, and 32 bits wide.  
+`data` is used to create new data types. These types are primitives, and are not functional.  
+
+- **What exactly is a `struct`?**  
+"struct" is short for structure. In other OOP languages, structs can be functional. In Flux, this is not the case. Structs are strictly data-only containers, bringing us back to the land of pure data structures.
+
+#### f5.1 Primitive Data Structures in Flux
+```
+import "io.fx", "types.fx";
+
+using io::output::print, types::string;
+
+struct Point
+{
+    float x, y, z;
+};
+
+def main() -> int
+{
+    size = sizeof(Point) / sizeof(float);
+    print(f"The size of the Point structure is {size}.");
+    return 0;
+};
+```
+Result:  
+`The size of the Point structure is 3.`
+
+Here we have a basic structure representing 3D point.
+
+#### f5.2 Calculating the distance between two 3D points
+```
+import "io.fx", "types.fx";
+
+using io::output::print, types::string;
+
+struct Point
+{
+    float x, y, z;
+};
+
+def sqrt(float x) -> float
+{
+    return x ^ 0.5;
+};
+
+def distance(struct a, struct b) -> float
+{
+    return sqrt( ((b.x - a.x) ^ 2) + ((b.y - a.y) ^ 2) + ((b.z - a.z) ^ 2) );
+};
+
+def main() -> int
+{
+    Point p1 = {x = 4.1, y = 5.05, z = -3.9};
+    Point p2 = {x = 10, y = -7.33, z = 2.12};
+
+    float dist = distance(p1, p2);
+    
+    print(f"The distance between p1 and p2 is {dist}");
+    return 0;
+};
+```
+Result:  
+`The distance between p1 and p2 is 14.977142584618734`
