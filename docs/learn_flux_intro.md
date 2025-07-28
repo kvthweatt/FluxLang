@@ -809,6 +809,14 @@ Here's what the value 10 looks like in 32 bits:
 
 <table align="center">
   <tr>
+    <th>(2,147,483,648)</th>
+    <th>(1,073,741,824)</th>
+    <th>(536,870,912)</th>
+    <th>(268,435,456)</th>
+    <th>(134,217,728)</th>
+    <th>(67,108,864)</th>
+    <th>(33,554,432)</th>
+    <th>(16,777,216)</th>
     <th>(8,388,608)</th>
     <th>(4,194,304)</th>
     <th>(2,097,152)</th>
@@ -825,14 +833,6 @@ Here's what the value 10 looks like in 32 bits:
     <th>(1,024)</th>
     <th>(512)</th>
     <th>(256)</th>
-    <th>(128)</th>
-    <th>(64)</th>
-    <th>(32)</th>
-    <th>(16)</th>
-    <th>(8)</th>
-    <th>(4)</th>
-    <th>(2)</th>
-    <th>(1)</th>
     <th>(128)</th>
     <th>(64)</th>
     <th>(32)</th>
