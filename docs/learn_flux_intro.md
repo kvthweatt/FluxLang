@@ -567,7 +567,7 @@ To reverse an array, which is what a string is, we do `[len - 1:0]`.
 If the first parameter is larger than the second, it means we're traversing the array in descending order.
 
 - **Why do we subtract 1 from the length of the string?**  
-Computers count starting at 0, meaning 9 is the 10th number when computers count. If my string length is 10, that means the last element is at position 9. Position 10 is outside of the array, and as far as the computer is concerned, position 10 is undefined. It's like saying:  
+Computers count starting at 0, meaning 9 is the 10th number when computers count. If our string length is 10, that means the last element is at position 9. Position 10 is outside of the array, and as far as the computer is concerned, position 10 is undefined. It's like saying:  
 **[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]** 10  
 You can do this, but it may result in a crash or undefined behavior.  
 This is why we must always be aware of our data types, sizes, and array lengths.
