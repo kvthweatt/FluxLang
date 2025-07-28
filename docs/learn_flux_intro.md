@@ -518,7 +518,7 @@ That's better. Here we see a string `"\nHello, {s}!"` but it is prefixed with an
 
 ---
 
-## 4 - String Manipulation
+## String Manipulation
 We will now learn different ways we can play with strings, starting by slicing them up.
 #### f4.1 Slices
 ```
@@ -620,7 +620,7 @@ def main() -> int
 ```
 ---
 
-## 5 - `data` and `struct`
+## `data` and `struct`
 Remember that `data` keyword from a few segments ago? Here's what it looks like:
 ```
 unsigned data{32} as u32;
@@ -734,6 +734,7 @@ struct BMP
     Header header;
     InfoHeader infoheader;
     // If we create this structure after opening the file, we can get the colorspace properly.
+    // We would do this in main() after reading the file into the buffer.
 };
 
 def main() -> int
@@ -741,7 +742,6 @@ def main() -> int
     file = open("image.bmp", "r");
     file.seek(0);
     unsigned data{8}[sizeof(file.bytes)] buffer = file.readall();
-    file.close();
 
     // We now have the file in the buffer. Time to capture that data.
     Header hdata;
@@ -754,3 +754,13 @@ def main() -> int
     return 0;
 };
 ```
+Alternatively, on the lines we capture the data into our structs, if we had all the information about the file such as the file size, image size, etc, we could dynamically create the BMP struct, and capture like so:
+```
+BMP bitmap;
+bitmap = (BMP)buffer;
+```
+Since the BMP struct would 100% reflect the file's dimensions, it perfectly captures all data into the members of the struct accordingly.
+
+- **(What) is this? What's (that)thing there?**  
+What you're seeing is called **cast notation**. Casting converts one type to another.  
+In this case, casting data to a structure results in the data aligning to the struct - this is also known as **data structuring**.
