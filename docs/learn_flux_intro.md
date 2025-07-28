@@ -771,9 +771,9 @@ In this case, casting data to a structure results in the data aligning to the st
 
 #### f5.4 Restructuring
 ```
-import "types.fx", "io.fx", "fio.fx";
+import "types.fx", "io.fx";
 
-using fio::input::open, io::output::print;
+using io::output::print;
 using types::string;
 
 struct Values32
