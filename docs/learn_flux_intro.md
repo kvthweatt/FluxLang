@@ -751,9 +751,13 @@ def main() -> int
 
     hdata = (Header)buffer[0:hdlen - 1];      // Capture header
     ihdata = (InfoHeader)[hdlen:ihdlen - 1];  // Capture info header
+    print((char[2])hdata.sig)
     return 0;
 };
 ```
+Result:  
+`BM`
+
 Alternatively, on the lines we capture the data into our structs, if we had all the information about the file such as the file size, image size, etc, we could dynamically create the BMP struct, and capture like so:
 ```
 BMP bitmap;
@@ -764,3 +768,116 @@ Since the BMP struct would 100% reflect the file's dimensions, it perfectly capt
 - **(What) is this? What's (that)thing there?**  
 What you're seeing is called **cast notation**. Casting converts one type to another.  
 In this case, casting data to a structure results in the data aligning to the struct - this is also known as **data structuring**.
+
+#### f5.4 Restructuring
+```
+import "types.fx", "io.fx", "fio.fx";
+
+using fio::input::open, io::output::print;
+using types::string;
+
+struct Values32
+{
+    i32 a, b, c, d;
+};
+
+struct Values16
+{
+  i16 a, b, c, d, e, f, g, h;
+}
+
+def main() -> int
+{
+    Values32 v1 = {a=10, b=20, c=30, d=40};
+    
+    Values16 v2 = (Values16)v1;
+
+    print(f"v2.a = {v2.a}\n");
+    print(f"v2.b = {v2.b});
+    return 0;
+};
+```
+Result:  
+```
+0
+10
+```
+
+- **Why does v2.a equal 0?**  
+We converted a struct that contained 32 bit integers into a struct of 16 bit integers.  
+Here's what the value 10 looks like in 32 bits:
+
+<table align="center">
+  <tr>
+    <th>(8,388,608)</th>
+    <th>(4,194,304)</th>
+    <th>(2,097,152)</th>
+    <th>(1,048,576)</th>
+    <th>(524,288)</th>
+    <th>(262,144)</th>
+    <th>(131,072)</th>
+    <th>(65,536)</th>
+    <th>(32,769)</th>
+    <th>(16,384)</th>
+    <th>(8,192)</th>
+    <th>(4,096)</th>
+    <th>(2,048)</th>
+    <th>(1,024)</th>
+    <th>(512)</th>
+    <th>(256)</th>
+    <th>(128)</th>
+    <th>(64)</th>
+    <th>(32)</th>
+    <th>(16)</th>
+    <th>(8)</th>
+    <th>(4)</th>
+    <th>(2)</th>
+    <th>(1)</th>
+    <th>(128)</th>
+    <th>(64)</th>
+    <th>(32)</th>
+    <th>(16)</th>
+    <th>(8)</th>
+    <th>(4)</th>
+    <th>(2)</th>
+    <th>(1)</th>
+  </tr>
+  <tr>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>1</td>
+    <td>0</td>
+    <td>1</td>
+    <td>0</td>
+  </tr>
+</table>
+
+What we're doing is splitting one 32 bit integer into two 16 bit integers.  
+The first 16 bits of the array above are 0. The last are `0000000000001010`.  
+So when `v2.a` which is `i16` type (16 bits wide), `v2.a` gets all zeros, `v2.b` becomes `0000000000001010`.
