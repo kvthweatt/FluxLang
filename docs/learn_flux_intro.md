@@ -749,8 +749,8 @@ def main() -> int
     InfoHeader ihdata;
     int ihdlen = sizeof(ihdata) / ( (4 * 9) + (2 * 2) ); // 9x4 bytes + 2x2 bytes
 
-    hdata = (Header)buffer[0:hdlen - 1];      // Capture header
-    ihdata = (InfoHeader)[hdlen:ihdlen - 1];  // Capture info header
+    hdata = (Header)buffer[0:hdlen - 1];            // Capture header
+    ihdata = (InfoHeader)buffer[hdlen:ihdlen - 1];  // Capture info header
     print((char[2])hdata.sig)
     return 0;
 };
