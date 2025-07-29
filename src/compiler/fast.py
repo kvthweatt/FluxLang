@@ -1209,11 +1209,33 @@ class ReturnStatement(Statement):
 
 @dataclass
 class BreakStatement(Statement):
-	pass
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        if not hasattr(builder, 'break_block'):
+            raise SyntaxError("'break' outside of loop or switch")
+        
+        # Insert unreachable instruction if there's trailing code
+        if builder.block.is_terminated:
+            return None
+            
+        builder.branch(builder.break_block)
+        # Mark following code as unreachable
+        builder.unreachable()
+        return None
 
 @dataclass
 class ContinueStatement(Statement):
-	pass
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        if not hasattr(builder, 'continue_block'):
+            raise SyntaxError("'continue' outside of loop")
+        
+        # Insert unreachable instruction if there's trailing code  
+        if builder.block.is_terminated:
+            return None
+            
+        builder.branch(builder.continue_block)
+        # Mark following code as unreachable
+        builder.unreachable()
+        return None
 
 @dataclass
 class Case(ASTNode):
