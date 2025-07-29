@@ -513,6 +513,87 @@ class AddressOf(Expression):
 class AlignOf(Expression):
 	target: Union[TypeSpec, Expression]
 
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		"""
+		Returns alignment in bytes for:
+		- Explicitly specified alignments (data{bits:align})
+		- Data types: alignment equals width in bytes (data{bits})
+		- Other types: Natural alignment from target platform
+		"""
+		# Get alignment for TypeSpec
+		if isinstance(self.target, TypeSpec):
+			# Use explicitly specified alignment if present
+			if self.target.alignment is not None:
+				return ir.Constant(ir.IntType(32), self.target.alignment)
+			
+			# Special case: Data types default to width alignment
+			if self.target.base_type == DataType.DATA and self.target.bit_width is not None:
+				return ir.Constant(ir.IntType(32), (self.target.bit_width + 7) // 8)
+			
+			# Default case: Use platform alignment
+			llvm_type = self.target.get_llvm_type(module)
+			return ir.Constant(ir.IntType(32), module.data_layout.preferred_alignment(llvm_type))
+		
+		# Get alignment for expressions
+		val = self.target.codegen(builder, module)
+		val_type = val.type.pointee if isinstance(val.type, ir.PointerType) else val.type
+		
+		# Handle data types in expressions
+		if (isinstance(self.target, VariableDeclaration) and 
+			self.target.type_spec.base_type == DataType.DATA and
+			self.target.type_spec.bit_width is not None):
+			return ir.Constant(ir.IntType(32), (self.target.type_spec.bit_width + 7) // 8)
+		
+		# Default case for expressions
+		return ir.Constant(ir.IntType(32), module.data_layout.preferred_alignment(val_type))
+
+@dataclass
+class TypeOf(Expression):
+    expression: Expression
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """
+        typeof(expr) - Returns type information (as a runtime value)
+        """
+        # Generate code for the expression
+        val = self.expression.codegen(builder, module)
+        
+        # Create a type descriptor structure
+        type_info = self._create_type_info(val.type, module)
+        
+        # Return pointer to type info
+        gv = ir.GlobalVariable(module, type_info, name=f"typeinfo.{uuid.uuid4().hex}")
+        gv.initializer = type_info
+        gv.linkage = 'internal'
+        return builder.bitcast(gv, ir.PointerType(ir.IntType(8)))
+
+    def _create_type_info(self, llvm_type: ir.Type, module: ir.Module) -> ir.Constant:
+        """Create a type descriptor constant"""
+        # Basic type info structure:
+        # - size (i32)
+        # - alignment (i32)
+        # - name (i8*)
+        
+        size = module.data_layout.get_type_size(llvm_type)
+        align = module.data_layout.preferred_alignment(llvm_type)
+        
+        # Get type name
+        type_name = str(llvm_type)
+        name_constant = ir.Constant(ir.ArrayType(ir.IntType(8), len(type_name)),
+                             bytearray(type_name.encode('utf-8')))
+        
+        # Create struct constant
+        return ir.Constant(ir.LiteralStructType([
+            ir.IntType(32),  # size
+            ir.IntType(32),  # alignment
+            ir.PointerType(ir.IntType(8))  # name pointer
+        ]), [
+            ir.Constant(ir.IntType(32), size),
+            ir.Constant(ir.IntType(32), align),
+            builder.gep(name_constant, [ir.Constant(ir.IntType(32), 0)],
+                      [ir.Constant(ir.IntType(32), 0)])
+            ])
+
 @dataclass
 class SizeOf(Expression):
 	target: Union[TypeSpec, Expression]
@@ -952,16 +1033,164 @@ class DoWhileLoop(Statement):
 
 @dataclass
 class ForLoop(Statement):
-	init: Optional[Statement]
-	condition: Optional[Expression]
-	update: Optional[Statement]
-	body: Block
+    init: Optional[Statement]
+    condition: Optional[Expression]
+    update: Optional[Statement]
+    body: Block
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Create basic blocks
+        func = builder.block.function
+        cond_block = func.append_basic_block('for.cond')
+        body_block = func.append_basic_block('for.body')
+        update_block = func.append_basic_block('for.update')
+        end_block = func.append_basic_block('for.end')
+
+        # Generate initialization
+        if self.init:
+            self.init.codegen(builder, module)
+
+        # Jump to condition block
+        builder.branch(cond_block)
+
+        # Condition block
+        builder.position_at_start(cond_block)
+        if self.condition:
+            cond_val = self.condition.codegen(builder, module)
+            builder.cbranch(cond_val, body_block, end_block)
+        else:  # Infinite loop if no condition
+            builder.branch(body_block)
+
+        # Body block
+        builder.position_at_start(body_block)
+        old_break = getattr(builder, 'break_block', None)
+        old_continue = getattr(builder, 'continue_block', None)
+        builder.break_block = end_block
+        builder.continue_block = update_block
+        
+        self.body.codegen(builder, module)
+        
+        if not builder.block.is_terminated:
+            builder.branch(update_block)
+
+        # Update block
+        builder.position_at_start(update_block)
+        if self.update:
+            self.update.codegen(builder, module)
+        builder.branch(cond_block)  # Loop back
+
+        # Restore break/continue
+        builder.break_block = old_break
+        builder.continue_block = old_continue
+
+        # End block
+        builder.position_at_start(end_block)
+        return None
 
 @dataclass
 class ForInLoop(Statement):
-	variables: List[str]
-	iterable: Expression
-	body: Block
+    variables: List[str]
+    iterable: Expression
+    body: Block
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Generate the iterable value
+        collection = self.iterable.codegen(builder, module)
+        coll_type = collection.type
+
+        # Create basic blocks
+        func = builder.block.function
+        entry_block = builder.block
+        cond_block = func.append_basic_block('forin.cond')
+        body_block = func.append_basic_block('forin.body')
+        end_block = func.append_basic_block('forin.end')
+
+        # Handle different iterable types
+        if isinstance(coll_type, ir.PointerType) and isinstance(coll_type.pointee, ir.ArrayType):
+            # Array iteration
+            arr_type = coll_type.pointee
+            size = arr_type.count
+            elem_type = arr_type.element
+            
+            # Create index variable
+            index_ptr = builder.alloca(ir.IntType(32), name='forin.idx')
+            builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
+            
+            # Jump to condition
+            builder.branch(cond_block)
+            
+            # Condition block
+            builder.position_at_start(cond_block)
+            current_idx = builder.load(index_ptr, name='idx')
+            cmp = builder.icmp_unsigned('<', current_idx, 
+                                      ir.Constant(ir.IntType(32), size), 
+                                      name='loop.cond')
+            builder.cbranch(cmp, body_block, end_block)
+            
+            # Body block - get current element
+            builder.position_at_start(body_block)
+            elem_ptr = builder.gep(collection, 
+                                 [ir.Constant(ir.IntType(32), 0)], 
+                                 [current_idx], 
+                                 name='elem.ptr')
+            elem_val = builder.load(elem_ptr, name='elem')
+            
+            # Store in loop variable
+            var_ptr = builder.alloca(elem_type, name=self.variables[0])
+            builder.store(elem_val, var_ptr)
+            builder.scope[self.variables[0]] = var_ptr
+            
+        elif isinstance(collection.type, ir.PointerType) and isinstance(collection.type.pointee, ir.IntType(8)):
+            # String iteration (char*)
+            zero = ir.Constant(ir.IntType(32), 0)
+            current_ptr = builder.alloca(collection.type, name='char.ptr')
+            builder.store(collection, current_ptr)
+            
+            builder.branch(cond_block)
+            
+            # Condition block
+            builder.position_at_start(cond_block)
+            ptr_val = builder.load(current_ptr, name='ptr')
+            char_val = builder.load(ptr_val, name='char')
+            cmp = builder.icmp_unsigned('!=', char_val, 
+                                       ir.Constant(ir.IntType(8), 0), 
+                                       name='loop.cond')
+            builder.cbranch(cmp, body_block, end_block)
+            
+            # Body block
+            builder.position_at_start(body_block)
+            var_ptr = builder.alloca(ir.IntType(8), name=self.variables[0])
+            builder.store(char_val, var_ptr)
+            builder.scope[self.variables[0]] = var_ptr
+            
+            # Increment pointer
+            next_ptr = builder.gep(ptr_val, [ir.Constant(ir.IntType(32), 1)], name='next.ptr')
+            builder.store(next_ptr, current_ptr)
+            
+        else:
+            raise ValueError(f"Cannot iterate over type {coll_type}")
+
+        # Generate loop body
+        old_break = getattr(builder, 'break_block', None)
+        old_continue = getattr(builder, 'continue_block', None)
+        builder.break_block = end_block
+        builder.continue_block = cond_block
+        
+        self.body.codegen(builder, module)
+        
+        if not builder.block.is_terminated:
+            # For arrays: increment index
+            if isinstance(coll_type, ir.PointerType) and isinstance(coll_type.pointee, ir.ArrayType):
+                current_idx = builder.load(index_ptr, name='idx')
+                next_idx = builder.add(current_idx, ir.Constant(ir.IntType(32), 1), name='next.idx')
+                builder.store(next_idx, index_ptr)
+            builder.branch(cond_block)
+
+        # Clean up
+        builder.break_block = old_break
+        builder.continue_block = old_continue
+        builder.position_at_start(end_block)
+        return None
 
 @dataclass
 class ReturnStatement(Statement):
