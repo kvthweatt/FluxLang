@@ -6,7 +6,7 @@ Copyright (C) 2025 Karac Thweatt
 
 Contributors:
 
-    Piotr Bednarski
+	Piotr Bednarski
 """
 
 from dataclasses import dataclass, field
@@ -38,7 +38,7 @@ class DataType(Enum):
 	#UINT16 = "uint16" # u16
 	#UINT32 = "uint32" # u32
 	#UINT64 = "uint64" # u64
-	#INT8 = "int8"     # byte
+	#INT8 = "int8"	 # byte
 	#INT16 = "int16"   # i16
 	#INT32 = "int32"   # i32
 	#INT64 = "int64"   # i64
@@ -408,8 +408,8 @@ class MemberAccess(Expression):
 				
 				member_ptr = builder.gep(
 					obj_val,
-					[ir.Constant(ir.IntType(32)), 0],
-					[ir.Constant(ir.IntType(32)), member_index],
+					[ir.Constant(ir.IntType(32), 0)],
+					[ir.Constant(ir.IntType(32), member_index)],
 					inbounds=True
 				)
 				return builder.load(member_ptr)
@@ -444,9 +444,70 @@ class ArrayAccess(Expression):
 class PointerDeref(Expression):
 	pointer: Expression
 
+
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		# Generate code for the pointer expression
+		ptr_val = self.pointer.codegen(builder, module)
+		
+		# Verify we have a pointer type
+		if not isinstance(ptr_val.type, ir.PointerType):
+			raise ValueError("Cannot dereference non-pointer type")
+		
+		# Load the value from the pointer
+		return builder.load(ptr_val, name="deref")
+
 @dataclass
 class AddressOf(Expression):
 	expression: Expression
+
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		# Generate code for the target expression
+		target = self.expression.codegen(builder, module)
+		
+		# Special case: If the target is a variable declaration, we need to ensure it's allocated first
+		if isinstance(self.expression, Identifier):
+			var_name = self.expression.name
+			
+			# Check if it's a local variable
+			if builder.scope is not None and var_name in builder.scope:
+				return builder.scope[var_name]
+			
+			# Check if it's a global variable
+			if var_name in module.globals:
+				return module.globals[var_name]
+			
+			# If we get here, the variable hasn't been declared yet
+			raise NameError(f"Unknown variable: {var_name}")
+		
+		# Handle member access
+		elif isinstance(self.expression, MemberAccess):
+			obj = self.expression.object.codegen(builder, module)
+			member_name = self.expression.member
+			
+			if isinstance(obj.type, ir.PointerType) and isinstance(obj.type.pointee, ir.LiteralStructType):
+				struct_type = obj.type.pointee
+				if hasattr(struct_type, 'names'):
+					try:
+						idx = struct_type.names.index(member_name)
+						return builder.gep(
+							obj,
+							[ir.Constant(ir.IntType(32), 0)],
+							[ir.Constant(ir.IntType(32), idx)],
+							inbounds=True
+						)
+					except ValueError:
+						raise ValueError(f"Member '{member_name}' not found in struct")
+		
+		# Handle array access
+		elif isinstance(self.expression, ArrayAccess):
+			array = self.expression.array.codegen(builder, module)
+			index = self.expression.index.codegen(builder, module)
+			
+			if isinstance(array.type, ir.PointerType):
+				zero = ir.Constant(ir.IntType(32), 0)
+				return builder.gep(array, [zero, index], inbounds=True)
+		
+		raise ValueError(f"Cannot take address of {type(self.expression).__name__}")
 
 @dataclass
 class AlignOf(Expression):
