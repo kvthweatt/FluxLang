@@ -911,9 +911,9 @@ def main() -> int
 };
 ```
 Result:  
-`1084227584`
+`327680`
 
-- **Why is the value 100,000,000x larger than 10?**  
+- **Why is the value so much larger than 10?**  
 We swapped the order of the bits, essentially rotating them left 16 spaces.
 
 ## 6 - Warming Up
