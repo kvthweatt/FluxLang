@@ -1028,7 +1028,7 @@ class FluxParser:
         message = None
         if self.expect(TokenType.COMMA):
             self.advance()
-            message = self.consume(TokenType.CHAR).value
+            message = self.consume(TokenType.STRING_LITERAL).value
         
         self.consume(TokenType.RIGHT_PAREN)
         self.consume(TokenType.SEMICOLON)

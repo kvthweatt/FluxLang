@@ -1301,17 +1301,145 @@ class SwitchStatement(Statement):
 
 @dataclass
 class TryBlock(Statement):
-	try_body: Block
-	catch_blocks: List[tuple] = field(default_factory=list)  # (exception_type, exception_name, body) tuples
+    try_body: Block
+    catch_blocks: List[Tuple[Optional[TypeSpec], str, Block]]  # (type, name, block)
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # For bare-metal systems programming, we'll use setjmp/longjmp style
+        # No C++ RTTI nonsense, no hidden runtime functions
+        
+        # Create basic blocks
+        func = builder.block.function
+        try_block = func.append_basic_block('try')
+        end_block = func.append_basic_block('try.end')
+        
+        # Set up jump buffer (simplified)
+        jmpbuf = builder.alloca(ir.ArrayType(ir.IntType(32), 6), name='jmpbuf')
+        
+        # Mock setjmp
+        setjmp = builder.call(
+            module.declare_intrinsic('llvm.eh.sjlj.setjmp'),
+            [builder.bitcast(jmpbuf, ir.PointerType(ir.IntType(8)))],
+            name='setjmp'
+        )
+        
+        # Branch based on setjmp result
+        builder.cbranch(
+            builder.icmp_unsigned('==', setjmp, ir.Constant(ir.IntType(32), 0)),
+            try_block,
+            end_block
+        )
+        
+        # TRY block
+        builder.position_at_start(try_block)
+        self.try_body.codegen(builder, module)
+        if not builder.block.is_terminated:
+            builder.branch(end_block)
+            
+        # CATCH blocks would be implemented via longjmp targets
+        # Flux would handle this at the callsite of throw:
+        # 1. Check handler registry
+        # 2. Restore registers
+        # 3. Branch to handler
+        
+        builder.position_at_start(end_block)
+        return None
 
 @dataclass
 class ThrowStatement(Statement):
-	expression: Expression
+    expression: Expression
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Bare-metal longjmp implementation
+        exc_val = self.expression.codegen(builder, module)
+        
+        # Store exception in known location
+        exc_slot = builder.gep(
+            module.globals.get('__flux_exception_slot'),
+            [ir.Constant(ir.IntType(32), 0)],
+            name='exc.ptr'
+        )
+        builder.store(exc_val, exc_slot)
+        
+        # longjmp to handler
+        builder.call(
+            module.declare_intrinsic('llvm.eh.sjlj.longjmp'),
+            [builder.bitcast(
+                builder.load(builder.globals.get('__flux_jmpbuf')),
+                ir.PointerType(ir.IntType(8))
+            )],
+        )
+        builder.unreachable()
+        return None
 
 @dataclass
 class AssertStatement(Statement):
-	condition: Expression
-	message: Optional[str] = None
+    condition: Expression
+    message: Optional[Expression] = None
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Generate condition value
+        cond_val = self.condition.codegen(builder, module)
+        
+        # Convert to boolean if needed
+        if not isinstance(cond_val.type, ir.IntType) or cond_val.type.width != 1:
+            zero = ir.Constant(cond_val.type, 0)
+            cond_val = builder.icmp_signed('!=', cond_val, zero)
+
+        # Create basic blocks
+        func = builder.block.function
+        pass_block = func.append_basic_block('assert.pass')
+        fail_block = func.append_basic_block('assert.fail')
+        
+        # Branch based on condition
+        builder.cbranch(cond_val, pass_block, fail_block)
+
+        # Failure block
+        builder.position_at_start(fail_block)
+        
+        if self.message:
+            # Create message string constant
+            msg_str = self.message + '\n'
+            msg_bytes = msg_str.encode('utf-8')
+            msg_type = ir.ArrayType(ir.IntType(8), len(msg_bytes))
+            msg_const = ir.Constant(msg_type, bytearray(msg_bytes))
+            
+            msg_gv = ir.GlobalVariable(
+                module,
+                msg_type,
+                name='assert_msg'
+            )
+            msg_gv.initializer = msg_const
+            msg_gv.linkage = 'internal'
+            msg_gv.global_constant = True
+            
+            # Get pointer to message
+            zero = ir.Constant(ir.IntType(32), 0)
+            msg_ptr = builder.gep(msg_gv, [zero, zero], inbounds=True)
+            
+            # Declare puts if not already present
+            puts = module.globals.get('puts')
+            if puts is None:
+                puts_ty = ir.FunctionType(
+                    ir.IntType(32),  # int return
+                    [ir.PointerType(ir.IntType(8))],  # char*
+                )
+                puts = ir.Function(module, puts_ty, 'puts')
+            
+            builder.call(puts, [msg_ptr])
+
+        # Declare abort if not present
+        abort = module.globals.get('abort')
+        if abort is None:
+            abort_ty = ir.FunctionType(ir.VoidType(), [])
+            abort = ir.Function(module, abort_ty, 'abort')
+        
+        builder.call(abort, [])
+        builder.unreachable()
+
+        # Success block
+        builder.position_at_start(pass_block)
+        return None
 
 # Function parameter
 @dataclass
