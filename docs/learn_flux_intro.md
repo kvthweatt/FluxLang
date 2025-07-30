@@ -783,7 +783,7 @@ struct Values32
 
 struct Values16
 {
-  i16 a, b, c, d, e, f, g, h;
+    i16 a, b, c, d, e, f, g, h;
 }
 
 def main() -> int
@@ -896,7 +896,7 @@ struct Values32
 
 struct Values16
 {
-  i16 a, b, c, d, e, f, g, h;
+    i16 a, b, c, d, e, f, g, h;
 }
 
 def main() -> int
@@ -956,7 +956,7 @@ def main() -> int
             default
             {
                 print(f"You lose! The value was {rand}. Game over.");
-                return 0;
+                break;
             };
         };
     };
@@ -973,7 +973,9 @@ You lose! The value was 2. Game over.
 
 Here we're introduced to 2 new keywords, `switch` and `while`.
 
-`while` is a keyword that means while the condition is true, execute this block repeatedly.
+`while` is a keyword that means while the condition is true, execute this block repeatedly.  
+`break` exits the loop immediately. You may use `break` in any loop.  
+`continue` goes to the next iteration (cycle) of the loop.
 
 `switch` statements have 2 sub-keywords, called `case` and `default`.  
 All switches **must** have a default, the default branch executes when no cases match the condition.
@@ -1056,7 +1058,7 @@ You take a step.
 
 As you can see, there's a difference in the output of these two programs.  
 In figure 6.2.1 we go past the end and fall off the imaginary cliff.  
-In figure 6.2.2 we make sure we're not at the end before taking a step
+In figure 6.2.2 we make sure we're not at the end before taking a step.
 
 #### f6.3.1 `for` Style 1: initializer, condition, expression
 ```
@@ -1067,14 +1069,18 @@ using io::output::print;
 
 def main() -> int
 {
-    string name("John");
-
-    for (character in name)
+    for (int counter = 0; counter < 3; counter++)
     {
-
+        print(f"All you're base are belong to us.\n");
     };
     return 0;
 };
+```
+Result:
+```
+All you're base are belong to us.
+All you're base are belong to us.
+All you're base are belong to us.
 ```
 
 #### f6.3.2 `for` Style 2: element in array
@@ -1082,10 +1088,29 @@ def main() -> int
 import "types.fx", "io.fx";
 
 using types::string;
-using io::output::print, io::input::input;
+using io::output::print;
 
 def main() -> int
 {
+    int[] int_array = [11, 22, 33, 44, 55, 66, 77, 88, 99, 00];
+
+    for (x in int_array)
+    {
+        print(f"{x}\n");
+    };
     return 0;
 };
+```
+Result:
+```
+11
+22
+33
+44
+55
+66
+77
+88
+99
+0
 ```
