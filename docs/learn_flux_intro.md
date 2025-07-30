@@ -524,7 +524,7 @@ We will now learn different ways we can play with strings, starting by slicing t
 ```
 import "io.fx", "types.fx";
 
-using io::output::print, io::input::input;
+using io::output::print;
 using types::string;
 
 def main() -> int
@@ -548,7 +548,7 @@ It translates to "start at position 0, end at position 3". That totals 4 bytes, 
 ```
 import "io.fx", "types.fx";
 
-using io::output::print, io::input::input;
+using io::output::print;
 using types::string;
 
 def main() -> int
@@ -924,12 +924,13 @@ What's the difference?
 Every condition of an `if/elif/else` chain needs to be evaluated. If there are 10 conditions, that requires 10 additional evaluations which consume CPU cycles. If you have some heavy duty algorithm, you should opt for `switch` statements.
 
 - `switch` statements are extremely fast.  
-Every condition is known at compile time, so a more optimized jump table can be created.  
+Every condition is known at compile time, so a more optimized jump table can be created.
+
 #### f6.1 A little game.
 ```
 import "types.fx", "io.fx", "random.fx";
 
-using io::output::print;
+using io::input::input, io::output::print;
 using types::string;
 using random::rand_int;
 
@@ -990,7 +991,7 @@ A `do`-`while` loop will execute its block before checking the condition. Here's
 import "types.fx", "io.fx";
 
 using types::string;
-using io::output::print, io::input::input;
+using io::output::print;
 
 def main() -> int
 {
@@ -1025,7 +1026,7 @@ You fell off the cliff!
 import "types.fx", "io.fx";
 
 using types::string;
-using io::output::print, io::input::input;
+using io::output::print;
 
 def main() -> int
 {
@@ -1056,3 +1057,35 @@ You take a step.
 As you can see, there's a difference in the output of these two programs.  
 In figure 6.2.1 we go past the end and fall off the imaginary cliff.  
 In figure 6.2.2 we make sure we're not at the end before taking a step
+
+#### f6.3.1 `for` Style 1: initializer, condition, expression
+```
+import "types.fx", "io.fx";
+
+using types::string;
+using io::output::print;
+
+def main() -> int
+{
+    string name("John");
+
+    for (character in name)
+    {
+
+    };
+    return 0;
+};
+```
+
+#### f6.3.2 `for` Style 2: element in array
+```
+import "types.fx", "io.fx";
+
+using types::string;
+using io::output::print, io::input::input;
+
+def main() -> int
+{
+    return 0;
+};
+```
