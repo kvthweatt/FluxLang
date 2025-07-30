@@ -113,9 +113,8 @@ Instance: `myObj newObj();`
 Inheritance: `object myO : baseO {};`  
 Member access: `newObj.x`  
 
-`this` never needs to be a parameter as it is always local to its object.  
-Meaning, you do not need to do `def __init(this, ...) -> this` which is the Python equivalent to `def __init__(self, ...):`, the 'self' or 'this' in Flux.  
-does not need to be a parameter like in Python.  
+**Object Methods:**  
+`this` never needs to be a parameter as it is always local to its object.
 
 **Object Constructor & Destructor Functions:**
 ```

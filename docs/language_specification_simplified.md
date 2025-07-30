@@ -124,7 +124,7 @@ Definition: `object myObj {};`
 Instance: `myObj newObj();`  
 Member access: `newObj.x`
 
-**Object Magic Methods:**  
+**Object Methods:**  
 `this` never needs to be a parameter as it is always local to its object.
 
 ```
