@@ -38,7 +38,7 @@ class DataType(Enum):
 	#UINT16 = "uint16" # u16
 	#UINT32 = "uint32" # u32
 	#UINT64 = "uint64" # u64
-	#INT8 = "int8"	 # byte
+	#INT8 = "int8"	   # byte
 	#INT16 = "int16"   # i16
 	#INT32 = "int32"   # i32
 	#INT64 = "int64"   # i64

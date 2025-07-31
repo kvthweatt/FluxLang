@@ -709,7 +709,7 @@ For this example we will be modeling the [Bitmap File Format](https://www.ece.ua
 <img src="https://upload.wikimedia.org/wikipedia/commons/7/75/BMPfileFormat.svg">
 </p>
 
-Using this schematic we will capture the header of a `.bmp` image but not the color table.
+Using this schematic we will capture the header of a `.bmp` image but not the color table.  
 ```
 import "types.fx", "io.fx", "fio.fx";
 
@@ -718,15 +718,15 @@ using types::string;
 
 struct Header
 {
-    unsigned data{2} sig;  // Not a type declaration, sig is a variable of this type
-    unsigned data{4} filesize, reserved, dataoffset;  // Structured in the order they appear
+    unsigned data{16} sig;  // Not a type declaration, sig is a variable of this type
+    unsigned data{32} filesize, reserved, dataoffset;  // Structured in the order they appear
 };
 
 struct InfoHeader
 {
-    unsigned data{4} size, width, height;
-    unsigned data{2} planes, bitsperpixel;
-    unsigned data{4} compression, imagesize, xpixelsperm, ypixelsperm, colorsused, importantcolors;
+    unsigned data{32} size, width, height;
+    unsigned data{16} planes, bitsperpixel;
+    unsigned data{32} compression, imagesize, xpixelsperm, ypixelsperm, colorsused, importantcolors;
 };
 
 struct BMP
