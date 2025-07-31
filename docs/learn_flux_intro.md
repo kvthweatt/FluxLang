@@ -1228,8 +1228,6 @@ def main() -> int
     myNewLock.doThis();
     myNewLock.unlock();
     myNewLock.doThis();
-    
-    (void)myNewLock;     // Destroy the object.
 
     return 0;
 };
@@ -1241,11 +1239,7 @@ Status: Locked.
 Error: Locked.
 Status: Unlocked.
 Doing this!
+Lock destroyed.
 ```
 The example above shows a very basic programmatic lock.  
 `doThis()` checks the lock status before doing anything else, and shows us an error if it's locked.
-
-Remember (cast) notation? We see it again, but look what we're casting to.  
-Here we're casting to `void`. As the sound of this implies, we are "casting into the void" which is verbally adjacent to destroying something. This is **very different** than `void` assignment. We will explain the difference later.  
-- **`void` casting an object is not syntactic sugar for calling an object's `__exit()` method.**  
-This is precisely why we do not see `Lock destroyed.` printed to the screen in the results of figure 7.2.
