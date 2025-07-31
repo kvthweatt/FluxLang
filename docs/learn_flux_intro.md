@@ -713,7 +713,8 @@ Using this schematic we will capture the header of a `.bmp` image but not the co
 ```
 import "types.fx", "io.fx", "fio.fx";
 
-using fio::input::open, io::output::print;
+using fio::File, fio::input::open;
+using io::output::print;
 using types::string;
 
 struct Header
@@ -739,9 +740,9 @@ struct BMP
 
 def main() -> int
 {
-    file = open("image.bmp", "r");
-    file.seek(0);
-    unsigned data{8}[sizeof(file.bytes)] buffer = file.readall();
+    File bmpfile = open("image.bmp", "r");
+    bmpfile.seek(0);
+    unsigned data{8}[sizeof(bmpfile.bytes)] buffer = bmpfile.readall();
 
     // We now have the file in the buffer. Time to capture that data.
     Header hdata;
