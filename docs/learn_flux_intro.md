@@ -918,6 +918,8 @@ Result:
 - **Why is the value so much larger than 10?**  
 We swapped the order of the bits, essentially rotating them left 16 spaces.
 
+---
+
 ## 6 - Warming Up
 Logical flow can be handled two ways. The slow way, or the fast way.  
 What's the difference?
@@ -1060,7 +1062,9 @@ You take a step.
 
 As you can see, there's a difference in the output of these two programs.  
 In figure 6.2.1 we go past the end and fall off the imaginary cliff.  
-In figure 6.2.2 we make sure we're not at the end before taking a step.
+In figure 6.2.2 we make sure we're not at the end before taking a step.  
+`do`-`while` loops are guaranteed to execute their block **at least once**.  
+A `while`-only loop may not execute at all in some circumstances.
 
 #### f6.3.1 `for` Style 1: initializer, condition, expression
 ```
@@ -1116,3 +1120,132 @@ Result:
 99
 0
 ```
+
+#### f6.4 Sizing an array of non-standard type width:
+In Flux you are bound to come across an array like:  
+```
+signed data{20} as someType;
+someType[50] someArray;
+```
+The reason we've been dividing `sizeof` results by `8` is because we've been sizing an array of bytes. In figure 6.4, `someType` is `20` bits wide so we divide the `sizeof(someArray)` by `20` to get the number of elements.
+
+---
+
+## 7 - Object-Oriented Programming (OOP)
+We're not burning rubber on the track yet, but we are at the races.
+
+- **What is an `object`?**  
+Objects in Flux are an imaginary container, like structures, but they can have functionality.  
+They are used to model real-world things.  
+We add attributes to change what these empty containers represent. Just like we add attributes to mirror the structure of a file, we add attributes to mirror the details of a real-life object or system. For example, a car object could have the attributes `paintColor`, `maxSpeed`, and `weight`, and functions like `accelerate()`, `applyBrake()`, `steer()` and `shiftGear()`.
+- **What does it mean to "have functionality"?**  
+Imagine teaching your dog to fetch a specific toy. You have added "that specific toy fetching"-functionality to your dog.  
+A function of your smartphone is to make and receive calls.
+
+What does an `object` look like?
+#### f7.1
+```
+object myObject
+{
+    // Constructor Function - must be present
+    def __init() -> this
+    {
+        // Can place any code you want in here.
+        return this;  // Must be present.
+    };
+
+    // Destructor Function - must be present
+    def __exit() -> void
+    {
+        // Can place any code you want in here.
+        return void;  // Must be present.
+    };
+};
+```
+This is the minimum boilerplate for an object. It must have a constructor, and a destructor function defined exactly as so.  You can change the constructor or destructor definitions, but their signatures and return values must be the same.  
+Without the comments (`//`) or delimeters (`{}`) an object is only 5 lines of code to prepare.  
+
+- **You can save yourself the time of writing this boilerplate by inheriting\* `standard::collections::baseObj`.**  
+**\*** *__Inheritance__ is a topic we will go over soon.*
+
+Now that we understand, we can try making our first object.
+
+#### f7.2 Modeling a lock with `object`
+```
+import "standard.fx";
+
+// using statements for commonly used modules/components are performed in standard.fx's global space.
+// No need to do `using standard::io::output::print;` if you imported standard.fx
+
+object Lock
+{
+    bool status = false;  // We'll treat false as unlocked, true as locked.
+
+    def __init() -> this
+    {
+        print("Created a new lock.\n");
+        return this;
+    };
+
+    def __exit() -> void
+    {
+        print("Lock destroyed.\n");
+        return void;
+    };
+
+    def doThis() -> void
+    {
+        if (this.status)
+        {
+            print("Error: Locked.\n");
+            return;
+        };
+        print("Doing this!\n");
+        return;
+    };
+
+    def lock() -> bool
+    {
+        this.status = true;
+        print("Status: Locked.\n");
+        return;
+    };
+
+    def unlock() -> bool
+    {
+        this.status = false;
+        print("Status: Unlocked.\n");
+        return;
+    };
+};
+
+def main() -> int
+{
+    Lock myNewLock();
+
+    myNewLock.doThis();
+    myNewLock.lock();
+    myNewLock.doThis();
+    myNewLock.unlock();
+    myNewLock.doThis();
+    
+    (void)myNewLock;     // Destroy the object.
+
+    return 0;
+};
+```
+Result:
+```
+Created a new lock.
+Status: Locked.
+Error: Locked.
+Status: Unlocked.
+Doing this!
+```
+The example above shows a very basic programmatic lock.  
+`doThis()` checks the lock status before doing anything else, and shows us an error if it's locked.
+
+Remember (cast) notation? We see it again, but look what we're casting to.  
+Here we're casting to `void`. As the sound of this implies, we are "casting into the void" which is verbally adjacent to destroying something. This is **very different** than `void` assignment. We will explain the difference later.  
+- **`void` casting an object is not syntactic sugar for calling an object's `__exit()` method.**  
+This is precisely why we do not see `Lock destroyed.` printed to the screen in the results of figure 7.2.
