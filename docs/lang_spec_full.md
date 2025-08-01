@@ -1144,6 +1144,10 @@ def main() -> int
     return 0;
 };
 ```
+Escape hatch:
+```
+int* raw = (~)my_owned;
+```
 
 Full specification hell in a function:
 ```
