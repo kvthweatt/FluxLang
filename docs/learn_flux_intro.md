@@ -645,8 +645,8 @@ struct Point
 
 def main() -> int
 {
-    sizeitems = sizeof(Point) / sizeof(float);
-    sizebytes = (sizeof(Point) / sizeof(float)) * (sizeof(float) / 8);
+    int sizeitems = sizeof(Point) / sizeof(float);
+    int sizebytes = (sizeof(Point) / sizeof(float)) * (sizeof(float) / 8);
     print(f"The size of the Point structure in bytes is {sizebytes}.");
     print(f"The size of the Point structure is {sizeitems} items.");
     return 0;
