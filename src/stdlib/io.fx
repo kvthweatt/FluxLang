@@ -4,7 +4,8 @@ import "types.fx";
 
 namespace standard
 {
-    namespace io
+    // Made constant to prevent modification after import
+    const namespace io
     {
         global
         {

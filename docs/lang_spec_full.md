@@ -919,46 +919,6 @@ operator<T>(T L, T R)[==] -> T;
 
 ---
 
-## **Smart Pointers:**
-
-```
-object unique_ptr<T>
-{
-    T* ptr;
-
-    def __init(T* p) -> this
-    {
-        this.ptr = p;
-        return this;
-    };
-
-    def __exit() -> void
-    {
-        if (this.ptr == !void)
-        {
-            (void)this.ptr;  // Explicit deallocation
-        };
-    };
-
-    def __eq(unique_ptr<T> other) -> this
-    {
-        if (this.ptr == !void) { (void)this.ptr; };
-        this.ptr = other.ptr;  // Transfer ownership
-        (void)other.ptr;       // Clean up
-        return this;
-    };
-};
-
-int x = 5;
-
-unique_ptr<int> a(@x);   // Alternatively `a(@new int);`
-unique_ptr<int> b;
-
-b = a;         // Ownership moved to b, a.ptr is now void
-
-doThing(a);    // Use-after-free, a no longer exists.
-```
-
 **Operator Overloading:**
 
 ```
@@ -1095,7 +1055,7 @@ Use this for compile-time validation without runtime cost.
 ```
 contract notSame {
 	assert(@a != @b, "Cannot assign unique_ptr to itself.");
-}
+};
 
 contract canMove : notSame {
 	assert(a.ptr != void, "Cannot move from empty unique_ptr.");

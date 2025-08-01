@@ -4,7 +4,8 @@ import "types.fx";
 
 namespace standard
 {
-    namespace collections
+    // Made constant to prevent modification after import
+    const namespace collections
     {
         // Dynamic array for integers (would need separate implementations for other types)
         object array<T>

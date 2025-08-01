@@ -4,7 +4,8 @@ import "types.fx";
 
 namespace standard
 {
-    namespace system
+    // Made constant to prevent modification after import
+    const namespace system
     {
         // Execute shell command
         def shell(string command) -> i32

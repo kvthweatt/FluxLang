@@ -15,7 +15,10 @@
 //    };
 //};
 
-namespace standard
+// "Final" stage, all standard library items are defined and imported,
+// now we make standard a constant namespace so it cannot be altered when imported.
+// Doing another namespace standard definition after this will result in a compiler error.
+const namespace standard
 {
     namespace io {
         // Basic I/O functions (placeholders for now)
