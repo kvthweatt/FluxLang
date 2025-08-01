@@ -555,7 +555,7 @@ def main() -> int
 {
     string s();
     s = "Testing!";
-    len = (sizeof(s) / 8) - 1;
+    int len = (sizeof(s) / 8) - 1;
     print(s[len:0]);
     return 0;
 };
@@ -587,7 +587,7 @@ def main() -> int
 {
     string s();
     s = "Testing!";
-    len = sizeof(s) / 8;
+    int len = sizeof(s) / 8;
     print(f"The size of s is {len} bytes long.");
     return 0;
 };
