@@ -328,8 +328,8 @@ def f_to_c(float temp) -> float
 
 def main() -> int
 {
-    c = -40;
-    f = c_to_f(c);  // -40 °C == -40 °F
+    int c = -40;
+    int f = c_to_f(c);  // -40 °C == -40 °F
     return 0;
 };
 ```
@@ -1168,7 +1168,7 @@ Without the comments (`//`) or delimeters (`{}`) an object is only 5 lines of co
 - **You can save yourself the time of writing this boilerplate by inheriting\* `standard::collections::baseObj`.**  
 **\*** *__Inheritance__ is a topic we will go over soon.*
 
-Now that we understand, we can try making our first object.
+Now that we see what objects look like, let's try doing something with them.
 
 #### f7.2 Modeling a lock with `object`
 ```
