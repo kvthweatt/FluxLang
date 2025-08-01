@@ -100,6 +100,14 @@ Experienced Level (planned)
 
 ---
 
+## What's special about Flux?
+
+Flux offers a way to handle data effectively without complicating what data inherently is, just bits.  
+Structs can be serialized to raw bits, and restructured into an entirely different struct.  
+Raw, reinterpret casting without bloat.
+
+---
+
 ## Compiling Flux
 
 **Linux instructions:**  
