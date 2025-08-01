@@ -1103,6 +1103,50 @@ Drawable object myObj
 
 ---
 
+## Ownership  
+Ownership in Flux is made possible with `~`. Here's how:
+```
+def ~make() -> ~int 
+{
+    int ~x = new int 42;
+    return ~x;
+};
+```
+The compiler checks, like so:
+```
+def ~make() -> ~int 
+{
+    int ~x = new int 42;
+    return x;  // ❌ ERROR: Must use ~x
+};
+```
+Leaked ownership:
+```
+def ~oops() -> void 
+{
+    int ~x = new int 42;  // ❌ ERROR: ~x not moved/destroyed
+};
+```
+Full example:
+```
+def ~read_file(string path) -> ~string 
+{
+    ~File f = new File path;
+    ~string data = read_all(f.fd);
+    return ~data;  // Explicit transfer
+};
+
+def main() -> int 
+{
+    ~string content = ~read_file("log.txt");
+    print(*content);
+    // content auto-freed here via __exit()
+    return 0;
+};
+```
+
+---
+
 Keyword list:
 
 ```
