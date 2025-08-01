@@ -1108,7 +1108,7 @@ Ownership in Flux is made possible with `~`. Here's how:
 ```
 def ~make() -> ~int 
 {
-    int ~x = new int 42;
+    int ~x = new int(42);
     return ~x;
 };
 ```
@@ -1116,7 +1116,7 @@ The compiler checks, like so:
 ```
 def ~make() -> ~int 
 {
-    int ~x = new int 42;
+    int ~x = new int(42);
     return x;  // ❌ ERROR: Must use ~x
 };
 ```
@@ -1124,14 +1124,14 @@ Leaked ownership:
 ```
 def ~oops() -> void 
 {
-    int ~x = new int 42;  // ❌ ERROR: ~x not moved/destroyed
+    int ~x = new int(42);  // ❌ ERROR: ~x not moved/destroyed
 };
 ```
 Full example:
 ```
 def ~read_file(string path) -> ~string 
 {
-    ~File f = new File path;
+    ~File f = new File(path);
     ~string data = read_all(f.fd);
     return ~data;  // Explicit transfer
 };
@@ -1143,6 +1143,15 @@ def main() -> int
     // content auto-freed here via __exit()
     return 0;
 };
+```
+
+Full specification hell in a function:
+```
+const volatile def ~foo<T>(T a) -> ~T : PreContract  // don't hurt me i'm scared
+{
+	T ~b = new T(5) + a;
+	return ~b;
+} : PostContract;
 ```
 
 ---
