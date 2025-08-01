@@ -1153,8 +1153,8 @@ Full specification hell in a function:
 ```
 const volatile def ~foo<T>(T a) -> ~T : PreContract  // don't hurt me i'm scared
 {
-	T ~b = new T(5) + a;
-	return ~b;
+	T ~b = new T(5);
+	return ~b + a;
 } : PostContract;
 ```
 
