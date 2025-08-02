@@ -1243,3 +1243,143 @@ Lock destroyed.
 ```
 The example above shows a very basic programmatic lock.  
 `doThis()` checks the lock status before doing anything else, and shows us an error if it's locked.
+
+#### f7.3 Inheritance
+The concept of inheritance is all about reusability. It allows us to not have to write so much code depending on what we're trying to accomplish. We're going to look at `struct` inheritance first, then we'll do `object` inheritance.
+
+#### f7.3.1 Struct Inheritance
+We're going to re-use the BMP example, but slightly modified to demonstrate *how* inheritance for structs works. It's important to understand the semantics behind `struct` inheritance when dealing with complex structures and how they relate to `data`.
+```
+struct Header
+{
+    unsigned data{16} sig;
+    unsigned data{32} filesize, reserved, dataoffset;
+};
+
+struct InfoHeader
+{
+    unsigned data{32} size, width, height;
+    unsigned data{16} planes, bitsperpixel;
+    unsigned data{32} compression, imagesize, xpixelsperm, ypixelsperm, colorsused, importantcolors;
+};
+
+struct BMP : Header, InfoHeader;
+```
+Here we see `:` after the struct name, this indicates inheritance. It's as if `BMP` is now defined as:
+```
+struct BMP
+{
+    unsigned data{16} sig;
+    unsigned data{32} filesize, reserved, dataoffset;
+    unsigned data{32} size, width, height;
+    unsigned data{16} planes, bitsperpixel;
+    unsigned data{32} compression, imagesize, xpixelsperm, ypixelsperm, colorsused, importantcolors;
+};
+```
+Inheritance operates in the order the bases (inherited structs) appear. This is to maintain the 1:1 mapping to `data` and allow us to do *serialization/deserialization* without *marshalling*.
+
+- **What are serialization and deserialization?**
+Serialization in programming is the process of converting a data structure into a format that can be stored or transmitted and reconstructed later. This format is typically a sequence of bytes or characters. Deserialization is the reverse of this process, and in Flux is called **restructuring**. It is done by casting any arbitrary sequence of bits to a `struct` of equal bit length. If the bit-lengths are not equal, it will result in a runtime error and undefined behavior.
+
+- **What is marshalling?**
+This refers to the process of transforming data structures into a format suitable for transmission across different environments, such as over a network, between different processes, or between different programming languages. This process is often necessary when data needs to cross boundaries where direct memory access or shared object representations are not possible.
+
+#### f7.3.2 Object Inheritance
+Clearly structures and objects are very different, and the two cannot inherit from each other. Example:
+```
+struct SomeStruct;
+
+object MyObject : SomeStruct; // Type mismatch, this won't compile
+```
+Object inheritance is different in that we have the potential to introduce the *diamond problem*. Flux solves this with explicit inheritance syntax. Before we get to the diamond problem, we'll start with simple inheritance to get the idea.
+
+```
+object B
+{
+    def __init() -> this
+    {
+        return this;
+    };
+
+    def __exit() -> void
+    {
+        return void;
+    };
+
+    def foo() -> void
+    {
+        print("Goodbye!\n");
+        return;
+    }
+};
+
+object A : B
+{
+    def __init() -> this
+    {
+        return this;
+    };
+
+    def __exit() -> void
+    {
+        return void;
+    };
+
+    def foo() -> void
+    {
+        print("Hello!\n");
+        return;
+    };
+};
+```
+
+In this case, since `A` already has `foo()`, it does not gain `foo()` from `B`. Essentially, we only inherit nonexistent identifiers.
+
+Now say we want to use `B.foo()` instead of `this.foo()` when we're inside of `A`'s scope, we need to use `virtual`.  
+`virtual` is used to fully qualify a name, like so:
+
+```
+object A : B
+{
+    def __init() -> this
+    {
+        return this;
+    };
+
+    def __exit() -> void
+    {
+        return void;
+    };
+
+    def foo() -> void
+    {
+        print("Hello!\n");
+        return;
+    };
+};
+
+def main() -> int
+{
+    A newObjectA();
+
+    newObjectA.virtual::B.foo();
+
+    return 0;
+};
+```
+Result:  
+`Goodbye!`
+
+- **What's the *diamond problem*?**
+The "diamond problem" in object-oriented programming is an ambiguity that arises in programming languages that support multiple inheritance. It occurs when an object inherits from two or more objects, and those parent objects themselves inherit from a common base object. Visualized, this creates a "diamond" shape in the inheritance hierarchy:
+```
+          A
+       /     \
+      B       C
+       \     /
+        D.foo()
+```
+
+If `D` has a method named `foo()`, `B` and `C` gain `foo()`, and when `A` gains `B` and `C`, it gains 2 copies of `foo()`. Normally this creates an issue where we don't know which `foo()` should be added to `A`.
+
+However, in Flux, this doesn't happen. Everything has an explicit "address" or "name", and we "locate" them with `virtual`.
