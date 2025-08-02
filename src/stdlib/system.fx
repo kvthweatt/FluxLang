@@ -7,7 +7,8 @@ namespace standard
     // Made constant to prevent modification after import
     const namespace system
     {
-        // Execute shell command
+        // Need to use `system.fx` to determine platform at compile time, and create a macro flag which we will switch over for the proper shell implementation.
+        // Execute shell command example
         def shell(string command) -> i32
         {
             i32 result;
@@ -38,8 +39,7 @@ namespace standard
         // Get environment variable
         def getenv(string name) -> string
         {
-            // Implementation would need to interface with libc
-            // After we create libfx, replace interface
+            // Would need `fio.fx` implementation to be capable of file input/output, also dependent on `system.fx`
             return "";
         };
     };

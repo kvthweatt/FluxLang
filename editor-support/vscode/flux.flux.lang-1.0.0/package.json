@@ -1,0 +1,26 @@
+{
+  "name": "flux.lang",
+  "publisher": "flux",
+  "displayName": "Flux Language Support",
+  "description": "Syntax highlighting and language support for Flux",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "flux",
+      "aliases": ["Flux", "flux"],
+      "extensions": [".fx"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "flux",
+      "scopeName": "source.flux",
+      "path": "./syntaxes/flux.tmLanguage.json"
+    }]
+  }
+}
