@@ -4,109 +4,132 @@
     <img src="https://github.com/kvthweatt/FluxLang/blob/main/resources/logo_cropped.jpg" width="300" height="150">
 </p>
 
-**Note:** This language is still in development. A simplified version of Flux will be the first to release. It will not support templates, inheritance, `operator`, `contract`, `compt`, `trait`, macros, or the _full_ built-in operator set (all logical/bitwise operators). This is not a complete list of all that will not be supported. The reduced language specification can be found [here](https://github.com/kvthweatt/FluxLang/blob/main/docs/language_specification_simplified.md).
+Flux is a systems programming language that combines the low-level control of C with Python-like readability, designed for performance-critical applications where data manipulation is key.
 
-Flux is a systems programming language, visually resembling C++, Rust, and Python.
-
-For the full specification, go [here](https://github.com/kvthweatt/FluxLang/blob/main/docs/lang_spec_full.md).
-
-- **Please note,**  
-The compiler is still in development. There are some unknown parser edge cases that still need resolving.  
-If you encounter any parsing issues please [submit them here](https://github.com/kvthweatt/FluxLang/issues).  
-Depending on how development goes, and how much help is received, some full specification features may be included.
-
----
-
-The following are example programs demonstrating what Flux looks like.  
-The Standard Library is not implemented yet, so these programs will not compile.
-
-#### Hello World
-
+## Why Flux Stands Out  
+### 1. Unparalleled Data Control  
+- Flux gives you direct, zero-overhead access to memory with powerful features like:  
+Bit-precise data types: Create custom types of any width (e.g., unsigned data{13:16} for 13-bit values with 16-bit alignment).  
+True serialization/deserialization: Cast structs to raw bits and back with no marshalling overhead.  
+Memory model you control: Explicit memory management with RAII support.
 ```
-import "standard.fx";
+// Model hardware registers precisely
+struct GPIORegisters {
+    unsigned data{32} control;
+    unsigned data{32} status;
+    unsigned data{64} buffer;
+};
+
+// Direct memory mapping
+volatile const GPIORegisters* GPIO = @0x40000000;
+```
+
+### 2. File Format Magic  
+Flux makes working with binary formats trivial by mapping structs directly to file layouts:
+```
+import "types.fx", "io.fx", "fio.fx";
+
+using fio::File, fio::input::open;
+using io::output::print;
+using types::string;
+
+struct Header
+{
+    unsigned data{16} sig;  // Not a type declaration, sig is a variable of this type
+    unsigned data{32} filesize, reserved, dataoffset;  // Structured in the order they appear
+};
+
+struct InfoHeader
+{
+    unsigned data{32} size, width, height;
+    unsigned data{16} planes, bitsperpixel;
+    unsigned data{32} compression, imagesize, xpixelsperm, ypixelsperm, colorsused, importantcolors;
+};
+
+struct BMP
+{
+    Header header;
+    InfoHeader infoheader;
+    // If we create this structure after opening the file, we can get the colorspace properly.
+    // We would do this in main() after reading the file into the buffer.
+};
 
 def main() -> int
 {
+    File bmpfile = open("image.bmp", "r");
+    bmpfile.seek(0);
+    unsigned data{8}[sizeof(bmpfile.content)] buffer = bmpfile.readall();
+    bmpfile.close()
+
+    // We now have the file in the buffer. Time to capture that data.
+    Header hdata;
+    int hdlen = sizeof(hdata) / ( 2 + (4 * 3) );  // 2 bytes + 4x3 bytes
+    InfoHeader ihdata;
+    int ihdlen = sizeof(ihdata) / ( (4 * 9) + (2 * 2) ); // 9x4 bytes + 2x2 bytes
+
+    hdata = (Header)buffer[0:hdlen - 1];            // Capture header
+    ihdata = (InfoHeader)buffer[hdlen:ihdlen - 1];  // Capture info header
+    print((char[2])hdata.sig)
+    return 0;
+};
+```
+Result:  
+`BM`
+
+### 3. Modern Features with Bare-Metal Performance  
+- Python-inspired syntax with C++-like power.  
+- Compile-time execution (compt blocks) for zero-cost abstractions.  
+- Ownership system (~ syntax) for memory safety where you need it.  
+- Full operator overloading with contracts for safe arithmetic.
+```
+// Smart pointer with move semantics
+operator (unique_ptr<T> a, unique_ptr<T> b)[=] -> unique_ptr<T> {
+    a.ptr = b.ptr;    // Transfer ownership
+    (void)b.ptr;      // Clean up
+    return a;
+};
+```
+
+### 5. Dual-Personality Language  
+Flux is ready for your needs - write high-level code when you want, drop to bare metal when you need:
+```
+// High-level
+int[] evens = [x for (x in 1..20) if (x % 2 == 0)];
+
+// Low-level
+volatile asm {
+    mov eax, 1
+    mov ebx, 0
+    int 0x80
+};
+```
+
+### 6. Hello World
+```
+import "standard.fx";
+
+def main() -> int {
     print("Hello World!");
+    return 0;
 };
 ```
 
-#### Basic string (Non-OOP):
+### Why Developers Love Flux
+- No hidden costs: What you write is what executes
 
-```
-unsigned data{8}[] as noopstr;
-```
+- True data freedom: Reinterpret memory safely and efficiently
 
-#### An example of [SHA256](https://github.com/kvthweatt/FluxLang/blob/main/examples/sha256.fx)
+- Readable systems code: Python-like syntax for low-level work
 
-#### Full-specification Smart Pointers (includes use of templates, and operators)
+- Compile-time power: Execute code during compilation for optimizations
 
-```
-object unique_ptr<T>
-{
-    T* ptr;
+### Join the Flux Revolution
+Flux is currently in active development. We're building:  
+- A compiler with full LLVM backend support.  
+- Another, bootstrapped compiler, entirely written in Flux.  
+- A standard library for systems programming and general purpose programming tasks.  
+- Tooling for embedded and high-performance applications.
 
-    def __init(T* p) -> this
-    {
-        this.ptr = p;
-        return this;
-    };
-
-    def __exit() -> void
-    {
-        if (this.ptr == !void)
-        {
-            (void)this.ptr;  // Explicit deallocation, very readable
-        };
-    };
-};
-
-operator (unique_ptr<T> L, unique_ptr<T> R)[=] -> unique_ptr<T>
-{
-    if (L.ptr != void) { L.ptr = void; };
-    L.ptr = R.ptr;  // Transfer ownership
-    (void)R.ptr;    // Clean up
-    return L;
-};
-
-int x = 5;
-
-unique_ptr<int> a(@x);   // Alternatively `a(@new int);`
-unique_ptr<int> b;
-
-b = a;         // Ownership moved to b, a.ptr is now void
-
-doThing(a);    // Use-after-free, a no longer exists.
-```
-
----
-
-## Implemented Keywords
-
-[This is a list](https://github.com/kvthweatt/FluxLang/blob/main/docs/codegen_progress.md) of AST classes that have LLVM `codegen()` methods.
-
-[This is a table](https://github.com/kvthweatt/FluxLang/blob/main/docs/keyword_progress.md) of keywords showing their implementation status.
-
-By using assembly you can do system calls.  
-`extern` for FFI is planned. Please be patient.
-
----
-
-## Learn Flux
-
-[Intro Level](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_intro.md) (in-development)  
-Adept Level (planned)  
-Experienced Level (planned)
-
----
-
-## What's special about Flux?
-
-Flux offers a way to handle data effectively without complicating what data inherently is, just bits.  
-Structs can be serialized to raw bits, and restructured into an entirely different struct.  
-Raw, reinterpret casting without bloat.
-
----
 
 ## Compiling Flux
 
