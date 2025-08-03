@@ -8,10 +8,10 @@ Flux is a systems programming language that combines the low-level control of C 
 
 ## Why Flux Stands Out  
 ### 1. Unparalleled Data Control  
-- Flux gives you direct, zero-overhead access to memory with powerful features like:  
-Bit-precise data types: Create custom types of any width (e.g., unsigned data{13:16} for 13-bit values with 16-bit alignment).  
-True serialization/deserialization: Cast structs to raw bits and back with no marshalling overhead.  
-Memory model you control: Explicit memory management with RAII support.
+Flux gives you direct, zero-overhead access to memory with powerful features like:  
+- Bit-precise data types: Create custom types of any width (e.g., unsigned data{13:16} for 13-bit values with 16-bit alignment).  
+- True serialization/deserialization: Cast structs to raw bits and back with no marshalling overhead.  
+- Memory model you control: Explicit memory management with RAII support.
 ```
 // Model hardware registers precisely
 struct GPIORegisters {
