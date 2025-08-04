@@ -114,6 +114,35 @@ def main() -> int {
 };
 ```
 
+### Restructuring
+```
+import "types.fx", "io.fx";
+
+using io::output::print;
+using types::string;
+
+struct Values32
+{
+    i32 a, b, c, d;
+};
+
+struct Values16
+{
+    i16 a, b, c, d, e, f, g, h;
+}
+
+def main() -> int
+{
+    Values32 v1 = {a=10, b=20, c=30, d=40};
+    
+    Values16 v2 = (Values16)v1;
+
+    print(f"v2.a = {v2.a}\n");
+    print(f"v2.b = {v2.b});
+    return 0;
+};
+```
+
 ### Why Developers Love Flux
 - No hidden costs: What you write is what executes
 

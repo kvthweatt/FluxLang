@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src" / "compiler"))
 from fc import FluxCompiler # type: ignore
 
 def main():
+    print(len(sys.argv))
     if len(sys.argv) < 2:
         print("Usage: python3 flux_compiler.py <input.fx> [options]")
         print("Options:")

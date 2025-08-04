@@ -9,9 +9,7 @@ Contributors:
     Piotr Bednarski
 """
 
-import sys
-import os
-import subprocess
+import sys, os, subprocess
 from pathlib import Path
 from llvmlite import ir
 from flexer import FluxLexer
@@ -23,6 +21,8 @@ class FluxCompiler:
         self.verbosity = int(verbosity) if verbosity != None else None
         self.module = ir.Module(name="flux_module")
         import platform
+        if platform.system() == "Windows":
+            self.module_triple = "x86_64-pc-windows-gnu"
         if platform.system() == "Darwin":  # macOS
             # Detect macOS architecture
             import subprocess
@@ -87,6 +87,32 @@ class FluxCompiler:
                     str(ll_file),
                     "-o", str(obj_file)
                 ], check=True)
+            elif platform.system() == "Windows":
+                # Windows-specific compilation steps
+                # First generate object file
+                obj_file = temp_dir / f"{base_name}.obj"
+                print(obj_file)
+                subprocess.run([
+                    "llc",
+                    "-O2",
+                    "-filetype=obj",
+                    str(ll_file),
+                    "-o", str(obj_file)
+                ], check=True)
+
+                self.temp_files.append(obj_file)
+                #print("HERE")
+                
+                # Generate .lib file for linking
+                lib_file = temp_dir / f"{base_name}.lib"
+                print(lib_file)
+                subprocess.run([
+                    "lld-link",
+                    "/lib",  # Create library
+                    "/out:" + str(lib_file),
+                    str(obj_file)
+                ], check=True)
+                self.temp_files.append(lib_file)
             else:  # Linux - use traditional assembly step
                 asm_file = temp_dir / f"{base_name}.s"
                 subprocess.run([
