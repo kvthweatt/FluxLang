@@ -743,7 +743,7 @@ def main() -> int
     File bmpfile = open("image.bmp", "r");
     bmpfile.seek(0);
     unsigned data{8}[sizeof(bmpfile.content)] buffer = bmpfile.readall();
-    bmpfile.close()
+    bmpfile.close();
 
     // We now have the file in the buffer. Time to capture that data.
     Header hdata;
