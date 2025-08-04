@@ -1374,12 +1374,73 @@ Result:
 The "diamond problem" in object-oriented programming is an ambiguity that arises in programming languages that support multiple inheritance. It occurs when an object inherits from two or more objects, and those parent objects themselves inherit from a common base object. Visualized, this creates a "diamond" shape in the inheritance hierarchy:
 ```
           A
-       /     \
+        /   \
       B       C
-       \     /
+        \   /
         D.foo()
 ```
 
 If `D` has a method named `foo()`, `B` and `C` gain `foo()`, and when `A` gains `B` and `C`, it gains 2 copies of `foo()`. Normally this creates an issue where we don't know which `foo()` should be added to `A`.
 
-However, in Flux, this doesn't happen. Everything has an explicit "address" or "name", and we "locate" them with `virtual`.
+However, in Flux, this doesn't happen. Everything has an explicit "address" or "name", and we "locate" them with `virtual`. To prevent `A` from having a massive inheritance tree, we explicitly restrict what `B` and `C` inherit themselves.
+
+Let's model this diamond and exclude what we don't want to end up as a part of `A`.
+#### f7.4 Inheritance Exclusion
+```
+object D
+{
+    def __init() -> this
+    {
+        return this;
+    };
+
+    def __exit() -> void
+    {
+        return void;
+    };
+
+    def foo() -> void
+    {
+        print("foo() from object D");
+        return;
+    };
+};
+
+object C : D[!__init,!__exit,!__expr,!foo]
+{
+    def __init() -> this
+    {
+        return this;
+    };
+
+    def __exit() -> void
+    {
+        return void;
+    };
+};
+
+object B : D[!__init,!__exit,!__expr]
+{
+    def __init() -> this
+    {
+        return this;
+    };
+
+    def __exit() -> void
+    {
+        return void;
+    };
+};
+
+object A : B, C[!__init,!__exit]; // A is still a prototype
+object A {}; // Now it's defined but it comes with batteries included.
+
+def main() -> int
+{
+    A someObj();
+    someObj.foo();
+    return 0;
+};
+```
+Result:  
+`foo() from object D`
