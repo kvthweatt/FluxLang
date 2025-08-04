@@ -5,7 +5,9 @@
 </p>
 
 Flux is a broadly mid-level systems OOP language.  
-Designed based on the question: "What if there was a language made which benefits from all we know now?" 
+Designed based on the question: "What if there was a language made which benefits from all we know now?"  
+[Full Specification](https://github.com/kvthweatt/FluxLang/blob/main/docs/lang_spec_full.md)  
+[Intro to Flux](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_intro.md)
 
 ## Why Flux Stands Out  
 ### 1. Unparalleled Data Control  
