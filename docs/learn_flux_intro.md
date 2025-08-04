@@ -753,7 +753,7 @@ def main() -> int
 
     hdata = (Header)buffer[0:hdlen - 1];            // Capture header
     ihdata = (InfoHeader)buffer[hdlen:ihdlen - 1];  // Capture info header
-    print((char[2])hdata.sig)
+    print((char[2])hdata.sig);
     return 0;
 };
 ```
