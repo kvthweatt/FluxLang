@@ -1153,13 +1153,22 @@ const volatile def ~foo<T>(T a) -> ~T : PreContract  // don't hurt me i'm scared
 
 ---
 
+## The `register` keyword  
+This works exactly like C's `register`, it is a compiler hint to store the value in the CPU's register and not RAM.  
+It is not guaranteed.  
+`register int x = 5;`  
+To make it guaranteed, use `volatile`:  
+`volatile register int x = 5;`
+
+---
+
 Keyword list:
 
 ```
 alignof, and, as, asm, assert, auto, break, bool, case, catch, char, compt, const, contract, continue, data, def, default,
 do, elif, else, extern, false, float, for, from, global, if, import, in, is, int, local, namespace, new, not, object,
-operator, or, private, public, return, signed, sizeof, struct, super, switch, this, throw, true, try, trait, typeof,
-union, unsigned, using, void, volatile, while, xor
+operator, or, private, public, register, return, signed, sizeof, struct, super, switch, this, throw, true, try, trait,
+typeof, union, unsigned, using, void, volatile, while, xor
 ```
 
 Literal types:
