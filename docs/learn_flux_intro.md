@@ -734,15 +734,14 @@ struct BMP
 {
     Header header;
     InfoHeader infoheader;
-    // If we create this structure after opening the file, we can get the colorspace properly.
-    // We would do this in main() after reading the file into the buffer.
+    // ...
 };
 
 def main() -> int
 {
     File bmpfile = open("image.bmp", "r");
     bmpfile.seek(0);
-    unsigned data{8}[sizeof(bmpfile.length)] buffer = bmpfile.readall();
+    byte[bmpfile.length] buffer = bmpfile.readall();
     bmpfile.close();
 
     // We now have the file in the buffer. Time to capture that data.

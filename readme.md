@@ -13,11 +13,11 @@ Designed based on the question: "What if there was a language made which benefit
 ### 1. Unparalleled Data Control  
 Flux gives you direct, zero-overhead access, manual memory with RAII.  
 Create variable bit-width custom primitive data types.  
-Perform true serialization/deserialization - cast structs to raw bits/bytes and back with no marshalling overhead.  
+No need to perform gymnastics for serialization/deserialization, structures are data-only primitives so they're already serialized as they are.
 
 ### 2. File Format Magic  
-Flux makes working with binary formats trivial by enforcing structs be data-only with no functionality.  
-This allows reinterpret cast-like behavior without gymnastics.
+Flux makes working with binary formats trivial by enforcing data-only structs.  
+Serialization and deserialization become native operations.
 ```
 import "types.fx", "io.fx", "fio.fx";
 
@@ -49,7 +49,7 @@ def main() -> int
 {
     File bmpfile = open("image.bmp", "r");
     bmpfile.seek(0);
-    unsigned data{8}[sizeof(bmpfile.content)] buffer = bmpfile.readall();
+    byte[bmpfile.length] buffer = bmpfile.readall();
     bmpfile.close();
 
     // We now have the file in the buffer. Time to capture that data.
