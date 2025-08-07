@@ -800,8 +800,8 @@ def main() -> int
 ```
 Result:  
 ```
-0
-10
+v2.a = 0
+v2.b = 10
 ```
 
 - **Why does v2.a equal 0?**  

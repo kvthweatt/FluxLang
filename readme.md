@@ -185,8 +185,8 @@ def main() -> int
 ```
 Result:
 ```
-0
-10
+v2.a = 0
+v2.b = 10
 ```
 
 ### Why Developers Love Flux
