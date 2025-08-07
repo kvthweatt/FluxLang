@@ -1443,3 +1443,4 @@ def main() -> int
 ```
 Result:  
 `foo() from object D`
+

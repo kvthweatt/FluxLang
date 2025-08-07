@@ -544,6 +544,24 @@ def main() -> int
     return 0;
 };
 ```
+
+**Extending an array:**
+```
+import "standard.fx";
+
+using standard::io, standard::types;
+
+def main() -> int
+{
+	int[] arr1 = [1,2,3];
+	int[] arr2 = [4];
+	arr1 += [4];              // Invalid
+	arr1 += arr2;             // Invalid
+
+	int[] arr3 = arr1 + arr2; // Correct!
+};
+```
+
 ---
 
 ## **Using `asm` to do in-line assembly:**
@@ -1142,15 +1160,6 @@ Escape hatch:
 int* raw = (~)my_owned;
 ```
 
-Full specification hell in a function:
-```
-const volatile def ~foo<T>(T a) -> ~T : PreContract  // don't hurt me i'm scared
-{
-	T ~b = new T(5);
-	return ~b + a;
-} : PostContract;
-```
-
 ---
 
 ## The `register` keyword  
@@ -1170,6 +1179,7 @@ do, elif, else, extern, false, float, for, from, global, if, import, in, is, int
 operator, or, private, public, register, return, signed, sizeof, struct, super, switch, this, throw, true, try, trait,
 typeof, union, unsigned, using, void, volatile, while, xor
 ```
+Count: 62 keywords
 
 Literal types:
 bool, int `5`, float `3.14`, char `"B"` == `66` - `65` == `'A'`, data

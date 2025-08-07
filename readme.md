@@ -83,14 +83,14 @@ compt
 ```
 def ~read_file(string path) -> ~string 
 {
-    ~File f = new File(path);
-    ~string data = read_all(f.fd);
+    File ~f = new File(path);
+    string ~data = read_all(~f.fd);
     return ~data;  // Explicit transfer
 };
 
 def main() -> int 
 {
-    ~string content = ~read_file("log.txt");
+    string ~content = ~read_file("log.txt");
     print(*content);
     // content auto-freed here via __exit()
     return 0;
