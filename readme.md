@@ -70,8 +70,55 @@ Result:
 ### 3. Modern Features with Bare-Metal Performance  
 - Python-inspired syntax with C++-like power.  
 - Compile-time execution (`compt` blocks) for zero-cost abstractions.  
+```
+compt
+{
+    if (def(MY_MACRO))
+    {
+        // ... do things
+    };
+};
+```
 - Ownership system (`~` syntax) for memory safety where you need it.  
+```
+def ~read_file(string path) -> ~string 
+{
+    ~File f = new File(path);
+    ~string data = read_all(f.fd);
+    return ~data;  // Explicit transfer
+};
+
+def main() -> int 
+{
+    ~string content = ~read_file("log.txt");
+    print(*content);
+    // content auto-freed here via __exit()
+    return 0;
+};
+```
+Escape hatch:
+```
+int* raw = (~)my_owned;
+```
 - Trait system for objects.
+```
+trait Drawable
+{
+    def draw() -> void;
+};
+
+Drawable object Square
+{
+    def __init() -> this { return this; };
+    def __exit() -> void { return void; };
+
+    def draw() -> void
+    {
+        // Implementation
+        return void;
+    };
+};
+```
 - Full operator overloading with contracts for safe arithmetic.
 ```
 // Smart pointer with move semantics
@@ -108,7 +155,7 @@ def main() -> int
 };
 ```
 
-### Reinterpret Restructuring
+### Restructuring
 ```
 import "types.fx", "io.fx";
 

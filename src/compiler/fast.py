@@ -160,23 +160,6 @@ class TypeSpec(ASTNode):
 			return ir.VoidType()
 		elif self.base_type == DataType.DATA:
 			return ir.IntType(self.bit_width)
-		# Fixed-width integer types
-#		elif self.base_type == DataType.UINT8:
-#			return ir.IntType(8)
-#		elif self.base_type == DataType.UINT16:
-#			return ir.IntType(16)
-#		elif self.base_type == DataType.UINT32:
-#			return ir.IntType(32)
-#		elif self.base_type == DataType.UINT64:
-#			return ir.IntType(64)
-#		elif self.base_type == DataType.INT8:
-#			return ir.IntType(8)
-#		elif self.base_type == DataType.INT16:
-#			return ir.IntType(16)
-#		elif self.base_type == DataType.INT32:
-#			return ir.IntType(32)
-#		elif self.base_type == DataType.INT64:
-#			return ir.IntType(64)
 		else:
 			raise ValueError(f"Unsupported type: {self.base_type}")
 	
@@ -416,7 +399,6 @@ class ArrayAccess(Expression):
 @dataclass
 class PointerDeref(Expression):
 	pointer: Expression
-
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
 		# Generate code for the pointer expression
