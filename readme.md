@@ -136,6 +136,11 @@ def main() -> int
     return 0;
 };
 ```
+Result:
+```
+0
+10
+```
 
 ### Why Developers Love Flux
 - No hidden costs: What you write is what executes.  
@@ -152,6 +157,8 @@ Flux is currently in active development. We're building:
 
 
 ## Compiling Flux
+
+We are still working on Windows & Mac compilation instructions.
 
 **Linux instructions:**  
 You will need:

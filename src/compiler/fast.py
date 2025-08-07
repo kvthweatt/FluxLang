@@ -32,16 +32,6 @@ class DataType(Enum):
 	DATA = "data"
 	VOID = "void"
 	THIS = "this"
-	# Fixed-width integer types
-	# These are to be defined in `types.fx`
-	#UINT8 = "uint8"   # ubyte
-	#UINT16 = "uint16" # u16
-	#UINT32 = "uint32" # u32
-	#UINT64 = "uint64" # u64
-	#INT8 = "int8"	   # byte
-	#INT16 = "int16"   # i16
-	#INT32 = "int32"   # i32
-	#INT64 = "int64"   # i64
 
 class Operator(Enum):
 	ADD = "+"
@@ -86,24 +76,7 @@ class Literal(ASTNode):
 			return ir.Constant(ir.IntType(8), ord(self.value[0]) if isinstance(self.value, str) else self.value)
 		elif self.type == DataType.VOID:
 			return None
-		# Fixed-width integer types
-#		elif self.type == DataType.UINT8:
-#			return ir.Constant(ir.IntType(8), int(self.value) if isinstance(self.value, str) else self.value)
-#		elif self.type == DataType.UINT16:
-#			return ir.Constant(ir.IntType(16), int(self.value) if isinstance(self.value, str) else self.value)
-#		elif self.type == DataType.UINT32:
-#			return ir.Constant(ir.IntType(32), int(self.value) if isinstance(self.value, str) else self.value)
-#		elif self.type == DataType.UINT64:
-#			return ir.Constant(ir.IntType(64), int(self.value) if isinstance(self.value, str) else self.value)
-#		elif self.type == DataType.INT8:
-#			return ir.Constant(ir.IntType(8), int(self.value) if isinstance(self.value, str) else self.value)
-#		elif self.type == DataType.INT16:
-#			return ir.Constant(ir.IntType(16), int(self.value) if isinstance(self.value, str) else self.value)
-#		elif self.type == DataType.INT32:
-#			return ir.Constant(ir.IntType(32), int(self.value) if isinstance(self.value, str) else self.value)
-#		elif self.type == DataType.INT64:
-#			return ir.Constant(ir.IntType(64), int(self.value) if isinstance(self.value, str) else self.value)
-#		elif self.type == DataType.DATA:
+		elif self.type == DataType.DATA:
 			# Handle array literals
 			if isinstance(self.value, list):
 				# For now, just return None for array literals - they should be handled at a higher level

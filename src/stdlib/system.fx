@@ -1,6 +1,16 @@
 // System Interaction
 
-import "types.fx";
+compt
+{
+    if (!def(FLUX_STANDARD_TYPES))
+    {
+        global import "types.fx";
+    };
+    if (!def (FLUX_STANDARD_COLLECTIONS))
+    {
+        global import "collections.fx";
+    };
+};
 
 namespace standard
 {
@@ -15,11 +25,11 @@ namespace standard
             volatile asm
             {
                 mov eax, 0x2E   ; sys_execve
-                mov ebx, command
+                mov ebx, command; 
                 xor ecx, ecx    ; no args
                 xor edx, edx    ; no env
-                int 0x80
-                mov result, eax
+                int 0x80        ; 
+                mov result, eax ; get result
             };
             return result;
         };
@@ -39,7 +49,7 @@ namespace standard
         // Get environment variable
         def getenv(string name) -> string
         {
-            // Would need `fio.fx` implementation to be capable of file input/output, also dependent on `system.fx`
+            // Would need `fio.fx` implementation to be capable of file input/output
             return "";
         };
     };
