@@ -1,0 +1,35 @@
+{
+  "logging": {
+    "level": 3,
+    "timestamp": true,
+    "colors": true,
+    "log_file": "logs/flux_compilation.log",
+    "component_filter": null
+  },
+  "compiler": {
+    "build_dir": "build",
+    "optimization_level": "O2",
+    "keep_temp_files": false
+  },
+  "examples": {
+    "development": {
+      "level": 4,
+      "timestamp": true,
+      "colors": true,
+      "component_filter": ["lexer", "parser", "codegen"]
+    },
+    "production": {
+      "level": 1,
+      "timestamp": false,
+      "colors": false,
+      "log_file": "/var/log/flux/compilation.log"
+    },
+    "debugging": {
+      "level": 5,
+      "timestamp": true,
+      "colors": true,
+      "log_file": "debug.log",
+      "component_filter": null
+    }
+  }
+}

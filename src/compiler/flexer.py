@@ -601,7 +601,7 @@ class FluxLexer:
                     self.advance(count=2)
                     continue
                 if self.peek_char() == '>':
-                    tokens.append(Token(TokenType.RETURN_ARROW, '-=', start_pos[0], start_pos[1]))
+                    tokens.append(Token(TokenType.RETURN_ARROW, '->', start_pos[0], start_pos[1]))
                     self.advance(count=2)
                     continue
             

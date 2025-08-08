@@ -15,15 +15,41 @@ from llvmlite import ir
 from flexer import FluxLexer
 from fparser import FluxParser, ParseError
 from fast import *
+from flux_logger import FluxLogger, FluxLoggerConfig, LogLevel
 
 class FluxCompiler:
-    def __init__(self, /, verbosity: int = None):
-        self.verbosity = int(verbosity) if verbosity != None else None
+    def __init__(self, /, 
+                 verbosity: int = None, 
+                 logger: FluxLogger = None,
+                 **logger_kwargs):
+        """
+        Initialize the Flux compiler with configurable logging
+        
+        Args:
+            verbosity: Legacy verbosity level (0-5) - maps to new logging system
+            logger: Custom FluxLogger instance (overrides verbosity)
+            **logger_kwargs: Additional arguments for FluxLogger creation
+        """
+        # Initialize logger
+        if logger:
+            self.logger = logger
+        else:
+            # Map legacy verbosity to new log levels
+            if verbosity is not None:
+                logger_kwargs['level'] = min(verbosity, 5)
+            self.logger = FluxLoggerConfig.create_logger(**logger_kwargs)
+        
+        # Store legacy verbosity for backward compatibility
+        self.verbosity = verbosity
+        
         self.module = ir.Module(name="flux_module")
         import platform
-        if platform.system() == "Windows":
+        self.platform = platform.system()
+        
+        # Configure platform-specific settings
+        if self.platform == "Windows":
             self.module_triple = "x86_64-pc-windows-gnu"
-        if platform.system() == "Darwin":  # macOS
+        elif self.platform == "Darwin":  # macOS
             # Detect macOS architecture
             import subprocess
             try:
@@ -36,138 +62,243 @@ class FluxCompiler:
                 self.module.triple = "arm64-apple-macosx11.0.0"  # Default to ARM64
         else:  # Linux and others
             self.module.triple = "x86_64-pc-linux-gnu"
-        #self.module.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
+        
+        self.logger.debug(f"Target platform: {self.platform}", "compiler")
+        self.logger.debug(f"Module triple: {self.module_triple}", "compiler")
+        
         self.temp_files = []
 
     def compile_file(self, filename: str, output_bin: str = None) -> str:
+        """
+        Compile a Flux source file to executable binary
+        
+        Args:
+            filename: Path to the .fx source file
+            output_bin: Optional output binary name
+            
+        Returns:
+            Path to the generated executable
+        """
         try:
-            # 1. Parse and generate LLVM IR
-            with open(filename, 'r') as f:
-                source = f.read()
-            
-            lexer = FluxLexer(source)
-            tokens = lexer.tokenize()
-
-            if self.verbosity == 0:
-                print(tokens)
-            
-            parser = FluxParser(tokens)
-            ast = parser.parse()
-
-            if self.verbosity == 1:
-                print(ast)
-            
-            print(ast)
-            self.module = ast.codegen(self.module)
-            llvm_ir = str(self.module)
-
-            if self.verbosity == 2:
-                print(llvm_ir)
-            
-            # Create temp directory
+            self.logger.section(f"Compiling Flux file: {filename}", LogLevel.INFO)
             base_name = Path(filename).stem
+            
+            # Step 1: Read source code
+            self.logger.step("Reading source file", LogLevel.INFO, "compiler")
+            try:
+                with open(filename, 'r') as f:
+                    source = f.read()
+                self.logger.debug(f"Read {len(source)} characters from {filename}", "compiler")
+            except Exception as e:
+                self.logger.error(f"Failed to read source file {filename}: {e}", "compiler")
+                raise
+            
+            # Step 2: Lexical analysis
+            self.logger.step("Lexical analysis", LogLevel.INFO, "lexer")
+            try:
+                lexer = FluxLexer(source)
+                tokens = lexer.tokenize()
+                self.logger.debug(f"Generated {len(tokens) if hasattr(tokens, '__len__') else '?'} tokens", "lexer")
+                
+                # Log tokens if requested (legacy compatibility + new system)
+                if self.verbosity == 0 or self.logger.level >= LogLevel.TRACE:
+                    self.logger.log_data(LogLevel.TRACE, "Generated Tokens", tokens, "lexer")
+                    
+            except Exception as e:
+                self.logger.error(f"Lexical analysis failed: {e}", "lexer")
+                raise
+            
+            # Step 3: Parsing
+            self.logger.step("Parsing", LogLevel.INFO, "parser")
+            try:
+                parser = FluxParser(tokens)
+                ast = parser.parse()
+                self.logger.debug("AST generation completed", "parser")
+                
+                # Log AST if requested (legacy compatibility + new system)
+                if self.verbosity == 1 or self.logger.level >= LogLevel.DEBUG:
+                    self.logger.log_data(LogLevel.DEBUG, "Generated AST", ast, "parser")
+                    
+                # Legacy: always print AST (TODO: remove this in future versions)
+                if not self.logger.level >= LogLevel.DEBUG:
+                    print(ast)
+                    
+            except Exception as e:
+                self.logger.error(f"Parsing failed: {e}", "parser")
+                raise
+            
+            # Step 4: Code generation
+            self.logger.step("LLVM IR code generation", LogLevel.INFO, "codegen")
+            try:
+                self.module = ast.codegen(self.module)
+                llvm_ir = str(self.module)
+                self.logger.debug(f"Generated LLVM IR ({len(llvm_ir)} chars)", "codegen")
+                
+                # Log LLVM IR if requested (legacy compatibility + new system)
+                if self.verbosity == 2 or self.logger.level >= LogLevel.TRACE:
+                    self.logger.log_data(LogLevel.TRACE, "Generated LLVM IR", llvm_ir, "codegen")
+                    
+            except Exception as e:
+                self.logger.error(f"Code generation failed: {e}", "codegen")
+                raise
+            
+            # Step 5: Create build directory
+            self.logger.step("Preparing build environment", LogLevel.DEBUG, "build")
             temp_dir = Path(f"build/{base_name}")
-            temp_dir.mkdir(exist_ok=True)
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            self.logger.debug(f"Build directory: {temp_dir.absolute()}", "build")
             
-            # 2. Generate LLVM IR file
+            # Step 6: Generate LLVM IR file
+            self.logger.step("Writing LLVM IR file", LogLevel.DEBUG, "build")
             ll_file = temp_dir / f"{base_name}.ll"
-            with open(ll_file, 'w') as f:
-                f.write(llvm_ir)
-            self.temp_files.append(ll_file)
+            try:
+                with open(ll_file, 'w') as f:
+                    f.write(llvm_ir)
+                self.temp_files.append(ll_file)
+                self.logger.debug(f"LLVM IR written to: {ll_file}", "build")
+            except Exception as e:
+                self.logger.error(f"Failed to write LLVM IR file: {e}", "build")
+                raise
             
-            # 3. Compile directly to object file (skip assembly step on macOS)
-            obj_file = temp_dir / f"{base_name}.o"
-            import platform
-            if platform.system() == "Darwin":  # macOS
-                # Compile directly to object file to avoid assembly issues
-                subprocess.run([
-                    "llc",
-                    "-O2",               # Enable optimizations  
-                    "-filetype=obj",     # Output object file directly
-                    str(ll_file),
-                    "-o", str(obj_file)
-                ], check=True)
-            elif platform.system() == "Windows":
-                # Windows-specific compilation steps
-                # First generate object file
+            # Step 7: Compile to object file (platform-specific)
+            self.logger.step(f"Compiling to object file ({self.platform})", LogLevel.INFO, "llc")
+            
+            if self.platform == "Darwin":  # macOS
+                obj_file = temp_dir / f"{base_name}.o"
+                cmd = ["llc", "-O2", "-filetype=obj", str(ll_file), "-o", str(obj_file)]
+                self.logger.debug(f"Running: {' '.join(cmd)}", "llc")
+                
+                try:
+                    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                    self.logger.trace(f"LLC output: {result.stdout}", "llc")
+                    if result.stderr:
+                        self.logger.warning(f"LLC stderr: {result.stderr}", "llc")
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"LLC compilation failed: {e.stderr}", "llc")
+                    raise
+                    
+            elif self.platform == "Windows":
                 obj_file = temp_dir / f"{base_name}.obj"
-                print(obj_file)
-                subprocess.run([
-                    "llc",
-                    "-O2",
-                    "-filetype=obj",
-                    str(ll_file),
-                    "-o", str(obj_file)
-                ], check=True)
-
-                self.temp_files.append(obj_file)
-                #print("HERE")
+                cmd = ["llc", "-O2", "-filetype=obj", str(ll_file), "-o", str(obj_file)]
+                self.logger.debug(f"Running: {' '.join(cmd)}", "llc")
                 
-                # Generate .lib file for linking
-                lib_file = temp_dir / f"{base_name}.lib"
-                print(lib_file)
-                subprocess.run([
-                    "lld-link",
-                    "/lib",  # Create library
-                    "/out:" + str(lib_file),
-                    str(obj_file)
-                ], check=True)
-                self.temp_files.append(lib_file)
-            else:  # Linux - use traditional assembly step
+                try:
+                    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                    self.logger.trace(f"LLC output: {result.stdout}", "llc")
+                    if result.stderr:
+                        self.logger.warning(f"LLC stderr: {result.stderr}", "llc")
+                    self.temp_files.append(obj_file)
+                    
+                    # Generate .lib file for linking on Windows
+                    lib_file = temp_dir / f"{base_name}.lib"
+                    lib_cmd = ["lld-link", "/lib", "/out:" + str(lib_file), str(obj_file)]
+                    self.logger.debug(f"Running: {' '.join(lib_cmd)}", "lld-link")
+                    
+                    lib_result = subprocess.run(lib_cmd, check=True, capture_output=True, text=True)
+                    self.logger.trace(f"LLD-Link output: {lib_result.stdout}", "lld-link")
+                    if lib_result.stderr:
+                        self.logger.warning(f"LLD-Link stderr: {lib_result.stderr}", "lld-link")
+                    self.temp_files.append(lib_file)
+                    
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Windows compilation failed: {e.stderr}", "llc")
+                    raise
+                    
+            else:  # Linux and others - use traditional assembly step
                 asm_file = temp_dir / f"{base_name}.s"
-                subprocess.run([
-                    "llc",
-                    "-O2",               # Enable optimizations
-                    str(ll_file),
-                    "-o", str(asm_file)
-                ], check=True)
-                self.temp_files.append(asm_file)
-
-                if self.verbosity == 3:
-                    with open(asm_file, "r") as f:
-                        f.seek(0)
-                        print(f.read())
+                obj_file = temp_dir / f"{base_name}.o"
                 
-                subprocess.run([
-                    "as", "--64", str(asm_file), "-o", str(obj_file)
-                ], check=True)
+                # Generate assembly
+                cmd = ["llc", "-O2", str(ll_file), "-o", str(asm_file)]
+                self.logger.debug(f"Running: {' '.join(cmd)}", "llc")
+                
+                try:
+                    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                    self.logger.trace(f"LLC output: {result.stdout}", "llc")
+                    if result.stderr:
+                        self.logger.warning(f"LLC stderr: {result.stderr}", "llc")
+                    self.temp_files.append(asm_file)
+                    
+                    # Log assembly if requested (legacy compatibility)
+                    if self.verbosity == 3 or self.logger.level >= LogLevel.TRACE:
+                        with open(asm_file, "r") as f:
+                            asm_content = f.read()
+                        self.logger.log_data(LogLevel.TRACE, "Generated Assembly", asm_content, "llc")
+                    
+                    # Assemble to object file
+                    as_cmd = ["as", "--64", str(asm_file), "-o", str(obj_file)]
+                    self.logger.debug(f"Running: {' '.join(as_cmd)}", "as")
+                    
+                    as_result = subprocess.run(as_cmd, check=True, capture_output=True, text=True)
+                    self.logger.trace(f"AS output: {as_result.stdout}", "as")
+                    if as_result.stderr:
+                        self.logger.warning(f"AS stderr: {as_result.stderr}", "as")
+                        
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Assembly failed: {e.stderr}", "as")
+                    raise
             
             self.temp_files.append(obj_file)
-
-            if self.verbosity == 4:
-                print(tokens)
-                print(ast)
-                print(llvm_ir)
-                with open(asm_file, "r") as f:
-                    f.seek(0)
-                    print(f.read())
+            self.logger.debug(f"Object file created: {obj_file}", "build")
             
-            # 5. Link executable
+            # Legacy verbosity level 4 - show everything
+            if self.verbosity == 4:
+                self.logger.log_data(LogLevel.INFO, "All Tokens", tokens, "legacy")
+                self.logger.log_data(LogLevel.INFO, "Complete AST", ast, "legacy")
+                self.logger.log_data(LogLevel.INFO, "Complete LLVM IR", llvm_ir, "legacy")
+                if self.platform == "Linux":
+                    with open(asm_file, "r") as f:
+                        asm_content = f.read()
+                    self.logger.log_data(LogLevel.INFO, "Complete Assembly", asm_content, "legacy")
+            
+            # Step 8: Link executable
             output_bin = output_bin or f"./{base_name}"
+            self.logger.step(f"Linking executable: {output_bin}", LogLevel.INFO, "linker")
+            
             link_args = [str(obj_file), "-o", output_bin]
             
-            if platform.system() == "Darwin":  # macOS
-                # Use clang for linking on macOS
-                subprocess.run(["clang"] + link_args, check=True)
-            else:  # Linux
-                subprocess.run(["gcc", "-no-pie"] + link_args, check=True)
+            if self.platform == "Darwin":  # macOS
+                link_cmd = ["clang"] + link_args
+            else:  # Linux and others
+                link_cmd = ["gcc", "-no-pie"] + link_args
             
-            print(f"Successfully built: {output_bin}")
+            self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
+            
+            try:
+                result = subprocess.run(link_cmd, check=True, capture_output=True, text=True)
+                self.logger.trace(f"Linker output: {result.stdout}", "linker")
+                if result.stderr:
+                    self.logger.warning(f"Linker stderr: {result.stderr}", "linker")
+            except subprocess.CalledProcessError as e:
+                self.logger.error(f"Linking failed: {e.stderr}", "linker")
+                raise
+            
+            # Success!
+            self.logger.success(f"Compilation completed: {output_bin}")
             return output_bin
             
         except Exception as e:
             self.cleanup()
-            print(f"Compilation failed: {e}", file=sys.stderr)
+            self.logger.failure(f"Compilation failed: {e}")
             sys.exit(1)
     
     def cleanup(self):
-        """Remove temporary files"""
+        """Remove temporary files and cleanup logger"""
+        self.logger.debug(f"Cleaning up {len(self.temp_files)} temporary files", "cleanup")
+        
         for f in self.temp_files:
             try:
                 if os.path.exists(f):
                     os.remove(f)
-            except:
-                pass
+                    self.logger.trace(f"Removed: {f}", "cleanup")
+            except Exception as e:
+                self.logger.warning(f"Failed to remove {f}: {e}", "cleanup")
+        
+        # Close logger if it has file handles
+        try:
+            self.logger.close()
+        except:
+            pass
 
 def main():
     if len(sys.argv) < 2:
