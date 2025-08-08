@@ -204,33 +204,46 @@ Flux is currently in active development. We're building:
 
 ## Compiling Flux
 
-We are still working on Windows & Mac compilation instructions.
+### **Windows Setup** 🪟
 
-**Linux instructions:**  
-You will need:
+**Required Components:**
+- **Python 3.8+** - For running the Flux compiler
+- **LLVM/Clang** - For code generation and compilation  
+- **Visual Studio** - For linking and Windows development tools
+- **Python packages** - `llvmlite` for LLVM bindings
+
+**Quick Setup:**
+```powershell
+# Install LLVM
+winget install LLVM.LLVM
+
+# Install Python dependencies  
+pip install llvmlite==0.41.0 dataclasses
+```
+
+**Important:** Compile from a **Visual Studio Developer Command Prompt** for proper toolchain access.
+
+📖 **[Detailed Windows Setup Guide](docs/windows_setup_guide.md)** - Complete installation instructions, troubleshooting, and environment understanding.
+
+---
+
+### **Linux Setup** 🐧
+
+**You will need:**
 - LLVM Toolchain
 ```bash
 sudo apt install llvm-14 clang-14 lld-14
 ```
-- Assembler & Linker
+- Build Tools
 ```bash
-sudo apt install binutils gcc g++ make     # GNU toolchain
+sudo apt install binutils gcc g++ make
 ```
-- Python Packages
-```bash
-pip install llvmlite==0.41.0 dataclasses
-```
-```bash
-sudo apt install binutils gcc g++ make     # GNU toolchain
-```
-- Python Packages
+- Python Dependencies
 ```bash
 pip install llvmlite==0.41.0 dataclasses
 ```
-```bash
-pip install llvmlite==0.41.0 dataclasses
-```
-_Verify your installation:_
+
+**Verification:**
 ```bash
 python3 --version        # Should show 3.8+
 llc --version            # Should show LLVM 14.x
@@ -238,14 +251,80 @@ as --version             # Should show GNU assembler
 gcc --version            # Should show GCC
 ```
 
-**_Compilation:_**
-1. Compile Flux to LLVM IR  
-   `python3 fc.py input.fx > output.ll`
-2. Compile LLVM IR to assembly  
-   `llc output.ll -o output.s`
-3. Assemble to object file  
-   `as output.s -o output.o`
-4. Link executable  
-   `gcc output.o -o program`
-5. Run
-   `./program`
+---
+
+### **macOS Setup** 🍎
+
+**Prerequisites:**
+```bash
+# Install Homebrew if you haven't already
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Install LLVM and Python
+brew install llvm python@3.11
+
+# Python dependencies
+pip3 install llvmlite==0.41.0 dataclasses
+```
+
+**Verification:**
+```bash
+python3 --version        # Should show 3.8+
+llc --version           # Should show LLVM
+clang --version         # Should show Clang
+```
+
+---
+
+## **Compilation Instructions**
+
+Flux uses a modern, integrated compiler that handles the entire build pipeline automatically.
+
+### **Basic Usage**
+
+```bash
+# Compile a Flux program
+python flux_compiler.py hello.fx
+
+# Specify output name
+python flux_compiler.py hello.fx -o my_program
+
+# Enable detailed logging
+python flux_compiler.py hello.fx --log-level 4
+```
+
+### **Advanced Options**
+
+```bash
+# Legacy verbosity levels (0-4)
+python flux_compiler.py program.fx -v2        # Show LLVM IR
+python flux_compiler.py program.fx -v3        # Show Assembly (Linux only)
+python flux_compiler.py program.fx -v4        # Show everything
+
+# Advanced logging
+python flux_compiler.py program.fx --log-level 4 --log-file build.log
+python flux_compiler.py program.fx --log-filter lexer,parser --log-timestamp
+```
+
+### **Platform-Specific Notes**
+
+**Windows:** 
+- Run from Visual Studio Developer Command Prompt
+- Executables will have `.exe` extension automatically
+- Uses Clang + MSVC linker
+
+**Linux:** 
+- Uses traditional `llc` + `as` + `gcc` pipeline
+- Supports both LLVM and GCC toolchains
+
+**macOS:** 
+- Uses Clang for both compilation and linking
+- Automatically detects ARM64 vs x86_64 architecture
+
+### **Build Output**
+
+Compiled programs are placed in the current directory by default:
+- **Windows:** `program.exe`
+- **Linux/macOS:** `program`
+
+Temporary build files are stored in `build/` directory and cleaned up automatically.

@@ -161,47 +161,74 @@ class FluxCompiler:
                 raise
             
             # Step 7: Compile to object file (platform-specific)
-            self.logger.step(f"Compiling to object file ({self.platform})", LogLevel.INFO, "llc")
+            self.logger.step(f"Compiling to object file ({self.platform})", LogLevel.INFO, "compiler")
             
             if self.platform == "Darwin":  # macOS
                 obj_file = temp_dir / f"{base_name}.o"
-                cmd = ["llc", "-O2", "-filetype=obj", str(ll_file), "-o", str(obj_file)]
-                self.logger.debug(f"Running: {' '.join(cmd)}", "llc")
                 
-                try:
-                    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                    self.logger.trace(f"LLC output: {result.stdout}", "llc")
-                    if result.stderr:
-                        self.logger.warning(f"LLC stderr: {result.stderr}", "llc")
-                except subprocess.CalledProcessError as e:
-                    self.logger.error(f"LLC compilation failed: {e.stderr}", "llc")
-                    raise
+                # Try llc first, fallback to clang if not available
+                llc_cmd = ["llc", "-O2", "-filetype=obj", str(ll_file), "-o", str(obj_file)]
+                clang_cmd = ["clang", "-c", "-O2", str(ll_file), "-o", str(obj_file)]
+                
+                success = False
+                for cmd, tool_name in [(llc_cmd, "llc"), (clang_cmd, "clang")]:
+                    self.logger.debug(f"Trying {tool_name}: {' '.join(cmd)}", "compiler")
+                    try:
+                        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                        self.logger.trace(f"{tool_name} output: {result.stdout}", "compiler")
+                        if result.stderr:
+                            self.logger.warning(f"{tool_name} stderr: {result.stderr}", "compiler")
+                        success = True
+                        break
+                    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                        self.logger.debug(f"{tool_name} failed: {e}", "compiler")
+                        continue
+                
+                if not success:
+                    self.logger.error("Neither llc nor clang could compile LLVM IR", "compiler")
+                    raise RuntimeError("Compilation failed - no suitable compiler found")
                     
             elif self.platform == "Windows":
                 obj_file = temp_dir / f"{base_name}.obj"
-                cmd = ["llc", "-O2", "-filetype=obj", str(ll_file), "-o", str(obj_file)]
-                self.logger.debug(f"Running: {' '.join(cmd)}", "llc")
+                
+                # Windows: Use Clang directly to compile LLVM IR to object file
+                # Try multiple possible Clang locations
+                clang_paths = [
+                    r"C:\Program Files\LLVM\bin\clang.exe",
+                    "clang.exe",  # If in PATH
+                    "clang"       # Unix-style name if available
+                ]
+                
+                self.clang_path = None  # Store as instance variable for later use
+                for path in clang_paths:
+                    try:
+                        # Test if this clang path works
+                        test_result = subprocess.run([path, "--version"], 
+                                                    capture_output=True, text=True, timeout=10)
+                        if test_result.returncode == 0:
+                            self.clang_path = path
+                            self.logger.debug(f"Found working Clang at: {path}", "compiler")
+                            break
+                    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                        continue
+                
+                if not self.clang_path:
+                    self.logger.error("No working Clang installation found on Windows", "compiler")
+                    raise RuntimeError("Clang not found - please install LLVM/Clang")
+                
+                # Compile LLVM IR to object file using Clang
+                cmd = [self.clang_path, "-c", "-O2", str(ll_file), "-o", str(obj_file)]
+                self.logger.debug(f"Running: {' '.join(cmd)}", "clang")
                 
                 try:
                     result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                    self.logger.trace(f"LLC output: {result.stdout}", "llc")
+                    self.logger.trace(f"Clang output: {result.stdout}", "clang")
                     if result.stderr:
-                        self.logger.warning(f"LLC stderr: {result.stderr}", "llc")
+                        self.logger.warning(f"Clang stderr: {result.stderr}", "clang")
                     self.temp_files.append(obj_file)
                     
-                    # Generate .lib file for linking on Windows
-                    lib_file = temp_dir / f"{base_name}.lib"
-                    lib_cmd = ["lld-link", "/lib", "/out:" + str(lib_file), str(obj_file)]
-                    self.logger.debug(f"Running: {' '.join(lib_cmd)}", "lld-link")
-                    
-                    lib_result = subprocess.run(lib_cmd, check=True, capture_output=True, text=True)
-                    self.logger.trace(f"LLD-Link output: {lib_result.stdout}", "lld-link")
-                    if lib_result.stderr:
-                        self.logger.warning(f"LLD-Link stderr: {lib_result.stderr}", "lld-link")
-                    self.temp_files.append(lib_file)
-                    
                 except subprocess.CalledProcessError as e:
-                    self.logger.error(f"Windows compilation failed: {e.stderr}", "llc")
+                    self.logger.error(f"Clang compilation failed: {e.stderr}", "clang")
                     raise
                     
             else:  # Linux and others - use traditional assembly step
@@ -253,14 +280,44 @@ class FluxCompiler:
             
             # Step 8: Link executable
             output_bin = output_bin or f"./{base_name}"
+            # Add .exe extension for Windows executables
+            if self.platform == "Windows" and not output_bin.endswith('.exe'):
+                output_bin += ".exe"
+            
             self.logger.step(f"Linking executable: {output_bin}", LogLevel.INFO, "linker")
             
-            link_args = [str(obj_file), "-o", output_bin]
-            
             if self.platform == "Darwin":  # macOS
-                link_cmd = ["clang"] + link_args
+                link_cmd = ["clang", str(obj_file), "-o", output_bin]
+            elif self.platform == "Windows":
+                # Use the same Clang we found for compilation
+                if hasattr(self, 'clang_path') and self.clang_path:
+                    link_cmd = [self.clang_path, str(obj_file), "-o", output_bin]
+                else:
+                    # Fallback to finding Clang again
+                    clang_paths = [
+                        r"C:\Program Files\LLVM\bin\clang.exe",
+                        "clang.exe",
+                        "clang"
+                    ]
+                    
+                    linker_path = None
+                    for path in clang_paths:
+                        try:
+                            test_result = subprocess.run([path, "--version"], 
+                                                        capture_output=True, text=True, timeout=10)
+                            if test_result.returncode == 0:
+                                linker_path = path
+                                break
+                        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                            continue
+                    
+                    if not linker_path:
+                        self.logger.error("No working Clang found for linking", "linker")
+                        raise RuntimeError("Clang not found for linking")
+                    
+                    link_cmd = [linker_path, str(obj_file), "-o", output_bin]
             else:  # Linux and others
-                link_cmd = ["gcc", "-no-pie"] + link_args
+                link_cmd = ["gcc", "-no-pie", str(obj_file), "-o", output_bin]
             
             self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
             
