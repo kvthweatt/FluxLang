@@ -91,8 +91,7 @@ def ~read_file(string path) -> ~string
 def main() -> int 
 {
     string ~content = ~read_file("log.txt");
-    print(*content);
-    // content auto-freed here via __exit()
+    print(~content); // content auto-freed here on-use
     return 0;
 };
 ```
