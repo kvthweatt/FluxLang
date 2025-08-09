@@ -4,7 +4,6 @@ Flux is a systems programming language resembling C++ and Python.
 This is the _full_ language specification.  
 If you like Flux, please consider contributing to the project or joining the [Flux Discord server](https://discord.gg/RAHjbYuNUc) where you can ask questions, provide feedback, and talk with other Flux enjoyers!
 
-Flux is a systems programming language, resembling C++ and Python.  
 It borrows elements from C++, Python, Zig, and Rust.  
 Flux supports RAII.  
 Python makes dealing with arrays simplistic, but doesn't have pointers natively. Flux solves this problem.  

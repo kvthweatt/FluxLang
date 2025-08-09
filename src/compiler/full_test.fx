@@ -1,4 +1,4 @@
-import "standard.fx";
+import "../stdlib/standard.fx";
 
 using standard::types;
 
@@ -21,7 +21,7 @@ object myObject
 
 myStruct newStruct;
 
-myObject newObject;
+myObject newObject();
 
 union myUnion
 {

@@ -194,7 +194,7 @@ class FluxCompiler:
                 # Windows: Use Clang directly to compile LLVM IR to object file
                 # Try multiple possible Clang locations
                 clang_paths = [
-                    r"C:\Program Files\LLVM\bin\clang.exe",
+                    "C:\\Program Files\\LLVM\\bin\\clang.exe",
                     "clang.exe",  # If in PATH
                     "clang"       # Unix-style name if available
                 ]
@@ -295,7 +295,7 @@ class FluxCompiler:
                 else:
                     # Fallback to finding Clang again
                     clang_paths = [
-                        r"C:\Program Files\LLVM\bin\clang.exe",
+                        "C:\\Program Files\\LLVM\\bin\\clang.exe",
                         "clang.exe",
                         "clang"
                     ]

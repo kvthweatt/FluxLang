@@ -7,8 +7,11 @@ import sys
 import os
 from pathlib import Path
 
-# Add src/compiler to Python path
+# Add src/compiler and src/stdlib to Python path
 sys.path.insert(0, str(Path(__file__).parent / "src" / "compiler"))
+sys.path.insert(0, str(Path(__file__).parent / "src" / "stdlib"))
+
+print(sys.path)
 
 # Import compiler components
 from fc import FluxCompiler # type: ignore
