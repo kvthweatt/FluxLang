@@ -118,7 +118,9 @@ def main():
     finally:
         # Ensure cleanup even on unexpected exit
         try:
-            compiler.cleanup()
+            # Comment out cleanup to preserve LLVM IR files for debugging
+            # compiler.cleanup()
+            pass
         except:
             pass
 

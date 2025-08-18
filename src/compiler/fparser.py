@@ -169,7 +169,7 @@ class FluxParser:
         elif self.expect(TokenType.VOLATILE):
             self.advance()
             if self.expect(TokenType.ASM):
-                return self.asm_statement()
+                return self.asm_statement(is_volatile=True)
         elif self.expect(TokenType.SEMICOLON):
             self.advance()
             return None
@@ -764,32 +764,139 @@ class FluxParser:
         self.consume(TokenType.RIGHT_BRACE)
         return Block(statements)
 
-    def asm_statement(self) -> ExpressionStatement:
+    def asm_statement(self, is_volatile: bool = False) -> ExpressionStatement:
         """
-        asm_statement -> ('volatile')? 'asm' '{' assembly_tokens '}' ';'
+        asm_statement -> ('volatile')? 'asm' ASM_BLOCK (':' operand_list)? (':' operand_list)? (':' clobber_list)? ';'
         """
-        # Check for volatile keyword
-        is_volatile = False
-        if self.expect(TokenType.VOLATILE):
+        # Check for volatile keyword if not already passed in
+        if not is_volatile and self.expect(TokenType.VOLATILE):
             is_volatile = True
             self.advance()
         
         self.consume(TokenType.ASM)
-        self.consume(TokenType.LEFT_BRACE)
         
-        # Collect assembly tokens
-        asm_tokens = []
-        while not self.expect(TokenType.RIGHT_BRACE):
-            asm_tokens.append(self.current_token.value)
+        # Get the ASM block content
+        asm_block_token = self.consume(TokenType.ASM_BLOCK)
+        asm_body = asm_block_token.value
+        
+        # Parse optional output operands (first colon)
+        output_operands = ""
+        if self.expect(TokenType.COLON):
             self.advance()
+            output_operands = self.parse_operand_list()
         
-        self.consume(TokenType.RIGHT_BRACE)
+        # Parse optional input operands (second colon)
+        input_operands = ""
+        if self.expect(TokenType.COLON):
+            self.advance()
+            input_operands = self.parse_operand_list()
+        
+        # Parse optional clobber list (third colon)
+        clobber_list = ""
+        if self.expect(TokenType.COLON):
+            self.advance()
+            clobber_list = self.parse_clobber_list()
+        
         self.consume(TokenType.SEMICOLON)
         
+        # Construct constraints string for LLVM
+        # The full LLVM inline asm syntax is: asm "code" : outputs : inputs : clobbers
+        constraints = ""
+        if output_operands or input_operands or clobber_list:
+            # Build full constraint string with all parts
+            constraint_parts = []
+            
+            # Add output operands
+            if output_operands:
+                constraint_parts.append(output_operands)
+            else:
+                constraint_parts.append("")  # Empty output section
+            
+            # Add input operands if any inputs or clobbers exist
+            if input_operands or clobber_list:
+                if input_operands:
+                    constraint_parts.append(input_operands)
+                else:
+                    constraint_parts.append("")  # Empty input section
+            
+            # Add clobber list if it exists
+            if clobber_list:
+                constraint_parts.append(clobber_list)
+            
+            # Join with colons for LLVM format
+            constraints = ":".join(constraint_parts)
+        
         return ExpressionStatement(InlineAsm(
-            body=' '.join(asm_tokens),
-            is_volatile=is_volatile
+            body=asm_body,
+            is_volatile=is_volatile,
+            constraints=constraints
         ))
+    
+    def parse_operand_list(self) -> str:
+        """
+        Parse operand list like: "=r" (variable), "m" (memory)
+        """
+        operands = []
+        
+        # Handle empty operand list
+        if self.expect(TokenType.COLON, TokenType.SEMICOLON):
+            return ""
+        
+        while not self.expect(TokenType.COLON, TokenType.SEMICOLON):
+            # Parse constraint string
+            if self.expect(TokenType.STRING_LITERAL):
+                constraint = self.current_token.value
+                self.advance()
+                
+                # Parse operand expression in parentheses
+                if self.expect(TokenType.LEFT_PAREN):
+                    self.advance()
+                    # For now, just consume until closing paren
+                    operand_expr = ""
+                    paren_depth = 1
+                    while paren_depth > 0 and not self.expect(TokenType.EOF):
+                        if self.expect(TokenType.LEFT_PAREN):
+                            paren_depth += 1
+                        elif self.expect(TokenType.RIGHT_PAREN):
+                            paren_depth -= 1
+                        
+                        if paren_depth > 0:
+                            operand_expr += self.current_token.value
+                        self.advance()
+                    
+                    operands.append(f'"{constraint}"({operand_expr})')
+                
+                # Handle comma separation
+                if self.expect(TokenType.COMMA):
+                    self.advance()
+            else:
+                # Skip unexpected tokens
+                self.advance()
+        
+        return ",".join(operands)
+    
+    def parse_clobber_list(self) -> str:
+        """
+        Parse clobber list like: "rax", "rcx", "memory"
+        """
+        clobbers = []
+        
+        # Handle empty clobber list
+        if self.expect(TokenType.SEMICOLON):
+            return ""
+        
+        while not self.expect(TokenType.SEMICOLON):
+            if self.expect(TokenType.STRING_LITERAL):
+                clobbers.append(f'"{self.current_token.value}"')
+                self.advance()
+                
+                if self.expect(TokenType.COMMA):
+                    self.advance()
+            else:
+                # Skip unexpected tokens
+                self.advance()
+        
+        return ",".join(clobbers)
     
     def if_statement(self) -> IfStatement:
         """

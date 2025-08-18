@@ -292,6 +292,37 @@ class FluxLexer:
         
         return Token(TokenType.ASM_BLOCK, result, start_pos[0], start_pos[1])
     
+    def read_asm_block_content(self) -> Token:
+        """Read an ASM block between braces { ... }"""
+        start_pos = (self.line, self.column)
+        
+        # Skip whitespace and newlines to find opening brace
+        while self.current_char() and self.current_char() in ' \t\r\n':
+            self.advance()
+        
+        if not self.current_char() or self.current_char() != '{':
+            raise ValueError("Expected '{' after 'asm' keyword")
+        
+        self.advance()  # Skip opening brace
+        brace_depth = 1
+        result = ""
+        
+        while self.current_char() and brace_depth > 0:
+            char = self.current_char()
+            if char == '{':
+                brace_depth += 1
+            elif char == '}':
+                brace_depth -= 1
+                
+            if brace_depth > 0:  # Don't include the closing brace
+                result += char
+            self.advance()
+        
+        # Clean up the result: strip leading/trailing whitespace but preserve line structure
+        result = result.strip()
+        
+        return Token(TokenType.ASM_BLOCK, result, start_pos[0], start_pos[1])
+    
     def read_string(self, quote_char: str) -> str:
         result = ""
         self.advance()  # Skip opening quote
@@ -517,7 +548,32 @@ class FluxLexer:
             
             # Identifiers and keywords
             if char.isalpha() or char == '_':
-                tokens.append(self.read_identifier())
+                token = self.read_identifier()
+                tokens.append(token)
+                
+                # Special handling for ASM keyword followed by brace
+                if token.type == TokenType.ASM:
+                    # Look ahead to see if this is followed by a brace (skip whitespace)
+                    saved_pos = self.position
+                    saved_line = self.line
+                    saved_col = self.column
+                    
+                    # Skip whitespace and newlines
+                    while self.current_char() and self.current_char() in ' \t\r\n':
+                        self.advance()
+                    
+                    # Check if next character is opening brace
+                    if self.current_char() == '{':
+                        # This is an ASM block, read it as a whole
+                        asm_block_token = self.read_asm_block_content()
+                        tokens.append(asm_block_token)
+                        continue
+                    else:
+                        # Not an ASM block, restore position and continue normally
+                        self.position = saved_pos
+                        self.line = saved_line
+                        self.column = saved_col
+                
                 continue
             
             # Multi-character operators (order matters - longest first)

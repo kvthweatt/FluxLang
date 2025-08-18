@@ -289,8 +289,18 @@ class UnaryOp(Expression):
 		operand_val = self.operand.codegen(builder, module)
 		
 		if self.operator == Operator.NOT:
+			# Handle NOT in global scope by creating constant
+			if builder.scope is None and isinstance(operand_val, ir.Constant):
+				if isinstance(operand_val.type, ir.IntType):
+					return ir.Constant(operand_val.type, ~operand_val.constant)
 			return builder.not_(operand_val)
 		elif self.operator == Operator.SUB:
+			# Handle negation - for constants in global scope, create negative constant
+			if builder.scope is None and isinstance(operand_val, ir.Constant):
+				if isinstance(operand_val.type, ir.IntType):
+					return ir.Constant(operand_val.type, -operand_val.constant)
+				elif isinstance(operand_val.type, ir.FloatType):
+					return ir.Constant(operand_val.type, -operand_val.constant)
 			return builder.neg(operand_val)
 		elif self.operator == Operator.INCREMENT:
 			# Handle both prefix and postfix increment
@@ -619,6 +629,19 @@ class VariableDeclaration(ASTNode):
 						else:
 							element_values.append(ir.Constant(llvm_type.element, item))
 					gvar.initializer = ir.Constant(llvm_type, element_values)
+				# Handle string literals for char arrays
+				elif isinstance(llvm_type, ir.ArrayType) and isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8 and isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR:
+					# Convert string to array of characters
+					string_val = self.initial_value.value
+					char_values = []
+					for i, char in enumerate(string_val):
+						if i >= llvm_type.count:
+							break
+						char_values.append(ir.Constant(ir.IntType(8), ord(char)))
+					# Pad remaining with zeros if needed
+					while len(char_values) < llvm_type.count:
+						char_values.append(ir.Constant(ir.IntType(8), 0))
+					gvar.initializer = ir.Constant(llvm_type, char_values)
 				else:
 					init_val = self.initial_value.codegen(builder, module)
 					if init_val is not None:
@@ -1411,22 +1434,161 @@ class InlineAsm(Expression):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Clean and format the assembly string
-        asm = self.body.replace('\n', '\\n').replace('\t', '\\t')
+        asm = self.body
         
-        # Create function type (void return, no arguments)
-        fn_type = ir.FunctionType(ir.VoidType(), [])
+        # Parse constraints and extract operands
+        output_operands = []
+        input_operands = []
+        output_constraints = []
+        input_constraints = []
+        clobber_list = []
         
-        # Create the inline assembly with exactly 4 parameters
+        if self.constraints:
+            # Parse the constraint string format: "outputs:inputs:clobbers"
+            # Example: '"=r"(stdout_handle)::"eax","memory"'
+            # or ': : "r"(stdout_handle), "r"(message), "m"(bytes_written) : "eax", "ecx", "edx", "memory"'
+            print(f"DEBUG: Parsing constraints: {self.constraints}")
+            constraint_parts = self.constraints.split(':')
+            print(f"DEBUG: Split into parts: {constraint_parts}")
+            
+            # Ensure we have at least 3 parts (outputs:inputs:clobbers)
+            while len(constraint_parts) < 3:
+                constraint_parts.append('')
+            
+            # Handle outputs (first part)
+            output_part = constraint_parts[0].strip()
+            if output_part:
+                # Parse output operands like '"=r"(stdout_handle)'
+                import re
+                output_matches = re.findall(r'"([^"]+)"\s*\(([^)]+)\)', output_part)
+                for constraint, var_name in output_matches:
+                    # Look up the variable
+                    if builder.scope and var_name in builder.scope:
+                        var_ptr = builder.scope[var_name]
+                        output_operands.append(var_ptr)
+                        output_constraints.append(constraint)
+                    elif var_name in module.globals:
+                        var_ptr = module.globals[var_name]
+                        output_operands.append(var_ptr)
+                        output_constraints.append(constraint)
+                            
+            # Handle inputs (second part)
+            input_part = constraint_parts[1].strip()
+            print(f"DEBUG: Input part: '{input_part}'")
+            if input_part:
+                # Parse input operands like '"r"(stdout_handle), "r"(message), "m"(bytes_written)'
+                import re
+                input_matches = re.findall(r'"([^"]+)"\s*\(([^)]+)\)', input_part)
+                print(f"DEBUG: Input matches: {input_matches}")
+                for constraint, var_name in input_matches:
+                    print(f"DEBUG: Looking for variable '{var_name}' with constraint '{constraint}'")
+                    # Look up the variable
+                    if builder.scope and var_name in builder.scope:
+                        var_ptr = builder.scope[var_name]
+                        # For arrays or memory constraints, pass the pointer; for register constraints, load the value
+                        if constraint in ['m'] or (isinstance(var_ptr.type, ir.PointerType) and isinstance(var_ptr.type.pointee, ir.ArrayType)):
+                            input_operands.append(var_ptr)
+                            print(f"DEBUG: Found in scope, using pointer: {var_ptr}")
+                        else:
+                            var_val = builder.load(var_ptr, name=f"{var_name}_load")
+                            input_operands.append(var_val)
+                            print(f"DEBUG: Found in scope, loaded value: {var_val}")
+                        input_constraints.append(constraint)
+                    elif var_name in module.globals:
+                        var_ptr = module.globals[var_name]
+                        # For arrays or memory constraints, pass the pointer; for register constraints, load the value
+                        if constraint in ['m'] or isinstance(var_ptr.type.pointee, ir.ArrayType):
+                            input_operands.append(var_ptr)
+                            print(f"DEBUG: Found in globals, using pointer: {var_ptr}")
+                        else:
+                            var_val = builder.load(var_ptr, name=f"{var_name}_load")
+                            input_operands.append(var_val)
+                            print(f"DEBUG: Found in globals, loaded value: {var_val}")
+                        input_constraints.append(constraint)
+                            
+            # Handle clobbers (third part)
+            clobber_part = constraint_parts[2].strip()
+            if clobber_part:
+                # Parse clobbers like '"eax", "ecx", "edx", "memory"'
+                import re
+                clobber_matches = re.findall(r'"([^"]+)"', clobber_part)
+                clobber_list = clobber_matches
+        
+        # Build the final constraint string in LLVM format
+        # LLVM inline assembly constraint format:
+        # - Each operand gets one constraint
+        # - Clobbers are prefixed with ~ and added to the constraint list
+        # - Format: "constraint1,constraint2,~clobber1,~clobber2"
+        
+        print(f"DEBUG: output_constraints = {output_constraints}")
+        print(f"DEBUG: input_constraints = {input_constraints}")
+        print(f"DEBUG: clobber_list = {clobber_list}")
+        
+        # Only input operands are passed as parameters
+        print(f"DEBUG: input_operands = {input_operands}")
+        print(f"DEBUG: output_operands = {output_operands}")
+        
+        # For memory output operands (=m), we need to pass them as input operands in LLVM
+        # but treat the constraint as an input/output constraint
+        final_input_operands = input_operands[:]
+        final_constraints = input_constraints[:]
+        
+        # Handle output operands - for memory operands (=m), convert to input/output (+m)
+        for i, (output_op, output_constraint) in enumerate(zip(output_operands, output_constraints)):
+            if output_constraint.startswith('=m'):
+                # Memory output becomes an input/output constraint
+                final_input_operands.insert(0, output_op)  # Add to beginning
+                # Convert =m to +m (input/output)
+                modified_constraint = output_constraint.replace('=m', '+m')
+                final_constraints.insert(0, modified_constraint)
+            elif output_constraint.startswith('=r'):
+                # Register output - LLVM will return this as a value
+                final_constraints.insert(0, output_constraint)
+            else:
+                # Other output constraints - assume register-like behavior
+                final_constraints.insert(0, output_constraint)
+        
+        # Add clobbers with ~ prefix and curly braces
+        clobber_constraints = [f"~{{{clobber}}}" for clobber in clobber_list]
+        final_constraints.extend(clobber_constraints)
+        
+        # Join all constraints with commas
+        constraint_str = ','.join(final_constraints)
+        
+        print(f"DEBUG: final constraint_str = '{constraint_str}'")
+        print(f"DEBUG: final_input_operands = {final_input_operands}")
+        
+        # Create function type based on final input operands
+        input_types = [op.type for op in final_input_operands]
+        
+        # Determine return type - for register outputs, we return a value; otherwise void
+        has_register_output = any(constraint.startswith('=r') or constraint.startswith('=a') or constraint.startswith('=b') for constraint in output_constraints)
+        
+        if has_register_output and output_operands:
+            # Return the type of the first register output
+            output_type = output_operands[0].type
+            if isinstance(output_type, ir.PointerType):
+                output_type = output_type.pointee
+            fn_type = ir.FunctionType(output_type, input_types)
+        else:
+            fn_type = ir.FunctionType(ir.VoidType(), input_types)
+        
+        # Create the inline assembly
         inline_asm = ir.InlineAsm(
-            fn_type,          # Function type (required)
-            asm,              # Assembly string (required)
-            self.constraints, # Constraints (required)
-            self.is_volatile  # Volatile flag (required)
-            # align_stack parameter omitted (defaults to False)
+            fn_type,              # Function type with input operand types
+            asm,                  # Assembly string
+            constraint_str,       # Clean constraints
+            self.is_volatile      # Volatile flag
         )
         
-        # Emit the call
-        return builder.call(inline_asm, [])
+        # Emit the call with final input operands
+        result = builder.call(inline_asm, final_input_operands)
+        
+        # If we have register output operands, store the result
+        if has_register_output and output_operands:
+            builder.store(result, output_operands[0])
+        
+        return result
 
 # Function definition
 @dataclass

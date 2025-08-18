@@ -48,20 +48,31 @@ class FluxCompiler:
         
         # Configure platform-specific settings
         if self.platform == "Windows":
-            self.module_triple = "x86_64-pc-windows-gnu"
+            self.module_triple = "x86_64-pc-windows-msvc"
+            self.module.triple = self.module_triple
+            # Set proper Windows data layout for x86_64
+            self.module.data_layout = "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
         elif self.platform == "Darwin":  # macOS
             # Detect macOS architecture
             import subprocess
             try:
                 arch = subprocess.check_output(["uname", "-m"], text=True).strip()
                 if arch == "arm64":
-                    self.module.triple = "arm64-apple-macosx11.0.0"
+                    self.module_triple = "arm64-apple-macosx11.0.0"
+                    self.module.triple = self.module_triple
+                    self.module.data_layout = "e-m:o-i64:64-i128:128-n32:64-S128"
                 else:
-                    self.module.triple = "x86_64-apple-macosx10.15.0"
+                    self.module_triple = "x86_64-apple-macosx10.15.0"
+                    self.module.triple = self.module_triple
+                    self.module.data_layout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
             except:
-                self.module.triple = "arm64-apple-macosx11.0.0"  # Default to ARM64
+                self.module_triple = "arm64-apple-macosx11.0.0"  # Default to ARM64
+                self.module.triple = self.module_triple
+                self.module.data_layout = "e-m:o-i64:64-i128:128-n32:64-S128"
         else:  # Linux and others
-            self.module.triple = "x86_64-pc-linux-gnu"
+            self.module_triple = "x86_64-pc-linux-gnu"
+            self.module.triple = self.module_triple
+            self.module.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
         
         self.logger.debug(f"Target platform: {self.platform}", "compiler")
         self.logger.debug(f"Module triple: {self.module_triple}", "compiler")
@@ -335,7 +346,8 @@ class FluxCompiler:
             return output_bin
             
         except Exception as e:
-            self.cleanup()
+            # Comment out cleanup to preserve LLVM IR files for debugging
+            # self.cleanup()
             self.logger.failure(f"Compilation failed: {e}")
             sys.exit(1)
     
