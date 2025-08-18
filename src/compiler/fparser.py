@@ -588,7 +588,7 @@ class FluxParser:
         return TypeSpec(base_type, is_signed, is_const, is_volatile, 
                        bit_width, alignment, is_array, array_size, is_pointer)
     
-    def base_type(self) -> DataType:
+    def base_type(self) -> Union[DataType, str]:
         """
         base_type -> 'int' | 'float' | 'char' | 'bool' | 'data' | 'void' | IDENTIFIER
         """
@@ -639,9 +639,10 @@ class FluxParser:
 #            self.advance()
 #            return DataType.INT64
         elif self.expect(TokenType.IDENTIFIER):
-            # Custom type - for now treat as DATA
+            # Custom type - return the actual name instead of DataType.DATA
+            custom_type_name = self.current_token.value
             self.advance()
-            return DataType.DATA
+            return custom_type_name
         else:
             self.error("Expected type specifier")
     

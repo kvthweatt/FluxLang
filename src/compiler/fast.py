@@ -128,7 +128,7 @@ class Identifier(ASTNode):
 # Type definitions
 @dataclass
 class TypeSpec(ASTNode):
-	base_type: DataType
+	base_type: Union[DataType, str]  # Can be DataType enum or custom type name
 	is_signed: bool = True
 	is_const: bool = False
 	is_volatile: bool = False
@@ -159,7 +159,11 @@ class TypeSpec(ASTNode):
 		elif self.base_type == DataType.VOID:
 			return ir.VoidType()
 		elif self.base_type == DataType.DATA:
-			return ir.IntType(self.bit_width)
+			if self.bit_width is not None:
+				return ir.IntType(self.bit_width)
+			else:
+				# If bit_width is None, this should not happen for properly resolved DATA types
+				raise ValueError(f"DATA type missing bit_width for {self}")
 		else:
 			raise ValueError(f"Unsupported type: {self.base_type}")
 	
@@ -167,8 +171,12 @@ class TypeSpec(ASTNode):
 		"""Get LLVM type with array support"""
 		base_type = self.get_llvm_type(module)
 		
-		if self.is_array and self.array_size:
-			return ir.ArrayType(base_type, self.array_size)
+		if self.is_array:
+			if self.array_size is not None:
+				return ir.ArrayType(base_type, self.array_size)
+			else:
+				# For unsized arrays (like byte[]), treat as pointer type
+				return ir.PointerType(base_type)
 		elif self.is_pointer:
 			return ir.PointerType(base_type)
 		else:
@@ -688,10 +696,25 @@ class VariableDeclaration(ASTNode):
 					# For non-pointer data types, just store the first character
 					char_val = ir.Constant(ir.IntType(8), ord(self.initial_value.value[0]))
 					builder.store(char_val, alloca)
-			else:
-				# Regular initialization
-				init_val = self.initial_value.codegen(builder, module)
-				builder.store(init_val, alloca)
+		else:
+			# Regular initialization
+			init_val = self.initial_value.codegen(builder, module)
+			# Cast init value to match variable type if needed
+			if init_val.type != llvm_type:
+				# Handle integer type casting
+				if isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.IntType):
+					if init_val.type.width > llvm_type.width:
+						# Truncate to smaller type
+						init_val = builder.trunc(init_val, llvm_type)
+					elif init_val.type.width < llvm_type.width:
+						# Extend to larger type (sign extend)
+						init_val = builder.sext(init_val, llvm_type)
+				# Handle other type conversions as needed
+				elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.FloatType):
+					init_val = builder.sitofp(init_val, llvm_type)
+				elif isinstance(init_val.type, ir.FloatType) and isinstance(llvm_type, ir.IntType):
+					init_val = builder.fptosi(init_val, llvm_type)
+			builder.store(init_val, alloca)
 		
 		builder.scope[self.name] = alloca
 		return alloca
@@ -736,7 +759,7 @@ class TypeDeclaration(Expression):
 		return f"TypeDeclaration({self.base_type} as {self.name}{init_str})"
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-		llvm_type = self.base_type.get_llvm_type(module)
+		llvm_type = self.base_type.get_llvm_type_with_array(module)
 		
 		if not hasattr(module, '_type_aliases'):
 			module._type_aliases = {}
