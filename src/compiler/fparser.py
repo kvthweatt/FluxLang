@@ -1543,18 +1543,36 @@ class FluxParser:
         
         # Look ahead to determine if it's a type or expression
         saved_pos = self.position
-        try:
-            # Try to parse as type spec first
-            target = self.type_spec()
-            self.consume(TokenType.RIGHT_PAREN)
-            return SizeOf(target)
-        except ParseError:
-            # If type parsing fails, try as expression
-            self.position = saved_pos
-            self.current_token = self.tokens[self.position]
-            expr = self.expression()
-            self.consume(TokenType.RIGHT_PAREN)
-            return SizeOf(expr)
+        
+        # Check if it starts with a known type keyword
+        if self.expect(TokenType.INT, TokenType.FLOAT_KW, TokenType.CHAR, 
+                      TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID,
+                      TokenType.CONST, TokenType.VOLATILE, TokenType.SIGNED, TokenType.UNSIGNED):
+            # Definitely a type, parse as type_spec
+            try:
+                target = self.type_spec()
+                self.consume(TokenType.RIGHT_PAREN)
+                return SizeOf(target)
+            except ParseError:
+                # If type parsing fails, try as expression
+                self.position = saved_pos
+                self.current_token = self.tokens[self.position]
+                expr = self.expression()
+                self.consume(TokenType.RIGHT_PAREN)
+                return SizeOf(expr)
+        else:
+            # Could be identifier (variable) or custom type - try expression first
+            try:
+                expr = self.expression()
+                self.consume(TokenType.RIGHT_PAREN)
+                return SizeOf(expr)
+            except ParseError:
+                # If expression parsing fails, try as type spec
+                self.position = saved_pos
+                self.current_token = self.tokens[self.position]
+                target = self.type_spec()
+                self.consume(TokenType.RIGHT_PAREN)
+                return SizeOf(target)
 
     def array_literal(self) -> Expression:
         """

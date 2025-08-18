@@ -573,22 +573,54 @@ class SizeOf(Expression):
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
 		"""Generate LLVM IR that returns size in BITS"""
+		print(f"DEBUG SizeOf: target type = {type(self.target).__name__}, target = {self.target}")
 		# Handle TypeSpec case (like sizeof(data{8}[]))
 		if isinstance(self.target, TypeSpec):
+			print(f"DEBUG SizeOf: Taking TypeSpec path")
 			llvm_type = self.target.get_llvm_type_with_array(module)
 			
 			# Calculate size in BITS
 			if isinstance(llvm_type, ir.IntType):
 				return ir.Constant(ir.IntType(64), llvm_type.width)  # Already in bits
 			elif isinstance(llvm_type, ir.ArrayType):
-				element_bits = llvm_type.element.width if hasattr(llvm_type.element, 'width') else 8
+				element_bits = llvm_type.element.width
 				return ir.Constant(ir.IntType(64), element_bits * llvm_type.count)
 			elif isinstance(llvm_type, ir.PointerType):
 				return ir.Constant(ir.IntType(64), 64)  # 64-bit pointers = 64 bits
 			else:
-				return ir.Constant(ir.IntType(64), 0)  # Unknown type
+				raise ValueError(f"Unknown type in sizeof: {llvm_type}")
 		
-		# Handle Expression case (like sizeof(variable))
+		# Handle Identifier case - look up the declared type instead of loading the value
+		if isinstance(self.target, Identifier):
+			# Look up the variable declaration in the current scope
+			if builder.scope is not None and self.target.name in builder.scope:
+				ptr = builder.scope[self.target.name]
+				if isinstance(ptr.type, ir.PointerType):
+					llvm_type = ptr.type.pointee  # Get the type being pointed to
+					# Calculate size in BITS using the same logic as TypeSpec
+					if isinstance(llvm_type, ir.IntType):
+						return ir.Constant(ir.IntType(64), llvm_type.width)
+					elif isinstance(llvm_type, ir.ArrayType):
+						element_bits = llvm_type.element.width
+						return ir.Constant(ir.IntType(64), element_bits * llvm_type.count)
+					else:
+						raise ValueError(f"Unknown type in sizeof for identifier {self.target.name}: {llvm_type}")
+				
+			# Check for global variables
+			if self.target.name in module.globals:
+				gvar = module.globals[self.target.name]
+				if isinstance(gvar.type, ir.PointerType):
+					llvm_type = gvar.type.pointee  # Get the type being pointed to
+					# Calculate size in BITS using the same logic as TypeSpec
+					if isinstance(llvm_type, ir.IntType):
+						return ir.Constant(ir.IntType(64), llvm_type.width)
+					elif isinstance(llvm_type, ir.ArrayType):
+						element_bits = llvm_type.element.width
+						return ir.Constant(ir.IntType(64), element_bits * llvm_type.count)
+					else:
+						raise ValueError(f"Unknown type in sizeof for global {self.target.name}: {llvm_type}")
+		
+		# Handle other Expression cases (like sizeof(expression))
 		target_val = self.target.codegen(builder, module)
 		val_type = target_val.type
 		
@@ -596,14 +628,14 @@ class SizeOf(Expression):
 		if isinstance(val_type, ir.PointerType):
 			if isinstance(val_type.pointee, ir.ArrayType):
 				arr_type = val_type.pointee
-				element_bits = arr_type.element.width if hasattr(arr_type.element, 'width') else 8
+				element_bits = arr_type.element.width
 				return ir.Constant(ir.IntType(64), element_bits * arr_type.count)
 			return ir.Constant(ir.IntType(64), 64)  # Pointer size
 		
 		# Direct types
 		if hasattr(val_type, 'width'):
 			return ir.Constant(ir.IntType(64), val_type.width)  # Already in bits
-		return ir.Constant(ir.IntType(64), 0)  # Fallback
+		raise ValueError(f"Cannot determine size of type: {val_type}")
 
 # Variable declarations
 @dataclass
@@ -680,8 +712,34 @@ class VariableDeclaration(ASTNode):
 		if self.initial_value:
 			# Handle string literals specially
 			if (isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR):
-				if isinstance(llvm_type, ir.PointerType):
-					# Create global string constant
+				if isinstance(llvm_type, ir.ArrayType) and isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8:
+					# Handle string literal initialization for local char arrays
+					string_val = self.initial_value.value
+					
+					# Store each character individually
+					for i, char in enumerate(string_val):
+						if i >= llvm_type.count:
+							break
+						
+						# Get pointer to array element
+						zero = ir.Constant(ir.IntType(32), 0)
+						index = ir.Constant(ir.IntType(32), i)
+						elem_ptr = builder.gep(alloca, [zero, index], name=f"{self.name}[{i}]")
+						
+						# Store the character
+						char_val = ir.Constant(ir.IntType(8), ord(char))
+						builder.store(char_val, elem_ptr)
+					
+					# Zero-fill remaining elements if needed
+					for i in range(len(string_val), llvm_type.count):
+						zero_val = ir.Constant(ir.IntType(32), 0)
+						index = ir.Constant(ir.IntType(32), i)
+						elem_ptr = builder.gep(alloca, [zero_val, index], name=f"{self.name}[{i}]")
+						zero_char = ir.Constant(ir.IntType(8), 0)
+						builder.store(zero_char, elem_ptr)
+						
+				elif isinstance(llvm_type, ir.PointerType):
+					# Create global string constant for pointer types
 					str_val = ir.Constant(ir.ArrayType(ir.IntType(8)), bytearray(self.initial_value.value.encode('utf-8') + b'\0'))
 					gv = ir.GlobalVariable(module, str_val.type, name=f".str.{self.name}")
 					gv.linkage = 'internal'
@@ -693,28 +751,35 @@ class VariableDeclaration(ASTNode):
 					str_ptr = builder.gep(gv, [zero, zero], name=f"{self.name}.ptr")
 					builder.store(str_ptr, alloca)
 				else:
-					# For non-pointer data types, just store the first character
+					# For non-pointer, non-array data types, just store the first character
 					char_val = ir.Constant(ir.IntType(8), ord(self.initial_value.value[0]))
 					builder.store(char_val, alloca)
-		else:
-			# Regular initialization
-			init_val = self.initial_value.codegen(builder, module)
-			# Cast init value to match variable type if needed
-			if init_val.type != llvm_type:
-				# Handle integer type casting
-				if isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.IntType):
-					if init_val.type.width > llvm_type.width:
-						# Truncate to smaller type
-						init_val = builder.trunc(init_val, llvm_type)
-					elif init_val.type.width < llvm_type.width:
-						# Extend to larger type (sign extend)
-						init_val = builder.sext(init_val, llvm_type)
-				# Handle other type conversions as needed
-				elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.FloatType):
-					init_val = builder.sitofp(init_val, llvm_type)
-				elif isinstance(init_val.type, ir.FloatType) and isinstance(llvm_type, ir.IntType):
-					init_val = builder.fptosi(init_val, llvm_type)
-			builder.store(init_val, alloca)
+			else:
+				# Regular initialization for non-string literals
+				init_val = self.initial_value.codegen(builder, module)
+				if init_val is not None:
+					# Cast init value to match variable type if needed
+					if init_val.type != llvm_type:
+						# Handle pointer type compatibility (for AddressOf expressions)
+						if isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
+							# Both are pointers - check if compatible or cast
+							if llvm_type.pointee != init_val.type.pointee:
+								# Cast pointer types if needed
+								init_val = builder.bitcast(init_val, llvm_type)
+						# Handle integer type casting
+						elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.IntType):
+							if init_val.type.width > llvm_type.width:
+								# Truncate to smaller type
+								init_val = builder.trunc(init_val, llvm_type)
+							elif init_val.type.width < llvm_type.width:
+								# Extend to larger type (sign extend)
+								init_val = builder.sext(init_val, llvm_type)
+						# Handle other type conversions as needed
+						elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.FloatType):
+							init_val = builder.sitofp(init_val, llvm_type)
+						elif isinstance(init_val.type, ir.FloatType) and isinstance(llvm_type, ir.IntType):
+							init_val = builder.fptosi(init_val, llvm_type)
+					builder.store(init_val, alloca)
 		
 		builder.scope[self.name] = alloca
 		return alloca
@@ -1456,8 +1521,14 @@ class InlineAsm(Expression):
     constraints: str = ""
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        # Clean and format the assembly string
-        asm = self.body
+        # Clean and format the assembly string - remove comment lines
+        asm_lines = []
+        for line in self.body.split('\n'):
+            # Strip whitespace and check if it's a comment line
+            stripped = line.strip()
+            if stripped and not stripped.startswith('//'):
+                asm_lines.append(line)
+        asm = '\n'.join(asm_lines)
         
         # Parse constraints and extract operands
         output_operands = []
@@ -1594,6 +1665,7 @@ class InlineAsm(Expression):
                 output_type = output_type.pointee
             fn_type = ir.FunctionType(output_type, input_types)
         else:
+            # For void return, still need proper function signature if we have operands
             fn_type = ir.FunctionType(ir.VoidType(), input_types)
         
         # Create the inline assembly
