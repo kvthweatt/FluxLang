@@ -19,10 +19,17 @@
 // now we make standard a constant namespace so it cannot be altered when imported.
 // Doing another namespace standard definition after this will result in a compiler error.
 
-const namespace standard
+//const namespace standard
+//{
+//    using standard::types;
+//    using standard::io;
+//    using standard::collections;
+//    using standard::system;
+//};
+
+import "types_tmp.fx";
+
+namespace standard
 {
-    using standard::types;
-    using standard::io;
-    using standard::collections;
-    using standard::system;
+    using standard::types2;
 };

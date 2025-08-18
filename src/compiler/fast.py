@@ -1800,6 +1800,11 @@ class NamespaceDef(ASTNode):
 		Namespaces in Flux are primarily a compile-time construct that affects name mangling.
 		At the LLVM level, we'll mangle names with the namespace prefix.
 		"""
+		# Register this namespace so using statements can reference it
+		if not hasattr(module, '_namespaces'):
+			module._namespaces = set()
+		module._namespaces.add(self.name)
+		
 		# Save the current module state
 		old_module = module
 		
@@ -1855,7 +1860,27 @@ class UsingStatement(Statement):
 	
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
 		"""Using statements are compile-time directives - no runtime code generated"""
-		# For now, just store the namespace information for symbol resolution
+		# Parse and validate namespace path
+		namespace_parts = self.namespace_path.split("::")
+		
+		# Initialize namespace registry if it doesn't exist
+		if not hasattr(module, '_namespaces'):
+			module._namespaces = set()
+		
+		# Check if the namespace exists
+		namespace_exists = self.namespace_path in module._namespaces
+		
+		# Also check for partial matches (e.g., "standard" exists if "standard::types" was defined)
+		if not namespace_exists:
+			for registered_ns in module._namespaces:
+				if registered_ns == namespace_parts[0] or registered_ns.startswith(self.namespace_path + "::"):
+					namespace_exists = True
+					break
+		
+		if not namespace_exists:
+			raise NameError(f"Namespace '{self.namespace_path}' is not defined")
+		
+		# Store the namespace information for symbol resolution
 		if not hasattr(module, '_using_namespaces'):
 			module._using_namespaces = []
 		module._using_namespaces.append(self.namespace_path)
@@ -1934,6 +1959,7 @@ class ImportStatement(Statement):
 			search_paths = [
 				Path.cwd(),
 				Path.cwd() / "lib",
+				Path(__file__).parent.parent / "stdlib",  # src/stdlib directory
 				Path(__file__).parent.parent / "lib",
 				Path.home() / ".flux" / "lib",
 				Path("/usr/local/lib/flux"),

@@ -1,0 +1,6 @@
+namespace standard
+{
+    namespace types
+    {
+    };	
+};
