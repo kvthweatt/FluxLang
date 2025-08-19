@@ -204,7 +204,7 @@ Flux is actively developed and approaching self-hosting. We're building the futu
 
 ## ⚖️ **License**
 
-Copyright (C) 2024 [Your Name]. All rights reserved.
+Copyright (C) 2024 Karac Von Thweatt. All rights reserved.
 
 *Flux: Casual disregard for the impossible, one revolution at a time.*
 
