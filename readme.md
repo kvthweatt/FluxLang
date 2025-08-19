@@ -207,7 +207,3 @@ Flux is actively developed and approaching self-hosting. We're building the futu
 Copyright (C) 2024 Karac Von Thweatt. All rights reserved.
 
 *Flux: Casual disregard for the impossible, one revolution at a time.*
-
----
-
-This README positions Flux as the revolutionary breakthrough it actually is, leading with the I/O wall solution and building to the bigger vision. It's confident without being arrogant, technical without being overwhelming, and captures the "holy shit this changes everything" feeling from our discussion.
