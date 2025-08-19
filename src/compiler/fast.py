@@ -107,15 +107,22 @@ class Identifier(ASTNode):
 		# Look up the name in the current scope
 		if builder.scope is not None and self.name in builder.scope:
 			ptr = builder.scope[self.name]
-			# Load the value if it's a pointer type
-			if isinstance(ptr.type, ir.PointerType):
+			# For arrays, return the pointer directly (don't load)
+			if isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.ArrayType):
+				return ptr
+			# Load the value if it's a non-array pointer type
+			elif isinstance(ptr.type, ir.PointerType):
 				return builder.load(ptr, name=self.name)
 			return ptr
 		
-		# Check for global variables - need to load their value
+		# Check for global variables
 		if self.name in module.globals:
 			gvar = module.globals[self.name]
-			if isinstance(gvar.type, ir.PointerType):
+			# For arrays, return the pointer directly (don't load)
+			if isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.ArrayType):
+				return gvar
+			# Load the value if it's a non-array pointer type
+			elif isinstance(gvar.type, ir.PointerType):
 				return builder.load(gvar, name=self.name)
 			return gvar
 		
@@ -343,8 +350,33 @@ class FunctionCall(Expression):
 		if func is None or not isinstance(func, ir.Function):
 			raise NameError(f"Unknown function: {self.name}")
 		
+		print(f"DEBUG FunctionCall: Calling {self.name} with {len(self.arguments)} arguments")
+		print(f"DEBUG FunctionCall: Function signature: {func.type}")
+		
 		# Generate code for arguments
-		arg_vals = [arg.codegen(builder, module) for arg in self.arguments]
+		arg_vals = []
+		for i, arg in enumerate(self.arguments):
+			arg_val = arg.codegen(builder, module)
+			print(f"DEBUG FunctionCall: arg[{i}] original type: {arg_val.type}")
+			
+			# Handle array-to-pointer decay for function arguments
+			if isinstance(arg_val.type, ir.PointerType) and isinstance(arg_val.type.pointee, ir.ArrayType):
+				print(f"DEBUG FunctionCall: arg[{i}] is pointer to array type")
+				# Check if function parameter expects a pointer to the element type
+				if i < len(func.args):
+					param_type = func.args[i].type
+					array_element_type = arg_val.type.pointee.element
+					print(f"DEBUG FunctionCall: param type: {param_type}, array element: {array_element_type}")
+					if isinstance(param_type, ir.PointerType) and param_type.pointee == array_element_type:
+						print(f"DEBUG FunctionCall: Converting array to pointer")
+						# Convert array to pointer by GEP to first element
+						zero = ir.Constant(ir.IntType(32), 0)
+						array_ptr = builder.gep(arg_val, [zero, zero], name="array_decay")
+						arg_val = array_ptr
+						print(f"DEBUG FunctionCall: arg[{i}] after decay: {arg_val.type}")
+			
+			arg_vals.append(arg_val)
+			
 		return builder.call(func, arg_vals)
 
 @dataclass
@@ -581,12 +613,12 @@ class SizeOf(Expression):
 			
 			# Calculate size in BITS
 			if isinstance(llvm_type, ir.IntType):
-				return ir.Constant(ir.IntType(64), llvm_type.width)  # Already in bits
+				return ir.Constant(ir.IntType(32), llvm_type.width)  # Already in bits
 			elif isinstance(llvm_type, ir.ArrayType):
 				element_bits = llvm_type.element.width
-				return ir.Constant(ir.IntType(64), element_bits * llvm_type.count)
+				return ir.Constant(ir.IntType(32), element_bits * llvm_type.count)
 			elif isinstance(llvm_type, ir.PointerType):
-				return ir.Constant(ir.IntType(64), 64)  # 64-bit pointers = 64 bits
+				return ir.Constant(ir.IntType(32), 64)  # 64-bit pointers = 64 bits
 			else:
 				raise ValueError(f"Unknown type in sizeof: {llvm_type}")
 		
@@ -599,10 +631,10 @@ class SizeOf(Expression):
 					llvm_type = ptr.type.pointee  # Get the type being pointed to
 					# Calculate size in BITS using the same logic as TypeSpec
 					if isinstance(llvm_type, ir.IntType):
-						return ir.Constant(ir.IntType(64), llvm_type.width)
+						return ir.Constant(ir.IntType(32), llvm_type.width)
 					elif isinstance(llvm_type, ir.ArrayType):
 						element_bits = llvm_type.element.width
-						return ir.Constant(ir.IntType(64), element_bits * llvm_type.count)
+						return ir.Constant(ir.IntType(32), element_bits * llvm_type.count)
 					else:
 						raise ValueError(f"Unknown type in sizeof for identifier {self.target.name}: {llvm_type}")
 				
@@ -613,10 +645,10 @@ class SizeOf(Expression):
 					llvm_type = gvar.type.pointee  # Get the type being pointed to
 					# Calculate size in BITS using the same logic as TypeSpec
 					if isinstance(llvm_type, ir.IntType):
-						return ir.Constant(ir.IntType(64), llvm_type.width)
+						return ir.Constant(ir.IntType(32), llvm_type.width)
 					elif isinstance(llvm_type, ir.ArrayType):
 						element_bits = llvm_type.element.width
-						return ir.Constant(ir.IntType(64), element_bits * llvm_type.count)
+						return ir.Constant(ir.IntType(32), element_bits * llvm_type.count)
 					else:
 						raise ValueError(f"Unknown type in sizeof for global {self.target.name}: {llvm_type}")
 		
@@ -1698,10 +1730,10 @@ class FunctionDef(ASTNode):
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Function:
 		# Convert return type
-		ret_type = self._convert_type(self.return_type)
+		ret_type = self._convert_type(self.return_type, module)
 		
 		# Convert parameter types
-		param_types = [self._convert_type(param.type_spec) for param in self.parameters]
+		param_types = [self._convert_type(param.type_spec, module) for param in self.parameters]
 		
 		# Create function type
 		func_type = ir.FunctionType(ret_type, param_types)
@@ -1744,21 +1776,11 @@ class FunctionDef(ASTNode):
 		builder.scope = old_scope
 		return func
 	
-	def _convert_type(self, type_spec: TypeSpec) -> ir.Type:
-		if type_spec.base_type == DataType.INT:
-			return ir.IntType(32)
-		elif type_spec.base_type == DataType.FLOAT:
-			return ir.FloatType()
-		elif type_spec.base_type == DataType.BOOL:
-			return ir.IntType(1)
-		elif type_spec.base_type == DataType.CHAR:
-			return ir.IntType(8)
-		elif type_spec.base_type == DataType.VOID:
-			return ir.VoidType()
-		elif type_spec.base_type == DataType.DATA:
-			return ir.IntType(type_spec.bit_width or 8)
-		else:
-			raise ValueError(f"Unsupported type: {type_spec.base_type}")
+	def _convert_type(self, type_spec: TypeSpec, module: ir.Module = None) -> ir.Type:
+		# Use the proper method that handles arrays and pointers
+		if module is None:
+			module = ir.Module()
+		return type_spec.get_llvm_type_with_array(module)
 
 @dataclass
 class DestructuringAssignment(Statement):
