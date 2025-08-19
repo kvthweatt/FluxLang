@@ -1,9 +1,3 @@
-Read files: C:\Users\kvthw\Flux\readme.md
-
-Here's a much better README that captures the revolutionary nature of what you've built:
-
----
-
 # Flux
 ### *The Systems Programming Language That Fixed Computing*
 
