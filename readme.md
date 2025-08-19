@@ -7,7 +7,8 @@
 
 > *"Linus Torvalds said there's no good replacement for C. I took that personally."*
 
-**Flux is the systems programming language designed to answer one question: "What if we built a language today, knowing everything we know now, with zero compromises?"**
+**Flux is the systems programming language designed to answer one question: "What if we built a language today, knowing everything we know now, with zero compromises?"**  
+It also does not rely on the C ABI, going entirely independent.
 
 ## 🚀 **I Accidentally Solved The I/O Wall**
 
