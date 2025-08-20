@@ -965,6 +965,25 @@ class VariableDeclaration(ASTNode):
 					# For non-pointer, non-array data types, just store the first character
 					char_val = ir.Constant(ir.IntType(8), ord(self.initial_value.value[0]))
 					builder.store(char_val, alloca)
+		else:
+			# Handle object constructor calls specially
+			if isinstance(self.initial_value, FunctionCall) and self.initial_value.name.endswith('.__init'):
+				# This is an object constructor call
+				# We need to call the constructor with 'this' pointer as first argument
+				constructor_func = module.globals.get(self.initial_value.name)
+				if constructor_func is None:
+					raise NameError(f"Constructor not found: {self.initial_value.name}")
+				
+				# Call constructor with 'this' pointer (alloca) as first argument
+				args = [alloca]  # 'this' pointer
+				# Add any additional constructor arguments
+				for arg_expr in self.initial_value.arguments:
+					args.append(arg_expr.codegen(builder, module))
+				
+				# Call the constructor
+				init_val = builder.call(constructor_func, args)
+				# Note: For constructors that return 'this', init_val will be the initialized object pointer
+				# But since we already have the object in alloca, we don't need to store init_val
 			else:
 				# Regular initialization for non-string literals
 				init_val = self.initial_value.codegen(builder, module)
@@ -2174,7 +2193,7 @@ class ObjectDef(ASTNode):
 			
 			print(f"[codegen] Method {method.name} function type: {func_type}")
 			# Create function with mangled name
-			func_name = f"{self.name}__{method.name}"
+			func_name = f"{self.name}.{method.name}"
 			func = ir.Function(module, func_type, func_name)
 			
 			# Set parameter names

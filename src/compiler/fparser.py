@@ -772,6 +772,26 @@ class FluxParser:
             # Regular variable declaration
             name = self.consume(TokenType.IDENTIFIER).value
             
+            # Check for object instantiation: identifier(args)
+            if self.expect(TokenType.LEFT_PAREN):
+                # Object instantiation syntax: Type identifier(args)
+                self.advance()  # consume '('
+                args = []
+                if not self.expect(TokenType.RIGHT_PAREN):
+                    args = self.argument_list()
+                self.consume(TokenType.RIGHT_PAREN)
+                
+                # Create a function call to the constructor as the initial value
+                # The constructor name uses mangling: ObjectName.MethodName
+                if isinstance(type_spec.base_type, str):  # Custom type
+                    constructor_name = f"{type_spec.base_type}.__init"
+                else:
+                    # For built-in types, use the type name directly
+                    constructor_name = type_spec.base_type.value + "__init"
+                
+                constructor_call = FunctionCall(constructor_name, args)
+                return VariableDeclaration(name, type_spec, constructor_call)
+            
             # Handle comma-separated variables
             names = [name]
             while self.expect(TokenType.COMMA):
