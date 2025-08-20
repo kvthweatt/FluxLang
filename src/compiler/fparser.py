@@ -34,6 +34,7 @@ class FluxParser:
         self.tokens = tokens
         self.position = 0
         self.current_token = self.tokens[0] if tokens else None
+        self.parse_errors = []  # Track parse errors
     
     def error(self, message: str) -> None:
         """Raise a parse error with current token context"""
@@ -95,9 +96,19 @@ class FluxParser:
                 elif stmt:
                     statements.append(stmt)
             except ParseError as e:
-                print(f"Parse error: {e}", file=sys.stderr)
+                error_msg = f"Parse error: {e}"
+                print(error_msg, file=sys.stderr)
+                self.parse_errors.append(error_msg)
                 self.synchronize()
         return Program(statements)
+    
+    def has_errors(self) -> bool:
+        """Check if any parse errors occurred during parsing"""
+        return len(self.parse_errors) > 0
+    
+    def get_errors(self) -> List[str]:
+        """Get list of parse error messages"""
+        return self.parse_errors.copy()
     
     def statement(self) -> Optional[Statement]:
         """
@@ -643,6 +654,8 @@ class FluxParser:
         elif self.expect(TokenType.THIS):
             self.advance()
             return DataType.THIS
+        elif self.expect(TokenType.OBJECT):
+            self.error("Objects cannot be used as types in struct members. Objects are not valid member types.")
         # Fixed-width integer types
 #        elif self.expect(TokenType.UINT8):
 #            self.advance()

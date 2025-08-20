@@ -124,6 +124,14 @@ class FluxCompiler:
             try:
                 parser = FluxParser(tokens)
                 ast = parser.parse()
+                
+                # Check if parse errors occurred
+                if parser.has_errors():
+                    self.logger.error(f"Compilation aborted due to {len(parser.get_errors())} parse error(s)", "parser")
+                    for error in parser.get_errors():
+                        self.logger.error(error, "parser")
+                    raise RuntimeError("Parse errors detected - compilation aborted")
+                
                 self.logger.debug("AST generation completed", "parser")
                 
                 # Log AST if requested (legacy compatibility + new system)

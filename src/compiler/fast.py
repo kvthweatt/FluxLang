@@ -199,12 +199,18 @@ class Identifier(ASTNode):
 		# Look up the name in the current scope
 		if builder.scope is not None and self.name in builder.scope:
 			ptr = builder.scope[self.name]
+			if self.name == "this":
+				return ptr
 			# For arrays, return the pointer directly (don't load)
 			if isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.ArrayType):
 				return ptr
 			# Load the value if it's a non-array pointer type
 			elif isinstance(ptr.type, ir.PointerType):
-				return builder.load(ptr, name=self.name)
+				ret_val = builder.load(ptr, name=self.name)
+				# Ensure we're not returning a pointer
+				if isinstance(ret_val.type, ir.PointerType) and not self.name == 'this':
+					ret_val = builder.load(ret_val)
+				return ret_val
 			return ptr
 		
 		# Check for global variables
@@ -1470,10 +1476,11 @@ class ReturnStatement(Statement):
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
 		if self.value is not None:
 			ret_val = self.value.codegen(builder, module)
-			# Ensure we're not returning a pointer
-			if isinstance(ret_val.type, ir.PointerType):
-				ret_val = builder.load(ret_val)
-			builder.ret(ret_val)
+			# Handle void literal returns
+			if ret_val is None or (isinstance(self.value, Literal) and self.value.type == DataType.VOID):
+				builder.ret_void()
+			else:
+				builder.ret(ret_val)
 		else:
 			builder.ret_void()
 		return None
@@ -2124,6 +2131,7 @@ class ObjectDef(ASTNode):
 	is_prototype: bool = False
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
+		print(f"[codegen] Processing object: {self.name}")
 		# First create a struct type for the object's data members
 		member_types = []
 		member_names = []
@@ -2133,8 +2141,10 @@ class ObjectDef(ASTNode):
 			member_types.append(member_type)
 			member_names.append(member.name)
 		
+		print(f"[codegen] Object {self.name} has {len(member_types)} members")
 		# Create the struct type for data members
-		struct_type = ir.LiteralStructType(member_types)
+		struct_type = ir.global_context.get_identified_type(self.name)
+		struct_type.set_body(*member_types)
 		struct_type.names = member_names
 		
 		# Store the struct type in the module
@@ -2142,11 +2152,17 @@ class ObjectDef(ASTNode):
 			module._struct_types = {}
 		module._struct_types[self.name] = struct_type
 		
+		print(f"[codegen] Created struct type for {self.name}: {struct_type}")
 		# Create methods as functions with 'this' parameter
 		for method in self.methods:
+			print(f"[codegen] Processing method: {method.name}")
 			# Convert return type
-			ret_type = self._convert_type(method.return_type, module)
+			if method.return_type.base_type == DataType.THIS:
+				ret_type = ir.PointerType(struct_type)
+			else:
+				ret_type = self._convert_type(method.return_type, module)
 			
+			print(f"[codegen] Method {method.name} return type: {ret_type}")
 			# Create parameter types - first parameter is always 'this' pointer
 			param_types = [ir.PointerType(struct_type)]
 			
@@ -2156,6 +2172,7 @@ class ObjectDef(ASTNode):
 			# Create function type
 			func_type = ir.FunctionType(ret_type, param_types)
 			
+			print(f"[codegen] Method {method.name} function type: {func_type}")
 			# Create function with mangled name
 			func_name = f"{self.name}__{method.name}"
 			func = ir.Function(module, func_type, func_name)
@@ -2187,7 +2204,12 @@ class ObjectDef(ASTNode):
 			
 			# Generate method body
 			if isinstance(method, FunctionDef):
-				method.body.codegen(method_builder, module)
+				# For __init__, return 'this' pointer directly
+				if method.name == '__init':
+					method_builder.ret(func.args[0])
+				else:
+					# For other methods, generate normal body
+					method.body.codegen(method_builder, module)
 			else:
 				method.body.codegen(method_builder, module)
 			
