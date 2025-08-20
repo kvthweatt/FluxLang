@@ -1318,6 +1318,18 @@ class Assignment(Statement):
 		member_index = member_names.index(member_name)
 		member_type = member_types[member_index]
 		
+		# Create unique identifier for this union variable instance
+		union_var_id = f"{union_ptr.name}_{id(union_ptr)}"
+		
+		# Check if union has already been initialized (immutability check)
+		if hasattr(builder, 'initialized_unions') and union_var_id in builder.initialized_unions:
+			raise RuntimeError(f"Union variable is immutable after initialization. Cannot reassign member '{member_name}' of union '{union_name}'")
+		
+		# Mark this union as initialized
+		if not hasattr(builder, 'initialized_unions'):
+			builder.initialized_unions = set()
+		builder.initialized_unions.add(union_var_id)
+		
 		# Cast the union pointer to the appropriate member type pointer and store the value
 		member_ptr_type = ir.PointerType(member_type)
 		casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{member_name}")
@@ -2109,6 +2121,9 @@ class FunctionDef(ASTNode):
 		# Create new scope for function body
 		old_scope = builder.scope
 		builder.scope = {}
+		# Initialize union tracking for this function scope
+		if not hasattr(builder, 'initialized_unions'):
+			builder.initialized_unions = set()
 		
 		# Allocate space for parameters and store initial values
 		for i, param in enumerate(func.args):
@@ -2692,6 +2707,8 @@ class Program(ASTNode):
 		# Create global builder with no function context
 		builder = ir.IRBuilder()
 		builder.scope = None  # Indicates global scope
+		# Track initialized unions for immutability enforcement
+		builder.initialized_unions = set()
 		
 		# Process all statements
 		for stmt in self.statements:
