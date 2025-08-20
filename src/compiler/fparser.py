@@ -280,7 +280,7 @@ class FluxParser:
         name = self.consume(TokenType.IDENTIFIER).value
         return Parameter(name, type_spec)
 
-    def union_def(self) -> UnionDef:
+    def union_def(self) -> UnionDefStatement:
         """
         union_def -> 'union' IDENTIFIER (';' | '{' union_member* '}' ';')
         """
@@ -290,7 +290,7 @@ class FluxParser:
         # Handle forward declaration
         if self.expect(TokenType.SEMICOLON):
             self.advance()
-            return UnionDef(name, [])
+            return UnionDefStatement(UnionDef(name, []))
         
         self.consume(TokenType.LEFT_BRACE)
         members = []
@@ -300,7 +300,7 @@ class FluxParser:
         
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
-        return UnionDef(name, members)
+        return UnionDefStatement(UnionDef(name, members))
 
     def union_member(self) -> UnionMember:
         """
@@ -747,7 +747,8 @@ class FluxParser:
         """
         decl = self.variable_declaration()
         self.consume(TokenType.SEMICOLON)
-        return ExpressionStatement(decl) if isinstance(decl, VariableDeclaration) else decl
+        # VariableDeclaration is already a Statement, not an Expression
+        return decl
     
     def variable_declaration(self) -> Union[VariableDeclaration, TypeDeclaration]:
         """
@@ -1466,9 +1467,15 @@ class FluxParser:
                 self.consume(TokenType.RIGHT_PAREN)
                 if isinstance(expr, Identifier):
                     expr = FunctionCall(expr.name, args)
+                elif isinstance(expr, MemberAccess):
+                    # Method call: obj.method() -> call obj_type.method with obj as first arg
+                    # For now, we'll generate the method call name and handle 'this' in codegen
+                    method_name = f"{{obj_type}}.{expr.member}"
+                    # We need to create a special method call that includes the object
+                    expr = MethodCall(expr.object, expr.member, args)
                 else:
-                    # Method call or complex expression
-                    expr = FunctionCall("", args)  # This might need refinement
+                    # Other complex expressions - not supported yet
+                    raise SyntaxError(f"Cannot call function on complex expression: {type(expr).__name__}")
             elif self.expect(TokenType.DOT):
                 # Member access
                 self.advance()

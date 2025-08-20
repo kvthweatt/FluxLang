@@ -564,17 +564,26 @@ class MemberAccess(Expression):
 	member: str
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-		# Handle static struct member access (A.x where A is a struct type)
+		# Handle static struct/union member access (A.x where A is a struct/union type)
 		if isinstance(self.object, Identifier):
-			struct_name = self.object.name
-			if hasattr(module, '_struct_types') and struct_name in module._struct_types:
+			type_name = self.object.name
+			if hasattr(module, '_struct_types') and type_name in module._struct_types:
 				# Look for the global variable representing this member
-				global_name = f"{struct_name}.{self.member}"
+				global_name = f"{type_name}.{self.member}"
 				for global_var in module.global_values:
 					if global_var.name == global_name:
 						return builder.load(global_var)
 				
-				raise NameError(f"Static member '{self.member}' not found in struct '{struct_name}'")
+				raise NameError(f"Static member '{self.member}' not found in struct '{type_name}'")
+			# Check for union types
+			elif hasattr(module, '_union_types') and type_name in module._union_types:
+				# Look for the global variable representing this member
+				global_name = f"{type_name}.{self.member}"
+				for global_var in module.global_values:
+					if global_var.name == global_name:
+						return builder.load(global_var)
+				
+				raise NameError(f"Static member '{self.member}' not found in union '{type_name}'")
 		
 		# Handle regular member access (obj.x where obj is an instance)
 		obj_val = self.object.codegen(builder, module)
@@ -583,6 +592,15 @@ class MemberAccess(Expression):
 			# Handle pointer to struct
 			if isinstance(obj_val.type.pointee, ir.LiteralStructType):
 				struct_type = obj_val.type.pointee
+				
+				# Check if this is actually a union (unions are implemented as structs)
+				if hasattr(module, '_union_types'):
+					for union_name, union_type in module._union_types.items():
+						if union_type == struct_type:
+							# This is a union - handle union member access
+							return self._handle_union_member_access(builder, module, obj_val, union_name)
+				
+				# Regular struct member access
 				if not hasattr(struct_type, 'names'):
 					raise ValueError("Struct type missing member names")
 				
@@ -600,6 +618,79 @@ class MemberAccess(Expression):
 				return builder.load(member_ptr)
 		
 		raise ValueError(f"Member access on unsupported type: {obj_val.type}")
+	
+	def _handle_union_member_access(self, builder: ir.IRBuilder, module: ir.Module, union_ptr: ir.Value, union_name: str) -> ir.Value:
+		"""Handle union member access by casting the union to the appropriate member type"""
+		# Get union member information
+		if not hasattr(module, '_union_member_info') or union_name not in module._union_member_info:
+			raise ValueError(f"Union member info not found for '{union_name}'")
+		
+		union_info = module._union_member_info[union_name]
+		member_names = union_info['member_names']
+		member_types = union_info['member_types']
+		
+		# Find the requested member
+		if self.member not in member_names:
+			raise ValueError(f"Member '{self.member}' not found in union '{union_name}'")
+		
+		member_index = member_names.index(self.member)
+		member_type = member_types[member_index]
+		
+		# Cast the union pointer to the appropriate member type pointer and load the value
+		member_ptr_type = ir.PointerType(member_type)
+		casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{self.member}")
+		return builder.load(casted_ptr, name=f"union_{self.member}_value")
+
+@dataclass
+class MethodCall(Expression):
+	object: Expression
+	method_name: str
+	arguments: List[Expression] = field(default_factory=list)
+
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		# For method calls, we need the pointer to the object, not the loaded value
+		if isinstance(self.object, Identifier):
+			# Look up the variable in scope to get the pointer directly
+			var_name = self.object.name
+			if builder.scope and var_name in builder.scope:
+				obj_ptr = builder.scope[var_name]
+			else:
+				raise NameError(f"Unknown variable: {var_name}")
+		else:
+			# For other expressions, generate code normally
+			obj_ptr = self.object.codegen(builder, module)
+		
+		# Determine the object's type to construct the method name
+		if isinstance(obj_ptr.type, ir.PointerType):
+			pointee_type = obj_ptr.type.pointee
+			# Check if it's a named struct type
+			if hasattr(module, '_struct_types'):
+				for type_name, struct_type in module._struct_types.items():
+					if struct_type == pointee_type:
+						obj_type_name = type_name
+						break
+				else:
+					raise ValueError(f"Cannot determine object type for method call: {pointee_type}")
+			else:
+				raise ValueError(f"Method call requires pointer to object, got: {obj_ptr.type}")
+		else:
+			raise ValueError(f"Method call requires pointer to object, got: {obj_ptr.type}")
+		
+		# Construct the method name: ObjectType.methodName
+		method_func_name = f"{obj_type_name}.{self.method_name}"
+		
+		# Look up the method function
+		func = module.globals.get(method_func_name)
+		if func is None:
+			raise NameError(f"Unknown method: {method_func_name}")
+		
+		# Generate arguments with 'this' pointer as first argument
+		args = [obj_ptr]  # 'this' pointer is the object pointer
+		for arg_expr in self.arguments:
+			args.append(arg_expr.codegen(builder, module))
+		
+		# Call the method
+		return builder.call(func, args)
 
 @dataclass
 class ArrayAccess(Expression):
@@ -856,7 +947,12 @@ class VariableDeclaration(ASTNode):
 	initial_value: Optional[Expression] = None
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		print(f"DEBUG VariableDeclaration: name={self.name}, type_spec.base_type={self.type_spec.base_type}")
+		print(f"DEBUG VariableDeclaration: module has _union_types: {hasattr(module, '_union_types')}")
+		if hasattr(module, '_union_types'):
+			print(f"DEBUG VariableDeclaration: _union_types keys: {list(module._union_types.keys())}")
 		llvm_type = self.type_spec.get_llvm_type_with_array(module)
+		print(f"DEBUG VariableDeclaration: resolved llvm_type = {llvm_type}")
 		
 		# Handle global variables
 		if builder.scope is None:
@@ -965,9 +1061,7 @@ class VariableDeclaration(ASTNode):
 					# For non-pointer, non-array data types, just store the first character
 					char_val = ir.Constant(ir.IntType(8), ord(self.initial_value.value[0]))
 					builder.store(char_val, alloca)
-		else:
-			# Handle object constructor calls specially
-			if isinstance(self.initial_value, FunctionCall) and self.initial_value.name.endswith('.__init'):
+			elif isinstance(self.initial_value, FunctionCall) and self.initial_value.name.endswith('.__init'):
 				# This is an object constructor call
 				# We need to call the constructor with 'this' pointer as first argument
 				constructor_func = module.globals.get(self.initial_value.name)
@@ -1130,12 +1224,41 @@ class Assignment(Statement):
 			return val
 			
 		elif isinstance(self.target, MemberAccess):
-			# Struct/object member assignment
-			obj = self.target.object.codegen(builder, module)
+			# Struct/union/object member assignment
+			# For member access, we need the pointer, not the loaded value
+			if isinstance(self.target.object, Identifier):
+				# Get the variable pointer directly from scope instead of loading
+				var_name = self.target.object.name
+				if builder.scope is not None and var_name in builder.scope:
+					obj = builder.scope[var_name]  # This is the pointer
+				elif var_name in module.globals:
+					obj = module.globals[var_name]  # This is the pointer
+				else:
+					raise NameError(f"Unknown variable: {var_name}")
+			else:
+				# For other expressions, generate code normally
+				obj = self.target.object.codegen(builder, module)
+			
 			member_name = self.target.member
+			
+			print(f"DEBUG Assignment: obj.type = {obj.type}, pointee = {getattr(obj.type, 'pointee', None)}")
+			print(f"DEBUG Assignment: member_name = {member_name}")
+			if hasattr(module, '_union_types'):
+				print(f"DEBUG Assignment: Union types available: {list(module._union_types.keys())}")
+				for union_name, union_type in module._union_types.items():
+					print(f"DEBUG Assignment: Union {union_name} type: {union_type}")
 			
 			if isinstance(obj.type, ir.PointerType) and isinstance(obj.type.pointee, ir.LiteralStructType):
 				struct_type = obj.type.pointee
+				
+				# Check if this is a union first
+				if hasattr(module, '_union_types'):
+					for union_name, union_type in module._union_types.items():
+						if union_type == struct_type:
+							# This is a union - handle union member assignment
+							return self._handle_union_member_assignment(builder, module, obj, union_name, member_name, val)
+				
+				# Regular struct member assignment
 				if hasattr(struct_type, 'names'):
 					try:
 						idx = struct_type.names.index(member_name)
@@ -1151,7 +1274,7 @@ class Assignment(Statement):
 						raise ValueError(f"Member '{member_name}' not found in struct")
 			
 			raise ValueError(f"Cannot assign to member '{member_name}' of non-struct type")
-			
+	
 		elif isinstance(self.target, ArrayAccess):
 			# Array element assignment
 			array = self.target.array.codegen(builder, module)
@@ -1178,14 +1301,46 @@ class Assignment(Statement):
 		else:
 			raise ValueError(f"Cannot assign to {type(self.target).__name__}")
 
+	def _handle_union_member_assignment(self, builder: ir.IRBuilder, module: ir.Module, union_ptr: ir.Value, union_name: str, member_name: str, val: ir.Value) -> ir.Value:
+		"""Handle union member assignment by casting the union to the appropriate member type"""
+		# Get union member information
+		if not hasattr(module, '_union_member_info') or union_name not in module._union_member_info:
+			raise ValueError(f"Union member info not found for '{union_name}'")
+		
+		union_info = module._union_member_info[union_name]
+		member_names = union_info['member_names']
+		member_types = union_info['member_types']
+		
+		# Find the requested member
+		if member_name not in member_names:
+			raise ValueError(f"Member '{member_name}' not found in union '{union_name}'")
+		
+		member_index = member_names.index(member_name)
+		member_type = member_types[member_index]
+		
+		# Cast the union pointer to the appropriate member type pointer and store the value
+		member_ptr_type = ir.PointerType(member_type)
+		casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{member_name}")
+		builder.store(val, casted_ptr)
+		return val
+
 @dataclass
 class Block(Statement):
 	statements: List[Statement] = field(default_factory=list)
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
 		result = None
-		for stmt in self.statements:
-			result = stmt.codegen(builder, module)
+		print(f"DEBUG Block: Processing {len(self.statements)} statements")
+		for i, stmt in enumerate(self.statements):
+			print(f"DEBUG Block: Processing statement {i}: {type(stmt).__name__}")
+			if stmt is not None:  # Skip None statements
+				try:
+					stmt_result = stmt.codegen(builder, module)
+					if stmt_result is not None:  # Only update result if not None
+						result = stmt_result
+				except Exception as e:
+					print(f"DEBUG Block: Error in statement {i} ({type(stmt).__name__}): {e}")
+					raise
 		return result
 
 @dataclass
@@ -1962,6 +2117,10 @@ class FunctionDef(ASTNode):
 			builder.scope[self.parameters[i].name] = alloca
 		
 		# Generate function body
+		print(f"DEBUG FunctionDef: Generating body for {self.name}")
+		print(f"DEBUG FunctionDef: Body has {len(self.body.statements)} statements")
+		for i, stmt in enumerate(self.body.statements):
+			print(f"DEBUG FunctionDef: Statement {i}: {type(stmt).__name__} = {stmt}")
 		self.body.codegen(builder, module)
 		
 		# Add implicit return if needed
@@ -2478,34 +2637,48 @@ class CustomTypeStatement(Statement):
 class FunctionDefStatement(Statement):
 	function_def: FunctionDef
 
-	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Value]:
 		# Delegate codegen to the contained FunctionDef
-		return self.function_def.codegen(builder, module)
+		self.function_def.codegen(builder, module)
+		return None
+
+# Union definition statement
+@dataclass
+class UnionDefStatement(Statement):
+	union_def: UnionDef
+
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Value]:
+		# Delegate codegen to the contained UnionDef
+		self.union_def.codegen(builder, module)
+		return None
 
 # Struct definition statement
 @dataclass
 class StructDefStatement(Statement):
 	struct_def: StructDef
 
-	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Value]:
 		# Delegate codegen to the contained StructDef
-		return self.struct_def.codegen(builder, module)
+		self.struct_def.codegen(builder, module)
+		return None
 
 # Object definition statement
 @dataclass
 class ObjectDefStatement(Statement):
 	object_def: ObjectDef
 
-	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-		return self.object_def.codegen(builder, module)
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Value]:
+		self.object_def.codegen(builder, module)
+		return None
 
 # Namespace definition statement
 @dataclass
 class NamespaceDefStatement(Statement):
 	namespace_def: NamespaceDef
 
-	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-		return self.namespace_def.codegen(builder, module)
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Value]:
+		self.namespace_def.codegen(builder, module)
+		return None
 
 # Program root
 @dataclass
