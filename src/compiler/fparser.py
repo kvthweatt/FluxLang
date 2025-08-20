@@ -1063,11 +1063,10 @@ class FluxParser:
             init = None
             if not self.expect(TokenType.SEMICOLON):
                 if self.is_variable_declaration():
-                    init = ExpressionStatement(self.variable_declaration())
+                    init = self.variable_declaration()  # Don't wrap in ExpressionStatement
                 else:
-                    init = self.expression_statement()
-            else:
-                self.consume(TokenType.SEMICOLON)
+                    init = ExpressionStatement(self.expression())
+            self.consume(TokenType.SEMICOLON)
             
             condition = None
             if not self.expect(TokenType.SEMICOLON):
@@ -1076,7 +1075,7 @@ class FluxParser:
             
             update = None
             if not self.expect(TokenType.RIGHT_PAREN):
-                update = self.expression_statement()
+                update = ExpressionStatement(self.expression())
             
             self.consume(TokenType.RIGHT_PAREN)
             body = self.block()
@@ -1271,7 +1270,7 @@ class FluxParser:
             operator = Operator.XOR
             self.advance()
             right = self.equality_expression()
-            expr = BianryOp(expr, operator, right)
+            expr = BinaryOp(expr, operator, right)
 
         return expr
     
@@ -1299,14 +1298,14 @@ class FluxParser:
         """
         expr = self.shift_expression()
         
-        while self.expect(TokenType.LESS_EQUAL, TokenType.LESS_THAN, TokenType.LESS_EQUAL, TokenType.GREATER_THAN, TokenType.GREATER_EQUAL):
-            if self.current_token.type == TokenType.LESS_EQUAL:
-                operator = Operator.LESS_EQUAL, TokenType.LESS_THAN
+        while self.expect(TokenType.LESS_THAN, TokenType.LESS_EQUAL, TokenType.GREATER_THAN, TokenType.GREATER_EQUAL):
+            if self.current_token.type == TokenType.LESS_THAN:
+                operator = Operator.LESS_THAN
             elif self.current_token.type == TokenType.LESS_EQUAL:
                 operator = Operator.LESS_EQUAL
             elif self.current_token.type == TokenType.GREATER_THAN:
                 operator = Operator.GREATER_THAN
-            else:  # GE
+            else:  # GREATER_EQUAL
                 operator = Operator.GREATER_EQUAL
             
             self.advance()
@@ -1321,8 +1320,8 @@ class FluxParser:
         """
         expr = self.additive_expression()
         
-        while self.expect(TokenType.LESS_EQUAL, TokenType.LEFT_SHIFT, TokenType.RIGHT_SHIFT):
-            if self.current_token.type == TokenType.LESS_EQUAL:
+        while self.expect(TokenType.LEFT_SHIFT, TokenType.RIGHT_SHIFT):
+            if self.current_token.type == TokenType.LEFT_SHIFT:
                 operator = Operator.BITSHIFT_LEFT
             else:  # RIGHT_SHIFT
                 operator = Operator.BITSHIFT_RIGHT
@@ -1335,7 +1334,26 @@ class FluxParser:
     
     def additive_expression(self) -> Expression:
         """
-        additive_expression -> multiplicative_expression (('+' | '-') multiplicative_expression)*
+        additive_expression -> range_expression
+        """
+        return self.range_expression()
+    
+    def range_expression(self) -> Expression:
+        """
+        range_expression -> arithmetic_expression ('..' arithmetic_expression)?
+        """
+        expr = self.arithmetic_expression()
+        
+        if self.expect(TokenType.RANGE):  # ..
+            self.advance()
+            end_expr = self.arithmetic_expression()
+            return RangeExpression(expr, end_expr)
+        
+        return expr
+    
+    def arithmetic_expression(self) -> Expression:
+        """
+        arithmetic_expression -> multiplicative_expression (('+' | '-') multiplicative_expression)*
         """
         expr = self.multiplicative_expression()
         
@@ -1651,19 +1669,64 @@ class FluxParser:
 
     def array_literal(self) -> Expression:
         """
-        array_literal -> '[' (expression (',' expression)*)? ']'
+        array_literal -> '[' (array_comprehension | expression (',' expression)*)? ']'
+        array_comprehension -> expression 'for' '(' type_spec IDENTIFIER 'in' expression ')'
         """
         self.consume(TokenType.LEFT_BRACKET)
-        elements = []
         
-        if not self.expect(TokenType.RIGHT_BRACKET):
-            elements.append(self.expression())
-            while self.expect(TokenType.COMMA):
-                self.advance()
-                elements.append(self.expression())
+        if self.expect(TokenType.RIGHT_BRACKET):
+            self.advance()
+            return Literal([], DataType.DATA)  # Empty array literal
         
-        self.consume(TokenType.RIGHT_BRACKET)
-        return Literal(elements, DataType.DATA)  # Array literal
+        # Look ahead to see if this is an array comprehension
+        saved_pos = self.position
+        saved_token = self.current_token
+        
+        try:
+            # Try to parse first expression and check for 'for' keyword
+            first_expr = self.expression()
+            
+            if self.expect(TokenType.FOR):
+                # This is an array comprehension: [expr for (type var in iterable)]
+                self.advance()  # consume 'for'
+                self.consume(TokenType.LEFT_PAREN)
+                
+                # Parse variable type and name
+                variable_type = self.type_spec()
+                variable_name = self.consume(TokenType.IDENTIFIER).value
+                
+                self.consume(TokenType.IN)
+                
+                # Parse iterable expression
+                iterable = self.expression()
+                
+                self.consume(TokenType.RIGHT_PAREN)
+                self.consume(TokenType.RIGHT_BRACKET)
+                
+                return ArrayComprehension(
+                    expression=first_expr,
+                    variable=variable_name,
+                    variable_type=variable_type,
+                    iterable=iterable
+                )
+            else:
+                # Regular array literal: [expr, expr, ...]
+                elements = [first_expr]
+                
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    elements.append(self.expression())
+                
+                self.consume(TokenType.RIGHT_BRACKET)
+                return Literal(elements, DataType.DATA)  # Array literal
+                
+        except ParseError:
+            # If parsing fails, restore position and try again
+            self.position = saved_pos
+            self.current_token = saved_token
+            # Fall back to empty array
+            self.consume(TokenType.RIGHT_BRACKET)
+            return Literal([], DataType.DATA)
     
     def struct_literal(self) -> Expression:
         """

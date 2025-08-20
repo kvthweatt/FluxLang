@@ -4,6 +4,8 @@ struct myStru1
 };
 
 signed data{16} as i16;
+unsigned data{8} as byte;
+byte[] as noopstr;
 
 struct myStru2
 {
@@ -13,8 +15,12 @@ struct myStru2
 def main() -> int
 {
     myStru1 newStru1 = {a = "A", b = "B", c = "C", d = "D", e = "E", f = "F", g = "G", h = "H"};
-
     myStru2 newStru2 = (myStru2)newStru1;
+
+
+    noopstr str = "ABCDEFGH";
+
+    myStru2 newStru3 = (myStru2)str;
 
 	return 0;
 };

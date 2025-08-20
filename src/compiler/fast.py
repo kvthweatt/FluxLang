@@ -62,11 +62,7 @@ class Literal(ASTNode):
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
 		if self.type == DataType.INT:
-			# Check if we have a custom type for this width
-			if hasattr(module, '_type_aliases'):
-				for name, llvm_type in module._type_aliases.items():
-					if isinstance(llvm_type, ir.IntType) and llvm_type.width == 64 and name.startswith('i'):
-						return ir.Constant(llvm_type, int(self.value) if isinstance(self.value, str) else self.value)
+			# Always generate i32 for DataType.INT literals
 			return ir.Constant(ir.IntType(32), int(self.value) if isinstance(self.value, str) else self.value)
 		elif self.type == DataType.FLOAT:
 			return ir.Constant(ir.FloatType(), float(self.value))
@@ -207,9 +203,9 @@ class Identifier(ASTNode):
 			# Load the value if it's a non-array pointer type
 			elif isinstance(ptr.type, ir.PointerType):
 				ret_val = builder.load(ptr, name=self.name)
-				# Ensure we're not returning a pointer
-				if isinstance(ret_val.type, ir.PointerType) and not self.name == 'this':
-					ret_val = builder.load(ret_val)
+				if hasattr(builder, 'volatile_vars') and self.name in builder.volatile_vars:
+					ret_val.volatile = True
+				# Do not dereference regular pointers (char*, byte*, etc.)
 				return ret_val
 			return ptr
 		
@@ -221,7 +217,10 @@ class Identifier(ASTNode):
 				return gvar
 			# Load the value if it's a non-array pointer type
 			elif isinstance(gvar.type, ir.PointerType):
-				return builder.load(gvar, name=self.name)
+				ret_val = builder.load(gvar, name=self.name)
+				if hasattr(builder, 'volatile_vars') and self.name in getattr(builder,'volatile_vars',set()):
+					ret_val.volatile = True
+				return ret_val
 			return gvar
 		
 		# Check if this is a custom type
@@ -424,14 +423,22 @@ class UnaryOp(Expression):
 			one = ir.Constant(operand_val.type, 1)
 			new_val = builder.add(operand_val, one)
 			if isinstance(self.operand, Identifier):
-				builder.scope[self.operand.name] = new_val
+				# Retrieve the variable's pointer from the current scope and store the updated value
+				ptr = builder.scope[self.operand.name]
+				st = builder.store(new_val, ptr)
+				if hasattr(builder,'volatile_vars') and self.operand.name in builder.volatile_vars:
+					st.volatile = True
 			return new_val if not self.is_postfix else operand_val
 		elif self.operator == Operator.DECREMENT:
 			# Handle both prefix and postfix decrement
 			one = ir.Constant(operand_val.type, 1)
 			new_val = builder.sub(operand_val, one)
 			if isinstance(self.operand, Identifier):
-				builder.scope[self.operand.name] = new_val
+				# Retrieve the variable's pointer from the current scope and store the updated value
+				ptr = builder.scope[self.operand.name]
+				st = builder.store(new_val, ptr)
+				if hasattr(builder,'volatile_vars') and self.operand.name in builder.volatile_vars:
+					st.volatile = True
 			return new_val if not self.is_postfix else operand_val
 		else:
 			raise ValueError(f"Unsupported unary operator: {self.operator}")
@@ -511,12 +518,134 @@ class CastExpression(Expression):
 		elif isinstance(source_val.type, ir.FloatType) and isinstance(target_llvm_type, ir.IntType):
 			return builder.fptosi(source_val, target_llvm_type)
 		
-		# Handle pointer casts
+		# Handle pointer to struct reinterpretation (e.g., char* -> MyStruct)
+		elif isinstance(source_val.type, ir.PointerType) and isinstance(target_llvm_type, ir.LiteralStructType):
+			# Bitcast the pointer to pointer-to-struct then load
+			target_ptr_type = ir.PointerType(target_llvm_type)
+			casted_ptr = builder.bitcast(source_val, target_ptr_type, name="ptr_to_struct")
+			return builder.load(casted_ptr, name="loaded_struct")
+		
+		# Handle pointer casts (pointer -> pointer)
 		elif isinstance(source_val.type, ir.PointerType) and isinstance(target_llvm_type, ir.PointerType):
 			return builder.bitcast(source_val, target_llvm_type)
 		
 		else:
 			raise ValueError(f"Unsupported cast from {source_val.type} to {target_llvm_type}")
+
+@dataclass
+class RangeExpression(Expression):
+	start: Expression
+	end: Expression
+	step: Optional[Expression] = None  # For future extension: start..end..step
+
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		"""Generate code for range expression - returns an iterable range object"""
+		start_val = self.start.codegen(builder, module)
+		end_val = self.end.codegen(builder, module)
+		
+		# For now, we'll create a simple range structure with start and end
+		# In a full implementation, this would be a proper iterable object
+		range_struct_type = ir.LiteralStructType([ir.IntType(32), ir.IntType(32)])
+		range_struct_type.names = ['start', 'end']
+		
+		# Allocate range struct
+		range_ptr = builder.alloca(range_struct_type, name="range")
+		
+		# Store start value
+		start_ptr = builder.gep(range_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)], inbounds=True)
+		builder.store(start_val, start_ptr)
+		
+		# Store end value
+		end_ptr = builder.gep(range_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 1)], inbounds=True)
+		builder.store(end_val, end_ptr)
+		
+		return range_ptr
+
+@dataclass
+class ArrayComprehension(Expression):
+	expression: Expression  # The expression to evaluate for each element
+	variable: str  # Loop variable name
+	variable_type: Optional[TypeSpec]  # Type of loop variable
+	iterable: Expression  # What to iterate over (e.g., range expression)
+	condition: Optional[Expression] = None  # Optional filter condition
+
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		"""Generate code for array comprehension [expr for var in iterable]"""
+		# For now, we'll handle the simple case: [x for (int x in 0..20)]
+		# This generates a loop that builds an array
+		
+		# Generate the iterable (range)
+		iterable_val = self.iterable.codegen(builder, module)
+		
+		# Determine the size of the result array
+		if isinstance(self.iterable, RangeExpression):
+			# For ranges, calculate size = end - start
+			start_val = self.iterable.start.codegen(builder, module)
+			end_val = self.iterable.end.codegen(builder, module)
+			size_val = builder.sub(end_val, start_val, name="range_size")
+		else:
+			raise NotImplementedError("Array comprehension only supports range expressions for now")
+		
+		# Create array type - assume int for now
+		element_type = ir.IntType(32)
+		
+		# Allocate dynamic array (for simplicity, we'll use a fixed size for now)
+		# In a full implementation, this would use dynamic memory allocation
+		max_size = 100  # Fixed maximum for now
+		array_type = ir.ArrayType(element_type, max_size)
+		array_ptr = builder.alloca(array_type, name="comprehension_array")
+		
+		# Create index variable
+		index_ptr = builder.alloca(ir.IntType(32), name="comp_index")
+		builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
+		
+		# Create loop variable
+		var_ptr = builder.alloca(element_type, name=self.variable)
+		builder.scope[self.variable] = var_ptr
+		
+		# Create loop: for (var = start; var < end; var++)
+		func = builder.block.function
+		loop_cond = func.append_basic_block('comp_loop_cond')
+		loop_body = func.append_basic_block('comp_loop_body')
+		loop_end = func.append_basic_block('comp_loop_end')
+		
+		# Initialize loop variable with start value
+		builder.store(start_val, var_ptr)
+		builder.branch(loop_cond)
+		
+		# Loop condition: var < end
+		builder.position_at_start(loop_cond)
+		current_var = builder.load(var_ptr, name="current_var")
+		cond = builder.icmp_signed('<', current_var, end_val, name="loop_cond")
+		builder.cbranch(cond, loop_body, loop_end)
+		
+		# Loop body: evaluate expression and store in array
+		builder.position_at_start(loop_body)
+		
+		# Evaluate the comprehension expression
+		expr_val = self.expression.codegen(builder, module)
+		
+		# Store in array at current index
+		current_index = builder.load(index_ptr, name="current_index")
+		array_elem_ptr = builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), current_index], inbounds=True)
+		builder.store(expr_val, array_elem_ptr)
+		
+		# Increment index
+		next_index = builder.add(current_index, ir.Constant(ir.IntType(32), 1), name="next_index")
+		builder.store(next_index, index_ptr)
+		
+		# Increment loop variable
+		next_var = builder.add(current_var, ir.Constant(ir.IntType(32), 1), name="next_var")
+		builder.store(next_var, var_ptr)
+		
+		# Continue loop
+		builder.branch(loop_cond)
+		
+		# End of loop
+		builder.position_at_start(loop_end)
+		
+		# Return the array pointer
+		return array_ptr
 
 @dataclass
 class FunctionCall(Expression):
@@ -529,30 +658,30 @@ class FunctionCall(Expression):
 		if func is None or not isinstance(func, ir.Function):
 			raise NameError(f"Unknown function: {self.name}")
 		
-		print(f"DEBUG FunctionCall: Calling {self.name} with {len(self.arguments)} arguments")
-		print(f"DEBUG FunctionCall: Function signature: {func.type}")
+		#print(f"DEBUG FunctionCall: Calling {self.name} with {len(self.arguments)} arguments")
+		#print(f"DEBUG FunctionCall: Function signature: {func.type}")
 		
 		# Generate code for arguments
 		arg_vals = []
 		for i, arg in enumerate(self.arguments):
 			arg_val = arg.codegen(builder, module)
-			print(f"DEBUG FunctionCall: arg[{i}] original type: {arg_val.type}")
+			#print(f"DEBUG FunctionCall: arg[{i}] original type: {arg_val.type}")
 			
 			# Handle array-to-pointer decay for function arguments
 			if isinstance(arg_val.type, ir.PointerType) and isinstance(arg_val.type.pointee, ir.ArrayType):
-				print(f"DEBUG FunctionCall: arg[{i}] is pointer to array type")
+				#print(f"DEBUG FunctionCall: arg[{i}] is pointer to array type")
 				# Check if function parameter expects a pointer to the element type
 				if i < len(func.args):
 					param_type = func.args[i].type
 					array_element_type = arg_val.type.pointee.element
-					print(f"DEBUG FunctionCall: param type: {param_type}, array element: {array_element_type}")
+					#print(f"DEBUG FunctionCall: param type: {param_type}, array element: {array_element_type}")
 					if isinstance(param_type, ir.PointerType) and param_type.pointee == array_element_type:
-						print(f"DEBUG FunctionCall: Converting array to pointer")
+						#print(f"DEBUG FunctionCall: Converting array to pointer")
 						# Convert array to pointer by GEP to first element
 						zero = ir.Constant(ir.IntType(32), 0)
 						array_ptr = builder.gep(arg_val, [zero, zero], name="array_decay")
 						arg_val = array_ptr
-						print(f"DEBUG FunctionCall: arg[{i}] after decay: {arg_val.type}")
+						#print(f"DEBUG FunctionCall: arg[{i}] after decay: {arg_val.type}")
 			
 			arg_vals.append(arg_val)
 			
@@ -875,10 +1004,10 @@ class SizeOf(Expression):
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
 		"""Generate LLVM IR that returns size in BITS"""
-		print(f"DEBUG SizeOf: target type = {type(self.target).__name__}, target = {self.target}")
+		#print(f"DEBUG SizeOf: target type = {type(self.target).__name__}, target = {self.target}")
 		# Handle TypeSpec case (like sizeof(data{8}[]))
 		if isinstance(self.target, TypeSpec):
-			print(f"DEBUG SizeOf: Taking TypeSpec path")
+			#print(f"DEBUG SizeOf: Taking TypeSpec path")
 			llvm_type = self.target.get_llvm_type_with_array(module)
 			
 			# Calculate size in BITS
@@ -947,12 +1076,12 @@ class VariableDeclaration(ASTNode):
 	initial_value: Optional[Expression] = None
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-		print(f"DEBUG VariableDeclaration: name={self.name}, type_spec.base_type={self.type_spec.base_type}")
-		print(f"DEBUG VariableDeclaration: module has _union_types: {hasattr(module, '_union_types')}")
-		if hasattr(module, '_union_types'):
-			print(f"DEBUG VariableDeclaration: _union_types keys: {list(module._union_types.keys())}")
+		#print(f"DEBUG VariableDeclaration: name={self.name}, type_spec.base_type={self.type_spec.base_type}")
+		#print(f"DEBUG VariableDeclaration: module has _union_types: {hasattr(module, '_union_types')}")
+		#if hasattr(module, '_union_types'):
+			#print(f"DEBUG VariableDeclaration: _union_types keys: {list(module._union_types.keys())}")
 		llvm_type = self.type_spec.get_llvm_type_with_array(module)
-		print(f"DEBUG VariableDeclaration: resolved llvm_type = {llvm_type}")
+		#print(f"DEBUG VariableDeclaration: resolved llvm_type = {llvm_type}")
 		
 		# Handle global variables
 		if builder.scope is None:
@@ -1047,13 +1176,16 @@ class VariableDeclaration(ASTNode):
 						
 				elif isinstance(llvm_type, ir.PointerType):
 					# Create global string constant for pointer types
-					str_val = ir.Constant(ir.ArrayType(ir.IntType(8)), bytearray(self.initial_value.value.encode('utf-8') + b'\0'))
+					string_val = self.initial_value.value
+					string_bytes = string_val.encode('utf-8') + b'\0'  # Null-terminate
+					str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+					str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
 					gv = ir.GlobalVariable(module, str_val.type, name=f".str.{self.name}")
 					gv.linkage = 'internal'
 					gv.global_constant = True
 					gv.initializer = str_val
 					
-					# Get pointer to the string
+					# Get pointer to the first character of the string
 					zero = ir.Constant(ir.IntType(32), 0)
 					str_ptr = builder.gep(gv, [zero, zero], name=f"{self.name}.ptr")
 					builder.store(str_ptr, alloca)
@@ -1106,6 +1238,11 @@ class VariableDeclaration(ASTNode):
 					builder.store(init_val, alloca)
 		
 		builder.scope[self.name] = alloca
+		# Track volatile variables so that subsequent loads/stores use the 'volatile' flag
+		if self.type_spec.is_volatile:
+			if not hasattr(builder, 'volatile_vars'):
+				builder.volatile_vars = set()
+			builder.volatile_vars.add(self.name)
 		return alloca
 	
 	def get_llvm_type(self, module: ir.Module) -> ir.Type:
@@ -1220,7 +1357,8 @@ class Assignment(Statement):
 			else:
 				raise NameError(f"Unknown variable: {self.target.name}")
 			
-			builder.store(val, ptr)
+			st = builder.store(val, ptr)
+			st.volatile = True
 			return val
 			
 		elif isinstance(self.target, MemberAccess):
@@ -1241,12 +1379,12 @@ class Assignment(Statement):
 			
 			member_name = self.target.member
 			
-			print(f"DEBUG Assignment: obj.type = {obj.type}, pointee = {getattr(obj.type, 'pointee', None)}")
-			print(f"DEBUG Assignment: member_name = {member_name}")
-			if hasattr(module, '_union_types'):
-				print(f"DEBUG Assignment: Union types available: {list(module._union_types.keys())}")
-				for union_name, union_type in module._union_types.items():
-					print(f"DEBUG Assignment: Union {union_name} type: {union_type}")
+			#print(f"DEBUG Assignment: obj.type = {obj.type}, pointee = {getattr(obj.type, 'pointee', None)}")
+			#print(f"DEBUG Assignment: member_name = {member_name}")
+			#if hasattr(module, '_union_types'):
+				#print(f"DEBUG Assignment: Union types available: {list(module._union_types.keys())}")
+				#for union_name, union_type in module._union_types.items():
+					#print(f"DEBUG Assignment: Union {union_name} type: {union_type}")
 			
 			if isinstance(obj.type, ir.PointerType) and isinstance(obj.type.pointee, ir.LiteralStructType):
 				struct_type = obj.type.pointee
@@ -1342,9 +1480,9 @@ class Block(Statement):
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
 		result = None
-		print(f"DEBUG Block: Processing {len(self.statements)} statements")
+		#print(f"DEBUG Block: Processing {len(self.statements)} statements")
 		for i, stmt in enumerate(self.statements):
-			print(f"DEBUG Block: Processing statement {i}: {type(stmt).__name__}")
+			#print(f"DEBUG Block: Processing statement {i}: {type(stmt).__name__}")
 			if stmt is not None:  # Skip None statements
 				try:
 					stmt_result = stmt.codegen(builder, module)
@@ -1666,10 +1804,63 @@ class ReturnStatement(Statement):
 			if ret_val is None or (isinstance(self.value, Literal) and self.value.type == DataType.VOID):
 				builder.ret_void()
 			else:
+				# Get the function's declared return type
+				func = builder.block.function
+				#print(f"DEBUG: func = {func}")
+				#print(f"DEBUG: func.type = {func.type}")
+				#print(f"DEBUG: type(func.type) = {type(func.type)}")
+				
+				# The function type is accessed differently in LLVM
+				if hasattr(func.type, 'return_type'):
+					expected_ret_type = func.type.return_type
+				elif hasattr(func.type, 'pointee') and hasattr(func.type.pointee, 'return_type'):
+					expected_ret_type = func.type.pointee.return_type
+				else:
+					raise RuntimeError(f"Cannot determine return type from func.type: {func.type}")
+				
+				# Cast return value to match function signature if needed
+				if ret_val.type != expected_ret_type:
+					ret_val = self._cast_to_return_type(builder, ret_val, expected_ret_type)
+				
 				builder.ret(ret_val)
 		else:
 			builder.ret_void()
 		return None
+	
+	def _cast_to_return_type(self, builder: ir.IRBuilder, value: ir.Value, target_type: ir.Type) -> ir.Value:
+		"""Automatically cast return value to match function signature"""
+		source_type = value.type
+		
+		# If types already match, no cast needed
+		if source_type == target_type:
+			return value
+		
+		# Handle integer type conversions
+		if isinstance(source_type, ir.IntType) and isinstance(target_type, ir.IntType):
+			if source_type.width < target_type.width:
+				# Extend to larger integer type (sign extend)
+				return builder.sext(value, target_type)
+			elif source_type.width > target_type.width:
+				# Truncate to smaller integer type
+				return builder.trunc(value, target_type)
+			else:
+				# Same width, should not happen but return as-is
+				return value
+		
+		# Handle int to float conversion
+		elif isinstance(source_type, ir.IntType) and isinstance(target_type, ir.FloatType):
+			return builder.sitofp(value, target_type)
+		
+		# Handle float to int conversion
+		elif isinstance(source_type, ir.FloatType) and isinstance(target_type, ir.IntType):
+			return builder.fptosi(value, target_type)
+		
+		# Handle pointer casts
+		elif isinstance(source_type, ir.PointerType) and isinstance(target_type, ir.PointerType):
+			return builder.bitcast(value, target_type)
+		
+		else:
+			raise ValueError(f"Cannot automatically cast return value from {source_type} to {target_type}")
 
 @dataclass
 class BreakStatement(Statement):
@@ -1939,9 +2130,9 @@ class InlineAsm(Expression):
             # Parse the constraint string format: "outputs:inputs:clobbers"
             # Example: '"=r"(stdout_handle)::"eax","memory"'
             # or ': : "r"(stdout_handle), "r"(message), "m"(bytes_written) : "eax", "ecx", "edx", "memory"'
-            print(f"DEBUG: Parsing constraints: {self.constraints}")
+            #print(f"DEBUG: Parsing constraints: {self.constraints}")
             constraint_parts = self.constraints.split(':')
-            print(f"DEBUG: Split into parts: {constraint_parts}")
+            #print(f"DEBUG: Split into parts: {constraint_parts}")
             
             # Ensure we have at least 3 parts (outputs:inputs:clobbers)
             while len(constraint_parts) < 3:
@@ -1966,36 +2157,36 @@ class InlineAsm(Expression):
                             
             # Handle inputs (second part)
             input_part = constraint_parts[1].strip()
-            print(f"DEBUG: Input part: '{input_part}'")
+            #print(f"DEBUG: Input part: '{input_part}'")
             if input_part:
                 # Parse input operands like '"r"(stdout_handle), "r"(message), "m"(bytes_written)'
                 import re
                 input_matches = re.findall(r'"([^"]+)"\s*\(([^)]+)\)', input_part)
-                print(f"DEBUG: Input matches: {input_matches}")
+                #print(f"DEBUG: Input matches: {input_matches}")
                 for constraint, var_name in input_matches:
-                    print(f"DEBUG: Looking for variable '{var_name}' with constraint '{constraint}'")
+                    #print(f"DEBUG: Looking for variable '{var_name}' with constraint '{constraint}'")
                     # Look up the variable
                     if builder.scope and var_name in builder.scope:
                         var_ptr = builder.scope[var_name]
                         # For arrays or memory constraints, pass the pointer; for register constraints, load the value
                         if constraint in ['m'] or (isinstance(var_ptr.type, ir.PointerType) and isinstance(var_ptr.type.pointee, ir.ArrayType)):
                             input_operands.append(var_ptr)
-                            print(f"DEBUG: Found in scope, using pointer: {var_ptr}")
+                            #print(f"DEBUG: Found in scope, using pointer: {var_ptr}")
                         else:
                             var_val = builder.load(var_ptr, name=f"{var_name}_load")
                             input_operands.append(var_val)
-                            print(f"DEBUG: Found in scope, loaded value: {var_val}")
+                            #print(f"DEBUG: Found in scope, loaded value: {var_val}")
                         input_constraints.append(constraint)
                     elif var_name in module.globals:
                         var_ptr = module.globals[var_name]
                         # For arrays or memory constraints, pass the pointer; for register constraints, load the value
                         if constraint in ['m'] or isinstance(var_ptr.type.pointee, ir.ArrayType):
                             input_operands.append(var_ptr)
-                            print(f"DEBUG: Found in globals, using pointer: {var_ptr}")
+                            #print(f"DEBUG: Found in globals, using pointer: {var_ptr}")
                         else:
                             var_val = builder.load(var_ptr, name=f"{var_name}_load")
                             input_operands.append(var_val)
-                            print(f"DEBUG: Found in globals, loaded value: {var_val}")
+                            #print(f"DEBUG: Found in globals, loaded value: {var_val}")
                         input_constraints.append(constraint)
                             
             # Handle clobbers (third part)
@@ -2012,13 +2203,13 @@ class InlineAsm(Expression):
         # - Clobbers are prefixed with ~ and added to the constraint list
         # - Format: "constraint1,constraint2,~clobber1,~clobber2"
         
-        print(f"DEBUG: output_constraints = {output_constraints}")
-        print(f"DEBUG: input_constraints = {input_constraints}")
-        print(f"DEBUG: clobber_list = {clobber_list}")
+        #print(f"DEBUG: output_constraints = {output_constraints}")
+        #print(f"DEBUG: input_constraints = {input_constraints}")
+        #print(f"DEBUG: clobber_list = {clobber_list}")
         
         # Only input operands are passed as parameters
-        print(f"DEBUG: input_operands = {input_operands}")
-        print(f"DEBUG: output_operands = {output_operands}")
+        #print(f"DEBUG: input_operands = {input_operands}")
+        #print(f"DEBUG: output_operands = {output_operands}")
         
         # For memory output operands (=m), we need to pass them as input operands in LLVM
         # but treat the constraint as an input/output constraint
@@ -2047,8 +2238,8 @@ class InlineAsm(Expression):
         # Join all constraints with commas
         constraint_str = ','.join(final_constraints)
         
-        print(f"DEBUG: final constraint_str = '{constraint_str}'")
-        print(f"DEBUG: final_input_operands = {final_input_operands}")
+        #print(f"DEBUG: final constraint_str = '{constraint_str}'")
+        #print(f"DEBUG: final_input_operands = {final_input_operands}")
         
         # Create function type based on final input operands
         input_types = [op.type for op in final_input_operands]
@@ -2132,10 +2323,10 @@ class FunctionDef(ASTNode):
 			builder.scope[self.parameters[i].name] = alloca
 		
 		# Generate function body
-		print(f"DEBUG FunctionDef: Generating body for {self.name}")
-		print(f"DEBUG FunctionDef: Body has {len(self.body.statements)} statements")
-		for i, stmt in enumerate(self.body.statements):
-			print(f"DEBUG FunctionDef: Statement {i}: {type(stmt).__name__} = {stmt}")
+		#print(f"DEBUG FunctionDef: Generating body for {self.name}")
+		#print(f"DEBUG FunctionDef: Body has {len(self.body.statements)} statements")
+		#for i, stmt in enumerate(self.body.statements):
+			#print(f"DEBUG FunctionDef: Statement {i}: {type(stmt).__name__} = {stmt}")
 		self.body.codegen(builder, module)
 		
 		# Add implicit return if needed
