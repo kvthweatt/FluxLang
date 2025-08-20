@@ -1,6 +1,12 @@
 // Windows x64 Hello World using volatile inline asm in AT&T syntax
 // No CRT calls; directly calls Kernel32!GetStdHandle and Kernel32!WriteFile
 
+struct myStru
+{
+    int a;
+    int b;
+};
+
 def main() -> int
 {
     // "Hello, World!\r\n" is 15 bytes (no NUL required for WriteFile)

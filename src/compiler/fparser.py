@@ -336,8 +336,13 @@ class FluxParser:
                         self.consume(TokenType.SEMICOLON)
                     else:
                         member = self.struct_member()
-                        member.is_private = False
-                        members.append(member)
+                        if isinstance(member, list):
+                            for m in member:
+                                m.is_private = False
+                                members.append(m)
+                        else:
+                            member.is_private = False
+                            members.append(member)
                 self.consume(TokenType.RIGHT_BRACE)
                 self.consume(TokenType.SEMICOLON)
             elif self.expect(TokenType.PRIVATE):
@@ -350,8 +355,13 @@ class FluxParser:
                         self.consume(TokenType.SEMICOLON)
                     else:
                         member = self.struct_member()
-                        member.is_private = True
-                        members.append(member)
+                        if isinstance(member, list):
+                            for m in member:
+                                m.is_private = True
+                                members.append(m)
+                        else:
+                            member.is_private = True
+                            members.append(member)
                 self.consume(TokenType.RIGHT_BRACE)
                 self.consume(TokenType.SEMICOLON)
             elif self.expect(TokenType.STRUCT):
@@ -362,7 +372,11 @@ class FluxParser:
                 if self.expect(TokenType.SEMICOLON):
                     self.advance()
             else:
-                members.append(self.struct_member())
+                member = self.struct_member()
+                if isinstance(member, list):
+                    members.extend(member)
+                else:
+                    members.append(member)
         
         self.consume(TokenType.RIGHT_BRACE)
         # Make semicolon optional after struct definition
@@ -370,9 +384,9 @@ class FluxParser:
             self.advance()
         return StructDef(name, members, base_structs, nested_structs)
     
-    def struct_member(self) -> StructMember:
+    def struct_member(self) -> Union[StructMember, List[StructMember]]:
         """
-        struct_member -> type_spec IDENTIFIER ';' // OR STRUCT, for nested
+        struct_member -> type_spec IDENTIFIER (',' IDENTIFIER)* ';' // OR STRUCT, for nested
         """
         if self.expect(TokenType.STRUCT):
             self.advance()
@@ -384,15 +398,31 @@ class FluxParser:
 
         type_spec = self.type_spec()
         name = self.consume(TokenType.IDENTIFIER).value
+        members = [name]
         
-        # Handle optional initial value
+        # Handle comma-separated variable names
+        while self.expect(TokenType.COMMA):
+            self.advance()
+            members.append(self.consume(TokenType.IDENTIFIER).value)
+        
+        # Handle optional initial value (only applies to last variable)
         initial_value = None
         if self.expect(TokenType.ASSIGN):
             self.advance()
             initial_value = self.expression()
         
         self.consume(TokenType.SEMICOLON)
-        return StructMember(name, type_spec, initial_value)
+        
+        # If multiple members, return a list
+        if len(members) > 1:
+            result = []
+            for i, member_name in enumerate(members):
+                # Only the last member can have an initial value
+                member_initial_value = initial_value if i == len(members) - 1 else None
+                result.append(StructMember(member_name, type_spec, member_initial_value))
+            return result
+        else:
+            return StructMember(members[0], type_spec, initial_value)
     
     def object_def(self) -> ObjectDef:
         """
@@ -1419,6 +1449,11 @@ class FluxParser:
                 # Postfix decrement
                 self.advance()
                 expr = UnaryOp(Operator.DECREMENT, expr, is_postfix=True)
+            elif self.expect(TokenType.AS):
+                # AS cast expression (postfix)
+                self.advance()
+                target_type = self.type_spec()
+                expr = CastExpression(target_type, expr)
             else:
                 break
         
@@ -1600,7 +1635,7 @@ class FluxParser:
         if not self.expect(TokenType.RIGHT_BRACE):
             name = self.consume(TokenType.IDENTIFIER).value
             self.consume(TokenType.ASSIGN)
-            value = self.statement()
+            value = self.expression()
             members[name] = value
             
             while self.expect(TokenType.COMMA):

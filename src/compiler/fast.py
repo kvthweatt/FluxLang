@@ -81,6 +81,9 @@ class Literal(ASTNode):
 			if isinstance(self.value, list):
 				# For now, just return None for array literals - they should be handled at a higher level
 				return None
+			# Handle struct literals (dictionaries with field names -> values)
+			elif isinstance(self.value, dict):
+				return self._handle_struct_literal(builder, module)
 			# Handle other DATA types
 			if hasattr(module, '_type_aliases') and str(self.type) in module._type_aliases:
 				llvm_type = module._type_aliases[str(self.type)]
@@ -97,7 +100,96 @@ class Literal(ASTNode):
 					return ir.Constant(llvm_type, int(self.value) if isinstance(self.value, str) else self.value)
 				elif isinstance(llvm_type, ir.FloatType):
 					return ir.Constant(llvm_type, float(self.value))
-			raise ValueError(f"Unsupported literal type: {self.type}")
+		raise ValueError(f"Unsupported literal type: {self.type}")
+
+	def _handle_struct_literal(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		"""Handle struct literal initialization (e.g., {a = 10, b = 20})"""
+		if not isinstance(self.value, dict):
+			raise ValueError("Expected dictionary for struct literal")
+		
+		# For now, we need to determine the struct type from context
+		# In a complete implementation, this would be resolved during semantic analysis
+		# For testing purposes, let's assume we can infer from the fields present
+		
+		# Look for a compatible struct type in the module
+		struct_type = None
+		field_names = list(self.value.keys())
+		
+		if hasattr(module, '_struct_types'):
+			for struct_name, candidate_type in module._struct_types.items():
+				if hasattr(candidate_type, 'names'):
+					# Check if all fields in the literal exist in this struct
+					if all(field in candidate_type.names for field in field_names):
+						struct_type = candidate_type
+						break
+		
+		if struct_type is None:
+			raise ValueError(f"No compatible struct type found for fields: {field_names}")
+		
+		# Allocate space for the struct instance
+		if builder.scope is None:
+			# Global context - create a struct constant
+			# Generate constant values for each field
+			field_values = []
+			for member_name in struct_type.names:
+				if member_name in self.value:
+					# Field is initialized in the literal
+					field_expr = self.value[member_name]
+					field_value = field_expr.codegen(builder, module)
+					field_values.append(field_value)
+				else:
+					# Field not specified, use zero initialization
+					field_index = struct_type.names.index(member_name)
+					field_type = struct_type.elements[field_index]
+					field_values.append(ir.Constant(field_type, 0))
+			
+			# Create struct constant
+			return ir.Constant(struct_type, field_values)
+		else:
+			# Local context - create an alloca and initialize fields
+			struct_ptr = builder.alloca(struct_type, name="struct_literal")
+			
+			# Initialize each field
+			for field_name, field_value_expr in self.value.items():
+				# Find field index
+				if field_name not in struct_type.names:
+					raise ValueError(f"Field '{field_name}' not found in struct")
+				
+				field_index = struct_type.names.index(field_name)
+				
+				# Get pointer to the field
+				field_ptr = builder.gep(
+					struct_ptr,
+					[ir.Constant(ir.IntType(32), 0),
+					 ir.Constant(ir.IntType(32), field_index)],
+					inbounds=True
+				)
+				
+				# Generate value and store it
+				field_value = field_value_expr.codegen(builder, module)
+				
+				# Get the expected field type
+				expected_type = struct_type.elements[field_index]
+				
+				# Convert field value to match the expected type if needed
+				if field_value.type != expected_type:
+					if isinstance(field_value.type, ir.IntType) and isinstance(expected_type, ir.IntType):
+						if field_value.type.width > expected_type.width:
+							# Truncate to smaller type
+							field_value = builder.trunc(field_value, expected_type)
+						elif field_value.type.width < expected_type.width:
+							# Extend to larger type
+							field_value = builder.sext(field_value, expected_type)
+					# Add other type conversions as needed
+					elif isinstance(field_value.type, ir.IntType) and isinstance(expected_type, ir.FloatType):
+						field_value = builder.sitofp(field_value, expected_type)
+					elif isinstance(field_value.type, ir.FloatType) and isinstance(expected_type, ir.IntType):
+						field_value = builder.fptosi(field_value, expected_type)
+				
+				builder.store(field_value, field_ptr)
+			
+			# Return the initialized struct (load it to get the value)
+			return builder.load(struct_ptr, name="struct_value")
 
 @dataclass
 class Identifier(ASTNode):
@@ -147,9 +239,13 @@ class TypeSpec(ASTNode):
 
 
 	def get_llvm_type(self, module: ir.Module) -> ir.Type:  # Renamed from get_llvm_type
-		if hasattr(module, '_union_types') and self.base_type in module._union_types:
-			return module._union_types[self.base_type]
 		if isinstance(self.base_type, str):
+			# Check for struct types first
+			if hasattr(module, '_struct_types') and self.base_type in module._struct_types:
+				return module._struct_types[self.base_type]
+			# Check for union types
+			if hasattr(module, '_union_types') and self.base_type in module._union_types:
+				return module._union_types[self.base_type]
 			# Handle custom types (like i64)
 			if hasattr(module, '_type_aliases') and self.base_type in module._type_aliases:
 				return module._type_aliases[self.base_type]
@@ -338,6 +434,83 @@ class UnaryOp(Expression):
 class CastExpression(Expression):
 	target_type: TypeSpec
 	expression: Expression
+
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		"""Generate code for cast expressions, including zero-cost struct reinterpretation"""
+		source_val = self.expression.codegen(builder, module)
+		target_llvm_type = self.target_type.get_llvm_type(module)
+		
+		# If source and target are the same type, no cast needed
+		if source_val.type == target_llvm_type:
+			return source_val
+		
+		# Handle struct-to-struct reinterpretation (zero-cost when sizes match)
+		if (isinstance(source_val.type, ir.PointerType) and 
+			isinstance(source_val.type.pointee, ir.LiteralStructType) and
+			isinstance(target_llvm_type, ir.LiteralStructType)):
+			
+			source_struct_type = source_val.type.pointee
+			target_struct_type = target_llvm_type
+			
+			# Check if sizes are compatible (same total bytes)
+			# Calculate size by summing element bit widths
+			source_size = sum(elem.width for elem in source_struct_type.elements if hasattr(elem, 'width'))
+			target_size = sum(elem.width for elem in target_struct_type.elements if hasattr(elem, 'width'))
+			
+			if source_size == target_size:
+				# Zero-cost reinterpretation: bitcast pointer, then load
+				target_ptr_type = ir.PointerType(target_struct_type)
+				reinterpreted_ptr = builder.bitcast(source_val, target_ptr_type, name="struct_reinterpret")
+				return builder.load(reinterpreted_ptr, name="reinterpreted_struct")
+			else:
+				raise ValueError(f"Cannot cast struct of size {source_size} to struct of size {target_size}")
+		
+		# Handle value-to-struct cast (load from pointer if needed)
+		elif (isinstance(source_val.type, ir.LiteralStructType) and
+			isinstance(target_llvm_type, ir.LiteralStructType)):
+			
+			# Check size compatibility
+			source_size = sum(elem.width for elem in source_val.type.elements if hasattr(elem, 'width'))
+			target_size = sum(elem.width for elem in target_llvm_type.elements if hasattr(elem, 'width'))
+			
+			if source_size == target_size:
+				# Create temporary storage for reinterpretation
+				source_ptr = builder.alloca(source_val.type, name="temp_source")
+				builder.store(source_val, source_ptr)
+				
+				# Bitcast to target type pointer and load
+				target_ptr_type = ir.PointerType(target_llvm_type)
+				reinterpreted_ptr = builder.bitcast(source_ptr, target_ptr_type, name="struct_reinterpret")
+				return builder.load(reinterpreted_ptr, name="reinterpreted_struct")
+			else:
+				raise ValueError(f"Cannot cast struct of size {source_size} to struct of size {target_size}")
+		
+		# Handle standard numeric casts
+		if isinstance(source_val.type, ir.IntType) and isinstance(target_llvm_type, ir.IntType):
+			if source_val.type.width > target_llvm_type.width:
+				# Truncate to smaller integer
+				return builder.trunc(source_val, target_llvm_type)
+			elif source_val.type.width < target_llvm_type.width:
+				# Extend to larger integer (sign extend)
+				return builder.sext(source_val, target_llvm_type)
+			else:
+				# Same width, no cast needed
+				return source_val
+		
+		# Handle int to float
+		elif isinstance(source_val.type, ir.IntType) and isinstance(target_llvm_type, ir.FloatType):
+			return builder.sitofp(source_val, target_llvm_type)
+		
+		# Handle float to int
+		elif isinstance(source_val.type, ir.FloatType) and isinstance(target_llvm_type, ir.IntType):
+			return builder.fptosi(source_val, target_llvm_type)
+		
+		# Handle pointer casts
+		elif isinstance(source_val.type, ir.PointerType) and isinstance(target_llvm_type, ir.PointerType):
+			return builder.bitcast(source_val, target_llvm_type)
+		
+		else:
+			raise ValueError(f"Unsupported cast from {source_val.type} to {target_llvm_type}")
 
 @dataclass
 class FunctionCall(Expression):
