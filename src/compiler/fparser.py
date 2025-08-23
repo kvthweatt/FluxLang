@@ -169,6 +169,9 @@ class FluxParser:
             return self.variable_declaration_statement()
         elif self.expect(TokenType.SIGNED):
             return self.variable_declaration_statement()
+        elif self.expect(TokenType.INT, TokenType.DATA, TokenType.CHAR, 
+                         TokenType.FLOAT_KW, TokenType.BOOL_KW, TokenType.VOID):
+            return self.variable_declaration_statement()
         elif self.expect(TokenType.CONST):
             self.advance()
             if self.expect(TokenType.VOLATILE):

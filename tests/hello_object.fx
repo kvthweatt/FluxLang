@@ -31,15 +31,49 @@ def pnl() -> void
     print(@nl, 1);
 };
 
+
+object string
+{
+    noopstr base;
+
+    def __init(unsigned data{8}[] a, int len) -> this
+    {
+        print(@a, len);
+        return this;
+    };
+
+    def __exit() -> void
+    {
+        return void;
+    };
+
+    def foo() -> noopstr
+    {
+        return this.base;
+    };
+};
+
 def main() -> int
 {
     noopstr str = "Hello World!";
     int len = sizeof(str) / 8;
+
+    string s("TEST", 4);
+
+    noopstr str = s.foo();
+    print(@str,4);
+    // string s = "TEST";   EQUIVALENT TO  s("TEST");
+    // Basic idea is assignment on initialization = a call to the __init method IF AND ONLY IF __init has 1 argument
+    // This is how we will achieve this functionality.
+
+    // We do need to add some other form to use in expression, which will be __expr()
+    // print(s); should call s.__expr()
+    // print(s.__expr()); // Equal to print(s); if s is an object
     
-    for (int x = 0; x < 20; x++)
-    {
-        print(@str, len);
-        pnl();
-    };
+    //for (int x = 0; x < 20; x++)
+    //{
+    //    print(@str, len);
+    //    pnl();
+    //};
     return 0;
 };

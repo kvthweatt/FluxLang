@@ -7,5 +7,7 @@ namespace standard
         unsigned data{8} as byte;
 
         byte[] as noopstr;
+
+        char nl = "\n";
 	};
 };

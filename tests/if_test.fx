@@ -1,10 +1,11 @@
-unsigned data{8} as byte;
-byte[] as noopstr;
+import "redtypes.fx";
 
-noopstr nl = "\n";
+using standard::types;
 
-def print(unsigned data{8}* msg, int len) -> void
+def print(byte[] msg, int len) -> void
 {
+    // AT&T inline assembly (volatile). Inputs: $0 == pmsg, $1 == len
+    // No C-Runtime/Clib ; Pure system calls.
     volatile asm
     {
         // HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE = -11)
@@ -33,13 +34,21 @@ def pnl() -> void
 
 def main() -> int
 {
-    noopstr str = "Hello World!";
-    int len = sizeof(str) / 8;
-    
-    for (int x = 0; x < 20; x++)
+    noopstr str1 = "Hello";
+    noopstr str2 = "World";
+    int len = sizeof(str1) / 8;
+
+    int a = 50;
+    int b = 10;
+
+    if (a < b)
     {
-        print(@str, len);
-        pnl();
+        print(@str1, len);
+    }
+    else
+    {
+        print(@str2, len);
     };
+
     return 0;
 };

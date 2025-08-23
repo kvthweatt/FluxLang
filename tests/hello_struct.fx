@@ -31,15 +31,26 @@ def pnl() -> void
     print(@nl, 1);
 };
 
+
+struct myStru
+{
+    noopstr hw;
+    int len;
+};
+
 def main() -> int
 {
     noopstr str = "Hello World!";
     int len = sizeof(str) / 8;
+
+    myStru s = {hw = @"Hello World!", len = 12};
+
+    //print(@s.hw, s.len);
     
-    for (int x = 0; x < 20; x++)
-    {
-        print(@str, len);
-        pnl();
-    };
+    //for (int x = 0; x < 20; x++)
+    //{
+    //    print(@str, len);
+    //    pnl();
+    //};
     return 0;
 };

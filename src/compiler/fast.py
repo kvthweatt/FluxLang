@@ -69,7 +69,14 @@ class Literal(ASTNode):
 		elif self.type == DataType.BOOL:
 			return ir.Constant(ir.IntType(1), bool(self.value))
 		elif self.type == DataType.CHAR:
-			return ir.Constant(ir.IntType(8), ord(self.value[0]) if isinstance(self.value, str) else self.value)
+			if isinstance(self.value, str):
+				if len(self.value) == 0:
+					# Handle empty string - return null character
+					return ir.Constant(ir.IntType(8), 0)
+				else:
+					return ir.Constant(ir.IntType(8), ord(self.value[0]))
+			else:
+				return ir.Constant(ir.IntType(8), self.value)
 		elif self.type == DataType.VOID:
 			return None
 		elif self.type == DataType.DATA:
@@ -226,6 +233,31 @@ class Identifier(ASTNode):
 		# Check if this is a custom type
 		if hasattr(module, '_type_aliases') and self.name in module._type_aliases:
 			return module._type_aliases[self.name]
+		
+		# Check for namespace-qualified names using 'using' statements
+		if hasattr(module, '_using_namespaces'):
+			for namespace in module._using_namespaces:
+				# Convert namespace path to mangled name format
+				mangled_prefix = namespace.replace('::', '__') + '__'
+				mangled_name = mangled_prefix + self.name
+				
+				# Check in global variables with mangled name
+				if mangled_name in module.globals:
+					gvar = module.globals[mangled_name]
+					# For arrays, return the pointer directly (don't load)
+					if isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.ArrayType):
+						return gvar
+					# Load the value if it's a non-array pointer type
+					elif isinstance(gvar.type, ir.PointerType):
+						ret_val = builder.load(gvar, name=self.name)
+						if hasattr(builder, 'volatile_vars') and self.name in getattr(builder,'volatile_vars',set()):
+							ret_val.volatile = True
+						return ret_val
+					return gvar
+				
+				# Check in type aliases with mangled name
+				if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
+					return module._type_aliases[mangled_name]
 			
 		raise NameError(f"Unknown identifier: {self.name}")
 
@@ -245,15 +277,42 @@ class TypeSpec(ASTNode):
 
 	def get_llvm_type(self, module: ir.Module) -> ir.Type:  # Renamed from get_llvm_type
 		if isinstance(self.base_type, str):
+			print(f"DEBUG get_llvm_type: Resolving base_type='{self.base_type}'")
 			# Check for struct types first
 			if hasattr(module, '_struct_types') and self.base_type in module._struct_types:
+				print(f"DEBUG get_llvm_type: Found struct type {self.base_type}")
 				return module._struct_types[self.base_type]
 			# Check for union types
 			if hasattr(module, '_union_types') and self.base_type in module._union_types:
+				print(f"DEBUG get_llvm_type: Found union type {self.base_type}")
 				return module._union_types[self.base_type]
 			# Handle custom types (like i64)
 			if hasattr(module, '_type_aliases') and self.base_type in module._type_aliases:
-				return module._type_aliases[self.base_type]
+				alias_type = module._type_aliases[self.base_type]
+				print(f"DEBUG get_llvm_type: Found direct type alias {self.base_type} -> {alias_type}")
+				# Return the alias type as-is (for noopstr -> i8*, we want i8*, not i8)
+				return alias_type
+			
+			# Check for namespace-qualified names using 'using' statements
+			if hasattr(module, '_using_namespaces'):
+				print(f"DEBUG get_llvm_type: Checking namespaces for '{self.base_type}'")
+				print(f"DEBUG get_llvm_type: Available namespaces: {module._using_namespaces}")
+				for namespace in module._using_namespaces:
+					# Convert namespace path to mangled name format
+					mangled_prefix = namespace.replace('::', '__') + '__'
+					mangled_name = mangled_prefix + self.base_type
+					print(f"DEBUG get_llvm_type: Checking mangled name '{mangled_name}' in namespace '{namespace}'")
+					
+					# Check in type aliases with mangled name
+					if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
+						alias_type = module._type_aliases[mangled_name]
+						print(f"DEBUG get_llvm_type: Found namespace type alias {mangled_name} -> {alias_type}")
+						# Return the alias type as-is
+						return alias_type
+			else:
+				print(f"DEBUG get_llvm_type: No _using_namespaces found on module")
+			
+			print(f"DEBUG get_llvm_type: No alias found for '{self.base_type}', falling back to i32")
 			return ir.IntType(32)  # Default fallback
 		
 		if self.base_type == DataType.INT:
@@ -525,6 +584,15 @@ class CastExpression(Expression):
 			casted_ptr = builder.bitcast(source_val, target_ptr_type, name="ptr_to_struct")
 			return builder.load(casted_ptr, name="loaded_struct")
 		
+		# Handle struct to pointer cast (e.g., struct A -> i8*)
+		elif isinstance(source_val.type, ir.LiteralStructType) and isinstance(target_llvm_type, ir.PointerType):
+			# Create temporary storage for the struct
+			source_ptr = builder.alloca(source_val.type, name="temp_struct")
+			builder.store(source_val, source_ptr)
+			
+			# Bitcast the struct pointer to the target pointer type
+			return builder.bitcast(source_ptr, target_llvm_type, name="struct_to_ptr")
+		
 		# Handle pointer casts (pointer -> pointer)
 		elif isinstance(source_val.type, ir.PointerType) and isinstance(target_llvm_type, ir.PointerType):
 			return builder.bitcast(source_val, target_llvm_type)
@@ -658,21 +726,67 @@ class FunctionCall(Expression):
 		if func is None or not isinstance(func, ir.Function):
 			raise NameError(f"Unknown function: {self.name}")
 		
+		# Check if this is a method call (has dot in name)
+		is_method_call = '.' in self.name
+		parameter_offset = 1 if is_method_call else 0  # Account for implicit 'this' parameter
+		
 		#print(f"DEBUG FunctionCall: Calling {self.name} with {len(self.arguments)} arguments")
 		#print(f"DEBUG FunctionCall: Function signature: {func.type}")
 		
 		# Generate code for arguments
 		arg_vals = []
 		for i, arg in enumerate(self.arguments):
-			arg_val = arg.codegen(builder, module)
+			print(f"DEBUG FunctionCall: Processing arg {i}: {type(arg).__name__} = {arg}")
+			print(f"DEBUG FunctionCall: arg.type = {getattr(arg, 'type', None)}")
+			param_index = i + parameter_offset  # Adjust index for method calls
+			if param_index < len(func.args):
+				print(f"DEBUG FunctionCall: func.args[{param_index}].type = {func.args[param_index].type}")
+				
+			# Check if this is a string literal that needs to be converted to pointer
+			print(f"DEBUG: Checking string literal conversion for arg {i} (param_index {param_index}):")
+			print(f"DEBUG:   isinstance(arg, Literal) = {isinstance(arg, Literal)}")
+			if isinstance(arg, Literal):
+				print(f"DEBUG:   arg.type == DataType.CHAR = {arg.type == DataType.CHAR}")
+			print(f"DEBUG:   param_index < len(func.args) = {param_index < len(func.args)}")
+			if param_index < len(func.args):
+				print(f"DEBUG:   func.args[{param_index}].type = {func.args[param_index].type}")
+				print(f"DEBUG:   isinstance(func.args[{param_index}].type, ir.PointerType) = {isinstance(func.args[param_index].type, ir.PointerType)}")
+				if isinstance(func.args[param_index].type, ir.PointerType):
+					print(f"DEBUG:   isinstance(func.args[{param_index}].type.pointee, ir.IntType) = {isinstance(func.args[param_index].type.pointee, ir.IntType)}")
+					if isinstance(func.args[param_index].type.pointee, ir.IntType):
+						print(f"DEBUG:   func.args[{param_index}].type.pointee.width == 8 = {func.args[param_index].type.pointee.width == 8}")
+						
+			if (isinstance(arg, Literal) and arg.type == DataType.CHAR and 
+				param_index < len(func.args) and isinstance(func.args[param_index].type, ir.PointerType) and 
+				isinstance(func.args[param_index].type.pointee, ir.IntType) and func.args[param_index].type.pointee.width == 8):
+				# This is a string literal being passed to a function expecting i8*
+				# Create a global string constant and return pointer to it
+				string_val = arg.value
+				string_bytes = string_val.encode('utf-8') + b'\0'  # Null-terminate
+				str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+				str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+				
+				# Create global variable for the string
+				gv = ir.GlobalVariable(module, str_val.type, name=f".str.arg{i}")
+				gv.linkage = 'internal'
+				gv.global_constant = True
+				gv.initializer = str_val
+				
+				# Get pointer to the first character of the string
+				zero = ir.Constant(ir.IntType(32), 0)
+				str_ptr = builder.gep(gv, [zero, zero], name=f"arg{i}_str_ptr")
+				arg_val = str_ptr
+			else:
+				arg_val = arg.codegen(builder, module)
+			
 			#print(f"DEBUG FunctionCall: arg[{i}] original type: {arg_val.type}")
 			
 			# Handle array-to-pointer decay for function arguments
 			if isinstance(arg_val.type, ir.PointerType) and isinstance(arg_val.type.pointee, ir.ArrayType):
 				#print(f"DEBUG FunctionCall: arg[{i}] is pointer to array type")
 				# Check if function parameter expects a pointer to the element type
-				if i < len(func.args):
-					param_type = func.args[i].type
+				if param_index < len(func.args):
+					param_type = func.args[param_index].type
 					array_element_type = arg_val.type.pointee.element
 					#print(f"DEBUG FunctionCall: param type: {param_type}, array element: {array_element_type}")
 					if isinstance(param_type, ir.PointerType) and param_type.pointee == array_element_type:
@@ -716,6 +830,28 @@ class MemberAccess(Expression):
 		
 		# Handle regular member access (obj.x where obj is an instance)
 		obj_val = self.object.codegen(builder, module)
+		print(f"DEBUG MemberAccess: obj_val.type = {obj_val.type}")
+		print(f"DEBUG MemberAccess: self.object = {self.object}")
+		print(f"DEBUG MemberAccess: self.member = {self.member}")
+		
+		# Special case: if this is accessing 'this' in a method, handle the double pointer issue
+		print(f"DEBUG MemberAccess: isinstance(self.object, Identifier) = {isinstance(self.object, Identifier)}")
+		print(f"DEBUG MemberAccess: self.object.name == 'this' = {self.object.name == 'this' if isinstance(self.object, Identifier) else 'N/A'}")
+		print(f"DEBUG MemberAccess: isinstance(obj_val.type, ir.PointerType) = {isinstance(obj_val.type, ir.PointerType)}")
+		if isinstance(obj_val.type, ir.PointerType):
+			print(f"DEBUG MemberAccess: obj_val.type.pointee = {obj_val.type.pointee}")
+			print(f"DEBUG MemberAccess: isinstance(obj_val.type.pointee, ir.PointerType) = {isinstance(obj_val.type.pointee, ir.PointerType)}")
+			if isinstance(obj_val.type.pointee, ir.PointerType):
+				print(f"DEBUG MemberAccess: obj_val.type.pointee.pointee = {obj_val.type.pointee.pointee}")
+				print(f"DEBUG MemberAccess: isinstance(obj_val.type.pointee.pointee, ir.LiteralStructType) = {isinstance(obj_val.type.pointee.pointee, ir.LiteralStructType)}")
+		if (isinstance(self.object, Identifier) and self.object.name == "this" and 
+			isinstance(obj_val.type, ir.PointerType) and 
+			isinstance(obj_val.type.pointee, ir.PointerType) and
+			isinstance(obj_val.type.pointee.pointee, ir.LiteralStructType)):
+			print(f"DEBUG MemberAccess: Detected double pointer 'this', loading actual pointer")
+			# Load the actual 'this' pointer from the alloca
+			obj_val = builder.load(obj_val, name="this_ptr")
+			print(f"DEBUG MemberAccess: After load, obj_val.type = {obj_val.type}")
 		
 		if isinstance(obj_val.type, ir.PointerType):
 			# Handle pointer to struct
@@ -733,6 +869,7 @@ class MemberAccess(Expression):
 				if not hasattr(struct_type, 'names'):
 					raise ValueError("Struct type missing member names")
 				
+				member_index = 0
 				try:
 					member_index = struct_type.names.index(self.member)
 				except ValueError:
@@ -740,8 +877,7 @@ class MemberAccess(Expression):
 				
 				member_ptr = builder.gep(
 					obj_val,
-					[ir.Constant(ir.IntType(32), 0)],
-					[ir.Constant(ir.IntType(32), member_index)],
+					[ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), member_index)],
 					inbounds=True
 				)
 				return builder.load(member_ptr)
@@ -865,26 +1001,81 @@ class AddressOf(Expression):
 	expression: Expression
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-		# Generate code for the target expression
-		target = self.expression.codegen(builder, module)
-		
-		# Special case: If the target is a variable declaration, we need to ensure it's allocated first
+		print(f"DEBUG AddressOf: Starting codegen for AddressOf of {self.expression}")
+		# Special case: Handle Identifier directly to avoid the codegen call that might fail
 		if isinstance(self.expression, Identifier):
 			var_name = self.expression.name
+			print(f"DEBUG AddressOf: Processing Identifier '{var_name}'")
 			
 			# Check if it's a local variable
 			if builder.scope is not None and var_name in builder.scope:
-				return builder.scope[var_name]
+				ptr = builder.scope[var_name]
+				print(f"DEBUG AddressOf: Found {var_name} in local scope, type: {ptr.type}")
+				# Special case: if this is a function parameter that's already a pointer type
+				# (like array parameters), return the loaded value directly
+				if (isinstance(ptr.type, ir.PointerType) and 
+					isinstance(ptr.type.pointee, ir.PointerType)):
+					print(f"DEBUG AddressOf: Double pointer detected, loading...")
+					# This is a pointer to a pointer (function parameter storage)
+					# Return the loaded pointer value, not the address of the storage
+					result = builder.load(ptr, name=f"{var_name}_ptr")
+					print(f"DEBUG AddressOf: Loaded result type: {result.type}")
+					return result
+				print(f"DEBUG AddressOf: Returning local pointer directly: {ptr.type}")
+				return ptr
 			
 			# Check if it's a global variable
 			if var_name in module.globals:
-				return module.globals[var_name]
+				gvar = module.globals[var_name]
+				print(f"DEBUG AddressOf: Found {var_name} in globals, type: {gvar.type}")
+				# For arrays (including string arrays like noopstr), return the global directly
+				# For other pointer types, check if it's a pointer to pointer
+				if (isinstance(gvar.type, ir.PointerType) and 
+					isinstance(gvar.type.pointee, ir.PointerType) and
+					not isinstance(gvar.type.pointee, ir.ArrayType)):
+					print(f"DEBUG AddressOf: Global double pointer (non-array) detected, loading...")
+					# This is a pointer to a pointer (non-array global variable storage of pointer type)
+					# Return the loaded pointer value, not the address of the storage
+					result = builder.load(gvar, name=f"{var_name}_ptr")
+					print(f"DEBUG AddressOf: Loaded global result type: {result.type}")
+					return result
+				print(f"DEBUG AddressOf: Returning global pointer directly: {gvar.type}")
+				return gvar
+			
+			# Check for namespace-qualified names using 'using' statements
+			if hasattr(module, '_using_namespaces'):
+				for namespace in module._using_namespaces:
+					# Convert namespace path to mangled name format
+					mangled_prefix = namespace.replace('::', '__') + '__'
+					mangled_name = mangled_prefix + var_name
+					
+					# Check in global variables with mangled name
+					if mangled_name in module.globals:
+						gvar = module.globals[mangled_name]
+						print(f"DEBUG AddressOf: Found {var_name} as {mangled_name}, type: {gvar.type}")
+						if isinstance(gvar.type, ir.PointerType):
+							print(f"DEBUG AddressOf: pointee type: {gvar.type.pointee}")
+							print(f"DEBUG AddressOf: is array type: {isinstance(gvar.type.pointee, ir.ArrayType)}")
+							# For arrays (including string arrays like noopstr), return the global directly
+							# For other pointer types, check if it's a pointer to pointer
+							if (isinstance(gvar.type.pointee, ir.PointerType) and not isinstance(gvar.type.pointee, ir.ArrayType)):
+								print(f"DEBUG AddressOf: Namespace global double pointer (non-array) detected, loading...")
+								# This is a pointer to a pointer (non-array global variable storage of pointer type)
+								# Return the loaded pointer value, not the address of the storage
+								result = builder.load(gvar, name=f"{var_name}_ptr")
+								print(f"DEBUG AddressOf: Loaded namespace global result type: {result.type}")
+								return result
+						print(f"DEBUG AddressOf: Returning namespace global directly: {gvar.type}")
+						return gvar
 			
 			# If we get here, the variable hasn't been declared yet
 			raise NameError(f"Unknown variable: {var_name}")
 		
+		# For non-Identifier expressions, generate code normally
+		target = self.expression.codegen(builder, module)
+		
 		# Handle member access
-		elif isinstance(self.expression, MemberAccess):
+		if isinstance(self.expression, MemberAccess):
 			obj = self.expression.object.codegen(builder, module)
 			member_name = self.expression.member
 			
@@ -1034,6 +1225,24 @@ class SizeOf(Expression):
 					elif isinstance(llvm_type, ir.ArrayType):
 						element_bits = llvm_type.element.width
 						return ir.Constant(ir.IntType(32), element_bits * llvm_type.count)
+					elif isinstance(llvm_type, ir.PointerType):
+						# For parameter that is a pointer (like i8* from unsized array parameter), 
+						# we can't determine the size at compile time, so return 0
+						# In a real implementation, this might require runtime size tracking
+						return ir.Constant(ir.IntType(32), 0)
+					elif isinstance(llvm_type, ir.LiteralStructType):
+						# Calculate struct size in bits by summing all member sizes
+						total_bits = 0
+						for element in llvm_type.elements:
+							if isinstance(element, ir.IntType):
+								total_bits += element.width
+							elif isinstance(element, ir.FloatType):
+								total_bits += 32  # Float is 32 bits
+							else:
+								# For other types, use data layout to get size in bytes, then convert to bits
+								bytes_size = module.data_layout.get_type_size(element)
+								total_bits += bytes_size * 8
+						return ir.Constant(ir.IntType(32), total_bits)
 					else:
 						raise ValueError(f"Unknown type in sizeof for identifier {self.target.name}: {llvm_type}")
 				
@@ -1048,6 +1257,9 @@ class SizeOf(Expression):
 					elif isinstance(llvm_type, ir.ArrayType):
 						element_bits = llvm_type.element.width
 						return ir.Constant(ir.IntType(32), element_bits * llvm_type.count)
+					elif isinstance(llvm_type, ir.PointerType):
+						# For pointer variables, return 0 (unknown size)
+						return ir.Constant(ir.IntType(32), 0)
 					else:
 						raise ValueError(f"Unknown type in sizeof for global {self.target.name}: {llvm_type}")
 		
@@ -1060,12 +1272,12 @@ class SizeOf(Expression):
 			if isinstance(val_type.pointee, ir.ArrayType):
 				arr_type = val_type.pointee
 				element_bits = arr_type.element.width
-				return ir.Constant(ir.IntType(64), element_bits * arr_type.count)
-			return ir.Constant(ir.IntType(64), 64)  # Pointer size
+				return ir.Constant(ir.IntType(32), element_bits * arr_type.count)
+			return ir.Constant(ir.IntType(32), 64)  # Pointer size
 		
 		# Direct types
 		if hasattr(val_type, 'width'):
-			return ir.Constant(ir.IntType(64), val_type.width)  # Already in bits
+			return ir.Constant(ir.IntType(32), val_type.width)  # Already in bits
 		raise ValueError(f"Cannot determine size of type: {val_type}")
 
 # Variable declarations
@@ -1076,18 +1288,86 @@ class VariableDeclaration(ASTNode):
 	initial_value: Optional[Expression] = None
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-		#print(f"DEBUG VariableDeclaration: name={self.name}, type_spec.base_type={self.type_spec.base_type}")
-		#print(f"DEBUG VariableDeclaration: module has _union_types: {hasattr(module, '_union_types')}")
-		#if hasattr(module, '_union_types'):
-			#print(f"DEBUG VariableDeclaration: _union_types keys: {list(module._union_types.keys())}")
-		llvm_type = self.type_spec.get_llvm_type_with_array(module)
+		print(f"DEBUG VariableDeclaration: name={self.name}, type_spec.base_type={self.type_spec.base_type}")
+		print(f"DEBUG VariableDeclaration: type_spec={self.type_spec}")
+		if hasattr(module, '_type_aliases'):
+			print(f"DEBUG VariableDeclaration: available type aliases: {list(module._type_aliases.keys())}")
+			for alias_name, alias_type in module._type_aliases.items():
+				print(f"DEBUG VariableDeclaration:   {alias_name} -> {alias_type}")
+		
+		# Check for automatic array size inference with string literals
+		# This handles both direct array types and type aliases that resolve to arrays
+		infer_array_size = False
+		resolved_type_spec = self.type_spec
+		
+		# Direct array type check
+		if (self.type_spec.is_array and self.type_spec.array_size is None and
+			self.initial_value and isinstance(self.initial_value, Literal) and
+			self.initial_value.type == DataType.CHAR):
+			infer_array_size = True
+		
+		# Type alias check - if base_type is a string, it might be a type alias
+		elif (isinstance(self.type_spec.base_type, str) and
+			self.initial_value and isinstance(self.initial_value, Literal) and
+			self.initial_value.type == DataType.CHAR):
+			# Check if the type alias resolves to an array type
+			if hasattr(module, '_type_aliases') and self.type_spec.base_type in module._type_aliases:
+				# Get the resolved LLVM type
+				resolved_llvm_type = module._type_aliases[self.type_spec.base_type]
+				# If it resolves to a pointer type (unsized array), we can infer the size
+				if isinstance(resolved_llvm_type, ir.PointerType) and isinstance(resolved_llvm_type.pointee, ir.IntType) and resolved_llvm_type.pointee.width == 8:
+					infer_array_size = True
+					# Create a proper array TypeSpec from the alias
+					resolved_type_spec = TypeSpec(
+						base_type=DataType.DATA,
+						is_signed=False,
+						is_const=self.type_spec.is_const,
+						is_volatile=self.type_spec.is_volatile,
+						bit_width=8,
+						alignment=self.type_spec.alignment,
+						is_array=True,
+						array_size=None,  # Will be inferred below
+						is_pointer=False
+					)
+		
+		if infer_array_size:
+			# Infer array size from string literal
+			string_length = len(self.initial_value.value)
+			# Create a new TypeSpec with the inferred size
+			inferred_type_spec = TypeSpec(
+				base_type=resolved_type_spec.base_type,
+				is_signed=resolved_type_spec.is_signed,
+				is_const=resolved_type_spec.is_const,
+				is_volatile=resolved_type_spec.is_volatile,
+				bit_width=resolved_type_spec.bit_width,
+				alignment=resolved_type_spec.alignment,
+				is_array=True,
+				array_size=string_length,  # Infer the size from string
+				is_pointer=resolved_type_spec.is_pointer
+			)
+			llvm_type = inferred_type_spec.get_llvm_type_with_array(module)
+		else:
+			llvm_type = self.type_spec.get_llvm_type_with_array(module)
 		#print(f"DEBUG VariableDeclaration: resolved llvm_type = {llvm_type}")
 		
 		# Handle global variables
 		if builder.scope is None:
-			# Check if global already exists
+			# Check if global already exists (handle both original name and potential namespaced names)
 			if self.name in module.globals:
 				return module.globals[self.name]
+			
+			# For namespaced variables, check if any existing global has the same effective name
+			# E.g., if we're defining 'standard__types__nl', check for any existing 'nl' variants
+			base_name = self.name.split('__')[-1]  # Extract the final name part (e.g., 'nl' from 'standard__types__nl')
+			for existing_name in list(module.globals.keys()):
+				existing_base_name = existing_name.split('__')[-1]
+				if existing_base_name == base_name and existing_name != self.name:
+					# Found a global with the same base name but different namespace
+					# Return the existing one to prevent duplicates
+					return module.globals[existing_name]
+				elif existing_name == self.name:
+					# Exact match - return existing
+					return module.globals[existing_name]
 				
 			# Create new global
 			gvar = ir.GlobalVariable(module, llvm_type, self.name)
@@ -1118,6 +1398,24 @@ class VariableDeclaration(ASTNode):
 					while len(char_values) < llvm_type.count:
 						char_values.append(ir.Constant(ir.IntType(8), 0))
 					gvar.initializer = ir.Constant(llvm_type, char_values)
+				# Handle string literals for pointer types (global variables)
+				elif isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8 and isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR:
+					# Create global string constant for pointer types
+					string_val = self.initial_value.value
+					string_bytes = string_val.encode('utf-8') + b'\0'  # Null-terminate
+					str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+					str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+					
+					# Create a separate global variable for the string data
+					str_gv = ir.GlobalVariable(module, str_val.type, name=f".str.{self.name}")
+					str_gv.linkage = 'internal'
+					str_gv.global_constant = True
+					str_gv.initializer = str_val
+					
+					# Get pointer to the first character of the string as the initializer
+					zero = ir.Constant(ir.IntType(32), 0)
+					str_ptr = str_gv.gep([zero, zero])
+					gvar.initializer = str_ptr
 				else:
 					init_val = self.initial_value.codegen(builder, module)
 					if init_val is not None:
@@ -1202,9 +1500,38 @@ class VariableDeclaration(ASTNode):
 				
 				# Call constructor with 'this' pointer (alloca) as first argument
 				args = [alloca]  # 'this' pointer
-				# Add any additional constructor arguments
-				for arg_expr in self.initial_value.arguments:
-					args.append(arg_expr.codegen(builder, module))
+				
+				# Process constructor arguments using the same logic as FunctionCall.codegen
+				# This ensures string literals are properly converted to global string constants
+				for i, arg_expr in enumerate(self.initial_value.arguments):
+					# Check if this is a string literal that needs conversion
+					param_index = i + 1  # +1 because args[0] is 'this' pointer
+					if (isinstance(arg_expr, Literal) and arg_expr.type == DataType.CHAR and
+						param_index < len(constructor_func.args) and
+						isinstance(constructor_func.args[param_index].type, ir.PointerType) and
+						isinstance(constructor_func.args[param_index].type.pointee, ir.IntType) and
+						constructor_func.args[param_index].type.pointee.width == 8):
+						# Convert string literal to global constant
+						string_val = arg_expr.value
+						string_bytes = string_val.encode('utf-8') + b'\0'  # Null-terminate
+						str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+						str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+						
+						# Create global variable for the string
+						gv = ir.GlobalVariable(module, str_val.type, name=f".str.ctor_{self.name}_arg{i}")
+						gv.linkage = 'internal'
+						gv.global_constant = True
+						gv.initializer = str_val
+						
+						# Get pointer to the first character of the string
+						zero = ir.Constant(ir.IntType(32), 0)
+						str_ptr = builder.gep(gv, [zero, zero], name=f"ctor_arg{i}_str_ptr")
+						arg_val = str_ptr
+					else:
+						# Normal argument processing
+						arg_val = arg_expr.codegen(builder, module)
+					
+					args.append(arg_val)
 				
 				# Call the constructor
 				init_val = builder.call(constructor_func, args)
@@ -1285,11 +1612,15 @@ class TypeDeclaration(Expression):
 		return f"TypeDeclaration({self.base_type} as {self.name}{init_str})"
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		print(f"DEBUG TypeDeclaration: Creating alias '{self.name}' for base_type '{self.base_type}'")
+		print(f"DEBUG TypeDeclaration: base_type={self.base_type}")
 		llvm_type = self.base_type.get_llvm_type_with_array(module)
+		print(f"DEBUG TypeDeclaration: resolved llvm_type={llvm_type}")
 		
 		if not hasattr(module, '_type_aliases'):
 			module._type_aliases = {}
 		module._type_aliases[self.name] = llvm_type
+		print(f"DEBUG TypeDeclaration: Added alias '{self.name}' -> {llvm_type}")
 		
 		if self.initial_value:
 			init_val = self.initial_value.codegen(builder, module)
@@ -1834,6 +2165,33 @@ class ReturnStatement(Statement):
 		# If types already match, no cast needed
 		if source_type == target_type:
 			return value
+		
+		# Handle string literal to pointer conversion
+		if (isinstance(source_type, ir.IntType) and source_type.width == 8 and 
+			isinstance(target_type, ir.PointerType) and isinstance(target_type.pointee, ir.IntType) and target_type.pointee.width == 8):
+			# Convert single character to string pointer
+			# Check if this is from an empty string literal by looking at the original expression
+			if (hasattr(self, 'value') and isinstance(self.value, Literal) and 
+				self.value.type == DataType.CHAR and self.value.value == ''):
+				# Create a global empty string constant
+				empty_str = "\0"  # Null terminated empty string
+				str_bytes = empty_str.encode('utf-8')
+				str_array_ty = ir.ArrayType(ir.IntType(8), len(str_bytes))
+				str_val = ir.Constant(str_array_ty, bytearray(str_bytes))
+				
+				# Get module reference - need to pass it properly
+				func = builder.block.function
+				module = func.module
+				
+				gv = ir.GlobalVariable(module, str_val.type, name=".str.empty")
+				gv.linkage = 'internal'
+				gv.global_constant = True
+				gv.initializer = str_val
+				
+				# Get pointer to the first character of the string
+				zero = ir.Constant(ir.IntType(32), 0)
+				str_ptr = builder.gep(gv, [zero, zero], name="empty_str_ptr")
+				return str_ptr
 		
 		# Handle integer type conversions
 		if isinstance(source_type, ir.IntType) and isinstance(target_type, ir.IntType):
@@ -2588,12 +2946,11 @@ class ObjectDef(ASTNode):
 			
 			# Generate method body
 			if isinstance(method, FunctionDef):
-				# For __init__, return 'this' pointer directly
-				if method.name == '__init':
+				# Generate normal body for all methods, including __init
+				method.body.codegen(method_builder, module)
+				# For __init__, add return 'this' pointer after body if not already terminated
+				if method.name == '__init' and not method_builder.block.is_terminated:
 					method_builder.ret(func.args[0])
-				else:
-					# For other methods, generate normal body
-					method.body.codegen(method_builder, module)
 			else:
 				method.body.codegen(method_builder, module)
 			
@@ -2614,31 +2971,8 @@ class ObjectDef(ASTNode):
 		return struct_type
 
 	def _convert_type(self, type_spec: TypeSpec, module: ir.Module) -> ir.Type:
-		if isinstance(type_spec.base_type, str):
-			# Check if it's a struct type
-			if hasattr(module, '_struct_types') and type_spec.base_type in module._struct_types:
-				return module._struct_types[type_spec.base_type]
-			# Check if it's a type alias
-			if hasattr(module, '_type_aliases') and type_spec.base_type in module._type_aliases:
-				return module._type_aliases[type_spec.base_type]
-			# Default to i32
-			return ir.IntType(32)
-		
-		# Handle primitive types
-		if type_spec.base_type == DataType.INT:
-			return ir.IntType(32)
-		elif type_spec.base_type == DataType.FLOAT:
-			return ir.FloatType()
-		elif type_spec.base_type == DataType.BOOL:
-			return ir.IntType(1)
-		elif type_spec.base_type == DataType.CHAR:
-			return ir.IntType(8)
-		elif type_spec.base_type == DataType.VOID:
-			return ir.VoidType()
-		elif type_spec.base_type == DataType.DATA:
-			return ir.IntType(type_spec.bit_width)
-		else:
-			raise ValueError(f"Unsupported type: {type_spec.base_type}")
+		# Use the comprehensive get_llvm_type_with_array method that handles all cases properly
+		return type_spec.get_llvm_type_with_array(module)
 
 # Namespace definition
 @dataclass
@@ -2663,6 +2997,22 @@ class NamespaceDef(ASTNode):
 			module._namespaces = set()
 		module._namespaces.add(self.name)
 		
+		# Also register nested namespaces with their full qualified names
+		for nested_ns in self.nested_namespaces:
+			full_nested_name = f"{self.name}::{nested_ns.name}"
+			module._namespaces.add(full_nested_name)
+			# Recursively register deeper nested namespaces
+			self._register_nested_namespaces(nested_ns, full_nested_name, module)
+		
+		# Enable type resolution within this namespace by adding it to _using_namespaces
+		if not hasattr(module, '_using_namespaces'):
+			module._using_namespaces = []
+		# Add the current namespace to the using list so types defined in this namespace
+		# can reference each other (like 'byte' can be found when defining 'noopstr')
+		old_using_namespaces = module._using_namespaces[:]
+		if self.name not in module._using_namespaces:
+			module._using_namespaces.append(self.name)
+		
 		# Save the current module state
 		old_module = module
 		
@@ -2670,46 +3020,57 @@ class NamespaceDef(ASTNode):
 		# Alternatively, we can just mangle names in the existing module
 		# For now, we'll use name mangling in the existing module
 		
-		# Process all namespace members with name mangling
-		for struct in self.structs:
-			# Mangle the struct name with namespace
-			original_name = struct.name
-			struct.name = f"{self.name}__{struct.name}"
-			struct.codegen(builder, module)
-			struct.name = original_name  # Restore original name
-		
-		for obj in self.objects:
-			# Mangle the object name with namespace
-			original_name = obj.name
-			obj.name = f"{self.name}__{obj.name}"
-			obj.codegen(builder, module)
-			obj.name = original_name
-		
-		for func in self.functions:
-			# Mangle the function name with namespace
-			original_name = func.name
-			func.name = f"{self.name}__{func.name}"
-			func.codegen(builder, module)
-			func.name = original_name
-		
-		for var in self.variables:
-			# Mangle the variable name with namespace
-			original_name = var.name
-			var.name = f"{self.name}__{var.name}"
-			var.codegen(builder, module)
-			var.name = original_name
-		
-		# Process nested namespaces
-		for nested_ns in self.nested_namespaces:
-			# Mangle the nested namespace name
-			original_name = nested_ns.name
-			nested_ns.name = f"{self.name}__{nested_ns.name}"
-			nested_ns.codegen(builder, module)
-			nested_ns.name = original_name
-		
-		# Handle inheritance here
+		try:
+			# Process all namespace members with name mangling
+			for struct in self.structs:
+				# Mangle the struct name with namespace
+				original_name = struct.name
+				struct.name = f"{self.name}__{struct.name}"
+				struct.codegen(builder, module)
+				struct.name = original_name  # Restore original name
+			
+			for obj in self.objects:
+				# Mangle the object name with namespace
+				original_name = obj.name
+				obj.name = f"{self.name}__{obj.name}"
+				obj.codegen(builder, module)
+				obj.name = original_name
+			
+			for func in self.functions:
+				# Mangle the function name with namespace
+				original_name = func.name
+				func.name = f"{self.name}__{func.name}"
+				func.codegen(builder, module)
+				func.name = original_name
+			
+			for var in self.variables:
+				# Mangle the variable name with namespace
+				original_name = var.name
+				var.name = f"{self.name}__{var.name}"
+				var.codegen(builder, module)
+				var.name = original_name
+			
+			# Process nested namespaces
+			for nested_ns in self.nested_namespaces:
+				# Mangle the nested namespace name
+				original_name = nested_ns.name
+				nested_ns.name = f"{self.name}__{nested_ns.name}"
+				nested_ns.codegen(builder, module)
+				nested_ns.name = original_name
+			
+			# Handle inheritance here
+		finally:
+			# Restore original using namespaces list to avoid namespace pollution
+			module._using_namespaces = old_using_namespaces
 		
 		return None
+	
+	def _register_nested_namespaces(self, namespace, parent_path, module):
+		"""Recursively register all nested namespaces with their full qualified names"""
+		for nested_ns in namespace.nested_namespaces:
+			full_nested_name = f"{parent_path}::{nested_ns.name}"
+			module._namespaces.add(full_nested_name)
+			self._register_nested_namespaces(nested_ns, full_nested_name, module)
 
 # Import statement
 @dataclass
@@ -2742,6 +3103,73 @@ class UsingStatement(Statement):
 		if not hasattr(module, '_using_namespaces'):
 			module._using_namespaces = []
 		module._using_namespaces.append(self.namespace_path)
+		
+		# Create unqualified aliases for symbols and generate code if needed
+		namespace_mangled = self.namespace_path.replace('::', '__')
+		
+		# Look for imported symbols that match this namespace and generate code if needed
+		if hasattr(module, '_imported_symbols'):
+			for import_path, statements in module._imported_symbols.items():
+				# Process statements from imported modules recursively
+				self._process_statements_for_namespace(statements, self.namespace_path, builder, module)
+	
+	def _process_statements_for_namespace(self, statements, target_namespace, builder, module):
+		"""Recursively process statements looking for matching namespace definitions"""
+		for stmt in statements:
+			# Look for NamespaceDefStatement that matches our target
+			if isinstance(stmt, NamespaceDefStatement):
+				# Get the mangled name (how it was stored during codegen)
+				mangled_name = stmt.namespace_def.name.replace('::', '__')
+				target_mangled = target_namespace.replace('::', '__')
+				
+				# Check if this namespace matches our target
+				if mangled_name == target_mangled or stmt.namespace_def.name == target_namespace:
+					# Generate code for this namespace now
+					stmt.namespace_def.codegen(builder, module)
+					break
+				# Check if this is a parent namespace that contains our target
+				elif target_namespace.startswith(stmt.namespace_def.name + '::'):
+					# This is a parent namespace, process its contents
+					self._process_namespace_contents(stmt.namespace_def, target_namespace, builder, module)
+			
+			# Look for nested namespace definitions within other statements
+			elif hasattr(stmt, 'namespace_def') and hasattr(stmt.namespace_def, 'nested_namespaces'):
+				# Recursively search nested namespaces
+				for nested_ns in stmt.namespace_def.nested_namespaces:
+					self._process_statements_for_namespace([NamespaceDefStatement(nested_ns)], target_namespace, builder, module)
+
+	def _process_namespace_contents(self, namespace_def, target_namespace, builder, module):
+		"""Process contents of a namespace looking for nested namespaces that match our target"""
+		# Look through nested namespaces
+		for nested_ns in namespace_def.nested_namespaces:
+			# Construct the full nested namespace path
+			full_nested_name = f"{namespace_def.name}::{nested_ns.name}"
+			if full_nested_name == target_namespace:
+				# Found the target namespace - generate its code
+				nested_ns.codegen(builder, module)
+				break
+			elif target_namespace.startswith(full_nested_name + '::'):
+				# This nested namespace is a parent of our target, recurse deeper
+				self._process_namespace_contents(nested_ns, target_namespace, builder, module)
+		
+		# Look for global variables with the mangled namespace prefix
+		for global_name in list(module.globals.keys()):
+			if global_name.startswith(namespace_mangled + '__'):
+				# Extract the unqualified name
+				unqualified_name = global_name[len(namespace_mangled) + 2:]  # +2 for the '__'
+				# Create an alias in globals
+				if unqualified_name not in module.globals:  # Don't override existing globals
+					module.globals[unqualified_name] = module.globals[global_name]
+		
+		# Look for type aliases with the mangled namespace prefix
+		if hasattr(module, '_type_aliases'):
+			for type_name in list(module._type_aliases.keys()):
+				if type_name.startswith(namespace_mangled + '__'):
+					# Extract the unqualified name
+					unqualified_name = type_name[len(namespace_mangled) + 2:]  # +2 for the '__'
+					# Create an alias in type_aliases
+					if unqualified_name not in module._type_aliases:  # Don't override existing types
+						module._type_aliases[unqualified_name] = module._type_aliases[type_name]
 
 @dataclass
 class ImportStatement(Statement):
@@ -2780,17 +3208,34 @@ class ImportStatement(Statement):
 			import_builder = ir.IRBuilder()
 			import_builder.scope = builder.scope  # Share the same scope
 			
-			# Generate code for each statement
+			# Process imports in the imported module
 			for stmt in imported_ast.statements:
 				if isinstance(stmt, ImportStatement):
 					stmt.codegen(import_builder, module)
-				else:
-					try:
-						stmt.codegen(import_builder, module)
-					except Exception as e:
-						raise RuntimeError(
-							f"Failed to generate code for {resolved_path}: {str(e)}"
-						) from e
+			
+			# Pre-register namespace definitions to make them available for using statements
+			# This registers namespace names without generating code yet
+			for stmt in imported_ast.statements:
+				if isinstance(stmt, NamespaceDefStatement):
+					# Register the namespace and its nested namespaces
+					if not hasattr(module, '_namespaces'):
+						module._namespaces = set()
+					module._namespaces.add(stmt.namespace_def.name)
+					
+					# Register nested namespaces with their full qualified names
+					for nested_ns in stmt.namespace_def.nested_namespaces:
+						full_nested_name = f"{stmt.namespace_def.name}::{nested_ns.name}"
+						module._namespaces.add(full_nested_name)
+						# Recursively register deeper nested namespaces
+						self._register_nested_namespaces_for_import(nested_ns, full_nested_name, module)
+			
+			# Store metadata about exported symbols but DON'T generate code yet
+			# This metadata will be used later by UsingStatement to create aliases
+			if not hasattr(module, '_imported_symbols'):
+				module._imported_symbols = {}
+			
+			# Store the AST for later code generation when used
+			module._imported_symbols[str(resolved_path)] = imported_ast.statements
 
 			# Store the processed module
 			self._processed_imports[str(resolved_path)] = module
