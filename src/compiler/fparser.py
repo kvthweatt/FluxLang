@@ -659,31 +659,6 @@ class FluxParser:
             return DataType.THIS
         elif self.expect(TokenType.OBJECT):
             self.error("Objects cannot be used as types in struct members. Objects are not valid member types.")
-        # Fixed-width integer types
-#        elif self.expect(TokenType.UINT8):
-#            self.advance()
-#            return DataType.UINT8
-#        elif self.expect(TokenType.UINT16):
-#            self.advance()
-#            return DataType.UINT16
-#        elif self.expect(TokenType.UINT32):
-#            self.advance()
-#            return DataType.UINT32
-#        elif self.expect(TokenType.UINT64):
-#            self.advance()
-#            return DataType.UINT64
-#        elif self.expect(TokenType.INT8):
-#            self.advance()
-#            return DataType.INT8
-#        elif self.expect(TokenType.INT16):
-#            self.advance()
-#            return DataType.INT16
-#        elif self.expect(TokenType.INT32):
-#            self.advance()
-#            return DataType.INT32
-#        elif self.expect(TokenType.INT64):
-#            self.advance()
-#            return DataType.INT64
         elif self.expect(TokenType.IDENTIFIER):
             # Custom type - return the actual name instead of DataType.DATA
             custom_type_name = self.current_token.value
@@ -707,9 +682,7 @@ class FluxParser:
             # Must have a base type
             if not self.expect(TokenType.INT, TokenType.FLOAT_KW, TokenType.CHAR, 
                              TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
-                             TokenType.IDENTIFIER):#, TokenType.UINT8, TokenType.UINT16,
-                             #TokenType.UINT32, TokenType.UINT64, TokenType.INT8,
-                             #TokenType.INT16, TokenType.INT32, TokenType.INT64):
+                             TokenType.IDENTIFIER):
                 return False
             
             self.advance()
@@ -1224,7 +1197,7 @@ class FluxParser:
     
     def assignment_expression(self) -> Expression:
         """
-        assignment_expression -> logical_or_expression ('=' assignment_expression)?
+        assignment_expression -> logical_or_expression (('=' | '+=' | '-=' | '*=' | '/=' | '%=') assignment_expression)?
         """
         expr = self.logical_or_expression()
         
@@ -1232,6 +1205,13 @@ class FluxParser:
             self.advance()
             value = self.assignment_expression()
             return Assignment(expr, value)
+        elif self.expect(TokenType.PLUS_ASSIGN, TokenType.MINUS_ASSIGN, TokenType.MULTIPLY_ASSIGN, 
+                         TokenType.DIVIDE_ASSIGN, TokenType.MODULO_ASSIGN):
+            # Handle compound assignments
+            op_token = self.current_token.type
+            self.advance()
+            value = self.assignment_expression()
+            return CompoundAssignment(expr, op_token, value)
         
         return expr
     
@@ -1531,6 +1511,50 @@ class FluxParser:
             args.append(self.expression())
         
         return args
+
+    def parse_f_string(self, f_string_content: str) -> FStringLiteral:
+        """Parse f-string into parts without evaluating anything"""
+        parts = []
+        i = 0
+        n = len(f_string_content)
+        
+        while i < n:
+            if f_string_content[i] == '{' and i + 1 < n and f_string_content[i + 1] == '{':
+                # Escaped {{
+                parts.append('{')
+                i += 2
+            elif f_string_content[i] == '}' and i + 1 < n and f_string_content[i + 1] == '}':
+                # Escaped }}
+                parts.append('}')
+                i += 2
+            elif f_string_content[i] == '{':
+                # Start of embedded expression - parse but don't evaluate
+                expr_start = i + 1
+                expr_end = f_string_content.find('}', expr_start)
+                if expr_end == -1:
+                    self.error("Unclosed expression in f-string")
+                
+                # Extract expression text
+                expr_text = f_string_content[expr_start:expr_end]
+                
+                # Parse the expression normally (but don't evaluate it)
+                from flexer import FluxLexer
+                lexer = FluxLexer(expr_text)
+                tokens = lexer.tokenize()
+                expr_parser = FluxParser(tokens)
+                expression = expr_parser.expression()
+                
+                parts.append(expression)
+                i = expr_end + 1
+            else:
+                # Regular character - accumulate into current string part
+                if not parts or not isinstance(parts[-1], str):
+                    parts.append(f_string_content[i])
+                else:
+                    parts[-1] += f_string_content[i]
+                i += 1
+        
+        return FStringLiteral(parts)
     
     def primary_expression(self) -> Expression:
         """
@@ -1577,6 +1601,10 @@ class FluxParser:
             value = self.current_token.value
             self.advance()
             return Literal(value, DataType.CHAR)
+        elif self.expect(TokenType.F_STRING):
+            f_string_content = self.current_token.value
+            self.advance()
+            return self.parse_f_string(f_string_content)
         elif self.expect(TokenType.TRUE):
             self.advance()
             return Literal(True, DataType.BOOL)

@@ -1,14 +1,11 @@
 unsigned data{8} as byte;
+signed data{16} as i16;
 byte[] as noopstr;
 
 noopstr nl = "\n";
 
 def print(unsigned data{8}* msg, int len) -> void
 {
-    byte* pmsg = msg;      // already a pointer
-
-    // AT&T inline assembly (volatile). Inputs: $0 == pmsg, $1 == len
-    // No C-Runtime/Clib ; Pure system calls.
     volatile asm
     {
         // HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE = -11)
@@ -26,7 +23,7 @@ def print(unsigned data{8}* msg, int len) -> void
         movq %r9, 32(%rsp)      // *(rsp+32) = lpOverlapped = NULL
         call WriteFile
         addq $$40, %rsp
-    } : : "r"(pmsg), "r"(len) : "rax","rcx","rdx","r8","r9","r10","r11","memory";
+    } : : "r"(msg), "r"(len) : "rax","rcx","rdx","r8","r9","r10","r11","memory";
     return void;
 };
 
@@ -35,17 +32,31 @@ def pnl() -> void
     print(@nl, 1);
 };
 
+
+struct A
+{
+    byte[] a, b, c, d;
+};
+
+struct B
+{
+    i16 a, b;
+};
+
+
+unsigned data{32} as u32;
+signed data{32} as i32;
+
+
 def main() -> int
 {
-    noopstr a = "Start ...";
-    int l1 = sizeof(a) / 8;
+    int x = 5;
 
-    noopstr b = "End.";
-    int l2 = sizeof(b) / 8;
-    
-    print(@a, l1);
+    noopstr y = f"Testing {x + x}";
+    int len = sizeof(y) / 8;
+
+    print(@x, len);
     pnl();
-    print(@b, l2);
 
     return 0;
 };

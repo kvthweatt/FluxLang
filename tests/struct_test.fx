@@ -35,7 +35,7 @@ def pnl() -> void
 
 struct A
 {
-    byte a, b, c, d;
+    byte[] a, b, c, d;
 };
 
 struct B
@@ -50,16 +50,29 @@ signed data{32} as i32;
 
 def main() -> int
 {
-    A str = {a = "F", b = "l", c = "u", d = "x"};
-    B b = str as B;        // works
-    //i32 b = str as i32;    // should work but fails
+    A ax = {a = "F", b = "l", c = "u", d = "x"};
 
-    noopstr s = (noopstr)b;
+    B bx = ax as B;
 
-    //noopstr s = (noopstr)str;
-    int len = sizeof(str) / 8;
+    int x = 5;
 
-    print(@s, len);
+    noopstr x = f"Testing{x}";
+
+    //B b = str as B;        // works
+                                                                             //i32 b = str as i32;    // should work but fails
+
+    noopstr s = (noopstr)ax;
+
+                                                                        //noopstr s = (noopstr)str;
+    int len = sizeof(x) / 8;
+
+// we should be able to do x + y   or   x + "!" because it should just put 
+
+    noopstr y = "!";
+
+    print(@x, len);
+    print(@y, 1);
+
     pnl();
 
     return 0;

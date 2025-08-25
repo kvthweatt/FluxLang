@@ -371,6 +371,61 @@ class QualifiedName(Expression):
 			return f"{qual_str}.{self.member}"
 		return qual_str
 
+# Helper utilities for array operations
+def is_array_or_array_pointer(val: ir.Value) -> bool:
+	"""Check if value is an array type or a pointer to an array type"""
+	return (isinstance(val.type, ir.ArrayType) or 
+			(isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType)))
+
+def is_array_pointer(val: ir.Value) -> bool:
+	"""Check if value is a pointer to an array type"""
+	return (isinstance(val.type, ir.PointerType) and 
+			isinstance(val.type.pointee, ir.ArrayType))
+
+def get_array_info(val: ir.Value) -> tuple:
+	"""Get (element_type, length) for array or array pointer"""
+	if isinstance(val.type, ir.ArrayType):
+		# Direct array type (loaded from a pointer)
+		return (val.type.element, val.type.count)
+	elif isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType):
+		# Pointer to array type
+		array_type = val.type.pointee
+		return (array_type.element, array_type.count)
+	else:
+		raise ValueError(f"Value is not an array or array pointer: {val.type}")
+
+def emit_memcpy(builder: ir.IRBuilder, module: ir.Module, dst_ptr: ir.Value, src_ptr: ir.Value, bytes: int) -> None:
+	"""Emit llvm.memcpy intrinsic call"""
+	# Declare llvm.memcpy.p0i8.p0i8.i64 if not already declared
+	memcpy_name = "llvm.memcpy.p0i8.p0i8.i64"
+	if memcpy_name not in module.globals:
+		memcpy_type = ir.FunctionType(
+			ir.VoidType(),
+			[ir.PointerType(ir.IntType(8)),  # dst
+			 ir.PointerType(ir.IntType(8)),  # src
+			 ir.IntType(64),                 # len
+			 ir.IntType(1)]                  # volatile
+		)
+		memcpy_func = ir.Function(module, memcpy_type, name=memcpy_name)
+		memcpy_func.attributes.add('nounwind')
+	else:
+		memcpy_func = module.globals[memcpy_name]
+	
+	# Cast pointers to i8* if needed
+	i8_ptr = ir.PointerType(ir.IntType(8))
+	if dst_ptr.type != i8_ptr:
+		dst_ptr = builder.bitcast(dst_ptr, i8_ptr)
+	if src_ptr.type != i8_ptr:
+		src_ptr = builder.bitcast(src_ptr, i8_ptr)
+	
+	# Call memcpy
+	builder.call(memcpy_func, [
+		dst_ptr,
+		src_ptr,
+		ir.Constant(ir.IntType(64), bytes),
+		ir.Constant(ir.IntType(1), 0)  # not volatile
+	])
+
 @dataclass
 class BinaryOp(Expression):
 	left: Expression
@@ -381,6 +436,37 @@ class BinaryOp(Expression):
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
 		left_val = self.left.codegen(builder, module)
 		right_val = self.right.codegen(builder, module)
+		
+		# Handle array concatenation (ADD) and subtraction (SUB)
+		if (self.operator in (Operator.ADD, Operator.SUB) and 
+			is_array_or_array_pointer(left_val) and is_array_or_array_pointer(right_val)):
+			
+			# Get array information
+			left_elem_type, left_len = get_array_info(left_val)
+			right_elem_type, right_len = get_array_info(right_val)
+			
+			# Type compatibility check
+			if left_elem_type != right_elem_type:
+				raise ValueError(f"Cannot {self.operator.value} arrays with different element types: {left_elem_type} vs {right_elem_type}")
+			
+			# Calculate result length
+			if self.operator == Operator.ADD:
+				result_len = left_len + right_len
+			else:  # SUB
+				result_len = max(left_len - right_len, 0)
+			
+			# Create result array type
+			result_array_type = ir.ArrayType(left_elem_type, result_len)
+			
+			# Check if both operands are global constants for compile-time concatenation
+			if (isinstance(left_val, ir.GlobalVariable) and 
+				isinstance(right_val, ir.GlobalVariable) and 
+				left_val.global_constant and right_val.global_constant):
+				# Compile-time concatenation of global constants
+				return self._create_global_array_concat(module, left_val, right_val, result_array_type, self.operator)
+			else:
+				# Runtime concatenation
+				return self._create_runtime_array_concat(builder, module, left_val, right_val, result_array_type, self.operator)
 		
 		# Ensure types match by casting if necessary
 		if left_val.type != right_val.type:
@@ -453,6 +539,74 @@ class BinaryOp(Expression):
 			return builder.xor(left_val, right_val)
 		else:
 			raise ValueError(f"Unsupported operator: {self.operator}")
+	
+	def _create_global_array_concat(self, module: ir.Module, left_val: ir.Value, right_val: ir.Value, result_array_type: ir.ArrayType, operator: Operator) -> ir.Value:
+		"""Create compile-time array concatenation for global constants"""
+		# Get the initializers from both global constants
+		left_init = left_val.initializer
+		right_init = right_val.initializer
+		
+		# Extract array elements
+		left_elements = list(left_init.constant)
+		right_elements = list(right_init.constant) if operator == Operator.ADD else []
+		
+		# Create new array with concatenated elements
+		if operator == Operator.ADD:
+			new_elements = left_elements + right_elements
+		else:  # SUB
+			left_len = len(left_elements)
+			right_len = len(right_elements)
+			new_len = max(left_len - right_len, 0)
+			new_elements = left_elements[:new_len]
+		
+		# Create global constant
+		global_name = f".array_concat_{id(self)}"
+		global_array = ir.GlobalVariable(module, result_array_type, name=global_name)
+		global_array.linkage = 'internal'
+		global_array.global_constant = True
+		global_array.initializer = ir.Constant(result_array_type, new_elements)
+		
+		return global_array
+	
+	def _create_runtime_array_concat(self, builder: ir.IRBuilder, module: ir.Module, left_val: ir.Value, right_val: ir.Value, result_array_type: ir.ArrayType, operator: Operator) -> ir.Value:
+		"""Create runtime array concatenation using memcpy"""
+		# Allocate new array for result
+		result_ptr = builder.alloca(result_array_type, name="array_concat_result")
+		
+		# Get array info
+		left_elem_type, left_len = get_array_info(left_val)
+		right_elem_type, right_len = get_array_info(right_val)
+		
+		# Calculate element size in bytes
+		elem_size_bytes = left_elem_type.width // 8
+		
+		# Copy left array to result
+		if left_len > 0:
+			# Get pointer to first element of result array
+			zero = ir.Constant(ir.IntType(32), 0)
+			result_start = builder.gep(result_ptr, [zero, zero], name="result_start")
+			
+			# Get pointer to source array start
+			left_start = builder.gep(left_val, [zero, zero], name="left_start")
+			
+			# Copy left array
+			left_bytes = left_len * elem_size_bytes
+			emit_memcpy(builder, module, result_start, left_start, left_bytes)
+		
+		# Copy right array to result (for ADD operation)
+		if operator == Operator.ADD and right_len > 0:
+			# Get pointer to position after left array in result
+			left_len_const = ir.Constant(ir.IntType(32), left_len)
+			result_right_start = builder.gep(result_ptr, [zero, left_len_const], name="result_right_start")
+			
+			# Get pointer to source array start
+			right_start = builder.gep(right_val, [zero, zero], name="right_start")
+			
+			# Copy right array
+			right_bytes = right_len * elem_size_bytes
+			emit_memcpy(builder, module, result_right_start, right_start, right_bytes)
+		
+		return result_ptr
 
 @dataclass
 class UnaryOp(Expression):
@@ -479,8 +633,15 @@ class UnaryOp(Expression):
 			return builder.neg(operand_val)
 		elif self.operator == Operator.INCREMENT:
 			# Handle both prefix and postfix increment
-			one = ir.Constant(operand_val.type, 1)
-			new_val = builder.add(operand_val, one)
+			if isinstance(operand_val.type, ir.PointerType):
+				# Pointer arithmetic: use GEP to increment by one element
+				one = ir.Constant(ir.IntType(32), 1)
+				new_val = builder.gep(operand_val, [one], name="ptr_inc")
+			else:
+				# Regular integer increment
+				one = ir.Constant(operand_val.type, 1)
+				new_val = builder.add(operand_val, one)
+			
 			if isinstance(self.operand, Identifier):
 				# Retrieve the variable's pointer from the current scope and store the updated value
 				ptr = builder.scope[self.operand.name]
@@ -490,8 +651,15 @@ class UnaryOp(Expression):
 			return new_val if not self.is_postfix else operand_val
 		elif self.operator == Operator.DECREMENT:
 			# Handle both prefix and postfix decrement
-			one = ir.Constant(operand_val.type, 1)
-			new_val = builder.sub(operand_val, one)
+			if isinstance(operand_val.type, ir.PointerType):
+				# Pointer arithmetic: use GEP to decrement by one element
+				neg_one = ir.Constant(ir.IntType(32), -1)
+				new_val = builder.gep(operand_val, [neg_one], name="ptr_dec")
+			else:
+				# Regular integer decrement
+				one = ir.Constant(operand_val.type, 1)
+				new_val = builder.sub(operand_val, one)
+			
 			if isinstance(self.operand, Identifier):
 				# Retrieve the variable's pointer from the current scope and store the updated value
 				ptr = builder.scope[self.operand.name]
@@ -714,6 +882,77 @@ class ArrayComprehension(Expression):
 		
 		# Return the array pointer
 		return array_ptr
+
+@dataclass
+class FStringLiteral(Expression):
+    """Represents an f-string - parsing only, evaluation happens at codegen"""
+    parts: List[Union[str, Expression]]
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Parser's job is done - now codegen handles the actual work
+        # Calculate total size (known strings + estimates for expressions)
+        total_size = 0
+        for part in self.parts:
+            if isinstance(part, str):
+                print(len(part))
+                total_size += len(part)
+            else:
+                total_size += 12  # Conservative estimate for expressions
+        
+        # Allocate buffer
+        buffer_type = ir.ArrayType(ir.IntType(8), total_size)
+        buffer_ptr = builder.alloca(buffer_type, name="fstring_buffer")
+        
+        # Build the string at runtime
+        current_pos = 0
+        print("PARTS: ", self.parts)
+        ## HACK FIX FOR FSTRING - MUST REDO CORRECTLY - REMOVE ASAP
+
+        ## END HACK FIX
+        for part in self.parts:
+            if isinstance(part, str):
+                current_pos = self._copy_string(builder, buffer_ptr, current_pos, part)
+            else:
+                current_pos = self._append_expression(builder, module, buffer_ptr, current_pos, part)
+        
+        return buffer_ptr
+    
+    def _copy_string(self, builder: ir.IRBuilder, buffer_ptr: ir.Value, 
+                   start_pos: int, string: str) -> int:
+        """Copy string literal to buffer"""
+        for i, char in enumerate(string):
+            char_ptr = builder.gep(
+                buffer_ptr,
+                [ir.Constant(ir.IntType(8), 0),
+                 ir.Constant(ir.IntType(8), start_pos + i)],
+                inbounds=True
+            )
+            builder.store(ir.Constant(ir.IntType(8), ord(char)), char_ptr)
+        return start_pos + len(string)
+    
+    def _append_expression(self, builder: ir.IRBuilder, module: ir.Module,
+                         buffer_ptr: ir.Value, start_pos: int, expr: Expression) -> int:
+        """Evaluate expression and convert to string - happens at runtime"""
+        # This is where the actual evaluation occurs, during codegen
+        value = expr.codegen(builder, module)
+        
+        # Convert value to string using runtime functions
+        # (This would call itoa, ftoa, etc. based on type)
+        # Placeholder implementation:
+        if isinstance(value.type, ir.IntType):
+            # For now, just store placeholder
+            temp_str = "123"
+            for i, char in enumerate(temp_str):
+                char_ptr = builder.gep(
+                    buffer_ptr,
+                    [ir.Constant(ir.IntType(8), 0),
+                     ir.Constant(ir.IntType(8), start_pos + i)],
+                    inbounds=True
+                )
+                builder.store(ir.Constant(ir.IntType(8), ord(char)), char_ptr)
+            return start_pos + len(temp_str)
+        
+        return start_pos
 
 @dataclass
 class FunctionCall(Expression):
@@ -1541,6 +1780,31 @@ class VariableDeclaration(ASTNode):
 				# Regular initialization for non-string literals
 				init_val = self.initial_value.codegen(builder, module)
 				if init_val is not None:
+					# Special case: Handle single byte to string conversion
+					if (isinstance(init_val.type, ir.IntType) and init_val.type.width == 8 and
+						isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and
+						llvm_type.pointee.width == 8):
+						# Create a single-character string from the byte
+						# This handles cases like: noopstr x = s[1];
+						char_array = ir.ArrayType(ir.IntType(8), 2)  # [i8 x 2] for char + null terminator
+						temp_alloca = builder.alloca(char_array, name=f"{self.name}_temp_str")
+						
+						# Store the character at index 0
+						zero = ir.Constant(ir.IntType(32), 0)
+						char_ptr = builder.gep(temp_alloca, [zero, zero], name="char_pos")
+						builder.store(init_val, char_ptr)
+						
+						# Store null terminator at index 1
+						one = ir.Constant(ir.IntType(32), 1)
+						null_ptr = builder.gep(temp_alloca, [zero, one], name="null_pos")
+						null_char = ir.Constant(ir.IntType(8), 0)
+						builder.store(null_char, null_ptr)
+						
+						# Get pointer to the first character (this is our string)
+						string_ptr = builder.gep(temp_alloca, [zero, zero], name=f"{self.name}_str_ptr")
+						builder.store(string_ptr, alloca)
+						return alloca
+					
 					# Cast init value to match variable type if needed
 					if init_val.type != llvm_type:
 						# Handle pointer type compatibility (for AddressOf expressions)
@@ -1688,6 +1952,40 @@ class Assignment(Statement):
 			else:
 				raise NameError(f"Unknown variable: {self.target.name}")
 			
+			# Check if this is an array concatenation assignment that requires resizing
+			if (isinstance(self.value, BinaryOp) and self.value.operator == Operator.ADD and
+				isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType)):
+				# This is the result of array concatenation - update variable to point to new array
+				if builder.scope is not None and self.target.name in builder.scope:
+					# For local variables, update the scope to point to the new array
+					builder.scope[self.target.name] = val
+					return val
+				else:
+					# For global variables, we can't easily resize, so convert to element pointer
+					zero = ir.Constant(ir.IntType(32), 0)
+					array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
+					builder.store(array_ptr, ptr)
+					return array_ptr
+			
+			# Handle type compatibility for assignments
+			if val.type != ptr.type.pointee:
+				# Handle array pointer assignments - for arrays, just store the pointer directly
+				if (isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType) and
+					isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.PointerType)):
+					# This is assigning an array to a pointer type (like noopstr)
+					# Get pointer to first element of array
+					zero = ir.Constant(ir.IntType(32), 0)
+					array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
+					builder.store(array_ptr, ptr)
+					return array_ptr
+				# Handle other type mismatches as needed
+				elif isinstance(val.type, ir.IntType) and isinstance(ptr.type.pointee, ir.IntType):
+					if val.type.width != ptr.type.pointee.width:
+						if val.type.width < ptr.type.pointee.width:
+							val = builder.sext(val, ptr.type.pointee)
+						else:
+							val = builder.trunc(val, ptr.type.pointee)
+			
 			st = builder.store(val, ptr)
 			st.volatile = True
 			return val
@@ -1770,6 +2068,168 @@ class Assignment(Statement):
 		else:
 			raise ValueError(f"Cannot assign to {type(self.target).__name__}")
 
+@dataclass
+class CompoundAssignment(Statement):
+	target: Expression
+	op_token: Any  # TokenType enum for the compound operator  
+	value: Expression
+
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		"""Generate code for compound assignments like +=, -=, *=, /=, %="""
+		from flexer import TokenType
+		
+		# Map compound assignment tokens to binary operators
+		op_map = {
+			TokenType.PLUS_ASSIGN: Operator.ADD,
+			TokenType.MINUS_ASSIGN: Operator.SUB,
+			TokenType.MULTIPLY_ASSIGN: Operator.MUL,
+			TokenType.DIVIDE_ASSIGN: Operator.DIV,
+			TokenType.MODULO_ASSIGN: Operator.MOD,
+		}
+		
+		if self.op_token not in op_map:
+			raise ValueError(f"Unsupported compound assignment operator: {self.op_token}")
+		
+		binary_op = op_map[self.op_token]
+		
+		# For compound assignment like s += q, this is equivalent to s = s + q
+		# But we need to handle array concatenation specially to support dynamic resizing
+		
+		# Check if this is array concatenation (ADD operation with array operands)
+		if binary_op == Operator.ADD and isinstance(self.target, Identifier):
+			# Get the target variable
+			if builder.scope is not None and self.target.name in builder.scope:
+				target_ptr = builder.scope[self.target.name]
+			elif self.target.name in module.globals:
+				target_ptr = module.globals[self.target.name]
+			else:
+				raise NameError(f"Unknown variable: {self.target.name}")
+			
+			# Load the current value of the target
+			target_val = self.target.codegen(builder, module)
+			right_val = self.value.codegen(builder, module)
+			
+			# Check if both operands are arrays or array pointers
+			if (is_array_or_array_pointer(target_val) and is_array_or_array_pointer(right_val)):
+				# This is array concatenation - create the binary operation
+				binary_expr = BinaryOp(self.target, binary_op, self.value)
+				concat_result = binary_expr.codegen(builder, module)
+				
+				# For array concatenation, we need to resize the variable to accommodate the new array
+				# This is similar to dynamic reallocation - create new storage and update the variable
+				if isinstance(concat_result.type, ir.PointerType) and isinstance(concat_result.type.pointee, ir.ArrayType):
+					# The concatenated result is a new array with the proper size
+					# Update the variable to point to this new array
+					if builder.scope is not None and self.target.name in builder.scope:
+						# For local variables, update the scope to point to the new array
+						builder.scope[self.target.name] = concat_result
+						return concat_result
+					else:
+						# For global variables, we can't easily resize, so convert to element pointer
+						zero = ir.Constant(ir.IntType(32), 0)
+						array_ptr = builder.gep(concat_result, [zero, zero], name="array_to_ptr")
+						builder.store(array_ptr, target_ptr)
+						return array_ptr
+				else:
+					# Direct storage for other pointer types
+					builder.store(concat_result, target_ptr)
+					return concat_result
+		
+		# For non-array operations, fall back to the simple approach
+		binary_expr = BinaryOp(self.target, binary_op, self.value)
+		assignment = Assignment(self.target, binary_expr)
+		return assignment.codegen(builder, module)
+	
+		"""Dynamically resize arrays to accommodate new values during assignment"""
+		# Get array information
+		val_elem_type, val_len = get_array_info(val)
+		ptr_elem_type, ptr_len = get_array_info(ptr)
+		
+		# If the new array is larger, we need to reallocate
+		if val_len > ptr_len:
+			# Create new array type with the larger size
+			new_array_type = ir.ArrayType(val_elem_type, val_len)
+			
+			# Allocate new storage for the resized array
+			new_alloca = builder.alloca(new_array_type, name=f"{var_name}_resized" if var_name else "array_resized")
+			
+			# Copy existing data from old array to new array (first ptr_len elements)
+			if ptr_len > 0:
+				elem_size_bytes = ptr_elem_type.width // 8
+				old_bytes = ptr_len * elem_size_bytes
+				
+				# Get pointer to start of old array
+				zero = ir.Constant(ir.IntType(32), 0)
+				old_start = builder.gep(ptr, [zero, zero], name="old_start")
+				
+				# Get pointer to start of new array
+				new_start = builder.gep(new_alloca, [zero, zero], name="new_start")
+				
+				# Copy old data
+				emit_memcpy(builder, module, new_start, old_start, old_bytes)
+			
+			# Copy new data to the new array (overwriting all elements)
+			new_bytes = val_len * (val_elem_type.width // 8)
+			zero = ir.Constant(ir.IntType(32), 0)
+			new_start = builder.gep(new_alloca, [zero, zero], name="new_start")
+			val_start = builder.gep(val, [zero, zero], name="val_start")
+			emit_memcpy(builder, module, new_start, val_start, new_bytes)
+			
+			# Update the original variable to point to the new array
+			if var_name and builder.scope and var_name in builder.scope:
+				builder.scope[var_name] = new_alloca
+			
+			return new_alloca
+		else:
+			# If new array is smaller or same size, just copy the data
+			copy_len = min(val_len, ptr_len)
+			copy_bytes = copy_len * (val_elem_type.width // 8)
+			
+			zero = ir.Constant(ir.IntType(32), 0)
+			ptr_start = builder.gep(ptr, [zero, zero], name="ptr_start")
+			val_start = builder.gep(val, [zero, zero], name="val_start")
+			
+			# Copy the data
+			emit_memcpy(builder, module, ptr_start, val_start, copy_bytes)
+			
+			# If the new array is smaller, zero out the remaining elements
+			if val_len < ptr_len:
+				remaining_bytes = (ptr_len - val_len) * (ptr_elem_type.width // 8)
+				if remaining_bytes > 0:
+					# Get pointer to remaining area
+					val_len_const = ir.Constant(ir.IntType(32), val_len)
+					remaining_start = builder.gep(ptr, [zero, val_len_const], name="remaining_start")
+					
+					# Declare memset if not already declared
+					memset_name = "llvm.memset.p0i8.i64"
+					if memset_name not in module.globals:
+						memset_type = ir.FunctionType(
+							ir.VoidType(),
+							[ir.PointerType(ir.IntType(8)),  # dst
+							 ir.IntType(8),                  # val
+							 ir.IntType(64),                 # len
+							 ir.IntType(1)]                  # volatile
+						)
+						memset_func = ir.Function(module, memset_type, name=memset_name)
+						memset_func.attributes.add('nounwind')
+					else:
+						memset_func = module.globals[memset_name]
+					
+					# Cast to i8* if needed
+					i8_ptr = ir.PointerType(ir.IntType(8))
+					if remaining_start.type != i8_ptr:
+						remaining_start = builder.bitcast(remaining_start, i8_ptr)
+					
+					# Zero out remaining bytes
+					builder.call(memset_func, [
+						remaining_start,
+						ir.Constant(ir.IntType(8), 0),  # zero
+						ir.Constant(ir.IntType(64), remaining_bytes),
+						ir.Constant(ir.IntType(1), 0)  # not volatile
+					])
+			
+			return ptr
+	
 	def _handle_union_member_assignment(self, builder: ir.IRBuilder, module: ir.Module, union_ptr: ir.Value, union_name: str, member_name: str, val: ir.Value) -> ir.Value:
 		"""Handle union member assignment by casting the union to the appropriate member type"""
 		# Get union member information
