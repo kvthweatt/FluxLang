@@ -1101,7 +1101,7 @@ class FStringLiteral(Expression):
             full_string += clean_part
         
         # Create string literal similar to how regular string literals are handled
-        string_bytes = full_string.encode('utf-8') + b'\0'  # Null-terminate
+        string_bytes = full_string.encode('ascii')
         str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
         str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
         
@@ -1464,7 +1464,7 @@ class FunctionCall(Expression):
 				# This is a string literal being passed to a function expecting i8*
 				# Create a global string constant and return pointer to it
 				string_val = arg.value
-				string_bytes = string_val.encode('utf-8') + b'\0'  # Null-terminate
+				string_bytes = string_val.encode('ascii')
 				str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
 				str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
 				
@@ -2047,7 +2047,7 @@ class TypeOf(Expression):
 		# Get type name
 		type_name = str(llvm_type)
 		name_constant = ir.Constant(ir.ArrayType(ir.IntType(8), len(type_name)),
-							 bytearray(type_name.encode('utf-8')))
+							 bytearray(type_name.encode('ascii')))
 		
 		# Create struct constant
 		return ir.Constant(ir.LiteralStructType([
@@ -2313,7 +2313,7 @@ class VariableDeclaration(ASTNode):
 				elif isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8 and isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR:
 					# Create global string constant for pointer types
 					string_val = self.initial_value.value
-					string_bytes = string_val.encode('utf-8') + b'\0'  # Null-terminate
+					string_bytes = string_val.encode('ascii')
 					str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
 					str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
 					
@@ -2360,7 +2360,7 @@ class VariableDeclaration(ASTNode):
 				if isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8:
 					# Handle string literal initialization for local pointer types (like noopstr)
 					string_val = self.initial_value.value
-					string_bytes = string_val.encode('utf-8') + b'\0'  # Null-terminate
+					string_bytes = string_val.encode('ascii')
 					str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
 					str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
 					
@@ -2422,7 +2422,7 @@ class VariableDeclaration(ASTNode):
 						constructor_func.args[param_index].type.pointee.width == 8):
 						# Convert string literal to global constant
 						string_val = arg_expr.value
-						string_bytes = string_val.encode('utf-8') + b'\0'  # Null-terminate
+						string_bytes = string_val.encode('ascii')
 						str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
 						str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
 						
@@ -3352,7 +3352,7 @@ class ReturnStatement(Statement):
 				self.value.type == DataType.CHAR and self.value.value == ''):
 				# Create a global empty string constant
 				empty_str = "\0"  # Null terminated empty string
-				str_bytes = empty_str.encode('utf-8')
+				str_bytes = empty_str.encode('ascii')
 				str_array_ty = ir.ArrayType(ir.IntType(8), len(str_bytes))
 				str_val = ir.Constant(str_array_ty, bytearray(str_bytes))
 				
@@ -3694,7 +3694,7 @@ class AssertStatement(Statement):
 		if self.message:
 			# Create message string constant
 			msg_str = self.message + '\n'
-			msg_bytes = msg_str.encode('utf-8')
+			msg_bytes = msg_str.encode('ascii')
 			msg_type = ir.ArrayType(ir.IntType(8), len(msg_bytes))
 			msg_const = ir.Constant(msg_type, bytearray(msg_bytes))
 			
@@ -4561,7 +4561,7 @@ class ImportStatement(Statement):
 		self._processed_imports[str(resolved_path)] = None
 
 		try:
-			with open(resolved_path, 'r', encoding='utf-8') as f:
+			with open(resolved_path, 'r', encoding='ascii') as f:
 				source = f.read()
 
 			# Create fresh parser/lexer instances
