@@ -711,8 +711,15 @@ class FluxParser:
             if self.expect(TokenType.MULTIPLY):
                 self.advance()
             
-            # Must have identifier or 'as' keyword
-            return self.expect(TokenType.IDENTIFIER, TokenType.AS)
+            # Check for 'as' followed by void - this is a void cast, not a type declaration
+            if self.expect(TokenType.AS):
+                self.advance()
+                if self.expect(TokenType.VOID):
+                    return False  # This is "x as void" - a void cast expression, not a type declaration
+                return self.expect(TokenType.IDENTIFIER)  # Type declaration like "int as myint"
+            
+            # Must have identifier for regular variable declaration
+            return self.expect(TokenType.IDENTIFIER)
         finally:
             self.position = saved_pos
             self.current_token = self.tokens[self.position] if self.position < len(self.tokens) else None
@@ -1110,18 +1117,24 @@ class FluxParser:
             self.advance()
             self.consume(TokenType.LEFT_PAREN)
             
-            # Exception type and name
-            if self.expect(TokenType.AUTO):
+            # Handle empty catch blocks (catch-all)
+            if self.expect(TokenType.RIGHT_PAREN):
                 self.advance()
-                exception_type = None
-                exception_name = self.consume(TokenType.IDENTIFIER).value
+                catch_body = self.block()
+                catch_blocks.append((None, None, catch_body))
             else:
-                exception_type = self.type_spec()
-                exception_name = self.consume(TokenType.IDENTIFIER).value
-            
-            self.consume(TokenType.RIGHT_PAREN)
-            catch_body = self.block()
-            catch_blocks.append((exception_type, exception_name, catch_body))
+                # Exception type and name
+                if self.expect(TokenType.AUTO):
+                    self.advance()
+                    exception_type = None
+                    exception_name = self.consume(TokenType.IDENTIFIER).value
+                else:
+                    exception_type = self.type_spec()
+                    exception_name = self.consume(TokenType.IDENTIFIER).value
+                
+                self.consume(TokenType.RIGHT_PAREN)
+                catch_body = self.block()
+                catch_blocks.append((exception_type, exception_name, catch_body))
         
         self.consume(TokenType.SEMICOLON)
         return TryBlock(try_body, catch_blocks)
@@ -1491,7 +1504,7 @@ class FluxParser:
                 self.advance()
                 expr = UnaryOp(Operator.DECREMENT, expr, is_postfix=True)
             elif self.expect(TokenType.AS):
-                # AS cast expression (postfix)
+                # AS cast expression (postfix) - support all type casts
                 self.advance()
                 target_type = self.type_spec()
                 expr = CastExpression(target_type, expr)

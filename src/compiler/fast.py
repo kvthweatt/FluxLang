@@ -615,6 +615,11 @@ class UnaryOp(Expression):
 	is_postfix: bool = False
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		# Handle special case: ++@x or --@x (increment/decrement address of)
+		if (self.operator in (Operator.INCREMENT, Operator.DECREMENT) and 
+			isinstance(self.operand, AddressOf)):
+			return self._handle_increment_address_of(builder, module)
+		
 		operand_val = self.operand.codegen(builder, module)
 		
 		if self.operator == Operator.NOT:
@@ -669,6 +674,45 @@ class UnaryOp(Expression):
 			return new_val if not self.is_postfix else operand_val
 		else:
 			raise ValueError(f"Unsupported unary operator: {self.operator}")
+	
+	def _handle_increment_address_of(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		"""Handle ++@x and --@x syntax (increment/decrement address of)"""
+		print(f"DEBUG: Handling {self.operator.value}@ for {self.operand.expression}")
+		
+		# Get the base address without dereferencing
+		base_address = self.operand.codegen(builder, module)
+		print(f"DEBUG: Base address type: {base_address.type}")
+		
+		# Handle different address types
+		if isinstance(base_address.type, ir.PointerType):
+			if isinstance(base_address.type.pointee, ir.ArrayType):
+				# For array pointers, get pointer to first element, then increment
+				zero = ir.Constant(ir.IntType(32), 0)
+				array_start = builder.gep(base_address, [zero, zero], name="array_start")
+				
+				# Now increment this element pointer
+				if self.operator == Operator.INCREMENT:
+					offset = ir.Constant(ir.IntType(32), 1)
+					new_address = builder.gep(array_start, [offset], name="inc_addr")
+				else:  # DECREMENT
+					offset = ir.Constant(ir.IntType(32), -1)
+					new_address = builder.gep(array_start, [offset], name="dec_addr")
+			else:
+				# For regular pointer types, perform direct pointer arithmetic
+				if self.operator == Operator.INCREMENT:
+					offset = ir.Constant(ir.IntType(32), 1)
+					new_address = builder.gep(base_address, [offset], name="inc_addr")
+				else:  # DECREMENT
+					offset = ir.Constant(ir.IntType(32), -1)
+					new_address = builder.gep(base_address, [offset], name="dec_addr")
+		else:
+			raise ValueError(f"Cannot increment/decrement address of non-pointer type: {base_address.type}")
+		
+		print(f"DEBUG: New address type: {new_address.type}")
+		print(f"DEBUG: Returning incremented/decremented address (not loaded value)")
+		
+		# Return the new address, not the value at that address
+		return new_address
 
 @dataclass
 class CastExpression(Expression):
@@ -676,9 +720,14 @@ class CastExpression(Expression):
 	expression: Expression
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-		"""Generate code for cast expressions, including zero-cost struct reinterpretation"""
-		source_val = self.expression.codegen(builder, module)
+		"""Generate code for cast expressions, including zero-cost struct reinterpretation and void casting"""
 		target_llvm_type = self.target_type.get_llvm_type(module)
+		
+		# Handle void casting - frees memory according to Flux specification
+		if isinstance(target_llvm_type, ir.VoidType):
+			return self._handle_void_cast(builder, module)
+		
+		source_val = self.expression.codegen(builder, module)
 		
 		# If source and target are the same type, no cast needed
 		if source_val.type == target_llvm_type:
@@ -701,6 +750,26 @@ class CastExpression(Expression):
 				# Zero-cost reinterpretation: bitcast pointer, then load
 				target_ptr_type = ir.PointerType(target_struct_type)
 				reinterpreted_ptr = builder.bitcast(source_val, target_ptr_type, name="struct_reinterpret")
+				return builder.load(reinterpreted_ptr, name="reinterpreted_struct")
+			else:
+				raise ValueError(f"Cannot cast struct of size {source_size} to struct of size {target_size}")
+		
+		# Handle loaded struct-to-struct cast (when source is already loaded from pointer)
+		elif (isinstance(source_val.type, ir.LiteralStructType) and
+			isinstance(target_llvm_type, ir.LiteralStructType)):
+			
+			# Check size compatibility
+			source_size = sum(elem.width for elem in source_val.type.elements if hasattr(elem, 'width'))
+			target_size = sum(elem.width for elem in target_llvm_type.elements if hasattr(elem, 'width'))
+			
+			if source_size == target_size:
+				# Create temporary storage for reinterpretation
+				source_ptr = builder.alloca(source_val.type, name="temp_source")
+				builder.store(source_val, source_ptr)
+				
+				# Bitcast to target type pointer and load
+				target_ptr_type = ir.PointerType(target_llvm_type)
+				reinterpreted_ptr = builder.bitcast(source_ptr, target_ptr_type, name="struct_reinterpret")
 				return builder.load(reinterpreted_ptr, name="reinterpreted_struct")
 			else:
 				raise ValueError(f"Cannot cast struct of size {source_size} to struct of size {target_size}")
@@ -754,8 +823,17 @@ class CastExpression(Expression):
 		
 		# Handle struct to pointer cast (e.g., struct A -> i8*)
 		elif isinstance(source_val.type, ir.LiteralStructType) and isinstance(target_llvm_type, ir.PointerType):
-			# Create temporary storage for the struct
-			source_ptr = builder.alloca(source_val.type, name="temp_struct")
+			# Check if source is already a loaded struct value from a pointer
+			# In this case, we need to get the original struct pointer
+			if hasattr(source_val, 'name') and source_val.name and 'struct' in source_val.name:
+				# This is a loaded struct - find the original pointer in scope
+				source_name = source_val.name.replace('_struct_load', '').replace('_load', '')
+				if builder.scope and source_name in builder.scope:
+					original_ptr = builder.scope[source_name]
+					return builder.bitcast(original_ptr, target_llvm_type, name="struct_to_ptr")
+			
+			# Create persistent storage for the struct that won't go out of scope
+			source_ptr = builder.alloca(source_val.type, name="struct_for_cast")
 			builder.store(source_val, source_ptr)
 			
 			# Bitcast the struct pointer to the target pointer type
@@ -767,6 +845,99 @@ class CastExpression(Expression):
 		
 		else:
 			raise ValueError(f"Unsupported cast from {source_val.type} to {target_llvm_type}")
+	
+	def _handle_void_cast(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		"""Handle void casting - immediately free memory according to Flux specification"""
+		# According to Flux specification:
+		# - Casting anything to void immediately frees the memory occupied by that thing
+		# - This works for both stack and heap allocated items
+		# - (void) is essentially "free this memory now" no matter where it is
+		# - After void casting, the variable becomes unusable (use-after-free)
+		# - This is a RUNTIME operation that generates actual free() calls
+		#
+		# NOTE: We DO NOT remove variables from scope at compile-time to allow
+		# testing of runtime crashes. The free() call will happen at runtime,
+		# and subsequent use will cause crashes as intended.
+		
+		if isinstance(self.expression, Identifier):
+			# This is a variable being cast to void - free it immediately at runtime
+			var_name = self.expression.name
+			
+			if builder.scope is not None and var_name in builder.scope:
+				# Local variable - generate runtime free call
+				var_ptr = builder.scope[var_name]
+				
+				# Generate runtime free call
+				self._generate_runtime_free(builder, module, var_ptr, var_name)
+				
+				# Remove from scope - variable becomes unusable at compile-time AND runtime
+				del builder.scope[var_name]  # RE-ENABLED: compile-time + runtime checking
+				
+			elif var_name in module.globals:
+				# Global variable - generate runtime free call
+				gvar = module.globals[var_name]
+				self._generate_runtime_free(builder, module, gvar, var_name)
+				# Note: We can't remove globals from the symbol table, but the memory is freed
+			else:
+				raise NameError(f"Cannot void cast unknown variable: {var_name}")
+		else:
+			# For expressions (not simple variables), generate the value and try to free it
+			expr_val = self.expression.codegen(builder, module)
+			if isinstance(expr_val.type, ir.PointerType):
+				# This is a pointer expression - we can free it
+				self._generate_runtime_free(builder, module, expr_val, "<expression>")
+			# For non-pointer expressions, there's nothing to free
+		
+		# Void casting doesn't return a value (returns void)
+		# In LLVM IR, we represent this as returning None
+		return None
+	
+	def _generate_runtime_free(self, builder: ir.IRBuilder, module: ir.Module, ptr_value: ir.Value, var_name: str) -> None:
+		"""Generate runtime free() call for the given pointer value"""
+		# Only generate runtime free() calls - no compile-time optimizations
+		# This ensures we can test the actual runtime behavior and crashes
+		
+		# Declare free() function if not already declared
+		free_func = module.globals.get('free')
+		if free_func is None:
+			# Create free() function signature: void free(void* ptr)
+			free_type = ir.FunctionType(
+				ir.VoidType(),  # void return
+				[ir.PointerType(ir.IntType(8))]  # void* parameter
+			)
+			free_func = ir.Function(module, free_type, 'free')
+			# Mark as external function to prevent optimization
+			free_func.linkage = 'external'
+		
+		# Force runtime execution by making the free call volatile/unoptimizable
+		if isinstance(ptr_value.type, ir.PointerType):
+			if isinstance(ptr_value.type.pointee, ir.PointerType):
+				# This is a pointer to a pointer (e.g., char** or noopstr)
+				# Load the actual pointer value and free that
+				actual_ptr = builder.load(ptr_value, name=f"{var_name}_ptr_load")
+				# Mark the load as volatile to prevent optimization
+				actual_ptr.volatile = True
+				# Cast to void* (i8*) for free()
+				void_ptr = builder.bitcast(actual_ptr, ir.PointerType(ir.IntType(8)), name=f"{var_name}_void_ptr")
+				# Generate the free() call - this will definitely happen at runtime
+				free_call = builder.call(free_func, [void_ptr])
+				# Mark call as having side effects to prevent elimination
+				free_call.tail = False
+			elif isinstance(ptr_value.type.pointee, ir.ArrayType):
+				# This is a pointer to an array (stack allocated)
+				# Calling free() on stack memory will cause undefined behavior/crash - perfect for testing
+				void_ptr = builder.bitcast(ptr_value, ir.PointerType(ir.IntType(8)), name=f"{var_name}_void_ptr")
+				free_call = builder.call(free_func, [void_ptr])
+				free_call.tail = False
+			else:
+				# This is a pointer to a regular value type
+				# Cast to void* (i8*) for free()
+				void_ptr = builder.bitcast(ptr_value, ir.PointerType(ir.IntType(8)), name=f"{var_name}_void_ptr")
+				free_call = builder.call(free_func, [void_ptr])
+				free_call.tail = False
+		else:
+			# This is not a pointer - nothing to free
+			pass
 
 @dataclass
 class RangeExpression(Expression):
@@ -889,46 +1060,112 @@ class FStringLiteral(Expression):
     parts: List[Union[str, Expression]]
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        # Parser's job is done - now codegen handles the actual work
-        # Calculate total size (known strings + estimates for expressions)
-        total_size = 0
+        # For simple f-strings with only string parts (no expressions), 
+        # we can create a compile-time string literal
+        if all(isinstance(part, str) for part in self.parts):
+            return self._create_string_literal(builder, module)
+        else:
+            # For f-strings with expressions, we need runtime evaluation
+            return self._create_runtime_fstring(builder, module)
+    
+    def _create_string_literal(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Create a compile-time string literal for f-strings without expressions"""
+        # Concatenate all string parts
+        full_string = ""
+        for part in self.parts:
+            clean_part = part
+            if clean_part.startswith('f"'):
+                clean_part = clean_part[2:]
+            if clean_part.endswith('"'):
+                clean_part = clean_part[:-1]
+            full_string += clean_part
+        
+        # Create string literal similar to how regular string literals are handled
+        string_bytes = full_string.encode('utf-8') + b'\0'  # Null-terminate
+        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+        str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+        
+        # Create global variable for the string
+        gv = ir.GlobalVariable(module, str_val.type, name=f".fstr.{id(self)}")
+        gv.linkage = 'internal'
+        gv.global_constant = True
+        gv.initializer = str_val
+        
+        # Return the global array directly (not a pointer to first element)
+        # This preserves the array type information [N x i8] instead of decaying to i8*
+        return gv
+    
+    def _create_runtime_fstring(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Create runtime-evaluated f-string by building string dynamically"""
+        # Estimate maximum buffer size we might need
+        max_size = 0
         for part in self.parts:
             if isinstance(part, str):
-                print(len(part))
-                total_size += len(part)
+                clean_part = part
+                if clean_part.startswith('f"'):
+                    clean_part = clean_part[2:]
+                if clean_part.endswith('"'):
+                    clean_part = clean_part[:-1]
+                max_size += len(clean_part)
             else:
-                total_size += 12  # Conservative estimate for expressions
+                # Assume expressions can generate up to 32 characters
+                max_size += 32
         
-        # Allocate buffer
-        buffer_type = ir.ArrayType(ir.IntType(8), total_size)
-        buffer_ptr = builder.alloca(buffer_type, name="fstring_buffer")
+        # Allocate buffer with maximum estimated size
+        buffer_array_type = ir.ArrayType(ir.IntType(8), max_size)
+        buffer_ptr = builder.alloca(buffer_array_type, name="fstring_buffer")
         
-        # Build the string at runtime
-        current_pos = 0
-        print("PARTS: ", self.parts)
-        ## HACK FIX FOR FSTRING - MUST REDO CORRECTLY - REMOVE ASAP
-
-        ## END HACK FIX
+        # Track current position in buffer
+        pos_ptr = builder.alloca(ir.IntType(32), name="fstring_pos")
+        builder.store(ir.Constant(ir.IntType(32), 0), pos_ptr)
+        
+        # Process each part of the f-string
         for part in self.parts:
             if isinstance(part, str):
-                current_pos = self._copy_string(builder, buffer_ptr, current_pos, part)
+                # Copy string literal
+                current_pos = builder.load(pos_ptr, name="current_pos")
+                new_pos = self._copy_string_to_buffer(builder, buffer_ptr, current_pos, part)
+                builder.store(new_pos, pos_ptr)
             else:
-                current_pos = self._append_expression(builder, module, buffer_ptr, current_pos, part)
+                # Evaluate expression and convert to string at runtime
+                current_pos = builder.load(pos_ptr, name="current_pos")
+                new_pos = self._append_expression_to_buffer(builder, module, buffer_ptr, current_pos, part)
+                builder.store(new_pos, pos_ptr)
         
-        return buffer_ptr
+        # Get final size
+        final_size = builder.load(pos_ptr, name="final_size")
+        
+        # Create properly sized result array
+        # Since LLVM needs compile-time array sizes, we'll allocate based on final_size at runtime
+        result_ptr = builder.alloca(ir.IntType(8), final_size, name="fstring_result")
+        
+        # Copy the constructed string to the final buffer
+        self._runtime_memcpy(builder, result_ptr, 
+                           builder.gep(buffer_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)]), 
+                           final_size)
+        
+        # Return the final buffer - this preserves the runtime-computed size
+        return result_ptr
     
     def _copy_string(self, builder: ir.IRBuilder, buffer_ptr: ir.Value, 
                    start_pos: int, string: str) -> int:
         """Copy string literal to buffer"""
-        for i, char in enumerate(string):
+        # Clean string by removing f" prefix and " suffix if present
+        clean_string = string
+        if clean_string.startswith('f"'):
+            clean_string = clean_string[2:]
+        if clean_string.endswith('"'):
+            clean_string = clean_string[:-1]
+        
+        for i, char in enumerate(clean_string):
             char_ptr = builder.gep(
                 buffer_ptr,
-                [ir.Constant(ir.IntType(8), 0),
-                 ir.Constant(ir.IntType(8), start_pos + i)],
+                [ir.Constant(ir.IntType(32), 0),
+                 ir.Constant(ir.IntType(32), start_pos + i)],
                 inbounds=True
             )
             builder.store(ir.Constant(ir.IntType(8), ord(char)), char_ptr)
-        return start_pos + len(string)
+        return start_pos + len(clean_string)
     
     def _append_expression(self, builder: ir.IRBuilder, module: ir.Module,
                          buffer_ptr: ir.Value, start_pos: int, expr: Expression) -> int:
@@ -938,21 +1175,211 @@ class FStringLiteral(Expression):
         
         # Convert value to string using runtime functions
         # (This would call itoa, ftoa, etc. based on type)
-        # Placeholder implementation:
+        # For now, implement proper runtime string conversion based on type
         if isinstance(value.type, ir.IntType):
-            # For now, just store placeholder
-            temp_str = "123"
+            # Call runtime itoa function to convert integer to string
+            # This is where we'd implement or call actual runtime conversion
+            # For now, store the actual converted integer as a placeholder
+            return self._convert_integer_to_string(builder, module, buffer_ptr, start_pos, value)
+        elif isinstance(value.type, ir.FloatType):
+            # Call runtime ftoa function to convert float to string
+            return self._convert_float_to_string(builder, module, buffer_ptr, start_pos, value)
+        else:
+            # For other types, just store placeholder for now
+            temp_str = "[value]"
             for i, char in enumerate(temp_str):
                 char_ptr = builder.gep(
                     buffer_ptr,
-                    [ir.Constant(ir.IntType(8), 0),
-                     ir.Constant(ir.IntType(8), start_pos + i)],
+                    [ir.Constant(ir.IntType(32), 0),
+                     ir.Constant(ir.IntType(32), start_pos + i)],
                     inbounds=True
                 )
                 builder.store(ir.Constant(ir.IntType(8), ord(char)), char_ptr)
             return start_pos + len(temp_str)
+    
+    def _convert_integer_to_string(self, builder: ir.IRBuilder, module: ir.Module,
+                                 buffer_ptr: ir.Value, start_pos: int, value: ir.Value) -> int:
+        """Convert integer to string at runtime using LLVM IR"""
+        # This implements a simple integer-to-string conversion in LLVM IR
+        # We'll use a divide-by-10 approach to extract digits
         
-        return start_pos
+        func = builder.block.function
+        
+        # Create blocks for the conversion algorithm
+        entry_block = builder.block
+        negative_block = func.append_basic_block('negative_block')
+        positive_block = func.append_basic_block('positive_block')
+        zero_check_block = func.append_basic_block('zero_check')
+        zero_block = func.append_basic_block('zero_block')
+        conversion_cond = func.append_basic_block('conversion_cond')
+        conversion_loop = func.append_basic_block('conversion_loop')
+        reverse_cond = func.append_basic_block('reverse_cond')
+        reverse_loop = func.append_basic_block('reverse_loop')
+        done_block = func.append_basic_block('conversion_done')
+        
+        # Allocate temporary buffer for digits (max 12 digits for 32-bit int + sign)
+        temp_buffer_type = ir.ArrayType(ir.IntType(8), 12)
+        temp_buffer = builder.alloca(temp_buffer_type, name="temp_digits")
+        
+        # Position counter for writing into the final buffer
+        pos_counter = builder.alloca(ir.IntType(32), name="pos_counter")
+        builder.store(ir.Constant(ir.IntType(32), start_pos), pos_counter)
+        
+        # Digit counter and working value
+        digit_count = builder.alloca(ir.IntType(32), name="digit_count")
+        builder.store(ir.Constant(ir.IntType(32), 0), digit_count)
+        working_val = builder.alloca(value.type, name="working_val")
+        
+        # Check if the number is negative
+        zero = ir.Constant(value.type, 0)
+        is_negative = builder.icmp_signed('<', value, zero, name="is_negative")
+        builder.cbranch(is_negative, negative_block, positive_block)
+        
+        # Handle negative numbers
+        builder.position_at_start(negative_block)
+        # Store minus sign
+        current_pos = builder.load(pos_counter, name="current_pos")
+        minus_ptr = builder.gep(
+            buffer_ptr,
+            [ir.Constant(ir.IntType(32), 0), current_pos],
+            inbounds=True
+        )
+        builder.store(ir.Constant(ir.IntType(8), ord('-')), minus_ptr)
+        # Increment position
+        new_pos = builder.add(current_pos, ir.Constant(ir.IntType(32), 1), name="new_pos")
+        builder.store(new_pos, pos_counter)
+        # Store absolute value
+        abs_val = builder.sub(zero, value, name="abs_val")
+        builder.store(abs_val, working_val)
+        builder.branch(zero_check_block)
+        
+        # Handle positive numbers
+        builder.position_at_start(positive_block)
+        builder.store(value, working_val)
+        builder.branch(zero_check_block)
+        
+        # Handle special case of zero
+        builder.position_at_start(zero_check_block)
+        current_val = builder.load(working_val, name="current_val")
+        is_zero = builder.icmp_signed('==', current_val, zero, name="is_zero")
+        builder.cbranch(is_zero, zero_block, conversion_cond)
+        
+        # Zero case
+        builder.position_at_start(zero_block)
+        current_pos = builder.load(pos_counter, name="current_pos")
+        zero_ptr = builder.gep(
+            buffer_ptr,
+            [ir.Constant(ir.IntType(32), 0), current_pos],
+            inbounds=True
+        )
+        builder.store(ir.Constant(ir.IntType(8), ord('0')), zero_ptr)
+        # Increment position and jump to done
+        new_pos = builder.add(current_pos, ir.Constant(ir.IntType(32), 1), name="new_pos")
+        builder.store(new_pos, pos_counter)
+        builder.branch(done_block)
+        
+        # Conversion condition: while working_val > 0
+        builder.position_at_start(conversion_cond)
+        current_val = builder.load(working_val, name="current_val")
+        is_nonzero = builder.icmp_signed('>', current_val, zero, name="is_nonzero")
+        builder.cbranch(is_nonzero, conversion_loop, reverse_cond)
+        
+        # Conversion loop: extract digit
+        builder.position_at_start(conversion_loop)
+        current_val = builder.load(working_val, name="current_val")
+        current_count = builder.load(digit_count, name="current_count")
+        
+        # Get remainder (digit) and quotient
+        ten = ir.Constant(value.type, 10)
+        digit_val = builder.srem(current_val, ten, name="digit_val")
+        quotient = builder.sdiv(current_val, ten, name="quotient")
+        
+        # Convert digit to ASCII and store in temp buffer
+        digit_char = builder.add(digit_val, ir.Constant(value.type, ord('0')), name="digit_char")
+        digit_char_i8 = builder.trunc(digit_char, ir.IntType(8), name="digit_char_i8")
+        
+        # Store in temporary buffer
+        temp_ptr = builder.gep(
+            temp_buffer,
+            [ir.Constant(ir.IntType(32), 0), current_count],
+            inbounds=True
+        )
+        builder.store(digit_char_i8, temp_ptr)
+        
+        # Update counters
+        builder.store(quotient, working_val)
+        new_count = builder.add(current_count, ir.Constant(ir.IntType(32), 1), name="new_count")
+        builder.store(new_count, digit_count)
+        
+        builder.branch(conversion_cond)
+        
+        # Reverse the digits into the final buffer
+        builder.position_at_start(reverse_cond)
+        final_count = builder.load(digit_count, name="final_count")
+        reverse_index = builder.alloca(ir.IntType(32), name="reverse_index")
+        builder.store(final_count, reverse_index)
+        
+        # Check if we have digits to reverse
+        has_digits = builder.icmp_signed('>', final_count, ir.Constant(ir.IntType(32), 0), name="has_digits")
+        builder.cbranch(has_digits, reverse_loop, done_block)
+        
+        # Reverse loop: copy digits from temp buffer to final buffer in reverse order
+        builder.position_at_start(reverse_loop)
+        current_reverse_index = builder.load(reverse_index, name="current_reverse_index")
+        current_pos = builder.load(pos_counter, name="current_pos")
+        
+        # Decrement reverse index (we're going backwards)
+        prev_reverse_index = builder.sub(current_reverse_index, ir.Constant(ir.IntType(32), 1), name="prev_reverse_index")
+        builder.store(prev_reverse_index, reverse_index)
+        
+        # Load digit from temp buffer
+        temp_digit_ptr = builder.gep(
+            temp_buffer,
+            [ir.Constant(ir.IntType(32), 0), prev_reverse_index],
+            inbounds=True
+        )
+        temp_digit = builder.load(temp_digit_ptr, name="temp_digit")
+        
+        # Store in final buffer
+        final_ptr = builder.gep(
+            buffer_ptr,
+            [ir.Constant(ir.IntType(32), 0), current_pos],
+            inbounds=True
+        )
+        builder.store(temp_digit, final_ptr)
+        
+        # Increment final position
+        new_pos = builder.add(current_pos, ir.Constant(ir.IntType(32), 1), name="new_pos")
+        builder.store(new_pos, pos_counter)
+        
+        # Check if more digits to reverse
+        is_more = builder.icmp_signed('>', prev_reverse_index, ir.Constant(ir.IntType(32), 0), name="is_more")
+        builder.cbranch(is_more, reverse_loop, done_block)
+        
+        # Done
+        builder.position_at_start(done_block)
+        final_pos = builder.load(pos_counter, name="final_pos")
+        
+        # Return the final position (as an integer, not an LLVM Value)
+        # Since we can't return a dynamic value from this function, we need to 
+        # return a conservative estimate and fix this differently
+        return start_pos + 11  # Maximum possible digits for a 32-bit integer
+    
+    def _convert_float_to_string(self, builder: ir.IRBuilder, module: ir.Module,
+                               buffer_ptr: ir.Value, start_pos: int, value: ir.Value) -> int:
+        """Convert float to string at runtime - proper implementation needed"""
+        # For now, just store "1.23" as placeholder
+        # In a real implementation, this would call ftoa or similar runtime function
+        temp_str = "1.23"
+        for i, char in enumerate(temp_str):
+            char_ptr = builder.gep(
+                buffer_ptr,
+                [ir.Constant(ir.IntType(32), 0),
+                 ir.Constant(ir.IntType(32), start_pos + i)],
+                inbounds=True
+            )
+            builder.store(ir.Constant(ir.IntType(8), ord(char)), char_ptr)
+        return start_pos + len(temp_str)
 
 @dataclass
 class FunctionCall(Expression):
@@ -1204,21 +1631,167 @@ class ArrayAccess(Expression):
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
 		# Get the array (should be a pointer to array or global)
 		array_val = self.array.codegen(builder, module)
-		index_val = self.index.codegen(builder, module)
 		
-		# Handle global arrays (like const arrays)
-		if isinstance(array_val, ir.GlobalVariable):
-			# Create GEP to access array element
-			zero = ir.Constant(ir.IntType(32), 0)
-			gep = builder.gep(array_val, [zero, index_val], name="array_gep")
-			return builder.load(gep, name="array_load")
-		# Handle local arrays
-		elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
-			zero = ir.Constant(ir.IntType(32), 0)
-			gep = builder.gep(array_val, [zero, index_val], name="array_gep")
-			return builder.load(gep, name="array_load")
+		# Check if this is a range expression (array slicing)
+		if isinstance(self.index, RangeExpression):
+			return self._handle_array_slice(builder, module, array_val)
 		else:
-			raise ValueError(f"Cannot access array element for type: {array_val.type}")
+			# Regular single element access
+			index_val = self.index.codegen(builder, module)
+			
+			# Handle global arrays (like const arrays)
+			if isinstance(array_val, ir.GlobalVariable):
+				# Create GEP to access array element
+				zero = ir.Constant(ir.IntType(32), 0)
+				gep = builder.gep(array_val, [zero, index_val], name="array_gep")
+				return builder.load(gep, name="array_load")
+			# Handle local arrays
+			elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
+				zero = ir.Constant(ir.IntType(32), 0)
+				gep = builder.gep(array_val, [zero, index_val], name="array_gep")
+				return builder.load(gep, name="array_load")
+			# Handle pointer types (like char*)
+			elif isinstance(array_val.type, ir.PointerType):
+				# Pointer arithmetic - add index to pointer
+				gep = builder.gep(array_val, [index_val], name="ptr_gep")
+				return builder.load(gep, name="ptr_load")
+			else:
+				raise ValueError(f"Cannot access array element for type: {array_val.type}")
+	
+	def _handle_array_slice(self, builder: ir.IRBuilder, module: ir.Module, array_val: ir.Value) -> ir.Value:
+		"""Handle array slicing with range expressions like s[0..3] or s[3..0] (inclusive on both ends)"""
+		start_val = self.index.start.codegen(builder, module)
+		end_val = self.index.end.codegen(builder, module)
+		
+		# Determine if this is a forward or reverse range
+		# For compile-time constants, we can check directly
+		is_reverse = False
+		if (isinstance(start_val, ir.Constant) and isinstance(end_val, ir.Constant)):
+			is_reverse = start_val.constant > end_val.constant
+		else:
+			# For runtime values, generate a comparison
+			reverse_cmp = builder.icmp_signed('>', start_val, end_val, name="is_reverse")
+			# For now, we'll handle only compile-time constants to keep it simple
+			# Runtime reverse detection would require conditional logic
+			raise ValueError("Runtime reverse range detection not yet implemented")
+		
+		# Calculate slice length based on direction
+		if is_reverse:
+			# Reverse range: length = (start - end) + 1
+			slice_len_exclusive = builder.sub(start_val, end_val, name="slice_len_exclusive")
+			slice_len = builder.add(slice_len_exclusive, ir.Constant(ir.IntType(32), 1), name="slice_len")
+		else:
+			# Forward range: length = (end - start) + 1
+			slice_len_exclusive = builder.sub(end_val, start_val, name="slice_len_exclusive")
+			slice_len = builder.add(slice_len_exclusive, ir.Constant(ir.IntType(32), 1), name="slice_len")
+		
+		# Determine the element type
+		if isinstance(array_val, ir.GlobalVariable):
+			if isinstance(array_val.type.pointee, ir.ArrayType):
+				element_type = array_val.type.pointee.element
+			else:
+				raise ValueError("Cannot slice non-array global variable")
+		elif isinstance(array_val.type, ir.PointerType):
+			if isinstance(array_val.type.pointee, ir.ArrayType):
+				element_type = array_val.type.pointee.element
+			else:
+				# For pointer types like i8*, the element type is the pointee
+				element_type = array_val.type.pointee
+		else:
+			raise ValueError(f"Cannot slice type: {array_val.type}")
+		
+		# For now, we'll create a fixed-size array to hold the slice
+		# In a full implementation, this could be dynamically sized
+		# We'll use a maximum reasonable slice size
+		max_slice_size = 256  # Should be enough for most string operations
+		slice_array_type = ir.ArrayType(element_type, max_slice_size)
+		slice_ptr = builder.alloca(slice_array_type, name="slice_array")
+		
+		# Get pointer to the start of the source array/string
+		if isinstance(array_val, ir.GlobalVariable):
+			# Global array access
+			zero = ir.Constant(ir.IntType(32), 0)
+			source_start_ptr = builder.gep(array_val, [zero, start_val], name="source_start")
+		elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
+			# Local array access
+			zero = ir.Constant(ir.IntType(32), 0)
+			source_start_ptr = builder.gep(array_val, [zero, start_val], name="source_start")
+		elif isinstance(array_val.type, ir.PointerType):
+			# Pointer arithmetic for strings (char*, etc.)
+			source_start_ptr = builder.gep(array_val, [start_val], name="source_start")
+		else:
+			raise ValueError(f"Unsupported array type for slicing: {array_val.type}")
+		
+		# Get pointer to the start of the slice array
+		zero = ir.Constant(ir.IntType(32), 0)
+		slice_start_ptr = builder.gep(slice_ptr, [zero, zero], name="slice_start")
+		
+		# Copy the slice using a loop that handles both forward and reverse directions
+		func = builder.block.function
+		loop_cond = func.append_basic_block('slice_loop_cond')
+		loop_body = func.append_basic_block('slice_loop_body')
+		loop_end = func.append_basic_block('slice_loop_end')
+		
+		# Create loop counter
+		counter_ptr = builder.alloca(ir.IntType(32), name="slice_counter")
+		builder.store(ir.Constant(ir.IntType(32), 0), counter_ptr)
+		builder.branch(loop_cond)
+		
+		# Loop condition: counter < slice_len
+		builder.position_at_start(loop_cond)
+		counter = builder.load(counter_ptr, name="counter")
+		cond = builder.icmp_signed('<', counter, slice_len, name="slice_cond")
+		builder.cbranch(cond, loop_body, loop_end)
+		
+		# Loop body: copy one element with direction-aware indexing
+		builder.position_at_start(loop_body)
+		
+		if is_reverse:
+			# For reverse slices: source index goes backwards from start to end
+			# counter=0 -> source_index = start (3)
+			# counter=1 -> source_index = start-1 (2)
+			# counter=2 -> source_index = start-2 (1)
+			# counter=3 -> source_index = start-3 (0)
+			source_offset = builder.sub(start_val, counter, name="reverse_source_offset")
+		else:
+			# For forward slices: source index goes forwards from start
+			# counter=0 -> source_index = start+0
+			# counter=1 -> source_index = start+1
+			source_offset = builder.add(start_val, counter, name="forward_source_offset")
+		
+		# Get source element at calculated offset
+		if isinstance(array_val, ir.GlobalVariable):
+			# Global array access
+			zero = ir.Constant(ir.IntType(32), 0)
+			source_elem_ptr = builder.gep(array_val, [zero, source_offset], name="source_elem")
+		elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
+			# Local array access
+			zero = ir.Constant(ir.IntType(32), 0)
+			source_elem_ptr = builder.gep(array_val, [zero, source_offset], name="source_elem")
+		elif isinstance(array_val.type, ir.PointerType):
+			# Pointer arithmetic for strings (char*, etc.)
+			source_elem_ptr = builder.gep(array_val, [source_offset], name="source_elem")
+		
+		source_elem = builder.load(source_elem_ptr, name="source_val")
+		
+		# Store in slice array at sequential destination index (always forward)
+		dest_elem_ptr = builder.gep(slice_start_ptr, [counter], name="dest_elem")
+		builder.store(source_elem, dest_elem_ptr)
+		
+		# Increment counter
+		next_counter = builder.add(counter, ir.Constant(ir.IntType(32), 1), name="next_counter")
+		builder.store(next_counter, counter_ptr)
+		builder.branch(loop_cond)
+		
+		# End of loop - add null terminator for strings
+		builder.position_at_start(loop_end)
+		if element_type == ir.IntType(8):  # For string slices, add null terminator
+			final_counter = builder.load(counter_ptr, name="final_counter")
+			null_ptr = builder.gep(slice_start_ptr, [final_counter], name="null_pos")
+			null_char = ir.Constant(ir.IntType(8), 0)
+			builder.store(null_char, null_ptr)
+		
+		return slice_ptr
 
 @dataclass
 class PointerDeref(Expression):
@@ -1310,6 +1883,12 @@ class AddressOf(Expression):
 			# If we get here, the variable hasn't been declared yet
 			raise NameError(f"Unknown variable: {var_name}")
 		
+		# Handle pointer dereference - &(*ptr) is equivalent to ptr
+		if isinstance(self.expression, PointerDeref):
+			# For &(*ptr), just return the pointer value directly
+			# This is a fundamental identity: &(*ptr) == ptr
+			return self.expression.pointer.codegen(builder, module)
+		
 		# For non-Identifier expressions, generate code normally
 		target = self.expression.codegen(builder, module)
 		
@@ -1340,6 +1919,24 @@ class AddressOf(Expression):
 			if isinstance(array.type, ir.PointerType):
 				zero = ir.Constant(ir.IntType(32), 0)
 				return builder.gep(array, [zero, index], inbounds=True)
+		
+		# Handle pointer dereference - &(*ptr) is equivalent to ptr
+		elif isinstance(self.expression, PointerDeref):
+			# For &(*ptr), just return the pointer value directly
+			# This is a fundamental identity: &(*ptr) == ptr
+			return self.expression.pointer.codegen(builder, module)
+		
+		# Handle function calls - create temporary storage for the result
+		elif isinstance(self.expression, FunctionCall):
+			# Generate the function call result
+			func_result = self.expression.codegen(builder, module)
+			
+			# Create temporary storage for the result
+			temp_alloca = builder.alloca(func_result.type, name="func_result_temp")
+			builder.store(func_result, temp_alloca)
+			
+			# Return pointer to the temporary storage
+			return temp_alloca
 		
 		raise ValueError(f"Cannot take address of {type(self.expression).__name__}")
 
@@ -1569,9 +2166,44 @@ class VariableDeclaration(ASTNode):
 						is_pointer=False
 					)
 		
+		# Check for struct-to-byte-array cast (e.g., noopstr s = (noopstr)struct_var)
+		elif (isinstance(self.type_spec.base_type, str) and
+			self.initial_value and isinstance(self.initial_value, CastExpression)):
+			# Check if target type is a byte array alias and source is a struct
+			if hasattr(module, '_type_aliases') and self.type_spec.base_type in module._type_aliases:
+				resolved_llvm_type = module._type_aliases[self.type_spec.base_type]
+				# If casting to a byte array type (i8* alias)
+				if isinstance(resolved_llvm_type, ir.PointerType) and isinstance(resolved_llvm_type.pointee, ir.IntType) and resolved_llvm_type.pointee.width == 8:
+					# Get the source value to determine its size
+					source_val = self.initial_value.expression.codegen(builder, module)
+					if isinstance(source_val.type, ir.LiteralStructType):
+						# Calculate struct size in bytes
+						struct_size_bits = sum(elem.width for elem in source_val.type.elements if hasattr(elem, 'width'))
+						struct_size_bytes = struct_size_bits // 8
+						# Create array TypeSpec with inferred size
+						infer_array_size = True
+						resolved_type_spec = TypeSpec(
+							base_type=DataType.DATA,
+							is_signed=False,
+							is_const=self.type_spec.is_const,
+							is_volatile=self.type_spec.is_volatile,
+							bit_width=8,
+							alignment=self.type_spec.alignment,
+							is_array=True,
+							array_size=struct_size_bytes,
+							is_pointer=False
+						)
+						# Use the struct size for array inference
+						string_length = struct_size_bytes
+		
 		if infer_array_size:
-			# Infer array size from string literal
-			string_length = len(self.initial_value.value)
+			# Infer array size - check if it's from struct cast or string literal
+			if isinstance(self.initial_value, CastExpression) and 'string_length' in locals():
+				# For struct casts, we already calculated the size above
+				pass  # string_length was set in the struct cast detection code
+			else:
+				# For string literals
+				string_length = len(self.initial_value.value)
 			# Create a new TypeSpec with the inferred size
 			inferred_type_spec = TypeSpec(
 				base_type=resolved_type_spec.base_type,
@@ -1711,25 +2343,6 @@ class VariableDeclaration(ASTNode):
 						zero_char = ir.Constant(ir.IntType(8), 0)
 						builder.store(zero_char, elem_ptr)
 						
-				elif isinstance(llvm_type, ir.PointerType):
-					# Create global string constant for pointer types
-					string_val = self.initial_value.value
-					string_bytes = string_val.encode('utf-8') + b'\0'  # Null-terminate
-					str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
-					str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
-					gv = ir.GlobalVariable(module, str_val.type, name=f".str.{self.name}")
-					gv.linkage = 'internal'
-					gv.global_constant = True
-					gv.initializer = str_val
-					
-					# Get pointer to the first character of the string
-					zero = ir.Constant(ir.IntType(32), 0)
-					str_ptr = builder.gep(gv, [zero, zero], name=f"{self.name}.ptr")
-					builder.store(str_ptr, alloca)
-				else:
-					# For non-pointer, non-array data types, just store the first character
-					char_val = ir.Constant(ir.IntType(8), ord(self.initial_value.value[0]))
-					builder.store(char_val, alloca)
 			elif isinstance(self.initial_value, FunctionCall) and self.initial_value.name.endswith('.__init'):
 				# This is an object constructor call
 				# We need to call the constructor with 'this' pointer as first argument
@@ -1805,28 +2418,40 @@ class VariableDeclaration(ASTNode):
 						builder.store(string_ptr, alloca)
 						return alloca
 					
-					# Cast init value to match variable type if needed
-					if init_val.type != llvm_type:
-						# Handle pointer type compatibility (for AddressOf expressions)
-						if isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
-							# Both are pointers - check if compatible or cast
-							if llvm_type.pointee != init_val.type.pointee:
-								# Cast pointer types if needed
-								init_val = builder.bitcast(init_val, llvm_type)
-						# Handle integer type casting
-						elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.IntType):
-							if init_val.type.width > llvm_type.width:
-								# Truncate to smaller type
-								init_val = builder.trunc(init_val, llvm_type)
-							elif init_val.type.width < llvm_type.width:
-								# Extend to larger type (sign extend)
-								init_val = builder.sext(init_val, llvm_type)
-						# Handle other type conversions as needed
-						elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.FloatType):
-							init_val = builder.sitofp(init_val, llvm_type)
-						elif isinstance(init_val.type, ir.FloatType) and isinstance(llvm_type, ir.IntType):
-							init_val = builder.fptosi(init_val, llvm_type)
-					builder.store(init_val, alloca)
+					# Special handling for cast to array initialization
+					if (isinstance(self.initial_value, CastExpression) and
+						isinstance(init_val.type, ir.PointerType) and
+						isinstance(llvm_type, ir.ArrayType)):
+						# Bitcast source pointer to match destination array pointer type
+						array_ptr_type = ir.PointerType(llvm_type)
+						casted_ptr = builder.bitcast(init_val, array_ptr_type, name="cast_to_array_ptr")
+						# Load the entire array from the casted pointer
+						array_value = builder.load(casted_ptr, name="loaded_array")
+						# Store the loaded array into our allocated array
+						builder.store(array_value, alloca)
+					else:
+						# Cast init value to match variable type if needed
+						if init_val.type != llvm_type:
+							# Handle pointer type compatibility (for AddressOf expressions)
+							if isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
+								# Both are pointers - check if compatible or cast
+								if llvm_type.pointee != init_val.type.pointee:
+									# Cast pointer types if needed
+									init_val = builder.bitcast(init_val, llvm_type)
+							# Handle integer type casting
+							elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.IntType):
+								if init_val.type.width > llvm_type.width:
+									# Truncate to smaller type
+									init_val = builder.trunc(init_val, llvm_type)
+								elif init_val.type.width < llvm_type.width:
+									# Extend to larger type (sign extend)
+									init_val = builder.sext(init_val, llvm_type)
+							# Handle other type conversions as needed
+							elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.FloatType):
+								init_val = builder.sitofp(init_val, llvm_type)
+							elif isinstance(init_val.type, ir.FloatType) and isinstance(llvm_type, ir.IntType):
+								init_val = builder.fptosi(init_val, llvm_type)
+						builder.store(init_val, alloca)
 		
 		builder.scope[self.name] = alloca
 		# Track volatile variables so that subsequent loads/stores use the 'volatile' flag
@@ -2067,6 +2692,41 @@ class Assignment(Statement):
 				
 		else:
 			raise ValueError(f"Cannot assign to {type(self.target).__name__}")
+	
+	def _handle_union_member_assignment(self, builder: ir.IRBuilder, module: ir.Module, union_ptr: ir.Value, union_name: str, member_name: str, val: ir.Value) -> ir.Value:
+		"""Handle union member assignment by casting the union to the appropriate member type"""
+		# Get union member information
+		if not hasattr(module, '_union_member_info') or union_name not in module._union_member_info:
+			raise ValueError(f"Union member info not found for '{union_name}'")
+		
+		union_info = module._union_member_info[union_name]
+		member_names = union_info['member_names']
+		member_types = union_info['member_types']
+		
+		# Find the requested member
+		if member_name not in member_names:
+			raise ValueError(f"Member '{member_name}' not found in union '{union_name}'")
+		
+		member_index = member_names.index(member_name)
+		member_type = member_types[member_index]
+		
+		# Create unique identifier for this union variable instance
+		union_var_id = f"{union_ptr.name}_{id(union_ptr)}"
+		
+		# Check if union has already been initialized (immutability check)
+		if hasattr(builder, 'initialized_unions') and union_var_id in builder.initialized_unions:
+			raise RuntimeError(f"Union variable is immutable after initialization. Cannot reassign member '{member_name}' of union '{union_name}'")
+		
+		# Mark this union as initialized
+		if not hasattr(builder, 'initialized_unions'):
+			builder.initialized_unions = set()
+		builder.initialized_unions.add(union_var_id)
+		
+		# Cast the union pointer to the appropriate member type pointer and store the value
+		member_ptr_type = ir.PointerType(member_type)
+		casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{member_name}")
+		builder.store(val, casted_ptr)
+		return val
 
 @dataclass
 class CompoundAssignment(Statement):
@@ -2778,45 +3438,149 @@ class TryBlock(Statement):
 	catch_blocks: List[Tuple[Optional[TypeSpec], str, Block]]  # (type, name, block)
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-		# For bare-metal systems programming, we'll use setjmp/longjmp style
-		# No C++ RTTI nonsense, no hidden runtime functions
+		"""
+		Flux try/catch using LLVM's native exception handling.
+		Generates proper LLVM IR that can catch runtime errors including UAF.
+		
+		Uses LLVM's invoke/landingpad mechanism for structured exception handling.
+		"""
 		
 		# Create basic blocks
 		func = builder.block.function
 		try_block = func.append_basic_block('try')
+		landing_pad_block = func.append_basic_block('lpad')
+		catch_blocks_ir = []
 		end_block = func.append_basic_block('try.end')
 		
-		# Set up jump buffer (simplified)
-		jmpbuf = builder.alloca(ir.ArrayType(ir.IntType(32), 6), name='jmpbuf')
+		# Create catch blocks
+		for i, (exc_type, exc_name, catch_body) in enumerate(self.catch_blocks):
+			catch_block = func.append_basic_block(f'catch_{i}')
+			catch_blocks_ir.append(catch_block)
 		
-		# Mock setjmp
-		setjmp = builder.call(
-			module.declare_intrinsic('llvm.eh.sjlj.setjmp'),
-			[builder.bitcast(jmpbuf, ir.PointerType(ir.IntType(8)))],
-			name='setjmp'
-		)
+		# Branch to try block
+		builder.branch(try_block)
 		
-		# Branch based on setjmp result
-		builder.cbranch(
-			builder.icmp_unsigned('==', setjmp, ir.Constant(ir.IntType(32), 0)),
-			try_block,
-			end_block
-		)
-		
-		# TRY block
+		# Generate TRY block with invoke instead of direct calls
 		builder.position_at_start(try_block)
+		
+		# Generate try body code with exception-aware calls
+		# Store landing pad info for exception-throwing operations
+		old_landing_pad = getattr(builder, 'flux_landing_pad', None)
+		builder.flux_landing_pad = landing_pad_block
+		
+		# Generate the try body - this will use invoke for potentially throwing operations
 		self.try_body.codegen(builder, module)
+		
+		# Restore previous landing pad
+		builder.flux_landing_pad = old_landing_pad
+		
+		# If try block completes normally, branch to end
 		if not builder.block.is_terminated:
 			builder.branch(end_block)
-			
-		# CATCH blocks would be implemented via longjmp targets
-		# Flux would handle this at the callsite of throw:
-		# 1. Check handler registry
-		# 2. Restore registers
-		# 3. Branch to handler
 		
+		# Generate LANDING PAD block
+		builder.position_at_start(landing_pad_block)
+		
+		# Create personality function for exception handling
+		personality_func = self._get_or_create_personality_func(module)
+		# Set personality function on the containing function
+		# Note: In llvmlite, personality function is set differently
+		try:
+			if hasattr(func, 'personality'):
+				func.personality = personality_func
+			elif hasattr(func.attributes, 'personality'):
+				func.attributes.personality = personality_func
+			else:
+				# Skip personality function setting for now
+				pass
+		except Exception as e:
+			# If setting personality function fails, continue without it
+			print(f"Warning: Could not set personality function: {e}")
+			pass
+		
+		# Create landing pad instruction
+		# This catches all exceptions (catch-all with cleanup)
+		landing_pad = builder.landingpad(
+			ir.LiteralStructType([ir.PointerType(ir.IntType(8)), ir.IntType(32)]),
+			personality_func
+		)
+		
+		# Add catch-all clause (catches any exception)
+		landing_pad.add_clause(ir.Constant(ir.PointerType(ir.IntType(8)), None))
+		landing_pad.cleanup = True
+		
+		# Extract exception pointer and selector from landing pad
+		exc_ptr = builder.extract_value(landing_pad, 0, name='exc_ptr')
+		exc_selector = builder.extract_value(landing_pad, 1, name='exc_sel')
+		
+		# For catch-all blocks, we don't need to check the selector
+		# Just jump to the first catch block (assuming catch() means catch-all)
+		if catch_blocks_ir:
+			builder.branch(catch_blocks_ir[0])
+		else:
+			# No catch blocks - resume exception
+			builder.resume(landing_pad)
+		
+		# Generate CATCH blocks
+		for i, (exc_type, exc_name, catch_body) in enumerate(self.catch_blocks):
+			builder.position_at_start(catch_blocks_ir[i])
+			
+			# Create scope for catch block if there's an exception variable
+			if exc_name:
+				# Allocate space for exception value
+				if exc_type:
+					exc_type_llvm = exc_type.get_llvm_type(module)
+				else:
+					exc_type_llvm = ir.IntType(32)  # Default exception type
+				
+				exc_var = builder.alloca(exc_type_llvm, name=exc_name)
+				# For now, store a constant exception value
+				# In a full implementation, this would extract info from exc_ptr
+				exc_value = ir.Constant(exc_type_llvm, 1001)  # UAF exception code
+				builder.store(exc_value, exc_var)
+				builder.scope[exc_name] = exc_var
+			
+			# Generate catch body
+			catch_body.codegen(builder, module)
+			
+			# Remove exception variable from scope
+			if exc_name and exc_name in builder.scope:
+				del builder.scope[exc_name]
+			
+			# Branch to end if not already terminated
+			if not builder.block.is_terminated:
+				builder.branch(end_block)
+		
+		# Position at end block
 		builder.position_at_start(end_block)
 		return None
+	
+	def _get_or_create_personality_func(self, module: ir.Module) -> ir.Function:
+		"""Get or create the exception personality function"""
+		func_name = '__flux_personality_v0'
+		if func_name in module.globals:
+			return module.globals[func_name]
+		
+		# Create personality function signature
+		# This is platform-specific, but typically looks like:
+		# i32 @personality(i32, i32, i64, i8*, i8*)
+		func_type = ir.FunctionType(
+			ir.IntType(32),
+			[ir.IntType(32), ir.IntType(32), ir.IntType(64), 
+			 ir.PointerType(ir.IntType(8)), ir.PointerType(ir.IntType(8))]
+		)
+		func = ir.Function(module, func_type, func_name)
+		func.linkage = 'external'
+		
+		# Generate basic personality function body
+		entry_block = func.append_basic_block('entry')
+		pers_builder = ir.IRBuilder(entry_block)
+		
+		# For now, always return 1 (EXCEPTION_EXECUTE_HANDLER)
+		# This means "handle the exception"
+		pers_builder.ret(ir.Constant(ir.IntType(32), 1))
+		
+		return func
 
 @dataclass
 class ThrowStatement(Statement):

@@ -43,7 +43,7 @@ def main() -> int
     noopstr str = "Hello World!";
     int len = sizeof(str) / 8;
 
-    myStru s = {hw = @"Hello World!", len = 12};
+    myStru s = {hw = "Hello World!", len = 12};
 
     //print(@s.hw, s.len);
     

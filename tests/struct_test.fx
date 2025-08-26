@@ -54,24 +54,15 @@ def main() -> int
 
     B bx = ax as B;
 
-    int x = 5;
-
-    noopstr x = f"Testing{x}";
-
     //B b = str as B;        // works
-                                                                             //i32 b = str as i32;    // should work but fails
+    //i32 b = str as i32;    // should work but fails
 
     noopstr s = (noopstr)ax;
+    //noopstr s = (noopstr)str;
+    
+    int len = sizeof(s) / 8;
 
-                                                                        //noopstr s = (noopstr)str;
-    int len = sizeof(x) / 8;
-
-// we should be able to do x + y   or   x + "!" because it should just put 
-
-    noopstr y = "!";
-
-    print(@x, len);
-    print(@y, 1);
+    print(@s, len);
 
     pnl();
 

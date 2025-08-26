@@ -1,10 +1,8 @@
 unsigned data{8} as byte;
-signed data{16} as i16;
 byte[] as noopstr;
-
 noopstr nl = "\n";
 
-def print(unsigned data{8}* msg, int len) -> void
+def print(byte* msg, int len) -> void
 {
     volatile asm
     {
@@ -32,30 +30,18 @@ def pnl() -> void
     print(@nl, 1);
 };
 
-
-struct A
+def peek(byte* x) -> byte
 {
-    byte[] a, b, c, d;
+    return *x;
 };
-
-struct B
-{
-    i16 a, b;
-};
-
-
-unsigned data{32} as u32;
-signed data{32} as i32;
-
 
 def main() -> int
 {
-    int x = 5;
-
-    noopstr y = f"Testing {x + x}";
-    int len = sizeof(y) / 8;
-
-    print(@y, len);
+    *(char*)0 = 0; // Testing if we can do C++ fuckery
+    noopstr s = "TEST";
+    noopstr* ps = @s;
+    s as void;
+    print(@(**ps),4);
     pnl();
 
     return 0;

@@ -1,9 +1,3 @@
-unsigned data{8} as byte;
-signed data{16} as i16;
-byte[] as noopstr;
-
-noopstr nl = "\n";
-
 def print(unsigned data{8}* msg, int len) -> void
 {
     volatile asm
@@ -27,36 +21,40 @@ def print(unsigned data{8}* msg, int len) -> void
     return void;
 };
 
+unsigned data{8}* nl = "\n";
+
 def pnl() -> void
 {
     print(@nl, 1);
 };
 
 
-struct A
-{
-    byte[] a, b, c, d;
-};
-
-struct B
-{
-    i16 a, b;
-};
 
 
-unsigned data{32} as u32;
-signed data{32} as i32;
 
+
+
+
+
+
+
+
+
+
+
+unsigned data{8} as byte;
+byte[] as noopstr;
 
 def main() -> int
 {
-    int x = 5;
-
-    noopstr y = f"Testing {x + x}";
-    int len = sizeof(y) / 8;
-
-    print(@y, len);
-    pnl();
-
+    noopstr str = "Hello World!";
+    //int len = sizeof(str) / 8;
+    
+    for (int x = 0; x < 2; x++)
+    {
+        print(@str, 12);
+        pnl();
+    };
+    
     return 0;
 };

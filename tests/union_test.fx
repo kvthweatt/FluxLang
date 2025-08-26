@@ -8,6 +8,6 @@ def main() -> int
 {
     myU newU;
     newU.a = 10;
-    newU.b = "C";
+    //newU.b = "C";
 	return 0;
 };
