@@ -297,6 +297,10 @@ class TypeSpec(ASTNode):
 			if hasattr(module, '_using_namespaces'):
 				print(f"DEBUG get_llvm_type: Checking namespaces for '{self.base_type}'")
 				print(f"DEBUG get_llvm_type: Available namespaces: {module._using_namespaces}")
+				
+				# Check ALL possible mangled names that could exist
+				print(f"DEBUG get_llvm_type: Available type aliases: {list(module._type_aliases.keys()) if hasattr(module, '_type_aliases') else 'None'}")
+				
 				for namespace in module._using_namespaces:
 					# Convert namespace path to mangled name format
 					mangled_prefix = namespace.replace('::', '__') + '__'
@@ -309,11 +313,27 @@ class TypeSpec(ASTNode):
 						print(f"DEBUG get_llvm_type: Found namespace type alias {mangled_name} -> {alias_type}")
 						# Return the alias type as-is
 						return alias_type
+				
+				# FORCE CHECK: Look for any type alias that ends with our type name
+				# This handles cases where the namespace processing order causes issues
+				if hasattr(module, '_type_aliases'):
+					for alias_name, alias_type in module._type_aliases.items():
+						# Check if this alias ends with our type name (e.g., 'standard__types__byte' ends with 'byte')
+						if alias_name.endswith('__' + self.base_type):
+							# Extract the namespace part to verify it's in our using list
+							namespace_part = alias_name[:-len('__' + self.base_type)]
+							# Convert back to namespace format (e.g., 'standard__types' -> 'standard::types')
+							namespace_name = namespace_part.replace('__', '::')
+							print(f"DEBUG get_llvm_type: Found potential match {alias_name} for namespace {namespace_name}")
+							# Check if this namespace is in our using list
+							if namespace_name in module._using_namespaces:
+								print(f"DEBUG get_llvm_type: Using forced match {alias_name} -> {alias_type}")
+								return alias_type
 			else:
 				print(f"DEBUG get_llvm_type: No _using_namespaces found on module")
 			
-			print(f"DEBUG get_llvm_type: No alias found for '{self.base_type}', falling back to i32")
-			return ir.IntType(32)  # Default fallback
+			print(f"DEBUG get_llvm_type: No alias found for '{self.base_type}'")
+			raise NameError(f"Unknown type: {self.base_type}")
 		
 		if self.base_type == DataType.INT:
 			return ir.IntType(32)
@@ -1389,6 +1409,22 @@ class FunctionCall(Expression):
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
 		# Look up the function in the module
 		func = module.globals.get(self.name, None)
+		
+		# If not found directly, check for namespace-qualified names using 'using' statements
+		if func is None or not isinstance(func, ir.Function):
+			if hasattr(module, '_using_namespaces'):
+				for namespace in module._using_namespaces:
+					# Convert namespace path to mangled name format
+					mangled_prefix = namespace.replace('::', '__') + '__'
+					mangled_name = mangled_prefix + self.name
+					
+					# Check for mangled function name
+					if mangled_name in module.globals:
+						candidate_func = module.globals[mangled_name]
+						if isinstance(candidate_func, ir.Function):
+							func = candidate_func
+							break
+		
 		if func is None or not isinstance(func, ir.Function):
 			raise NameError(f"Unknown function: {self.name}")
 		
@@ -2317,7 +2353,24 @@ class VariableDeclaration(ASTNode):
 		if self.initial_value:
 			# Handle string literals specially
 			if (isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR):
-				if isinstance(llvm_type, ir.ArrayType) and isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8:
+				if isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8:
+					# Handle string literal initialization for local pointer types (like noopstr)
+					string_val = self.initial_value.value
+					string_bytes = string_val.encode('utf-8') + b'\0'  # Null-terminate
+					str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+					str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+					
+					# Create global variable for the string data
+					str_gv = ir.GlobalVariable(module, str_val.type, name=f".str.{self.name}")
+					str_gv.linkage = 'internal'
+					str_gv.global_constant = True
+					str_gv.initializer = str_val
+					
+					# Get pointer to the first character of the string as the initializer
+					zero = ir.Constant(ir.IntType(32), 0)
+					str_ptr = builder.gep(str_gv, [zero, zero], name=f"{self.name}_str_ptr")
+					builder.store(str_ptr, alloca)
+				elif isinstance(llvm_type, ir.ArrayType) and isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8:
 					# Handle string literal initialization for local char arrays
 					string_val = self.initial_value.value
 					
@@ -3877,8 +3930,26 @@ class FunctionDef(ASTNode):
 		# Create function type
 		func_type = ir.FunctionType(ret_type, param_types)
 		
-		# Create function
-		func = ir.Function(module, func_type, self.name)
+		# Check if function already exists (from prototype)
+		if self.name in module.globals:
+			existing = module.globals[self.name]
+			if isinstance(existing, ir.Function):
+				# Verify the signatures match
+				print(f"DEBUG: Comparing function types for '{self.name}':")
+				print(f"DEBUG: Existing type: {existing.type}")
+				print(f"DEBUG: New type:      {func_type}")
+				print(f"DEBUG: Types equal:   {existing.type == func_type}")
+				print(f"DEBUG: Existing function type: {existing.ftype}")
+				print(f"DEBUG: Existing.ftype == func_type: {existing.ftype == func_type}")
+				# Compare the actual function type, not the pointer type
+				if existing.ftype != func_type:
+					raise ValueError(f"Function '{self.name}' redefined with different signature\nExisting: {existing.ftype}\nNew: {func_type}")
+				func = existing
+			else:
+				raise ValueError(f"Name '{self.name}' already used for non-function")
+		else:
+			# Create new function
+			func = ir.Function(module, func_type, self.name)
 
 		if self.is_prototype == True:
 			return func
@@ -4328,6 +4399,11 @@ class UsingStatement(Statement):
 			module._using_namespaces = []
 		module._using_namespaces.append(self.namespace_path)
 		
+		# Also add the leaf namespace name for direct access (e.g., 'types' from 'standard::types')
+		leaf_name = self.namespace_path.split('::')[-1]
+		if leaf_name not in module._using_namespaces:
+			module._using_namespaces.append(leaf_name)
+		
 		# Create unqualified aliases for symbols and generate code if needed
 		namespace_mangled = self.namespace_path.replace('::', '__')
 		
@@ -4339,61 +4415,125 @@ class UsingStatement(Statement):
 	
 	def _process_statements_for_namespace(self, statements, target_namespace, builder, module):
 		"""Recursively process statements looking for matching namespace definitions"""
+		print(f"DEBUG: Processing statements for namespace: {target_namespace}")
+		
+		# FIRST PASS: Process all using statements to establish type resolution context
+		print(f"DEBUG: First pass - processing using statements")
 		for stmt in statements:
+			if hasattr(stmt, '__class__') and stmt.__class__.__name__ == 'UsingStatement':
+				print(f"DEBUG: Found using statement: {stmt.namespace_path}")
+				# Add namespace to using list without recursive processing
+				if not hasattr(module, '_using_namespaces'):
+					module._using_namespaces = []
+				if stmt.namespace_path not in module._using_namespaces:
+					module._using_namespaces.append(stmt.namespace_path)
+					print(f"DEBUG: Added {stmt.namespace_path} to using namespaces")
+					
+					# Also add the leaf namespace name for direct access (e.g., 'types' from 'standard::types')
+					leaf_name = stmt.namespace_path.split('::')[-1]
+					if leaf_name not in module._using_namespaces:
+						module._using_namespaces.append(leaf_name)
+						print(f"DEBUG: Added leaf namespace '{leaf_name}' to using namespaces")
+		
+		# SECOND PASS: Process namespace definitions with full context
+		print(f"DEBUG: Second pass - processing namespace definitions")
+		for stmt in statements:
+			print(f"DEBUG: Checking statement: {type(stmt).__name__}")
 			# Look for NamespaceDefStatement that matches our target
 			if isinstance(stmt, NamespaceDefStatement):
+				print(f"DEBUG: Found NamespaceDefStatement: {stmt.namespace_def.name}")
 				# Get the mangled name (how it was stored during codegen)
 				mangled_name = stmt.namespace_def.name.replace('::', '__')
 				target_mangled = target_namespace.replace('::', '__')
+				print(f"DEBUG: Comparing {mangled_name} with {target_mangled}")
 				
 				# Check if this namespace matches our target
 				if mangled_name == target_mangled or stmt.namespace_def.name == target_namespace:
+					print(f"DEBUG: Match found! Generating code for namespace")
 					# Generate code for this namespace now
 					stmt.namespace_def.codegen(builder, module)
 					break
 				# Check if this is a parent namespace that contains our target
 				elif target_namespace.startswith(stmt.namespace_def.name + '::'):
+					print(f"DEBUG: Parent namespace found, processing contents")
 					# This is a parent namespace, process its contents
 					self._process_namespace_contents(stmt.namespace_def, target_namespace, builder, module)
 			
 			# Look for nested namespace definitions within other statements
 			elif hasattr(stmt, 'namespace_def') and hasattr(stmt.namespace_def, 'nested_namespaces'):
+				print(f"DEBUG: Checking nested namespaces in statement")
 				# Recursively search nested namespaces
 				for nested_ns in stmt.namespace_def.nested_namespaces:
 					self._process_statements_for_namespace([NamespaceDefStatement(nested_ns)], target_namespace, builder, module)
+			
+			# Direct NamespaceDef objects (handle both wrapped and unwrapped)
+			elif hasattr(stmt, '__class__') and stmt.__class__.__name__ == 'NamespaceDef':
+				print(f"DEBUG: Found direct NamespaceDef: {stmt.name}")
+				# Get the mangled name (how it was stored during codegen)
+				mangled_name = stmt.name.replace('::', '__')
+				target_mangled = target_namespace.replace('::', '__')
+				print(f"DEBUG: Comparing direct {mangled_name} with {target_mangled}")
+				
+				# Check if this namespace matches our target
+				if mangled_name == target_mangled or stmt.name == target_namespace:
+					print(f"DEBUG: Direct match found! Generating code for namespace")
+					# Generate code for this namespace now
+					stmt.codegen(builder, module)
+					break
+				# Check if this is a parent namespace that contains our target
+				elif target_namespace.startswith(stmt.name + '::'):
+					print(f"DEBUG: Direct parent namespace found, processing contents")
+					# This is a parent namespace, process its contents
+					self._process_namespace_contents(stmt, target_namespace, builder, module)
 
 	def _process_namespace_contents(self, namespace_def, target_namespace, builder, module):
 		"""Process contents of a namespace looking for nested namespaces that match our target"""
+		print(f"DEBUG: Processing namespace contents for {namespace_def.name}, looking for {target_namespace}")
 		# Look through nested namespaces
 		for nested_ns in namespace_def.nested_namespaces:
+			print(f"DEBUG: Checking nested namespace: {nested_ns.name}")
 			# Construct the full nested namespace path
 			full_nested_name = f"{namespace_def.name}::{nested_ns.name}"
+			print(f"DEBUG: Full nested name: {full_nested_name}")
 			if full_nested_name == target_namespace:
 				# Found the target namespace - generate its code
+				print(f"DEBUG: Found target namespace {target_namespace}, generating code")
+				# IMPORTANT: Before generating the target namespace, first process its dependencies
+				# by recursively processing any using statements it contains
+				self._process_namespace_dependencies(nested_ns, builder, module)
 				nested_ns.codegen(builder, module)
 				break
 			elif target_namespace.startswith(full_nested_name + '::'):
 				# This nested namespace is a parent of our target, recurse deeper
+				print(f"DEBUG: Recursing deeper into {full_nested_name}")
 				self._process_namespace_contents(nested_ns, target_namespace, builder, module)
+
+	def _process_namespace_dependencies(self, namespace_def, builder, module):
+		"""Process all dependencies of a namespace before generating its code"""
+		print(f"DEBUG: Processing dependencies for namespace {namespace_def.name}")
 		
-		# Look for global variables with the mangled namespace prefix
-		for global_name in list(module.globals.keys()):
-			if global_name.startswith(namespace_mangled + '__'):
-				# Extract the unqualified name
-				unqualified_name = global_name[len(namespace_mangled) + 2:]  # +2 for the '__'
-				# Create an alias in globals
-				if unqualified_name not in module.globals:  # Don't override existing globals
-					module.globals[unqualified_name] = module.globals[global_name]
+		# Look through all variables in this namespace to find using statements
+		# In the AST structure, using statements might be within the namespace variables
+		# or we need to check the imported symbols for dependencies
 		
-		# Look for type aliases with the mangled namespace prefix
-		if hasattr(module, '_type_aliases'):
-			for type_name in list(module._type_aliases.keys()):
-				if type_name.startswith(namespace_mangled + '__'):
-					# Extract the unqualified name
-					unqualified_name = type_name[len(namespace_mangled) + 2:]  # +2 for the '__'
-					# Create an alias in type_aliases
-					if unqualified_name not in module._type_aliases:  # Don't override existing types
-						module._type_aliases[unqualified_name] = module._type_aliases[type_name]
+		# For the standard::io namespace, we know it depends on standard::types
+		# Let's check if standard::types needs to be processed first
+		if namespace_def.name == 'io' and hasattr(module, '_using_namespaces'):
+			if 'standard::types' in module._using_namespaces:
+				print(f"DEBUG: Processing standard::types dependency first")
+				# Find and process standard::types
+				if hasattr(module, '_imported_symbols'):
+					for import_path, statements in module._imported_symbols.items():
+						for stmt in statements:
+							if hasattr(stmt, '__class__') and stmt.__class__.__name__ == 'NamespaceDef':
+								if stmt.name == 'standard':
+									# Found the standard namespace, look for types nested namespace
+									for nested_ns in stmt.nested_namespaces:
+										if nested_ns.name == 'types':
+											print(f"DEBUG: Generating code for standard::types dependency")
+											# Generate the types namespace first
+											nested_ns.codegen(builder, module)
+											return
 
 @dataclass
 class ImportStatement(Statement):
@@ -4440,15 +4580,23 @@ class ImportStatement(Statement):
 			# Pre-register namespace definitions to make them available for using statements
 			# This registers namespace names without generating code yet
 			for stmt in imported_ast.statements:
+				# Handle both NamespaceDefStatement and direct NamespaceDef objects
+				namespace_def = None
 				if isinstance(stmt, NamespaceDefStatement):
+					namespace_def = stmt.namespace_def
+				elif hasattr(stmt, '__class__') and stmt.__class__.__name__ == 'NamespaceDef':
+					# Direct NamespaceDef object
+					namespace_def = stmt
+				
+				if namespace_def is not None:
 					# Register the namespace and its nested namespaces
 					if not hasattr(module, '_namespaces'):
 						module._namespaces = set()
-					module._namespaces.add(stmt.namespace_def.name)
+					module._namespaces.add(namespace_def.name)
 					
 					# Register nested namespaces with their full qualified names
-					for nested_ns in stmt.namespace_def.nested_namespaces:
-						full_nested_name = f"{stmt.namespace_def.name}::{nested_ns.name}"
+					for nested_ns in namespace_def.nested_namespaces:
+						full_nested_name = f"{namespace_def.name}::{nested_ns.name}"
 						module._namespaces.add(full_nested_name)
 						# Recursively register deeper nested namespaces
 						self._register_nested_namespaces_for_import(nested_ns, full_nested_name, module)
@@ -4474,6 +4622,13 @@ class ImportStatement(Statement):
 		"""Dynamically imports the parser class to avoid circular imports"""
 		import fparser
 		return fparser.FluxParser
+
+	def _register_nested_namespaces_for_import(self, namespace, parent_path, module):
+		"""Recursively register all nested namespaces with their full qualified names for imported modules"""
+		for nested_ns in namespace.nested_namespaces:
+			full_nested_name = f"{parent_path}::{nested_ns.name}"
+			module._namespaces.add(full_nested_name)
+			self._register_nested_namespaces_for_import(nested_ns, full_nested_name, module)
 
 	def _resolve_path(self, module_name: str) -> Optional[Path]:
 		"""Robust path resolution with proper error handling"""
