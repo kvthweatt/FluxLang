@@ -9,8 +9,11 @@ namespace standard
     namespace io
     {
         def win_print(byte[] msg, int x) -> void;
+        def wpnl() -> void;
         def nix_print(byte* msg, int x) -> void;
+        def npnl() -> void;
         def mac_print(byte* msg, int x) -> void;
+        def mpnl() -> void;
 
         def win_print(byte[] msg, int x) -> void
         {
@@ -32,6 +35,12 @@ namespace standard
                 call WriteFile
                 addq $$40, %rsp
             } : : "r"(msg), "r"(x) : "rax","rcx","rdx","r8","r9","r10","r11","memory";
+            return void;
+        };
+
+        def wpnl() -> void
+        {
+            win_print(@nl,1);
             return void;
         };
 

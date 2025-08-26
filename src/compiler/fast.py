@@ -2075,12 +2075,12 @@ class SizeOf(Expression):
 			
 			# Calculate size in BITS
 			if isinstance(llvm_type, ir.IntType):
-				return ir.Constant(ir.IntType(32), llvm_type.width)  # Already in bits
+				return ir.Constant(ir.IntType(llvm_type.width), llvm_type.width)  # Already in bits
 			elif isinstance(llvm_type, ir.ArrayType):
 				element_bits = llvm_type.element.width
-				return ir.Constant(ir.IntType(32), element_bits * llvm_type.count)
+				return ir.Constant(ir.IntType(llvm_type.width), element_bits * llvm_type.count)
 			elif isinstance(llvm_type, ir.PointerType):
-				return ir.Constant(ir.IntType(32), 64)  # 64-bit pointers = 64 bits
+				return ir.Constant(ir.IntType(llvm_type.width), llvm_type.width)  # 64-bit pointers = 64 bits
 			else:
 				raise ValueError(f"Unknown type in sizeof: {llvm_type}")
 		
@@ -2093,10 +2093,10 @@ class SizeOf(Expression):
 					llvm_type = ptr.type.pointee  # Get the type being pointed to
 					# Calculate size in BITS using the same logic as TypeSpec
 					if isinstance(llvm_type, ir.IntType):
-						return ir.Constant(ir.IntType(32), llvm_type.width)
+						return ir.Constant(ir.IntType(llvm_type.width), llvm_type.width)
 					elif isinstance(llvm_type, ir.ArrayType):
 						element_bits = llvm_type.element.width
-						return ir.Constant(ir.IntType(32), element_bits * llvm_type.count)
+						return ir.Constant(ir.IntType(llvm_type.element.width), element_bits * llvm_type.count)
 					elif isinstance(llvm_type, ir.PointerType):
 						# For parameter that is a pointer (like i8* from unsized array parameter), 
 						# we can't determine the size at compile time, so return 0
@@ -2183,9 +2183,13 @@ class VariableDeclaration(ASTNode):
 			self.initial_value and isinstance(self.initial_value, Literal) and
 			self.initial_value.type == DataType.CHAR):
 			# Check if the type alias resolves to an array type
-			if hasattr(module, '_type_aliases') and self.type_spec.base_type in module._type_aliases:
-				# Get the resolved LLVM type
-				resolved_llvm_type = module._type_aliases[self.type_spec.base_type]
+			# Use the same resolution logic as TypeSpec.get_llvm_type to handle namespaced types
+			try:
+				resolved_llvm_type = self.type_spec.get_llvm_type(module)
+			except NameError:
+				resolved_llvm_type = None
+			
+			if resolved_llvm_type is not None:
 				# If it resolves to a pointer type (unsized array), we can infer the size
 				if isinstance(resolved_llvm_type, ir.PointerType) and isinstance(resolved_llvm_type.pointee, ir.IntType) and resolved_llvm_type.pointee.width == 8:
 					infer_array_size = True

@@ -2,9 +2,10 @@ import "redio.fx";
 
 using standard::io;
 
-def main() -> i64
+def main() -> int
 {
     noopstr m = "Test!";
-    win_print(@m,5);
+    int len = sizeof(m) / 8;
+    win_print(@m,len);
 	return 0;
 };
