@@ -452,36 +452,77 @@ class BinaryOp(Expression):
 	operator: Operator
 	right: Expression
 
+	def _literal_string_to_array_ptr(self, builder: ir.IRBuilder, module: ir.Module, lit: Literal, name_hint: str) -> ir.Value:
+		"""Turn a string Literal(DataType.CHAR with python str value) into a pointer-to-array value preserving array semantics.
+		Returns a pointer to the first element (via gep) of an internal global array. The pointee is an ArrayType(i8, N).
+		"""
+		if not isinstance(lit, Literal) or lit.type != DataType.CHAR or not isinstance(lit.value, str):
+			raise ValueError("Expected string Literal for conversion")
+		string_bytes = lit.value.encode('ascii')
+		arr_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+		const_arr = ir.Constant(arr_ty, bytearray(string_bytes))
+		gname = f".str.binop.{name_hint}.{id(lit)}"
+		gv = ir.GlobalVariable(module, const_arr.type, name=gname)
+		gv.linkage = 'internal'
+		gv.global_constant = True
+		gv.initializer = const_arr
+		zero = ir.Constant(ir.IntType(32), 0)
+		ptr = builder.gep(gv, [zero, zero], name=f"{name_hint}_str_ptr")
+		# Mark as array pointer for downstream logic that preserves array semantics
+		ptr.type._is_array_pointer = True
+		return ptr
 
 	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-		left_val = self.left.codegen(builder, module)
-		right_val = self.right.codegen(builder, module)
+		# Attempt to promote string literals to array pointers when using + or - for concatenation
+		left_expr, right_expr = self.left, self.right
+		left_val = None
+		right_val = None
+		if self.operator in (Operator.ADD, Operator.SUB):
+			# Fast path: both operands are string literals -> compile-time constant concat
+			if isinstance(left_expr, Literal) and isinstance(right_expr, Literal) \
+				and left_expr.type == DataType.CHAR and right_expr.type == DataType.CHAR \
+				and isinstance(left_expr.value, str) and isinstance(right_expr.value, str):
+				# Build concatenated constant array
+				concat = left_expr.value + (right_expr.value if self.operator == Operator.ADD else '')
+				lit_concat = Literal(concat, DataType.CHAR)
+				return self._literal_string_to_array_ptr(builder, module, lit_concat, "concat")
+			# Otherwise, codegen operands first
+			left_val = left_expr.codegen(builder, module)
+			right_val = right_expr.codegen(builder, module)
+			# Promote any string literal that resulted in scalar i8 into array pointer
+			def promote_if_scalar_char(val, expr, hint):
+				if isinstance(expr, Literal) and expr.type == DataType.CHAR and isinstance(expr.value, str):
+					# If val is i8, promote to array pointer using the literal content
+					if isinstance(val.type, ir.IntType) and val.type.width == 8:
+						return self._literal_string_to_array_ptr(builder, module, expr, hint)
+				return val
+			left_val = promote_if_scalar_char(left_val, left_expr, "lhs")
+			right_val = promote_if_scalar_char(right_val, right_expr, "rhs")
+		else:
+			# Non-concat operators: regular codegen
+			left_val = left_expr.codegen(builder, module)
+			right_val = right_expr.codegen(builder, module)
 		
 		# Handle array concatenation (ADD) and subtraction (SUB)
 		if (self.operator in (Operator.ADD, Operator.SUB) and 
 			is_array_or_array_pointer(left_val) and is_array_or_array_pointer(right_val)):
-			
 			# Get array information
 			left_elem_type, left_len = get_array_info(left_val)
 			right_elem_type, right_len = get_array_info(right_val)
-			
 			# Type compatibility check
 			if left_elem_type != right_elem_type:
 				raise ValueError(f"Cannot {self.operator.value} arrays with different element types: {left_elem_type} vs {right_elem_type}")
-			
 			# Calculate result length
 			if self.operator == Operator.ADD:
 				result_len = left_len + right_len
 			else:  # SUB
 				result_len = max(left_len - right_len, 0)
-			
 			# Create result array type
 			result_array_type = ir.ArrayType(left_elem_type, result_len)
-			
 			# Check if both operands are global constants for compile-time concatenation
 			if (isinstance(left_val, ir.GlobalVariable) and 
 				isinstance(right_val, ir.GlobalVariable) and 
-				left_val.global_constant and right_val.global_constant):
+				getattr(left_val, 'global_constant', False) and getattr(right_val, 'global_constant', False)):
 				# Compile-time concatenation of global constants
 				return self._create_global_array_concat(module, left_val, right_val, result_array_type, self.operator)
 			else:
@@ -586,6 +627,9 @@ class BinaryOp(Expression):
 		global_array.global_constant = True
 		global_array.initializer = ir.Constant(result_array_type, new_elements)
 		
+		# CRITICAL: Mark as array pointer to preserve type information
+		global_array.type._is_array_pointer = True
+		
 		return global_array
 	
 	def _create_runtime_array_concat(self, builder: ir.IRBuilder, module: ir.Module, left_val: ir.Value, right_val: ir.Value, result_array_type: ir.ArrayType, operator: Operator) -> ir.Value:
@@ -625,6 +669,9 @@ class BinaryOp(Expression):
 			# Copy right array
 			right_bytes = right_len * elem_size_bytes
 			emit_memcpy(builder, module, result_right_start, right_start, right_bytes)
+		
+		# CRITICAL: Mark as array pointer to preserve type information
+		result_ptr.type._is_array_pointer = True
 		
 		return result_ptr
 
@@ -1444,6 +1491,41 @@ class FStringLiteral(Expression):
             builder.store(ir.Constant(ir.IntType(8), ord(char)), char_ptr)
         return start_pos + len(temp_str)
 
+# Utility functions for macro management
+def define_macro(module: ir.Module, macro_name: str) -> None:
+	"""Define a macro in the module's macro registry"""
+	if not hasattr(module, '_defined_macros'):
+		module._defined_macros = set()
+	module._defined_macros.add(macro_name)
+
+def is_macro_defined(module: ir.Module, macro_name: str) -> bool:
+	"""Check if a macro is defined in the module's macro registry"""
+	if not hasattr(module, '_defined_macros'):
+		return False
+	return macro_name in module._defined_macros
+
+def get_defined_macros(module: ir.Module) -> set:
+	"""Get the set of currently defined macros"""
+	if not hasattr(module, '_defined_macros'):
+		return set()
+	return module._defined_macros.copy()
+
+@dataclass
+class DefMacro(Expression):
+	"""AST node for def(MACRO_NAME) expressions - checks if a macro is defined"""
+	macro_name: str
+	
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+		"""Generate code that returns true if macro is defined, false otherwise"""
+		# Check if the macro is defined in the module's macro registry
+		if not hasattr(module, '_defined_macros'):
+			module._defined_macros = set()
+		
+		is_defined = self.macro_name in module._defined_macros
+		# Return a boolean constant (i1 type in LLVM)
+		return ir.Constant(ir.IntType(1), is_defined)
+
+
 @dataclass
 class FunctionCall(Expression):
 	name: str
@@ -1542,6 +1624,58 @@ class FunctionCall(Expression):
 						arg_val = array_ptr
 						#print(f"DEBUG FunctionCall: arg[{i}] after decay: {arg_val.type}")
 			
+			# Check if we have a type mismatch and need to call __expr for automatic conversion
+			if param_index < len(func.args):
+				expected_type = func.args[param_index].type
+				if arg_val.type != expected_type:
+					# Check if this is an object type that has a __expr method for automatic conversion
+					if isinstance(arg_val.type, ir.PointerType):
+						# Get the struct name - handle both identified and literal struct types
+						struct_name = None
+						
+						# Try to get name from identified struct types
+						if hasattr(arg_val.type.pointee, '_name'):
+							struct_name = arg_val.type.pointee._name.strip('"')
+							print(f"DEBUG FunctionCall: Found struct name from _name: {struct_name}")
+						
+						# Try to get name from module's struct types
+						if struct_name is None and hasattr(module, '_struct_types'):
+							print(f"DEBUG FunctionCall: Checking module._struct_types: {list(module._struct_types.keys())}")
+							for name, struct_type in module._struct_types.items():
+								print(f"DEBUG FunctionCall: Comparing {name}: {struct_type} vs {arg_val.type.pointee}")
+								# More robust comparison that handles both identified and literal struct types
+								if (struct_type == arg_val.type.pointee or 
+									(hasattr(struct_type, '_name') and hasattr(arg_val.type.pointee, '_name') and
+									 struct_type._name == arg_val.type.pointee._name) or
+									(str(struct_type) == str(arg_val.type.pointee))):
+									struct_name = name
+									print(f"DEBUG FunctionCall: Found struct name from module: {struct_name}")
+									break
+						
+						# If we found a struct name, look for __expr method
+						if struct_name:
+							print(f"DEBUG FunctionCall: Looking for __expr method for struct type: {struct_name}")
+							expr_method_name = f"{struct_name}.__expr"
+							print(f"DEBUG FunctionCall: Checking for method: {expr_method_name}")
+							print(f"DEBUG FunctionCall: Available globals: {list(module.globals.keys())}")
+							
+							if expr_method_name in module.globals:
+								expr_func = module.globals[expr_method_name]
+								if isinstance(expr_func, ir.Function):
+									print(f"DEBUG FunctionCall: Found __expr method, calling it for automatic conversion")
+									# Call the __expr method to get the underlying representation
+									converted_val = builder.call(expr_func, [arg_val])
+									print(f"DEBUG FunctionCall: Converted {arg_val.type} to {converted_val.type}, expected {expected_type}")
+									# Check if the converted type matches what's expected
+									if converted_val.type == expected_type:
+										arg_val = converted_val
+								else:
+									print(f"DEBUG FunctionCall: __expr method not a function: {type(expr_func)}")
+							else:
+								print(f"DEBUG FunctionCall: __expr method not found: {expr_method_name}")
+						else:
+							print(f"DEBUG FunctionCall: No struct name found for type: {arg_val.type}")
+			
 			arg_vals.append(arg_val)
 			
 		return builder.call(func, arg_vals)
@@ -1599,8 +1733,12 @@ class MemberAccess(Expression):
 			print(f"DEBUG MemberAccess: After load, obj_val.type = {obj_val.type}")
 		
 		if isinstance(obj_val.type, ir.PointerType):
-			# Handle pointer to struct
-			if isinstance(obj_val.type.pointee, ir.LiteralStructType):
+			# Handle pointer to struct (both literal and identified struct types)
+			is_struct_pointer = (isinstance(obj_val.type.pointee, ir.LiteralStructType) or
+								hasattr(obj_val.type.pointee, '_name') or  # Identified struct type
+								hasattr(obj_val.type.pointee, 'elements'))  # Other struct-like types
+			
+			if is_struct_pointer:
 				struct_type = obj_val.type.pointee
 				
 				# Check if this is actually a union (unions are implemented as structs)
@@ -2158,6 +2296,21 @@ class SizeOf(Expression):
 								bytes_size = module.data_layout.get_type_size(element)
 								total_bits += bytes_size * 8
 						return ir.Constant(ir.IntType(32), total_bits)
+					elif hasattr(llvm_type, 'elements'):  # Identified struct type
+						# Calculate struct size in bits by summing all member sizes
+						total_bits = 0
+						for element in llvm_type.elements:
+							if isinstance(element, ir.IntType):
+								total_bits += element.width
+							elif isinstance(element, ir.FloatType):
+								total_bits += 32  # Float is 32 bits
+							elif isinstance(element, ir.PointerType):
+								total_bits += 64  # Assume 64-bit pointers
+							else:
+								# For other types, use data layout to get size in bytes, then convert to bits
+								bytes_size = module.data_layout.get_type_size(element)
+								total_bits += bytes_size * 8
+						return ir.Constant(ir.IntType(32), total_bits)
 					else:
 						raise ValueError(f"Unknown type in sizeof for identifier {self.target.name}: {llvm_type}")
 				
@@ -2532,8 +2685,21 @@ class VariableDeclaration(ASTNode):
 					else:
 						# Cast init value to match variable type if needed
 						if init_val.type != llvm_type:
+							# Handle array concatenation results - preserve array pointer semantics
+							if (isinstance(self.initial_value, BinaryOp) and 
+								self.initial_value.operator in (Operator.ADD, Operator.SUB) and
+								isinstance(init_val.type, ir.PointerType) and 
+								isinstance(init_val.type.pointee, ir.ArrayType) and
+								isinstance(llvm_type, ir.PointerType) and 
+								isinstance(llvm_type.pointee, ir.IntType)):
+								# This is array concatenation result being assigned to pointer type (like noopstr)
+								# Convert array to pointer by GEP to first element, preserving array semantics
+								zero = ir.Constant(ir.IntType(32), 0)
+								array_ptr = builder.gep(init_val, [zero, zero], name="concat_array_to_ptr")
+								builder.store(array_ptr, alloca)
+								return alloca
 							# Handle pointer type compatibility (for AddressOf expressions)
-							if isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
+							elif isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
 								# Both are pointers - check if compatible or cast
 								if llvm_type.pointee != init_val.type.pointee:
 									# Cast pointer types if needed
@@ -2650,6 +2816,51 @@ class Statement(ASTNode):
 	pass
 
 @dataclass
+class MacroDefinition(Statement):
+	"""AST node for def IDENTIFIER LITERAL; statements - defines a macro"""
+	macro_name: str
+	macro_value: Union[str, int, float, bool]
+	
+	def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
+		"""Generate code to define a macro and create a global constant"""
+		# Add macro to the module's macro registry
+		define_macro(module, self.macro_name)
+		
+		# Create a global constant for the macro value
+		if isinstance(self.macro_value, str):
+			# String literal - create global string constant
+			string_bytes = self.macro_value.encode('ascii') + b'\0'  # null terminated
+			str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+			str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+			
+			# Create global variable
+			gv = ir.GlobalVariable(module, str_val.type, name=self.macro_name)
+			gv.linkage = 'internal'
+			gv.global_constant = True
+			gv.initializer = str_val
+		elif isinstance(self.macro_value, int):
+			# Integer literal - create global integer constant
+			int_val = ir.Constant(ir.IntType(32), self.macro_value)
+			gv = ir.GlobalVariable(module, int_val.type, name=self.macro_name)
+			gv.linkage = 'internal'
+			gv.global_constant = True
+			gv.initializer = int_val
+		elif isinstance(self.macro_value, float):
+			# Float literal - create global float constant
+			float_val = ir.Constant(ir.FloatType(), self.macro_value)
+			gv = ir.GlobalVariable(module, float_val.type, name=self.macro_name)
+			gv.linkage = 'internal'
+			gv.global_constant = True
+			gv.initializer = float_val
+		elif isinstance(self.macro_value, bool):
+			# Boolean literal - create global boolean constant
+			bool_val = ir.Constant(ir.IntType(1), self.macro_value)
+			gv = ir.GlobalVariable(module, bool_val.type, name=self.macro_name)
+			gv.linkage = 'internal'
+			gv.global_constant = True
+			gv.initializer = bool_val
+
+@dataclass
 class ExpressionStatement(Statement):
 	expression: Expression
 
@@ -2733,15 +2944,31 @@ class Assignment(Statement):
 			
 			member_name = self.target.member
 			
-			#print(f"DEBUG Assignment: obj.type = {obj.type}, pointee = {getattr(obj.type, 'pointee', None)}")
-			#print(f"DEBUG Assignment: member_name = {member_name}")
-			#if hasattr(module, '_union_types'):
-				#print(f"DEBUG Assignment: Union types available: {list(module._union_types.keys())}")
-				#for union_name, union_type in module._union_types.items():
-					#print(f"DEBUG Assignment: Union {union_name} type: {union_type}")
+			print(f"DEBUG Assignment: obj = {obj}")
+			print(f"DEBUG Assignment: obj.type = {obj.type}")
+			if hasattr(obj.type, 'pointee'):
+				print(f"DEBUG Assignment: obj.type.pointee = {obj.type.pointee}")
+			print(f"DEBUG Assignment: member_name = {member_name}")
+			print(f"DEBUG Assignment: isinstance(obj.type, ir.PointerType) = {isinstance(obj.type, ir.PointerType)}")
+			if isinstance(obj.type, ir.PointerType):
+				print(f"DEBUG Assignment: isinstance(obj.type.pointee, ir.LiteralStructType) = {isinstance(obj.type.pointee, ir.LiteralStructType)}")
+			if hasattr(module, '_union_types'):
+				print(f"DEBUG Assignment: Union types available: {list(module._union_types.keys())}")
+				for union_name, union_type in module._union_types.items():
+					print(f"DEBUG Assignment: Union {union_name} type: {union_type}")
 			
-			if isinstance(obj.type, ir.PointerType) and isinstance(obj.type.pointee, ir.LiteralStructType):
+			# Handle both literal struct types and identified struct types
+			is_struct_pointer = (isinstance(obj.type, ir.PointerType) and 
+							(isinstance(obj.type.pointee, ir.LiteralStructType) or
+							 hasattr(obj.type.pointee, '_name') or  # Identified struct type
+							 hasattr(obj.type.pointee, 'elements')))  # Other struct-like types
+			
+			if is_struct_pointer:
 				struct_type = obj.type.pointee
+				print(f"DEBUG Assignment: Detected struct type: {struct_type}")
+				print(f"DEBUG Assignment: struct_type has names: {hasattr(struct_type, 'names')}")
+				if hasattr(struct_type, 'names'):
+					print(f"DEBUG Assignment: struct_type.names: {struct_type.names}")
 				
 				# Check if this is a union first
 				if hasattr(module, '_union_types'):
@@ -2754,6 +2981,7 @@ class Assignment(Statement):
 				if hasattr(struct_type, 'names'):
 					try:
 						idx = struct_type.names.index(member_name)
+						print(f"DEBUG Assignment: Found member '{member_name}' at index {idx}")
 						member_ptr = builder.gep(
 							obj,
 							[ir.Constant(ir.IntType(32), 0),
@@ -2764,8 +2992,10 @@ class Assignment(Statement):
 						return val
 					except ValueError:
 						raise ValueError(f"Member '{member_name}' not found in struct")
+				else:
+					raise ValueError(f"Struct type missing member names: {struct_type}")
 			
-			raise ValueError(f"Cannot assign to member '{member_name}' of non-struct type")
+			raise ValueError(f"Cannot assign to member '{member_name}' of non-struct type: {obj.type}")
 	
 		elif isinstance(self.target, ArrayAccess):
 			# Array element assignment
@@ -4279,11 +4509,14 @@ class ObjectDef(ASTNode):
 			
 			# Store parameters in scope
 			for i, param in enumerate(func.args):
-				alloca = method_builder.alloca(param.type, name=f"{param.name}.addr")
-				method_builder.store(param, alloca)
-				if i == 0:  # 'this' pointer
-					method_builder.scope["this"] = alloca
+				if i == 0:  # 'this' pointer - store the parameter directly, not an alloca
+					# The 'this' pointer is already a pointer to the struct, we don't need to
+					# allocate storage for it since we just need to access its members
+					method_builder.scope["this"] = param
 				else:
+					# For other parameters, create alloca as usual
+					alloca = method_builder.alloca(param.type, name=f"{param.name}.addr")
+					method_builder.store(param, alloca)
 					method_builder.scope[method.parameters[i-1].name] = alloca
 			
 			# Generate method body

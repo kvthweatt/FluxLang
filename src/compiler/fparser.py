@@ -224,10 +224,11 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
         return UsingStatement(namespace_path)
     
-    def function_def(self) -> FunctionDef:
+    def function_def(self) -> Union[FunctionDef, DefMacro]:
         """
         function_def -> ('const')? ('volatile')? 'def' IDENTIFIER '(' parameter_list? ')' '->' type_spec ';'
         function_def -> ('const')? ('volatile')? 'def' IDENTIFIER '(' parameter_list? ')' '->' type_spec block ';'
+        macro_def -> 'def' IDENTIFIER LITERAL ';'
         """
         is_const = False
         is_volatile = False
@@ -243,6 +244,37 @@ class FluxParser:
         self.consume(TokenType.DEF)
         name = self.consume(TokenType.IDENTIFIER).value
         
+        # Check if this is a macro definition: def IDENTIFIER LITERAL;
+        if (not self.expect(TokenType.LEFT_PAREN) and 
+            self.expect(TokenType.STRING_LITERAL, TokenType.INTEGER, TokenType.FLOAT, TokenType.CHAR, TokenType.TRUE, TokenType.FALSE)):
+            # This is a macro definition
+            if is_const or is_volatile:
+                self.error("Macro definitions cannot have const or volatile qualifiers")
+            
+            # Parse the literal value
+            if self.expect(TokenType.STRING_LITERAL):
+                value = self.current_token.value
+                self.advance()
+            elif self.expect(TokenType.INTEGER):
+                value = int(self.current_token.value, 0)
+                self.advance()
+            elif self.expect(TokenType.FLOAT):
+                value = float(self.current_token.value)
+                self.advance()
+            elif self.expect(TokenType.CHAR):
+                value = self.current_token.value
+                self.advance()
+            elif self.expect(TokenType.TRUE):
+                value = True
+                self.advance()
+            elif self.expect(TokenType.FALSE):
+                value = False
+                self.advance()
+            
+            self.consume(TokenType.SEMICOLON)
+            return MacroDefinition(name, value)
+        
+        # This is a function definition
         self.consume(TokenType.LEFT_PAREN)
         parameters = self.parameter_list() if not self.expect(TokenType.RIGHT_PAREN) else []
         self.consume(TokenType.RIGHT_PAREN)
@@ -1480,7 +1512,19 @@ class FluxParser:
                     args = self.argument_list()
                 self.consume(TokenType.RIGHT_PAREN)
                 if isinstance(expr, Identifier):
-                    expr = FunctionCall(expr.name, args)
+                    # Special case: def(MACRO_NAME) creates a DefMacro node
+                    if expr.name == "def":
+                        if len(args) != 1:
+                            self.error("def() macro check requires exactly one argument (the macro name)")
+                        
+                        # The argument should be an identifier representing the macro name
+                        if not isinstance(args[0], Identifier):
+                            self.error("def() macro check requires a macro name identifier as argument")
+                        
+                        macro_name = args[0].name
+                        expr = DefMacro(macro_name)
+                    else:
+                        expr = FunctionCall(expr.name, args)
                 elif isinstance(expr, MemberAccess):
                     # Method call: obj.method() -> call obj_type.method with obj as first arg
                     # For now, we'll generate the method call name and handle 'this' in codegen
@@ -1589,6 +1633,25 @@ class FluxParser:
             name = self.current_token.value
             self.advance()
             return Identifier(name)
+        elif self.expect(TokenType.DEF) and self.peek() and self.peek().type == TokenType.LEFT_PAREN:
+            # Handle def() macro function calls directly
+            self.advance()  # consume DEF
+            self.consume(TokenType.LEFT_PAREN)
+            args = []
+            if not self.expect(TokenType.RIGHT_PAREN):
+                args = self.argument_list()
+            self.consume(TokenType.RIGHT_PAREN)
+            
+            # Validate def() call
+            if len(args) != 1:
+                self.error("def() macro check requires exactly one argument (the macro name)")
+            
+            # The argument should be an identifier representing the macro name
+            if not isinstance(args[0], Identifier):
+                self.error("def() macro check requires a macro name identifier as argument")
+            
+            macro_name = args[0].name
+            return DefMacro(macro_name)
         elif self.expect(TokenType.XOR):
             # Handle XOR as a function call
             self.advance()

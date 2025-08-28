@@ -1,26 +1,33 @@
-object myObj
+import "redio.fx";
+
+using standard::io;
+
+object string
 {
-	def __init() -> this
-	{
-	    return this;
-	};
+    noopstr base;
 
-	def __exit() -> void
-	{
-	    return void;
-	};
+    def __init(noopstr str) -> this
+    {
+        this.base = str;
+        return this;
+    };
 
-	def foo() -> void
-	{
-		return void;
-	};
+    def __exit() -> void
+    {
+        return void;
+    };
+
+    def __expr() -> noopstr
+    {
+        return this.base;
+    };
 };
 
 def main() -> int
 {
-	myObj newObj();
+    string str("Hello World!");
+    int len = sizeof(str) / 8;
 
-	newObj.foo();
-	
-	return 0;
+    win_print(str, len);
+    return 0;
 };
