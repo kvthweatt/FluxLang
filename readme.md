@@ -1,22 +1,14 @@
 # Flux
-### *The Systems Programming Language That Fixed Computing*
+### *A general purpose, statically typed, object-oriented systems programming language.*
 
 <p align="center">
     <img src="https://github.com/kvthweatt/FluxLang/blob/main/resources/logo_cropped.jpg" width="300" height="150">
 </p>
 
-> *"Linus Torvalds said there's no good replacement for C. I took that personally."*
+**Flux is the systems programming language designed to answer one question: "What if we built a language today, knowing everything we know now, with zero compromises and without relying on legacy?"**  
+Flux also does not rely on the C ABI, going entirely independent.
 
-**Flux is the systems programming language designed to answer one question: "What if we built a language today, knowing everything we know now, with zero compromises?"**  
-It also does not rely on the C ABI, going entirely independent.
-
-## 🚀 **I Accidentally Solved The I/O Wall**
-
-Modern computers waste **70-90% of their time** parsing data instead of computing. JSON parsing, file format conversion, protocol serialization - it's all computational overhead that shouldn't exist.
-
-**Flux eliminates it entirely.**
-
-### **Before Flux: The Traditional Way**
+### **Parsing binary data in C++**
 ```
 // C++ - Parse BMP header (20+ lines of manual parsing)
 BMP parseBMP(uint8_t* data) {
@@ -27,20 +19,20 @@ BMP parseBMP(uint8_t* data) {
     return result;
 }
 ```
-### **After Flux: Zero-Cost Data Structures**
+### **Parsing binary data in Flux**
 ```
 struct BMP {
     Header header;
     InfoHeader info;
 };
 
-// One line. Zero overhead. Perfect.
+// Minimal implementation
 BMP bitmap = (BMP)file_data;
 print((char[2])bitmap.header.sig);  // "BM"
 ```
-**Result:** File parsing becomes insanely fast. I'm nearing the ability to benchmark the actual performance.
+**Result:** More coherent, simpler code.
 
-## ⚡ **Revolutionary Features**
+## ⚡ **Features**
 
 ### **1. Custom Bit-Width Types**
 ```
@@ -48,7 +40,6 @@ unsigned data{13:16} as custom;     // 13-bit data, 16-bit aligned
 signed data{24:32} as audio_sample; // Perfect 24-bit audio
 volatile unsigned data{32} as gpio; // Hardware register mapping
 ```
-Perfect hardware control. Network protocol compatibility. Cache optimization. **Impossible in any other language.**
 
 ### **2. First-Class Operators** 
 ```
@@ -80,7 +71,7 @@ compt {
     float[1024] SIN_TABLE = compute_sin_table();
 };
 ```
-Move arbitrary complexity from runtime to compile-time. **C++'s constexpr wishes it could do this.**
+Move arbitrary complexity from runtime to compile-time.
 
 ### **4. Memory Layout Mastery**
 ```
@@ -91,17 +82,9 @@ struct GPIORegisters {
 };
 GPIORegisters* gpio = @0x40000000;  // Zero abstraction
 gpio.control = 0x1;
-
-// Network protocol perfection
-struct TCPHeader {
-    unsigned data{16:0} src_port;    // Little-endian
-    unsigned data{16:1} dst_port;    // Big-endian
-    unsigned data{4} header_len;
-    unsigned data{6} flags;
-};
-TCPHeader header = (TCPHeader)network_packet;  // Wire-compatible
 ```
-### **5. Inline Assembly Done Right**
+
+### **5. Inline Assembly**
 ```
 volatile asm {
     movq $-11, %rcx
@@ -110,32 +93,7 @@ volatile asm {
     movq $0, %rdx
 } : : "r"(message), "r"(length) : "rax","rcx","memory";
 ```
-## 🎯 **Real-World Impact**
-
-| **Domain** | **Current Bottleneck** | **Flux Performance** |
-|------------|------------------------|---------------------|
-| **Gaming** | 30-60s loading screens | Sub-second loading |
-| **Databases** | Parsing overhead | 100x faster queries |
-| **AI Training** | 70% time on data prep | 3-10x training speedup |
-| **Web Services** | JSON serialization | 10x more requests/server |
-| **Embedded** | Memory/CPU constraints | Perfect hardware mapping |
-
-## 🧠 **The AI Revolution**
-
-**Current AI Pipeline:**
-```
-data = json.load(dataset)         # Parse gigabytes
-images = decode_images(data)      # Convert formats  
-tensors = preprocess(images)      # Reshape, normalize
-model.train(tensors)              # Finally, computation
-```
-**Flux AI Pipeline:**
-```
-TrainingBatch batch = (TrainingBatch)dataset_file;    // Instant
-ModelWeights model = (ModelWeights)checkpoint;        // Zero parsing
-GPUTensor tensor = (GPUTensor)input;                 // Direct mapping
-```
-**AI becomes compute-bound instead of I/O-bound. This could enable AGI by removing computational bottlenecks.**
+**Note:** The assembly syntax currently used is Intel, this will be changed.
 
 ## 🏗️ **The Vision: Replace Everything**
 
@@ -144,10 +102,8 @@ GPUTensor tensor = (GPUTensor)input;                 // Direct mapping
 - [ ] Self-hosting Flux compiler  
 - [ ] Direct assembly generation
 
-### **Phase 2: Ecosystem** *(1-2 Years)*
-- [ ] **Flash**: Flux-native shell
+### **Phase 2: Ecosystem** *(1-2 Years)
 - [ ] Standard library for systems programming
-- [ ] AI frameworks with zero overhead
 - [ ] Developer tooling and IDE support
 
 ### **Phase 3: Total Revolution** *(3-5 Years)*
