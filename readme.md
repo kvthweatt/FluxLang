@@ -49,7 +49,7 @@ operator (u32 x, int n)[>>>] -> u32 {
 };
 
 // Templated with safety contracts
-contract NonZero { assert(a != 0 && b != 0); }
+contract NonZero { assert(a != 0 && b != 0); };
 operator<T>(T a, T b)[/] -> T : NonZero {
     return a / b;  // Safe division for any type
 };
