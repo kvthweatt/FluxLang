@@ -17,7 +17,7 @@ BMP parseBMP(uint8_t* data) {
     result.filesize = *(uint32_t*)(data + 2);
     // ... error-prone, slow, lots of code
     return result;
-}
+};
 ```
 ### **Parsing binary data in Flux**
 ```
