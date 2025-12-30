@@ -1,189 +1,254 @@
 # Flux
-### *The Systems Programming Language That Fixed Computing*
+### *A general purpose, statically typed, object-oriented systems programming language for precise control over binary data.*
 
 <p align="center">
     <img src="https://github.com/kvthweatt/FluxLang/blob/main/resources/logo_cropped.jpg" width="300" height="150">
 </p>
 
-> *"Linus Torvalds said there's no good replacement for C. I took that personally."*
+## What is Flux?
 
-**Flux is the systems programming language designed to answer one question: "What if we built a language today, knowing everything we know now, with zero compromises?"**  
-It also does not rely on the C ABI, going entirely independent.
+Flux is a compiled systems language that combines C-like performance with Python-inspired syntax. It's designed for programmers who need direct memory control and bit-level precision without fighting complex abstractions.
 
-## 🚀 **I Accidentally Solved The I/O Wall**
+**Key characteristics:**
+- Manual memory management
+- Explicit control over data layout
+- Zero-cost binary data manipulation
+- Compile-time execution capabilities
+- Clean, readable syntax
 
-Modern computers waste **70-90% of their time** parsing data instead of computing. JSON parsing, file format conversion, protocol serialization - it's all computational overhead that shouldn't exist.
+## Core Features
 
-**Flux eliminates it entirely.**
+### Bit-Precise Data Types
 
-### **Before Flux: The Traditional Way**
+Define types with exact bit widths and alignment:
+
+```flux
+unsigned data{1} as bit;           // 1-bit type
+unsigned data{13:16} as custom;    // 13 bits, 16-bit aligned
+unsigned data{32} as u32;          // Standard 32-bit unsigned
 ```
-// C++ - Parse BMP header (20+ lines of manual parsing)
-BMP parseBMP(uint8_t* data) {
-    BMP result;
-    result.sig = *(uint16_t*)data;
-    result.filesize = *(uint32_t*)(data + 2);
-    // ... error-prone, slow, lots of code
-    return result;
-}
-```
-### **After Flux: Zero-Cost Data Structures**
-```
-struct BMP {
-    Header header;
-    InfoHeader info;
+
+### Zero-Copy Struct Casting
+
+Map structs directly onto raw bytes without parsing:
+
+```flux
+struct Header {
+    unsigned data{16} magic;
+    unsigned data{32} filesize;
+    unsigned data{32} offset;
 };
 
-// One line. Zero overhead. Perfect.
-BMP bitmap = (BMP)file_data;
-print((char[2])bitmap.header.sig);  // "BM"
+byte[] buffer = file.readall();
+Header header = (Header)buffer;
+print(header.filesize);  // Direct access, no parsing
 ```
-**Result:** File parsing becomes insanely fast. I'm nearing the ability to benchmark the actual performance.
 
-## ⚡ **Revolutionary Features**
+### Bit-Level Field Access
 
-### **1. Custom Bit-Width Types**
-```
-unsigned data{13:16} as custom;     // 13-bit data, 16-bit aligned
-signed data{24:32} as audio_sample; // Perfect 24-bit audio
-volatile unsigned data{32} as gpio; // Hardware register mapping
-```
-Perfect hardware control. Network protocol compatibility. Cache optimization. **Impossible in any other language.**
+Extract individual bits from bytes as named fields:
 
-### **2. First-Class Operators** 
-```
-// Custom operators that feel native
-operator (u32 x, int n)[>>>] -> u32 {
-    return (x >> n) | (x << (32 - n));  // Rotate right
+```flux
+struct Flags {
+    unsigned data{1} enabled;
+    unsigned data{1} error;
+    unsigned data{1} ready;
+    unsigned data{1} busy;
+    unsigned data{4} mode;
 };
 
-// Templated with safety contracts
-contract NonZero { assert(a != 0 && b != 0); }
-operator<T>(T a, T b)[/] -> T : NonZero {
-    return a / b;  // Safe division for any type
-};
+byte status = 0b10110001;
+Flags f = (Flags)status;
+if (f.enabled && !f.error) { /* ... */ }
+```
 
-// Usage feels like language extensions
-result = value >>> 8;
-safe_result = dividend / divisor;  // Contract-checked
-```
-### **3. Compile-Time Execution**
-```
+### Compile-Time Execution
+
+Run actual Flux code during compilation:
+
+```flux
 compt {
-    // Full Flux runtime in the compiler
-    if (def(TARGET_ARM64)) {
-        def CACHE_LINE_SIZE 128;
-        unsigned data{8}[256] LOOKUP_TABLE = generate_optimized_arm();
+    def MY_CONSTANT 42;
+    
+    if (!def(DEBUG_MODE)) {
+        global def DEBUG_MODE true;
+    };
+};
+```
+
+## Practical Examples
+
+**Network Protocol Parsing:**
+```flux
+struct TCPHeader {
+    unsigned data{16} src_port, dst_port;
+    unsigned data{32} seq_num;
+    unsigned data{4} data_offset;
+    unsigned data{6} flags;
+    unsigned data{16} window;
+};
+
+byte[] packet = recv();
+TCPHeader tcp = (TCPHeader)packet;
+```
+
+**Hardware Register Access:**
+```flux
+struct GPIOControl {
+    unsigned data{2} mode;
+    unsigned data{1} pull_up;
+    unsigned data{3} drive_strength;
+    unsigned data{2} reserved;
+};
+
+volatile byte* gpio = @0x40000000;
+GPIOControl ctrl = (GPIOControl)(*gpio);
+ctrl.mode = 0b01;  // Set to output
+*gpio = (byte)ctrl;
+```
+
+**Memory-Efficient Game Data:**
+```flux
+struct Entity {
+    unsigned data{1} active;
+    unsigned data{1} visible;
+    unsigned data{2} team;
+    unsigned data{4} type;
+};
+// 8 properties in 1 byte per entity
+```
+
+## Language Basics
+
+**Functions:**
+```flux
+def add(int x, int y) -> int {
+    return x + y;
+};
+```
+
+**Objects (OOP):**
+```flux
+object Vector3 {
+    float x, y, z;
+    
+    def __init(float x, float y, float z) -> this {
+        this.x = x; this.y = y; this.z = z;
+        return this;
     };
     
-    // Pre-compute crypto tables, physics constants, etc.
-    float[1024] SIN_TABLE = compute_sin_table();
+    def length() -> float {
+        return sqrt(this.x^2 + this.y^2 + this.z^2);
+    };
 };
 ```
-Move arbitrary complexity from runtime to compile-time. **C++'s constexpr wishes it could do this.**
 
-### **4. Memory Layout Mastery**
-```
-// Direct hardware programming
-struct GPIORegisters {
-    volatile unsigned data{32} control;
-    volatile unsigned data{32} status;
+**Structs (Data-only):**
+```flux
+struct Point {
+    float x, y, z;
 };
-GPIORegisters* gpio = @0x40000000;  // Zero abstraction
-gpio.control = 0x1;
+```
 
-// Network protocol perfection
-struct TCPHeader {
-    unsigned data{16:0} src_port;    // Little-endian
-    unsigned data{16:1} dst_port;    // Big-endian
-    unsigned data{4} header_len;
-    unsigned data{6} flags;
+**Memory Management:**
+```flux
+int* ptr;                // Allocate
+*ptr = 42;
+(void)ptr;               // Deallocate explicitly
+```
+
+**Ownership (Optional):**
+```flux
+def ~make() -> ~int {
+    int ~x = 42;
+    return ~x;  // Explicit transfer
 };
-TCPHeader header = (TCPHeader)network_packet;  // Wire-compatible
 ```
-### **5. Inline Assembly Done Right**
-```
-volatile asm {
-    movq $-11, %rcx
-    call GetStdHandle
-    movq %rax, %rcx
-    movq $0, %rdx
-} : : "r"(message), "r"(length) : "rax","rcx","memory";
-```
-## 🎯 **Real-World Impact**
 
-| **Domain** | **Current Bottleneck** | **Flux Performance** |
-|------------|------------------------|---------------------|
-| **Gaming** | 30-60s loading screens | Sub-second loading |
-| **Databases** | Parsing overhead | 100x faster queries |
-| **AI Training** | 70% time on data prep | 3-10x training speedup |
-| **Web Services** | JSON serialization | 10x more requests/server |
-| **Embedded** | Memory/CPU constraints | Perfect hardware mapping |
+## Design Philosophy
 
-## 🧠 **The AI Revolution**
+Flux follows a "high-trust" model:
+- The language provides powerful tools
+- The programmer is responsible for using them correctly
+- Explicit is better than implicit
+- Performance and control over safety guarantees
 
-**Current AI Pipeline:**
-```
-data = json.load(dataset)         # Parse gigabytes
-images = decode_images(data)      # Convert formats  
-tensors = preprocess(images)      # Reshape, normalize
-model.train(tensors)              # Finally, computation
-```
-**Flux AI Pipeline:**
-```
-TrainingBatch batch = (TrainingBatch)dataset_file;    // Instant
-ModelWeights model = (ModelWeights)checkpoint;        // Zero parsing
-GPUTensor tensor = (GPUTensor)input;                 // Direct mapping
-```
-**AI becomes compute-bound instead of I/O-bound. This could enable AGI by removing computational bottlenecks.**
+This means:
+- Manual memory management (no garbage collection)
+- No borrow checker (you manage lifetimes)
+- Direct hardware access when needed
+- Full compile-time programming capabilities
 
-## 🏗️ **The Vision: Replace Everything**
+## Ideal Use Cases
 
-### **Phase 1: Bootstrap** *(Months Away)*
-- [x] Working compiler for reduced specification (Python → LLVM → executable) (Almost complete)
-- [ ] Self-hosting Flux compiler  
-- [ ] Direct assembly generation
+Flux is well-suited for:
+- **Embedded systems** - Direct hardware register access
+- **Network protocols** - Zero-copy packet parsing
+- **File format handling** - Binary data interpretation
+- **Game engines** - Memory-efficient entity systems
+- **Device drivers** - Memory-mapped I/O
+- **Performance-critical code** - When you need C-level control
 
-### **Phase 2: Ecosystem** *(1-2 Years)*
-- [ ] **Flash**: Flux-native shell
-- [ ] Standard library for systems programming
-- [ ] AI frameworks with zero overhead
-- [ ] Developer tooling and IDE support
+Flux may not be the best choice for:
+- Applications where memory safety is critical
+- Projects requiring a mature ecosystem
+- Teams new to systems programming
+- Rapid prototyping of business logic
 
-### **Phase 3: Total Revolution** *(3-5 Years)*
-- [ ] Linux kernel rewrite in pure Flux
-- [ ] Unified computing stack - no language fragmentation
-- [ ] Performance revolution across all computing
+## Current Status
 
-**"The good replacement for C that Linus was waiting for."**
+Flux is in active development. The language specification is complete, but implementation is ongoing.
 
-## 🚀 **Get Started**
+**What exists:**
+- Complete language specification (reduced and full versions)
+- Comprehensive tutorial documentation
+- Clear syntax and semantics
 
-### **Hello World**
-```
+**What's being built:**
+- Compiler implementation
+- Standard library
+- Build tooling
+- Package manager
+
+## Getting Involved
+
+- **Discord:** [Join the Flux community](https://discord.gg/RAHjbYuNUc)
+- **Contribute:** The project welcomes contributors
+- **Feedback:** Share your thoughts on language design
+
+## Learning Resources
+
+- **Intro to Programming with Flux** - Start here if new to programming
+- **Reduced Specification** - Core language features
+- **Full Specification** - Complete language reference
+
+## Example: Complete Program
+
+```flux
 import "standard.fx";
 
+using standard::io;
+
+struct Packet {
+    unsigned data{8} type;
+    unsigned data{16} length;
+    unsigned data{32} timestamp;
+};
+
 def main() -> int {
-    print("Hello, World!");
+    byte[] data = [0x01, 0x00, 0x20, 0x5F, 0x12, 0x34, 0x56];
+    Packet pkt = (Packet)data;
+    
+    print(f"Type: {pkt.type}");
+    print(f"Length: {pkt.length}");
+    print(f"Time: {pkt.timestamp}");
+    
     return 0;
 };
 ```
-### **Quick Setup**
-# Install dependencies
-`pip install llvmlite==0.41.0`
 
-# Compile and run
-```
-python flux_compiler.py hello.fx
-./hello
-```
-### **Try Something Amazing** (Nearing implementation)
-```
-// Load a bitmap image in one line
-struct BMP { Header h; InfoHeader i; };
-BMP image = (BMP)file_data;
-print(f"Image: {image.i.width}x{image.i.height}");
-```
+**Note:** Flux is a systems programming language that assumes you understand memory management and low-level programming concepts. If you're new to systems programming, work through the tutorial documentation carefully.
+
 ## 📚 **Learn More**
 
 - **[Language Specification](docs/lang_spec_full.md)** - Complete language reference
