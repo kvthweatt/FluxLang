@@ -10,6 +10,6 @@ struct X
 def main() -> int
 {
 	X x = {a = "TEST", b = "ING!"};
-    win_print(@x.a, 10);
+    win_print(@x.a, 4);
     return 0;
 };

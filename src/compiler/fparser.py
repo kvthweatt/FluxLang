@@ -592,14 +592,13 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
         return NamespaceDef(name, functions, structs, objects, variables, nested_namespaces, base_namespaces)
     
-    def type_spec(self, caller=None) -> TypeSpec:
+    def type_spec(self) -> TypeSpec:
         """
         type_spec -> ('const')? ('volatile')? ('signed'|'unsigned')? base_type alignment? array_spec? pointer_spec?
         """
         is_const = False
         is_volatile = False
         is_signed = True
-
 
         if self.expect(TokenType.CONST):
             is_const = True
@@ -612,29 +611,37 @@ class FluxParser:
         if self.expect(TokenType.SIGNED):
             is_signed = True
             self.advance()
-
         elif self.expect(TokenType.UNSIGNED):
             is_signed = False
             self.advance()
         
         # Base type
-        base_type = self.base_type()
+        base_type_result = self.base_type()
+        custom_typename = None
+        
+        # Handle custom type names
+        if isinstance(base_type_result, list):
+            base_type = base_type_result[0]
+            custom_typename = base_type_result[1]
+        else:
+            base_type = base_type_result
         
         # Bit width and alignment for data types
         bit_width = None
         alignment = None
         
-        if base_type == DataType.DATA:
+        if base_type == DataType.DATA and custom_typename is None:
+            # Only parse bit width for explicit data{N} types, not custom type aliases
             if self.expect(TokenType.LEFT_BRACE):
                 self.advance()
-                bit_width = int(self.consume(TokenType.INTEGER).value, 0)
+                bit_width = int(self.consume(TokenType.INTEGER).value)
                 
                 if self.expect(TokenType.COLON):
                     self.advance()
-                    alignment = int(self.consume(TokenType.INTEGER).value, 0)
+                    alignment = int(self.consume(TokenType.INTEGER).value)
                 
                 self.consume(TokenType.RIGHT_BRACE)
-                
+        
         # Array specification
         is_array = False
         array_size = None
@@ -643,7 +650,7 @@ class FluxParser:
             is_array = True
             self.advance()
             if not self.expect(TokenType.RIGHT_BRACKET):
-                array_size = int(self.consume(TokenType.INTEGER).value, 0)
+                array_size = int(self.consume(TokenType.INTEGER).value)
             self.consume(TokenType.RIGHT_BRACKET)
         
         # Pointer specification
@@ -652,12 +659,23 @@ class FluxParser:
             is_pointer = True
             self.advance()
         
-        return TypeSpec(base_type, is_signed, is_const, is_volatile, 
-                       bit_width, alignment, is_array, array_size, is_pointer)
+        return TypeSpec(
+            base_type=base_type,
+            is_signed=is_signed,
+            is_const=is_const,
+            is_volatile=is_volatile,
+            bit_width=bit_width,
+            alignment=alignment,
+            is_array=is_array,
+            array_size=array_size,
+            is_pointer=is_pointer,
+            custom_typename=custom_typename
+        )
     
-    def base_type(self) -> Union[DataType, str]:
+    def base_type(self) -> Union[DataType, List]:
         """
         base_type -> 'int' | 'float' | 'char' | 'bool' | 'data' | 'void' | IDENTIFIER
+        Returns DataType for built-in types, or [DataType.DATA, typename] for custom types
         """
         if self.expect(TokenType.INT):
             self.advance()
@@ -681,12 +699,12 @@ class FluxParser:
             self.advance()
             return DataType.THIS
         elif self.expect(TokenType.OBJECT):
-            self.error("Objects cannot be used as types in struct members. Objects are not valid member types.") # Why the fuck is this here as if type_spec->base_type is used only by structs??? wtf.
+            self.error("Objects cannot be used as types in struct members.")
         elif self.expect(TokenType.IDENTIFIER):
-            # Custom type - return the actual name instead of DataType.DATA
-            custom_type_name = self.current_token.value
+            # Custom type - return [DataType.DATA, typename]
+            custom_typename = self.current_token.value
             self.advance()
-            return custom_type_name
+            return [DataType.DATA, custom_typename]
         else:
             self.error("Expected type specifier")
     
@@ -761,7 +779,10 @@ class FluxParser:
         variable_declaration -> type_spec IDENTIFIER ('=' expression)?
                              | type_spec 'as' IDENTIFIER ('=' expression)?
         """
+        #print("before type_spec()")
         type_spec = self.type_spec()
+        #print("after type_spec()")
+        print(type_spec.bit_width)
 
         # Check if this is a type declaration (using 'as')
         if self.expect(TokenType.AS):

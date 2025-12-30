@@ -110,10 +110,6 @@ class Literal(ASTNode):
         if not isinstance(self.value, dict):
             raise ValueError("Expected dictionary for struct literal")
         
-        # For now, we need to determine the struct type from context
-        # In a complete implementation, this would be resolved during semantic analysis
-        # For testing purposes, let's assume we can infer from the fields present
-        
         # Look for a compatible struct type in the module
         struct_type = None
         field_names = list(self.value.keys())
@@ -132,14 +128,41 @@ class Literal(ASTNode):
         # Allocate space for the struct instance
         if builder.scope is None:
             # Global context - create a struct constant
-            # Generate constant values for each field
             field_values = []
             for member_name in struct_type.names:
                 if member_name in self.value:
                     # Field is initialized in the literal
                     field_expr = self.value[member_name]
-                    field_value = field_expr.codegen(builder, module)
-                    field_values.append(field_value)
+                    field_index = struct_type.names.index(member_name)
+                    expected_type = struct_type.elements[field_index]
+                    
+                    # Handle string literals for pointer types (like noopstr which is i8*)
+                    if (isinstance(field_expr, Literal) and 
+                        field_expr.type == DataType.CHAR and
+                        isinstance(expected_type, ir.PointerType) and
+                        isinstance(expected_type.pointee, ir.IntType) and
+                        expected_type.pointee.width == 8):
+                        # Create a global string constant
+                        string_val = field_expr.value
+                        string_bytes = string_val.encode('ascii')
+                        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+                        str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+                        
+                        # Create global variable for the string
+                        gv = ir.GlobalVariable(module, str_val.type, 
+                                              name=f".str.struct_init_{member_name}")
+                        gv.linkage = 'internal'
+                        gv.global_constant = True
+                        gv.initializer = str_val
+                        
+                        # Get pointer to first character
+                        zero = ir.Constant(ir.IntType(32), 0)
+                        str_ptr = gv.gep([zero, zero])
+                        field_values.append(str_ptr)
+                    else:
+                        # Normal field initialization
+                        field_value = field_expr.codegen(builder, module)
+                        field_values.append(field_value)
                 else:
                     # Field not specified, use zero initialization
                     field_index = struct_type.names.index(member_name)
@@ -168,26 +191,47 @@ class Literal(ASTNode):
                     inbounds=True
                 )
                 
-                # Generate value and store it
-                field_value = field_value_expr.codegen(builder, module)
-                
                 # Get the expected field type
                 expected_type = struct_type.elements[field_index]
                 
-                # Convert field value to match the expected type if needed
-                if field_value.type != expected_type:
-                    if isinstance(field_value.type, ir.IntType) and isinstance(expected_type, ir.IntType):
-                        if field_value.type.width > expected_type.width:
-                            # Truncate to smaller type
-                            field_value = builder.trunc(field_value, expected_type)
-                        elif field_value.type.width < expected_type.width:
-                            # Extend to larger type
-                            field_value = builder.sext(field_value, expected_type)
-                    # Add other type conversions as needed
-                    elif isinstance(field_value.type, ir.IntType) and isinstance(expected_type, ir.FloatType):
-                        field_value = builder.sitofp(field_value, expected_type)
-                    elif isinstance(field_value.type, ir.FloatType) and isinstance(expected_type, ir.IntType):
-                        field_value = builder.fptosi(field_value, expected_type)
+                # Handle string literals for pointer types (like noopstr which is i8*)
+                if (isinstance(field_value_expr, Literal) and 
+                    field_value_expr.type == DataType.CHAR and
+                    isinstance(expected_type, ir.PointerType) and
+                    isinstance(expected_type.pointee, ir.IntType) and
+                    expected_type.pointee.width == 8):
+                    # Create a global string constant for local initialization too
+                    string_val = field_value_expr.value
+                    string_bytes = string_val.encode('ascii')
+                    str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+                    str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+                    
+                    # Create global variable for the string
+                    gv = ir.GlobalVariable(module, str_val.type, 
+                                          name=f".str.local_struct_init_{field_name}")
+                    gv.linkage = 'internal'
+                    gv.global_constant = True
+                    gv.initializer = str_val
+                    
+                    # Get pointer to first character
+                    zero = ir.Constant(ir.IntType(32), 0)
+                    str_ptr = builder.gep(gv, [zero, zero], name=f"{field_name}_str_ptr")
+                    field_value = str_ptr
+                else:
+                    # Generate value normally
+                    field_value = field_value_expr.codegen(builder, module)
+                    
+                    # Convert field value to match the expected type if needed
+                    if field_value.type != expected_type:
+                        if isinstance(field_value.type, ir.IntType) and isinstance(expected_type, ir.IntType):
+                            if field_value.type.width > expected_type.width:
+                                field_value = builder.trunc(field_value, expected_type)
+                            elif field_value.type.width < expected_type.width:
+                                field_value = builder.sext(field_value, expected_type)
+                        elif isinstance(field_value.type, ir.IntType) and isinstance(expected_type, ir.FloatType):
+                            field_value = builder.sitofp(field_value, expected_type)
+                        elif isinstance(field_value.type, ir.FloatType) and isinstance(expected_type, ir.IntType):
+                            field_value = builder.fptosi(field_value, expected_type)
                 
                 builder.store(field_value, field_ptr)
             
@@ -207,7 +251,11 @@ class Identifier(ASTNode):
             # For arrays, return the pointer directly (don't load)
             if isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.ArrayType):
                 return ptr
-            # Load the value if it's a non-array pointer type
+            # For structs, return the pointer directly (don't load)
+            # This allows member access to work: x.a needs the pointer to x, not the loaded value
+            elif isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.LiteralStructType):
+                return ptr
+            # Load the value if it's a non-array, non-struct pointer type
             elif isinstance(ptr.type, ir.PointerType):
                 ret_val = builder.load(ptr, name=self.name)
                 if hasattr(builder, 'volatile_vars') and self.name in builder.volatile_vars:
@@ -222,7 +270,10 @@ class Identifier(ASTNode):
             # For arrays, return the pointer directly (don't load)
             if isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.ArrayType):
                 return gvar
-            # Load the value if it's a non-array pointer type
+            # For structs, return the pointer directly (don't load)
+            elif isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.LiteralStructType):
+                return gvar
+            # Load the value if it's a non-array, non-struct pointer type
             elif isinstance(gvar.type, ir.PointerType):
                 ret_val = builder.load(gvar, name=self.name)
                 if hasattr(builder, 'volatile_vars') and self.name in getattr(builder,'volatile_vars',set()):
@@ -247,7 +298,10 @@ class Identifier(ASTNode):
                     # For arrays, return the pointer directly (don't load)
                     if isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.ArrayType):
                         return gvar
-                    # Load the value if it's a non-array pointer type
+                    # For structs, return the pointer directly (don't load)
+                    elif isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.LiteralStructType):
+                        return gvar
+                    # Load the value if it's a non-array, non-struct pointer type
                     elif isinstance(gvar.type, ir.PointerType):
                         ret_val = builder.load(gvar, name=self.name)
                         if hasattr(builder, 'volatile_vars') and self.name in getattr(builder,'volatile_vars',set()):
@@ -263,8 +317,8 @@ class Identifier(ASTNode):
 
 # Type definitions
 @dataclass
-class TypeSpec(ASTNode):
-    base_type: Union[DataType, str]  # Can be DataType enum or custom type name
+class TypeSpec:
+    base_type: Union[DataType, str]
     is_signed: bool = True
     is_const: bool = False
     is_volatile: bool = False
@@ -273,68 +327,41 @@ class TypeSpec(ASTNode):
     is_array: bool = False
     array_size: Optional[int] = None
     is_pointer: bool = False
+    custom_typename: Optional[str] = None  # Add this field
 
 
-    def get_llvm_type(self, module: ir.Module) -> ir.Type:  # Renamed from get_llvm_type
-        if isinstance(self.base_type, str):
-            #print(f"DEBUG get_llvm_type: Resolving base_type='{self.base_type}'")
-            # Check for struct types first
-            if hasattr(module, '_struct_types') and self.base_type in module._struct_types:
-                #print(f"DEBUG get_llvm_type: Found struct type {self.base_type}")
-                return module._struct_types[self.base_type]
-            # Check for union types
-            if hasattr(module, '_union_types') and self.base_type in module._union_types:
-                #print(f"DEBUG get_llvm_type: Found union type {self.base_type}")
-                return module._union_types[self.base_type]
-            # Handle custom types (like i64)
-            if hasattr(module, '_type_aliases') and self.base_type in module._type_aliases:
-                alias_type = module._type_aliases[self.base_type]
-                #print(f"DEBUG get_llvm_type: Found direct type alias {self.base_type} -> {alias_type}")
-                # Return the alias type as-is (for noopstr -> i8*, we want i8*, not i8)
-                return alias_type
-            
-            # Check for namespace-qualified names using 'using' statements
-            if hasattr(module, '_using_namespaces'):
-                #print(f"DEBUG get_llvm_type: Checking namespaces for '{self.base_type}'")
-                #print(f"DEBUG get_llvm_type: Available namespaces: {module._using_namespaces}")
-                
-                # Check ALL possible mangled names that could exist
-                #print(f"DEBUG get_llvm_type: Available type aliases: {list(module._type_aliases.keys()) if hasattr(module, '_type_aliases') else 'None'}")
-                
-                for namespace in module._using_namespaces:
-                    # Convert namespace path to mangled name format
-                    mangled_prefix = namespace.replace('::', '__') + '__'
-                    mangled_name = mangled_prefix + self.base_type
-                    #print(f"DEBUG get_llvm_type: Checking mangled name '{mangled_name}' in namespace '{namespace}'")
-                    
-                    # Check in type aliases with mangled name
-                    if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
-                        alias_type = module._type_aliases[mangled_name]
-                        #print(f"DEBUG get_llvm_type: Found namespace type alias {mangled_name} -> {alias_type}")
-                        # Return the alias type as-is
-                        return alias_type
-                
-                # FORCE CHECK: Look for any type alias that ends with our type name
-                # This handles cases where the namespace processing order causes issues
-                if hasattr(module, '_type_aliases'):
-                    for alias_name, alias_type in module._type_aliases.items():
-                        # Check if this alias ends with our type name (e.g., 'standard__types__byte' ends with 'byte')
-                        if alias_name.endswith('__' + self.base_type):
-                            # Extract the namespace part to verify it's in our using list
-                            namespace_part = alias_name[:-len('__' + self.base_type)]
-                            # Convert back to namespace format (e.g., 'standard__types' -> 'standard::types')
-                            namespace_name = namespace_part.replace('__', '::')
-                            #print(f"DEBUG get_llvm_type: Found potential match {alias_name} for namespace {namespace_name}")
-                            # Check if this namespace is in our using list
-                            if namespace_name in module._using_namespaces:
-                                #print(f"DEBUG get_llvm_type: Using forced match {alias_name} -> {alias_type}")
-                                return alias_type
-            #else:
-                #print(f"DEBUG get_llvm_type: No _using_namespaces found on module")
-            
-            #print(f"DEBUG get_llvm_type: No alias found for '{self.base_type}'")
-            raise NameError(f"Unknown type: {self.base_type}")
+    def get_llvm_type(self, module: ir.Module) -> ir.Type:
+        """Get LLVM type for this TypeSpec, resolving custom type names"""
         
+        # Handle custom type names (type aliases) FIRST, before checking bit_width
+        if self.custom_typename:
+            # Look up the type alias with various namespace prefixes
+            potential_names = [
+                self.custom_typename,
+                f"standard__types__{self.custom_typename}",
+                f"standard__{self.custom_typename}",
+                f"types__{self.custom_typename}"
+            ]
+            
+            for name in potential_names:
+                if hasattr(module, '_type_aliases') and name in module._type_aliases:
+                    base_type = module._type_aliases[name]
+                    
+                    # If it's an array type with no size specified, return pointer to element
+                    if isinstance(base_type, ir.ArrayType) and not self.is_array:
+                        return ir.PointerType(base_type.element)
+                    
+                    return base_type
+            
+            # Check struct types
+            for name in potential_names:
+                if hasattr(module, '_struct_types') and name in module._struct_types:
+                    return module._struct_types[name]
+            
+            # If not found, raise error
+            raise NameError(f"Unknown type: {self.custom_typename} (searched: {potential_names})")
+        
+        # Handle built-in types
         if self.base_type == DataType.INT:
             return ir.IntType(32)
         elif self.base_type == DataType.FLOAT:
@@ -346,28 +373,37 @@ class TypeSpec(ASTNode):
         elif self.base_type == DataType.VOID:
             return ir.VoidType()
         elif self.base_type == DataType.DATA:
-            if self.bit_width is not None:
-                return ir.IntType(self.bit_width)
-            else:
-                # If bit_width is None, this should not happen for properly resolved DATA types
+            # Only require bit_width for explicit data{N} types without custom names
+            if self.bit_width is None:
                 raise ValueError(f"DATA type missing bit_width for {self}")
+            return ir.IntType(self.bit_width)
         else:
             raise ValueError(f"Unsupported type: {self.base_type}")
     
     def get_llvm_type_with_array(self, module: ir.Module) -> ir.Type:
-        """Get LLVM type with array support"""
+        """Get LLVM type including array/pointer specifications"""
+        
+        # Get base type (this handles custom type names)
         base_type = self.get_llvm_type(module)
         
+        # Handle array types
         if self.is_array:
             if self.array_size is not None:
+                # Fixed-size array
                 return ir.ArrayType(base_type, self.array_size)
             else:
-                # For unsized arrays (like byte[]), treat as pointer type
-                return ir.PointerType(base_type)
-        elif self.is_pointer:
+                # Unsized array - return pointer to element type
+                # If base_type is already a pointer (like from a type alias), use its pointee
+                if isinstance(base_type, ir.PointerType):
+                    return base_type  # Already a pointer type
+                else:
+                    return ir.PointerType(base_type)
+        
+        # Handle pointer types
+        if self.is_pointer:
             return ir.PointerType(base_type)
-        else:
-            return base_type
+        
+        return base_type
 
 @dataclass
 class CustomType(ASTNode):
@@ -1605,6 +1641,11 @@ class FunctionCall(Expression):
                 arg_val = str_ptr
             else:
                 arg_val = arg.codegen(builder, module)
+                print(f"DEBUG FunctionCall arg[{i}]: type(arg) = {type(arg).__name__}")
+                print(f"DEBUG FunctionCall arg[{i}]: arg = {arg}")
+                print(f"DEBUG FunctionCall arg[{i}]: arg_val.type = {arg_val.type}")
+                if param_index < len(func.args):
+                    print(f"DEBUG FunctionCall arg[{i}]: expected type = {func.args[param_index].type}")
             
             #print(f"DEBUG FunctionCall: arg[{i}] original type: {arg_val.type}")
             
@@ -1709,28 +1750,14 @@ class MemberAccess(Expression):
         
         # Handle regular member access (obj.x where obj is an instance)
         obj_val = self.object.codegen(builder, module)
-        #print(f"DEBUG MemberAccess: obj_val.type = {obj_val.type}")
-        #print(f"DEBUG MemberAccess: self.object = {self.object}")
-        #print(f"DEBUG MemberAccess: self.member = {self.member}")
         
         # Special case: if this is accessing 'this' in a method, handle the double pointer issue
-        #print(f"DEBUG MemberAccess: isinstance(self.object, Identifier) = {isinstance(self.object, Identifier)}")
-        #print(f"DEBUG MemberAccess: self.object.name == 'this' = {self.object.name == 'this' if isinstance(self.object, Identifier) else 'N/A'}")
-        #print(f"DEBUG MemberAccess: isinstance(obj_val.type, ir.PointerType) = {isinstance(obj_val.type, ir.PointerType)}")
-        #if isinstance(obj_val.type, ir.PointerType):
-            #print(f"DEBUG MemberAccess: obj_val.type.pointee = {obj_val.type.pointee}")
-            #print(f"DEBUG MemberAccess: isinstance(obj_val.type.pointee, ir.PointerType) = {isinstance(obj_val.type.pointee, ir.PointerType)}")
-            #if isinstance(obj_val.type.pointee, ir.PointerType):
-                #print(f"DEBUG MemberAccess: obj_val.type.pointee.pointee = {obj_val.type.pointee.pointee}")
-                #print(f"DEBUG MemberAccess: isinstance(obj_val.type.pointee.pointee, ir.LiteralStructType) = {isinstance(obj_val.type.pointee.pointee, ir.LiteralStructType)}")
         if (isinstance(self.object, Identifier) and self.object.name == "this" and 
             isinstance(obj_val.type, ir.PointerType) and 
             isinstance(obj_val.type.pointee, ir.PointerType) and
             isinstance(obj_val.type.pointee.pointee, ir.LiteralStructType)):
-            #print(f"DEBUG MemberAccess: Detected double pointer 'this', loading actual pointer")
             # Load the actual 'this' pointer from the alloca
             obj_val = builder.load(obj_val, name="this_ptr")
-            #print(f"DEBUG MemberAccess: After load, obj_val.type = {obj_val.type}")
         
         if isinstance(obj_val.type, ir.PointerType):
             # Handle pointer to struct (both literal and identified struct types)
@@ -1758,6 +1785,7 @@ class MemberAccess(Expression):
                 except ValueError:
                     raise ValueError(f"Member '{self.member}' not found in struct")
                 
+                # FIXED: Pass indices as a single list argument
                 member_ptr = builder.gep(
                     obj_val,
                     [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), member_index)],
@@ -2029,46 +2057,39 @@ class PointerDeref(Expression):
 class AddressOf(Expression):
     expression: Expression
 
+# Replace the AddressOf.codegen() method (around line 800 in fast.py)
+# This fixes the GEP calls throughout the method
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        #print(f"DEBUG AddressOf: Starting codegen for AddressOf of {self.expression}")
         # Special case: Handle Identifier directly to avoid the codegen call that might fail
         if isinstance(self.expression, Identifier):
             var_name = self.expression.name
-            #print(f"DEBUG AddressOf: Processing Identifier '{var_name}'")
             
             # Check if it's a local variable
             if builder.scope is not None and var_name in builder.scope:
                 ptr = builder.scope[var_name]
-                #print(f"DEBUG AddressOf: Found {var_name} in local scope, type: {ptr.type}")
                 # Special case: if this is a function parameter that's already a pointer type
                 # (like array parameters), return the loaded value directly
                 if (isinstance(ptr.type, ir.PointerType) and 
                     isinstance(ptr.type.pointee, ir.PointerType)):
-                    #print(f"DEBUG AddressOf: Double pointer detected, loading...")
                     # This is a pointer to a pointer (function parameter storage)
                     # Return the loaded pointer value, not the address of the storage
                     result = builder.load(ptr, name=f"{var_name}_ptr")
-                    #print(f"DEBUG AddressOf: Loaded result type: {result.type}")
                     return result
-                #print(f"DEBUG AddressOf: Returning local pointer directly: {ptr.type}")
                 return ptr
             
             # Check if it's a global variable
             if var_name in module.globals:
                 gvar = module.globals[var_name]
-                #print(f"DEBUG AddressOf: Found {var_name} in globals, type: {gvar.type}")
                 # For arrays (including string arrays like noopstr), return the global directly
                 # For other pointer types, check if it's a pointer to pointer
                 if (isinstance(gvar.type, ir.PointerType) and 
                     isinstance(gvar.type.pointee, ir.PointerType) and
                     not isinstance(gvar.type.pointee, ir.ArrayType)):
-                    #print(f"DEBUG AddressOf: Global double pointer (non-array) detected, loading...")
                     # This is a pointer to a pointer (non-array global variable storage of pointer type)
                     # Return the loaded pointer value, not the address of the storage
                     result = builder.load(gvar, name=f"{var_name}_ptr")
-                    #print(f"DEBUG AddressOf: Loaded global result type: {result.type}")
                     return result
-                #print(f"DEBUG AddressOf: Returning global pointer directly: {gvar.type}")
                 return gvar
             
             # Check for namespace-qualified names using 'using' statements
@@ -2081,20 +2102,14 @@ class AddressOf(Expression):
                     # Check in global variables with mangled name
                     if mangled_name in module.globals:
                         gvar = module.globals[mangled_name]
-                        #print(f"DEBUG AddressOf: Found {var_name} as {mangled_name}, type: {gvar.type}")
                         if isinstance(gvar.type, ir.PointerType):
-                            #print(f"DEBUG AddressOf: pointee type: {gvar.type.pointee}")
-                            #print(f"DEBUG AddressOf: is array type: {isinstance(gvar.type.pointee, ir.ArrayType)}")
                             # For arrays (including string arrays like noopstr), return the global directly
                             # For other pointer types, check if it's a pointer to pointer
                             if (isinstance(gvar.type.pointee, ir.PointerType) and not isinstance(gvar.type.pointee, ir.ArrayType)):
-                                #print(f"DEBUG AddressOf: Namespace global double pointer (non-array) detected, loading...")
                                 # This is a pointer to a pointer (non-array global variable storage of pointer type)
                                 # Return the loaded pointer value, not the address of the storage
                                 result = builder.load(gvar, name=f"{var_name}_ptr")
-                                #print(f"DEBUG AddressOf: Loaded namespace global result type: {result.type}")
                                 return result
-                        #print(f"DEBUG AddressOf: Returning namespace global directly: {gvar.type}")
                         return gvar
             
             # If we get here, the variable hasn't been declared yet
@@ -2106,39 +2121,49 @@ class AddressOf(Expression):
             # This is a fundamental identity: &(*ptr) == ptr
             return self.expression.pointer.codegen(builder, module)
         
-        # For non-Identifier expressions, generate code normally
-        target = self.expression.codegen(builder, module)
-        
-        # Handle member access
+        # Handle member access BEFORE calling codegen to avoid loading the value
         if isinstance(self.expression, MemberAccess):
             obj = self.expression.object.codegen(builder, module)
             member_name = self.expression.member
             
+            # Debug: Check what we got
+            print(f"DEBUG AddressOf(MemberAccess): obj.type = {obj.type}")
+            
             if isinstance(obj.type, ir.PointerType) and isinstance(obj.type.pointee, ir.LiteralStructType):
                 struct_type = obj.type.pointee
+                print(f"DEBUG AddressOf(MemberAccess): struct_type = {struct_type}")
+                print(f"DEBUG AddressOf(MemberAccess): struct_type.names = {struct_type.names}")
+                
                 if hasattr(struct_type, 'names'):
                     try:
                         idx = struct_type.names.index(member_name)
-                        return builder.gep(
+                        print(f"DEBUG AddressOf(MemberAccess): member '{member_name}' at index {idx}")
+                        print(f"DEBUG AddressOf(MemberAccess): member type = {struct_type.elements[idx]}")
+                        
+                        # Return pointer to member WITHOUT loading
+                        member_ptr = builder.gep(
                             obj,
-                            [ir.Constant(ir.IntType(32), 0)],
-                            [ir.Constant(ir.IntType(32), idx)],
-                            inbounds=True
+                            [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), idx)],
+                            inbounds=True,
+                            name=f"ptr_to_{member_name}"
                         )
+                        print(f"DEBUG AddressOf(MemberAccess): GEP result type = {member_ptr.type}")
+                        return member_ptr
                     except ValueError:
                         raise ValueError(f"Member '{member_name}' not found in struct")
         
         # Handle array access
-        elif isinstance(self.expression, ArrayAccess):
+        if isinstance(self.expression, ArrayAccess):
             array = self.expression.array.codegen(builder, module)
             index = self.expression.index.codegen(builder, module)
             
             if isinstance(array.type, ir.PointerType):
                 zero = ir.Constant(ir.IntType(32), 0)
+                # FIXED: Pass indices as a single list
                 return builder.gep(array, [zero, index], inbounds=True)
         
         # Handle pointer dereference - &(*ptr) is equivalent to ptr
-        elif isinstance(self.expression, PointerDeref):
+        if isinstance(self.expression, PointerDeref):
             # For &(*ptr), just return the pointer value directly
             # This is a fundamental identity: &(*ptr) == ptr
             return self.expression.pointer.codegen(builder, module)
@@ -2155,9 +2180,7 @@ class AddressOf(Expression):
             # Return pointer to the temporary storage
             return temp_alloca
         
-        raise ValueError(f"Cannot take address of {type(self.expression).__name__}")
-
-@dataclass
+        raise ValueError(f"Cannot take address of {type(self.expression).__name__}")@dataclass
 class AlignOf(Expression):
     target: Union[TypeSpec, Expression]
 
@@ -2356,15 +2379,7 @@ class VariableDeclaration(ASTNode):
     initial_value: Optional[Expression] = None
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        #print(f"DEBUG VariableDeclaration: name={self.name}, type_spec.base_type={self.type_spec.base_type}")
-        #print(f"DEBUG VariableDeclaration: type_spec={self.type_spec}")
-        #if hasattr(module, '_type_aliases'):
-            #print(f"DEBUG VariableDeclaration: available type aliases: {list(module._type_aliases.keys())}")
-            #for alias_name, alias_type in module._type_aliases.items():
-                #print(f"DEBUG VariableDeclaration:   {alias_name} -> {alias_type}")
-        
         # Check for automatic array size inference with string literals
-        # This handles both direct array types and type aliases that resolve to arrays
         infer_array_size = False
         resolved_type_spec = self.type_spec
         
@@ -2373,23 +2388,20 @@ class VariableDeclaration(ASTNode):
             self.initial_value and isinstance(self.initial_value, Literal) and
             self.initial_value.type == DataType.CHAR):
             infer_array_size = True
+            string_length = len(self.initial_value.value)
         
-        # Type alias check - if base_type is a string, it might be a type alias
-        elif (isinstance(self.type_spec.base_type, str) and
-            self.initial_value and isinstance(self.initial_value, Literal) and
-            self.initial_value.type == DataType.CHAR):
-            # Check if the type alias resolves to an array type
-            # Use the same resolution logic as TypeSpec.get_llvm_type to handle namespaced types
+        # Type alias check - if custom_typename exists, check if it resolves to an array
+        elif (self.type_spec.custom_typename and
+              self.initial_value and isinstance(self.initial_value, Literal) and
+              self.initial_value.type == DataType.CHAR):
             try:
                 resolved_llvm_type = self.type_spec.get_llvm_type(module)
-            except NameError:
-                resolved_llvm_type = None
-            
-            if resolved_llvm_type is not None:
-                # If it resolves to a pointer type (unsized array), we can infer the size
-                if isinstance(resolved_llvm_type, ir.PointerType) and isinstance(resolved_llvm_type.pointee, ir.IntType) and resolved_llvm_type.pointee.width == 8:
+                # If it's a pointer to i8 (string type), we can infer size
+                if isinstance(resolved_llvm_type, ir.PointerType) and \
+                   isinstance(resolved_llvm_type.pointee, ir.IntType) and \
+                   resolved_llvm_type.pointee.width == 8:
                     infer_array_size = True
-                    # Create a proper array TypeSpec from the alias
+                    string_length = len(self.initial_value.value)
                     resolved_type_spec = TypeSpec(
                         base_type=DataType.DATA,
                         is_signed=False,
@@ -2398,64 +2410,30 @@ class VariableDeclaration(ASTNode):
                         bit_width=8,
                         alignment=self.type_spec.alignment,
                         is_array=True,
-                        array_size=None,  # Will be inferred below
+                        array_size=string_length,
                         is_pointer=False
                     )
-        
-        # Check for struct-to-byte-array cast (e.g., noopstr s = (noopstr)struct_var)
-        elif (isinstance(self.type_spec.base_type, str) and
-            self.initial_value and isinstance(self.initial_value, CastExpression)):
-            # Check if target type is a byte array alias and source is a struct
-            if hasattr(module, '_type_aliases') and self.type_spec.base_type in module._type_aliases:
-                resolved_llvm_type = module._type_aliases[self.type_spec.base_type]
-                # If casting to a byte array type (i8* alias)
-                if isinstance(resolved_llvm_type, ir.PointerType) and isinstance(resolved_llvm_type.pointee, ir.IntType) and resolved_llvm_type.pointee.width == 8:
-                    # Get the source value to determine its size
-                    source_val = self.initial_value.expression.codegen(builder, module)
-                    if isinstance(source_val.type, ir.LiteralStructType):
-                        # Calculate struct size in bytes
-                        struct_size_bits = sum(elem.width for elem in source_val.type.elements if hasattr(elem, 'width'))
-                        struct_size_bytes = struct_size_bits // 8
-                        # Create array TypeSpec with inferred size
-                        infer_array_size = True
-                        resolved_type_spec = TypeSpec(
-                            base_type=DataType.DATA,
-                            is_signed=False,
-                            is_const=self.type_spec.is_const,
-                            is_volatile=self.type_spec.is_volatile,
-                            bit_width=8,
-                            alignment=self.type_spec.alignment,
-                            is_array=True,
-                            array_size=struct_size_bytes,
-                            is_pointer=False
-                        )
-                        # Use the struct size for array inference
-                        string_length = struct_size_bytes
+            except (NameError, AttributeError):
+                pass  # Type not found, continue with normal processing
         
         if infer_array_size:
-            # Infer array size - check if it's from struct cast or string literal
-            if isinstance(self.initial_value, CastExpression) and 'string_length' in locals():
-                # For struct casts, we already calculated the size above
-                pass  # string_length was set in the struct cast detection code
-            else:
-                # For string literals
-                string_length = len(self.initial_value.value)
-            # Create a new TypeSpec with the inferred size
+            # Create TypeSpec with inferred array size
             inferred_type_spec = TypeSpec(
                 base_type=resolved_type_spec.base_type,
                 is_signed=resolved_type_spec.is_signed,
                 is_const=resolved_type_spec.is_const,
                 is_volatile=resolved_type_spec.is_volatile,
-                bit_width=resolved_type_spec.bit_width,
+                bit_width=resolved_type_spec.bit_width or 8,
                 alignment=resolved_type_spec.alignment,
                 is_array=True,
-                array_size=string_length,  # Infer the size from string
-                is_pointer=resolved_type_spec.is_pointer
+                array_size=string_length,
+                is_pointer=resolved_type_spec.is_pointer,
+                custom_typename=resolved_type_spec.custom_typename
             )
             llvm_type = inferred_type_spec.get_llvm_type_with_array(module)
         else:
+            # Normal type resolution using the improved get_llvm_type_with_array
             llvm_type = self.type_spec.get_llvm_type_with_array(module)
-        #print(f"DEBUG VariableDeclaration: resolved llvm_type = {llvm_type}")
         
         # Handle global variables
         if builder.scope is None:
@@ -2786,29 +2764,47 @@ class TypeDeclaration(Expression):
             return gvar
         return None
     
-    def get_llvm_type(self, type_spec: TypeSpec) -> ir.Type:
-        if isinstance(type_spec.base_type, str):
-            # Handle custom types by looking them up in the module
-            if hasattr(module, '_type_aliases') and type_spec.base_type in module._type_aliases:
-                return module._type_aliases[type_spec.base_type]
-            # Default to i32 if type not found
+    def get_llvm_type(self, module: ir.Module) -> ir.Type:
+        # Handle custom type names (type aliases)
+        if self.custom_typename:
+            # Look up the type alias
+            if hasattr(module, '_type_aliases') and self.custom_typename in module._type_aliases:
+                return module._type_aliases[self.custom_typename]
+            
+            # Check for namespaced types (e.g., standard__types__noopstr)
+            potential_names = [
+                self.custom_typename,
+                f"standard__types__{self.custom_typename}",
+                f"standard__{self.custom_typename}"
+            ]
+            
+            for name in potential_names:
+                if hasattr(module, '_type_aliases') and name in module._type_aliases:
+                    return module._type_aliases[name]
+            
+            # If not found in aliases, check struct types
+            if hasattr(module, '_struct_types') and self.custom_typename in module._struct_types:
+                return module._struct_types[self.custom_typename]
+            
+            raise NameError(f"Unknown type: {self.custom_typename}")
+        
+        # Handle built-in types
+        if self.base_type == DataType.INT:
             return ir.IntType(32)
-        elif type_spec.base_type == DataType.INT:
-            return ir.IntType(32)
-        elif type_spec.base_type == DataType.FLOAT:
+        elif self.base_type == DataType.FLOAT:
             return ir.FloatType()
-        elif type_spec.base_type == DataType.BOOL:
+        elif self.base_type == DataType.BOOL:
             return ir.IntType(1)
-        elif type_spec.base_type == DataType.CHAR:
+        elif self.base_type == DataType.CHAR:
             return ir.IntType(8)
-        elif type_spec.base_type == DataType.VOID:
+        elif self.base_type == DataType.VOID:
             return ir.VoidType()
-        elif type_spec.base_type == DataType.DATA:
-            # For data types, use the specified bit width
-            width = type_spec.bit_width
-            return ir.IntType(width)
+        elif self.base_type == DataType.DATA:
+            if self.bit_width is None:
+                raise ValueError(f"DATA type missing bit_width for {self}")
+            return ir.IntType(self.bit_width)
         else:
-            raise ValueError(f"Unsupported type: {type_spec.base_type}")
+            raise ValueError(f"Unsupported type: {self.base_type}")
 
 # Statements
 @dataclass
@@ -4397,41 +4393,22 @@ class StructDef(ASTNode):
         return struct_type
     
     def _convert_type(self, type_spec: TypeSpec, module: ir.Module) -> ir.Type:
-        if isinstance(type_spec.base_type, str):
-            print("HERE22")
-            # Check if it's a struct type
-            if hasattr(module, '_struct_types') and type_spec.base_type in module._struct_types:
-                return module._struct_types[type_spec.base_type]
-            print("HERE33")
-            # Check if it's a type alias
-            if hasattr(module, '_type_aliases') and type_spec.base_type in module._type_aliases:
-                return module._type_aliases[type_spec.base_type]
-        
-        print("TYPE SPEC:", type_spec)
-        
-        if type_spec.bit_width is None:
-            #print(module._type_aliases)
-            #print(module._type_aliases.values())
-            print(type_spec.base_type)
-            print("DEFAULTING")
-            #print(type_spec.bit_width) # NONE when `noopstr` custom type
-            return ir.IntType(type_spec.bit_width)
-        
-        # Handle primitive types
-        if type_spec.base_type == DataType.INT:
-            return ir.IntType(32)
-        elif type_spec.base_type == DataType.FLOAT:
-            return ir.FloatType()
-        elif type_spec.base_type == DataType.BOOL:
-            return ir.IntType(1)
-        elif type_spec.base_type == DataType.CHAR:
-            return ir.IntType(8)
-        elif type_spec.base_type == DataType.VOID:
-            return ir.VoidType()
-        elif type_spec.base_type == DataType.DATA:
-            return ir.IntType(type_spec.bit_width)
-        else:
-            raise ValueError(f"Unsupported type: {type_spec.base_type}")
+        try:
+            return type_spec.get_llvm_type(module)
+        except (NameError, ValueError) as e:
+            # If type resolution fails, provide helpful error message
+            if type_spec.custom_typename:
+                raise NameError(
+                    f"Unknown type '{type_spec.custom_typename}' in struct member. "
+                    f"Make sure the type is defined before the struct or imported properly."
+                )
+            elif type_spec.base_type == DataType.DATA and type_spec.bit_width is None:
+                raise ValueError(
+                    f"DATA type missing bit_width. Use explicit bit width like data{{8}} "
+                    f"or define a type alias first."
+                )
+            else:
+                raise ValueError(f"Unsupported type: {type_spec.base_type}")
 
 # Object method
 @dataclass
