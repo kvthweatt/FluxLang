@@ -2,9 +2,15 @@ import "redio.fx";
 
 using standard::io;
 
+struct test
+{
+    noopstr x = "test";
+    noopstr y = "ing!";
+};
+
 def main() -> int
 {
-    noopstr x = "Test" + "ing!";
-    win_print(@x, sizeof(x)/8);
+    test a;
+    win_print(@a.x, 4);
     return 0;
 };

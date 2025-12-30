@@ -6,6 +6,7 @@ def main() -> int
 {
     noopstr name = "World";
     int num = 42;
-    win_print(f"Hello {name}! The number is {num}.", 25);
+    noopstr str = f"Hello {name}! The number is {num}";
+    win_print(@str, sizeof(str) / 8);
     return 0;
 };

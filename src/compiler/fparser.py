@@ -415,8 +415,7 @@ class FluxParser:
                 nested_struct = self.struct_def()
                 nested_structs.append(nested_struct)
                 # Allow both with and without semicolon for nested structs
-                if self.expect(TokenType.SEMICOLON):
-                    self.advance()
+                self.expect(TokenType.SEMICOLON)
             else:
                 member = self.struct_member()
                 if isinstance(member, list):
@@ -425,27 +424,18 @@ class FluxParser:
                     members.append(member)
         
         self.consume(TokenType.RIGHT_BRACE)
-        # Make semicolon optional after struct definition
-        if self.expect(TokenType.SEMICOLON):
-            self.advance()
+        self.expect(TokenType.SEMICOLON)
+        self.advance()
         return StructDef(name, members, base_structs, nested_structs)
     
     def struct_member(self) -> Union[StructMember, List[StructMember]]:
         """
-        struct_member -> type_spec IDENTIFIER (',' IDENTIFIER)* ';' // OR STRUCT, for nested
+        struct_member -> type_spec IDENTIFIER (',' IDENTIFIER)* ';'
         """
-        if self.expect(TokenType.STRUCT):
-            self.advance()
-            name = self.consume(TokenType.IDENTIFIER).value
-            self.consume(TokenType.SEMICOLON)
-            # Create a dummy type spec for the forward declaration
-            type_spec = TypeSpec(name, is_signed=True)  # Using name as base_type
-            return StructMember(name, type_spec)
-
         type_spec = self.type_spec()
         name = self.consume(TokenType.IDENTIFIER).value
         members = [name]
-        
+
         # Handle comma-separated variable names
         while self.expect(TokenType.COMMA):
             self.advance()
@@ -602,7 +592,7 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
         return NamespaceDef(name, functions, structs, objects, variables, nested_namespaces, base_namespaces)
     
-    def type_spec(self) -> TypeSpec:
+    def type_spec(self, caller=None) -> TypeSpec:
         """
         type_spec -> ('const')? ('volatile')? ('signed'|'unsigned')? base_type alignment? array_spec? pointer_spec?
         """
@@ -634,16 +624,17 @@ class FluxParser:
         bit_width = None
         alignment = None
         
-        if base_type == DataType.DATA and self.expect(TokenType.LEFT_BRACE):
-            self.advance()
-            bit_width = int(self.consume(TokenType.INTEGER).value, 0)
-            
-            if self.expect(TokenType.COLON):
+        if base_type == DataType.DATA:
+            if self.expect(TokenType.LEFT_BRACE):
                 self.advance()
-                alignment = int(self.consume(TokenType.INTEGER).value, 0)
-            
-            self.consume(TokenType.RIGHT_BRACE)
-        
+                bit_width = int(self.consume(TokenType.INTEGER).value, 0)
+                
+                if self.expect(TokenType.COLON):
+                    self.advance()
+                    alignment = int(self.consume(TokenType.INTEGER).value, 0)
+                
+                self.consume(TokenType.RIGHT_BRACE)
+                
         # Array specification
         is_array = False
         array_size = None
@@ -690,7 +681,7 @@ class FluxParser:
             self.advance()
             return DataType.THIS
         elif self.expect(TokenType.OBJECT):
-            self.error("Objects cannot be used as types in struct members. Objects are not valid member types.")
+            self.error("Objects cannot be used as types in struct members. Objects are not valid member types.") # Why the fuck is this here as if type_spec->base_type is used only by structs??? wtf.
         elif self.expect(TokenType.IDENTIFIER):
             # Custom type - return the actual name instead of DataType.DATA
             custom_type_name = self.current_token.value
