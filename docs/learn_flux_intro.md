@@ -1379,68 +1379,76 @@ The "diamond problem" in object-oriented programming is an ambiguity that arises
         D.foo()
 ```
 
-If `D` has a method named `foo()`, `B` and `C` gain `foo()`, and when `A` gains `B` and `C`, it gains 2 copies of `foo()`. Normally this creates an issue where we don't know which `foo()` should be added to `A`.
+If `D` has a method named `foo()`, `B` and `C` gain `foo()`, and when `A` gains `B` and `C`, it gains 2 copies of `foo()`. This creates an issue where we don't know which `foo()` should be added to `A`.
 
-However, in Flux, this doesn't happen. Everything has an explicit "address" or "name", and we "locate" them with `virtual`. To prevent `A` from having a massive inheritance tree, we explicitly restrict what `B` and `C` inherit themselves.
+However, in Flux, this doesn't happen; we do not inherit existing methods.
+Imagine `B` and `C` gain `foo()`, the resolution is this:
+```
+          A
+       //   \\
+      B ===== C
+        \   /
+        D.foo()
+```
+If `A` = `B`, `B` = C`, then `A` could equal `C` as well.  
+You might say then what about if we have `def foo(int) -> char;` and `def foo(int) -> string;` available?  
+This is where you specify what you want.
 
-Let's model this diamond and exclude what we don't want to end up as a part of `A`.
 #### f7.4 Inheritance Exclusion
 ```
-object D
-{
-    def __init() -> this
-    {
+object D {
+    def __init() -> this {
         return this;
     };
 
-    def __exit() -> void
-    {
+    def __exit() -> void {
         return void;
     };
 
-    def foo() -> void
-    {
+    def foo() -> void {
         print("foo() from object D");
         return;
     };
+	
+	def foo(bool) -> int {
+	    print("foo(bool) from object D");
+		return 0;
+	};
 };
 
-object C : D[!__init,!__exit,!__expr,!foo]
-{
-    def __init() -> this
-    {
+object C : D[!foo()->void, !foo(bool)->int] (
+    // Prevents gaining overloaded foo() and foo(bool)
+	
+    def __init() -> this {
         return this;
     };
 
-    def __exit() -> void
-    {
+    def __exit() -> void {
+        return void;
+    };
+	
+	def foo() -> int {
+		print("foo() from C");
+	};
+};
+
+object B : C {
+    def __init() -> this {
+        return this;
+    };
+
+    def __exit() -> void {
         return void;
     };
 };
 
-object B : D[!__init,!__exit,!__expr]
-{
-    def __init() -> this
-    {
-        return this;
-    };
+object A : B {}; // Now it's defined but it comes with batteries included.
 
-    def __exit() -> void
-    {
-        return void;
-    };
-};
-
-object A : B, C[!__init,!__exit]; // A is still a prototype
-object A {}; // Now it's defined but it comes with batteries included.
-
-def main() -> int
-{
+def main() -> int {
     A someObj();
     someObj.foo();
     return 0;
 };
 ```
 Result:  
-`foo() from object D`
-
+`foo() from object C`
