@@ -8,12 +8,17 @@ namespace standard
 {
     namespace io
     {
+		// INPUT
+
+		
+		// OUTPUT
         def win_print(byte[] msg, int x) -> void;
         def wpnl() -> void;
         def nix_print(byte* msg, int x) -> void;
         def npnl() -> void;
         def mac_print(byte* msg, int x) -> void;
         def mpnl() -> void;
+		def print(noopstr s) -> void;
 
         def win_print(byte[] msg, int x) -> void
         {
@@ -53,5 +58,19 @@ namespace standard
         {
 
         };
+
+		def print(noopstr s) -> void
+		{
+			// GENERIC PRINT
+			//
+			// Designed to use system.fx to determine which OS we're on
+			// and call the appropriate print function.
+			if (def(WINDOWS)) {
+				int len = sizeof(*s) / 8;
+				win_print(@s, len);
+			};
+			(void)s; // Linker complains but this is supposed to be here.
+			return;
+		};
     };
 };

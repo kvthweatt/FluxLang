@@ -253,7 +253,7 @@ class FluxCompiler:
                     raise RuntimeError("Clang not found - please install LLVM/Clang")
                 
                 # Compile LLVM IR to object file using Clang
-                cmd = [self.clang_path, "-c", "-O2", str(ll_file), "-o", str(obj_file)]
+                cmd = [self.clang_path, "-c", "-O2", "-Wno-override-module", str(ll_file), "-o", str(obj_file)]
                 self.logger.debug(f"Running: {' '.join(cmd)}", "clang")
                 
                 try:
@@ -333,10 +333,10 @@ class FluxCompiler:
                         "/nodefaultlib",
                         "/subsystem:console",
                         "/opt:ref",           # Remove unused
-                        "/opt:icf=2",         # <-- AGGRESSIVE identical code folding
+                        "/opt:icf=2",         # AGGRESSIVE identical code folding
                         "/merge:.rdata=.text",
                         "/merge:.data=.text", 
-                        "/align:512",
+                        # REMOVED: /align:512 (causes warning without /driver)
                         "/debug:none",
                         "/fixed",
                         str(obj_file),
@@ -372,10 +372,10 @@ class FluxCompiler:
                         "/nodefaultlib",
                         "/subsystem:console",
                         "/opt:ref",           # Remove unused
-                        "/opt:icf=2",         # <-- AGGRESSIVE identical code folding
+                        "/opt:icf=2",         # AGGRESSIVE identical code folding
                         "/merge:.rdata=.text",
                         "/merge:.data=.text", 
-                        "/align:512",
+                        # REMOVED: /align:512 (causes warning without /driver)
                         "/debug:none",
                         "/fixed",
                         str(obj_file),

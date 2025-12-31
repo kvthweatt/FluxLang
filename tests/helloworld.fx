@@ -4,6 +4,6 @@ using standard::io;
 
 def main() -> int
 {
-    win_print("Hello World!", 12);
+	win_print("Hello World!", 12);
     return 0;
 };

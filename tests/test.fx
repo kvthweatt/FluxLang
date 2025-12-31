@@ -1,16 +1,13 @@
+int x = 10;
 
-import "redstandard.fx";
-
-using standard::io;
-
-struct T {
-    noopstr a, b;
+def foo(int a) -> int
+{
+	(void)x;
+    return a;
 };
 
 def main() -> int {
-    
-    T newt = {a = "Test", b = "ing!"};
-
-    win_print(newt.a, 4);
-    return 0;
+    int b = foo(x);
+	//b += x;
+    return x;
 };

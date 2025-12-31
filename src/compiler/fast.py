@@ -996,51 +996,50 @@ class CastExpression(Expression):
         return None
     
     def _generate_runtime_free(self, builder: ir.IRBuilder, module: ir.Module, ptr_value: ir.Value, var_name: str) -> None:
-        """Generate runtime free() call for the given pointer value"""
-        # Only generate runtime free() calls - no compile-time optimizations
-        # This ensures we can test the actual runtime behavior and crashes
+        """Generate direct syscall to free memory - no external dependencies"""
         
-        # Declare free() function if not already declared
-        free_func = module.globals.get('free')
-        if free_func is None:
-            # Create free() function signature: void free(void* ptr)
-            free_type = ir.FunctionType(
-                ir.VoidType(),  # void return
-                [ir.PointerType(ir.IntType(8))]  # void* parameter
-            )
-            free_func = ir.Function(module, free_type, 'free')
-            # Mark as external function to prevent optimization
-            free_func.linkage = 'external'
-        
-        # Force runtime execution by making the free call volatile/unoptimizable
-        if isinstance(ptr_value.type, ir.PointerType):
-            if isinstance(ptr_value.type.pointee, ir.PointerType):
-                # This is a pointer to a pointer (e.g., char** or noopstr)
-                # Load the actual pointer value and free that
-                actual_ptr = builder.load(ptr_value, name=f"{var_name}_ptr_load")
-                # Mark the load as volatile to prevent optimization
-                actual_ptr.volatile = True
-                # Cast to void* (i8*) for free()
-                void_ptr = builder.bitcast(actual_ptr, ir.PointerType(ir.IntType(8)), name=f"{var_name}_void_ptr")
-                # Generate the free() call - this will definitely happen at runtime
-                free_call = builder.call(free_func, [void_ptr])
-                # Mark call as having side effects to prevent elimination
-                free_call.tail = False
-            elif isinstance(ptr_value.type.pointee, ir.ArrayType):
-                # This is a pointer to an array (stack allocated)
-                # Calling free() on stack memory will cause undefined behavior/crash - perfect for testing
-                void_ptr = builder.bitcast(ptr_value, ir.PointerType(ir.IntType(8)), name=f"{var_name}_void_ptr")
-                free_call = builder.call(free_func, [void_ptr])
-                free_call.tail = False
-            else:
-                # This is a pointer to a regular value type
-                # Cast to void* (i8*) for free()
-                void_ptr = builder.bitcast(ptr_value, ir.PointerType(ir.IntType(8)), name=f"{var_name}_void_ptr")
-                free_call = builder.call(free_func, [void_ptr])
-                free_call.tail = False
+        # Cast pointer to i8* if needed
+        i8_ptr = ir.PointerType(ir.IntType(8))
+        if ptr_value.type != i8_ptr:
+            void_ptr = builder.bitcast(ptr_value, i8_ptr, name=f"{var_name}_void_ptr")
         else:
-            # This is not a pointer - nothing to free
-            pass
+            void_ptr = ptr_value
+        
+        # Check OS macros
+        is_windows = is_macro_defined(module, 'WINDOWS')
+        is_linux = is_macro_defined(module, 'LINUX')
+        is_macos = is_macro_defined(module, 'MACOS')
+        
+        if is_windows:
+            # NtFreeVirtualMemory syscall (syscall number 0x1E on x64)
+            asm_code = """
+                mov r10, rcx
+                mov eax, 0x1E
+                syscall
+            """
+            constraints = "r,~{rax},~{r10},~{r11},~{memory}"
+        elif is_linux:
+            # munmap syscall (syscall number 11 on x64)
+            asm_code = """
+                mov rax, 11
+                syscall
+            """
+            constraints = "r,~{rax},~{r11},~{memory}"
+        elif is_macos:
+            # munmap syscall (syscall number 0x2000049 on x64)
+            asm_code = """
+                mov rax, 0x2000049
+                syscall
+            """
+            constraints = "r,~{rax},~{memory}"
+        else:
+            # No OS defined, skip free
+            return
+        
+        # Create inline asm
+        asm_type = ir.FunctionType(ir.VoidType(), [i8_ptr])
+        inline_asm = ir.InlineAsm(asm_type, asm_code, constraints, side_effect=True)
+        builder.call(inline_asm, [void_ptr])
 
 @dataclass
 class RangeExpression(Expression):
@@ -1648,22 +1647,6 @@ class FunctionCall(Expression):
                     print(f"DEBUG FunctionCall arg[{i}]: expected type = {func.args[param_index].type}")
             
             #print(f"DEBUG FunctionCall: arg[{i}] original type: {arg_val.type}")
-            
-            # Handle array-to-pointer decay for function arguments
-            if isinstance(arg_val.type, ir.PointerType) and isinstance(arg_val.type.pointee, ir.ArrayType):
-                #print(f"DEBUG FunctionCall: arg[{i}] is pointer to array type")
-                # Check if function parameter expects a pointer to the element type
-                if param_index < len(func.args):
-                    param_type = func.args[param_index].type
-                    array_element_type = arg_val.type.pointee.element
-                    #print(f"DEBUG FunctionCall: param type: {param_type}, array element: {array_element_type}")
-                    if isinstance(param_type, ir.PointerType) and param_type.pointee == array_element_type:
-                        #print(f"DEBUG FunctionCall: Converting array to pointer")
-                        # Convert array to pointer by GEP to first element
-                        zero = ir.Constant(ir.IntType(32), 0)
-                        array_ptr = builder.gep(arg_val, [zero, zero], name="array_decay")
-                        arg_val = array_ptr
-                        #print(f"DEBUG FunctionCall: arg[{i}] after decay: {arg_val.type}")
             
             # Check if we have a type mismatch and need to call __expr for automatic conversion
             if param_index < len(func.args):
@@ -4357,7 +4340,6 @@ class StructDef(ASTNode):
     nested_structs: List['StructDef'] = field(default_factory=list)
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
-        print("HERE1")
         # Convert member types
         member_types = []
         member_names = []
@@ -4365,20 +4347,17 @@ class StructDef(ASTNode):
             member_type = self._convert_type(member.type_spec, module)
             member_types.append(member_type)
             member_names.append(member.name)
-        print("HERE2")
         # Create the struct type
         struct_type = ir.LiteralStructType(member_types)
         struct_type.names = member_names
-        print("HERE3")
+        struct_type.packed = True # NEVER CHANGE THIS
         # Store the type in the module's context
         if not hasattr(module, '_struct_types'):
             module._struct_types = {}
         module._struct_types[self.name] = struct_type
-        print("HERE4")
         # Create global variables for initialized members
         for member in self.members:
             if member.initial_value is not None:  # Check for initial_value here
-                print("HERE5")
                 # Create global variable for initialized members
                 gvar = ir.GlobalVariable(
                     module, 
@@ -4387,9 +4366,6 @@ class StructDef(ASTNode):
                 )
                 gvar.initializer = member.initial_value.codegen(builder, module)
                 gvar.linkage = 'internal'
-            else:
-                print("HERE6")
-        print("RETURNED!?")
         return struct_type
     
     def _convert_type(self, type_spec: TypeSpec, module: ir.Module) -> ir.Type:
