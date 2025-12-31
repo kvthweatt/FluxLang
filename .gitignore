@@ -171,6 +171,8 @@ uv.lock
 *.o
 *.ll
 *.bc
+# For IDA disassembly leftover from analyzing binaries
+*.i64
 build/temp*/
 
 # Project-specific

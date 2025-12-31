@@ -330,11 +330,17 @@ class FluxCompiler:
                     link_cmd = [
                         "C:\\Program Files\\LLVM\\bin\\lld-link.exe",
                         "/entry:main",
-                        "/nodefaultlib",      # This prevents msvcrt.lib
+                        "/nodefaultlib",
                         "/subsystem:console",
-                        "/opt:ref",
+                        "/opt:ref",           # Remove unused
+                        "/opt:icf=2",         # <-- AGGRESSIVE identical code folding
+                        "/merge:.rdata=.text",
+                        "/merge:.data=.text", 
+                        "/align:512",
+                        "/debug:none",
+                        "/fixed",
                         str(obj_file),
-                        "kernel32.lib",       # Only if using kernel32 functions
+                        "kernel32.lib",
                         f"/out:{output_bin}"
                     ]
                 else:
@@ -360,7 +366,22 @@ class FluxCompiler:
                         self.logger.error("No working Clang found for linking", "linker")
                         raise RuntimeError("Clang not found for linking")
                     
-                    link_cmd = [linker_path, str(obj_file), "-o", output_bin]
+                    link_cmd = [
+                        "C:\\Program Files\\LLVM\\bin\\lld-link.exe",
+                        "/entry:main",
+                        "/nodefaultlib",
+                        "/subsystem:console",
+                        "/opt:ref",           # Remove unused
+                        "/opt:icf=2",         # <-- AGGRESSIVE identical code folding
+                        "/merge:.rdata=.text",
+                        "/merge:.data=.text", 
+                        "/align:512",
+                        "/debug:none",
+                        "/fixed",
+                        str(obj_file),
+                        "kernel32.lib",
+                        f"/out:{output_bin}"
+                    ]
             else:  # Linux and others
                 link_cmd = [
                     linker_path,
