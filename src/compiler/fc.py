@@ -327,7 +327,16 @@ class FluxCompiler:
             elif self.platform == "Windows":
                 # Use the same Clang we found for compilation
                 if hasattr(self, 'clang_path') and self.clang_path:
-                    link_cmd = [self.clang_path, str(obj_file), "-o", output_bin]
+                    link_cmd = [
+                        "C:\\Program Files\\LLVM\\bin\\lld-link.exe",
+                        "/entry:main",
+                        "/nodefaultlib",      # This prevents msvcrt.lib
+                        "/subsystem:console",
+                        "/opt:ref",
+                        str(obj_file),
+                        "kernel32.lib",       # Only if using kernel32 functions
+                        f"/out:{output_bin}"
+                    ]
                 else:
                     # Fallback to finding Clang again
                     clang_paths = [
@@ -353,8 +362,15 @@ class FluxCompiler:
                     
                     link_cmd = [linker_path, str(obj_file), "-o", output_bin]
             else:  # Linux and others
-                link_cmd = ["gcc", "-no-pie", str(obj_file), "-o", output_bin]
-            
+                link_cmd = [
+                    linker_path,
+                    "/entry:main",
+                    "/nodefaultlib",
+                    "/subsystem:native",          # Pure syscall mode
+                    "/opt:ref",                   # Remove unused
+                    str(obj_file),
+                    f"/out:{output_bin}"
+                ]            
             self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
             
             try:

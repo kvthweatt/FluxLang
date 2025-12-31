@@ -10,8 +10,7 @@ struct T {
 def main() -> int {
     
     T newt = {a = "Test", b = "ing!"};
-	
-	
+
     win_print(newt.a, 4);
     return 0;
 };
