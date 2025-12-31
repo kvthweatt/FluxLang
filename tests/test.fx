@@ -1,15 +1,17 @@
+
 import "redstandard.fx";
 
 using standard::io;
 
-struct X
-{
+struct T {
     noopstr a, b;
 };
 
-def main() -> int
-{
-	X x = {a = "TEST", b = "ING!"};
-    win_print(@x.a, 4);
+def main() -> int {
+    
+    T newt = {a = "Test", b = "ing!"};
+	
+	
+    win_print(newt.a, 4);
     return 0;
 };

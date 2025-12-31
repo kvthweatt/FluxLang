@@ -187,7 +187,24 @@ class FluxCompiler:
                 
                 # Try llc first, fallback to clang if not available
                 llc_cmd = ["llc", "-O2", "-filetype=obj", str(ll_file), "-o", str(obj_file)]
-                clang_cmd = ["clang", "-c", "-O2", str(ll_file), "-o", str(obj_file)]
+                clang_cmd = [
+                    "clang",
+                    "-c",
+                    "-O2",
+                    "-ffreestanding",        # No standard library, no CRT startup
+                    "-nostdlib",             # Don't link libc
+                    "-fno-builtin",          # Don't replace with builtins
+                    "-fno-stack-protector",
+                    "-mno-red-zone",         # Important for kernel/freestanding
+                    "-fno-pic",
+                    "-fno-pie",
+                    "-fno-exceptions",
+                    "-fno-rtti",
+                    "-fpack-struct=1",       # Explicit packing (though Flux defaults to packed)
+                    str(ll_file),
+                    "-o",
+                    str(obj_file)
+                ]
                 
                 success = False
                 for cmd, tool_name in [(llc_cmd, "llc"), (clang_cmd, "clang")]:
