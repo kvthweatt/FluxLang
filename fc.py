@@ -38,7 +38,7 @@ from fc import FluxCompiler # type: ignore
 def main():
     if len(sys.argv) < 2:
         print("Flux Language Compiler")
-        print("Usage: python3 flux_compiler.py <input.fx> [options]\n")
+        print("Usage: python3 fc.py <input.fx> [options]\n")
         print("Basic Options:")
         print("  -o <output>         Output binary name")
         print("  -v <level>          Legacy verbosity level (0-5)")
@@ -60,9 +60,9 @@ def main():
         print("  FLUX_LOG_COMPONENTS Filter components (comma-separated)")
         print("")
         print("Examples:")
-        print("  python3 flux_compiler.py hello.fx")
-        print("  python3 flux_compiler.py hello.fx -o hello --log-level 4")
-        print("  python3 flux_compiler.py hello.fx --log-filter lexer,parser --log-timestamp")
+        print("  python3 fc.py hello.fx")
+        print("  python3 fc.py hello.fx -o hello --log-level 4")
+        print("  python3 fc.py hello.fx --log-filter lexer,parser --log-timestamp")
         sys.exit(1)
     
     args = sys.argv[1:]  # Skip script name
