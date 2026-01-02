@@ -2,7 +2,7 @@
 """
 Flux Compiler with Full Toolchain Integration
 
-Copyright (C) 2025 Karac Thweatt
+Copyright (C) 2026 Karac Thweatt
 
 Contributors:
 
@@ -48,7 +48,7 @@ class FluxCompiler:
         
         # Configure platform-specific settings
         if self.platform == "Windows":
-            self.module_triple = "x86_64-pc-windows-msvc"
+            self.module_triple = "x86_64-pc-windows"
             self.module.triple = self.module_triple
             # Set proper Windows data layout for x86_64
             self.module.data_layout = "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
@@ -190,7 +190,7 @@ class FluxCompiler:
                 clang_cmd = [
                     "clang",
                     "-c",
-                    "-O2",
+                    "-Os",
                     "-ffreestanding",        # No standard library, no CRT startup
                     "-nostdlib",             # Don't link libc
                     "-fno-builtin",          # Don't replace with builtins
@@ -227,45 +227,32 @@ class FluxCompiler:
             elif self.platform == "Windows":
                 obj_file = temp_dir / f"{base_name}.obj"
                 
-                # Windows: Use Clang directly to compile LLVM IR to object file
-                # Try multiple possible Clang locations
-                clang_paths = [
-                    "C:\\Program Files\\LLVM\\bin\\clang.exe",
-                    "clang.exe",  # If in PATH
-                    "clang"       # Unix-style name if available
-                ]
+                # Use llc instead of clang - it handles inline asm labels correctly
+                llc_cmd = ["llc", "-O2", "-filetype=obj", str(ll_file), "-o", str(obj_file)]
                 
-                self.clang_path = None  # Store as instance variable for later use
-                for path in clang_paths:
-                    try:
-                        # Test if this clang path works
-                        test_result = subprocess.run([path, "--version"], 
-                                                    capture_output=True, text=True, timeout=10)
-                        if test_result.returncode == 0:
-                            self.clang_path = path
-                            self.logger.debug(f"Found working Clang at: {path}", "compiler")
-                            break
-                    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-                        continue
-                
-                if not self.clang_path:
-                    self.logger.error("No working Clang installation found on Windows", "compiler")
-                    raise RuntimeError("Clang not found - please install LLVM/Clang")
-                
-                # Compile LLVM IR to object file using Clang
-                cmd = [self.clang_path, "-c", "-O2", "-Wno-override-module", str(ll_file), "-o", str(obj_file)]
-                self.logger.debug(f"Running: {' '.join(cmd)}", "clang")
+                self.logger.debug(f"Running llc: {' '.join(llc_cmd)}", "llc")
                 
                 try:
-                    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                    self.logger.trace(f"Clang output: {result.stdout}", "clang")
+                    result = subprocess.run(llc_cmd, check=True, capture_output=True, text=True)
+                    self.logger.trace(f"llc output: {result.stdout}", "llc")
                     if result.stderr:
-                        self.logger.warning(f"Clang stderr: {result.stderr}", "clang")
+                        self.logger.warning(f"llc stderr: {result.stderr}", "llc")
                     self.temp_files.append(obj_file)
                     
                 except subprocess.CalledProcessError as e:
-                    self.logger.error(f"Clang compilation failed: {e.stderr}", "clang")
-                    raise
+                    # Fallback to clang if llc fails
+                    self.logger.debug(f"llc failed, falling back to clang: {e}", "llc")
+                    
+                    # Try clang as fallback
+                    clang_cmd = [self.clang_path, "-c", "-O2", "-Wno-override-module", 
+                                str(ll_file), "-o", str(obj_file)]
+                    
+                    try:
+                        result = subprocess.run(clang_cmd, check=True, capture_output=True, text=True)
+                        self.temp_files.append(obj_file)
+                    except subprocess.CalledProcessError as e2:
+                        self.logger.error(f"Both llc and clang failed: {e2.stderr}", "compiler")
+                        raise
                     
             else:  # Linux and others - use traditional assembly step
                 asm_file = temp_dir / f"{base_name}.s"
@@ -332,12 +319,13 @@ class FluxCompiler:
                         "/entry:main",
                         "/nodefaultlib",
                         "/subsystem:console",
-                        "/opt:ref",           # Remove unused
-                        "/opt:icf=2",         # AGGRESSIVE identical code folding
+                        "/opt:ref",
+                        "/opt:icf",
                         "/merge:.rdata=.text",
-                        "/merge:.data=.text", 
-                        # REMOVED: /align:512 (causes warning without /driver)
-                        "/debug:none",
+                        "/merge:.data=.text",
+                        "/align:1",             # Memory section alignment
+                        "/filealign:1",         # FILE alignment - KEY FOR SMALL FILES!
+                        "/release",             # Calculates checksum automatically
                         "/fixed",
                         str(obj_file),
                         "kernel32.lib",
@@ -365,23 +353,6 @@ class FluxCompiler:
                     if not linker_path:
                         self.logger.error("No working Clang found for linking", "linker")
                         raise RuntimeError("Clang not found for linking")
-                    
-                    link_cmd = [
-                        "C:\\Program Files\\LLVM\\bin\\lld-link.exe",
-                        "/entry:main",
-                        "/nodefaultlib",
-                        "/subsystem:console",
-                        "/opt:ref",           # Remove unused
-                        "/opt:icf=2",         # AGGRESSIVE identical code folding
-                        "/merge:.rdata=.text",
-                        "/merge:.data=.text", 
-                        # REMOVED: /align:512 (causes warning without /driver)
-                        "/debug:none",
-                        "/fixed",
-                        str(obj_file),
-                        "kernel32.lib",
-                        f"/out:{output_bin}"
-                    ]
             else:  # Linux and others
                 link_cmd = [
                     linker_path,
@@ -392,20 +363,20 @@ class FluxCompiler:
                     str(obj_file),
                     f"/out:{output_bin}"
                 ]            
-            self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
-            
-            try:
-                result = subprocess.run(link_cmd, check=True, capture_output=True, text=True)
-                self.logger.trace(f"Linker output: {result.stdout}", "linker")
-                if result.stderr:
-                    self.logger.warning(f"Linker stderr: {result.stderr}", "linker")
-            except subprocess.CalledProcessError as e:
-                self.logger.error(f"Linking failed: {e.stderr}", "linker")
-                raise
-            
-            # Success!
-            self.logger.success(f"Compilation completed: {output_bin}")
-            return output_bin
+                self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
+                
+                try:
+                    result = subprocess.run(link_cmd, check=True, capture_output=True, text=True)
+                    self.logger.trace(f"Linker output: {result.stdout}", "linker")
+                    if result.stderr:
+                        self.logger.warning(f"Linker stderr: {result.stderr}", "linker")
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Linking failed: {e.stderr}", "linker")
+                    raise
+                
+                # Success!
+                self.logger.success(f"Compilation completed: {output_bin}")
+                return output_bin
             
         except Exception as e:
             # Comment out cleanup to preserve LLVM IR files for debugging

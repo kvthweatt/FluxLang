@@ -2,7 +2,7 @@
 """
 Flux Abstract Syntax Tree
 
-Copyright (C) 2025 Karac Thweatt
+Copyright (C) 2026 Karac Thweatt
 
 Contributors:
 

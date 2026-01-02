@@ -5,7 +5,7 @@ Flux Compiler Logging System
 Provides configurable verbose logging with multiple levels and output options.
 Supports both command-line configuration and environment variables.
 
-Copyright (C) 2025 Karac Thweatt
+Copyright (C) 2026 Karac Thweatt
 """
 
 import sys
