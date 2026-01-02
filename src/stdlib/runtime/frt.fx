@@ -10,9 +10,98 @@
 // frt.fx - Minimal C Runtime Replacement for Flux
 // This file replaces CRT dependencies for Windows/Linux/macOS
 
-import "types.fx";
+import "io.fx";
 
-using standard::types;
+if(_FLUX_VER > 1)
+{
+};
+
+if(!def(_INC_FRT))
+{
+	global def _INC_FRT;
+};
+
+if(!def(_FRTBLD))
+{
+	/*
+	 * This is an internal Flux runtime header file. It is used when building
+	 * the Flux runtimes only. It is not to be used as a public header file.
+	 */
+	using standard::io::print;
+	print( "Use of Flux runtime library internal header file.");
+};
+
+if(defined (_M_MRX000) || defined (_M_ALPHA) || defined (_M_PPC))
+{
+	global def UNALIGNED __unaligned;
+}
+else
+{
+	global def UNALIGNED;
+};
+
+if(def(_M_IX86))
+{
+	/*
+	 * 386/486
+	 */
+	def REG1    register;
+	def REG2    register;
+	def REG3    register;
+	def REG4;
+	def REG5;
+	def REG6;
+	def REG7;
+	def REG8;
+	def REG9;
+}
+elif (defined (_M_MRX000) || defined (_M_ALPHA) || defined (_M_PPC))
+{
+	/*
+	 * MIPS, ALPHA, or PPC
+	 */
+	def REG1    register;
+	def REG2    register;
+	def REG3    register;
+	def REG4    register;
+	def REG5    register;
+	def REG6    register;
+	def REG7    register;
+	def REG8    register;
+	def REG9    register;
+}
+elif (defined (_M_M68K) || defined (_M_MPPC))
+{
+
+	def REG1;
+	def REG2;
+	def REG3;
+	def REG4;
+	def REG5;
+	def REG6;
+	def REG7;
+	def REG8;
+	def REG9;
+}
+else
+{
+	using standard::io::print;
+	print("Machine register set not defined");
+
+	/*
+	 * Unknown machine
+	 */
+
+	def REG1;
+	def REG2;
+	def REG3;
+	def REG4;
+	def REG5;
+	def REG6;
+	def REG7;
+	def REG8;
+	def REG9;
+};
 
 // ============ GLOBAL SYMBOLS ============
 namespace __frt
