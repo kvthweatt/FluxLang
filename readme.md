@@ -43,6 +43,7 @@ byte[] buffer = file.readall();
 Header header = (Header)buffer;
 print(header.filesize);  // Direct access, no parsing
 ```
+Struct specification can be read [here](https://github.com/kvthweatt/FluxLang/blob/main/docs/struct_specification.md).
 
 ### Bit-Level Field Access
 
