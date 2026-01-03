@@ -314,14 +314,21 @@ class FluxCompiler:
             elif self.platform == "Windows":
                 # Windows linking
                 link_cmd = [
-                    "lld-link.exe",
-                    "/entry:main",
-                    "/nodefaultlib",
-                    "/subsystem:console",
-                    "/opt:ref",
-                    str(obj_file),
-                    "kernel32.lib",
-                    f"/out:{output_bin}"
+                        "C:\\Program Files\\LLVM\\bin\\lld-link.exe",
+                        "/entry:main",
+                        "/nodefaultlib",
+                        "/subsystem:console",
+                        "/opt:ref",
+                        "/opt:icf",
+                        "/merge:.rdata=.text",
+                        "/merge:.data=.text",
+                        "/align:1",             # Memory section alignment
+                        "/filealign:1",         # FILE alignment - KEY FOR SMALL FILES!
+                        "/release",             # Calculates checksum automatically
+                        "/fixed",
+                        str(obj_file),
+                        "kernel32.lib",
+                        f"/out:{output_bin}"
                 ]
                 
                 self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")

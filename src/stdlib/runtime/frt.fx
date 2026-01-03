@@ -126,24 +126,20 @@ if(def(WINDOWS))
         // Kernel32 functions
         def* GetProcessHeap() -> void*;
         def* HeapAlloc(void* hHeap, unsigned data{32} dwFlags, size_t dwBytes) -> void*;
-        def* HeapFree(void* hHeap, unsigned data{32} dwFlags, void* lpMem) -> int;// {if(hHeap==void){return 0;};(void)hHeap;return 0;};
+        def* HeapFree(void* hHeap, unsigned data{32} dwFlags, void* lpMem) -> int;
         def* ExitProcess(unsigned data{32} uExitCode) -> void;
         def* GetStdHandle(unsigned data{32} nStdHandle) -> void*;
-        def* WriteFile(void* hFile, void* lpBuffer, unsigned data{32} nNumberOfBytesToWrite, 
-                       unsigned data{32}* lpNumberOfBytesWritten, void* lpOverlapped) -> int;
-        def* ReadFile(void* hFile, void* lpBuffer, unsigned data{32} nNumberOfBytesToRead,
-                      unsigned data{32}* lpNumberOfBytesRead, void* lpOverlapped) -> int;
+        def* WriteFile(void* hFile, void* lpBuffer, unsigned data{32} nNumberOfBytesToWrite, unsigned data{32}* lpNumberOfBytesWritten, void* lpOverlapped) -> int;
+        def* ReadFile(void* hFile, void* lpBuffer, unsigned data{32} nNumberOfBytesToRead, unsigned data{32}* lpNumberOfBytesRead, void* lpOverlapped) -> int;
         
         // NTDLL functions (for direct syscalls)
-        def* NtAllocateVirtualMemory(void* ProcessHandle, void** BaseAddress, unsigned data{32} ZeroBits,
-                                     size_t* RegionSize, unsigned data{32} AllocationType, 
-                                     unsigned data{32} Protect) -> unsigned data{32};
+        def* NtAllocateVirtualMemory(void* ProcessHandle, void** BaseAddress, unsigned data{32} ZeroBits, size_t* RegionSize, unsigned data{32} AllocationType, unsigned data{32} Protect) -> unsigned data{32};
         
         // Constants
-        const unsigned data{32} HEAP_ZERO_MEMORY = 0x00000008;
-        const unsigned data{32} STD_INPUT_HANDLE = -10;
+        const unsigned data{32} HEAP_ZERO_MEMORY  = 0x00000008;
+        const unsigned data{32} STD_INPUT_HANDLE  = -10;
         const unsigned data{32} STD_OUTPUT_HANDLE = -11;
-        const unsigned data{32} STD_ERROR_HANDLE = -12;
+        const unsigned data{32} STD_ERROR_HANDLE  = -12;
     };
 };
 
@@ -317,10 +313,10 @@ namespace __heap
 // ============ ENTRY POINTS ============
 if(def(WINDOWS))
 {
-    def mainCRTStartup() -> void
+    global def mainCRTStartup() -> void
     {
-        // Windows console entry point
         // Just a symbol to satisfy Windows.
+        // Windows console entry point
         
         // Initialize floating point
         __fpmath_init();
@@ -353,16 +349,41 @@ if(def(WINDOWS))
         return void;
     };
 
-    def WinMainCRTStartup() -> void
+    global def WinMainCRTStartup() -> void
     {
+        // Just a symbol to satisfy Windows.
         // Windows GUI entry point (similar but different subsystem)
-        return mainCRTStartup();
+        return mainFRTStartup();
+    };
+
+    global def mainFRTStartup() -> void
+    {
+        // Initialize floating point
+        __fpmath_init();
+        
+        // Initialize heap
+        __heap::init();
+        
+        // Call main
+        int exit_code = main();
+        
+        // Exit process
+        volatile asm
+        {
+            movq    exit_code, %rcx
+            subq    $40, %rsp
+            call    ExitProcess
+            addq    $40, %rsp
+        };
+        
+        // Never reached
+        return void;
     };
 };
 
 if(def(LINUX))
 {
-    def _start() -> void
+    global def _start() -> void
     {
         // Linux x64 entry point
         
@@ -421,7 +442,7 @@ if(def(LINUX))
 
 if(def(MACOS))
 {
-    def start() -> void
+    global def start() -> void
     {
         // macOS entry point (similar to Linux but different)
         return _start();
@@ -603,13 +624,12 @@ namespace __frt_io
                 addq    $40, %rsp
             };
             
-            return (size_t)written;
+            return written;
         };
         
         def read(int fd, void* buf, size_t count) -> size_t
         {
-            if (fd != STDIN_FD)
-                return 0;
+            if (fd != STDIN_FD) {return 0;};
                 
             unsigned data{32} read = 0;
             volatile asm
@@ -632,7 +652,7 @@ namespace __frt_io
                 addq    $40, %rsp
             };
             
-            return (size_t)read;
+            return read;
         };
     }
     else
@@ -751,7 +771,7 @@ def __frt_init() -> void
 {
     // NEVER DO ANYTHING HERE
     // DO NOT ADD CODE TO THIS FUNCTION
-    // FUCK OFF DON'T LOOK HERE
     // WHY ARE YOU STILL HERE
+    // GO AWAY
     return void;
 }

@@ -1,3 +1,11 @@
+// Merely a demonstration of what AES will look like in Flux.
+// Written by Karac Thweatt
+
+import "frt.fx"; // for memcpy
+
+// import "crypto.fx"
+// using standard::crypto::CryptoErr;
+
 namespace aes
 {
     // AES S-box (forward)
@@ -76,14 +84,20 @@ namespace aes
         {
             // Determine key size and number of rounds
             this.key_size = key.len;
-            switch (this.key_size)
+            try
             {
-                case (16) {this.rounds = 10; break;}
-                case (24) {this.rounds = 12; break;}
-                case (32) {this.rounds = 14; break;}
-                default {throw(CryptoError("Invalid AES key size"));};
+                switch (this.key_size)
+                {
+                    case (16) {this.rounds = 10; break;}
+                    case (24) {this.rounds = 12; break;}
+                    case (32) {this.rounds = 14; break;}
+                    default {throw(CryptoError("Invalid AES key size"));};
+                };
+            }
+            catch (CryptoErr as err)
+            {
+                // Handle err
             };
-            
             // Key expansion
             this.round_keys = this.key_expansion(key);
             return this;
@@ -432,41 +446,48 @@ namespace aes
     {
         AESContext ctx(key);
         
-        if (ciphertext.len % 16 != 0)
+        try
         {
-            throw(CryptoError("Ciphertext length must be multiple of 16"));
-        };
-        
-        // Decrypt each block
-        byte[] padded = byte[ciphertext.len];
-        for (int i = 0; i < ciphertext.len; i += 16)
-        {
-            byte[16] block = (byte[16])ciphertext[i:i+15];
-            byte[16] decrypted = ctx.decrypt_block(block);
-            for (int j = 0; j < 16; j++)
+            if (ciphertext.len % 16 != 0)
             {
-                padded[i + j] = decrypted[j];
+                throw(CryptoError("Ciphertext length must be multiple of 16"));
             };
-        };
-        
-        // Remove padding (PKCS#7)
-        int pad_len = padded[padded.len - 1];
-        if (pad_len < 1 || pad_len > 16)
-        {
-            throw(CryptoError("Invalid padding"));
-        };
-        
-        for (int i = padded.len - pad_len; i < padded.len; i++)
-        {
-            if (padded[i] != pad_len)
+            
+            // Decrypt each block
+            byte[] padded = byte[ciphertext.len];
+            for (int i = 0; i < ciphertext.len; i += 16)
+            {
+                byte[16] block = (byte[16])ciphertext[i:i+15];
+                byte[16] decrypted = ctx.decrypt_block(block);
+                for (int j = 0; j < 16; j++)
+                {
+                    padded[i + j] = decrypted[j];
+                };
+            };
+            
+            // Remove padding (PKCS#7)
+            int pad_len = padded[padded.len - 1];
+            if (pad_len < 1 || pad_len > 16)
             {
                 throw(CryptoError("Invalid padding"));
             };
+            
+            for (int i = padded.len - pad_len; i < padded.len; i++)
+            {
+                if (padded[i] != pad_len)
+                {
+                    throw(CryptoError("Invalid padding"));
+                };
+            };
+            
+            byte[] plaintext = byte[padded.len - pad_len];
+            memcpy(plaintext, padded, plaintext.len);
+        }
+        catch (CryptoError as err)
+        {
+            // Handle err
         };
-        
-        byte[] plaintext = byte[padded.len - pad_len];
-        memcpy(plaintext, padded, plaintext.len);
-        
+            
         return plaintext;
     };
 };
