@@ -312,47 +312,36 @@ class FluxCompiler:
             if self.platform == "Darwin":  # macOS
                 link_cmd = ["clang", str(obj_file), "-o", output_bin]
             elif self.platform == "Windows":
-                # Use the same Clang we found for compilation
-                if hasattr(self, 'clang_path') and self.clang_path:
-                    link_cmd = [
-                        "C:\\Program Files\\LLVM\\bin\\lld-link.exe",
-                        "/entry:main",
-                        "/nodefaultlib",
-                        "/subsystem:console",
-                        "/opt:ref",
-                        "/opt:icf",
-                        "/merge:.rdata=.text",
-                        "/merge:.data=.text",
-                        "/align:1",             # Memory section alignment
-                        "/filealign:1",         # FILE alignment - KEY FOR SMALL FILES!
-                        "/release",             # Calculates checksum automatically
-                        "/fixed",
-                        str(obj_file),
-                        "kernel32.lib",
-                        f"/out:{output_bin}"
-                    ]
-                else:
-                    # Fallback to finding Clang again
-                    clang_paths = [
-                        "C:\\Program Files\\LLVM\\bin\\clang.exe",
-                        "clang.exe",
-                        "clang"
-                    ]
+                # Windows linking
+                link_cmd = [
+                    "lld-link.exe",
+                    "/entry:main",
+                    "/nodefaultlib",
+                    "/subsystem:console",
+                    "/opt:ref",
+                    str(obj_file),
+                    "kernel32.lib",
+                    f"/out:{output_bin}"
+                ]
+                
+                self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
+                
+                try:
+                    result = subprocess.run(link_cmd, check=True, capture_output=True, text=True)
+                    self.logger.trace(f"Linker output: {result.stdout}", "linker")
+                    if result.stderr:
+                        self.logger.warning(f"Linker stderr: {result.stderr}", "linker")
                     
-                    linker_path = None
-                    for path in clang_paths:
-                        try:
-                            test_result = subprocess.run([path, "--version"], 
-                                                        capture_output=True, text=True, timeout=10)
-                            if test_result.returncode == 0:
-                                linker_path = path
-                                break
-                        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-                            continue
+                    # Success!
+                    self.logger.success(f"Compilation completed: {output_bin}")
+                    return output_bin
                     
-                    if not linker_path:
-                        self.logger.error("No working Clang found for linking", "linker")
-                        raise RuntimeError("Clang not found for linking")
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Linking failed: {e.stderr}", "linker")
+                    raise
+                except FileNotFoundError:
+                    self.logger.error("lld-link.exe not found. Make sure LLVM is installed and in PATH.", "linker")
+                    raise RuntimeError("Clang not found for linking")
             else:  # Linux and others
                 link_cmd = [
                     linker_path,
