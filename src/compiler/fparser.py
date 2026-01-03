@@ -595,6 +595,7 @@ class FluxParser:
     def type_spec(self) -> TypeSpec:
         """
         type_spec -> ('const')? ('volatile')? ('signed'|'unsigned')? base_type alignment? array_spec? pointer_spec?
+        array_spec -> ('[' expression? ']')+
         """
         is_const = False
         is_volatile = False
@@ -642,16 +643,29 @@ class FluxParser:
                 
                 self.consume(TokenType.RIGHT_BRACE)
         
-        # Array specification
-        is_array = False
-        array_size = None
+        # Array specification - support multiple dimensions
+        array_dims = []
         
-        if self.expect(TokenType.LEFT_BRACKET):
-            is_array = True
+        while self.expect(TokenType.LEFT_BRACKET):
             self.advance()
             if not self.expect(TokenType.RIGHT_BRACKET):
-                array_size = int(self.consume(TokenType.INTEGER).value)
+                try:
+                    array_size = int(self.consume(TokenType.INTEGER).value)
+                    array_dims.append(array_size)
+                except:
+                    # If it's not an integer literal, parse as expression
+                    # Restore position and parse as expression
+                    self.position -= 1  # Go back to INTEGER token
+                    self.current_token = self.tokens[self.position]
+                    expr = self.expression()
+                    array_dims.append(expr)
+            else:
+                array_dims.append(None)  # Unsized array dimension
             self.consume(TokenType.RIGHT_BRACKET)
+        
+        is_array = len(array_dims) > 0
+        array_size = array_dims[0] if array_dims else None
+        array_dimensions = array_dims if array_dims else None
         
         # Pointer specification
         is_pointer = False
@@ -668,6 +682,7 @@ class FluxParser:
             alignment=alignment,
             is_array=is_array,
             array_size=array_size,
+            array_dimensions=array_dimensions,
             is_pointer=is_pointer,
             custom_typename=custom_typename
         )
@@ -740,8 +755,8 @@ class FluxParser:
                 if self.expect(TokenType.RIGHT_BRACE):
                     self.advance()
             
-            # Skip array specification
-            if self.expect(TokenType.LEFT_BRACKET):
+            # Skip array specification - support multiple dimensions
+            while self.expect(TokenType.LEFT_BRACKET):
                 self.advance()
                 if self.expect(TokenType.INTEGER):
                     self.advance()

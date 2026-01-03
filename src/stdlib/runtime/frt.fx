@@ -31,7 +31,7 @@ if(!def(_FRTBLD))
 	print( "Use of Flux runtime library internal header file.");
 };
 
-if(defined (_M_MRX000) || defined (_M_ALPHA) || defined (_M_PPC))
+if(def(_M_MRX000) || def(_M_ALPHA) || def(_M_PPC))
 {
 	global def UNALIGNED __unaligned;
 }
@@ -55,7 +55,7 @@ if(def(_M_IX86))
 	def REG8;
 	def REG9;
 }
-elif (defined (_M_MRX000) || defined (_M_ALPHA) || defined (_M_PPC))
+elif (def(_M_MRX000) || def(_M_ALPHA) || def(_M_PPC))
 {
 	/*
 	 * MIPS, ALPHA, or PPC
@@ -70,7 +70,7 @@ elif (defined (_M_MRX000) || defined (_M_ALPHA) || defined (_M_PPC))
 	def REG8    register;
 	def REG9    register;
 }
-elif (defined (_M_M68K) || defined (_M_MPPC))
+elif (def(_M_M68K) || def(_M_MPPC))
 {
 
 	def REG1;
@@ -282,13 +282,13 @@ namespace __heap
             {
                 // Linux syscall: mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
                 // rax = 9 (mmap), rdi = address (0), rsi = length, rdx = prot, r10 = flags, r8 = fd, r9 = offset
-                movq    $9, %rax            // mmap syscall number
-                xorq    %rdi, %rdi          // address = NULL
-                movq    size, %rsi          // length
-                movq    $0x3, %rdx          // PROT_READ | PROT_WRITE
-                movq    $0x22, %r10         // MAP_PRIVATE | MAP_ANONYMOUS
-                movq    $-1, %r8            // fd = -1
-                xorq    %r9, %r9            // offset = 0
+                movq $9, %rax            // mmap syscall number
+                xorq %rdi, %rdi          // address = NULL
+                movq size, %rsi          // length
+                movq $0x3, %rdx          // PROT_READ | PROT_WRITE
+                movq $0x22, %r10         // MAP_PRIVATE | MAP_ANONYMOUS
+                movq $-1, %r8            // fd = -1
+                xorq %r9, %r9            // offset = 0
                 
                 syscall
                 movq    %rax, result
@@ -304,9 +304,9 @@ namespace __heap
             {
                 // Linux syscall: munmap(ptr, size)
                 // rax = 11 (munmap), rdi = ptr, rsi = size
-                movq    $11, %rax           // munmap syscall number
-                movq    ptr, %rdi
-                movq    size, %rsi
+                movq $11, %rax           // munmap syscall number
+                movq ptr, %rdi
+                movq size, %rsi
                 
                 syscall
             };

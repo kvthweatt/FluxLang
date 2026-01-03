@@ -64,10 +64,13 @@ class TokenType(Enum):
     FLOAT_KW = auto()
     FOR = auto()
     FROM = auto()
+    GLOBAL = auto()
+    HEAP = auto()
     IF = auto()
     IMPORT = auto()
     IN = auto()
     INT = auto()
+    LOCAL = auto()
     NAMESPACE = auto()
     NOT = auto()
     OBJECT = auto()
@@ -77,6 +80,7 @@ class TokenType(Enum):
     RETURN = auto()
     SIGNED = auto()
     SIZEOF = auto()
+    STACK = auto()
     STRUCT = auto()
     SUPER = auto()
     SWITCH = auto()
@@ -210,9 +214,12 @@ class FluxLexer:
             'from': TokenType.FROM,
             'for': TokenType.FOR,
             'if': TokenType.IF,
+            'global': TokenType.GLOBAL,
+            'heap': TokenType.HEAP,
             'import': TokenType.IMPORT,
             'in': TokenType.IN,
             'int': TokenType.INT,
+            'local': TokenType.LOCAL,
             'namespace': TokenType.NAMESPACE,
             'not': TokenType.NOT,
             'object': TokenType.OBJECT,
@@ -222,6 +229,7 @@ class FluxLexer:
             'return': TokenType.RETURN,
             'signed': TokenType.SIGNED,
             'sizeof': TokenType.SIZEOF,
+            'stack': TokenType.STACK,
             'struct': TokenType.STRUCT,
             'super': TokenType.SUPER,
             'switch': TokenType.SWITCH,

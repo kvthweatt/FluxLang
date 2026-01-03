@@ -326,9 +326,9 @@ class TypeSpec:
     alignment: Optional[int] = None
     is_array: bool = False
     array_size: Optional[int] = None
+    array_dimensions: Optional[List[Optional[int]]] = None  # Add this for multi-dimensional arrays
     is_pointer: bool = False
-    custom_typename: Optional[str] = None  # Add this field
-
+    custom_typename: Optional[str] = None
 
     def get_llvm_type(self, module: ir.Module) -> ir.Type:
         """Get LLVM type for this TypeSpec, resolving custom type names"""
@@ -386,16 +386,27 @@ class TypeSpec:
         # Get base type (this handles custom type names)
         base_type = self.get_llvm_type(module)
         
-        # Handle array types
-        if self.is_array:
+        # Handle array types - support multi-dimensional arrays
+        if self.is_array and self.array_dimensions:
+            # Build array type from the inside out
+            # e.g., byte[4][4] becomes ArrayType(ArrayType(byte, 4), 4)
+            current_type = base_type
+            for dim in reversed(self.array_dimensions):
+                if dim is not None:
+                    current_type = ir.ArrayType(current_type, dim)
+                else:
+                    # Unsized array dimension - use pointer
+                    current_type = ir.PointerType(current_type)
+            return current_type
+        elif self.is_array:
+            # Single-dimensional array (backward compatibility)
             if self.array_size is not None:
                 # Fixed-size array
                 return ir.ArrayType(base_type, self.array_size)
             else:
                 # Unsized array - return pointer to element type
-                # If base_type is already a pointer (like from a type alias), use its pointee
                 if isinstance(base_type, ir.PointerType):
-                    return base_type  # Already a pointer type
+                    return base_type
                 else:
                     return ir.PointerType(base_type)
         
