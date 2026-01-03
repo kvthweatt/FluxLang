@@ -1,5 +1,5 @@
 # Flux
-### *A general purpose, statically typed, object-oriented systems programming language for precise control over binary data.*
+### *A general purpose, statically typed, broadly mid-level, object-oriented systems programming language for precise control over binary data.*
 
 <p align="center">
     <img src="https://github.com/kvthweatt/FluxLang/blob/main/resources/logo_cropped.jpg" width="300" height="150">
