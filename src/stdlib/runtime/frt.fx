@@ -126,7 +126,7 @@ if(def(WINDOWS))
         // Kernel32 functions
         def* GetProcessHeap() -> void*;
         def* HeapAlloc(void* hHeap, unsigned data{32} dwFlags, size_t dwBytes) -> void*;
-        def* HeapFree(void* hHeap, unsigned data{32} dwFlags, void* lpMem) -> int;
+        def* HeapFree(void* hHeap, unsigned data{32} dwFlags, void* lpMem) -> int;// {if(hHeap==void){return 0;};(void)hHeap;return 0;};
         def* ExitProcess(unsigned data{32} uExitCode) -> void;
         def* GetStdHandle(unsigned data{32} nStdHandle) -> void*;
         def* WriteFile(void* hFile, void* lpBuffer, unsigned data{32} nNumberOfBytesToWrite, 
@@ -242,28 +242,8 @@ namespace __heap
             };
             return void;
         };
-        
-        def alloc(size_t size) -> void*
-        {
-            void* result = void;
-            volatile asm
-            {
-                // Parameters:
-                // RCX = hHeap = __heap_base
-                // RDX = dwFlags = HEAP_ZERO_MEMORY (0x00000008)
-                // R8 = dwBytes = size
-                movq    __heap_base, %rcx
-                movq    $0x00000008, %rdx    // HEAP_ZERO_MEMORY
-                movq    size, %r8
-                
-                subq    $40, %rsp
-                call    HeapAlloc
-                addq    $40, %rsp
-                
-                movq    %rax, result
-            };
-            return result;
-        };
+        // Looking for alloc() ?  Try heap()
+        // Looking for free() ?   Try (void)
     }
     else
     {  // Linux/macOS
@@ -274,49 +254,11 @@ namespace __heap
             // We'll use mmap for simplicity
             return void;
         };
-        
-        def alloc(size_t size) -> void*
-        {
-            void* result = void;
-            volatile asm
-            {
-                // Linux syscall: mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
-                // rax = 9 (mmap), rdi = address (0), rsi = length, rdx = prot, r10 = flags, r8 = fd, r9 = offset
-                movq $9, %rax            // mmap syscall number
-                xorq %rdi, %rdi          // address = NULL
-                movq size, %rsi          // length
-                movq $0x3, %rdx          // PROT_READ | PROT_WRITE
-                movq $0x22, %r10         // MAP_PRIVATE | MAP_ANONYMOUS
-                movq $-1, %r8            // fd = -1
-                xorq %r9, %r9            // offset = 0
-                
-                syscall
-                movq    %rax, result
-            };
-            return result;
-        };
-        
-        def free(void* ptr, size_t size) -> void
-        {
-            if (ptr == void) return;
-            
-            volatile asm
-            {
-                // Linux syscall: munmap(ptr, size)
-                // rax = 11 (munmap), rdi = ptr, rsi = size
-                movq $11, %rax           // munmap syscall number
-                movq ptr, %rdi
-                movq size, %rsi
-                
-                syscall
-            };
-            return void;
-        };
     };
     
     def realloc(void* ptr, size_t new_size) -> void*
     {
-        if (ptr == void) {return alloc(new_size);};
+        if (ptr == void) {return heap(newsize);};
         
         if(def(WINDOWS))
         {
@@ -365,7 +307,7 @@ namespace __heap
         else
         {
             // Linux: use mremap or implement alloc/copy/free
-            void* new_ptr = alloc(new_size);
+            void* new_ptr = heap(new_size);
             (void)ptr;
             return new_ptr;
         };
