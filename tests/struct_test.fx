@@ -1,15 +1,14 @@
-import "redstandard.fx";
+import "redtypes.fx";
+using standard::types;
 
-using standard::io;
-
-struct x
+struct X
 {
-	noopstr a = "TEST";
-	noopstr b = "ING!";
+	int a;
 };
 
 def main() -> int
 {
-	win_print(x.a, 8);
-    return 0;
+	X x = {a = 65};
+	byte test = (byte)x.a;
+	return 0;
 };

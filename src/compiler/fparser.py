@@ -27,7 +27,7 @@ class ParseError(Exception):
     def __init__(self, message: str, token: Optional[Token] = None):
         self.message = message
         self.token = token
-        super().__init__(f"Parse error: {message}" + (f" at {token.line}:{token.column}" if token else ""))
+        super().__init__(f"{message}" + (f" at {token.line}:{token.column}" if token else ""))
 
 class FluxParser:
     def __init__(self, tokens: List[Token]):
@@ -35,6 +35,7 @@ class FluxParser:
         self.position = 0
         self.current_token = self.tokens[0] if tokens else None
         self.parse_errors = []  # Track parse errors
+        self._processing_imports = set()
     
     def error(self, message: str) -> None:
         """Raise a parse error with current token context"""
@@ -777,7 +778,16 @@ class FluxParser:
                 return self.expect(TokenType.IDENTIFIER)  # Type declaration like "int as myint"
             
             # Must have identifier for regular variable declaration
-            return self.expect(TokenType.IDENTIFIER)
+            # After identifier, we can have: =, ;, (, {, or [
+            if not self.expect(TokenType.IDENTIFIER):
+                return False
+            
+            self.advance()  # consume the variable name
+            
+            # Valid next tokens after variable name
+            return self.expect(TokenType.ASSIGN, TokenType.SEMICOLON, 
+                             TokenType.LEFT_PAREN, TokenType.LEFT_BRACE,
+                             TokenType.COMMA, TokenType.LEFT_BRACKET)
         finally:
             self.position = saved_pos
             self.current_token = self.tokens[self.position] if self.position < len(self.tokens) else None
@@ -795,11 +805,11 @@ class FluxParser:
         """
         variable_declaration -> type_spec IDENTIFIER ('=' expression)?
                              | type_spec 'as' IDENTIFIER ('=' expression)?
+                             | type_spec IDENTIFIER '{' struct_init '}'  # Struct literal init
+        
+        Note: Array dimensions must be part of type_spec, not after IDENTIFIER
         """
-        #print("before type_spec()")
         type_spec = self.type_spec()
-        #print("after type_spec()")
-        print(type_spec.bit_width)
 
         # Check if this is a type declaration (using 'as')
         if self.expect(TokenType.AS):
@@ -811,11 +821,57 @@ class FluxParser:
             if self.expect(TokenType.ASSIGN):
                 self.advance()
                 initial_value = self.expression()
+                
+                # If the initial value is a struct literal, infer the type from the variable's type_spec
+                if isinstance(initial_value, StructLiteral) and initial_value.struct_type is None:
+                    if type_spec.custom_typename:
+                        initial_value.struct_type = type_spec.custom_typename
+                    else:
+                        self.error("Struct literal initialization requires a custom type")
             
             return TypeDeclaration(type_name, type_spec, initial_value)
         else:
             # Regular variable declaration
             name = self.consume(TokenType.IDENTIFIER).value
+            
+            # Check for array dimensions AFTER the identifier (C-style: int arr[4])
+            # This extends the type_spec that was already parsed
+            if self.expect(TokenType.LEFT_BRACKET):
+                array_dims = []
+                while self.expect(TokenType.LEFT_BRACKET):
+                    self.advance()
+                    if not self.expect(TokenType.RIGHT_BRACKET):
+                        try:
+                            array_size = int(self.consume(TokenType.INTEGER).value)
+                            array_dims.append(array_size)
+                        except:
+                            expr = self.expression()
+                            array_dims.append(expr)
+                    else:
+                        array_dims.append(None)
+                    self.consume(TokenType.RIGHT_BRACKET)
+                
+                # Update type_spec with array information
+                type_spec.is_array = True
+                type_spec.array_size = array_dims[0] if array_dims else None
+                type_spec.array_dimensions = array_dims if array_dims else None
+            
+            # Check for struct literal initialization: StructName var {fields}
+            if self.expect(TokenType.LEFT_BRACE):
+                # This is struct literal initialization without explicit cast
+                struct_literal = self.struct_literal()
+                
+                # Get struct name from type_spec
+                if type_spec.custom_typename:
+                    struct_name = type_spec.custom_typename
+                else:
+                    self.error("Struct initialization requires a custom type name")
+                
+                # Set the struct type on the literal (inferred from declaration)
+                struct_literal.struct_type = struct_name
+                
+                # Create StructInstance with the literal's field values
+                return VariableDeclaration(name, type_spec, struct_literal)
             
             # Check for object instantiation: identifier(args)
             if self.expect(TokenType.LEFT_PAREN):
@@ -827,11 +883,9 @@ class FluxParser:
                 self.consume(TokenType.RIGHT_PAREN)
                 
                 # Create a function call to the constructor as the initial value
-                # The constructor name uses mangling: ObjectName.MethodName
-                if isinstance(type_spec.base_type, str):  # Custom type
-                    constructor_name = f"{type_spec.base_type}.__init"
+                if type_spec.custom_typename:
+                    constructor_name = f"{type_spec.custom_typename}.__init"
                 else:
-                    # For built-in types, use the type name directly
                     constructor_name = type_spec.base_type.value + "__init"
                 
                 constructor_call = FunctionCall(constructor_name, args)
@@ -1272,13 +1326,24 @@ class FluxParser:
     def assignment_expression(self) -> Expression:
         """
         assignment_expression -> logical_or_expression (('=' | '+=' | '-=' | '*=' | '/=' | '%=') assignment_expression)?
+        
+        Now handles struct field assignment:
+            struct_instance.field = value
         """
         expr = self.logical_or_expression()
         
         if self.expect(TokenType.ASSIGN):
             self.advance()
             value = self.assignment_expression()
-            return Assignment(expr, value)
+            
+            # Check if this is struct field assignment
+            if isinstance(expr, MemberAccess):
+                # This could be struct field assignment or object member assignment
+                # The codegen will determine based on type
+                # For now, use Assignment and let codegen handle it
+                return Assignment(expr, value)
+            else:
+                return Assignment(expr, value)
         elif self.expect(TokenType.PLUS_ASSIGN, TokenType.MINUS_ASSIGN, TokenType.MULTIPLY_ASSIGN, 
                          TokenType.DIVIDE_ASSIGN, TokenType.MODULO_ASSIGN):
             # Handle compound assignments
@@ -1449,6 +1514,10 @@ class FluxParser:
     def cast_expression(self) -> Expression:
         """
         cast_expression -> ('(' type_spec ')')? unary_expression
+        
+        Handles:
+        - (Type)expr -> CastExpression (for ALL types - struct or primitive)
+        - expr (no cast)
         """
         if self.expect(TokenType.LEFT_PAREN):
             # Look ahead to see if this is a cast
@@ -1459,6 +1528,8 @@ class FluxParser:
                 if self.expect(TokenType.RIGHT_PAREN):
                     self.advance()  # consume ')'
                     expr = self.unary_expression()
+                    
+                    # ALWAYS use CastExpression - let codegen figure out if it's a struct
                     return CastExpression(target_type, expr)
                 else:
                     # Not a cast, restore position
@@ -1519,7 +1590,7 @@ class FluxParser:
         postfix_expression -> primary_expression (postfix_operator)*
         postfix_operator -> '[' expression ']'
                          | '(' argument_list? ')'
-                         | '.' IDENTIFIER
+                         | '.' IDENTIFIER        # Field access for structs
                          | '->' IDENTIFIER
                          | '++'
                          | '--'
@@ -1546,7 +1617,6 @@ class FluxParser:
                         if len(args) != 1:
                             self.error("def() macro check requires exactly one argument (the macro name)")
                         
-                        # The argument should be an identifier representing the macro name
                         if not isinstance(args[0], Identifier):
                             self.error("def() macro check requires a macro name identifier as argument")
                         
@@ -1556,17 +1626,17 @@ class FluxParser:
                         expr = FunctionCall(expr.name, args)
                 elif isinstance(expr, MemberAccess):
                     # Method call: obj.method() -> call obj_type.method with obj as first arg
-                    # For now, we'll generate the method call name and handle 'this' in codegen
                     method_name = f"{{obj_type}}.{expr.member}"
-                    # We need to create a special method call that includes the object
                     expr = MethodCall(expr.object, expr.member, args)
                 else:
-                    # Other complex expressions - not supported yet
                     raise SyntaxError(f"Cannot call function on complex expression: {type(expr).__name__}")
             elif self.expect(TokenType.DOT):
-                # Member access
+                # Member access - could be struct field or object method/member
                 self.advance()
                 member = self.consume(TokenType.IDENTIFIER).value
+                
+                # Create MemberAccess node - codegen will determine if it's
+                # StructFieldAccess or object member based on type
                 expr = MemberAccess(expr, member)
             elif self.expect(TokenType.INCREMENT):
                 # Postfix increment
@@ -1580,7 +1650,87 @@ class FluxParser:
                 # AS cast expression (postfix) - support all type casts
                 self.advance()
                 target_type = self.type_spec()
-                expr = CastExpression(target_type, expr)
+                
+                # Check if this is a struct cast
+                if target_type.custom_typename:
+                    expr = StructRecast(target_type.custom_typename, expr)
+                else:
+                    expr = CastExpression(target_type, expr)
+            else:
+                break
+        
+        return expr
+    def postfix_expression(self) -> Expression:
+        """
+        postfix_expression -> primary_expression (postfix_operator)*
+        postfix_operator -> '[' expression ']'
+                         | '(' argument_list? ')'
+                         | '.' IDENTIFIER        # Field access for structs
+                         | '->' IDENTIFIER
+                         | '++'
+                         | '--'
+        """
+        expr = self.primary_expression()
+        
+        while True:
+            if self.expect(TokenType.LEFT_BRACKET):
+                # Array access
+                self.advance()
+                index = self.expression()
+                self.consume(TokenType.RIGHT_BRACKET)
+                expr = ArrayAccess(expr, index)
+            elif self.expect(TokenType.LEFT_PAREN):
+                # Function call
+                self.advance()
+                args = []
+                if not self.expect(TokenType.RIGHT_PAREN):
+                    args = self.argument_list()
+                self.consume(TokenType.RIGHT_PAREN)
+                if isinstance(expr, Identifier):
+                    # Special case: def(MACRO_NAME) creates a DefMacro node
+                    if expr.name == "def":
+                        if len(args) != 1:
+                            self.error("def() macro check requires exactly one argument (the macro name)")
+                        
+                        if not isinstance(args[0], Identifier):
+                            self.error("def() macro check requires a macro name identifier as argument")
+                        
+                        macro_name = args[0].name
+                        expr = DefMacro(macro_name)
+                    else:
+                        expr = FunctionCall(expr.name, args)
+                elif isinstance(expr, MemberAccess):
+                    # Method call: obj.method() -> call obj_type.method with obj as first arg
+                    method_name = f"{{obj_type}}.{expr.member}"
+                    expr = MethodCall(expr.object, expr.member, args)
+                else:
+                    raise SyntaxError(f"Cannot call function on complex expression: {type(expr).__name__}")
+            elif self.expect(TokenType.DOT):
+                # Member access - could be struct field or object method/member
+                self.advance()
+                member = self.consume(TokenType.IDENTIFIER).value
+                
+                # Create MemberAccess node - codegen will determine if it's
+                # StructFieldAccess or object member based on type
+                expr = MemberAccess(expr, member)
+            elif self.expect(TokenType.INCREMENT):
+                # Postfix increment
+                self.advance()
+                expr = UnaryOp(Operator.INCREMENT, expr, is_postfix=True)
+            elif self.expect(TokenType.DECREMENT):
+                # Postfix decrement
+                self.advance()
+                expr = UnaryOp(Operator.DECREMENT, expr, is_postfix=True)
+            elif self.expect(TokenType.AS):
+                # AS cast expression (postfix) - support all type casts
+                self.advance()
+                target_type = self.type_spec()
+                
+                # Check if this is a struct cast
+                if target_type.custom_typename:
+                    expr = StructRecast(target_type.custom_typename, expr)
+                else:
+                    expr = CastExpression(target_type, expr)
             else:
                 break
         
@@ -1656,7 +1806,7 @@ class FluxParser:
                            | 'super'
                            | '(' expression ')'
                            | array_literal
-                           | struct_literal
+                           | struct_literal  # Returns StructLiteral, not old Literal
         """
         if self.expect(TokenType.IDENTIFIER):
             name = self.current_token.value
@@ -1671,11 +1821,9 @@ class FluxParser:
                 args = self.argument_list()
             self.consume(TokenType.RIGHT_PAREN)
             
-            # Validate def() call
             if len(args) != 1:
                 self.error("def() macro check requires exactly one argument (the macro name)")
             
-            # The argument should be an identifier representing the macro name
             if not isinstance(args[0], Identifier):
                 self.error("def() macro check requires a macro name identifier as argument")
             
@@ -1701,7 +1849,7 @@ class FluxParser:
         elif self.expect(TokenType.CHAR):
             value = self.current_token.value
             self.advance()
-            return Literal(value, DataType.CHAR)  # String as char array
+            return Literal(value, DataType.CHAR)
         elif self.expect(TokenType.STRING_LITERAL):
             value = self.current_token.value
             self.advance()
@@ -1733,8 +1881,9 @@ class FluxParser:
         elif self.expect(TokenType.LEFT_BRACKET):
             return self.array_literal()
         elif self.expect(TokenType.LEFT_BRACE):
+            # Parse struct literal - returns StructLiteral node
             return self.struct_literal()
-        if self.expect(TokenType.SIZEOF):
+        elif self.expect(TokenType.SIZEOF):
             return self.sizeof_expression()
         elif self.expect(TokenType.ALIGNOF):
             return self.alignof_expression()
@@ -1864,28 +2013,58 @@ class FluxParser:
             self.consume(TokenType.RIGHT_BRACKET)
             return Literal([], DataType.DATA)
     
-    def struct_literal(self) -> Expression:
+    def struct_literal(self) -> StructLiteral:
         """
-        struct_literal -> '{' (IDENTIFIER '=' expression (',' IDENTIFIER '=' expression)*)? '}'
+        struct_literal -> '{' (named_init | positional_init)? '}'
+        named_init -> IDENTIFIER '=' expression (',' IDENTIFIER '=' expression)*
+        positional_init -> expression (',' expression)*
+        
+        Returns StructLiteral AST node.
+        Supports both:
+            {a = 10, b = 20}  // Named fields
+            {10, 20}          // Positional (field order from struct definition)
         """
         self.consume(TokenType.LEFT_BRACE)
-        members = {}
+        field_values = {}
+        positional_values = []
+        is_positional = False
         
         if not self.expect(TokenType.RIGHT_BRACE):
-            name = self.consume(TokenType.IDENTIFIER).value
-            self.consume(TokenType.ASSIGN)
-            value = self.expression()
-            members[name] = value
-            
-            while self.expect(TokenType.COMMA):
-                self.advance()
+            # Look ahead to determine if this is named or positional
+            # If we see IDENTIFIER followed by '=', it's named
+            # Otherwise, it's positional
+            if self.expect(TokenType.IDENTIFIER) and self.peek() and self.peek().type == TokenType.ASSIGN:
+                # Named initialization
+                is_positional = False
                 name = self.consume(TokenType.IDENTIFIER).value
                 self.consume(TokenType.ASSIGN)
                 value = self.expression()
-                members[name] = value
+                field_values[name] = value
+                
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    name = self.consume(TokenType.IDENTIFIER).value
+                    self.consume(TokenType.ASSIGN)
+                    value = self.expression()
+                    field_values[name] = value
+            else:
+                # Positional initialization
+                is_positional = True
+                value = self.expression()
+                positional_values.append(value)
+                
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    value = self.expression()
+                    positional_values.append(value)
         
         self.consume(TokenType.RIGHT_BRACE)
-        return Literal(members, DataType.DATA)  # Struct literal
+        
+        # Return StructLiteral with either named or positional values
+        if is_positional:
+            return StructLiteral(field_values={}, positional_values=positional_values)
+        else:
+            return StructLiteral(field_values=field_values, positional_values=[])
 
     def struct_body_item(self):
             if self.expect(TokenType.PUBLIC):

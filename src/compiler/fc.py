@@ -313,6 +313,7 @@ class FluxCompiler:
                 link_cmd = ["clang", str(obj_file), "-o", output_bin]
             elif self.platform == "Windows":
                 # Windows linking
+                """
                 link_cmd = [
                         "C:\\Program Files\\LLVM\\bin\\lld-link.exe",
                         "/entry:main",
@@ -329,6 +330,38 @@ class FluxCompiler:
                         str(obj_file),
                         "kernel32.lib",
                         f"/out:{output_bin}"
+                ]
+                """
+                """ MUCH more aggressive link command. Stripping causes issues. """
+                link_cmd = [
+                    "C:\\Program Files\\LLVM\\bin\\lld-link.exe",
+                    "/entry:main",
+                    "/nodefaultlib",
+                    "/subsystem:console",
+                    "/opt:ref",                    # Remove unused functions/data
+                    "/opt:icf",                    # Identical COMDAT folding
+                    "/merge:.rdata=.text",         # Merge read-only data with code
+                    "/merge:.data=.text",          # Merge data with code
+                    #"/merge:.bss=.text",           # Merge uninitialized data
+                    "/align:1",                    # 1-byte alignment (minimal padding)
+                    "/filealign:1",                # 1-byte file alignment (tiny executable)
+                    "/release",                    # Release mode (no debug info)
+                    "/driver",                     # ???
+                    "/fixed",                      # Fixed base address
+                    "/incremental:no",             # Disable incremental linking
+                    #"/strip:all",                  # Remove all symbols
+                    "/guard:no",                   # Disable CFG (Control Flow Guard)
+                    "/dynamicbase:no",             # Disable ASLR (for smaller size)
+                    "/nxcompat:no",                # Disable DEP compatibility
+                    "/highentropyva:no",           # Disable high entropy ASLR
+                    "/opt:lldlto=3",               # Aggressive LTO optimization if available
+                    "/opt:lldltojobs=all",         # Use all cores for LTO
+                    str(obj_file),
+                    # Only link essential libraries
+                    "kernel32.lib",
+                    # "user32.lib",  # Uncomment only if GUI functions are used
+                    # "gdi32.lib",   # Uncomment only if drawing functions are used
+                    f"/out:{output_bin}"
                 ]
                 
                 self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")

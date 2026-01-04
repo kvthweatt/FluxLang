@@ -82,7 +82,7 @@ def process_block(byte[64] block, u32[8] hash) -> u32[8] {
     // Compression loop
     for (int i = 0; i < 64; i++) {
         u32 S1 = (e >>> 6) ^ (e >>> 11) ^ (e >>> 25);
-        u32 ch = (e & f) ^ ((~e) & g);
+        u32 ch = (e & f) ^ ((e) & g);
         u32 temp1 = h + S1 + ch + K[i] + W[i];
         u32 S0 = (a >>> 2) ^ (a >>> 13) ^ (a >>> 22);
         u32 maj = (a & b) ^ (a & c) ^ (b & c);

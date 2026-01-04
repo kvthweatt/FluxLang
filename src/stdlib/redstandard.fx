@@ -5,8 +5,6 @@
 
 import "redio.fx";
 
-using standard::io;
-
 namespace standard
 {
 };

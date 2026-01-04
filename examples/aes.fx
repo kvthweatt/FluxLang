@@ -94,7 +94,7 @@ namespace aes
                     default {throw(CryptoError("Invalid AES key size"));};
                 };
             }
-            catch (CryptoErr as err)
+            catch (CryptoErr err)
             {
                 // Handle err
             };

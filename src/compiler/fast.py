@@ -10,7 +10,7 @@ Contributors:
 """
 
 from dataclasses import dataclass, field
-from typing import List, Any, Optional, Union, Tuple, ClassVar
+from typing import List, Any, Optional, Union, Dict, Tuple, ClassVar
 from enum import Enum
 from llvmlite import ir
 from pathlib import Path
@@ -835,6 +835,9 @@ class CastExpression(Expression):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate code for cast expressions, including zero-cost struct reinterpretation and void casting"""
+        
+        # CRITICAL: Use get_llvm_type() which handles type alias resolution
+        # This must happen BEFORE any struct checking logic
         target_llvm_type = self.target_type.get_llvm_type(module)
         
         # Handle void casting - frees memory according to Flux specification
@@ -847,6 +850,9 @@ class CastExpression(Expression):
         if source_val.type == target_llvm_type:
             return source_val
         
+        # Now check if RESOLVED types are structs (after alias resolution)
+        # This prevents treating "byte" (which resolves to i8) as a struct
+        
         # Handle struct-to-struct reinterpretation (zero-cost when sizes match)
         if (isinstance(source_val.type, ir.PointerType) and 
             isinstance(source_val.type.pointee, ir.LiteralStructType) and
@@ -856,7 +862,6 @@ class CastExpression(Expression):
             target_struct_type = target_llvm_type
             
             # Check if sizes are compatible (same total bytes)
-            # Calculate size by summing element bit widths
             source_size = sum(elem.width for elem in source_struct_type.elements if hasattr(elem, 'width'))
             target_size = sum(elem.width for elem in target_struct_type.elements if hasattr(elem, 'width'))
             
@@ -869,26 +874,6 @@ class CastExpression(Expression):
                 raise ValueError(f"Cannot cast struct of size {source_size} to struct of size {target_size}")
         
         # Handle loaded struct-to-struct cast (when source is already loaded from pointer)
-        elif (isinstance(source_val.type, ir.LiteralStructType) and
-            isinstance(target_llvm_type, ir.LiteralStructType)):
-            
-            # Check size compatibility
-            source_size = sum(elem.width for elem in source_val.type.elements if hasattr(elem, 'width'))
-            target_size = sum(elem.width for elem in target_llvm_type.elements if hasattr(elem, 'width'))
-            
-            if source_size == target_size:
-                # Create temporary storage for reinterpretation
-                source_ptr = builder.alloca(source_val.type, name="temp_source")
-                builder.store(source_val, source_ptr)
-                
-                # Bitcast to target type pointer and load
-                target_ptr_type = ir.PointerType(target_llvm_type)
-                reinterpreted_ptr = builder.bitcast(source_ptr, target_ptr_type, name="struct_reinterpret")
-                return builder.load(reinterpreted_ptr, name="reinterpreted_struct")
-            else:
-                raise ValueError(f"Cannot cast struct of size {source_size} to struct of size {target_size}")
-        
-        # Handle value-to-struct cast (load from pointer if needed)
         elif (isinstance(source_val.type, ir.LiteralStructType) and
             isinstance(target_llvm_type, ir.LiteralStructType)):
             
@@ -921,11 +906,11 @@ class CastExpression(Expression):
                 return source_val
         
         # Handle int to float
-        elif isinstance(source_val.type, ir.IntType) and isinstance(target_llvm_type, ir.FloatType):
+        elif isinstance(source_val.type, ir.IntType) and isinstance(target_llvm_type, (ir.FloatType, ir.DoubleType)):
             return builder.sitofp(source_val, target_llvm_type)
         
         # Handle float to int
-        elif isinstance(source_val.type, ir.FloatType) and isinstance(target_llvm_type, ir.IntType):
+        elif isinstance(source_val.type, (ir.FloatType, ir.DoubleType)) and isinstance(target_llvm_type, ir.IntType):
             return builder.fptosi(source_val, target_llvm_type)
         
         # Handle pointer to struct reinterpretation (e.g., char* -> MyStruct)
@@ -938,7 +923,6 @@ class CastExpression(Expression):
         # Handle struct to pointer cast (e.g., struct A -> i8*)
         elif isinstance(source_val.type, ir.LiteralStructType) and isinstance(target_llvm_type, ir.PointerType):
             # Check if source is already a loaded struct value from a pointer
-            # In this case, we need to get the original struct pointer
             if hasattr(source_val, 'name') and source_val.name and 'struct' in source_val.name:
                 # This is a loaded struct - find the original pointer in scope
                 source_name = source_val.name.replace('_struct_load', '').replace('_load', '')
@@ -962,48 +946,24 @@ class CastExpression(Expression):
     
     def _handle_void_cast(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Handle void casting - immediately free memory according to Flux specification"""
-        # According to Flux specification:
-        # - Casting anything to void immediately frees the memory occupied by that thing
-        # - This works for both stack and heap allocated items
-        # - (void) is essentially "free this memory now" no matter where it is
-        # - After void casting, the variable becomes unusable (use-after-free)
-        # - This is a RUNTIME operation that generates actual free() calls
-        #
-        # NOTE: We DO NOT remove variables from scope at compile-time to allow
-        # testing of runtime crashes. The free() call will happen at runtime,
-        # and subsequent use will cause crashes as intended.
-        
         if isinstance(self.expression, Identifier):
-            # This is a variable being cast to void - free it immediately at runtime
             var_name = self.expression.name
             
             if builder.scope is not None and var_name in builder.scope:
-                # Local variable - generate runtime free call
                 var_ptr = builder.scope[var_name]
-                
-                # Generate runtime free call
                 self._generate_runtime_free(builder, module, var_ptr, var_name)
-                
-                # Remove from scope - variable becomes unusable at compile-time AND runtime
-                del builder.scope[var_name]  # RE-ENABLED: compile-time + runtime checking
+                del builder.scope[var_name]
                 
             elif var_name in module.globals:
-                # Global variable - generate runtime free call
                 gvar = module.globals[var_name]
                 self._generate_runtime_free(builder, module, gvar, var_name)
-                # Note: We can't remove globals from the symbol table, but the memory is freed
             else:
                 raise NameError(f"Cannot void cast unknown variable: {var_name}")
         else:
-            # For expressions (not simple variables), generate the value and try to free it
             expr_val = self.expression.codegen(builder, module)
             if isinstance(expr_val.type, ir.PointerType):
-                # This is a pointer expression - we can free it
                 self._generate_runtime_free(builder, module, expr_val, "<expression>")
-            # For non-pointer expressions, there's nothing to free
         
-        # Void casting doesn't return a value (returns void)
-        # In LLVM IR, we represent this as returning None
         return None
     
     def _generate_runtime_free(self, builder: ir.IRBuilder, module: ir.Module, ptr_value: ir.Value, var_name: str) -> None:
@@ -1022,7 +982,6 @@ class CastExpression(Expression):
         is_macos = is_macro_defined(module, 'MACOS')
         
         if is_windows:
-            # NtFreeVirtualMemory syscall (syscall number 0x1E on x64)
             asm_code = """
                 mov r10, rcx
                 mov eax, 0x1E
@@ -1030,24 +989,20 @@ class CastExpression(Expression):
             """
             constraints = "r,~{rax},~{r10},~{r11},~{memory}"
         elif is_linux:
-            # munmap syscall (syscall number 11 on x64)
             asm_code = """
                 mov rax, 11
                 syscall
             """
             constraints = "r,~{rax},~{r11},~{memory}"
         elif is_macos:
-            # munmap syscall (syscall number 0x2000049 on x64)
             asm_code = """
                 mov rax, 0x2000049
                 syscall
             """
             constraints = "r,~{rax},~{memory}"
         else:
-            # No OS defined, skip free
             return
         
-        # Create inline asm
         asm_type = ir.FunctionType(ir.VoidType(), [i8_ptr])
         inline_asm = ir.InlineAsm(asm_type, asm_code, constraints, side_effect=True)
         builder.call(inline_asm, [void_ptr])
@@ -1603,32 +1558,11 @@ class FunctionCall(Expression):
         is_method_call = '.' in self.name
         parameter_offset = 1 if is_method_call else 0  # Account for implicit 'this' parameter
         
-        #print(f"DEBUG FunctionCall: Calling {self.name} with {len(self.arguments)} arguments")
-        #print(f"DEBUG FunctionCall: Function signature: {func.type}")
-        
         # Generate code for arguments
         arg_vals = []
         for i, arg in enumerate(self.arguments):
-            #print(f"DEBUG FunctionCall: Processing arg {i}: {type(arg).__name__} = {arg}")
-            #print(f"DEBUG FunctionCall: arg.type = {getattr(arg, 'type', None)}")
-            param_index = i + parameter_offset  # Adjust index for method calls
-            #if param_index < len(func.args):
-                #print(f"DEBUG FunctionCall: func.args[{param_index}].type = {func.args[param_index].type}")
-                
-            # Check if this is a string literal that needs to be converted to pointer
-            #print(f"DEBUG: Checking string literal conversion for arg {i} (param_index {param_index}):")
-            #print(f"DEBUG:   isinstance(arg, Literal) = {isinstance(arg, Literal)}")
-            #if isinstance(arg, Literal):
-                #print(f"DEBUG:   arg.type == DataType.CHAR = {arg.type == DataType.CHAR}")
-            #print(f"DEBUG:   param_index < len(func.args) = {param_index < len(func.args)}")
-            #if param_index < len(func.args):
-                #print(f"DEBUG:   func.args[{param_index}].type = {func.args[param_index].type}")
-                #print(f"DEBUG:   isinstance(func.args[{param_index}].type, ir.PointerType) = {isinstance(func.args[param_index].type, ir.PointerType)}")
-                #if isinstance(func.args[param_index].type, ir.PointerType):
-                    #print(f"DEBUG:   isinstance(func.args[{param_index}].type.pointee, ir.IntType) = {isinstance(func.args[param_index].type.pointee, ir.IntType)}")
-                    #if isinstance(func.args[param_index].type.pointee, ir.IntType):
-                        #print(f"DEBUG:   func.args[{param_index}].type.pointee.width == 8 = {func.args[param_index].type.pointee.width == 8}")
-                        
+            param_index = i + parameter_offset
+            
             if (isinstance(arg, Literal) and arg.type == DataType.CHAR and 
                 param_index < len(func.args) and isinstance(func.args[param_index].type, ir.PointerType) and 
                 isinstance(func.args[param_index].type.pointee, ir.IntType) and func.args[param_index].type.pointee.width == 8):
@@ -1651,68 +1585,56 @@ class FunctionCall(Expression):
                 arg_val = str_ptr
             else:
                 arg_val = arg.codegen(builder, module)
-                print(f"DEBUG FunctionCall arg[{i}]: type(arg) = {type(arg).__name__}")
-                print(f"DEBUG FunctionCall arg[{i}]: arg = {arg}")
-                print(f"DEBUG FunctionCall arg[{i}]: arg_val.type = {arg_val.type}")
-                if param_index < len(func.args):
-                    print(f"DEBUG FunctionCall arg[{i}]: expected type = {func.args[param_index].type}")
             
-            #print(f"DEBUG FunctionCall: arg[{i}] original type: {arg_val.type}")
-            
-            # Check if we have a type mismatch and need to call __expr for automatic conversion
+            # Type checking and conversion logic
             if param_index < len(func.args):
                 expected_type = func.args[param_index].type
+                
                 if arg_val.type != expected_type:
+                    # If we have [N x T]* and expect T*, convert via GEP
+                    if (isinstance(arg_val.type, ir.PointerType) and 
+                        isinstance(arg_val.type.pointee, ir.ArrayType) and
+                        isinstance(expected_type, ir.PointerType) and
+                        arg_val.type.pointee.element == expected_type.pointee):
+                        # Array to pointer decay: [4 x i8]* -> i8*
+                        zero = ir.Constant(ir.IntType(1), 0) # This can be 1 bit. We're only storing 0
+                        arg_val = builder.gep(arg_val, [zero, zero], name=f"arg{i}_decay")
+                    
                     # Check if this is an object type that has a __expr method for automatic conversion
-                    if isinstance(arg_val.type, ir.PointerType):
+                    elif isinstance(arg_val.type, ir.PointerType):
                         # Get the struct name - handle both identified and literal struct types
                         struct_name = None
                         
                         # Try to get name from identified struct types
                         if hasattr(arg_val.type.pointee, '_name'):
                             struct_name = arg_val.type.pointee._name.strip('"')
-                            #print(f"DEBUG FunctionCall: Found struct name from _name: {struct_name}")
                         
                         # Try to get name from module's struct types
                         if struct_name is None and hasattr(module, '_struct_types'):
-                            #print(f"DEBUG FunctionCall: Checking module._struct_types: {list(module._struct_types.keys())}")
                             for name, struct_type in module._struct_types.items():
-                                #print(f"DEBUG FunctionCall: Comparing {name}: {struct_type} vs {arg_val.type.pointee}")
                                 # More robust comparison that handles both identified and literal struct types
                                 if (struct_type == arg_val.type.pointee or 
                                     (hasattr(struct_type, '_name') and hasattr(arg_val.type.pointee, '_name') and
                                      struct_type._name == arg_val.type.pointee._name) or
                                     (str(struct_type) == str(arg_val.type.pointee))):
                                     struct_name = name
-                                    #print(f"DEBUG FunctionCall: Found struct name from module: {struct_name}")
                                     break
                         
                         # If we found a struct name, look for __expr method
                         if struct_name:
-                            #print(f"DEBUG FunctionCall: Looking for __expr method for struct type: {struct_name}")
                             expr_method_name = f"{struct_name}.__expr"
-                            #print(f"DEBUG FunctionCall: Checking for method: {expr_method_name}")
-                            #print(f"DEBUG FunctionCall: Available globals: {list(module.globals.keys())}")
                             
                             if expr_method_name in module.globals:
                                 expr_func = module.globals[expr_method_name]
                                 if isinstance(expr_func, ir.Function):
-                                    #print(f"DEBUG FunctionCall: Found __expr method, calling it for automatic conversion")
                                     # Call the __expr method to get the underlying representation
                                     converted_val = builder.call(expr_func, [arg_val])
-                                    #print(f"DEBUG FunctionCall: Converted {arg_val.type} to {converted_val.type}, expected {expected_type}")
                                     # Check if the converted type matches what's expected
                                     if converted_val.type == expected_type:
                                         arg_val = converted_val
-                                #else:
-                                    #print(f"DEBUG FunctionCall: __expr method not a function: {type(expr_func)}")
-                            #else:
-                                #print(f"DEBUG FunctionCall: __expr method not found: {expr_method_name}")
-                        #else:
-                            #print(f"DEBUG FunctionCall: No struct name found for type: {arg_val.type}")
             
             arg_vals.append(arg_val)
-            
+        
         return builder.call(func, arg_vals)
 
 @dataclass
@@ -1721,6 +1643,14 @@ class MemberAccess(Expression):
     member: str
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Check if this is a struct type
+        if hasattr(module, '_struct_types'):
+            obj = self.object.codegen(builder, module)
+            for struct_name, struct_type in module._struct_types.items():
+                if obj.type == struct_type or (isinstance(obj.type, ir.PointerType) and obj.type.pointee == struct_type):
+                    # This is struct field access
+                    field_access = StructFieldAccess(self.object, self.member)
+                    return field_access.codegen(builder, module)
         # Handle static struct/union member access (A.x where A is a struct/union type)
         if isinstance(self.object, Identifier):
             type_name = self.object.name
@@ -4334,68 +4264,778 @@ class UnionDef(ASTNode):
         
         return union_type
 
+
+"""
+Flux Struct Implementation according to struct_specification.md
+
+This implements structs as type contracts with runtime-queryable vtables,
+enabling zero-cost data reinterpretation through destructive casting.
+
+Key concepts:
+1. Struct declarations create vtables (metadata about memory layout)
+2. Struct instances are pure data with no vtable pointers
+3. Field access consults vtable at compile time
+4. Casting between structs is zero-cost bitcast operation
+"""
+
 # Struct member
 @dataclass
 class StructMember(ASTNode):
+    """
+    Struct member with explicit type specification.
+    
+    Attributes:
+        name: Member field name
+        type_spec: Type specification (must include bit_width for data types)
+        offset: Calculated bit offset in struct (set during vtable generation)
+        is_private: Whether this is a private member
+        initial_value: Optional initialization expression (not stored in vtable)
+    """
     name: str
     type_spec: TypeSpec
-    initial_value: Optional[Expression] = None
+    offset: Optional[int] = None  # Bit offset, calculated during vtable gen
     is_private: bool = False
+    initial_value: Optional[Expression] = None
+
+# Struct instance
+@dataclass
+class StructInstance(Expression):
+    """
+    Struct instance - actual data container.
+    
+    This represents an actual struct in memory with data packed inline.
+    The data is already serialized according to the struct's vtable layout.
+    
+    Syntax:
+        StructName instance_name;                    # Uninitialized
+        StructName instance_name {field1 = val1};   # Initialized with literal
+    
+    Example:
+        struct Data { 
+            unsigned data{32} a; 
+            unsigned data{32} b; 
+        };
+        
+        Data d {a = 0x54534554, b = 0x21474E49};  # "TEST" "ING!"
+        // Memory layout: [54 53 45 54 21 47 4E 49] = "TESTING!"
+    """
+    struct_name: str
+    field_values: Dict[str, Expression] = field(default_factory=dict)
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """
+        Generate struct instance with data packed inline.
+        
+        Returns an LLVM value containing the raw packed bits.
+        """
+        # Get struct definition
+        if not hasattr(module, '_struct_vtables'):
+            raise ValueError(f"Struct '{self.struct_name}' not defined")
+        
+        vtable = module._struct_vtables.get(self.struct_name)
+        if not vtable:
+            raise ValueError(f"Struct '{self.struct_name}' not defined")
+        
+        struct_type = module._struct_types[self.struct_name]
+        
+        # Create zeroed instance
+        if isinstance(struct_type, ir.IntType):
+            # Small struct - integer type
+            instance = ir.Constant(struct_type, 0)
+        else:
+            # Large struct - array of bytes
+            instance = ir.Constant(struct_type, [ir.Constant(ir.IntType(8), 0)] * vtable.total_bytes)
+        
+        # Pack field values into the instance
+        for field_name, field_value_expr in self.field_values.items():
+            # Find field in vtable
+            field_info = next(
+                (f for f in vtable.fields if f[0] == field_name),
+                None
+            )
+            if not field_info:
+                raise ValueError(f"Field '{field_name}' not found in struct '{self.struct_name}'")
+            
+            _, bit_offset, bit_width, alignment = field_info
+            
+            # Generate value
+            field_value = field_value_expr.codegen(builder, module)
+            
+            # Pack value into instance at correct bit offset
+            instance = self._pack_field_value(
+                builder, instance, field_value, 
+                bit_offset, bit_width, vtable.total_bits
+            )
+        
+        return instance
+    
+    def _pack_field_value(
+        self, 
+        builder: ir.IRBuilder, 
+        instance: ir.Value,
+        field_value: ir.Value,
+        bit_offset: int,
+        bit_width: int,
+        total_bits: int
+    ) -> ir.Value:
+        """
+        Pack a field value into the struct instance at the correct bit offset.
+        
+        This performs bit manipulation to insert the field value at the
+        correct position in the packed struct.
+        """
+        if isinstance(instance.type, ir.IntType):
+            # Integer type - use bit operations
+            instance_type = instance.type
+            
+            # Convert field value to same width as instance for manipulation
+            if field_value.type.width < instance_type.width:
+                field_value_extended = builder.zext(field_value, instance_type)
+            elif field_value.type.width > instance_type.width:
+                field_value_extended = builder.trunc(field_value, instance_type)
+            else:
+                field_value_extended = field_value
+            
+            # Shift field value to correct position
+            if bit_offset > 0:
+                field_value_shifted = builder.shl(
+                    field_value_extended,
+                    ir.Constant(instance_type, bit_offset)
+                )
+            else:
+                field_value_shifted = field_value_extended
+            
+            # Create mask to clear target bits in instance
+            mask = ((1 << bit_width) - 1) << bit_offset
+            clear_mask = (~mask) & ((1 << total_bits) - 1)
+            
+            # Clear target bits
+            instance_cleared = builder.and_(
+                instance,
+                ir.Constant(instance_type, clear_mask)
+            )
+            
+            # Insert field value
+            result = builder.or_(instance_cleared, field_value_shifted)
+            
+            return result
+        else:
+            # Array type - byte-level manipulation
+            # Calculate byte offset and bit offset within byte
+            byte_offset = bit_offset // 8
+            bit_in_byte = bit_offset % 8
+            
+            # For now, support only byte-aligned fields in array structs
+            if bit_in_byte != 0 or bit_width % 8 != 0:
+                raise NotImplementedError(
+                    "Unaligned fields in large structs not yet supported"
+                )
+            
+            # Insert bytes at correct position
+            field_bytes = bit_width // 8
+            
+            # Extract bytes from field value
+            for i in range(field_bytes):
+                byte_val = builder.trunc(
+                    builder.lshr(
+                        field_value,
+                        ir.Constant(field_value.type, i * 8)
+                    ),
+                    ir.IntType(8)
+                )
+                
+                # Insert into array
+                instance = builder.insert_value(
+                    instance,
+                    byte_val,
+                    byte_offset + i
+                )
+            
+            return instance
+
+# Struct literal
+@dataclass
+class StructLiteral(Expression):
+    """
+    Struct literal for inline initialization.
+    
+    Syntax: (StructType){field1 = value1, field2 = value2}
+    
+    Examples:
+        Data d = (Data){a = 10, b = 20};
+        process((Data){a = 100, b = 200});
+        d = (Data){a = 30, b = 40};  // Re-assign with new literal
+    
+    The struct type MUST be explicitly specified via cast syntax.
+    No implicit type inference - this is explicit Flux style.
+    """
+    field_values: Dict[str, Expression]
+    positional_values: Dict[str, Expression]
+    struct_type: Optional[str] = None  # Set by CastExpression wrapper
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """
+        Generate packed struct literal.
+        
+        The struct type must be explicitly specified via cast before codegen.
+        This should never be called directly - always wrapped in CastExpression.
+        """
+        if self.struct_type is None:
+            raise ValueError(
+                "Struct literal must be cast to a type: (StructType){fields...}"
+            )
+        
+        # Create StructInstance with explicit type
+        instance = StructInstance(self.struct_type, self.field_values)
+        return instance.codegen(builder, module)
+
+# Struct pointer vtable
+@dataclass
+class StructVTable:
+    """
+    Virtual table containing struct layout metadata.
+    
+    This is generated at compile time and stored as a global constant.
+    It enables zero-cost struct reinterpretation and field access.
+    
+    Attributes:
+        struct_name: Name of the struct
+        total_bits: Total size in bits
+        total_bytes: Total size in bytes (rounded up)
+        alignment: Required alignment in bits
+        fields: List of (name, offset, width, alignment) tuples
+    """
+    struct_name: str
+    total_bits: int
+    total_bytes: int
+    alignment: int
+    fields: List[Tuple[str, int, int, int]]  # (name, bit_offset, bit_width, alignment)
+    
+    def to_llvm_constant(self, module: ir.Module) -> ir.Constant:
+        """
+        Generate LLVM IR constant for vtable metadata.
+        
+        Format:
+        {
+            i32 total_bits,
+            i32 field_count,
+            [N x {i32 offset, i32 width, i32 alignment}] fields
+        }
+        """
+        i32 = ir.IntType(32) # REPLACE WITH CODE TO EVALUATE INSTEAD OF HARD-CODE
+        
+        # Create field metadata array type
+        field_type = ir.LiteralStructType([i32, i32, i32])
+        field_array_type = ir.ArrayType(field_type, len(self.fields))
+        
+        # Build field array
+        field_constants = []
+        for name, offset, width, alignment in self.fields:
+            field_constants.append(ir.Constant(field_type, [
+                ir.Constant(i32, offset),
+                ir.Constant(i32, width),
+                ir.Constant(i32, alignment)
+            ]))
+        
+        # Build vtable struct
+        vtable_type = ir.LiteralStructType([
+            i32,              # total_bits
+            i32,              # field_count
+            field_array_type  # fields
+        ])
+        
+        return ir.Constant(vtable_type, [
+            ir.Constant(i32, self.total_bits),
+            ir.Constant(i32, len(self.fields)),
+            ir.Constant(field_array_type, field_constants)
+        ])
 
 # Struct definition
 @dataclass
 class StructDef(ASTNode):
+    """
+    Struct definition - creates a type contract (vtable).
+    
+    Unlike traditional structs, this does NOT allocate data.
+    It creates compile-time metadata that describes memory layout.
+    
+    Actual struct instances are pure data with no overhead.
+    """
     name: str
     members: List[StructMember] = field(default_factory=list)
-    base_structs: List[str] = field(default_factory=list)  # inheritance
+    base_structs: List[str] = field(default_factory=list)
     nested_structs: List['StructDef'] = field(default_factory=list)
-
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
-        # Convert member types
-        member_types = []
-        member_names = []
+    vtable: Optional[StructVTable] = None  # Generated during codegen
+    
+    def calculate_vtable(self, module: ir.Module) -> StructVTable:
+        """
+        Calculate struct layout and generate vtable.
+        
+        This determines:
+        - Bit offset for each field
+        - Total struct size in bits
+        - Required alignment
+        
+        Returns: StructVTable with all metadata
+        """
+        fields = []
+        current_offset = 0
+        max_alignment = 1
+        
         for member in self.members:
-            member_type = self._convert_type(member.type_spec, module)
-            member_types.append(member_type)
-            member_names.append(member.name)
-        # Create the struct type
-        struct_type = ir.LiteralStructType(member_types)
-        struct_type.names = member_names
-        struct_type.packed = True # NEVER CHANGE THIS
-        # Store the type in the module's context
+            # Get member type information
+            member_type = member.type_spec
+            
+            # Calculate bit width
+            if member_type.bit_width is not None:
+                bit_width = member_type.bit_width
+                alignment = member_type.alignment or bit_width
+            elif member_type.custom_typename:
+                # Look up custom type in module's type table
+                custom_type_info = self._get_custom_type_info(
+                    member_type.custom_typename, module
+                )
+                bit_width = custom_type_info['bit_width']
+                alignment = custom_type_info['alignment']
+            else:
+                # Built-in types
+                bit_width = self._get_builtin_bit_width(member_type.base_type)
+                alignment = bit_width
+            
+            # Handle alignment
+            if alignment > 1:
+                # Align current offset to alignment boundary
+                misalignment = current_offset % alignment
+                if misalignment != 0:
+                    current_offset += alignment - misalignment
+            
+            # Record field metadata
+            fields.append((member.name, current_offset, bit_width, alignment))
+            member.offset = current_offset  # Store in member for later use
+            
+            # Advance offset
+            current_offset += bit_width
+            max_alignment = max(max_alignment, alignment)
+        
+        # Calculate total size
+        total_bits = current_offset
+        
+        # Align total size to max alignment
+        if max_alignment > 1:
+            misalignment = total_bits % max_alignment
+            if misalignment != 0:
+                total_bits += max_alignment - misalignment
+        
+        total_bytes = (total_bits + 7) // 8  # Round up to bytes
+        
+        return StructVTable(
+            struct_name=self.name,
+            total_bits=total_bits,
+            total_bytes=total_bytes,
+            alignment=max_alignment,
+            fields=fields
+        )
+    
+    def _get_builtin_bit_width(self, base_type: DataType) -> int:
+        """Get bit width for built-in types"""
+        widths = {
+            DataType.BOOL: 1,
+            DataType.CHAR: 8,
+            DataType.INT: 32,
+            DataType.FLOAT: 32,
+            DataType.VOID: 0
+        }
+        return widths.get(base_type, 32)
+    
+    def _get_custom_type_info(self, typename: str, module: ir.Module) -> Dict:
+        """
+        Look up custom type information from module's type registry.
+        
+        Returns: dict with 'bit_width' and 'alignment' keys
+        """
+        if not hasattr(module, '_custom_types'):
+            raise NameError(f"Custom type '{typename}' not found")
+        
+        if typename not in module._custom_types:
+            raise NameError(f"Custom type '{typename}' not defined")
+        
+        return module._custom_types[typename]
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
+        """
+        Generate LLVM IR for struct definition.
+        
+        This creates:
+        1. Global vtable constant with metadata
+        2. Type alias for instances (raw bits)
+        3. Helper functions for field access
+        
+        Returns: LLVM type representing struct instances (integer type)
+        """
+        # Calculate vtable
+        self.vtable = self.calculate_vtable(module)
+        
+        # Generate vtable global constant
+        vtable_constant = self.vtable.to_llvm_constant(module)
+        vtable_global = ir.GlobalVariable(
+            module,
+            vtable_constant.type,
+            name=f"{self.name}.vtable"
+        )
+        vtable_global.initializer = vtable_constant
+        vtable_global.linkage = 'internal'
+        vtable_global.global_constant = True
+        
+        # Create type alias for instances
+        # Instances are just raw bits - represented as integer type
+        if self.vtable.total_bits <= 64:
+            # Small structs: use native integer type
+            instance_type = ir.IntType(self.vtable.total_bits)
+        else:
+            # Large structs: use byte array
+            instance_type = ir.ArrayType(ir.IntType(8), self.vtable.total_bytes)
+        
+        # Store type information in module
         if not hasattr(module, '_struct_types'):
             module._struct_types = {}
-        module._struct_types[self.name] = struct_type
-        # Create global variables for initialized members
-        for member in self.members:
-            if member.initial_value is not None:  # Check for initial_value here
-                # Create global variable for initialized members
-                gvar = ir.GlobalVariable(
-                    module, 
-                    member_type, 
-                    f"{self.name}.{member.name}"
-                )
-                gvar.initializer = member.initial_value.codegen(builder, module)
-                gvar.linkage = 'internal'
-        return struct_type
+        if not hasattr(module, '_struct_vtables'):
+            module._struct_vtables = {}
+        
+        module._struct_types[self.name] = instance_type
+        module._struct_vtables[self.name] = self.vtable
+        
+        # Generate field access helpers
+        self._generate_field_accessors(module, instance_type)
+        
+        # Process nested structs
+        for nested in self.nested_structs:
+            nested.codegen(builder, module)
+        
+        return instance_type
     
-    def _convert_type(self, type_spec: TypeSpec, module: ir.Module) -> ir.Type:
+    def _generate_field_accessors(self, module: ir.Module, struct_type: ir.Type):
+        """
+        Store field access information in vtable.
+        
+        Field access is done inline at the call site, not via helper functions.
+        The vtable metadata tells the compiler how to generate the correct
+        bit manipulation code for each field access.
+        
+        This function just validates the layout - actual access code is
+        generated on-demand when fields are accessed.
+        """
+        # No hidden functions generated - field access is always inline
+        # The vtable is sufficient metadata for the compiler to generate
+        # correct access code at each use site
+        pass
+    
+    def _get_field_llvm_type(self, type_spec: TypeSpec, module: ir.Module) -> ir.Type:
+        """Convert TypeSpec to LLVM type"""
         try:
             return type_spec.get_llvm_type(module)
-        except (NameError, ValueError) as e:
-            # If type resolution fails, provide helpful error message
-            if type_spec.custom_typename:
-                raise NameError(
-                    f"Unknown type '{type_spec.custom_typename}' in struct member. "
-                    f"Make sure the type is defined before the struct or imported properly."
-                )
-            elif type_spec.base_type == DataType.DATA and type_spec.bit_width is None:
-                raise ValueError(
-                    f"DATA type missing bit_width. Use explicit bit width like data{{8}} "
-                    f"or define a type alias first."
+        except:
+            # Fallback for data types
+            if type_spec.bit_width:
+                return ir.IntType(type_spec.bit_width)
+            return ir.IntType(32)
+
+# ============================================================================
+# Struct Operations
+# ============================================================================
+
+@dataclass
+class StructFieldAccess(Expression):
+    """
+    Access a field from a struct instance.
+    
+    Syntax: instance.field_name
+    
+    This generates inline bit manipulation code to extract the field value
+    from the packed struct data using vtable metadata.
+    """
+    struct_instance: Expression
+    field_name: str
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """
+        Generate inline field access code.
+        
+        Uses vtable metadata to determine bit offset and generates
+        the appropriate shift/mask operations inline.
+        """
+        # Get struct instance value
+        instance = self.struct_instance.codegen(builder, module)
+        
+        # Determine struct type from instance
+        # For now, we need the struct name - this should be tracked in type system
+        # TODO: Add type tracking to expressions
+        struct_name = self._infer_struct_name(instance, module)
+        
+        # Get vtable
+        vtable = module._struct_vtables.get(struct_name)
+        if not vtable:
+            raise ValueError(f"Cannot determine struct type for field access")
+        
+        # Find field in vtable
+        field_info = next(
+            (f for f in vtable.fields if f[0] == self.field_name),
+            None
+        )
+        if not field_info:
+            raise ValueError(f"Field '{self.field_name}' not found in struct '{struct_name}'")
+        
+        _, bit_offset, bit_width, alignment = field_info
+        
+        # Generate inline extraction code
+        if isinstance(instance.type, ir.IntType):
+            # Integer type - simple bit operations
+            instance_type = instance.type
+            
+            # Shift to position
+            if bit_offset > 0:
+                shifted = builder.lshr(
+                    instance,
+                    ir.Constant(instance_type, bit_offset)
                 )
             else:
-                raise ValueError(f"Unsupported type: {type_spec.base_type}")
+                shifted = instance
+            
+            # Mask to field width
+            mask = (1 << bit_width) - 1
+            masked = builder.and_(
+                shifted,
+                ir.Constant(instance_type, mask)
+            )
+            
+            # Truncate to field width if needed
+            field_type = ir.IntType(bit_width)
+            if instance_type.width != bit_width:
+                result = builder.trunc(masked, field_type)
+            else:
+                result = masked
+            
+            return result
+        else:
+            # Array type - byte extraction
+            byte_offset = bit_offset // 8
+            bit_in_byte = bit_offset % 8
+            
+            if bit_in_byte == 0 and bit_width % 8 == 0:
+                # Byte-aligned - simple extraction
+                field_bytes = bit_width // 8
+                field_type = ir.IntType(bit_width)
+                
+                # Extract bytes and combine
+                result = ir.Constant(field_type, 0)
+                for i in range(field_bytes):
+                    byte_val = builder.extract_value(instance, byte_offset + i)
+                    byte_extended = builder.zext(byte_val, field_type)
+                    byte_shifted = builder.shl(
+                        byte_extended,
+                        ir.Constant(field_type, i * 8)
+                    )
+                    result = builder.or_(result, byte_shifted)
+                
+                return result
+            else:
+                # Unaligned - complex bit manipulation
+                raise NotImplementedError(
+                    "Unaligned field access in large structs not yet supported"
+                )
+    
+    def _infer_struct_name(self, instance: ir.Value, module: ir.Module) -> str:
+        """
+        Infer struct name from instance type.
+        
+        TODO: This should be tracked in the type system properly.
+        For now, we match by type equality.
+        """
+        if not hasattr(module, '_struct_types'):
+            raise ValueError("No struct types defined")
+        
+        for struct_name, struct_type in module._struct_types.items():
+            if instance.type == struct_type:
+                return struct_name
+        
+        raise ValueError("Cannot determine struct type from instance")
+
+@dataclass
+class StructFieldAssign(Statement):
+    """
+    Assign a value to a struct field.
+    
+    Syntax: instance.field_name = value;
+    
+    Generates inline bit manipulation to update the field in place.
+    """
+    struct_instance: Expression
+    field_name: str
+    value: Expression
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """
+        Generate inline field assignment code.
+        
+        This modifies the struct in place using bit manipulation.
+        """
+        # Get struct instance (must be lvalue/pointer)
+        instance_ptr = self.struct_instance.codegen(builder, module)
+        
+        # Load current value
+        instance = builder.load(instance_ptr)
+        
+        # Get struct type
+        struct_name = self._infer_struct_name(instance, module)
+        vtable = module._struct_vtables[struct_name]
+        
+        # Find field
+        field_info = next(
+            (f for f in vtable.fields if f[0] == self.field_name),
+            None
+        )
+        if not field_info:
+            raise ValueError(f"Field '{self.field_name}' not found")
+        
+        _, bit_offset, bit_width, alignment = field_info
+        
+        # Generate new value
+        new_value = self.value.codegen(builder, module)
+        
+        # Pack new value into instance
+        if isinstance(instance.type, ir.IntType):
+            instance_type = instance.type
+            
+            # Extend/truncate new value to instance width
+            if new_value.type.width < instance_type.width:
+                new_value_extended = builder.zext(new_value, instance_type)
+            elif new_value.type.width > instance_type.width:
+                new_value_extended = builder.trunc(new_value, instance_type)
+            else:
+                new_value_extended = new_value
+            
+            # Shift to position
+            if bit_offset > 0:
+                new_value_shifted = builder.shl(
+                    new_value_extended,
+                    ir.Constant(instance_type, bit_offset)
+                )
+            else:
+                new_value_shifted = new_value_extended
+            
+            # Create clear mask
+            mask = ((1 << bit_width) - 1) << bit_offset
+            clear_mask = (~mask) & ((1 << vtable.total_bits) - 1)
+            
+            # Clear old value
+            instance_cleared = builder.and_(
+                instance,
+                ir.Constant(instance_type, clear_mask)
+            )
+            
+            # Insert new value
+            updated_instance = builder.or_(instance_cleared, new_value_shifted)
+            
+            # Store back
+            builder.store(updated_instance, instance_ptr)
+            
+            return updated_instance
+        else:
+            raise NotImplementedError(
+                "Field assignment in large structs not yet supported"
+            )
+    
+    def _infer_struct_name(self, instance: ir.Value, module: ir.Module) -> str:
+        """Infer struct name from instance type"""
+        if not hasattr(module, '_struct_types'):
+            raise ValueError("No struct types defined")
+        
+        for struct_name, struct_type in module._struct_types.items():
+            if instance.type == struct_type:
+                return struct_name
+        
+        raise ValueError("Cannot determine struct type from instance")
+
+@dataclass
+class StructRecast(Expression):
+    """
+    Zero-cost struct reinterpretation cast.
+    
+    Syntax: (TargetStruct)source_data
+    
+    This performs:
+    1. Runtime size check (can be optimized away if sizes known)
+    2. Bitcast pointer (zero cost)
+    3. No data movement or copying
+    """
+    target_type: str  # Struct type name
+    source_expr: Expression
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """
+        Generate zero-cost reinterpret cast.
+        
+        Size checking is done at compile time when possible.
+        If sizes don't match at compile time, it's a compilation error.
+        Runtime size checks only occur for dynamic arrays.
+        Invalid casts result in undefined behavior (programmer's responsibility).
+        """
+        # Get target struct vtable
+        if not hasattr(module, '_struct_vtables'):
+            raise ValueError(f"Struct '{self.target_type}' not defined")
+        
+        target_vtable = module._struct_vtables.get(self.target_type)
+        if not target_vtable:
+            raise ValueError(f"Struct '{self.target_type}' not defined")
+        
+        # Get source value
+        source_value = self.source_expr.codegen(builder, module)
+        target_type = module._struct_types[self.target_type]
+        
+        # Compile-time size check if source size is known
+        if hasattr(source_value.type, 'count'):
+            # Array type - check size at compile time
+            source_bytes = source_value.type.count
+            if source_bytes != target_vtable.total_bytes:
+                raise ValueError(
+                    f"Size mismatch in cast to {self.target_type}: "
+                    f"source is {source_bytes} bytes, target requires {target_vtable.total_bytes} bytes"
+                )
+        
+        # Perform zero-cost bitcast
+        if isinstance(source_value.type, ir.PointerType):
+            # Cast pointer, then load
+            casted_ptr = builder.bitcast(source_value, target_type.as_pointer())
+            result = builder.load(casted_ptr)
+        else:
+            # Direct bitcast (reinterpret bits)
+            # This is a no-op in machine code
+            result = builder.bitcast(source_value, target_type)
+        
+        return result
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+def register_struct_type(module: ir.Module, type_name: str, bit_width: int, alignment: int):
+    """
+    Register a custom type in the module's type registry.
+    
+    Used for `unsigned data{N:M} as typename` declarations.
+    """
+    if not hasattr(module, '_custom_types'):
+        module._custom_types = {}
+    
+    module._custom_types[type_name] = {
+        'bit_width': bit_width,
+        'alignment': alignment
+    }
+
+def get_struct_vtable(module: ir.Module, struct_name: str) -> Optional[StructVTable]:
+    """Get vtable for a struct type"""
+    if not hasattr(module, '_struct_vtables'):
+        return None
+    return module._struct_vtables.get(struct_name)
 
 # Object method
 @dataclass
@@ -4632,166 +5272,10 @@ class UsingStatement(Statement):
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
         """Using statements are compile-time directives - no runtime code generated"""
-        # Parse and validate namespace path
-        namespace_parts = self.namespace_path.split("::")
-        
-        # Initialize namespace registry if it doesn't exist
-        if not hasattr(module, '_namespaces'):
-            module._namespaces = set()
-        
-        # Check if the namespace exists
-        namespace_exists = self.namespace_path in module._namespaces
-        
-        # Also check for partial matches (e.g., "standard" exists if "standard::types" was defined)
-        if not namespace_exists:
-            for registered_ns in module._namespaces:
-                if registered_ns == namespace_parts[0] or registered_ns.startswith(self.namespace_path + "::"):
-                    namespace_exists = True
-                    break
-        
-        if not namespace_exists:
-            raise NameError(f"Namespace '{self.namespace_path}' is not defined")
-        
-        # Store the namespace information for symbol resolution
+        # For now, just store the namespace information for symbol resolution
         if not hasattr(module, '_using_namespaces'):
             module._using_namespaces = []
         module._using_namespaces.append(self.namespace_path)
-        
-        # Also add the leaf namespace name for direct access (e.g., 'types' from 'standard::types')
-        leaf_name = self.namespace_path.split('::')[-1]
-        if leaf_name not in module._using_namespaces:
-            module._using_namespaces.append(leaf_name)
-        
-        # Create unqualified aliases for symbols and generate code if needed
-        namespace_mangled = self.namespace_path.replace('::', '__')
-        
-        # Look for imported symbols that match this namespace and generate code if needed
-        if hasattr(module, '_imported_symbols'):
-            for import_path, statements in module._imported_symbols.items():
-                # Process statements from imported modules recursively
-                self._process_statements_for_namespace(statements, self.namespace_path, builder, module)
-    
-    def _process_statements_for_namespace(self, statements, target_namespace, builder, module):
-        """Recursively process statements looking for matching namespace definitions"""
-        #print(f"DEBUG: Processing statements for namespace: {target_namespace}")
-        
-        # FIRST PASS: Process all using statements to establish type resolution context
-        #print(f"DEBUG: First pass - processing using statements")
-        for stmt in statements:
-            if hasattr(stmt, '__class__') and stmt.__class__.__name__ == 'UsingStatement':
-                #print(f"DEBUG: Found using statement: {stmt.namespace_path}")
-                # Add namespace to using list without recursive processing
-                if not hasattr(module, '_using_namespaces'):
-                    module._using_namespaces = []
-                if stmt.namespace_path not in module._using_namespaces:
-                    module._using_namespaces.append(stmt.namespace_path)
-                    #print(f"DEBUG: Added {stmt.namespace_path} to using namespaces")
-                    
-                    # Also add the leaf namespace name for direct access (e.g., 'types' from 'standard::types')
-                    leaf_name = stmt.namespace_path.split('::')[-1]
-                    if leaf_name not in module._using_namespaces:
-                        module._using_namespaces.append(leaf_name)
-                        #print(f"DEBUG: Added leaf namespace '{leaf_name}' to using namespaces")
-        
-        # SECOND PASS: Process namespace definitions with full context
-        #print(f"DEBUG: Second pass - processing namespace definitions")
-        for stmt in statements:
-            #print(f"DEBUG: Checking statement: {type(stmt).__name__}")
-            # Look for NamespaceDefStatement that matches our target
-            if isinstance(stmt, NamespaceDefStatement):
-                #print(f"DEBUG: Found NamespaceDefStatement: {stmt.namespace_def.name}")
-                # Get the mangled name (how it was stored during codegen)
-                mangled_name = stmt.namespace_def.name.replace('::', '__')
-                target_mangled = target_namespace.replace('::', '__')
-                #print(f"DEBUG: Comparing {mangled_name} with {target_mangled}")
-                
-                # Check if this namespace matches our target
-                if mangled_name == target_mangled or stmt.namespace_def.name == target_namespace:
-                    #print(f"DEBUG: Match found! Generating code for namespace")
-                    # Generate code for this namespace now
-                    stmt.namespace_def.codegen(builder, module)
-                    break
-                # Check if this is a parent namespace that contains our target
-                elif target_namespace.startswith(stmt.namespace_def.name + '::'):
-                    #print(f"DEBUG: Parent namespace found, processing contents")
-                    # This is a parent namespace, process its contents
-                    self._process_namespace_contents(stmt.namespace_def, target_namespace, builder, module)
-            
-            # Look for nested namespace definitions within other statements
-            elif hasattr(stmt, 'namespace_def') and hasattr(stmt.namespace_def, 'nested_namespaces'):
-                #print(f"DEBUG: Checking nested namespaces in statement")
-                # Recursively search nested namespaces
-                for nested_ns in stmt.namespace_def.nested_namespaces:
-                    self._process_statements_for_namespace([NamespaceDefStatement(nested_ns)], target_namespace, builder, module)
-            
-            # Direct NamespaceDef objects (handle both wrapped and unwrapped)
-            elif hasattr(stmt, '__class__') and stmt.__class__.__name__ == 'NamespaceDef':
-                #print(f"DEBUG: Found direct NamespaceDef: {stmt.name}")
-                # Get the mangled name (how it was stored during codegen)
-                mangled_name = stmt.name.replace('::', '__')
-                target_mangled = target_namespace.replace('::', '__')
-                #print(f"DEBUG: Comparing direct {mangled_name} with {target_mangled}")
-                
-                # Check if this namespace matches our target
-                if mangled_name == target_mangled or stmt.name == target_namespace:
-                    #print(f"DEBUG: Direct match found! Generating code for namespace")
-                    # Generate code for this namespace now
-                    stmt.codegen(builder, module)
-                    break
-                # Check if this is a parent namespace that contains our target
-                elif target_namespace.startswith(stmt.name + '::'):
-                    #print(f"DEBUG: Direct parent namespace found, processing contents")
-                    # This is a parent namespace, process its contents
-                    self._process_namespace_contents(stmt, target_namespace, builder, module)
-
-    def _process_namespace_contents(self, namespace_def, target_namespace, builder, module):
-        """Process contents of a namespace looking for nested namespaces that match our target"""
-        #print(f"DEBUG: Processing namespace contents for {namespace_def.name}, looking for {target_namespace}")
-        # Look through nested namespaces
-        for nested_ns in namespace_def.nested_namespaces:
-            #print(f"DEBUG: Checking nested namespace: {nested_ns.name}")
-            # Construct the full nested namespace path
-            full_nested_name = f"{namespace_def.name}::{nested_ns.name}"
-            #print(f"DEBUG: Full nested name: {full_nested_name}")
-            if full_nested_name == target_namespace:
-                # Found the target namespace - generate its code
-                #print(f"DEBUG: Found target namespace {target_namespace}, generating code")
-                # IMPORTANT: Before generating the target namespace, first process its dependencies
-                # by recursively processing any using statements it contains
-                self._process_namespace_dependencies(nested_ns, builder, module)
-                nested_ns.codegen(builder, module)
-                break
-            elif target_namespace.startswith(full_nested_name + '::'):
-                # This nested namespace is a parent of our target, recurse deeper
-                #print(f"DEBUG: Recursing deeper into {full_nested_name}")
-                self._process_namespace_contents(nested_ns, target_namespace, builder, module)
-
-    def _process_namespace_dependencies(self, namespace_def, builder, module):
-        """Process all dependencies of a namespace before generating its code"""
-        #print(f"DEBUG: Processing dependencies for namespace {namespace_def.name}")
-        
-        # Look through all variables in this namespace to find using statements
-        # In the AST structure, using statements might be within the namespace variables
-        # or we need to check the imported symbols for dependencies
-        
-        # For the standard::io namespace, we know it depends on standard::types
-        # Let's check if standard::types needs to be processed first
-        if namespace_def.name == 'io' and hasattr(module, '_using_namespaces'):
-            if 'standard::types' in module._using_namespaces:
-                #print(f"DEBUG: Processing standard::types dependency first")
-                # Find and process standard::types
-                if hasattr(module, '_imported_symbols'):
-                    for import_path, statements in module._imported_symbols.items():
-                        for stmt in statements:
-                            if hasattr(stmt, '__class__') and stmt.__class__.__name__ == 'NamespaceDef':
-                                if stmt.name == 'standard':
-                                    # Found the standard namespace, look for types nested namespace
-                                    for nested_ns in stmt.nested_namespaces:
-                                        if nested_ns.name == 'types':
-                                            #print(f"DEBUG: Generating code for standard::types dependency")
-                                            # Generate the types namespace first
-                                            nested_ns.codegen(builder, module)
-                                            return
 
 @dataclass
 class ImportStatement(Statement):
@@ -4815,7 +5299,7 @@ class ImportStatement(Statement):
         self._processed_imports[str(resolved_path)] = None
 
         try:
-            with open(resolved_path, 'r', encoding='ascii') as f:
+            with open(resolved_path, 'r', encoding='utf-8') as f:
                 source = f.read()
 
             # Create fresh parser/lexer instances
@@ -4830,42 +5314,17 @@ class ImportStatement(Statement):
             import_builder = ir.IRBuilder()
             import_builder.scope = builder.scope  # Share the same scope
             
-            # Process imports in the imported module
+            # Generate code for each statement
             for stmt in imported_ast.statements:
                 if isinstance(stmt, ImportStatement):
                     stmt.codegen(import_builder, module)
-            
-            # Pre-register namespace definitions to make them available for using statements
-            # This registers namespace names without generating code yet
-            for stmt in imported_ast.statements:
-                # Handle both NamespaceDefStatement and direct NamespaceDef objects
-                namespace_def = None
-                if isinstance(stmt, NamespaceDefStatement):
-                    namespace_def = stmt.namespace_def
-                elif hasattr(stmt, '__class__') and stmt.__class__.__name__ == 'NamespaceDef':
-                    # Direct NamespaceDef object
-                    namespace_def = stmt
-                
-                if namespace_def is not None:
-                    # Register the namespace and its nested namespaces
-                    if not hasattr(module, '_namespaces'):
-                        module._namespaces = set()
-                    module._namespaces.add(namespace_def.name)
-                    
-                    # Register nested namespaces with their full qualified names
-                    for nested_ns in namespace_def.nested_namespaces:
-                        full_nested_name = f"{namespace_def.name}::{nested_ns.name}"
-                        module._namespaces.add(full_nested_name)
-                        # Recursively register deeper nested namespaces
-                        self._register_nested_namespaces_for_import(nested_ns, full_nested_name, module)
-            
-            # Store metadata about exported symbols but DON'T generate code yet
-            # This metadata will be used later by UsingStatement to create aliases
-            if not hasattr(module, '_imported_symbols'):
-                module._imported_symbols = {}
-            
-            # Store the AST for later code generation when used
-            module._imported_symbols[str(resolved_path)] = imported_ast.statements
+                else:
+                    try:
+                        stmt.codegen(import_builder, module)
+                    except Exception as e:
+                        raise RuntimeError(
+                            f"Failed to generate code for {resolved_path}: {str(e)}"
+                        ) from e
 
             # Store the processed module
             self._processed_imports[str(resolved_path)] = module
@@ -4881,13 +5340,6 @@ class ImportStatement(Statement):
         import fparser
         return fparser.FluxParser
 
-    def _register_nested_namespaces_for_import(self, namespace, parent_path, module):
-        """Recursively register all nested namespaces with their full qualified names for imported modules"""
-        for nested_ns in namespace.nested_namespaces:
-            full_nested_name = f"{parent_path}::{nested_ns.name}"
-            module._namespaces.add(full_nested_name)
-            self._register_nested_namespaces_for_import(nested_ns, full_nested_name, module)
-
     def _resolve_path(self, module_name: str) -> Optional[Path]:
         """Robust path resolution with proper error handling"""
         try:
@@ -4898,12 +5350,11 @@ class ImportStatement(Statement):
             # Check in standard locations
             search_paths = [
                 Path.cwd(),
-                Path.cwd() / "lib",
-                Path(__file__).parent.parent / "stdlib",  # src/stdlib directory
-                Path(__file__).parent.parent / "lib",
-                Path.home() / ".flux" / "lib",
-                Path("/usr/local/lib/flux"),
-                Path("/usr/lib/flux")
+                Path.cwd() / "src/stdlib",
+                Path(__file__).parent.parent / "stdlib",
+                Path.home() / ".flux" / "stdlib",
+                Path("/usr/local/stdlib/flux"),
+                Path("/usr/stdlib/flux")
             ]
 
             for path in search_paths:

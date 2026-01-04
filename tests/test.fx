@@ -1,13 +1,12 @@
-int x = 10;
+import "redstandard.fx";
+using standard::io;
 
-def foo(int a) -> int
+def main() -> int
 {
-	(void)x;
-    return a;
-};
+    noopstr x = "test";
+    noopstr y = "ing!";
+    noopstr z = x + y;
 
-def main() -> int {
-    int b = foo(x);
-	//b += x;
-    return x;
+    win_print(@z, 8);
+    return 0;
 };

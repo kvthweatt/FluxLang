@@ -3,7 +3,7 @@
 // License: MIT
 
 import "standard.fx";
-using standard::io, standard::types;
+using standard::io; using standard::types;
 
 // ============ BIT-EXACT FLOATING POINT TYPES ============
 
@@ -49,21 +49,21 @@ namespace standard
             
             // Euler's number and related
             const float E         = 2.71828182845904523536;
-            const float LOG2E     = 1.44269504088896340736;  // log₂(e)
-            const float LOG10E    = 0.43429448190325182765;  // log₁₀(e)
+            const float LOG2E     = 1.44269504088896340736;  // log2(e)
+            const float LOG10E    = 0.43429448190325182765;  // log10(e)
             const float LN2       = 0.69314718055994530942;  // ln(2)
             const float LN10      = 2.30258509299404568402;  // ln(10)
             
             // Square roots
-            const float ROOT2     = 1.41421356237309504880;  // √2
-            const float ROOT1_2   = 0.70710678118654752440;  // 1/√2
-            const float ROOT3     = 1.73205080756887729353;  // √3
+            const float ROOT2     = 1.41421356237309504880;  // root(2)
+            const float ROOT1_2   = 0.70710678118654752440;  // 1/root(2)
+            const float ROOT3     = 1.73205080756887729353;  // root(3)
             
             // Small values
-            const float EPSILON   = 1.1920929e-7;   // Single precision epsilon
-            const float EPSILON_D = 2.2204460492503131e-16;  // Double precision epsilon
-            const float MIN_NORM  = 1.175494351e-38;  // Single precision min normal
-            const float MAX_FLOAT = 3.402823466e+38;  // Single precision max
+            //const float EPSILON   = 1.1920929 * 10^-7; // exponent parsing fails
+            //const float EPSILON_D = 2.2204460492503131 * (10^-16);  // Double precision epsilon
+            //const float MIN_NORM  = 1.175494351 * (10^-38);  // Single precision min normal
+            //const float MAX_FLOAT = 3.402823466 * (10^+38);  // Single precision max
         };
 
         // ============ BASIC OPERATIONS ============
@@ -86,7 +86,7 @@ namespace standard
             def floor(float x) -> float
             {
                 int n = (int)x;
-                if (x >= 0 || x == (float)n)
+                if (x >= 0 or x == (float)n)
                 {
                     return (float)n;
                 };
@@ -96,7 +96,7 @@ namespace standard
             def ceil(float x) -> float
             {
                 int n = (int)x;
-                if (x <= 0 || x == (float)n)
+                if (x <= 0 or x == (float)n)
                 {
                     return (float)n;
                 };
