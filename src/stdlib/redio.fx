@@ -19,7 +19,50 @@ namespace standard
         def mac_print(byte* msg, int x) -> void;
         def mpnl() -> void;
 		def print(noopstr s) -> void;
-
+def win_input() -> noopstr
+{
+    char[256] buffer;
+    u32 bytes_read;
+    
+    volatile asm
+    {
+        // Get console input handle
+        movq $$-10, %rcx               // STD_INPUT_HANDLE
+        subq $$32, %rsp
+        call GetStdHandle
+        addq $$32, %rsp
+        movq %rax, %r12                // Save handle in non-volatile register
+        
+        // Read from console
+        movq %r12, %rcx                // hConsoleInput
+        leaq -260(%rbp), %rdx          // buffer address (adjust offset based on your stack layout)
+        movl $$255, %r8d               // max chars to read
+        leaq -264(%rbp), %r9           // &bytes_read (adjust offset)
+        subq $$40, %rsp
+        movq $$0, 32(%rsp)             // lpOverlapped = NULL
+        call ReadFile
+        addq $$40, %rsp
+        
+        // Check if read was successful
+        testl %eax, %eax
+        jz read_failed
+        
+        // Null-terminate the string
+        movl -264(%rbp), %eax          // bytes_read
+        leaq -260(%rbp), %rcx          // buffer address
+        movb $$0, (%rcx, %rax)         // buffer[bytes_read] = '\0'
+        jmp read_done
+        
+    read_failed:
+        // On failure, set empty string
+        movb $$0, -260(%rbp)
+        
+    read_done:
+        
+    } : : : "rax","rcx","rdx","r8","r9","r10","r11","r12","memory";
+    
+    return buffer;
+};
         def win_print(byte[] msg, int x) -> void
         {
             volatile asm

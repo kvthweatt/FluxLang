@@ -48,7 +48,7 @@ class FluxCompiler:
         
         # Configure platform-specific settings
         if self.platform == "Windows":
-            self.module_triple = "x86_64-pc-windows-msvc"
+            self.module_triple = "x86_64-pc-windows"
             self.module.triple = self.module_triple
             # Set proper Windows data layout for x86_64
             self.module.data_layout = "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
@@ -203,6 +203,7 @@ class FluxCompiler:
                     "-march=native",          # Optimize for current CPU
                     "-mtune=native",
                     "-fomit-frame-pointer",   # Omit frame pointers (smaller, faster)
+                    "-fno-integrated-as",
                     str(ll_file),
                     "-o",
                     str(obj_file)
@@ -231,43 +232,35 @@ class FluxCompiler:
                 
                 # Windows: Use Clang directly to compile LLVM IR to object file
                 # Try multiple possible Clang locations
+                llc_cmd = ["llc", "-O2", "-filetype=obj", str(ll_file), "-o", str(obj_file)]
                 clang_paths = [
                     "C:\\Program Files\\LLVM\\bin\\clang.exe",
                     "clang.exe",  # If in PATH
                     "clang"       # Unix-style name if available
                 ]
                 
-                self.clang_path = None  # Store as instance variable for later use
-                for path in clang_paths:
+                clang_path = "C:\\Program Files\\LLVM\\bin\\"
+                success = False
+                for cmd, tool_name in [(llc_cmd, "llc")]:#, (clang_cmd, "clang")]:
+                    self.logger.debug(f"Trying {tool_name}: {' '.join(cmd)}", "compiler")
                     try:
-                        # Test if this clang path works
-                        test_result = subprocess.run([path, "--version"], 
-                                                    capture_output=True, text=True, timeout=10)
-                        if test_result.returncode == 0:
-                            self.clang_path = path
-                            self.logger.debug(f"Found working Clang at: {path}", "compiler")
-                            break
-                    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                        self.logger.trace(f"{tool_name} output: {result.stdout}", "compiler")
+                        if result.stderr:
+                            self.logger.warning(f"{tool_name} stderr: {result.stderr}", "compiler")
+                        success = True
+                        break
+                    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                        self.logger.debug(f"{tool_name} failed: {e}", "compiler")
                         continue
                 
-                if not self.clang_path:
+                if not clang_path:
                     self.logger.error("No working Clang installation found on Windows", "compiler")
                     raise RuntimeError("Clang not found - please install LLVM/Clang")
                 
                 # Compile LLVM IR to object file using Clang
-                cmd = [self.clang_path, "-c", "-O2", str(ll_file), "-o", str(obj_file)]
-                self.logger.debug(f"Running: {' '.join(cmd)}", "clang")
-                
-                try:
-                    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                    self.logger.trace(f"Clang output: {result.stdout}", "clang")
-                    if result.stderr:
-                        self.logger.warning(f"Clang stderr: {result.stderr}", "clang")
-                    self.temp_files.append(obj_file)
-                    
-                except subprocess.CalledProcessError as e:
-                    self.logger.error(f"Clang compilation failed: {e.stderr}", "clang")
-                    raise
+                #cmd = [clang_path, "-c", "-O2", str(ll_file), "-o", str(obj_file)]
+                #self.logger.debug(f"Running: {' '.join(cmd)}", "clang")
                     
             else:  # Linux and others - use traditional assembly step
                 asm_file = temp_dir / f"{base_name}.s"
@@ -328,46 +321,50 @@ class FluxCompiler:
                 link_cmd = ["clang", str(obj_file), "-o", output_bin]
             elif self.platform == "Windows":
                 # Use the same Clang we found for compilation
-                if hasattr(self, 'clang_path') and self.clang_path:
-                    link_cmd = [
-                        "C:\\Program Files\\LLVM\\bin\\lld-link.exe",
-                        "/entry:main",
-                        "/nodefaultlib",
-                        "/subsystem:console",
-                        "/opt:ref",           # Remove unused
-                        "/opt:icf=2",         # <-- AGGRESSIVE identical code folding
-                        "/merge:.rdata=.text",
-                        "/merge:.data=.text", 
-                        "/align:1",
-                        "/filealign:1",
-                        "/debug:none",
-                        "/fixed",
-                        str(obj_file),
-                        "kernel32.lib",
-                        f"/out:{output_bin}"
-                    ]
-                else:
-                    # Fallback to finding Clang again
-                    clang_paths = [
-                        "C:\\Program Files\\LLVM\\bin\\clang.exe",
-                        "clang.exe",
-                        "clang"
-                    ]
+                link_cmd = [
+                    "C:\\Program Files\\LLVM\\bin\\lld-link.exe",
+                    "/entry:main",
+                    "/nodefaultlib",
+                    "/subsystem:console",
+                    "/opt:ref",                    # Remove unused functions/data
+                    "/opt:icf",                    # Identical COMDAT folding
+                    "/merge:.rdata=.text",         # Merge read-only data with code
+                    "/merge:.data=.text",          # Merge data with code
+                    #"/merge:.bss=.text",           # Merge uninitialized data
+                    "/align:1",                    # 1-byte alignment (minimal padding)
+                    "/filealign:1",                # 1-byte file alignment (tiny executable)
+                    "/release",                    # Release mode (no debug info)
+                    "/fixed",                      # Fixed base address
+                    "/incremental:no",             # Disable incremental linking
+                    #"/strip:all",                  # Remove all symbols
+                    "/guard:no",                   # Disable CFG (Control Flow Guard)
+                    "/dynamicbase:no",             # Disable ASLR (for smaller size)
+                    "/nxcompat:no",                # Disable DEP compatibility
+                    "/highentropyva:no",           # Disable high entropy ASLR
+                    "/opt:lldlto=3",               # Aggressive LTO optimization if available
+                    "/opt:lldltojobs=all",         # Use all cores for LTO
+                    str(obj_file),
+                    # Only link essential libraries
+                    "kernel32.lib",
+                    # "user32.lib",  # Uncomment only if GUI functions are used
+                    # "gdi32.lib",   # Uncomment only if drawing functions are used
+                    f"/out:{output_bin}"
+                ]
                     
-                    linker_path = None
-                    for path in clang_paths:
-                        try:
-                            test_result = subprocess.run([path, "--version"], 
-                                                        capture_output=True, text=True, timeout=10)
-                            if test_result.returncode == 0:
-                                linker_path = path
-                                break
-                        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-                            continue
-                    
-                    if not linker_path:
-                        self.logger.error("No working Clang found for linking", "linker")
-                        raise RuntimeError("Clang not found for linking")
+                linker_path = None
+                for path in clang_paths:
+                    try:
+                        test_result = subprocess.run([path, "--version"], 
+                                                    capture_output=True, text=True, timeout=10)
+                        if test_result.returncode == 0:
+                            linker_path = path
+                            break
+                    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                        continue
+                
+                if not linker_path:
+                    self.logger.error("No working Clang found for linking", "linker")
+                    raise RuntimeError("Clang not found for linking")
             else:  # Linux and others
                 link_cmd = [
                     linker_path,
