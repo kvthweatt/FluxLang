@@ -238,83 +238,6 @@ class Literal(ASTNode):
             # Return the initialized struct (load it to get the value)
             return builder.load(struct_ptr, name="struct_value")
 
-@dataclass
-class Identifier(ASTNode):
-    name: str
-
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        # Look up the name in the current scope
-        if builder.scope is not None and self.name in builder.scope:
-            ptr = builder.scope[self.name]
-            if self.name == "this":
-                return ptr
-            # For arrays, return the pointer directly (don't load)
-            if isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.ArrayType):
-                return ptr
-            # For structs, return the pointer directly (don't load)
-            # This allows member access to work: x.a needs the pointer to x, not the loaded value
-            elif isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.LiteralStructType):
-                return ptr
-            # Load the value if it's a non-array, non-struct pointer type
-            elif isinstance(ptr.type, ir.PointerType):
-                ret_val = builder.load(ptr, name=self.name)
-                if hasattr(builder, 'volatile_vars') and self.name in builder.volatile_vars:
-                    ret_val.volatile = True
-                # Do not dereference regular pointers (char*, byte*, etc.)
-                return ret_val
-            return ptr
-        
-        # Check for global variables
-        if self.name in module.globals:
-            gvar = module.globals[self.name]
-            # For arrays, return the pointer directly (don't load)
-            if isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.ArrayType):
-                return gvar
-            # For structs, return the pointer directly (don't load)
-            elif isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.LiteralStructType):
-                return gvar
-            # Load the value if it's a non-array, non-struct pointer type
-            elif isinstance(gvar.type, ir.PointerType):
-                ret_val = builder.load(gvar, name=self.name)
-                if hasattr(builder, 'volatile_vars') and self.name in getattr(builder,'volatile_vars',set()):
-                    ret_val.volatile = True
-                return ret_val
-            return gvar
-        
-        # Check if this is a custom type
-        if hasattr(module, '_type_aliases') and self.name in module._type_aliases:
-            return module._type_aliases[self.name]
-        
-        # Check for namespace-qualified names using 'using' statements
-        if hasattr(module, '_using_namespaces'):
-            for namespace in module._using_namespaces:
-                # Convert namespace path to mangled name format
-                mangled_prefix = namespace.replace('::', '__') + '__'
-                mangled_name = mangled_prefix + self.name
-                
-                # Check in global variables with mangled name
-                if mangled_name in module.globals:
-                    gvar = module.globals[mangled_name]
-                    # For arrays, return the pointer directly (don't load)
-                    if isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.ArrayType):
-                        return gvar
-                    # For structs, return the pointer directly (don't load)
-                    elif isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.LiteralStructType):
-                        return gvar
-                    # Load the value if it's a non-array, non-struct pointer type
-                    elif isinstance(gvar.type, ir.PointerType):
-                        ret_val = builder.load(gvar, name=self.name)
-                        if hasattr(builder, 'volatile_vars') and self.name in getattr(builder,'volatile_vars',set()):
-                            ret_val.volatile = True
-                        return ret_val
-                    return gvar
-                
-                # Check in type aliases with mangled name
-                if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
-                    return module._type_aliases[mangled_name]
-            
-        raise NameError(f"Unknown identifier: {self.name}")
-
 # Type definitions
 @dataclass
 class TypeSpec:
@@ -425,6 +348,143 @@ class CustomType(ASTNode):
 @dataclass
 class Expression(ASTNode):
     pass
+
+@dataclass
+class Identifier(Expression):
+    name: str
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Look up the name in the current scope
+        if builder.scope is not None and self.name in builder.scope:
+            ptr = builder.scope[self.name]
+            
+            # Get type information if available
+            type_spec = None
+            if hasattr(builder, 'scope_type_info') and self.name in builder.scope_type_info:
+                type_spec = builder.scope_type_info[self.name]
+            
+            # Handle special case for 'this' pointer
+            if self.name == "this":
+                if type_spec and not hasattr(ptr, '_flux_type_spec'):
+                    ptr._flux_type_spec = type_spec
+                return ptr
+            
+            # For arrays, return the pointer directly (don't load)
+            if isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.ArrayType):
+                if type_spec and not hasattr(ptr, '_flux_type_spec'):
+                    ptr._flux_type_spec = type_spec
+                return ptr
+            
+            # For structs, return the pointer directly (don't load)
+            elif isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.LiteralStructType):
+                if type_spec and not hasattr(ptr, '_flux_type_spec'):
+                    ptr._flux_type_spec = type_spec
+                return ptr
+            
+            # Load the value if it's a non-array, non-struct pointer type
+            elif isinstance(ptr.type, ir.PointerType):
+                is_volatile = hasattr(builder, 'volatile_vars') and self.name in builder.volatile_vars
+                ret_val = builder.load(ptr, name=self.name)
+                if is_volatile:
+                    ret_val.volatile = True
+                # Attach type metadata to loaded value
+                if type_spec and not hasattr(ret_val, '_flux_type_spec'):
+                    ret_val._flux_type_spec = type_spec
+                return ret_val
+            
+            # For non-pointer types, attach metadata and return
+            if type_spec and not hasattr(ptr, '_flux_type_spec'):
+                ptr._flux_type_spec = type_spec
+            return ptr
+        
+        # Check for global variables
+        if self.name in module.globals:
+            gvar = module.globals[self.name]
+            
+            # Try to get type information from global metadata
+            type_spec = None
+            if hasattr(module, '_global_type_info') and self.name in module._global_type_info:
+                type_spec = module._global_type_info[self.name]
+            
+            # For arrays, return the pointer directly (don't load)
+            if isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.ArrayType):
+                if type_spec and not hasattr(gvar, '_flux_type_spec'):
+                    gvar._flux_type_spec = type_spec
+                return gvar
+            
+            # For structs, return the pointer directly (don't load)
+            elif isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.LiteralStructType):
+                if type_spec and not hasattr(gvar, '_flux_type_spec'):
+                    gvar._flux_type_spec = type_spec
+                return gvar
+            
+            # Load the value if it's a non-array, non-struct pointer type
+            elif isinstance(gvar.type, ir.PointerType):
+                is_volatile = hasattr(builder, 'volatile_vars') and self.name in getattr(builder, 'volatile_vars', set())
+                ret_val = builder.load(gvar, name=self.name)
+                if is_volatile:
+                    ret_val.volatile = True
+                # Attach type metadata
+                if type_spec and not hasattr(ret_val, '_flux_type_spec'):
+                    ret_val._flux_type_spec = type_spec
+                return ret_val
+            
+            if type_spec and not hasattr(gvar, '_flux_type_spec'):
+                gvar._flux_type_spec = type_spec
+            return gvar
+        
+        # Check if this is a custom type
+        if hasattr(module, '_type_aliases') and self.name in module._type_aliases:
+            return module._type_aliases[self.name]
+        
+        # Check for namespace-qualified names using 'using' statements
+        if hasattr(module, '_using_namespaces'):
+            for namespace in module._using_namespaces:
+                # Convert namespace path to mangled name format
+                mangled_prefix = namespace.replace('::', '__') + '__'
+                mangled_name = mangled_prefix + self.name
+                
+                # Check in global variables with mangled name
+                if mangled_name in module.globals:
+                    gvar = module.globals[mangled_name]
+                    
+                    # Try to get type information
+                    type_spec = None
+                    if hasattr(module, '_global_type_info') and mangled_name in module._global_type_info:
+                        type_spec = module._global_type_info[mangled_name]
+                    
+                    # For arrays, return the pointer directly (don't load)
+                    if isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.ArrayType):
+                        if type_spec and not hasattr(gvar, '_flux_type_spec'):
+                            gvar._flux_type_spec = type_spec
+                        return gvar
+                    
+                    # For structs, return the pointer directly (don't load)
+                    elif isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.LiteralStructType):
+                        if type_spec and not hasattr(gvar, '_flux_type_spec'):
+                            gvar._flux_type_spec = type_spec
+                        return gvar
+                    
+                    # Load the value if it's a non-array, non-struct pointer type
+                    elif isinstance(gvar.type, ir.PointerType):
+                        is_volatile = hasattr(builder, 'volatile_vars') and self.name in getattr(builder, 'volatile_vars', set())
+                        ret_val = builder.load(gvar, name=self.name)
+                        if is_volatile:
+                            ret_val.volatile = True
+                        # Attach type metadata
+                        if type_spec and not hasattr(ret_val, '_flux_type_spec'):
+                            ret_val._flux_type_spec = type_spec
+                        return ret_val
+                    
+                    if type_spec and not hasattr(gvar, '_flux_type_spec'):
+                        gvar._flux_type_spec = type_spec
+                    return gvar
+                
+                # Check in type aliases with mangled name
+                if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
+                    return module._type_aliases[mangled_name]
+            
+        raise NameError(f"Unknown identifier: {self.name}")
 
 @dataclass
 class QualifiedName(Expression):
@@ -2301,7 +2361,7 @@ class VariableDeclaration(ASTNode):
     name: str
     type_spec: TypeSpec
     initial_value: Optional[Expression] = None
-    is_global: bool = False  # Add flag for global keyword
+    is_global: bool = False
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Check for automatic array size inference with string literals
@@ -2367,16 +2427,12 @@ class VariableDeclaration(ASTNode):
                 return module.globals[self.name]
             
             # For namespaced variables, check if any existing global has the same effective name
-            # E.g., if we're defining 'standard__types__nl', check for any existing 'nl' variants
-            base_name = self.name.split('__')[-1]  # Extract the final name part (e.g., 'nl' from 'standard__types__nl')
+            base_name = self.name.split('__')[-1]
             for existing_name in list(module.globals.keys()):
                 existing_base_name = existing_name.split('__')[-1]
                 if existing_base_name == base_name and existing_name != self.name:
-                    # Found a global with the same base name but different namespace
-                    # Return the existing one to prevent duplicates
                     return module.globals[existing_name]
                 elif existing_name == self.name:
-                    # Exact match - return existing
                     return module.globals[existing_name]
                 
             # Create new global
@@ -2386,43 +2442,36 @@ class VariableDeclaration(ASTNode):
             if self.initial_value:
                 # Handle array literals specially
                 if isinstance(llvm_type, ir.ArrayType) and hasattr(self.initial_value, 'value') and isinstance(self.initial_value.value, list):
-                    # Create array constant from list of values
                     element_values = []
                     for item in self.initial_value.value:
                         if hasattr(item, 'value'):
-                            # Convert each element to LLVM constant
                             element_values.append(ir.Constant(llvm_type.element, item.value))
                         else:
                             element_values.append(ir.Constant(llvm_type.element, item))
                     gvar.initializer = ir.Constant(llvm_type, element_values)
                 # Handle string literals for char arrays
                 elif isinstance(llvm_type, ir.ArrayType) and isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8 and isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR:
-                    # Convert string to array of characters (no null termination)
                     string_val = self.initial_value.value
                     char_values = []
                     for i, char in enumerate(string_val):
                         if i >= llvm_type.count:
                             break
                         char_values.append(ir.Constant(ir.IntType(8), ord(char)))
-                    # Pad remaining with zeros if needed
                     while len(char_values) < llvm_type.count:
                         char_values.append(ir.Constant(ir.IntType(8), 0))
                     gvar.initializer = ir.Constant(llvm_type, char_values)
                 # Handle string literals for pointer types (global variables)
                 elif isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8 and isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR:
-                    # Create global string constant for pointer types (no null termination)
                     string_val = self.initial_value.value
                     string_bytes = string_val.encode('ascii')
                     str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
                     str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
                     
-                    # Create a separate global variable for the string data
                     str_gv = ir.GlobalVariable(module, str_val.type, name=f".str.{self.name}")
                     str_gv.linkage = 'internal'
                     str_gv.global_constant = True
                     str_gv.initializer = str_val
                     
-                    # Get pointer to the first character of the string as the initializer
                     zero = ir.Constant(ir.IntType(32), 0)
                     str_ptr = str_gv.gep([zero, zero])
                     gvar.initializer = str_ptr
@@ -2431,13 +2480,11 @@ class VariableDeclaration(ASTNode):
                     if init_val is not None:
                         gvar.initializer = init_val
                     else:
-                        # Fallback for None return from codegen
                         if isinstance(llvm_type, ir.ArrayType):
                             gvar.initializer = ir.Constant(llvm_type, ir.Undefined)
                         else:
                             gvar.initializer = ir.Constant(llvm_type, 0)
             else:
-                # Default initialize based on type
                 if isinstance(llvm_type, ir.ArrayType):
                     gvar.initializer = ir.Constant(llvm_type, ir.Undefined)
                 elif isinstance(llvm_type, ir.IntType):
@@ -2447,26 +2494,28 @@ class VariableDeclaration(ASTNode):
                 else:
                     gvar.initializer = ir.Constant(llvm_type, None)
             
-            # Set linkage and visibility
             gvar.linkage = 'internal'
             return gvar
         
         # Handle local variables
         alloca = builder.alloca(llvm_type, name=self.name)
+        
+        # Store type information in scope metadata
+        if not hasattr(builder, 'scope_type_info'):
+            builder.scope_type_info = {}
+        builder.scope_type_info[self.name] = self.type_spec
+        
         if self.initial_value:
             # Handle string literals specially
             if (isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR):
                 if isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8:
-                    # Handle string literal initialization for local pointer types (like noopstr)
-                    # Store string data in the local stack frame, not as a global constant
+                    # Store string data on stack
                     string_val = self.initial_value.value
                     string_bytes = string_val.encode('ascii')
                     str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
                     
-                    # Allocate space for the string on the stack
                     str_alloca = builder.alloca(str_array_ty, name=f"{self.name}_str_data")
                     
-                    # Store each character individually (no null termination)
                     for i, byte_val in enumerate(string_bytes):
                         zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
                         index = ir.Constant(ir.IntType(32), i)
@@ -2474,30 +2523,24 @@ class VariableDeclaration(ASTNode):
                         char_val = ir.Constant(ir.IntType(8), byte_val)
                         builder.store(char_val, elem_ptr)
                     
-                    # Get pointer to the first character
                     zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
                     str_ptr = builder.gep(str_alloca, [zero, zero], name=f"{self.name}_str_ptr")
                     builder.store(str_ptr, alloca)
                     
                 elif isinstance(llvm_type, ir.ArrayType) and isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8:
-                    # Handle string literal initialization for local char arrays (no null termination)
                     string_val = self.initial_value.value
                     
-                    # Store each character individually
                     for i, char in enumerate(string_val):
                         if i >= llvm_type.count:
                             break
                         
-                        # Get pointer to array element
                         zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
                         index = ir.Constant(ir.IntType(32), i)
                         elem_ptr = builder.gep(alloca, [zero, index], name=f"{self.name}[{i}]")
                         
-                        # Store the character
                         char_val = ir.Constant(ir.IntType(8), ord(char))
                         builder.store(char_val, elem_ptr)
                     
-                    # Zero-fill remaining elements if needed
                     for i in range(len(string_val), llvm_type.count):
                         zero_val = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
                         index = ir.Constant(ir.IntType(32), i)
@@ -2506,33 +2549,25 @@ class VariableDeclaration(ASTNode):
                         builder.store(zero_char, elem_ptr)
                         
             elif isinstance(self.initial_value, FunctionCall) and self.initial_value.name.endswith('.__init'):
-                # This is an object constructor call
-                # We need to call the constructor with 'this' pointer as first argument
                 constructor_func = module.globals.get(self.initial_value.name)
                 if constructor_func is None:
                     raise NameError(f"Constructor not found: {self.initial_value.name}")
                 
-                # Call constructor with 'this' pointer (alloca) as first argument
-                args = [alloca]  # 'this' pointer
+                args = [alloca]
                 
-                # Process constructor arguments
                 for i, arg_expr in enumerate(self.initial_value.arguments):
-                    # Check if this is a string literal that needs conversion
-                    param_index = i + 1  # +1 because args[0] is 'this' pointer
+                    param_index = i + 1
                     if (isinstance(arg_expr, Literal) and arg_expr.type == DataType.CHAR and
                         param_index < len(constructor_func.args) and
                         isinstance(constructor_func.args[param_index].type, ir.PointerType) and
                         isinstance(constructor_func.args[param_index].type.pointee, ir.IntType) and
                         constructor_func.args[param_index].type.pointee.width == 8):
-                        # Store string on stack, not as global constant
                         string_val = arg_expr.value
                         string_bytes = string_val.encode('ascii')
                         str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
                         
-                        # Allocate on stack
                         str_alloca = builder.alloca(str_array_ty, name=f"ctor_arg{i}_str_data")
                         
-                        # Store characters (no null termination)
                         for j, byte_val in enumerate(string_bytes):
                             zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
                             index = ir.Constant(ir.IntType(32), j)
@@ -2540,66 +2575,45 @@ class VariableDeclaration(ASTNode):
                             char_val = ir.Constant(ir.IntType(8), byte_val)
                             builder.store(char_val, elem_ptr)
                         
-                        # Get pointer to first character
                         zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
                         str_ptr = builder.gep(str_alloca, [zero, zero], name=f"ctor_arg{i}_str_ptr")
                         arg_val = str_ptr
                     else:
-                        # Normal argument processing
                         arg_val = arg_expr.codegen(builder, module)
                     
                     args.append(arg_val)
                 
-                # Call the constructor
                 init_val = builder.call(constructor_func, args)
-                # Note: For constructors that return 'this', init_val will be the initialized object pointer
-                # But since we already have the object in alloca, we don't need to store init_val
             else:
-                # Regular initialization for non-string literals
                 init_val = self.initial_value.codegen(builder, module)
                 if init_val is not None:
-                    # Special handling for cast to array initialization
                     if (isinstance(self.initial_value, CastExpression) and
                         isinstance(init_val.type, ir.PointerType) and
                         isinstance(llvm_type, ir.ArrayType)):
-                        # Bitcast source pointer to match destination array pointer type
                         array_ptr_type = ir.PointerType(llvm_type)
                         casted_ptr = builder.bitcast(init_val, array_ptr_type, name="cast_to_array_ptr")
-                        # Load the entire array from the casted pointer
                         array_value = builder.load(casted_ptr, name="loaded_array")
-                        # Store the loaded array into our allocated array
                         builder.store(array_value, alloca)
                     else:
-                        # Cast init value to match variable type if needed
                         if init_val.type != llvm_type:
-                            # Handle array concatenation results - preserve array pointer semantics
                             if (isinstance(self.initial_value, BinaryOp) and 
                                 self.initial_value.operator in (Operator.ADD, Operator.SUB) and
                                 isinstance(init_val.type, ir.PointerType) and 
                                 isinstance(init_val.type.pointee, ir.ArrayType) and
                                 isinstance(llvm_type, ir.PointerType) and 
                                 isinstance(llvm_type.pointee, ir.IntType)):
-                                # This is array concatenation result being assigned to pointer type (like noopstr)
-                                # Convert array to pointer by GEP to first element, preserving array semantics
                                 zero = ir.Constant(ir.IntType(32), 0)
                                 array_ptr = builder.gep(init_val, [zero, zero], name="concat_array_to_ptr")
                                 builder.store(array_ptr, alloca)
                                 return alloca
-                            # Handle pointer type compatibility (for AddressOf expressions)
                             elif isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
-                                # Both are pointers - check if compatible or cast
                                 if llvm_type.pointee != init_val.type.pointee:
-                                    # Cast pointer types if needed
                                     init_val = builder.bitcast(init_val, llvm_type)
-                            # Handle integer type casting
                             elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.IntType):
                                 if init_val.type.width > llvm_type.width:
-                                    # Truncate to smaller type
                                     init_val = builder.trunc(init_val, llvm_type)
                                 elif init_val.type.width < llvm_type.width:
-                                    # Extend to larger type (sign extend)
                                     init_val = builder.sext(init_val, llvm_type)
-                            # Handle other type conversions as needed
                             elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.FloatType):
                                 init_val = builder.sitofp(init_val, llvm_type)
                             elif isinstance(init_val.type, ir.FloatType) and isinstance(llvm_type, ir.IntType):
@@ -2607,7 +2621,6 @@ class VariableDeclaration(ASTNode):
                         builder.store(init_val, alloca)
         
         builder.scope[self.name] = alloca
-        # Track volatile variables so that subsequent loads/stores use the 'volatile' flag
         if self.type_spec.is_volatile:
             if not hasattr(builder, 'volatile_vars'):
                 builder.volatile_vars = set()
@@ -2616,16 +2629,12 @@ class VariableDeclaration(ASTNode):
     
     def get_llvm_type(self, module: ir.Module) -> ir.Type:
         if isinstance(self.type_spec.base_type, str):
-            # Check if it's a struct type
             if hasattr(module, '_struct_types') and self.type_spec.base_type in module._struct_types:
                 return module._struct_types[self.type_spec.base_type]
-            # Check if it's a type alias
             if hasattr(module, '_type_aliases') and self.type_spec.base_type in module._type_aliases:
                 return module._type_aliases[self.type_spec.base_type]
-            # Default to i32
             return ir.IntType(type_spec.bit_width)
         
-        # Handle primitive types
         if self.type_spec.base_type == DataType.INT:
             return ir.IntType(32)
         elif self.type_spec.base_type == DataType.FLOAT:
@@ -3915,9 +3924,16 @@ class AssertStatement(Statement):
 
 # Function parameter
 @dataclass
-class Parameter(ASTNode):
+class Parameter:
     name: str
     type_spec: TypeSpec
+    
+    def __post_init__(self):
+        # Store the original type name for debugging/metadata
+        if self.type_spec.custom_typename:
+            self.original_type_name = self.type_spec.custom_typename
+        else:
+            self.original_type_name = str(self.type_spec.base_type)
 
 @dataclass
 class InlineAsm(Expression):
@@ -4101,13 +4117,30 @@ class FunctionDef(ASTNode):
     is_const: bool = False
     is_volatile: bool = False
     is_prototype: bool = False
-
+    
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Function:
         # Convert return type
         ret_type = self._convert_type(self.return_type, module)
         
-        # Convert parameter types
-        param_types = [self._convert_type(param.type_spec, module) for param in self.parameters]
+        # Convert parameter types - preserve type aliases in metadata
+        param_types = []
+        param_metadata = []
+        for param in self.parameters:
+            param_type = self._convert_type(param.type_spec, module)
+            param_types.append(param_type)
+            # Store original type information for later use
+            if param.type_spec.custom_typename:
+                param_metadata.append({
+                    'name': param.name,
+                    'original_type': param.type_spec.custom_typename,
+                    'type_spec': param.type_spec
+                })
+            else:
+                param_metadata.append({
+                    'name': param.name,
+                    'original_type': None,
+                    'type_spec': param.type_spec
+                })
         
         # Create function type
         func_type = ir.FunctionType(ret_type, param_types)
@@ -4117,13 +4150,6 @@ class FunctionDef(ASTNode):
             existing = module.globals[self.name]
             if isinstance(existing, ir.Function):
                 # Verify the signatures match
-                #print(f"DEBUG: Comparing function types for '{self.name}':")
-                #print(f"DEBUG: Existing type: {existing.type}")
-                #print(f"DEBUG: New type:      {func_type}")
-                #print(f"DEBUG: Types equal:   {existing.type == func_type}")
-                #print(f"DEBUG: Existing function type: {existing.ftype}")
-                #print(f"DEBUG: Existing.ftype == func_type: {existing.ftype == func_type}")
-                # Compare the actual function type, not the pointer type
                 if existing.ftype != func_type:
                     raise ValueError(f"Function '{self.name}' redefined with different signature\nExisting: {existing.ftype}\nNew: {func_type}")
                 func = existing
@@ -4132,7 +4158,20 @@ class FunctionDef(ASTNode):
         else:
             # Create new function
             func = ir.Function(module, func_type, self.name)
-
+        
+        # Store parameter metadata on the function for later retrieval
+        if not hasattr(module, '_function_param_metadata'):
+            module._function_param_metadata = {}
+        module._function_param_metadata[self.name] = param_metadata
+        
+        # Store return type metadata
+        if not hasattr(module, '_function_return_metadata'):
+            module._function_return_metadata = {}
+        module._function_return_metadata[self.name] = {
+            'original_type': self.return_type.custom_typename if self.return_type.custom_typename else None,
+            'type_spec': self.return_type
+        }
+        
         if self.is_prototype == True:
             return func
         
@@ -4151,17 +4190,21 @@ class FunctionDef(ASTNode):
         if not hasattr(builder, 'initialized_unions'):
             builder.initialized_unions = set()
         
-        # Allocate space for parameters and store initial values
+        # Store parameter type information in scope metadata
+        if not hasattr(builder, 'scope_type_info'):
+            builder.scope_type_info = {}
+        old_scope_type_info = builder.scope_type_info
+        builder.scope_type_info = {}
+        
+        # Allocate space for parameters and store initial values WITH type information
         for i, param in enumerate(func.args):
             alloca = builder.alloca(param.type, name=f"{param.name}.addr")
             builder.store(param, alloca)
             builder.scope[self.parameters[i].name] = alloca
+            # Store the original type spec for this parameter
+            builder.scope_type_info[self.parameters[i].name] = self.parameters[i].type_spec
         
         # Generate function body
-        #print(f"DEBUG FunctionDef: Generating body for {self.name}")
-        #print(f"DEBUG FunctionDef: Body has {len(self.body.statements)} statements")
-        #for i, stmt in enumerate(self.body.statements):
-            #print(f"DEBUG FunctionDef: Statement {i}: {type(stmt).__name__} = {stmt}")
         self.body.codegen(builder, module)
         
         # Add implicit return if needed
@@ -4173,6 +4216,7 @@ class FunctionDef(ASTNode):
         
         # Restore previous scope
         builder.scope = old_scope
+        builder.scope_type_info = old_scope_type_info
         return func
     
     def _convert_type(self, type_spec: TypeSpec, module: ir.Module = None) -> ir.Type:

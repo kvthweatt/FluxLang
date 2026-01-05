@@ -6,112 +6,49 @@
 ; |                                                                         |
 ; +-------------------------------------------------------------------------+
 ;
-; Input SHA256 : 9846E486CF47266298C3A2C70CFA6CA139450C446D2E05BD2E6C190387B7A457
-; Input MD5    : C2433BD83BA24B411CCC50E15CFEC665
-; Input CRC32  : 5649334D
+; Input SHA256 : E3771136CE681E531067D61A467127848B7CD36BD4C235EF9510CB8A356E8AB1
+; Input MD5    : 6B04EDB25BBE47CF487DB04C5826691F
+; Input CRC32  : 8DC8FFE1
 ; Compiler     : Visual C++ (guessed)
 
-; File Name   : C:\Users\kvthw\Flux\helloworld.exe
-; Format      : Portable executable for AMD64 (PE)
-; Imagebase   : 140000000
-; Timestamp   : 695824C3 (Fri Jan 02 20:04:19 2026)
-; Section 1. (virtual address 00001000)
-; Virtual size                  : 000001D8 (    472.)
-; Section size in file          : 00000200 (    512.)
-; Offset to raw data for section: 00000200
-; Flags 60000020: Text Executable Readable
-; Alignment     : default
 
 .686p
 .mmx
 .model flat
 
 
+; [000001F8 BYTES: COLLAPSED SEGMENT HEADER. PRESS CTRL-NUMPAD+ TO EXPAND]
+; Section 1. (virtual address 000001F8)
+; Virtual size                  : 00000108 (    264.)
+; Section size in file          : 00000108 (    264.)
+; Offset to raw data for section: 000001F8
+; Flags 60000020: Text Executable Readable
+; Alignment     : default
+
 ; Segment type: Pure code
 ; Segment permissions: Read/Execute
 _text segment para public 'CODE' use64
 assume cs:_text
-;org 140001000h
-assume es:nothing, ss:nothing, ds:_text, fs:nothing, gs:nothing
-
-
-
-; __int64 __fastcall sub_140001000(LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite)
-sub_140001000 proc near
-
-lpOverlapped= qword ptr -18h
-
-push    rsi
-push    rdi
-mov     esi, edx
-mov     rdi, rcx
-mov     rcx, 0FFFFFFFFFFFFFFF5h ; nStdHandle
-sub     rsp, 20h
-call    GetStdHandle
-add     rsp, 20h
-mov     rcx, rax        ; hFile
-mov     rdx, rdi        ; lpBuffer
-mov     r8d, esi        ; nNumberOfBytesToWrite
-xor     r9, r9          ; lpNumberOfBytesWritten
-sub     rsp, 28h
-mov     [rsp+38h+lpOverlapped], r9 ; lpOverlapped
-call    WriteFile
-add     rsp, 28h
-pop     rdi
-pop     rsi
-retn
-sub_140001000 endp
-
-algn_14000103C:
-align 20h
-
-
-
-sub_140001040 proc near
-
-lpOverlapped= qword ptr -18h
-
-push    rsi
-push    rdi
-lea     rsi, byte_140001128
-mov     edi, 1
-mov     rcx, 0FFFFFFFFFFFFFFF5h ; nStdHandle
-sub     rsp, 20h
-call    GetStdHandle
-add     rsp, 20h
-mov     rcx, rax        ; hFile
-mov     rdx, rsi        ; lpBuffer
-mov     r8d, edi        ; nNumberOfBytesToWrite
-xor     r9, r9          ; lpNumberOfBytesWritten
-sub     rsp, 28h
-mov     [rsp+38h+lpOverlapped], r9 ; lpOverlapped
-call    WriteFile
-add     rsp, 28h
-pop     rdi
-pop     rsi
-retn
-sub_140001040 endp
-
-algn_140001083:
-align 10h
-; [00000001 BYTES: COLLAPSED FUNCTION nullsub_1. PRESS CTRL-NUMPAD+ TO EXPAND]
-align 20h
-; [00000001 BYTES: COLLAPSED FUNCTION nullsub_2. PRESS CTRL-NUMPAD+ TO EXPAND]
-align 10h
-; [00000001 BYTES: COLLAPSED FUNCTION nullsub_3. PRESS CTRL-NUMPAD+ TO EXPAND]
-align 20h
+;org 1400001F8h
+assume es:GAP, ss:GAP, ds:HEADER, fs:nothing, gs:nothing
 
 
 
 public start
 start proc near
 
-lpOverlapped= qword ptr -18h
+lpOverlapped= qword ptr -28h
+var_20= qword ptr -20h
+var_18= dword ptr -18h
 
 push    rsi
 push    rdi
-lea     rsi, byte_1400011B1
-mov     edi, 0Ch
+sub     rsp, 10h
+mov     rax, 6F57206F6C6C6548h
+mov     [rsp+20h+var_20], rax
+mov     [rsp+20h+var_18], 21646C72h
+mov     rsi, rsp
+xor     edi, edi
 mov     rcx, 0FFFFFFFFFFFFFFF5h ; nStdHandle
 sub     rsp, 20h
 call    GetStdHandle
@@ -121,34 +58,34 @@ mov     rdx, rsi        ; lpBuffer
 mov     r8d, edi        ; nNumberOfBytesToWrite
 xor     r9, r9          ; lpNumberOfBytesWritten
 sub     rsp, 28h
-mov     [rsp+38h+lpOverlapped], r9 ; lpOverlapped
+mov     [rsp+48h+lpOverlapped], r9 ; lpOverlapped
 call    WriteFile
 add     rsp, 28h
 xor     eax, eax
+add     rsp, 10h
 pop     rdi
 pop     rsi
 retn
 start endp
 
-algn_140001105:
-align 10h
-; [00000006 BYTES: COLLAPSED FUNCTION GetStdHandle. PRESS CTRL-NUMPAD+ TO EXPAND]
-align 20h
-; [00000006 BYTES: COLLAPSED FUNCTION WriteFile. PRESS CTRL-NUMPAD+ TO EXPAND]
+algn_140000254:
 align 8
-byte_140001128 db 0Ah, 3 dup(0CCh)
-__IMPORT_DESCRIPTOR_KERNEL32 dd rva off_140001158 ; Import Name Table
+; [00000006 BYTES: COLLAPSED FUNCTION GetStdHandle. PRESS CTRL-NUMPAD+ TO EXPAND]
+db 0Ah dup(0CCh)
+; [00000006 BYTES: COLLAPSED FUNCTION WriteFile. PRESS CTRL-NUMPAD+ TO EXPAND]
+align 10h
+__IMPORT_DESCRIPTOR_KERNEL32 dd rva off_140000298 ; Import Name Table
 dd 0                    ; Time stamp
 dd 0                    ; Forwarder Chain
 dd rva aKernel32Dll     ; DLL Name
 dd rva __imp_GetStdHandle ; Import Address Table
+align 8
 dq 2 dup(0)
-dq 0CCCCCCCC00000000h
 ;
 ; Import names for KERNEL32.dll
 ;
-off_140001158 dq rva word_140001188
-dq rva word_140001198
+off_140000298 dq rva word_1400002C8
+dq rva word_1400002D8
 dq 0
 _text ends
 
@@ -169,33 +106,26 @@ extrn __imp_WriteFile:qword
 ; Segment permissions: Read/Execute
 _text segment para public 'CODE' use64
 assume cs:_text
-;org 140001188h
-assume es:nothing, ss:nothing, ds:_text, fs:nothing, gs:nothing
-word_140001188 dw 302h
+;org 1400002C8h
+assume es:GAP, ss:GAP, ds:HEADER, fs:nothing, gs:nothing
+word_1400002C8 dw 302h
 db 'GetStdHandle',0
 align 8
-word_140001198 dw 65Fh
+word_1400002D8 dw 65Fh
 db 'WriteFile',0
 aKernel32Dll db 'KERNEL32.dll',0
-byte_1400011B1 db 48h, 65h, 2 dup(6Ch), 6Fh, 20h, 57h
-dq 0CCCCCC21646C726Fh
-stru_1400011C0 UNWIND_INFO_HDR <1, 0, 2, 2, 0, 0>
+align 4
+stru_1400002F4 UNWIND_INFO_HDR <1, 0, 6, 3, 0, 0>
+UNWIND_CODE <6, 2, 1>   ; UWOP_ALLOC_SMALL
 UNWIND_CODE <2, 0, 7>   ; UWOP_PUSH_NONVOL
 UNWIND_CODE <1, 0, 6>   ; UWOP_PUSH_NONVOL
-stru_1400011C8 UNWIND_INFO_HDR <1, 0, 2, 2, 0, 0>
-UNWIND_CODE <2, 0, 7>   ; UWOP_PUSH_NONVOL
-UNWIND_CODE <1, 0, 6>   ; UWOP_PUSH_NONVOL
-stru_1400011D0 UNWIND_INFO_HDR <1, 0, 2, 2, 0, 0>
-UNWIND_CODE <2, 0, 7>   ; UWOP_PUSH_NONVOL
-UNWIND_CODE <1, 0, 6>   ; UWOP_PUSH_NONVOL
-align 40h
-dq 1C0h dup(?)
+align 4
 _text ends
 
-; Section 2. (virtual address 00002000)
-; Virtual size                  : 00000024 (     36.)
-; Section size in file          : 00000200 (    512.)
-; Offset to raw data for section: 00000400
+; Section 2. (virtual address 00000300)
+; Virtual size                  : 0000000C (     12.)
+; Section size in file          : 0000000C (     12.)
+; Offset to raw data for section: 00000300
 ; Flags 40000040: Data Readable
 ; Alignment     : default
 
@@ -203,18 +133,20 @@ _text ends
 ; Segment permissions: Read
 _pdata segment para public 'DATA' use64
 assume cs:_pdata
-;org 140002000h
-ExceptionDir RUNTIME_FUNCTION <rva sub_140001000, \
-                  rva algn_14000103C, \
-                  rva stru_1400011C0>
-RUNTIME_FUNCTION <rva sub_140001040, \
-                  rva algn_140001083, \
-                  rva stru_1400011C8>
-RUNTIME_FUNCTION <rva start, \
-                  rva algn_140001105, \
-                  rva stru_1400011D0>
-align 1000h
+;org 140000300h
+ExceptionDir RUNTIME_FUNCTION <rva start, \
+                  rva algn_140000254, \
+                  rva stru_1400002F4>
 _pdata ends
+
+
+; Segment type: Pure data
+; Segment permissions: Read/Write
+GAP segment byte private 'DATA' use64
+assume cs:GAP
+;org 14000030Ch
+align 1000h
+GAP ends
 
 
 end start

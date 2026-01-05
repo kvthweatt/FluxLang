@@ -168,6 +168,9 @@ uv.lock
 # Flux-specific
 *.exe
 *.obj
+*.lib
+*.asm
+*.s
 *.o
 *.ll
 *.bc
