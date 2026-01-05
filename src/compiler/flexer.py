@@ -466,8 +466,10 @@ class FluxLexer:
         token_type = self.keywords.get(result, TokenType.IDENTIFIER)
         
         # Special handling for boolean literals
-        if result == 'true' or result == 'false':
-            token_type = TokenType.BOOL
+        if result == 'true':
+            token_type = TokenType.TRUE
+        elif result == 'false':
+            token_type = TokenType.FALSE
         
         return Token(token_type, result, start_pos[0], start_pos[1])
     

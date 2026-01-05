@@ -3329,7 +3329,7 @@ class IfStatement(Statement):
 class WhileLoop(Statement):
     condition: Expression
     body: Block
-
+    
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         func = builder.block.function
         cond_block = func.append_basic_block('while.cond')
@@ -3353,7 +3353,10 @@ class WhileLoop(Statement):
         # Emit body block
         builder.position_at_start(body_block)
         self.body.codegen(builder, module)
-        builder.branch(cond_block)  # Loop back
+        
+        # Only branch back if body didn't terminate (no break/return)
+        if not builder.block.is_terminated:
+            builder.branch(cond_block)  # Loop back
         
         # Restore break/continue targets
         builder.break_block = old_break
