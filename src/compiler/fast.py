@@ -3283,7 +3283,7 @@ class Block(Statement):
                     if stmt_result is not None:  # Only update result if not None
                         result = stmt_result
                 except Exception as e:
-                    #print(f"DEBUG Block: Error in statement {i} ({type(stmt).__name__}): {e}")
+                    print(f"DEBUG Block: Error in statement {i} ({type(stmt).__name__}): {e}")
                     raise
         return result
 
@@ -3354,6 +3354,62 @@ class WhileLoop(Statement):
         builder.position_at_start(body_block)
         self.body.codegen(builder, module)
         builder.branch(cond_block)  # Loop back
+        
+        # Restore break/continue targets
+        builder.break_block = old_break
+        builder.continue_block = old_continue
+        
+        # Position builder at end block
+        builder.position_at_start(end_block)
+        return None
+
+@dataclass
+class DoLoop(Statement):
+    """Plain do loop - executes body once"""
+    body: Block
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # A plain do loop just executes the body once
+        # It's essentially just a block with break/continue support
+        
+        if builder.block is None:
+            # For global scope, create a temporary function
+            func_type = ir.FunctionType(ir.VoidType(), [])
+            temp_func = ir.Function(module, func_type, name="__do_temp")
+            temp_block = temp_func.append_basic_block("entry")
+            temp_builder = ir.IRBuilder(temp_block)
+            
+            # Generate using temporary builder
+            self._generate_loop(temp_builder, module)
+            temp_builder.ret_void()
+            return None
+        else:
+            return self._generate_loop(builder, module)
+
+    def _generate_loop(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Internal method that generates the actual loop structure"""
+        func = builder.block.function
+        
+        # Create blocks
+        body_block = func.append_basic_block('do.body')
+        end_block = func.append_basic_block('do.end')
+        
+        # Save current break/continue targets
+        old_break = getattr(builder, 'break_block', None)
+        old_continue = getattr(builder, 'continue_block', None)
+        builder.break_block = end_block
+        builder.continue_block = body_block  # Continue jumps back to start of body
+        
+        # Jump to body
+        builder.branch(body_block)
+        
+        # Generate the body
+        builder.position_at_start(body_block)
+        self.body.codegen(builder, module)
+        
+        # If body didn't terminate (no break/return), loop back to body (infinite loop)
+        if not builder.block.is_terminated:
+            builder.branch(body_block)
         
         # Restore break/continue targets
         builder.break_block = old_break
@@ -3689,13 +3745,15 @@ class BreakStatement(Statement):
         if not hasattr(builder, 'break_block'):
             raise SyntaxError("'break' outside of loop or switch")
         
-        # Insert unreachable instruction if there's trailing code
+        # Don't do anything if block is already terminated
         if builder.block.is_terminated:
             return None
             
+        # Branch to break block - this terminates the block
         builder.branch(builder.break_block)
-        # Mark following code as unreachable
-        builder.unreachable()
+        
+        # Don't call unreachable() - the branch already terminated the block
+        # Any subsequent code will naturally be unreachable
         return None
 
 @dataclass
@@ -3704,13 +3762,15 @@ class ContinueStatement(Statement):
         if not hasattr(builder, 'continue_block'):
             raise SyntaxError("'continue' outside of loop")
         
-        # Insert unreachable instruction if there's trailing code  
+        # Don't do anything if block is already terminated
         if builder.block.is_terminated:
             return None
             
+        # Branch to continue block - this terminates the block
         builder.branch(builder.continue_block)
-        # Mark following code as unreachable
-        builder.unreachable()
+        
+        # Don't call unreachable() - the branch already terminated the block
+        # Any subsequent code will naturally be unreachable
         return None
 
 @dataclass

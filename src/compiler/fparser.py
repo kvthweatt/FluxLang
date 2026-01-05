@@ -1141,18 +1141,32 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
         return WhileLoop(condition, body)
     
-    def do_while_statement(self) -> DoWhileLoop:
+    def do_while_statement(self) -> Union[DoLoop, DoWhileLoop]:
         """
-        do_while_statement -> 'do' block 'while' '(' expression ')' ';'
+        do_while_statement -> 'do' block ('while' '(' expression ')' ';' | ';')
+        
+        Supports both:
+            do { ... };              # Plain do loop (executes once)
+            do { ... } while (cond); # Do-while loop (repeats while condition is true)
         """
         self.consume(TokenType.DO)
         body = self.block()
-        self.consume(TokenType.WHILE)
-        self.consume(TokenType.LEFT_PAREN)
-        condition = self.expression()
-        self.consume(TokenType.RIGHT_PAREN)
-        self.consume(TokenType.SEMICOLON)
-        return DoWhileLoop(body, condition)
+        
+        # Check if this is a do-while or plain do
+        if self.expect(TokenType.WHILE):
+            # Do-while loop
+            self.advance()
+            self.consume(TokenType.LEFT_PAREN)
+            condition = self.expression()
+            self.consume(TokenType.RIGHT_PAREN)
+            self.consume(TokenType.SEMICOLON)
+            return DoWhileLoop(body, condition)
+        elif self.expect(TokenType.SEMICOLON):
+            # Plain do loop
+            self.advance()
+            return DoLoop(body)
+        else:
+            self.error("Expected 'while' or ';' after do block")
     
     def for_statement(self) -> Union[ForLoop, ForInLoop]:
         """
