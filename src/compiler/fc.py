@@ -48,7 +48,7 @@ class FluxCompiler:
         
         # Configure platform-specific settings
         if self.platform == "Windows":
-            self.module_triple = "x86_64-pc-window"
+            self.module_triple = "x86_64-pc-windows"
             self.module.triple = self.module_triple
             # Set proper Windows data layout for x86_64
             self.module.data_layout = "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
@@ -239,11 +239,13 @@ class FluxCompiler:
                     "-fdata-sections",        # Place each data in its own section
                     "-fno-unwind-tables",     # Disable unwind tables (saves space)
                     "-fno-asynchronous-unwind-tables",
-                    "-fmerge-all-constants",  # Merge duplicate constants
+                    #"-fmerge-all-constants",  # Merge duplicate constants
+                                                # Enabling may cause undefined behavior for Flux programs
                     "-fno-stack-protector",   # Disable stack protection
                     "-fno-ident",             # Don't emit .ident directive
                     "-Wl,--gc-sections",      # Remove unused sections during linking
                     "-march=native",          # Optimize for current CPU
+                    "-Wno-override-module",   # Do not override triple presets
                     "-mtune=native",
                     "-fomit-frame-pointer",   # Omit frame pointers (smaller, faster)
                     str(ll_file),
@@ -271,7 +273,37 @@ class FluxCompiler:
                 obj_file = temp_dir / f"{base_name}.o"
                 
                 # Generate assembly
-                cmd = ["llc", "-O2", str(ll_file), "-o", str(asm_file)]
+                cmd = [
+                    "llc",
+                    "-O3",                        # Maximum optimization level
+                    "-mtriple=x86_64-linux",      # Explicit target triple
+                    "-march=x86-64",
+                    "-mcpu=native",               # Optimize for current CPU
+                    "-enable-misched",            # Enable machine instruction scheduler
+                    "-enable-tail-merge",         # Merge similar tail code
+                    #"-disable-cfi",               # Disable control flow integrity (smaller)
+                    #"-disable-fault-maps",        # Disable fault maps (smaller)
+                    #"-disable-live-intervals",    # Disable live interval analysis for speed
+                    #"-disable-post-ra-scheduler", # Disable post-register allocation scheduler
+                    "-disable-verify",            # Disable verification for speed
+                    "-filetype=obj",              # Direct object file output
+                    #"-join-physregs",             # Join physical registers
+                    "-no-x86-call-frame-opt",     # Disable call frame optimization (smaller)
+                    "-optimize-regalloc",         # Optimize register allocation
+                    "-relocation-model=static",   # Static relocation (no PIC)
+                    #"-spiller=default",
+                    #"-strip-debug",               # Strip debug info
+                    "-tail-dup-size=3",           # Tail duplication threshold
+                    "-tailcallopt",               # Enable tail call optimization
+                    #"-tls-direct-seg-refs",       # Direct TLS segment references
+                    "-x86-asm-syntax=att",      # Intel syntax assembly (optional)
+                    "-x86-use-base-pointer",      # Use base pointer
+                    #"-x86-use-recip",             # Use reciprocal approximations
+                    #"-stats",                     # Print statistics (optional)
+                    str(ll_file),
+                    "-o",
+                    str(obj_file)
+                ]
                 self.logger.debug(f"Running: {' '.join(cmd)}", "llc")
                 
                 try:
@@ -324,10 +356,11 @@ class FluxCompiler:
             if self.platform == "Darwin":  # macOS
                 link_cmd = ["clang", str(obj_file), "-o", output_bin]
             elif self.platform == "Windows":
-                # Use LLD
+                # Use LLD 
                 link_cmd = [
                     "C:\\Program Files\\LLVM\\bin\\lld-link.exe",
-                    "/entry:main",
+                    "/entry:main",                 # TODO -> f"/entry:{entrypoint}"
+                                                   # Custom entrypoint support, default main if unspecified
                     "/nodefaultlib",
                     "/subsystem:console",
                     "/opt:ref",                    # Remove unused functions/data
@@ -344,7 +377,7 @@ class FluxCompiler:
                     "/guard:no",                   # Disable CFG (Control Flow Guard)
                     "/dynamicbase:no",             # Disable ASLR (for smaller size)
                     "/nxcompat:no",                # Disable DEP compatibility
-                    "/highentropyva:no",           # Disable high entropy ASLR
+                    #"/highentropyva:no",           # Disable high entropy ASLR
                     "/opt:lldlto=3",               # Aggressive LTO optimization if available
                     "/opt:lldltojobs=all",         # Use all cores for LTO
                     str(obj_file),
@@ -366,14 +399,52 @@ class FluxCompiler:
                     raise
             else:  # Linux and others
                 link_cmd = [
-                    linker_path,
-                    "/entry:main",
-                    "/nodefaultlib",
-                    "/subsystem:native",          # Pure syscall mode
-                    "/opt:ref",                   # Remove unused
+                    "ld",
+                    "--gc-sections",                    # Remove unused sections
+                    "--as-needed",                      # Only link needed libraries
+                    "--strip-all",                      # Strip all symbols
+                    "--build-id=none",                  # No build ID
+                    "--no-eh-frame-hdr",                # No exception handling frame header
+                    "--no-ld-generated-unwind-info",    # No unwind info
+                    "-z", "noseparate-code",            # Don't separate code segments
+                    "-z", "norelro",                    # Disable RELRO (size tradeoff)
+                    "-z", "now",                        # Bind now (alternative to norelro)
+                    "-z", "noexecstack",                # No executable stack
+                    "-z", "max-page-size=0x1000",       # Small page size
+                    "-z", "common-page-size=0x1000",    # Small common page size
+                    "-z", "defs",                       # Report undefined symbols (strict)
+                    "--hash-style=gnu",                 # GNU hash style (faster)
+                    "--sort-section=alignment",         # Sort by alignment
+                    "--compress-debug-sections=none",   # No debug compression
+                    "--fatal-warnings",                 # Treat warnings as errors
+                    "--stats",                          # Show linker statistics
+                    "--cref",                           # Cross reference output
+                    "-Map", f"{output_bin}.map",        # Generate map file
+                    "--orphan-handling=place",          # Handle orphan sections
+                    #"--icf=all",                        # Identical Code Folding
+                    #"--print-icf-sections",             # Show ICF statistics
+                    #"--plugin-opt=O3",                  # LTO optimization level 3
+                    #"--plugin-opt=merge-functions",     # Merge similar functions
+                    #"--plugin-opt=dce",                 # Dead code elimination
+                    #"--plugin-opt=inline",              # Function inlining
+                    "--unresolved-symbols=ignore-all",
+                    "-Ttext-segment=0x400000",          # Text segment address
+                    "--section-start", ".rodata=0x500000",  # Read-only data address
+                    "--section-start", ".data=0x600000",    # Data section address
+                    "--section-start", ".bss=0x700000",     # BSS section address
+                    "-e", "main",                       # Entry point
                     str(obj_file),
-                    f"/out:{output_bin}"
-                ]            
+                    # Runtime dependencies -- Enable if you want them in your code.
+                    #"/usr/lib/x86_64-linux-gnu/Scrt1.o",        # Startup code
+                    #"/usr/lib/x86_64-linux-gnu/crti.o",         # C runtime init
+                    #"-lc",                                     # C library
+                    #"/usr/lib/x86_64-linux-gnu/crtn.o",        # C runtime term
+                    #"-lgcc",                                   # GCC runtime
+                    #"-lgcc_eh",                                # GCC exception handling
+                    "--start-group",
+                    "--end-group",
+                    "-o", output_bin
+                ]
                 self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
                 
                 try:

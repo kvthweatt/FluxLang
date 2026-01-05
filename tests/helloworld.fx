@@ -1,6 +1,6 @@
 import "redstandard.fx";
 
-using standard::io;
+using standard::io::console;
 
 def main() -> int
 {

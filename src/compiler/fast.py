@@ -16,6 +16,15 @@ from llvmlite import ir
 from pathlib import Path
 import os
 
+## TO DO
+#
+# -> Add `lext` keyword to set external linkage.
+#    \_> Cause gv.linkage = 'external'
+#
+# -> Add `extern` keyword for FFI.
+#
+## /TODO
+
 # Base classes first
 @dataclass
 class ASTNode:
@@ -2749,7 +2758,7 @@ class MacroDefinition(Statement):
         # Create a global constant for the macro value
         if isinstance(self.macro_value, str):
             # String literal - create global string constant
-            string_bytes = self.macro_value.encode('ascii') + b'\0'  # null terminated
+            string_bytes = self.macro_value.encode('ascii') #+ b'\0'  # NEVER NULL TERMINATE
             str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
             str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
             

@@ -282,22 +282,7 @@ Potential future features:
    ```flux
    register("rax") int counter;  // Force specific register
    ```
-
-2. **Register Classes**
-   ```flux
-   register(integer) int x;      // Use integer register
-   register(floating) float y;   // Use FP register
-   register(simd) int[4] vec;    // Use SIMD register
-   ```
-
-3. **Register Pressure Analysis**
-   ```flux
-   @pragma(show_register_pressure)
-   def hot_function() -> void {
-       // Compiler reports: "11/16 registers in use"
-   };
-   ```
-
+   
 ## Summary
 
 | Feature | Behavior |

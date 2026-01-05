@@ -150,6 +150,9 @@ class FluxParser:
         elif self.expect(TokenType.LOCAL):
             storage_class = 'local'
             self.advance()
+        elif self.expect(TokenType.REGISTER):
+            storage_class = 'register'
+            self.advance()
         
         # Now check what comes after qualifiers and storage class
         if is_const or is_volatile:
