@@ -171,6 +171,7 @@ uv.lock
 *.lib
 *.asm
 *.s
+*.id*
 *.o
 *.ll
 *.bc

@@ -125,6 +125,41 @@ class FluxParser:
                   | control_statement
         """
         storage_class = None
+        is_const = False
+        is_volatile = False
+        
+        # Parse qualifiers first (const, volatile)
+        if self.expect(TokenType.CONST):
+            is_const = True
+            self.advance()
+        
+        if self.expect(TokenType.VOLATILE):
+            is_volatile = True
+            self.advance()
+        
+        # After qualifiers, check for storage class or other keywords
+        if self.expect(TokenType.STACK):
+            storage_class = 'stack'
+            self.advance()
+        elif self.expect(TokenType.HEAP):
+            storage_class = 'heap'
+            self.advance()
+        elif self.expect(TokenType.GLOBAL):
+            storage_class = 'global'
+            self.advance()
+        elif self.expect(TokenType.LOCAL):
+            storage_class = 'local'
+            self.advance()
+        
+        # Now check what comes after qualifiers and storage class
+        if is_const or is_volatile:
+            if self.expect(TokenType.ASM):
+                return self.asm_statement(is_volatile=True)
+            if self.expect(TokenType.DEF):
+                return self.function_def()
+            else:
+                # It's a variable declaration with qualifiers
+                return self.variable_declaration_statement()
         if self.expect(TokenType.IMPORT):
             return self.import_statement()
         elif self.expect(TokenType.USING):
@@ -174,42 +209,16 @@ class FluxParser:
         elif self.expect(TokenType.INT, TokenType.DATA, TokenType.CHAR, 
                          TokenType.FLOAT_KW, TokenType.BOOL_KW, TokenType.VOID):
             return self.variable_declaration_statement()
-        elif self.expect(TokenType.CONST):
-            self.advance()
-            if self.expect(TokenType.VOLATILE):
-                self.advance()
-                if self.expect(TokenType.DEF):
-                    return self.function_def()
-                else:
-                    return self.variable_declaration_statement()
-        elif self.expect(TokenType.VOLATILE):
-            self.advance()
-            if self.expect(TokenType.ASM):
-                return self.asm_statement(is_volatile=True)
         elif self.expect(TokenType.SEMICOLON):
             self.advance()
             return None
         elif self.expect(TokenType.AUTO) and self.peek() and self.peek().type == TokenType.LEFT_BRACE:
             # Handle destructuring assignment
             destructure = self.destructuring_assignment()
-            self.consume(TokenType.SEMICOLON)
+            self.consume(TokenType.SEMICOLON) ## MOVE THIS INTO DESTRUCTURING_ASSIGNMENT()
             return destructure
         elif self.expect(TokenType.ASM):
             return self.asm_statement()
-        ## TODO
-        ## ADD -   `stack`, `heap`, `global`, `local`, `private`, and `public`
-        elif self.expect(TokenType.STACK):
-            storage_class = 'stack'
-            self.advance()
-        elif self.expect(TokenType.HEAP):
-            storage_class = 'heap'
-            self.advance()
-        elif self.expect(TokenType.GLOBAL):
-            storage_class = 'global'
-            self.advance()
-        elif self.expect(TokenType.LOCAL):
-            storage_class = 'local'
-            self.advance()
         else:
             return self.expression_statement()
     

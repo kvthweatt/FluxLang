@@ -43,31 +43,6 @@ namespace standard
             return void;
         };
 
-def win_input(byte[] buffer, int max_bytes) -> int
-{
-    volatile int bytes_read;
-    volatile asm
-    {
-        // HANDLE h = GetStdHandle(STD_INPUT_HANDLE = -10)
-        movq $$-10, %rcx
-        subq $$32, %rsp
-        call GetStdHandle
-        addq $$32, %rsp
-
-        // BOOL ok = ReadFile(h, buffer, max_bytes, &bytes_read, NULL)
-        movq %rax, %rcx         // RCX = handle (from GetStdHandle)
-        movq $1, %rdx           // RDX = lpBuffer (operand 1 = buffer)
-        movl $2, %r8d           // R8D = nNumberOfBytesToRead (operand 2 = max_bytes, DWORD)
-        leaq $0, %r9            // R9 = lpNumberOfBytesRead (operand 0 = &bytes_read, memory)
-        subq $$40, %rsp         // 32 bytes shadow + 8 for 5th arg slot
-        xorq %rax, %rax         // Clear RAX
-        movq %rax, 32(%rsp)     // *(rsp+32) = lpOverlapped = NULL
-        call ReadFile
-        addq $$40, %rsp
-    } : "=m"(bytes_read) : "r"(buffer), "r"(max_bytes) : "rax","rcx","rdx","r8","r9","r10","r11","memory";
-    return bytes_read;
-};
-
         def wpnl() -> void
         {
             win_print(@nl,1);
