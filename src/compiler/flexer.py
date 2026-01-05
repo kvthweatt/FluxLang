@@ -77,6 +77,7 @@ class TokenType(Enum):
     OR = auto()
     PRIVATE = auto()
     PUBLIC = auto()
+    REGISTER = auto()
     RETURN = auto()
     SIGNED = auto()
     SIZEOF = auto()
@@ -226,6 +227,7 @@ class FluxLexer:
             'or': TokenType.OR,
             'private': TokenType.PRIVATE,
             'public': TokenType.PUBLIC,
+            'register': TokenType.REGISTER,
             'return': TokenType.RETURN,
             'signed': TokenType.SIGNED,
             'sizeof': TokenType.SIZEOF,

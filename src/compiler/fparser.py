@@ -619,17 +619,15 @@ class FluxParser:
     
     def type_spec(self) -> TypeSpec:
         """
-        type_spec -> ('const')? ('volatile')? ('signed'|'unsigned')? ('heap'|'stack'|'register')? base_type alignment? array_spec? pointer_spec?
+        type_spec -> ('const')? ('volatile')? ('signed'|'unsigned')? ('global'|'local')? ('heap'|'stack'|'register')? base_type alignment? array_spec? pointer_spec?
         array_spec -> ('[' expression? ']')+
-
-        ## ADDED  ('heap'|'stack'|'register')?  FOR FUTURE REFERENCE
-        ## MUST ADD
-        ## TODO
         """
         is_const = False
         is_volatile = False
         is_signed = True
+        storage_class = None  # NEW
 
+        # Parse qualifiers
         if self.expect(TokenType.CONST):
             is_const = True
             self.advance()
@@ -645,7 +643,24 @@ class FluxParser:
             is_signed = False
             self.advance()
         
-        # Base type
+        # NEW: Parse storage class
+        if self.expect(TokenType.GLOBAL):
+            storage_class = StorageClass.GLOBAL
+            self.advance()
+        elif self.expect(TokenType.LOCAL):
+            storage_class = StorageClass.LOCAL
+            self.advance()
+        elif self.expect(TokenType.HEAP):
+            storage_class = StorageClass.HEAP
+            self.advance()
+        elif self.expect(TokenType.STACK):
+            storage_class = StorageClass.STACK
+            self.advance()
+        elif self.expect(TokenType.REGISTER):
+            storage_class = StorageClass.REGISTER
+            self.advance()
+        
+        # Base type parsing
         base_type_result = self.base_type()
         custom_typename = None
         
@@ -661,7 +676,6 @@ class FluxParser:
         alignment = None
         
         if base_type == DataType.DATA and custom_typename is None:
-            # Only parse bit width for explicit data{N} types, not custom type aliases
             if self.expect(TokenType.LEFT_BRACE):
                 self.advance()
                 bit_width = int(self.consume(TokenType.INTEGER).value)
@@ -678,17 +692,15 @@ class FluxParser:
         while self.expect(TokenType.LEFT_BRACKET):
             self.advance()
             if not self.expect(TokenType.RIGHT_BRACKET):
-                # Check if it's an integer literal first
                 if self.expect(TokenType.INTEGER):
                     array_size = int(self.current_token.value)
                     array_dims.append(array_size)
                     self.advance()
                 else:
-                    # Parse as expression (handles identifiers, etc.)
                     expr = self.expression()
                     array_dims.append(expr)
             else:
-                array_dims.append(None)  # Unsized array dimension
+                array_dims.append(None)
             self.consume(TokenType.RIGHT_BRACKET)
         
         is_array = len(array_dims) > 0
@@ -712,8 +724,10 @@ class FluxParser:
             array_size=array_size,
             array_dimensions=array_dimensions,
             is_pointer=is_pointer,
-            custom_typename=custom_typename
+            custom_typename=custom_typename,
+            storage_class=storage_class  # NEW
         )
+
     
     def base_type(self) -> Union[DataType, List]:
         """
@@ -823,7 +837,6 @@ class FluxParser:
         """
         decl = self.variable_declaration()
         self.consume(TokenType.SEMICOLON)
-        # VariableDeclaration is already a Statement, not an Expression
         return decl
     
     def variable_declaration(self) -> Union[VariableDeclaration, TypeDeclaration]:

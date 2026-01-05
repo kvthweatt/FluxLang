@@ -33,6 +33,15 @@ class DataType(Enum):
     VOID = "void"
     THIS = "this"
 
+class StorageClass(Enum):
+    """Storage class specifiers for variables"""
+    AUTO = "auto"         # Default: automatic storage (stack for locals, global for module-level)
+    STACK = "stack"       # Force stack allocation
+    HEAP = "heap"         # Force heap allocation
+    GLOBAL = "global"     # Global/static storage
+    LOCAL = "local"       # Local scope (restricted to current stack)
+    REGISTER = "register" # Hint: keep in register if possible
+
 class Operator(Enum):
     ADD = "+"
     SUB = "-"
@@ -249,9 +258,10 @@ class TypeSpec:
     alignment: Optional[int] = None
     is_array: bool = False
     array_size: Optional[int] = None
-    array_dimensions: Optional[List[Optional[int]]] = None  # Add this for multi-dimensional arrays
+    array_dimensions: Optional[List[Optional[int]]] = None
     is_pointer: bool = False
     custom_typename: Optional[str] = None
+    storage_class: Optional[StorageClass] = None  # NEW: storage class
 
     def get_llvm_type(self, module: ir.Module) -> ir.Type:
         """Get LLVM type for this TypeSpec, resolving custom type names"""
@@ -2628,27 +2638,23 @@ class VariableDeclaration(ASTNode):
         return alloca
     
     def get_llvm_type(self, module: ir.Module) -> ir.Type:
-        if isinstance(self.type_spec.base_type, str):
-            if hasattr(module, '_struct_types') and self.type_spec.base_type in module._struct_types:
-                return module._struct_types[self.type_spec.base_type]
-            if hasattr(module, '_type_aliases') and self.type_spec.base_type in module._type_aliases:
-                return module._type_aliases[self.type_spec.base_type]
-            return ir.IntType(type_spec.bit_width)
-        
-        if self.type_spec.base_type == DataType.INT:
-            return ir.IntType(32)
-        elif self.type_spec.base_type == DataType.FLOAT:
-            return ir.FloatType()
-        elif self.type_spec.base_type == DataType.BOOL:
-            return ir.IntType(1)
-        elif self.type_spec.base_type == DataType.CHAR:
-            return ir.IntType(8)
-        elif self.type_spec.base_type == DataType.VOID:
-            return ir.VoidType()
-        elif self.type_spec.base_type == DataType.DATA:
-            return ir.IntType(self.type_spec.bit_width)
+        if infer_array_size:
+            inferred_type_spec = TypeSpec(
+                base_type=resolved_type_spec.base_type,
+                is_signed=resolved_type_spec.is_signed,
+                is_const=resolved_type_spec.is_const,
+                is_volatile=resolved_type_spec.is_volatile,
+                bit_width=resolved_type_spec.bit_width or 8,
+                alignment=resolved_type_spec.alignment,
+                is_array=True,
+                array_size=string_length,
+                is_pointer=resolved_type_spec.is_pointer,
+                custom_typename=resolved_type_spec.custom_typename,
+                storage_class=resolved_type_spec.storage_class  # NEW
+            )
+            llvm_type = inferred_type_spec.get_llvm_type_with_array(module)
         else:
-            raise ValueError(f"Unsupported type: {self.type_spec.base_type}")
+            llvm_type = self.type_spec.get_llvm_type_with_array(module)
 
 # Type declarations
 @dataclass
