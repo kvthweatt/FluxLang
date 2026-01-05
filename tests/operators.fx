@@ -9,6 +9,13 @@ def main() -> int
 
     noopstr s = "Success!";
     noopstr f = "Fail.";
+
+    switch (x)
+    {
+        case (4) {win_print(@s,8);return 0;}
+        default {win_print(@f,5);};
+    };
+
     if (x == 4)
     {
         win_print(@s,8);

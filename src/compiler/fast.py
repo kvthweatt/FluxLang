@@ -3726,28 +3726,33 @@ class Case(ASTNode):
 class SwitchStatement(Statement):
     expression: Expression
     cases: List[Case] = field(default_factory=list)
-
+    
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         switch_val = self.expression.codegen(builder, module)
         
-        # Create basic blocks for each case (including default)
+        # Create basic blocks
         func = builder.block.function
-        case_blocks = []
+        merge_block = func.append_basic_block("switch_merge")
         default_block = None
+        case_blocks = []
         
-        # Create blocks for all cases first
-        for case in self.cases:
+        # Create blocks for all cases
+        for i, case in enumerate(self.cases):
             if case.value is None:  # Default case
                 default_block = func.append_basic_block("switch_default")
                 case_blocks.append((None, default_block))
             else:
-                case_block = func.append_basic_block(f"case_{len(case_blocks)}")
+                case_block = func.append_basic_block(f"switch_case_{i}")
                 case_blocks.append((case.value, case_block))
+        
+        # If no default block was specified, use merge block as default
+        if default_block is None:
+            default_block = merge_block
         
         # Create the switch instruction
         switch = builder.switch(switch_val, default_block)
         
-        # Add all cases to the switch
+        # Add all non-default cases to the switch
         for value, block in case_blocks:
             if value is not None:
                 case_const = value.codegen(builder, module)
@@ -3756,21 +3761,16 @@ class SwitchStatement(Statement):
         # Generate code for each case block
         for i, (value, case_block) in enumerate(case_blocks):
             builder.position_at_start(case_block)
+            
+            # Generate the case body
             self.cases[i].body.codegen(builder, module)
             
-            # Add terminator if not already present
+            # Add branch to merge block if the case doesn't already have a terminator
+            # (cases with return/break will already be terminated)
             if not builder.block.is_terminated:
-                if default_block:
-                    builder.branch(default_block)
-                else:
-                    # If no default, branch to function return
-                    if isinstance(func.return_type, ir.VoidType):
-                        builder.ret_void()
-                    else:
-                        builder.ret(ir.Constant(func.return_type, 0))
+                builder.branch(merge_block)
         
-        # Position builder after the switch
-        merge_block = func.append_basic_block("switch_merge")
+        # Position builder at merge block for subsequent code
         builder.position_at_start(merge_block)
         
         return None
