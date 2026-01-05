@@ -5395,10 +5395,11 @@ class ImportStatement(Statement):
             search_paths = [
                 Path.cwd(),
                 Path.cwd() / "src/stdlib",
+                Path.cwd() / "src/stdlib/runtime",
                 Path(__file__).parent.parent / "stdlib",
                 Path.home() / ".flux" / "stdlib",
-                Path("/usr/local/stdlib/flux"),
-                Path("/usr/stdlib/flux")
+                Path("/usr/local/flux/stdlib/"),
+                Path("/usr/flux/stdlib")
             ]
 
             for path in search_paths:

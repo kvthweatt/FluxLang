@@ -29,6 +29,7 @@ from pathlib import Path
 # Add src/compiler and src/stdlib to Python path
 sys.path.insert(0, str(Path(__file__).parent / "src" / "compiler"))
 sys.path.insert(0, str(Path(__file__).parent / "src" / "stdlib"))
+sys.path.insert(0, str(Path(__file__).parent / "src" / "stdlib" / "runtime"))
 
 print(sys.path)
 
