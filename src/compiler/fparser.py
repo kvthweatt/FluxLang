@@ -124,6 +124,7 @@ class FluxParser:
                   | assignment_statement
                   | control_statement
         """
+        storage_class = None
         if self.expect(TokenType.IMPORT):
             return self.import_statement()
         elif self.expect(TokenType.USING):
@@ -197,6 +198,18 @@ class FluxParser:
             return self.asm_statement()
         ## TODO
         ## ADD -   `stack`, `heap`, `global`, `local`, `private`, and `public`
+        elif self.expect(TokenType.STACK):
+            storage_class = 'stack'
+            self.advance()
+        elif self.expect(TokenType.HEAP):
+            storage_class = 'heap'
+            self.advance()
+        elif self.expect(TokenType.GLOBAL):
+            storage_class = 'global'
+            self.advance()
+        elif self.expect(TokenType.LOCAL):
+            storage_class = 'local'
+            self.advance()
         else:
             return self.expression_statement()
     
@@ -597,8 +610,12 @@ class FluxParser:
     
     def type_spec(self) -> TypeSpec:
         """
-        type_spec -> ('const')? ('volatile')? ('signed'|'unsigned')? base_type alignment? array_spec? pointer_spec?
+        type_spec -> ('const')? ('volatile')? ('signed'|'unsigned')? ('heap'|'stack'|'register')? base_type alignment? array_spec? pointer_spec?
         array_spec -> ('[' expression? ']')+
+
+        ## ADDED  ('heap'|'stack'|'register')?  FOR FUTURE REFERENCE
+        ## MUST ADD
+        ## TODO
         """
         is_const = False
         is_volatile = False
@@ -652,14 +669,13 @@ class FluxParser:
         while self.expect(TokenType.LEFT_BRACKET):
             self.advance()
             if not self.expect(TokenType.RIGHT_BRACKET):
-                try:
-                    array_size = int(self.consume(TokenType.INTEGER).value)
+                # Check if it's an integer literal first
+                if self.expect(TokenType.INTEGER):
+                    array_size = int(self.current_token.value)
                     array_dims.append(array_size)
-                except:
-                    # If it's not an integer literal, parse as expression
-                    # Restore position and parse as expression
-                    self.position -= 1  # Go back to INTEGER token
-                    self.current_token = self.tokens[self.position]
+                    self.advance()
+                else:
+                    # Parse as expression (handles identifiers, etc.)
                     expr = self.expression()
                     array_dims.append(expr)
             else:

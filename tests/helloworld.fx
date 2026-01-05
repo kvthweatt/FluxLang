@@ -2,11 +2,9 @@ import "redstandard.fx";
 
 using standard::io;
 
-def null() -> void {return;};
-
 def main() -> int
 {
-	win_print("Test", 4);
-	//wpnl();
+	noopstr x = "Hello World!";
+	win_print(x, 12);
 	return 0;
 };

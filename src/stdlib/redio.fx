@@ -19,50 +19,7 @@ namespace standard
         def mac_print(byte* msg, int x) -> void;
         def mpnl() -> void;
 		def print(noopstr s) -> void;
-def win_input() -> noopstr
-{
-    char[256] buffer;
-    u32 bytes_read;
-    
-    volatile asm
-    {
-        // Get console input handle
-        movq $$-10, %rcx               // STD_INPUT_HANDLE
-        subq $$32, %rsp
-        call GetStdHandle
-        addq $$32, %rsp
-        movq %rax, %r12                // Save handle in non-volatile register
-        
-        // Read from console
-        movq %r12, %rcx                // hConsoleInput
-        leaq -260(%rbp), %rdx          // buffer address (adjust offset based on your stack layout)
-        movl $$255, %r8d               // max chars to read
-        leaq -264(%rbp), %r9           // &bytes_read (adjust offset)
-        subq $$40, %rsp
-        movq $$0, 32(%rsp)             // lpOverlapped = NULL
-        call ReadFile
-        addq $$40, %rsp
-        
-        // Check if read was successful
-        testl %eax, %eax
-        jz read_failed
-        
-        // Null-terminate the string
-        movl -264(%rbp), %eax          // bytes_read
-        leaq -260(%rbp), %rcx          // buffer address
-        movb $$0, (%rcx, %rax)         // buffer[bytes_read] = '\0'
-        jmp read_done
-        
-    read_failed:
-        // On failure, set empty string
-        movb $$0, -260(%rbp)
-        
-    read_done:
-        
-    } : : : "rax","rcx","rdx","r8","r9","r10","r11","r12","memory";
-    
-    return buffer;
-};
+
         def win_print(byte[] msg, int x) -> void
         {
             volatile asm
@@ -85,6 +42,31 @@ def win_input() -> noopstr
             } : : "r"(msg), "r"(x) : "rax","rcx","rdx","r8","r9","r10","r11","memory";
             return void;
         };
+
+def win_input(byte[] buffer, int max_bytes) -> int
+{
+    volatile int bytes_read;
+    volatile asm
+    {
+        // HANDLE h = GetStdHandle(STD_INPUT_HANDLE = -10)
+        movq $$-10, %rcx
+        subq $$32, %rsp
+        call GetStdHandle
+        addq $$32, %rsp
+
+        // BOOL ok = ReadFile(h, buffer, max_bytes, &bytes_read, NULL)
+        movq %rax, %rcx         // RCX = handle (from GetStdHandle)
+        movq $1, %rdx           // RDX = lpBuffer (operand 1 = buffer)
+        movl $2, %r8d           // R8D = nNumberOfBytesToRead (operand 2 = max_bytes, DWORD)
+        leaq $0, %r9            // R9 = lpNumberOfBytesRead (operand 0 = &bytes_read, memory)
+        subq $$40, %rsp         // 32 bytes shadow + 8 for 5th arg slot
+        xorq %rax, %rax         // Clear RAX
+        movq %rax, 32(%rsp)     // *(rsp+32) = lpOverlapped = NULL
+        call ReadFile
+        addq $$40, %rsp
+    } : "=m"(bytes_read) : "r"(buffer), "r"(max_bytes) : "rax","rcx","rdx","r8","r9","r10","r11","memory";
+    return bytes_read;
+};
 
         def wpnl() -> void
         {
@@ -112,7 +94,7 @@ def win_input() -> noopstr
 				int len = sizeof(*s) / 8;
 				win_print(@s, len);
 			};
-			(void)s; // Linker complains but this is supposed to be here.
+			(void)s;
 			return;
 		};
     };

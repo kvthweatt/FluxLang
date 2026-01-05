@@ -2301,6 +2301,7 @@ class VariableDeclaration(ASTNode):
     name: str
     type_spec: TypeSpec
     initial_value: Optional[Expression] = None
+    is_global: bool = False  # Add flag for global keyword
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Check for automatic array size inference with string literals
@@ -2359,8 +2360,8 @@ class VariableDeclaration(ASTNode):
             # Normal type resolution using the improved get_llvm_type_with_array
             llvm_type = self.type_spec.get_llvm_type_with_array(module)
         
-        # Handle global variables
-        if builder.scope is None:
+        # Handle global variables (either at module scope OR explicitly marked with 'global' keyword)
+        if builder.scope is None or self.is_global:
             # Check if global already exists (handle both original name and potential namespaced names)
             if self.name in module.globals:
                 return module.globals[self.name]
@@ -2396,7 +2397,7 @@ class VariableDeclaration(ASTNode):
                     gvar.initializer = ir.Constant(llvm_type, element_values)
                 # Handle string literals for char arrays
                 elif isinstance(llvm_type, ir.ArrayType) and isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8 and isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR:
-                    # Convert string to array of characters
+                    # Convert string to array of characters (no null termination)
                     string_val = self.initial_value.value
                     char_values = []
                     for i, char in enumerate(string_val):
@@ -2409,7 +2410,7 @@ class VariableDeclaration(ASTNode):
                     gvar.initializer = ir.Constant(llvm_type, char_values)
                 # Handle string literals for pointer types (global variables)
                 elif isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8 and isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR:
-                    # Create global string constant for pointer types
+                    # Create global string constant for pointer types (no null termination)
                     string_val = self.initial_value.value
                     string_bytes = string_val.encode('ascii')
                     str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
@@ -2457,23 +2458,29 @@ class VariableDeclaration(ASTNode):
             if (isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR):
                 if isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8:
                     # Handle string literal initialization for local pointer types (like noopstr)
+                    # Store string data in the local stack frame, not as a global constant
                     string_val = self.initial_value.value
                     string_bytes = string_val.encode('ascii')
                     str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
-                    str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
                     
-                    # Create global variable for the string data
-                    str_gv = ir.GlobalVariable(module, str_val.type, name=f".str.{self.name}")
-                    str_gv.linkage = 'internal'
-                    str_gv.global_constant = True
-                    str_gv.initializer = str_val
+                    # Allocate space for the string on the stack
+                    str_alloca = builder.alloca(str_array_ty, name=f"{self.name}_str_data")
                     
-                    # Get pointer to the first character of the string as the initializer
-                    zero = ir.Constant(ir.IntType(32), 0)
-                    str_ptr = builder.gep(str_gv, [zero, zero], name=f"{self.name}_str_ptr")
+                    # Store each character individually (no null termination)
+                    for i, byte_val in enumerate(string_bytes):
+                        zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
+                        index = ir.Constant(ir.IntType(32), i)
+                        elem_ptr = builder.gep(str_alloca, [zero, index], name=f"{self.name}_char{i}")
+                        char_val = ir.Constant(ir.IntType(8), byte_val)
+                        builder.store(char_val, elem_ptr)
+                    
+                    # Get pointer to the first character
+                    zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
+                    str_ptr = builder.gep(str_alloca, [zero, zero], name=f"{self.name}_str_ptr")
                     builder.store(str_ptr, alloca)
+                    
                 elif isinstance(llvm_type, ir.ArrayType) and isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8:
-                    # Handle string literal initialization for local char arrays
+                    # Handle string literal initialization for local char arrays (no null termination)
                     string_val = self.initial_value.value
                     
                     # Store each character individually
@@ -2482,7 +2489,7 @@ class VariableDeclaration(ASTNode):
                             break
                         
                         # Get pointer to array element
-                        zero = ir.Constant(ir.IntType(32), 0)
+                        zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
                         index = ir.Constant(ir.IntType(32), i)
                         elem_ptr = builder.gep(alloca, [zero, index], name=f"{self.name}[{i}]")
                         
@@ -2492,7 +2499,7 @@ class VariableDeclaration(ASTNode):
                     
                     # Zero-fill remaining elements if needed
                     for i in range(len(string_val), llvm_type.count):
-                        zero_val = ir.Constant(ir.IntType(32), 0)
+                        zero_val = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
                         index = ir.Constant(ir.IntType(32), i)
                         elem_ptr = builder.gep(alloca, [zero_val, index], name=f"{self.name}[{i}]")
                         zero_char = ir.Constant(ir.IntType(8), 0)
@@ -2508,8 +2515,7 @@ class VariableDeclaration(ASTNode):
                 # Call constructor with 'this' pointer (alloca) as first argument
                 args = [alloca]  # 'this' pointer
                 
-                # Process constructor arguments using the same logic as FunctionCall.codegen
-                # This ensures string literals are properly converted to global string constants
+                # Process constructor arguments
                 for i, arg_expr in enumerate(self.initial_value.arguments):
                     # Check if this is a string literal that needs conversion
                     param_index = i + 1  # +1 because args[0] is 'this' pointer
@@ -2518,21 +2524,25 @@ class VariableDeclaration(ASTNode):
                         isinstance(constructor_func.args[param_index].type, ir.PointerType) and
                         isinstance(constructor_func.args[param_index].type.pointee, ir.IntType) and
                         constructor_func.args[param_index].type.pointee.width == 8):
-                        # Convert string literal to global constant
+                        # Store string on stack, not as global constant
                         string_val = arg_expr.value
                         string_bytes = string_val.encode('ascii')
                         str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
-                        str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
                         
-                        # Create global variable for the string
-                        gv = ir.GlobalVariable(module, str_val.type, name=f".str.ctor_{self.name}_arg{i}")
-                        gv.linkage = 'internal'
-                        gv.global_constant = True
-                        gv.initializer = str_val
+                        # Allocate on stack
+                        str_alloca = builder.alloca(str_array_ty, name=f"ctor_arg{i}_str_data")
                         
-                        # Get pointer to the first character of the string
-                        zero = ir.Constant(ir.IntType(32), 0)
-                        str_ptr = builder.gep(gv, [zero, zero], name=f"ctor_arg{i}_str_ptr")
+                        # Store characters (no null termination)
+                        for j, byte_val in enumerate(string_bytes):
+                            zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
+                            index = ir.Constant(ir.IntType(32), j)
+                            elem_ptr = builder.gep(str_alloca, [zero, index])
+                            char_val = ir.Constant(ir.IntType(8), byte_val)
+                            builder.store(char_val, elem_ptr)
+                        
+                        # Get pointer to first character
+                        zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
+                        str_ptr = builder.gep(str_alloca, [zero, zero], name=f"ctor_arg{i}_str_ptr")
                         arg_val = str_ptr
                     else:
                         # Normal argument processing
@@ -2548,31 +2558,6 @@ class VariableDeclaration(ASTNode):
                 # Regular initialization for non-string literals
                 init_val = self.initial_value.codegen(builder, module)
                 if init_val is not None:
-                    # Special case: Handle single byte to string conversion
-                    if (isinstance(init_val.type, ir.IntType) and init_val.type.width == 8 and
-                        isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and
-                        llvm_type.pointee.width == 8):
-                        # Create a single-character string from the byte
-                        # This handles cases like: noopstr x = s[1];
-                        char_array = ir.ArrayType(ir.IntType(8), 2)  # [i8 x 2] for char + null terminator
-                        temp_alloca = builder.alloca(char_array, name=f"{self.name}_temp_str")
-                        
-                        # Store the character at index 0
-                        zero = ir.Constant(ir.IntType(32), 0)
-                        char_ptr = builder.gep(temp_alloca, [zero, zero], name="char_pos")
-                        builder.store(init_val, char_ptr)
-                        
-                        # Store null terminator at index 1
-                        one = ir.Constant(ir.IntType(32), 1)
-                        null_ptr = builder.gep(temp_alloca, [zero, one], name="null_pos")
-                        null_char = ir.Constant(ir.IntType(8), 0)
-                        builder.store(null_char, null_ptr)
-                        
-                        # Get pointer to the first character (this is our string)
-                        string_ptr = builder.gep(temp_alloca, [zero, zero], name=f"{self.name}_str_ptr")
-                        builder.store(string_ptr, alloca)
-                        return alloca
-                    
                     # Special handling for cast to array initialization
                     if (isinstance(self.initial_value, CastExpression) and
                         isinstance(init_val.type, ir.PointerType) and

@@ -4,7 +4,10 @@ using standard::io;
 
 def main() -> int
 {
-	noopstr x = win_input();
-	win_print(@x, 1);
-	return 0;
+    int MAX = 256;
+    char[MAX] buffer;
+    
+    u32 bytes_read = win_input(buffer, MAX);
+
+    return 0;
 };
