@@ -173,6 +173,8 @@ class Literal(ASTNode):
         if struct_type is None:
             raise ValueError(f"No compatible struct type found for fields: {field_names}")
         
+        ## -- URGENT
+        ## TODO -> REWORK THIS V V V
         # Allocate space for the struct instance
         if builder.scope is None:
             # Global context - create a struct constant

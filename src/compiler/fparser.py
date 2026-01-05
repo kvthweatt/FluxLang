@@ -1386,7 +1386,8 @@ class FluxParser:
             else:
                 return Assignment(expr, value)
         elif self.expect(TokenType.PLUS_ASSIGN, TokenType.MINUS_ASSIGN, TokenType.MULTIPLY_ASSIGN, 
-                         TokenType.DIVIDE_ASSIGN, TokenType.MODULO_ASSIGN):
+                         TokenType.DIVIDE_ASSIGN, TokenType.MODULO_ASSIGN, TokenType.POWER_ASSIGN,
+                         TokenType.XOR_ASSIGN, TokenType.BITSHIFT_LEFT_ASSIGN, TokenType.BITSHIFT_RIGHT_ASSIGN):
             # Handle compound assignments
             op_token = self.current_token.type
             self.advance()
@@ -1483,8 +1484,8 @@ class FluxParser:
         """
         expr = self.additive_expression()
         
-        while self.expect(TokenType.LEFT_SHIFT, TokenType.RIGHT_SHIFT):
-            if self.current_token.type == TokenType.LEFT_SHIFT:
+        while self.expect(TokenType.BITSHIFT_LEFT, TokenType.BITSHIFT_RIGHT):
+            if self.current_token.type == TokenType.BITSHIFT_LEFT:
                 operator = Operator.BITSHIFT_LEFT
             else:  # RIGHT_SHIFT
                 operator = Operator.BITSHIFT_RIGHT

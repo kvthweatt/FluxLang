@@ -116,6 +116,7 @@ class TokenType(Enum):
     DIVIDE = auto()         # /
     MODULO = auto()         # %
     POWER = auto()          # ^
+    XOR_OP = auto()         # ^^
     INCREMENT = auto()      # ++
     DECREMENT = auto()      # --
     
@@ -128,8 +129,8 @@ class TokenType(Enum):
     GREATER_EQUAL = auto()  # >=
     
     # Shift
-    LEFT_SHIFT = auto()     # <<
-    RIGHT_SHIFT = auto()    # >>
+    BITSHIFT_LEFT = auto()     # <<
+    BITSHIFT_RIGHT = auto()    # >>
     
     # Assignment
     ASSIGN = auto()         # =
@@ -140,8 +141,8 @@ class TokenType(Enum):
     MODULO_ASSIGN = auto()  # %=
     POWER_ASSIGN = auto()   # ^=
     XOR_ASSIGN = auto()     # ^^=
-    LEFT_SHIFT_ASSIGN = auto()  # <<=
-    RIGHT_SHIFT_ASSIGN = auto() # >>=
+    BITSHIFT_LEFT_ASSIGN = auto()  # <<=
+    BITSHIFT_RIGHT_ASSIGN = auto() # >>=
     
     # Other operators
     ADDRESS_OF = auto()     # @
@@ -589,12 +590,12 @@ class FluxLexer:
             
             # Multi-character operators (order matters - longest first)
             if char == '<' and self.peek_char() == '<' and self.peek_char(2) == '=':
-                tokens.append(Token(TokenType.LEFT_SHIFT_ASSIGN, '<<=', start_pos[0], start_pos[1]))
+                tokens.append(Token(TokenType.BITSHIFT_LEFT_ASSIGN, '<<=', start_pos[0], start_pos[1]))
                 self.advance(count=3)
                 continue
             
             if char == '>' and self.peek_char() == '>' and self.peek_char(2) == '=':
-                tokens.append(Token(TokenType.RIGHT_SHIFT_ASSIGN, '>>=', start_pos[0], start_pos[1]))
+                tokens.append(Token(TokenType.BITSHIFT_RIGHT_ASSIGN, '>>=', start_pos[0], start_pos[1]))
                 self.advance(count=3)
                 continue
             
@@ -638,12 +639,12 @@ class FluxLexer:
                     continue
             
             if char == '<' and self.peek_char() == '<':
-                tokens.append(Token(TokenType.LEFT_SHIFT, '<<', start_pos[0], start_pos[1]))
+                tokens.append(Token(TokenType.BITSHIFT_LEFT, '<<', start_pos[0], start_pos[1]))
                 self.advance(count=2)
                 continue
             
             if char == '>' and self.peek_char() == '>':
-                tokens.append(Token(TokenType.RIGHT_SHIFT, '>>', start_pos[0], start_pos[1]))
+                tokens.append(Token(TokenType.BITSHIFT_RIGHT, '>>', start_pos[0], start_pos[1]))
                 self.advance(count=2)
                 continue
             
@@ -691,6 +692,10 @@ class FluxLexer:
                 tokens.append(Token(TokenType.POWER_ASSIGN, '^=', start_pos[0], start_pos[1]))
                 self.advance(count=2)
                 continue
+
+            if char == '^' and self.peek_char() == '^':
+                if self.peek_char() == '=':
+                    tokens.append(Token(TokenType.XOR))
             
             if char == '&' and self.peek_char() == '=':
                 tokens.append(Token(TokenType.AND_ASSIGN, '&=', start_pos[0], start_pos[1]))

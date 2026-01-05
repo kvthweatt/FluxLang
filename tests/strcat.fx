@@ -1,16 +1,12 @@
-import "redio.fx";
+import "redstandard.fx";
 
-using standard::io;
-
-struct test
-{
-    noopstr x = "test";
-    noopstr y = "ing!";
-};
+using standard::io::console;
 
 def main() -> int
 {
-    test a;
-    win_print(@a.x, 4);
+    noopstr a = "TEST";
+    noopstr b = a + "ING";
+
+    win_print(@b,7);
     return 0;
 };

@@ -5,7 +5,7 @@ using standard::io::console;
 def main() -> int
 {
 	int x = 2;
-	x = x << 1;
+	x <<= 1;
 
     noopstr s = "Success!";
     noopstr f = "Fail.";
