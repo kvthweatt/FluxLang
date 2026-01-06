@@ -18,6 +18,15 @@ namespace standard
             def input() -> byte[];
             //def input(byte[] msg) -> byte[]; <-- overloading not working correctly.
 
+            // OUTPUT FORWARD DECLARATIONS
+            def win_print(byte* msg, int x) -> void;
+            def wpnl() -> void;
+            def nix_print(byte* msg, int x) -> void;
+            def npnl() -> void;
+            def mac_print(byte* msg, int x) -> void;
+            def mpnl() -> void;
+            def print(noopstr s) -> void;
+
             // INPUT DEFINITIONS
             def win_input(byte[] buf, int max_len) -> int
             {
@@ -44,17 +53,8 @@ namespace standard
                 } : : "r"(buf), "r"(max_len), "r"(bytes_read_ptr)
                   : "rax","rcx","rdx","r8","r9","r10","r11","memory";
 
-                return bytes_read;
+                return --bytes_read;
             };
-
-    		// OUTPUT FORWARD DECLARATIONS
-            def win_print(byte* msg, int x) -> void;
-            def wpnl() -> void;
-            def nix_print(byte* msg, int x) -> void;
-            def npnl() -> void;
-            def mac_print(byte* msg, int x) -> void;
-            def mpnl() -> void;
-    		def print(noopstr s) -> void;
 
             // OUTPUT DEFINITIONS
             def win_print(byte* msg, int x) -> void

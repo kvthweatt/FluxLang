@@ -8,8 +8,8 @@ def main() -> int
     char[256] buffer;
     
     int bytes_read = win_input(buffer, MAX);
-    wpnl();
-    win_print(@buffer,--bytes_read);
+    //wpnl();
+    win_print(@buffer,bytes_read);
 
     return 0;
 };
