@@ -137,12 +137,12 @@ def format_string(string input) -> string {
     local char buffer[256];
     
     // Format into buffer
-    int len = snprintf(buffer, 256, "Result: %s", input);
+    int len = snprintf(buffer, 256, "Result: %s", input); // Error
     
     // Create result (copy allowed)
     string result = copy_from_buffer(buffer, len);
     
-    // buffer automatically "dies" here
+    // buffer "dies" here
     // No risk of dangling references
     return result;
 };
@@ -150,23 +150,6 @@ def format_string(string input) -> string {
 
 ### 3.2 Loop Accumulators
 
-```flux
-def sum_matrix(int[][100] matrix, int rows) -> int {
-    local int total = 0;  // Proven: never escapes
-    
-    for (int r = 0; r < rows; r++) {
-        for (int c = 0; c < 100; c++) {
-            total += matrix[r][c];
-        }
-    }
-    
-    return total;  // ERROR: 'total' is local
-    // Wait, this is actually an error!
-    // Need to use non-local for return value
-};
-```
-
-Correct version:
 ```flux
 def sum_matrix(int[][100] matrix, int rows) -> int {
     int total = 0;  // Regular variable for return
@@ -291,7 +274,7 @@ def example() -> void {
 };
 ```
 
-**Key difference**: Rust tracks lifetimes; Flux prohibits cross-frame movement entirely.
+**Key difference**: Rust tracks lifetimes; Flux `local` prohibits cross-frame movement entirely.
 
 ### 5.3 vs Java's `final` / C++'s `const`
 
