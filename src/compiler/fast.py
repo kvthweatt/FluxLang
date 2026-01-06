@@ -1964,33 +1964,64 @@ class ArrayAccess(Expression):
         # Check if this is a range expression (array slicing)
         if isinstance(self.index, RangeExpression):
             return self._handle_array_slice(builder, module, array_val)
+        
+        # Regular single element access - generate the index expression
+        index_val = self.index.codegen(builder, module)
+        
+        # CRITICAL FIX: Ensure index is i32 for GEP
+        # GEP expects i32 indices, but expressions might return i64
+        if index_val.type != ir.IntType(32):
+            if isinstance(index_val.type, ir.IntType):
+                # Truncate or extend to i32 as needed
+                if index_val.type.width > 32:
+                    index_val = builder.trunc(index_val, ir.IntType(32), name="idx_trunc")
+                else:
+                    index_val = builder.sext(index_val, ir.IntType(32), name="idx_ext")
+        
+        # Handle global arrays (like const arrays)
+        if isinstance(array_val, ir.GlobalVariable):
+            # Create GEP to access array element
+            # Need two indices: [0] to dereference pointer, [index] to access element
+            zero = ir.Constant(ir.IntType(32), 0)  # CHANGED from IntType(1) to IntType(32)
+            gep = builder.gep(array_val, [zero, index_val], inbounds=True, name="array_gep")
+            return builder.load(gep, name="array_load")
+        
+        # Handle local arrays
+        elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
+            # Local array allocated with alloca
+            # Need two indices: [0] to dereference the alloca pointer, [index] to access element
+            zero = ir.Constant(ir.IntType(32), 0)  # CHANGED from IntType(1) to IntType(32)
+            gep = builder.gep(array_val, [zero, index_val], inbounds=True, name="array_gep")
+            return builder.load(gep, name="array_load")
+        
+        # Handle pointer types (like char*)
+        elif isinstance(array_val.type, ir.PointerType):
+            # For pointers, we only need one index (direct pointer arithmetic)
+            gep = builder.gep(array_val, [index_val], inbounds=True, name="ptr_gep")
+            return builder.load(gep, name="ptr_load")
+        
         else:
-            # Regular single element access
-            index_val = self.index.codegen(builder, module)
-            
-            # Handle global arrays (like const arrays)
-            if isinstance(array_val, ir.GlobalVariable):
-                # Create GEP to access array element
-                zero = ir.Constant(ir.IntType(1), 0)
-                gep = builder.gep(array_val, [zero, index_val], name="array_gep")
-                return builder.load(gep, name="array_load")
-            # Handle local arrays
-            elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
-                zero = ir.Constant(ir.IntType(1), 0)
-                gep = builder.gep(array_val, [zero, index_val], name="array_gep")
-                return builder.load(gep, name="array_load")
-            # Handle pointer types (like char*)
-            elif isinstance(array_val.type, ir.PointerType):
-                # Pointer arithmetic - add index to pointer
-                gep = builder.gep(array_val, [index_val], name="ptr_gep")
-                return builder.load(gep, name="ptr_load")
-            else:
-                raise ValueError(f"Cannot access array element for type: {array_val.type}")
+            raise ValueError(f"Cannot access array element for type: {array_val.type}")
     
     def _handle_array_slice(self, builder: ir.IRBuilder, module: ir.Module, array_val: ir.Value) -> ir.Value:
         """Handle array slicing with range expressions like s[0..3] or s[3..0] (inclusive on both ends)"""
         start_val = self.index.start.codegen(builder, module)
         end_val = self.index.end.codegen(builder, module)
+        
+        # Ensure indices are i32
+        if start_val.type != ir.IntType(32):
+            if isinstance(start_val.type, ir.IntType):
+                if start_val.type.width > 32:
+                    start_val = builder.trunc(start_val, ir.IntType(32), name="start_trunc")
+                else:
+                    start_val = builder.sext(start_val, ir.IntType(32), name="start_ext")
+        
+        if end_val.type != ir.IntType(32):
+            if isinstance(end_val.type, ir.IntType):
+                if end_val.type.width > 32:
+                    end_val = builder.trunc(end_val, ir.IntType(32), name="end_trunc")
+                else:
+                    end_val = builder.sext(end_val, ir.IntType(32), name="end_ext")
         
         # Determine if this is a forward or reverse range
         # For compile-time constants, we can check directly
@@ -2037,23 +2068,21 @@ class ArrayAccess(Expression):
         slice_ptr = builder.alloca(slice_array_type, name="slice_array")
         
         # Get pointer to the start of the source array/string
+        zero = ir.Constant(ir.IntType(1), 0)
         if isinstance(array_val, ir.GlobalVariable):
             # Global array access
-            zero = ir.Constant(ir.IntType(1), 0)
-            source_start_ptr = builder.gep(array_val, [zero, start_val], name="source_start")
+            source_start_ptr = builder.gep(array_val, [zero, start_val], inbounds=True, name="source_start")
         elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
             # Local array access
-            zero = ir.Constant(ir.IntType(1), 0)
-            source_start_ptr = builder.gep(array_val, [zero, start_val], name="source_start")
+            source_start_ptr = builder.gep(array_val, [zero, start_val], inbounds=True, name="source_start")
         elif isinstance(array_val.type, ir.PointerType):
             # Pointer arithmetic for strings (char*, etc.)
-            source_start_ptr = builder.gep(array_val, [start_val], name="source_start")
+            source_start_ptr = builder.gep(array_val, [start_val], inbounds=True, name="source_start")
         else:
             raise ValueError(f"Unsupported array type for slicing: {array_val.type}")
         
         # Get pointer to the start of the slice array
-        zero = ir.Constant(ir.IntType(1), 0)
-        slice_start_ptr = builder.gep(slice_ptr, [zero, zero], name="slice_start")
+        slice_start_ptr = builder.gep(slice_ptr, [zero, zero], inbounds=True, name="slice_start")
         
         # Copy the slice using a loop that handles both forward and reverse directions
         func = builder.block.function
@@ -2077,34 +2106,26 @@ class ArrayAccess(Expression):
         
         if is_reverse:
             # For reverse slices: source index goes backwards from start to end
-            # counter=0 -> source_index = start (3)
-            # counter=1 -> source_index = start-1 (2)
-            # counter=2 -> source_index = start-2 (1)
-            # counter=3 -> source_index = start-3 (0)
             source_offset = builder.sub(start_val, counter, name="reverse_source_offset")
         else:
             # For forward slices: source index goes forwards from start
-            # counter=0 -> source_index = start+0
-            # counter=1 -> source_index = start+1
             source_offset = builder.add(start_val, counter, name="forward_source_offset")
         
         # Get source element at calculated offset
         if isinstance(array_val, ir.GlobalVariable):
             # Global array access
-            zero = ir.Constant(ir.IntType(1), 0)
-            source_elem_ptr = builder.gep(array_val, [zero, source_offset], name="source_elem")
+            source_elem_ptr = builder.gep(array_val, [zero, source_offset], inbounds=True, name="source_elem")
         elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
             # Local array access
-            zero = ir.Constant(ir.IntType(1), 0)
-            source_elem_ptr = builder.gep(array_val, [zero, source_offset], name="source_elem")
+            source_elem_ptr = builder.gep(array_val, [zero, source_offset], inbounds=True, name="source_elem")
         elif isinstance(array_val.type, ir.PointerType):
             # Pointer arithmetic for strings (char*, etc.)
-            source_elem_ptr = builder.gep(array_val, [source_offset], name="source_elem")
+            source_elem_ptr = builder.gep(array_val, [source_offset], inbounds=True, name="source_elem")
         
         source_elem = builder.load(source_elem_ptr, name="source_val")
         
         # Store in slice array at sequential destination index (always forward)
-        dest_elem_ptr = builder.gep(slice_start_ptr, [counter], name="dest_elem")
+        dest_elem_ptr = builder.gep(slice_start_ptr, [counter], inbounds=True, name="dest_elem")
         builder.store(source_elem, dest_elem_ptr)
         
         # Increment counter
@@ -2116,7 +2137,7 @@ class ArrayAccess(Expression):
         builder.position_at_start(loop_end)
         if element_type == ir.IntType(8):  # For string slices, add null terminator
             final_counter = builder.load(counter_ptr, name="final_counter")
-            null_ptr = builder.gep(slice_start_ptr, [final_counter], name="null_pos")
+            null_ptr = builder.gep(slice_start_ptr, [final_counter], inbounds=True, name="null_pos")
             null_char = ir.Constant(ir.IntType(8), 0)
             builder.store(null_char, null_ptr)
         
@@ -2606,8 +2627,38 @@ class VariableDeclaration(ASTNode):
         builder.scope_type_info[self.name] = self.type_spec
         
         if self.initial_value:
+            # CRITICAL FIX: Handle array literals with proper element-by-element initialization
+            if (isinstance(self.initial_value, Literal) and 
+                self.initial_value.type == DataType.DATA and
+                isinstance(self.initial_value.value, list) and
+                isinstance(llvm_type, ir.ArrayType)):
+                
+                # Initialize each array element individually
+                for i, elem in enumerate(self.initial_value.value):
+                    zero = ir.Constant(ir.IntType(1), 0)
+                    index = ir.Constant(ir.IntType(32), i)
+                    elem_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"{self.name}[{i}]")
+                    
+                    # Generate the element value
+                    if isinstance(elem, Literal):
+                        elem_val = elem.codegen(builder, module)
+                    elif isinstance(elem, (int, float)):
+                        elem_val = ir.Constant(llvm_type.element, elem)
+                    else:
+                        elem_val = elem.codegen(builder, module)
+                    
+                    # Ensure the element value matches the array element type
+                    if elem_val.type != llvm_type.element:
+                        if isinstance(elem_val.type, ir.IntType) and isinstance(llvm_type.element, ir.IntType):
+                            if elem_val.type.width > llvm_type.element.width:
+                                elem_val = builder.trunc(elem_val, llvm_type.element)
+                            elif elem_val.type.width < llvm_type.element.width:
+                                elem_val = builder.sext(elem_val, llvm_type.element)
+                    
+                    builder.store(elem_val, elem_ptr)
+            
             # Handle string literals specially
-            if (isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR):
+            elif (isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR):
                 if isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8:
                     # Store string data on stack
                     string_val = self.initial_value.value
@@ -2617,13 +2668,13 @@ class VariableDeclaration(ASTNode):
                     str_alloca = builder.alloca(str_array_ty, name=f"{self.name}_str_data")
                     
                     for i, byte_val in enumerate(string_bytes):
-                        zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
+                        zero = ir.Constant(ir.IntType(1), 0)
                         index = ir.Constant(ir.IntType(32), i)
                         elem_ptr = builder.gep(str_alloca, [zero, index], name=f"{self.name}_char{i}")
                         char_val = ir.Constant(ir.IntType(8), byte_val)
                         builder.store(char_val, elem_ptr)
                     
-                    zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
+                    zero = ir.Constant(ir.IntType(1), 0)
                     str_ptr = builder.gep(str_alloca, [zero, zero], name=f"{self.name}_str_ptr")
                     builder.store(str_ptr, alloca)
                     
@@ -2634,7 +2685,7 @@ class VariableDeclaration(ASTNode):
                         if i >= llvm_type.count:
                             break
                         
-                        zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
+                        zero = ir.Constant(ir.IntType(1), 0)
                         index = ir.Constant(ir.IntType(32), i)
                         elem_ptr = builder.gep(alloca, [zero, index], name=f"{self.name}[{i}]")
                         
@@ -2642,9 +2693,9 @@ class VariableDeclaration(ASTNode):
                         builder.store(char_val, elem_ptr)
                     
                     for i in range(len(string_val), llvm_type.count):
-                        zero_val = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
+                        zero = ir.Constant(ir.IntType(1), 0)
                         index = ir.Constant(ir.IntType(32), i)
-                        elem_ptr = builder.gep(alloca, [zero_val, index], name=f"{self.name}[{i}]")
+                        elem_ptr = builder.gep(alloca, [zero, index], name=f"{self.name}[{i}]")
                         zero_char = ir.Constant(ir.IntType(8), 0)
                         builder.store(zero_char, elem_ptr)
                         
@@ -2669,13 +2720,13 @@ class VariableDeclaration(ASTNode):
                         str_alloca = builder.alloca(str_array_ty, name=f"ctor_arg{i}_str_data")
                         
                         for j, byte_val in enumerate(string_bytes):
-                            zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
+                            zero = ir.Constant(ir.IntType(1), 0)
                             index = ir.Constant(ir.IntType(32), j)
                             elem_ptr = builder.gep(str_alloca, [zero, index])
                             char_val = ir.Constant(ir.IntType(8), byte_val)
                             builder.store(char_val, elem_ptr)
                         
-                        zero = ir.Constant(ir.IntType(1), 0)  ## CAN BE 1 BIT WIDE
+                        zero = ir.Constant(ir.IntType(1), 0)
                         str_ptr = builder.gep(str_alloca, [zero, zero], name=f"ctor_arg{i}_str_ptr")
                         arg_val = str_ptr
                     else:
@@ -2705,6 +2756,11 @@ class VariableDeclaration(ASTNode):
                                 zero = ir.Constant(ir.IntType(1), 0)
                                 array_ptr = builder.gep(init_val, [zero, zero], name="concat_array_to_ptr")
                                 builder.store(array_ptr, alloca)
+                                builder.scope[self.name] = alloca
+                                if self.type_spec.is_volatile:
+                                    if not hasattr(builder, 'volatile_vars'):
+                                        builder.volatile_vars = set()
+                                    builder.volatile_vars.add(self.name)
                                 return alloca
                             elif isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
                                 if llvm_type.pointee != init_val.type.pointee:
