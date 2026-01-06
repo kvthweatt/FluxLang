@@ -57,6 +57,7 @@ class Operator(Enum):
     MUL = "*"
     DIV = "/"
     MOD = "%"
+    NOT = "!"
     POWER = "^"
     XOR = "^^"
     OR = "||"
@@ -3299,6 +3300,11 @@ class IfStatement(Statement):
     else_block: Optional[Block] = None
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Check if we're in global scope (conditional compilation)
+        if builder.block is None:
+            return self._codegen_global_scope(builder, module)
+        
+        # Normal if statement inside a function
         # Generate condition
         cond_val = self.condition.codegen(builder, module)
         
@@ -3313,16 +3319,53 @@ class IfStatement(Statement):
         # Emit then block
         builder.position_at_start(then_block)
         self.then_block.codegen(builder, module)
-        builder.branch(merge_block)
+        if not builder.block.is_terminated:
+            builder.branch(merge_block)
         
         # Emit else block
         builder.position_at_start(else_block)
         if self.else_block:
             self.else_block.codegen(builder, module)
-        builder.branch(merge_block)
+        if not builder.block.is_terminated:
+            builder.branch(merge_block)
         
         # Position builder at merge block
         builder.position_at_start(merge_block)
+        return None
+    
+    def _codegen_global_scope(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Handle if statements at global scope (conditional compilation)"""
+        # Evaluate condition at compile time
+        try:
+            # Try to evaluate the condition
+            cond_val = self.condition.codegen(builder, module)
+            
+            # For compile-time conditionals (like def() checks), we get a constant
+            if isinstance(cond_val, ir.Constant):
+                # Evaluate the constant boolean value
+                if cond_val.constant:
+                    # Condition is true - execute then block
+                    self.then_block.codegen(builder, module)
+                else:
+                    # Condition is false - check elif blocks or execute else
+                    executed = False
+                    for elif_cond, elif_block in self.elif_blocks:
+                        elif_val = elif_cond.codegen(builder, module)
+                        if isinstance(elif_val, ir.Constant) and elif_val.constant:
+                            elif_block.codegen(builder, module)
+                            executed = True
+                            break
+                    
+                    if not executed and self.else_block:
+                        self.else_block.codegen(builder, module)
+            else:
+                # Runtime condition in global scope - not supported
+                raise RuntimeError("Cannot use runtime conditions in global scope if statements")
+        except Exception as e:
+            print(f"Warning: Could not evaluate global if condition: {e}")
+            # Default to executing the then block for safety
+            self.then_block.codegen(builder, module)
+        
         return None
 
 @dataclass
@@ -4377,6 +4420,10 @@ class FunctionDef(ASTNode):
         if module is None:
             module = ir.Module()
         return type_spec.get_llvm_type_with_array(module)
+
+@dataclass
+class FunctionPointer(ASTNode):
+    pass
 
 @dataclass
 class DestructuringAssignment(Statement):

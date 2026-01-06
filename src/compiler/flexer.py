@@ -119,6 +119,8 @@ class TokenType(Enum):
     XOR_OP = auto()         # ^^
     INCREMENT = auto()      # ++
     DECREMENT = auto()      # --
+    LOGICAL_AND = auto()    # &&
+    LOGICAL_OR = auto()     # ||
     
     # Comparison
     EQUAL = auto()          # ==
@@ -139,6 +141,7 @@ class TokenType(Enum):
     MULTIPLY_ASSIGN = auto()# *=
     DIVIDE_ASSIGN = auto()  # /=
     MODULO_ASSIGN = auto()  # %=
+    AND_ASSIGN = auto()     # &=
     POWER_ASSIGN = auto()   # ^=
     XOR_ASSIGN = auto()     # ^^=
     BITSHIFT_LEFT_ASSIGN = auto()  # <<=
@@ -155,6 +158,7 @@ class TokenType(Enum):
     RETURN_ARROW = auto()   # ->
     CHAIN_ARROW = auto()    # <-
     RECURSE_ARROW = auto()  # <~
+    FUNCTION_POINTER = auto() # {}*
     
     # Delimiters
     LEFT_PAREN = auto()     # (
@@ -591,6 +595,10 @@ class FluxLexer:
                 continue
             
             # Multi-character operators (order matters - longest first)
+            if char == '{' and self.peek_char() == '}' and self.peek_char(2) == '*':
+                tokens.append(Token(TokenType.FUNCTION_POINTER, '<<=', start_pos[0], start_pos[1]))
+                self.advance(count=3)
+                continue
             if char == '<' and self.peek_char() == '<' and self.peek_char(2) == '=':
                 tokens.append(Token(TokenType.BITSHIFT_LEFT_ASSIGN, '<<=', start_pos[0], start_pos[1]))
                 self.advance(count=3)
@@ -699,15 +707,25 @@ class FluxLexer:
                 if self.peek_char() == '=':
                     tokens.append(Token(TokenType.XOR))
             
-            if char == '&' and self.peek_char() == '=':
-                tokens.append(Token(TokenType.AND_ASSIGN, '&=', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
+            if char == '&':
+                if self.peek_char() == '&':
+                    tokens.append(Token(TokenType.LOGICAL_AND, '&=', start_pos[0], start_pos[1]))
+                    self.advance(count=2)
+                    continue
+                elif self.peek_char() == '=':
+                    tokens.append(Token(TokenType.AND_ASSIGN, '&=', start_pos[0], start_pos[1]))
+                    self.advance(count=2)
+                    continue
             
-            if char == '|' and self.peek_char() == '=':
-                tokens.append(Token(TokenType.OR_ASSIGN, '|=', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
+            if char == '|':
+                if self.peek_char() == "|":
+                    tokens.append(Token(TokenType.LOGICAL_OR, '|=', start_pos[0], start_pos[1]))
+                    self.advance(count=2)
+                    continue
+                elif self.peek_char() == '=':
+                    tokens.append(Token(TokenType.OR_ASSIGN, '|=', start_pos[0], start_pos[1]))
+                    self.advance(count=2)
+                    continue
             
             if char == '.' and self.peek_char() == '.':
                 tokens.append(Token(TokenType.RANGE, '..', start_pos[0], start_pos[1]))

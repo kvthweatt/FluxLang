@@ -10,7 +10,7 @@
 // frt.fx - Minimal C Runtime Replacement for Flux
 // This file replaces CRT dependencies for Windows/Linux/macOS
 
-import "io.fx";
+//import "io.fx";
 
 if(_FLUX_VER > 1)
 {
@@ -18,89 +18,75 @@ if(_FLUX_VER > 1)
 
 if(!def(_INC_FRT))
 {
-	global def _INC_FRT;
+	global def _INC_FRT 1;
 };
 
 if(!def(_FRTBLD))
 {
-	/*
-	 * This is an internal Flux runtime header file. It is used when building
-	 * the Flux runtimes only. It is not to be used as a public header file.
-	 */
-	using standard::io::print;
-	print( "Use of Flux runtime library internal header file.");
+	//using standard::io::print;
+	//print( "Use of Flux runtime library internal header file.");
 };
 
-if(def(_M_MRX000) || def(_M_ALPHA) || def(_M_PPC))
+if(def(_M_MRX000) or def(_M_ALPHA) or def(_M_PPC))
 {
-	global def UNALIGNED __unaligned;
+	global def UNALIGNED 1;
 }
 else
 {
-	global def UNALIGNED;
+	global def UNALIGNED 1;
 };
 
 if(def(_M_IX86))
 {
-	/*
-	 * 386/486
-	 */
-	def REG1    register;
-	def REG2    register;
-	def REG3    register;
-	def REG4;
-	def REG5;
-	def REG6;
-	def REG7;
-	def REG8;
-	def REG9;
+	def REG1    1;
+	def REG2    1;
+	def REG3    1;
+	def REG4    0;
+	def REG5    0;
+	def REG6    0;
+	def REG7    0;
+	def REG8    0;
+	def REG9    0;
 }
-elif (def(_M_MRX000) || def(_M_ALPHA) || def(_M_PPC))
+elif (def(_M_MRX000) or def(_M_ALPHA) or def(_M_PPC))
 {
-	/*
-	 * MIPS, ALPHA, or PPC
-	 */
-	def REG1    register;
-	def REG2    register;
-	def REG3    register;
-	def REG4    register;
-	def REG5    register;
-	def REG6    register;
-	def REG7    register;
-	def REG8    register;
-	def REG9    register;
+	def REG1    1;
+	def REG2    1;
+	def REG3    1;
+	def REG4    1;
+	def REG5    1;
+	def REG6    1;
+	def REG7    1;
+	def REG8    1;
+	def REG9    1;
 }
-elif (def(_M_M68K) || def(_M_MPPC))
+elif (def(_M_M68K) or def(_M_MPPC))
 {
 
-	def REG1;
-	def REG2;
-	def REG3;
-	def REG4;
-	def REG5;
-	def REG6;
-	def REG7;
-	def REG8;
-	def REG9;
+	def REG1    0;
+	def REG2    0;
+	def REG3    0;
+	def REG4    0;
+	def REG5    0;
+	def REG6    0;
+	def REG7    0;
+	def REG8    0;
+	def REG9    0;
 }
 else
 {
-	using standard::io::print;
-	print("Machine register set not defined");
+	//using standard::io::print;
+	//print("Machine register set not defined");
 
-	/*
-	 * Unknown machine
-	 */
-
-	def REG1;
-	def REG2;
-	def REG3;
-	def REG4;
-	def REG5;
-	def REG6;
-	def REG7;
-	def REG8;
-	def REG9;
+	def REG1    0;
+	def REG2    0;
+	def REG3    0;
+	def REG4    0;
+	def REG5    0;
+	def REG6    0;
+	def REG7    0;
+	def REG8    0;
+	def REG9    0;
 };
 
 // ============ GLOBAL SYMBOLS ============
@@ -124,16 +110,16 @@ if(def(WINDOWS))
     namespace __winapi
     {
         // Kernel32 functions
-        def* GetProcessHeap() -> void*;
-        def* HeapAlloc(void* hHeap, unsigned data{32} dwFlags, size_t dwBytes) -> void*;
-        def* HeapFree(void* hHeap, unsigned data{32} dwFlags, void* lpMem) -> int;
-        def* ExitProcess(unsigned data{32} uExitCode) -> void;
-        def* GetStdHandle(unsigned data{32} nStdHandle) -> void*;
-        def* WriteFile(void* hFile, void* lpBuffer, unsigned data{32} nNumberOfBytesToWrite, unsigned data{32}* lpNumberOfBytesWritten, void* lpOverlapped) -> int;
-        def* ReadFile(void* hFile, void* lpBuffer, unsigned data{32} nNumberOfBytesToRead, unsigned data{32}* lpNumberOfBytesRead, void* lpOverlapped) -> int;
+        //int{}* GetProcessHeap() -> void*;
+        //def* HeapAlloc(void* hHeap, unsigned data{32} dwFlags, size_t dwBytes) -> void*;
+        //def* HeapFree(void* hHeap, unsigned data{32} dwFlags, void* lpMem) -> int;
+        //def* ExitProcess(unsigned data{32} uExitCode) -> void;
+        //def* GetStdHandle(unsigned data{32} nStdHandle) -> void*;
+        //def* WriteFile(void* hFile, void* lpBuffer, unsigned data{32} nNumberOfBytesToWrite, unsigned data{32}* lpNumberOfBytesWritten, void* lpOverlapped) -> int;
+        //def* ReadFile(void* hFile, void* lpBuffer, unsigned data{32} nNumberOfBytesToRead, unsigned data{32}* lpNumberOfBytesRead, void* lpOverlapped) -> int;
         
         // NTDLL functions (for direct syscalls)
-        def* NtAllocateVirtualMemory(void* ProcessHandle, void** BaseAddress, unsigned data{32} ZeroBits, size_t* RegionSize, unsigned data{32} AllocationType, unsigned data{32} Protect) -> unsigned data{32};
+        //def* NtAllocateVirtualMemory(void* ProcessHandle, void** BaseAddress, unsigned data{32} ZeroBits, size_t* RegionSize, unsigned data{32} AllocationType, unsigned data{32} Protect) -> unsigned data{32};
         
         // Constants
         const unsigned data{32} HEAP_ZERO_MEMORY  = 0x00000008;
@@ -226,7 +212,7 @@ namespace __heap
 {
     if(def(WINDOWS))
     {
-        def init() -> void
+        def heap_init() -> void
         {
             // Get the process heap
             volatile asm
@@ -244,7 +230,7 @@ namespace __heap
     else
     {  // Linux/macOS
     
-        def init() -> void
+        def heap_init() -> void
         {
             // Linux/macOS uses brk/sbrk or mmap
             // We'll use mmap for simplicity
@@ -254,7 +240,7 @@ namespace __heap
     
     def realloc(void* ptr, size_t new_size) -> void*
     {
-        if (ptr == void) {return heap(newsize);};
+        if (ptr == void) { heap void* ptr; return ptr; };
         
         if(def(WINDOWS))
         {
@@ -303,7 +289,8 @@ namespace __heap
         else
         {
             // Linux: use mremap or implement alloc/copy/free
-            void* new_ptr = heap(new_size);
+            heap heap_new_size = new_size;
+            heap void* new_ptr = @heap_new_size;
             (void)ptr;
             return new_ptr;
         };
@@ -322,7 +309,8 @@ if(def(WINDOWS))
         __fpmath_init();
         
         // Initialize heap
-        __heap::init();
+        using __heap::heap_init;
+        heap_init();
         
         // TODO: Call static constructors (if any)
         // __initterm(__xi_a, __xi_z);
@@ -362,7 +350,8 @@ if(def(WINDOWS))
         __fpmath_init();
         
         // Initialize heap
-        __heap::init();
+        using __heap::heap_init;
+        heap_init();
         
         // Call main
         int exit_code = main();
@@ -397,12 +386,13 @@ if(def(LINUX))
         __fpmath_init();
         
         // Initialize heap
-        __heap::init();
+        using __heap::heap_init;
+        heap_init();
         
         // Get argc, argv, envp from stack
         int argc;
-        char** argv;
-        char** envp;
+        //char** argv; // <-- ADD DOUBLE PTR SUPPORT
+        //char** envp;
         
         volatile asm
         {
@@ -494,7 +484,7 @@ def memmove(void* dest, void* src, size_t count) -> void*
             d[i] = s[i];
         };
     }
-    else if (d > s)
+    elif (d > s)
     {
         // Copy backward
         for (size_t i = count; i > 0; i--)
@@ -697,9 +687,9 @@ def __security_check_cookie(void* cookie) -> void
     if (cookie == void)
     {
         abort();
-    }
+    };
     return void;
-}
+};
 
 def __report_gsfailure() -> void
 {
@@ -750,15 +740,15 @@ if(def(WINDOWS))
 // These help with linking
 if(def(WINDOWS))
 {
-    global def DLLEXPORT __declspec(dllexport);
-    global def DLLIMPORT __declspec(dllimport);
-    global def STDCALL __stdcall;
+    global def DLLEXPORT 1;//__declspec(dllexport);
+    global def DLLIMPORT 1;//__declspec(dllimport);
+    global def STDCALL 1;//__stdcall;
 }
 else
 {
-    global def DLLEXPORT;
-    global def DLLIMPORT;
-    global def STDCALL;
+    global def DLLEXPORT 1;
+    global def DLLIMPORT 1;
+    global def STDCALL 1;
 };
 
 // ============ FORCE SYMBOL REFERENCES ============
@@ -774,4 +764,4 @@ def __frt_init() -> void
     // WHY ARE YOU STILL HERE
     // GO AWAY
     return void;
-}
+};

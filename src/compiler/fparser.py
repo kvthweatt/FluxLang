@@ -609,12 +609,15 @@ class FluxParser:
                 objects.append(self.object_def())
             elif self.expect(TokenType.NAMESPACE):
                 nested_namespaces.append(self.namespace_def())
+            elif self.expect(TokenType.IF):
+                if_stmt = self.if_statement()
+                pass
             elif self.is_variable_declaration():
                 var_decl = self.variable_declaration()
                 variables.append(var_decl)
                 self.consume(TokenType.SEMICOLON)
             else:
-                self.error("Expected function, struct, object, namespace, or variable declaration")
+                self.error("Expected function, struct, object, namespace, if or def, or variable declaration")
         
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
@@ -737,7 +740,12 @@ class FluxParser:
         base_type -> 'int' | 'float' | 'char' | 'bool' | 'data' | 'void' | IDENTIFIER
         Returns DataType for built-in types, or [DataType.DATA, typename] for custom types
         """
+        # ADD {}* function pointer support
+        # URGENT
         if self.expect(TokenType.INT):
+            if self.expect(TokenType.FUNCTION_POINTER):
+                # Do function_pointer_declaration() returns FunctionPointer <- Add to AST
+                print(self.current_token.type)
             self.advance()
             return DataType.INT
         elif self.expect(TokenType.FLOAT_KW):
@@ -1430,7 +1438,7 @@ class FluxParser:
         """
         expr = self.logical_xor_expression()
         
-        while self.expect(TokenType.AND):
+        while self.expect(TokenType.AND) or self.expect(TokenType.LOGICAL_AND):
             operator = Operator.AND
             self.advance()
             right = self.logical_xor_expression()

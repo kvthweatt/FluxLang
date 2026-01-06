@@ -1,13 +1,16 @@
 import "redstandard.fx";
 
-using standard::io::console;
-
 def main() -> int
 {
 	noopstr d = "Done.";
-    for (;;)
+
+    if (1==1)
     {
         win_print(d, 5);
+    };
+    for (;;)
+    {
+        win_print("Done.", 5);
         break;
     };
 	do
