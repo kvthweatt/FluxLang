@@ -18,20 +18,13 @@ namespace standard
             def input() -> byte[];
             //def input(byte[] msg) -> byte[]; <-- overloading not working correctly.
 
-            // OUTPUT FORWARD DECLARATIONS
-            def win_print(byte* msg, int x) -> void;
-            def wpnl() -> void;
-            def nix_print(byte* msg, int x) -> void;
-            def npnl() -> void;
-            def mac_print(byte* msg, int x) -> void;
-            def mpnl() -> void;
-            def print(noopstr s) -> void;
-
             // INPUT DEFINITIONS
             def win_input(byte[] buf, int max_len) -> int
             {
                 i32 bytes_read = 0;
                 i32* bytes_read_ptr = @bytes_read;
+                i32 original_mode = 0;
+                i32* mode_ptr = @original_mode;
                 
                 volatile asm
                 {
@@ -40,21 +33,56 @@ namespace standard
                     subq $$32, %rsp
                     call GetStdHandle
                     addq $$32, %rsp
+                    movq %rax, %r12
                     
-                    // Read input (waits for Enter)
-                    movq %rax, %rcx          // handle
-                    movq $0, %rdx            // buf
-                    movl $1, %r8d            // max_len
-                    movq $2, %r9             // bytes_read_ptr
+                    // Get current console mode
+                    movq %rax, %rcx
+                    movq $3, %rdx
+                    subq $$32, %rsp
+                    call GetConsoleMode
+                    addq $$32, %rsp
+                    
+                    // Enable ENABLE_PROCESSED_INPUT (for Ctrl+C) and keep ENABLE_LINE_INPUT
+                    // 0x001F = ENABLE_PROCESSED_INPUT | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | 
+                    //          ENABLE_WINDOW_INPUT | ENABLE_MOUSE_INPUT
+                    movq %r12, %rcx
+                    movq $$0x001F, %rdx
+                    subq $$32, %rsp
+                    call SetConsoleMode
+                    addq $$32, %rsp
+                    
+                    // Read input (will wait for Enter)
+                    movq %r12, %rcx
+                    movq $0, %rdx           // buf
+                    movl $1, %r8d           // max_len
+                    movq $2, %r9            // bytes_read_ptr
                     subq $$40, %rsp
                     movq $$0, 32(%rsp)
                     call ReadFile
                     addq $$40, %rsp
-                } : : "r"(buf), "r"(max_len), "r"(bytes_read_ptr)
-                  : "rax","rcx","rdx","r8","r9","r10","r11","memory";
-
-                return --bytes_read;
+                    
+                    // Restore original mode
+                    movq %r12, %rcx
+                    movl ($3), %edx
+                    subq $$32, %rsp
+                    call SetConsoleMode
+                    addq $$32, %rsp
+                    
+                    // Return bytes_read
+                    movl ($2), %eax
+                } : : "r"(buf), "r"(max_len), "r"(bytes_read_ptr), "r"(mode_ptr)
+                  : "rax","rcx","rdx","r8","r9","r10","r11","r12","memory";
+                return bytes_read - 2;
             };
+
+    		// OUTPUT FORWARD DECLARATIONS
+            def win_print(byte* msg, int x) -> void;
+            def wpnl() -> void;
+            def nix_print(byte* msg, int x) -> void;
+            def npnl() -> void;
+            def mac_print(byte* msg, int x) -> void;
+            def mpnl() -> void;
+    		def print(noopstr s) -> void;
 
             // OUTPUT DEFINITIONS
             def win_print(byte* msg, int x) -> void
