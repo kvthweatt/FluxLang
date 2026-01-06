@@ -43,9 +43,9 @@ The Flux struct model is built on three foundational principles:
 
 ## 2. Theoretical Foundation
 
-### 2.1 Struct Declarations as Virtual Tables
+### 2.1 Struct Declarations as Table Layout Descriptors
 
-A struct declaration in Flux creates a **virtual table (vtable)** containing metadata about the memory layout:
+A struct declaration in Flux creates a **Table Layout Descriptor (TLD)** containing metadata about the memory layout:
 
 ```flux
 struct NetworkPacket {
@@ -55,7 +55,7 @@ struct NetworkPacket {
 };
 ```
 
-This declaration generates a compile-time vtable with the following information:
+This declaration generates a compile-time TLD with the following information:
 
 | Field     | Bit Offset | Bit Width | Alignment |
 |-----------|------------|-----------|-----------|
@@ -68,8 +68,8 @@ This declaration generates a compile-time vtable with the following information:
 #### 2.1.1 LLVM IR Representation
 
 ```llvm
-; Vtable metadata (global constant)
-@NetworkPacket.vtable = internal constant {
+; TLD metadata (global constant)
+@NetworkPacket.TLD = internal constant {
     i32,                          ; total_bits
     i32,                          ; field_count
     [3 x {i32, i32, i32}]        ; fields: [offset, width, alignment]
@@ -89,7 +89,7 @@ This declaration generates a compile-time vtable with the following information:
 
 ### 2.2 Struct Instances as Pure Data
 
-When a struct is instantiated, it allocates **only** the raw bit storage with no vtable pointer:
+When a struct is instantiated, it allocates **only** the raw bit storage with no TLD pointer:
 
 ```flux
 NetworkPacket pkt;
@@ -108,9 +108,9 @@ NetworkPacket pkt;
 
 **Key observation**: The instance contains no type information—it is purely a 112-bit memory region.
 
-### 2.3 Field Access via Vtable Lookup
+### 2.3 Field Access via TLD Lookup
 
-Field access operations consult the vtable at compile time to determine bit offsets:
+Field access operations consult the TLD at compile time to determine bit offsets:
 
 ```flux
 pkt.port = 8080;
@@ -119,7 +119,7 @@ pkt.port = 8080;
 #### 2.3.1 LLVM IR Representation
 
 ```llvm
-; Load vtable metadata (compile-time constant)
+; Load TLD metadata (compile-time constant)
 ; port: offset=0, width=16
 
 ; Access field via bit manipulation
@@ -319,10 +319,10 @@ struct ExtendedHeader : Header {
 };
 ```
 
-#### 4.1.1 Vtable Representation
+#### 4.1.1 TLD Representation
 
 ```llvm
-@Header.vtable = constant {
+@Header.TLD = constant {
     i32, i32, [2 x {i32, i32, i32}]
 } {
     i32 48,  ; 16 + 32 bits
@@ -333,7 +333,7 @@ struct ExtendedHeader : Header {
     ]
 }
 
-@ExtendedHeader.vtable = constant {
+@ExtendedHeader.TLD = constant {
     i32, i32, [3 x {i32, i32, i32}]
 } {
     i32 80,  ; 16 + 32 + 32 bits
@@ -461,7 +461,7 @@ store volatile i8 %pin_set, i8* %gpio, align 4
 
 | Operation | C/C++ Cost | Flux Cost | Notes |
 |-----------|------------|-----------|-------|
-| Struct declaration | O(1) compile | O(1) compile + vtable | Negligible difference |
+| Struct declaration | O(1) compile | O(1) compile + TLD | Negligible difference |
 | Instance creation | O(n) (init) | O(1) (raw alloc) | Flux faster for large structs |
 | Field access (aligned) | O(1) | O(1) | Identical |
 | Field access (unaligned) | O(1)* | O(log n) bit ops | *Compiler may insert shifts anyway |
@@ -526,7 +526,7 @@ def process_stream(byte[] data) -> void {
 | Padding control | Compiler-dependent (`#pragma pack`) | Explicit per-field |
 | Type reinterpretation | `reinterpret_cast` (unsafe) | Structured, bounds-checked |
 | Bit-fields | Limited (int/unsigned only) | Arbitrary width (`data{N}`) |
-| Struct as contract | No | Yes (vtable metadata) |
+| Struct as contract | No | Yes (TLD metadata) |
 | Zero-cost parsing | Manual pointer arithmetic | Built-in destructive casts |
 
 ### 7.2 Rust
@@ -544,7 +544,7 @@ def process_stream(byte[] data) -> void {
 |---------|-----|------|
 | Packed structs | `packed struct` | Default (explicit align needed) |
 | Comptime | `comptime` keyword | `compt` blocks |
-| Type as value | Yes | Partial (vtable metadata) |
+| Type as value | Yes | Partial (TLD metadata) |
 | Destructive ops | No | Built-in consumption |
 
 ---
@@ -693,7 +693,7 @@ def serialize_message(Message msg) -> byte[] {
 
 The Flux compiler must maintain:
 
-1. **Vtable Generation Pass**: Create global metadata for each struct declaration
+1. **TLD Generation Pass**: Create global metadata for each struct declaration
 2. **Type Checking Pass**: Validate restructuring casts for size compatibility
 3. **IR Generation Pass**: Emit bitcast + bounds check for casts
 4. **Optimization Pass**: Eliminate redundant size checks when provable at compile time
@@ -723,7 +723,7 @@ namespace __frt_struct {
 
 ### 9.3 Debugging Support
 
-Struct vtables enable runtime type introspection:
+Struct TLDs enable runtime type introspection:
 
 ```flux
 def print_struct_info<T>() -> void {
@@ -731,8 +731,8 @@ def print_struct_info<T>() -> void {
     print(f"Size: {sizeof(T)} bits");
     print(f"Alignment: {alignof(T)} bits");
     
-    // Access vtable metadata
-    for (field in T.vtable.fields) {
+    // Access TLD metadata
+    for (field in T.TLD.fields) {
         print(f"  {field.name}: offset={field.offset}, width={field.width}");
     };
 };
@@ -747,7 +747,7 @@ def print_struct_info<T>() -> void {
 1. **No middle-slice consumption**: By design, prevents fragmentation but limits some use cases
 2. **Manual alignment**: Requires programmer to understand target architecture alignment requirements
 3. **No automatic endianness handling**: Byte order must be manually managed
-4. **Vtable overhead**: Small metadata cost per struct type (acceptable for most use cases)
+4. **TLD overhead**: Small metadata cost per struct type (acceptable for most use cases)
 
 ### 10.2 Proposed Extensions
 
@@ -791,7 +791,7 @@ The Flux struct model represents a paradigm shift in how programming languages h
 
 These properties make Flux uniquely suited for systems programming domains requiring maximum performance and explicit control over data representation, including network protocol implementation, binary format parsing, embedded systems programming, and cross-platform ABI interoperation.
 
-The separation of type contracts (vtables) from data storage (instances) eliminates the traditional tradeoff between type safety and performance, achieving both simultaneously through compile-time metadata and zero-cost runtime operations.
+The separation of type contracts (TLDs) from data storage (instances) eliminates the traditional tradeoff between type safety and performance, achieving both simultaneously through compile-time metadata and zero-cost runtime operations.
 
 ---
 
