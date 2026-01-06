@@ -4,8 +4,8 @@ using standard::io;
 
 def main() -> int
 {
-    int MAX = 256;
-    char[256] buffer;
+    int MAX = 10;
+    char[10] buffer;
     
     noopstr p = ".";
     noopstr h = "Hello, ";

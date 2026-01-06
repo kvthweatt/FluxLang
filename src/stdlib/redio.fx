@@ -18,6 +18,16 @@ namespace standard
             def input() -> byte[];
             //def input(byte[] msg) -> byte[]; <-- overloading not working correctly.
 
+            // OUTPUT FORWARD DECLARATIONS
+            def win_print(byte* msg, int x) -> void;
+            def wpnl() -> void;
+            def nix_print(byte* msg, int x) -> void;
+            def npnl() -> void;
+            def mac_print(byte* msg, int x) -> void;
+            def mpnl() -> void;
+            def print(noopstr s) -> void;
+            def reset_from_input() -> void;
+
             // INPUT DEFINITIONS
             def win_input(byte[] buf, int max_len) -> int
             {
@@ -72,17 +82,9 @@ namespace standard
                     movl ($2), %eax
                 } : : "r"(buf), "r"(max_len), "r"(bytes_read_ptr), "r"(mode_ptr)
                   : "rax","rcx","rdx","r8","r9","r10","r11","r12","memory";
+                reset_from_input();
                 return bytes_read - 2;
             };
-
-    		// OUTPUT FORWARD DECLARATIONS
-            def win_print(byte* msg, int x) -> void;
-            def wpnl() -> void;
-            def nix_print(byte* msg, int x) -> void;
-            def npnl() -> void;
-            def mac_print(byte* msg, int x) -> void;
-            def mpnl() -> void;
-    		def print(noopstr s) -> void;
 
             // OUTPUT DEFINITIONS
             def win_print(byte* msg, int x) -> void
@@ -111,6 +113,14 @@ namespace standard
             def wpnl() -> void
             {
                 win_print(@nl,1);
+                return void;
+            };
+
+            def reset_from_input() -> void
+            {
+                char bs = 8;
+                win_print(@bs,1);
+                win_print(@bs,1);
                 return void;
             };
 
