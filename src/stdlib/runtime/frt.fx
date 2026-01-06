@@ -9,6 +9,8 @@
 //
 // frt.fx - Minimal C Runtime Replacement for Flux
 // This file replaces CRT dependencies for Windows/Linux/macOS
+//
+// Almost compiles. 
 
 //import "io.fx";
 

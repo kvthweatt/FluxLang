@@ -383,6 +383,7 @@ class FluxCompiler:
                     str(obj_file),
                     # Only link essential libraries
                     "kernel32.lib",
+                    "msvcrt.lib",   # Optional, link with C runtime
                     # "user32.lib",  # Uncomment only if GUI functions are used
                     # "gdi32.lib",   # Uncomment only if drawing functions are used
                     f"/out:{output_bin}"
