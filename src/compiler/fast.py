@@ -1733,7 +1733,7 @@ class FunctionCall(Expression):
                 str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
                 str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
                 
-                # Create global variable for the string
+                # Create global variable for the string <-- URGENT DO NOT DO THIS, THIS GOES ON THE STACK
                 gv = ir.GlobalVariable(module, str_val.type, name=f".str.arg{i}")
                 gv.linkage = 'internal'
                 gv.global_constant = True
