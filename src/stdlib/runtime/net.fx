@@ -3,7 +3,9 @@
 // License: MIT
 
 import "standard.fx";
-using standard::io, standard::types;
+
+using standard::io;
+using standard::types;
 
 // ============ SYSTEM CALL NUMBERS ============
 

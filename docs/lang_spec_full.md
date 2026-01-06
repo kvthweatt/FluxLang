@@ -985,111 +985,6 @@ operator (int a, int b)[+] -> int
 
 ---
 
-## **Contracts:**  
-Contracts are a collection of assertion statements. They can only be attached to functions, structs, and objects since they are assertions on data.  
-Contracts must refer to valid members of the function, struct, or object they are contracting.
-
-Pre-contracts must refer to valid parameters being passed.  
-Post-contracts must refer to valid members of the function at the time of contract execution.
-
-Example, if you void cast anything and a contract refers to it, that will result in a use-after-free bug.
-```
-// Prototype
-contract MyContract;
-
-// Definition
-contract PreContract
-{
-	assert(typeof(a) == int, f"Invalid type passed to {this}.");
-	assert(a != 0, "Parameter must be non-zero.");
-};
-
-contract Inheritable
-{
-	assert(b != 0);
-};
-
-contract PostContract : Inheritable  // Can perform contract inheritance
-{
-	assert(typeof(a) == int, f"Invalid type passed to {this}.");
-	assert(a != 10);  // Automatically raises ContractError
-	assert(b == 5);   // ''
-};
-
-// Implementation
-def foo(int a) -> int : PreContract // Checks parameters
-{
-	int b = 5;
-	return a * 10;
-} : PostContract;   // Check just before the return
-
-// Example
-def bar(int a) -> int
-{
-	return foo(a);
-};
-
-int x = bar(1);   // Fails PostContract in foo()
-
-contract BasicContract
-{
-	assert(a != 0, "Value must be non-zero.");
-};
-
-// Contracts for structs or objects go after the definition, because : after the name is for inheritance.
-// Contracts for structs or objects only apply AFTER instantiation. They are always considered post-contracts.
-
-struct MyStruct
-{
-	int a = 0;
-} : BasicContract; // Valid until instanced.
-
-object MyObject
-{
-	int a = 0;
-
-	def __init() -> this
-	{
-		return this;
-	};
-} : BasicContract;  // Valid until instanced.
-
-MyObject someObj(); // ContractError: Object instantiation prevented.
-```
-
-Overuse of contracts can add significant overhead to a Flux program. If you don't have a good reason to use them, you shouldn't. 
-Contracts in compt blocks behave identically to runtime contracts, but since compt executes at compile time, a contract failure halts compilation.  
-Use this for compile-time validation without runtime cost.
-
-**Enhanced unique pointer with operators and contracts:**
-```
-contract notSame {
-	assert(@a != @b, "Cannot assign unique_ptr to itself.");
-};
-
-contract canMove : notSame {
-	assert(a.ptr != void, "Cannot move from empty unique_ptr.");
-	assert(b.ptr == void, "Destination must be void.")
-};
-
-contract didMove {
-	assert(a.ptr == void, "Move must invalidate source.");
-	assert(b.ptr != void, "Destination must now own the resource.");
-};
-
-operator (unique_ptr<int> a, unique_ptr<int> b)[=] -> unique_ptr<int> : canMove
-{
-	b.ptr = a.ptr;    // Transfer
-	a.ptr = void;     // Invalidate source
-	return b;
-} : didMove;
-```
-
-In the context of developing smart pointers and unique pointers, operators combined with contracts shine.
-This creates a selective runtime pseudo-borrow-checker. You borrow check what you want borrow checked.
-
----
-
 ## Traits
 Traits are contracts imposed on objects dictating they __must__ implement the defined prototypes.
 ```
@@ -1113,54 +1008,6 @@ Drawable object myObj
 
 ---
 
-## Ownership  
-Ownership in Flux is made possible with `~`. Here's how:
-```
-def ~make() -> ~int 
-{
-    int ~x = new int(42);
-    return ~x;
-};
-```
-The compiler checks, like so:
-```
-def ~make() -> ~int 
-{
-    int ~x = new int(42);
-    return x;  // ❌ ERROR: Must use ~x
-};
-```
-Leaked ownership:
-```
-def ~oops() -> void 
-{
-    int ~x = new int(42);  // ❌ ERROR: ~x not moved/destroyed
-};
-```
-Full example:
-```
-def ~read_file(string path) -> ~string 
-{
-    ~File f = new File(path);
-    ~string data = read_all(f.fd);
-    return ~data;  // Explicit transfer
-};
-
-def main() -> int 
-{
-    ~string content = ~read_file("log.txt");
-    print(*content);
-    // content auto-freed here via __exit()
-    return 0;
-};
-```
-Escape hatch:
-```
-int* raw = (~)my_owned;
-```
-
----
-
 ## The `register` keyword  
 This works exactly like C's `register`, it is a compiler hint to store the value in the CPU's register and not RAM.  
 It is not guaranteed.  
@@ -1174,8 +1021,8 @@ Keyword list:
 
 ```
 alignof, and, as, asm, assert, auto, break, bool, case, catch, char, compt, const, contract, continue, data, def, default,
-do, elif, else, extern, false, float, for, from, global, if, import, in, is, int, local, namespace, new, not, object,
-operator, or, private, public, register, return, signed, sizeof, struct, super, switch, this, throw, true, try, trait,
+do, elif, else, extern, false, float, for, from, global, heap, if, import, in, is, int, lext, local, namespace, not, object,
+operator, or, private, public, register, return, signed, sizeof, stack, struct, super, switch, this, throw, true, try, trait,
 typeof, union, unsigned, using, void, volatile, while, xor
 ```
 Count: 62 keywords

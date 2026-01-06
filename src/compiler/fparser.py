@@ -713,10 +713,10 @@ class FluxParser:
         array_size = array_dims[0] if array_dims else None
         array_dimensions = array_dims if array_dims else None
         
-        # Pointer specification
-        is_pointer = False
-        if self.expect(TokenType.MULTIPLY):
-            is_pointer = True
+        # Pointer specification - support multiple levels
+        pointer_depth = 0
+        while self.expect(TokenType.MULTIPLY):
+            pointer_depth += 1
             self.advance()
         
         return TypeSpec(
@@ -729,11 +729,11 @@ class FluxParser:
             is_array=is_array,
             array_size=array_size,
             array_dimensions=array_dimensions,
-            is_pointer=is_pointer,
+            is_pointer=pointer_depth > 0,
+            pointer_depth=pointer_depth,  # NEW: Track depth
             custom_typename=custom_typename,
-            storage_class=storage_class  # NEW
+            storage_class=storage_class
         )
-
     
     def base_type(self) -> Union[DataType, List]:
         """
@@ -1627,9 +1627,9 @@ class FluxParser:
             operand = self.unary_expression()
             return UnaryOp(operator, operand)
         elif self.expect(TokenType.MULTIPLY):
-            # Pointer dereference
+            # Pointer dereference - this handles *x, **x, ***x, etc.
             self.advance()
-            operand = self.unary_expression()
+            operand = self.unary_expression()  # <-- FIX: Use unary_expression, not postfix_expression
             return PointerDeref(operand)
         elif self.expect(TokenType.ADDRESS_OF):
             # Address-of operator

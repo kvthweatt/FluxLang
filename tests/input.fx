@@ -5,7 +5,7 @@ using standard::io;
 def main() -> int
 {
     int MAX = 256;
-    char[MAX] buffer;
+    char[256] buffer;
     
     u32 bytes_read = win_input(buffer, MAX);
 

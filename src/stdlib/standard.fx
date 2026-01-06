@@ -27,9 +27,11 @@
 //    using standard::system;
 //};
 
-import "types_tmp.fx";
+import "io.fx";
 
 namespace standard
 {
-    using standard::types2;
 };
+
+using standard::types;
+using standard::io;

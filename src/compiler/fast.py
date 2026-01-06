@@ -302,13 +302,17 @@ class TypeSpec:
     array_size: Optional[int] = None
     array_dimensions: Optional[List[Optional[int]]] = None
     is_pointer: bool = False
+    pointer_depth: int = 0
     custom_typename: Optional[str] = None
     storage_class: Optional[StorageClass] = None  # NEW: storage class
 
     def get_llvm_type(self, module: ir.Module) -> ir.Type:
         """Get LLVM type for this TypeSpec, resolving custom type names"""
         
-        # Handle custom type names (type aliases) FIRST, before checking bit_width
+        # URGENT
+        # MAYBE HERE? MAYBE THERE? MAYBE Z:\LOST\FOLDER
+        # MAYBE THE MOON!
+        # TODO -> FIX THIS BULLSHIT VVV WHAT THE FUCK IS THIS
         if self.custom_typename:
             # Look up the type alias with various namespace prefixes
             potential_names = [
@@ -634,8 +638,27 @@ class BinaryOp(Expression):
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Attempt to promote string literals to array pointers when using + or - for concatenation
         left_expr, right_expr = self.left, self.right
-        left_val = None
-        right_val = None
+        left_val = self.left.codegen(builder, module)
+        right_val = self.right.codegen(builder, module)
+        # Handle pointer arithmetic - treat pointers as integers
+        if isinstance(left_val.type, ir.PointerType) or isinstance(right_val.type, ir.PointerType):
+            # For pointer arithmetic, convert to intptr and back
+            intptr_type = ir.IntType(32)  # Use 64-bit for addresses
+            
+            if isinstance(left_val.type, ir.PointerType):
+                left_val = builder.ptrtoint(left_val, intptr_type, name="ptr_to_int")
+            
+            if isinstance(right_val.type, ir.PointerType):
+                right_val = builder.ptrtoint(right_val, intptr_type, name="ptr_to_int")
+            
+            # Now do the arithmetic on integers
+            if self.operator == Operator.ADD:
+                result = builder.add(left_val, right_val, name="ptr_add")
+            elif self.operator == Operator.SUB:
+                result = builder.sub(left_val, right_val, name="ptr_sub")
+            
+            # Return as integer - let Assignment cast back to pointer if needed
+            return result
         if self.operator in (Operator.ADD, Operator.SUB):
             # Fast path: both operands are string literals -> compile-time constant concat
             if isinstance(left_expr, Literal) and isinstance(right_expr, Literal) \
@@ -2162,9 +2185,6 @@ class PointerDeref(Expression):
 class AddressOf(Expression):
     expression: Expression
 
-# Replace the AddressOf.codegen() method (around line 800 in fast.py)
-# This fixes the GEP calls throughout the method
-
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Special case: Handle Identifier directly to avoid the codegen call that might fail
         if isinstance(self.expression, Identifier):
@@ -2220,10 +2240,10 @@ class AddressOf(Expression):
             # If we get here, the variable hasn't been declared yet
             raise NameError(f"Unknown variable: {var_name}")
         
-        # Handle pointer dereference - &(*ptr) is equivalent to ptr
+        # Handle pointer dereference - @(*ptr) is equivalent to ptr
         if isinstance(self.expression, PointerDeref):
-            # For &(*ptr), just return the pointer value directly
-            # This is a fundamental identity: &(*ptr) == ptr
+            # For @(*ptr), just return the pointer value directly
+            # This is a fundamental identity: @(*ptr) == ptr
             return self.expression.pointer.codegen(builder, module)
         
         # Handle member access BEFORE calling codegen to avoid loading the value
@@ -2231,19 +2251,12 @@ class AddressOf(Expression):
             obj = self.expression.object.codegen(builder, module)
             member_name = self.expression.member
             
-            # Debug: Check what we got
-            print(f"DEBUG AddressOf(MemberAccess): obj.type = {obj.type}")
-            
             if isinstance(obj.type, ir.PointerType) and isinstance(obj.type.pointee, ir.LiteralStructType):
                 struct_type = obj.type.pointee
-                print(f"DEBUG AddressOf(MemberAccess): struct_type = {struct_type}")
-                print(f"DEBUG AddressOf(MemberAccess): struct_type.names = {struct_type.names}")
                 
                 if hasattr(struct_type, 'names'):
                     try:
                         idx = struct_type.names.index(member_name)
-                        print(f"DEBUG AddressOf(MemberAccess): member '{member_name}' at index {idx}")
-                        print(f"DEBUG AddressOf(MemberAccess): member type = {struct_type.elements[idx]}")
                         
                         # Return pointer to member WITHOUT loading
                         member_ptr = builder.gep(
@@ -2252,7 +2265,6 @@ class AddressOf(Expression):
                             inbounds=True,
                             name=f"ptr_to_{member_name}"
                         )
-                        print(f"DEBUG AddressOf(MemberAccess): GEP result type = {member_ptr.type}")
                         return member_ptr
                     except ValueError:
                         raise ValueError(f"Member '{member_name}' not found in struct")
@@ -2267,10 +2279,10 @@ class AddressOf(Expression):
                 # FIXED: Pass indices as a single list
                 return builder.gep(array, [zero, index], inbounds=True)
         
-        # Handle pointer dereference - &(*ptr) is equivalent to ptr
+        # Handle pointer dereference - @(*ptr) is equivalent to ptr
         if isinstance(self.expression, PointerDeref):
-            # For &(*ptr), just return the pointer value directly
-            # This is a fundamental identity: &(*ptr) == ptr
+            # For @(*ptr), just return the pointer value directly
+            # This is a fundamental identity: @(*ptr) == ptr
             return self.expression.pointer.codegen(builder, module)
         
         # Handle function calls - create temporary storage for the result
@@ -2285,7 +2297,9 @@ class AddressOf(Expression):
             # Return pointer to the temporary storage
             return temp_alloca
         
-        raise ValueError(f"Cannot take address of {type(self.expression).__name__}")@dataclass
+        raise ValueError(f"Cannot take address of {type(self.expression).__name__}")
+
+@dataclass
 class AlignOf(Expression):
     target: Union[TypeSpec, Expression]
 
