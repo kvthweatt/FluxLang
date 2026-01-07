@@ -15,6 +15,7 @@ from llvmlite import ir
 from flexer import FluxLexer
 from fparser import FluxParser, ParseError
 from fast import *
+from fpreprocess import *
 from flux_logger import FluxLogger, FluxLoggerConfig, LogLevel
 
 class FluxCompiler:
@@ -91,6 +92,9 @@ class FluxCompiler:
             Path to the generated executable
         """
         try:
+            self.logger.section(f"Preprocessing Flux file: {filename}", LogLevel.INFO)
+            preprocessor = FluxPreprocessor()
+            result = preprocessor.preprocess(filename)
             self.logger.section(f"Compiling Flux file: {filename}", LogLevel.INFO)
             base_name = Path(filename).stem
             
@@ -107,7 +111,8 @@ class FluxCompiler:
             # Step 2: Lexical analysis
             self.logger.step("Lexical analysis", LogLevel.INFO, "lexer")
             try:
-                lexer = FluxLexer(source)
+                print(result)
+                lexer = FluxLexer(result)
                 tokens = lexer.tokenize()
                 self.logger.debug(f"Generated {len(tokens) if hasattr(tokens, '__len__') else '?'} tokens", "lexer")
                 
