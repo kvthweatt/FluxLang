@@ -2,7 +2,7 @@
 __pycache__/
 *.py[cod]
 *.pyc
-/src/compiler/__pycache__/
+src/compiler/__pycache__/
 *$py.class
 
 # C extensions
