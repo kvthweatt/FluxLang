@@ -113,7 +113,7 @@ class FluxParser:
     
     def statement(self) -> Optional[Statement]:
         """
-        statement -> import_statement
+        statement -> 
                   | function_def_statement
                   | struct_def
                   | object_def_statement
@@ -163,8 +163,6 @@ class FluxParser:
             else:
                 # It's a variable declaration with qualifiers
                 return self.variable_declaration_statement()
-        if self.expect(TokenType.IMPORT):
-            return self.import_statement()
         elif self.expect(TokenType.USING):
             return self.using_statement()
         elif self.expect(TokenType.DEF):
@@ -224,15 +222,6 @@ class FluxParser:
             return self.asm_statement()
         else:
             return self.expression_statement()
-    
-    def import_statement(self) -> ImportStatement:
-        """
-        import_statement -> 'import' STRING_LITERAL ';'
-        """
-        self.consume(TokenType.IMPORT)
-        module_name = self.consume(TokenType.STRING_LITERAL).value
-        self.consume(TokenType.SEMICOLON)
-        return ImportStatement(module_name)
     
     def using_statement(self) -> UsingStatement:
         """
