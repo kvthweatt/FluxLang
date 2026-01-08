@@ -1714,6 +1714,9 @@ class DefMacro(Expression):
 class FunctionCall(Expression):
     name: str
     arguments: List[Expression] = field(default_factory=list)
+    
+    # Class-level counter for globally unique string literals
+    _string_counter = 0
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Look up the function in the module
@@ -1756,8 +1759,12 @@ class FunctionCall(Expression):
                 str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
                 str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
                 
-                # Create global variable for the string <-- URGENT DO NOT DO THIS, THIS GOES ON THE STACK
-                gv = ir.GlobalVariable(module, str_val.type, name=f".str.arg{i}")
+                # Create global variable for the string with globally unique name
+                # Use class-level counter to ensure uniqueness across all function calls
+                str_name = f".str.{FunctionCall._string_counter}"
+                FunctionCall._string_counter += 1
+                
+                gv = ir.GlobalVariable(module, str_val.type, name=str_name)
                 gv.linkage = 'internal'
                 gv.global_constant = True
                 gv.initializer = str_val
@@ -1780,7 +1787,7 @@ class FunctionCall(Expression):
                         isinstance(expected_type, ir.PointerType) and
                         arg_val.type.pointee.element == expected_type.pointee):
                         # Array to pointer decay: [4 x i8]* -> i8*
-                        zero = ir.Constant(ir.IntType(1), 0) # This can be 1 bit. We're only storing 0
+                        zero = ir.Constant(ir.IntType(1), 0)
                         arg_val = builder.gep(arg_val, [zero, zero], name=f"arg{i}_decay")
                     
                     # Check if this is an object type that has a __expr method for automatic conversion
