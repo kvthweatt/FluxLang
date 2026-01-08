@@ -91,6 +91,8 @@ class FluxCompiler:
             if verbosity is not None:
                 logger_kwargs['level'] = min(verbosity, 5)
             self.logger = FluxLoggerConfig.create_logger(**logger_kwargs)
+
+        self.temp_files = []
         
         # Store legacy verbosity for backward compatibility
         self.verbosity = verbosity
@@ -98,39 +100,44 @@ class FluxCompiler:
         self.module = ir.Module(name="flux_module")
         import platform
         self.platform = platform.system()
-        
-        # Configure platform-specific settings
-        if self.platform == "Windows":
-            self.module_triple = "x86_64-pc-windows"
-            self.module.triple = self.module_triple
-            # Set proper Windows data layout for x86_64
-            self.module.data_layout = "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
-        elif self.platform == "Darwin":  # macOS
-            # Detect macOS architecture
-            import subprocess
-            try:
-                arch = subprocess.check_output(["uname", "-m"], text=True).strip()
-                if arch == "arm64":
-                    self.module_triple = "arm64-apple-macosx11.0.0"
-                    self.module.triple = self.module_triple
+
+        if config['target'] == "bootloader":
+            # intentionally break this for the else coming after this.
+            self.platform = None
+            # heheh yeah qemu time
+            self.module_triple = "i386-unknown-none-code16"
+            # 16-bit data layout
+            self.module.data_layout = "e-m:e-p:16:16-i64:32-f80:32-n8:16-a:0:16-S16"
+        else:
+            # Configure platform-specific settings
+            if self.platform == "Windows":
+                self.module_triple = "x86_64-pc-windows"
+                # Set proper Windows data layout for x86_64
+                # Hahaha we're gonna mess this up and make Windows like it.
+                self.module.data_layout = "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
+            elif self.platform == "Darwin":  # macOS
+                # Detect macOS architecture
+                try:
+                    arch = subprocess.check_output(["uname", "-m"], text=True).strip()
+                    if arch == "arm64":
+                        self.module_triple = "arm64-apple-macosx11.0.0"
+                        self.module.data_layout = "e-m:o-i64:64-i128:128-n32:64-S128"
+                        return
+                    else:
+                        self.module_triple = "x86_64-apple-macosx10.15.0"
+                        self.module.data_layout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
+                        return
+                except:
+                    self.module_triple = "arm64-apple-macosx11.0.0"  # Default to ARM64
                     self.module.data_layout = "e-m:o-i64:64-i128:128-n32:64-S128"
-                else:
-                    self.module_triple = "x86_64-apple-macosx10.15.0"
-                    self.module.triple = self.module_triple
-                    self.module.data_layout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
-            except:
-                self.module_triple = "arm64-apple-macosx11.0.0"  # Default to ARM64
-                self.module.triple = self.module_triple
-                self.module.data_layout = "e-m:o-i64:64-i128:128-n32:64-S128"
-        else:  # Linux and others
-            self.module_triple = "x86_64-pc-linux-gnu"
-            self.module.triple = self.module_triple
-            self.module.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
-        
-        debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
-                                          f"Module triple: {self.module_triple}"])
-        
-        self.temp_files = []
+                    return
+            else:  # Linux and others
+                self.module_triple = "x86_64-pc-linux-gnu"
+                self.module.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
+                return
+            
+            debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
+                                              f"Module triple: {self.module_triple}"])
 
     def compile_file(self, filename: str, output_bin: str = None) -> str:
         """
@@ -164,9 +171,7 @@ class FluxCompiler:
             self.logger.step("Lexical analysis", LogLevel.INFO, "lexer")
             try:
                 lexer = FluxLexer(result)
-                tokens = lexer.tokenize()
-                debugger(self.debug_levels, [1,8], [f"Lexer: Generated {len(tokens) if hasattr(tokens, '__len__') else '?'}"])
-                
+                tokens = lexer.tokenize()               
                 # Log tokens if requested (legacy compatibility + new system)
                 debugger(self.debug_levels, [1,8], ["Lexer",tokens])
             except Exception as e:
@@ -522,6 +527,284 @@ class FluxCompiler:
             # self.cleanup()
             self.logger.failure(f"Compilation failed: {e}")
             sys.exit(1)
+
+    def compile_bootloader(self, filename: str, output_bin: str = None) -> str:
+        """
+        Compile a Flux source file to a raw 16-bit bootloader binary
+        """
+        try:
+            self.logger.section(f"COMPILING {filename.upper()} IN BOOTLOADER MODE", LogLevel.INFO)
+            base_name = Path(filename).stem
+            preprocessor = FluxPreprocessor()
+            result = preprocessor.preprocess(filename)
+            
+            # Step 2: Lexical analysis
+            self.logger.step("Lexical analysis", LogLevel.INFO, "lexer")
+            try:
+                lexer = FluxLexer(result)
+                tokens = lexer.tokenize()
+                #self.logger.debug(f"Generated {len(tokens) if hasattr(tokens, '__len__') else '?'} tokens", "lexer")
+                
+                debugger(self.debug_levels, [1,8], [f"Lexer produced {len(tokens)} tokens:", tokens])
+            except Exception as e:
+                self.logger.error(f"Lexical analysis failed: {e}", "lexer")
+                raise
+            
+            # Step 3: Parsing
+            self.logger.step("Parsing", LogLevel.INFO, "parser")
+            try:
+                parser = FluxParser(tokens)
+                ast = parser.parse()
+                
+                if parser.has_errors():
+                    self.logger.error(f"Compilation aborted due to {len(parser.get_errors())} parse error(s)", "parser")
+                    for error in parser.get_errors():
+                        self.logger.error(error, "parser")
+                    raise RuntimeError("Parse errors detected - compilation aborted")
+                
+                debugger(self.debug_levels, [3,8], ["AST:", ast])
+                        
+            except Exception as e:
+                self.logger.error(f"Parsing failed: {e}", "parser")
+                raise
+            
+            # Step 4: Code generation with 16-bit configuration
+            self.logger.step("LLVM IR code generation (16-bit mode)", LogLevel.INFO, "codegen")
+            try:                
+                self.module = ast.codegen(self.module)
+                llvm_ir = str(self.module)
+                
+                self.logger.debug(f"Generated LLVM IR ({len(llvm_ir)} chars)", "codegen")
+                
+                if self.logger.level >= LogLevel.TRACE:
+                    self.logger.log_data(LogLevel.TRACE, "Generated LLVM IR", llvm_ir, "codegen")
+                        
+            except Exception as e:
+                self.logger.error(f"Code generation failed: {e}", "codegen")
+                raise
+            
+            # Step 5: Create build directory
+            self.logger.step("Preparing build environment", LogLevel.DEBUG, "build")
+            temp_dir = Path(f"build/{base_name}")
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            self.logger.debug(f"Build directory: {temp_dir.absolute()}", "build")
+            
+            # Step 6: Write LLVM IR file
+            self.logger.step("Writing LLVM IR file", LogLevel.DEBUG, "build")
+            ll_file = temp_dir / f"{base_name}.ll"
+            try:
+                with open(ll_file, 'w') as f:
+                    f.write(llvm_ir)
+                self.temp_files.append(ll_file)
+                self.logger.debug(f"LLVM IR written to: {ll_file}", "build")
+            except Exception as e:
+                self.logger.error(f"Failed to write LLVM IR file: {e}", "build")
+                raise
+            
+            # Step 7: Generate 32-bit assembly (we'll add .code16 directive manually)
+            self.logger.step("Generating x86 assembly", LogLevel.INFO, "llc")
+            asm_file = temp_dir / f"{base_name}.s"
+            
+            llc_cmd = [
+                "llc",
+                "-march=x86",              # x86 architecture
+                "-mcpu=i386",              # Target 386 CPU
+                "-relocation-model=static", # Static addressing (no PIC)
+                "-code-model=small",       # Small code model
+                "-filetype=asm",           # Assembly output
+                "-x86-asm-syntax=intel",   # Intel syntax
+                str(ll_file),
+                "-o",
+                str(asm_file)
+            ]
+            
+            self.logger.debug(f"Running: {' '.join(llc_cmd)}", "llc")
+            
+            try:
+                result = subprocess.run(llc_cmd, check=True, capture_output=True, text=True)
+                self.logger.trace(f"LLC output: {result.stdout}", "llc")
+                if result.stderr:
+                    self.logger.warning(f"LLC stderr: {result.stderr}", "llc")
+                self.temp_files.append(asm_file)
+            except subprocess.CalledProcessError as e:
+                self.logger.error(f"Assembly generation failed: {e.stderr}", "llc")
+                raise
+            
+            # Step 8: Modify assembly to add .code16 directive and remove unwanted sections
+            self.logger.step("Modifying assembly for 16-bit real mode", LogLevel.INFO, "build")
+            modified_asm_file = temp_dir / f"{base_name}_16bit.s"
+            
+            try:
+                with open(asm_file, 'r') as f:
+                    asm_content = f.read()
+                
+                # Add .code16 at the beginning and clean up
+                modified_asm = ".code16\n"
+                modified_asm += ".section .boot, \"ax\"\n"  # Bootable section
+                modified_asm += ".global _start\n"
+                modified_asm += "_start:\n"
+                
+                # Filter out problematic directives and 32-bit instructions
+                for line in asm_content.split('\n'):
+                    line_stripped = line.strip()
+                    
+                    # Skip these directives/sections
+                    if any(skip in line_stripped for skip in [
+                        '.section',
+                        '.text',
+                        '.data',
+                        '.bss',
+                        '.file',
+                        '.globl main',
+                        '.type',
+                        '.size',
+                        '.ident',
+                        '.addrsig'
+                    ]):
+                        continue
+                    
+                    # Keep function labels and code
+                    if line_stripped and not line_stripped.startswith('.'):
+                        modified_asm += line + "\n"
+                
+                with open(modified_asm_file, 'w') as f:
+                    f.write(modified_asm)
+                
+                self.temp_files.append(modified_asm_file)
+                self.logger.debug(f"Modified assembly written to: {modified_asm_file}", "build")
+                
+                if self.logger.level >= LogLevel.TRACE:
+                    self.logger.log_data(LogLevel.TRACE, "Modified Assembly", modified_asm, "build")
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to modify assembly: {e}", "build")
+                raise
+            
+            # Step 9: Assemble to object file
+            self.logger.step("Assembling to object file", LogLevel.INFO, "as")
+            obj_file = temp_dir / f"{base_name}.o"
+            
+            as_cmd = [
+                "as",
+                "--32",                    # 32-bit mode (for .code16)
+                str(modified_asm_file),
+                "-o",
+                str(obj_file)
+            ]
+            
+            self.logger.debug(f"Running: {' '.join(as_cmd)}", "as")
+            
+            try:
+                result = subprocess.run(as_cmd, check=True, capture_output=True, text=True)
+                self.logger.trace(f"AS output: {result.stdout}", "as")
+                if result.stderr:
+                    self.logger.warning(f"AS stderr: {result.stderr}", "as")
+                self.temp_files.append(obj_file)
+            except subprocess.CalledProcessError as e:
+                self.logger.error(f"Assembly failed: {e.stderr}", "as")
+                raise
+            
+            # Step 10: Link to raw binary
+            self.logger.step("Linking to raw binary", LogLevel.INFO, "linker")
+            
+            output_bin = output_bin or f"{base_name}.bin"
+            
+            ld_cmd = [
+                "ld",
+                "-m", "elf_i386",          # 32-bit ELF (for 16-bit code)
+                "-T", self._create_bootloader_linker_script(temp_dir),  # Custom linker script
+                "--oformat=binary",        # Raw binary output
+                "-nostdlib",               # No standard library
+                str(obj_file),
+                "-o",
+                output_bin
+            ]
+            
+            self.logger.debug(f"Running: {' '.join(ld_cmd)}", "linker")
+            
+            try:
+                result = subprocess.run(ld_cmd, check=True, capture_output=True, text=True)
+                self.logger.trace(f"Linker output: {result.stdout}", "linker")
+                if result.stderr:
+                    self.logger.warning(f"Linker stderr: {result.stderr}", "linker")
+            except subprocess.CalledProcessError as e:
+                self.logger.error(f"Linking failed: {e.stderr}", "linker")
+                raise
+            
+            # Step 11: Verify binary size and add boot signature
+            self.logger.step("Adding boot signature", LogLevel.INFO, "build")
+            
+            try:
+                with open(output_bin, 'rb') as f:
+                    bootloader = bytearray(f.read())
+                
+                # Bootloader must be exactly 512 bytes
+                if len(bootloader) > 510:
+                    self.logger.error(f"Bootloader too large: {len(bootloader)} bytes (max 510)", "build")
+                    raise RuntimeError(f"Bootloader exceeds 510 bytes")
+                
+                # Pad to 510 bytes
+                bootloader.extend([0] * (510 - len(bootloader)))
+                
+                # Add boot signature (0x55AA in little-endian)
+                bootloader.extend([0x55, 0xAA])
+                
+                # Write final bootloader
+                with open(output_bin, 'wb') as f:
+                    f.write(bootloader)
+                
+                self.logger.debug(f"Bootloader is {len(bootloader)} bytes with signature", "build")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to add boot signature: {e}", "build")
+                raise
+            
+            # Success!
+            self.logger.success(f"Bootloader compiled: {output_bin} ({len(bootloader)} bytes)")
+            return output_bin
+            
+        except Exception as e:
+            self.logger.failure(f"Bootloader compilation failed: {e}")
+            sys.exit(1)
+
+    def _create_bootloader_linker_script(self, temp_dir: Path) -> str:
+        """
+        Create a custom linker script for bootloader
+        
+        Returns:
+            Path to linker script
+        """
+        linker_script = temp_dir / "bootloader.ld"
+        
+        script_content = """
+    OUTPUT_FORMAT("binary")
+    OUTPUT_ARCH(i386)
+    ENTRY(_start)
+
+    SECTIONS
+    {
+        . = 0x7C00;  /* BIOS loads bootloader here */
+        
+        .boot : {
+            *(.boot)
+            *(.text)
+            *(.rodata)
+            *(.data)
+        }
+        
+        /DISCARD/ : {
+            *(.eh_frame)
+            *(.comment)
+            *(.note*)
+        }
+    }
+    """
+        
+        with open(linker_script, 'w') as f:
+            f.write(script_content)
+        
+        self.temp_files.append(linker_script)
+        return str(linker_script)
     
     def cleanup(self):
         """Remove temporary files and cleanup logger"""
@@ -585,10 +868,20 @@ def main():
     
     compiler = FluxCompiler(verbosity=verbosity)
     try:
-        binary_path = compiler.compile_file(input_file, output_bin)
-        print(f"Executable created at: {binary_path}")
-    finally:
-        compiler.cleanup()
+        match (config['target']):
+            case "bootloader":
+                print("BOOTLOADER")
+                binary_path = compiler.compile_bootloader(input_file, output_bin)
+                print(f"Bootloader created at: {binary_path}")
+                return
+            case _:
+                binary_path = compiler.compile_file(input_file, output_bin)
+                print(f"Executable created at: {binary_path}")
+                return
+    except:
+        pass
+    return
 
 if __name__ == "__main__":
     main()
+    exit()

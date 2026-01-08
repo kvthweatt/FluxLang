@@ -25,6 +25,7 @@ Please report any issues to kvthweatt@gmail.com or create an issue on the GitHub
 import sys
 import os
 from pathlib import Path
+#from fconfig import *
 
 # Add src/compiler and src/stdlib to Python path
 sys.path.insert(0, str(Path(__file__).parent / "src" / "compiler"))
@@ -33,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src" / "stdlib" / "runtime"))
 
 # Import compiler components
 from fc import FluxCompiler # type: ignore
+from fc import config
 
 def main():
     if len(sys.argv) < 2:
@@ -134,6 +136,9 @@ def main():
         binary_path = ""
         
         # Compile the file
+        if config['target'] == "bootloader":
+            binary_path = compiler.compile_bootloader(input_file, output_bin)
+            return
         if compile_as_library:
             binary_path = compiler.compile_library(input_file, output_bin)
         else:
