@@ -347,10 +347,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python run_tests.py               # Run all tests
-  python run_tests.py -v            # Run with verbose output
-  python run_tests.py --filter hello # Only run tests with 'hello' in filename
-  python run_tests.py --compile-only # Only compile, don't run executables
+  python run_tests.py                  # Run all tests
+  python run_tests.py -v               # Run with verbose output
+  python run_tests.py --filter hello   # Only run tests with 'hello' in filename
+  python run_tests.py --compile-only   # Only compile, don't run executables
   python run_tests.py --keep-artifacts # Keep compiled executables
         """
     )

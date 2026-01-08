@@ -17,6 +17,7 @@ from fparser import FluxParser, ParseError
 from fast import *
 from fpreprocess import *
 from flux_logger import FluxLogger, FluxLoggerConfig, LogLevel
+from fconfig import *
 
 class FluxCompiler:
     def __init__(self, /, 
@@ -32,6 +33,9 @@ class FluxCompiler:
             **logger_kwargs: Additional arguments for FluxLogger creation
         """
         # Initialize logger
+        print("RIGHT HERE vvv")
+        print(config.get('operating_system', 'win'))
+        print("RIGHT HERE ^^^")
         if logger:
             self.logger = logger
         else:
@@ -373,8 +377,8 @@ class FluxCompiler:
                     "/merge:.rdata=.text",         # Merge read-only data with code
                     "/merge:.data=.text",          # Merge data with code
                     #"/merge:.bss=.text",           # Merge uninitialized data
-                    "/align:1",                    # 1-byte alignment (minimal padding)
-                    "/filealign:1",                # 1-byte file alignment (tiny executable)
+                    "/align:32",                    # 32-bit memory alignment (minimal padding)
+                    "/filealign:32",                # 32-bit file alignment (tiny executable)
                     "/release",                    # Release mode (no debug info)
                     "/fixed",                      # Fixed base address
                     "/incremental:no",             # Disable incremental linking
