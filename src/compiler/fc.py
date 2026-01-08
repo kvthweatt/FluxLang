@@ -33,9 +33,6 @@ class FluxCompiler:
             **logger_kwargs: Additional arguments for FluxLogger creation
         """
         # Initialize logger
-        print("RIGHT HERE vvv")
-        print(config.get('operating_system', 'win'))
-        print("RIGHT HERE ^^^")
         if logger:
             self.logger = logger
         else:
@@ -197,7 +194,7 @@ class FluxCompiler:
                 # Try llc first, fallback to clang if not available
                 llc_cmd = ["llc", "-O2", "-filetype=obj", str(ll_file), "-o", str(obj_file)]
                 clang_cmd = [
-                    "clang",
+                    config.get('compiler'),
                     "-c",
                     "-Os",                    # Optimize for size
                     "-O3",                    # Optimize for speed (clang will use the most aggressive)
@@ -240,30 +237,31 @@ class FluxCompiler:
                 
                 # Windows: Use Clang directly to compile LLVM IR to object file
                 # Try multiple possible Clang locations
+                #print(config['architecture'])
+                #exit()
                 clang_args = [
                     "-c",
-                    "-Os",                    # Optimize for size
-                    "-O3",                    # Optimize for speed (clang will use the most aggressive)
-                    "-ffunction-sections",    # Place each function in its own section
-                    "-fdata-sections",        # Place each data in its own section
-                    "-fno-unwind-tables",     # Disable unwind tables (saves space)
-                    "-fno-asynchronous-unwind-tables",
-                    #"-fmerge-all-constants",  # Merge duplicate constants
+                    "-Os" if int(config['optimize_size']) == 1 else "",                    # Optimize for size
+                    "-O3" if int(config['optimize_speed']) == 1 else "",                    # Optimize for speed (clang will use the most aggressive)
+                    "-ffunction-sections" if int(config['unique_function_sections']) == 1 else "",    # Place each function in its own section
+                    "-fdata-sections" if int(config['no_unwind_tables']) == 1 else "",        # Place each data in its own section
+                    "-fno-unwind-tables" if int(config['no_unwind_tables']) == 1 else "",     # Disable unwind tables (saves space)
+                    "-fno-asynchronous-unwind-tables" if int(config['no_async_unwind_tables']) == 1 else "",
+                    "-fmerge-all-constants" if int(config['merge_all_constants']) == 1 else "",  # Merge duplicate constants
                                                 # Enabling may cause undefined behavior for Flux programs
-                    "-fno-stack-protector",   # Disable stack protection
-                    "-fno-ident",             # Don't emit .ident directive
-                    "-Wl,--gc-sections",      # Remove unused sections during linking
-                    "-march=native",          # Optimize for current CPU
-                    "-Wno-override-module",   # Do not override triple presets
-                    "-mtune=native",
-                    "-fomit-frame-pointer",   # Omit frame pointers (smaller, faster)
+                    "-fno-stack-protector" if int(config['disable_stack_protection']) == 1 else "",   # Disable stack protection
+                    "-fno-ident" if int(config['no_ident']) == 1 else "",             # Don't emit .ident directive
+                    "-march=" + config['architecture'],          # Optimize for current CPU
+                    "-Wno-override-module" if int(config['generic_triple']) == 1 else self.module_triple,   # Do not override triple presets
+                    "-mtune=" + config['architecture'],
+                    "-fomit-frame-pointer" if int(config['omit_frame_pointers']) == 1 else "",   # Omit frame pointers (smaller, faster)
                     str(ll_file),
                     "-o",
                     str(obj_file)
                 ]
 
                 # Compile LLVM IR to object file using Clang
-                cmd = ["clang"] + clang_args
+                cmd = [config.get('compiler')] + clang_args
                 self.logger.debug(f"Running: {' '.join(cmd)}", "clang")
                 
                 try:
@@ -365,34 +363,33 @@ class FluxCompiler:
             if self.platform == "Darwin":  # macOS
                 link_cmd = ["clang", str(obj_file), "-o", output_bin]
             elif self.platform == "Windows":
-                # Use LLD 
+                # Use LLD
                 link_cmd = [
-                    "C:\\Program Files\\LLVM\\bin\\lld-link.exe",
-                    "/entry:main",                 # TODO -> f"/entry:{entrypoint}"
+                    f"C:\\Program Files\\LLVM\\bin\\{config['linker']}.exe",
+                    "/entry:" + config.get('entrypoint', 'main'),                 # TODO -> f"/entry:{entrypoint}"
                                                    # Custom entrypoint support, default main if unspecified
-                    "/nodefaultlib",
-                    "/subsystem:console",
-                    "/opt:ref",                    # Remove unused functions/data
-                    "/opt:icf",                    # Identical COMDAT folding
-                    "/merge:.rdata=.text",         # Merge read-only data with code
-                    "/merge:.data=.text",          # Merge data with code
-                    #"/merge:.bss=.text",           # Merge uninitialized data
-                    "/align:32",                    # 32-bit memory alignment (minimal padding)
-                    "/filealign:32",                # 32-bit file alignment (tiny executable)
-                    "/release",                    # Release mode (no debug info)
-                    "/fixed",                      # Fixed base address
-                    "/incremental:no",             # Disable incremental linking
-                    #"/strip:all",                  # Remove all symbols
-                    "/guard:no",                   # Disable CFG (Control Flow Guard)
-                    "/dynamicbase:no",             # Disable ASLR (for smaller size)
-                    "/nxcompat:no",                # Disable DEP compatibility
-                    #"/highentropyva:no",           # Disable high entropy ASLR
-                    "/opt:lldlto=3",               # Aggressive LTO optimization if available
-                    "/opt:lldltojobs=all",         # Use all cores for LTO
+                    "/nodefaultlib" if int(config['no_default_libraries']) == 1 else "",
+                    "/subsystem:" + config['subsystem'],
+                    "/opt:ref" if int(config['remove_unused_funcs']) == 1 else "",                    # Remove unused functions/data
+                    "/opt:icf" if int(config['comdat_folding']) == 1 else "",                    # Identical COMDAT folding
+                    "/merge:.rdata=.text" if int(config['merge_read_only_w_text']) == 1 else "",         # Merge read-only data with code
+                    "/merge:.data=.text" if int(config['marge_data_and_code']) == 1 else "",          # Merge data with code
+                    "/align:" + config['memory_alignment'],                    # 32-bit memory alignment (minimal padding)
+                    "/filealign:" + config['bin_disk_alignment'],                # 32-bit file alignment (tiny executable)
+                    "/" + config['mode'],                    # Release mode (no debug info)
+                    "/fixed" if int(config['fixed_base_address']) == 1 else "",                      # Fixed base address
+                    "/incremental:no" if int(config['incremental_linking']) == 1 else "",             # Disable incremental linking
+                    "/strip:all" if int(config['strip_executable']) == 1 else "",                  # Remove all symbols
+                    "/guard:no" if int(config['control_flow_guard']) == 1 else "",                   # Disable CFG (Control Flow Guard)
+                    "/dynamicbase:no" if int(config['aslr']) == 1 else "",             # Disable ASLR (for smaller size)
+                    #"/highentropyva:no" if int(config['no_default_libraries']) == 0 else "",           # Disable high entropy ASLR
+                    "/nxcompat:no" if int(config['dep_compatibility']) == 1 else "",                # Disable DEP compatibility
+                    "/opt:lldlto=" + config['lto_optimization_level'],               # Aggressive LTO optimization if available
+                    "/opt:lldltojobs=all" if int(config['all_cores_for_lto']) == 1 else "",         # Use all cores for LTO
                     str(obj_file),
                     # Only link essential libraries
-                    "kernel32.lib",
-                    "msvcrt.lib",   # Optional, link with C runtime
+                    config['lib_files'],
+                    #"msvcrt.lib",   # Optional, link with C runtime
                     # "user32.lib",  # Uncomment only if GUI functions are used
                     # "gdi32.lib",   # Uncomment only if drawing functions are used
                     f"/out:{output_bin}"
