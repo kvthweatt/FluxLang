@@ -19,6 +19,56 @@ from fpreprocess import *
 from flux_logger import FluxLogger, FluxLoggerConfig, LogLevel
 from fconfig import *
 
+def get_debug_level(level: str):
+    match(level):
+        case ("none"):
+            return 0
+        case ("lexer"):
+            return 1
+        case ("parser"):
+            return 2
+        case ("ast"):
+            return 3
+        case ("compiler"):
+            return 4
+        case ("linker"):
+            return 5
+        case ("codegen"):
+            return 6
+        case ("trace"):
+            return 7
+        case ("everything"):
+            return 8
+        case _:
+            return 0
+
+def set_debug_level():
+    tmp_debug_levels = []
+    debug_level = config['debug_level']
+    debug_level = debug_level.split(" | ")
+    if len(debug_level) == 1:
+        debug_level = debug_level[0]
+        return [get_debug_level(debug_level)]
+        return
+    for level in debug_level:
+        tmp_debug_levels.append(get_debug_level(level))
+    return tmp_debug_levels
+
+
+def debugger(debug_levels: list, target_levels: list, args: list):
+    for level in target_levels:
+        if level in debug_levels:
+            try:
+                print("START DEBUG")
+                print('\n'.join(args))
+                print("END DEBUG")
+            except:
+                print("START DEBUG")
+                print(args)
+                print("END DEBUG")
+            continue
+
+
 class FluxCompiler:
     def __init__(self, /, 
                  verbosity: int = None, 
@@ -33,6 +83,7 @@ class FluxCompiler:
             **logger_kwargs: Additional arguments for FluxLogger creation
         """
         # Initialize logger
+        self.debug_levels = set_debug_level()
         if logger:
             self.logger = logger
         else:
@@ -76,8 +127,8 @@ class FluxCompiler:
             self.module.triple = self.module_triple
             self.module.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
         
-        self.logger.debug(f"Target platform: {self.platform}", "compiler")
-        self.logger.debug(f"Module triple: {self.module_triple}", "compiler")
+        debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
+                                          f"Module triple: {self.module_triple}"])
         
         self.temp_files = []
 
@@ -104,23 +155,20 @@ class FluxCompiler:
             try:
                 with open(filename, 'r') as f:
                     source = f.read()
-                self.logger.debug(f"Read {len(source)} characters from {filename}", "compiler")
+                debugger(self.debug_levels, [4,8], [f"Compiler: Read {len(source)} characters from {filename}"])
             except Exception as e:
-                self.logger.error(f"Failed to read source file {filename}: {e}", "compiler")
+                debugger(self.debug_levels, [4,8], [f"Compiler: Failed to read source file {filename}: {e}"])
                 raise
             
             # Step 2: Lexical analysis
             self.logger.step("Lexical analysis", LogLevel.INFO, "lexer")
             try:
-                print(result)
                 lexer = FluxLexer(result)
                 tokens = lexer.tokenize()
-                self.logger.debug(f"Generated {len(tokens) if hasattr(tokens, '__len__') else '?'} tokens", "lexer")
+                debugger(self.debug_levels, [1,8], [f"Lexer: Generated {len(tokens) if hasattr(tokens, '__len__') else '?'}"])
                 
                 # Log tokens if requested (legacy compatibility + new system)
-                if self.verbosity == 0 or self.logger.level >= LogLevel.TRACE:
-                    self.logger.log_data(LogLevel.TRACE, "Generated Tokens", tokens, "lexer")
-                    
+                debugger(self.debug_levels, [1,8], ["Lexer",tokens])
             except Exception as e:
                 self.logger.error(f"Lexical analysis failed: {e}", "lexer")
                 raise
@@ -128,6 +176,7 @@ class FluxCompiler:
             # Step 3: Parsing
             self.logger.step("Parsing", LogLevel.INFO, "parser")
             try:
+                debugger(self.debug_levels, [2,8], [result])
                 parser = FluxParser(tokens)
                 ast = parser.parse()
                 
@@ -138,19 +187,20 @@ class FluxCompiler:
                         self.logger.error(error, "parser")
                     raise RuntimeError("Parse errors detected - compilation aborted")
                 
-                self.logger.debug("AST generation completed", "parser")
-                
                 # Log AST if requested (legacy compatibility + new system)
                 if self.verbosity == 1 or self.logger.level >= LogLevel.DEBUG:
                     self.logger.log_data(LogLevel.DEBUG, "Generated AST", ast, "parser")
-                    
-                # Legacy: always print AST (TODO: remove this in future versions)
-                if not self.logger.level >= LogLevel.DEBUG:
-                    print(ast)
+                
+                debugger(self.debug_levels, [3,8], [ast])
                     
             except Exception as e:
-                self.logger.error(f"Parsing failed: {e}", "parser")
+                debugger(self.debug_levels, [2,8], [f"Parser: {e}"])
                 raise
+
+            # CHECK FIRST
+            #
+            # LEFT OFF REPLACING LOG DEBUGGER WITH DEBUGGER FUNCTION
+            # CONTINUE BELOW
             
             # Step 4: Code generation
             self.logger.step("LLVM IR code generation", LogLevel.INFO, "codegen")
@@ -526,7 +576,6 @@ def main():
                     tokens = lexer.tokenize()
                     parser = FluxParser(tokens)
                     ast = parser.parse()
-                    print(ast)
                     return
 
     

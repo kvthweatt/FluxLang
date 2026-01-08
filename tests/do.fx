@@ -1,4 +1,4 @@
-import "redstandard.fx";
+import "standard.fx";
 
 def main() -> int
 {

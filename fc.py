@@ -31,8 +31,6 @@ sys.path.insert(0, str(Path(__file__).parent / "src" / "compiler"))
 sys.path.insert(0, str(Path(__file__).parent / "src" / "stdlib"))
 sys.path.insert(0, str(Path(__file__).parent / "src" / "stdlib" / "runtime"))
 
-print(sys.path)
-
 # Import compiler components
 from fc import FluxCompiler # type: ignore
 
