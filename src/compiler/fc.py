@@ -134,9 +134,8 @@ class FluxCompiler:
             else:  # Linux and others
                 self.module_triple = "x86_64-pc-linux-gnu"
                 self.module.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
-                return
             
-            debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
+        debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
                                               f"Module triple: {self.module_triple}"])
 
     def compile_file(self, filename: str, output_bin: str = None) -> str:
@@ -343,28 +342,18 @@ class FluxCompiler:
                     "-mcpu=native",               # Optimize for current CPU
                     "-enable-misched",            # Enable machine instruction scheduler
                     "-enable-tail-merge",         # Merge similar tail code
-                    #"-disable-cfi",               # Disable control flow integrity (smaller)
-                    #"-disable-fault-maps",        # Disable fault maps (smaller)
-                    #"-disable-live-intervals",    # Disable live interval analysis for speed
-                    #"-disable-post-ra-scheduler", # Disable post-register allocation scheduler
                     "-disable-verify",            # Disable verification for speed
-                    "-filetype=obj",              # Direct object file output
-                    #"-join-physregs",             # Join physical registers
+                    "-filetype=asm",              # Assembly file output
                     "-no-x86-call-frame-opt",     # Disable call frame optimization (smaller)
                     "-optimize-regalloc",         # Optimize register allocation
                     "-relocation-model=static",   # Static relocation (no PIC)
-                    #"-spiller=default",
-                    #"-strip-debug",               # Strip debug info
                     "-tail-dup-size=3",           # Tail duplication threshold
                     "-tailcallopt",               # Enable tail call optimization
-                    #"-tls-direct-seg-refs",       # Direct TLS segment references
-                    "-x86-asm-syntax=att",      # Intel syntax assembly (optional)
+                    "-x86-asm-syntax=att",        # ATT syntax assembly
                     "-x86-use-base-pointer",      # Use base pointer
-                    #"-x86-use-recip",             # Use reciprocal approximations
-                    #"-stats",                     # Print statistics (optional)
                     str(ll_file),
                     "-o",
-                    str(obj_file)
+                    str(asm_file)                 # Output to assembly file
                 ]
                 self.logger.debug(f"Running: {' '.join(cmd)}", "llc")
                 
@@ -393,7 +382,7 @@ class FluxCompiler:
                 except subprocess.CalledProcessError as e:
                     self.logger.error(f"Assembly failed: {e.stderr}", "as")
                     raise
-            
+
             self.temp_files.append(obj_file)
             self.logger.debug(f"Object file created: {obj_file}", "build")
             
