@@ -39,7 +39,7 @@ contexts:
           scope: constant.character.escape.flux
 
     # Keywords
-    - match: '\b(alignof|and|as|asm|assert|auto|break|bool|case|catch|char|contract|compt|const|continue|data|def|default|do|elif|else|extern|false|float|for|from|global|if|import|in|is|int|local|namespace|new|not|object|operator|or|private|public|return|signed|sizeof|struct|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|void|volatile|while|xor)\b'
+    - match: '\b(alignof|and|as|asm|assert|auto|break|bool|case|catch|char|contract|compt|const|continue|data|def|default|do|elif|else|extern|false|float|for|from|global|heap|if|import|in|is|int|local|namespace|not|object|operator|or|private|public|register|return|signed|sizeof|stack|struct|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|void|volatile|while|xor)\b'
       scope: keyword.control.flux
 
     # Types

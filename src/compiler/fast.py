@@ -60,8 +60,8 @@ class Operator(Enum):
     NOT = "!"
     POWER = "^"
     XOR = "^^"
-    OR = "||"
-    AND = "&&"
+    OR = "|"
+    AND = "&"
     NOR = "!|"
     NAND = "!&"
     INCREMENT = "++"
@@ -101,7 +101,6 @@ class Operator(Enum):
     # Directionals
     RETURN_ARROW = "->"
     CHAIN_ARROW = "<-"
-    RECURSE_ARROW = "<~"
 
 # Literal values (no dependencies)
 @dataclass

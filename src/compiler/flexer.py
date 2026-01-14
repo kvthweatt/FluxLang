@@ -119,8 +119,8 @@ class TokenType(Enum):
     XOR_OP = auto()         # ^^
     INCREMENT = auto()      # ++
     DECREMENT = auto()      # --
-    LOGICAL_AND = auto()    # &&
-    LOGICAL_OR = auto()     # ||
+    LOGICAL_AND = auto()    # &
+    LOGICAL_OR = auto()     # |
     
     # Comparison
     EQUAL = auto()          # ==
@@ -157,7 +157,7 @@ class TokenType(Enum):
     # Directionals
     RETURN_ARROW = auto()   # ->
     CHAIN_ARROW = auto()    # <-
-    RECURSE_ARROW = auto()  # <~
+    #RECURSE_ARROW = auto()  # <~
     FUNCTION_POINTER = auto() # {}*
     
     # Delimiters
@@ -253,6 +253,7 @@ class FluxLexer:
             'volatile': TokenType.VOLATILE,
             'while': TokenType.WHILE,
             'xor': TokenType.XOR,
+            #'contract': TokenType.CONTRACT,
             # Fixed-width integer types
             #'uint8': TokenType.UINT8,
             #'uint16': TokenType.UINT16,
@@ -637,10 +638,6 @@ class FluxLexer:
                     tokens.append(Token(TokenType.CHAIN_ARROW, '<-', start_pos[0], start_pos[1]))
                     self.advance(count=2)
                     continue
-                elif self.peek_char() == "~":
-                    tokens.append(Token(TokenType.RECURSE_ARROW, '<~', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
             
             if char == '>':
                 if self.peek_char() == '=':
@@ -709,7 +706,7 @@ class FluxLexer:
             
             if char == '&':
                 if self.peek_char() == '&':
-                    tokens.append(Token(TokenType.LOGICAL_AND, '&=', start_pos[0], start_pos[1]))
+                    tokens.append(Token(TokenType.AND, '&&', start_pos[0], start_pos[1]))
                     self.advance(count=2)
                     continue
                 elif self.peek_char() == '=':
@@ -719,7 +716,7 @@ class FluxLexer:
             
             if char == '|':
                 if self.peek_char() == "|":
-                    tokens.append(Token(TokenType.LOGICAL_OR, '|=', start_pos[0], start_pos[1]))
+                    tokens.append(Token(TokenType.OR, '||', start_pos[0], start_pos[1]))
                     self.advance(count=2)
                     continue
                 elif self.peek_char() == '=':
@@ -747,8 +744,8 @@ class FluxLexer:
                 '^': TokenType.POWER,
                 '<': TokenType.LESS_THAN,
                 '>': TokenType.GREATER_THAN,
-                '&': TokenType.AND,
-                '|': TokenType.OR,
+                '&': TokenType.LOGICAL_AND,
+                '|': TokenType.LOGICAL_OR,
                 '!': TokenType.NOT,
                 '@': TokenType.ADDRESS_OF,
                 '=': TokenType.ASSIGN,

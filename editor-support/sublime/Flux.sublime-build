@@ -1,0 +1,19 @@
+{
+    "shell_cmd": "python \"C:/Users/kvthw/Flux/fc.py\" \"$file\"",
+    "working_dir": "C:/Users/kvthw/Flux",
+    "selector": "source.fx",
+    
+    "target": "exec",
+    "quiet": false,
+    
+    // Force UTF-8 encoding
+    "encoding": "utf-8",
+    "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+    },
+    
+    "windows": {
+        "shell_cmd": "chcp 65001 >nul && python \"C:\\Users\\kvthw\\Flux\\fc.py\" \"$file\" 2>&1"
+    }
+}
