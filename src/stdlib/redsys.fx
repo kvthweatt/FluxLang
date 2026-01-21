@@ -2,75 +2,61 @@
 
 import "redtypes.fx";
 
-using standard::types;
-
-const int CURRENT_OS;
+global const int CURRENT_OS;
+global const int OS_UNKNOWN = 0;
+global const int OS_WINDOWS = 1;
+global const int OS_LINUX = 2;
+global const int OS_MACOS = 3;
 
 namespace standard
 {
     namespace system
     {
-        // OS Constants
-        const int OS_UNKNOWN = 0;
-        const int OS_WINDOWS = 1;
-        const int OS_LINUX = 2;
-        const int OS_MACOS = 3;
-
         // OS Detection function using inline assembly
         def get_os() -> int
         {
-            volatile int result = OS_UNKNOWN;
+            i32 result = 0;
             
-            volatile asm 
+            volatile asm
             {
-                // Try Windows detection first - GetVersion API call
-                subq $32, %rsp           // Shadow space for Windows calling convention
-                call GetVersion          // Windows API call
-                addq $32, %rsp
+                // Check TEB/PEB for Windows (fs segment on x64)
+                // Windows always has gs:[0x30] pointing to PEB
+                movq %gs:0x30, %rax
+                testq %rax, %rax
+                jz not_windows
                 
-                // If GetVersion succeeded, we're on Windows
-                testl %eax, %eax
-                jz try_linux
+                // If we got here, likely Windows
+                movl $$1, %ebx
+                jmp done
                 
-                movl $1, %eax            // OS_WINDOWS
-                jmp detection_done
-                
-            try_linux:
-                // Try Linux - sys_uname syscall (syscall 63)
-                movq $63, %rax           // sys_uname
-                movq $0, %rdi            // NULL buffer (we don't need the data)
+            not_windows:
+                // Try Linux - check if /proc filesystem signature exists
+                // This is hard in pure asm, so check for Linux syscall convention
+                movq $$1, %rax      // sys_write syscall number
+                movq $$-1, %rdi     // invalid fd
+                movq $$0, %rsi      // null buffer
+                movq $$0, %rdx      // zero length
                 syscall
                 
-                // Linux syscall returns 0 on success
-                cmpq $0, %rax
-                jne try_macos
+                // Linux returns -EBADF (-9), others crash or return different
+                cmpq $$-9, %rax
+                jne not_linux
                 
-                movl $2, %eax            // OS_LINUX
-                jmp detection_done
+                movl $$2, %ebx
+                jmp done
                 
-            try_macos:
-                // Try macOS - getpid syscall (different number than Linux)
-                movq $20, %rax           // macOS getpid syscall number
-                syscall
+            not_linux:
+                // Default to macOS if not Windows or Linux
+                movl $$3, %ebx
                 
-                // getpid returns positive PID on success
-                cmpq $0, %rax
-                jle unknown_os
-                
-                movl $3, %eax            // OS_MACOS
-                jmp detection_done
-                
-            unknown_os:
-                movl $0, %eax            // OS_UNKNOWN
-                
-            detection_done:
-                nop
-                
-            } : "=a"(result) : : "rcx", "rdx", "rdi", "rsi", "r8", "r9", "r10", "r11", "memory";
+            done:
+                movl %ebx, %eax
+                movl %eax, $0
+            } : "=r"(result) : : "rax", "rbx", "rcx", "rdx", "rdi", "rsi", "memory";
             
             return result;
         };
     };
 };
 
-CURRENT_OS = get_os();
+using standard::system;

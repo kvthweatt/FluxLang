@@ -128,7 +128,24 @@ class FluxParser:
         is_const = False
         is_volatile = False
         
-        # Parse qualifiers first (const, volatile)
+        # Parse storage class FIRST (global, local, heap, stack, register)
+        if self.expect(TokenType.GLOBAL):
+            storage_class = 'global'
+            self.advance()
+        elif self.expect(TokenType.LOCAL):
+            storage_class = 'local'
+            self.advance()
+        elif self.expect(TokenType.HEAP):
+            storage_class = 'heap'
+            self.advance()
+        elif self.expect(TokenType.STACK):
+            storage_class = 'stack'
+            self.advance()
+        elif self.expect(TokenType.REGISTER):
+            storage_class = 'register'
+            self.advance()
+        
+        # Parse qualifiers AFTER storage class (const, volatile)
         if self.expect(TokenType.CONST):
             is_const = True
             self.advance()
@@ -137,33 +154,20 @@ class FluxParser:
             is_volatile = True
             self.advance()
         
-        # After qualifiers, check for storage class or other keywords
-        if self.expect(TokenType.STACK):
-            storage_class = 'stack'
-            self.advance()
-        elif self.expect(TokenType.HEAP):
-            storage_class = 'heap'
-            self.advance()
-        elif self.expect(TokenType.GLOBAL):
-            storage_class = 'global'
-            self.advance()
-        elif self.expect(TokenType.LOCAL):
-            storage_class = 'local'
-            self.advance()
-        elif self.expect(TokenType.REGISTER):
-            storage_class = 'register'
-            self.advance()
-        
-        # Now check what comes after qualifiers and storage class
-        if is_const or is_volatile:
+        # If we have storage class OR qualifiers, it MUST be a variable declaration or function
+        if storage_class or is_const or is_volatile:
             if self.expect(TokenType.ASM):
-                return self.asm_statement(is_volatile=True)
-            if self.expect(TokenType.DEF):
+                return self.asm_statement(is_volatile=is_volatile)
+            elif self.expect(TokenType.DEF):
                 return self.function_def()
             else:
-                # It's a variable declaration with qualifiers
-                return self.variable_declaration_statement()
-        elif self.expect(TokenType.USING):
+                # It's a variable declaration - consume it
+                var_decl = self.variable_declaration()
+                self.consume(TokenType.SEMICOLON)
+                return var_decl
+        
+        # No storage class or qualifiers - check for other statement types
+        if self.expect(TokenType.USING):
             return self.using_statement()
         elif self.expect(TokenType.DEF):
             return self.function_def()
@@ -183,8 +187,6 @@ class FluxParser:
             return self.while_statement()
         elif self.expect(TokenType.FOR):
             return self.for_statement()
-        elif self.expect(TokenType.DO):
-            return self.do_while_statement()
         elif self.expect(TokenType.SWITCH):
             return self.switch_statement()
         elif self.expect(TokenType.TRY):
@@ -216,7 +218,7 @@ class FluxParser:
         elif self.expect(TokenType.AUTO) and self.peek() and self.peek().type == TokenType.LEFT_BRACE:
             # Handle destructuring assignment
             destructure = self.destructuring_assignment()
-            self.consume(TokenType.SEMICOLON) ## MOVE THIS INTO DESTRUCTURING_ASSIGNMENT()
+            self.consume(TokenType.SEMICOLON)
             return destructure
         elif self.expect(TokenType.ASM):
             return self.asm_statement()
@@ -570,12 +572,6 @@ class FluxParser:
         
         # INHERITANCE - TODO after v1 Flux
         base_namespaces = []
-        #if self.expect(TokenType.COLON):
-        #    self.advance()
-        #    base_namespaces.append(self.consume(TokenType.IDENTIFIER).value)
-        #    while self.expect(TokenType.COMMA):
-        #        self.advance()
-        #        base_namespaces.append(self.consume(TokenType.IDENTIFIER).value)
         
         functions = []
         structs = []
@@ -590,7 +586,15 @@ class FluxParser:
         self.consume(TokenType.LEFT_BRACE)
         
         while not self.expect(TokenType.RIGHT_BRACE):
-            if self.expect(TokenType.DEF):
+            # Check for storage class keywords FIRST
+            if self.expect(TokenType.GLOBAL, TokenType.LOCAL, TokenType.HEAP, 
+                           TokenType.STACK, TokenType.REGISTER,
+                           TokenType.CONST, TokenType.VOLATILE):
+                # Storage class means variable declaration
+                var_decl = self.variable_declaration()
+                variables.append(var_decl)
+                self.consume(TokenType.SEMICOLON)
+            elif self.expect(TokenType.DEF):
                 functions.append(self.function_def())
             elif self.expect(TokenType.STRUCT):
                 structs.append(self.struct_def())
@@ -614,31 +618,17 @@ class FluxParser:
     
     def type_spec(self) -> TypeSpec:
         """
-        type_spec -> ('const')? ('volatile')? ('signed'|'unsigned')? ('global'|'local')? ('heap'|'stack'|'register')? base_type alignment? array_spec? pointer_spec?
+        type_spec -> ('global'|'local'|'heap'|'stack'|'register')? ('const')? ('volatile')? ('signed'|'unsigned')? base_type alignment? array_spec? pointer_spec?
         array_spec -> ('[' expression? ']')+
+        
+        NOTE: Storage class can come FIRST, before qualifiers
         """
         is_const = False
         is_volatile = False
         is_signed = True
-        storage_class = None  # NEW
+        storage_class = None
 
-        # Parse qualifiers
-        if self.expect(TokenType.CONST):
-            is_const = True
-            self.advance()
-        
-        if self.expect(TokenType.VOLATILE):
-            is_volatile = True
-            self.advance()
-        
-        if self.expect(TokenType.SIGNED):
-            is_signed = True
-            self.advance()
-        elif self.expect(TokenType.UNSIGNED):
-            is_signed = False
-            self.advance()
-        
-        # NEW: Parse storage class
+        # Parse storage class FIRST (before qualifiers)
         if self.expect(TokenType.GLOBAL):
             storage_class = StorageClass.GLOBAL
             self.advance()
@@ -653,6 +643,22 @@ class FluxParser:
             self.advance()
         elif self.expect(TokenType.REGISTER):
             storage_class = StorageClass.REGISTER
+            self.advance()
+
+        # Parse qualifiers AFTER storage class
+        if self.expect(TokenType.CONST):
+            is_const = True
+            self.advance()
+        
+        if self.expect(TokenType.VOLATILE):
+            is_volatile = True
+            self.advance()
+        
+        if self.expect(TokenType.SIGNED):
+            is_signed = True
+            self.advance()
+        elif self.expect(TokenType.UNSIGNED):
+            is_signed = False
             self.advance()
         
         # Base type parsing
@@ -719,7 +725,7 @@ class FluxParser:
             array_size=array_size,
             array_dimensions=array_dimensions,
             is_pointer=pointer_depth > 0,
-            pointer_depth=pointer_depth,  # NEW: Track depth
+            pointer_depth=pointer_depth,
             custom_typename=custom_typename,
             storage_class=storage_class
         )
@@ -909,7 +915,11 @@ class FluxParser:
                 struct_literal.struct_type = struct_name
                 
                 # Create StructInstance with the literal's field values
-                return VariableDeclaration(name, type_spec, struct_literal)
+                var_decl = VariableDeclaration(name, type_spec, struct_literal)
+                # Mark as global if storage_class is GLOBAL
+                if type_spec.storage_class == StorageClass.GLOBAL:
+                    var_decl.is_global = True
+                return var_decl
             
             # Check for object instantiation: identifier(args)
             if self.expect(TokenType.LEFT_PAREN):
@@ -927,7 +937,11 @@ class FluxParser:
                     constructor_name = type_spec.base_type.value + "__init"
                 
                 constructor_call = FunctionCall(constructor_name, args)
-                return VariableDeclaration(name, type_spec, constructor_call)
+                var_decl = VariableDeclaration(name, type_spec, constructor_call)
+                # Mark as global if storage_class is GLOBAL
+                if type_spec.storage_class == StorageClass.GLOBAL:
+                    var_decl.is_global = True
+                return var_decl
             
             # Handle comma-separated variables
             names = [name]
@@ -941,8 +955,14 @@ class FluxParser:
                 self.advance()
                 initial_value = self.expression()
             
-            # For now, just return the first declaration
-            return VariableDeclaration(names[0], type_spec, initial_value)
+            # Create variable declaration
+            var_decl = VariableDeclaration(names[0], type_spec, initial_value)
+            
+            # Mark as global if storage_class is GLOBAL
+            if type_spec.storage_class == StorageClass.GLOBAL:
+                var_decl.is_global = True
+            
+            return var_decl
     
     def block_statement(self) -> Block:
         """
@@ -1906,7 +1926,7 @@ class FluxParser:
         elif self.expect(TokenType.STRING_LITERAL):
             value = self.current_token.value
             self.advance()
-            return Literal(value, DataType.CHAR)
+            return StringLiteral(value)
         elif self.expect(TokenType.F_STRING):
             f_string_content = self.current_token.value
             self.advance()

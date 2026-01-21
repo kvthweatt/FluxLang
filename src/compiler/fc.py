@@ -289,44 +289,44 @@ class FluxCompiler:
             elif self.platform == "Windows":
                 obj_file = temp_dir / f"{base_name}.obj"
                 
-                # Windows: Use Clang directly to compile LLVM IR to object file
-                # Try multiple possible Clang locations
-                #print(config['architecture'])
-                #exit()
-                clang_args = [
-                    "-c",
-                    "-Os" if int(config['optimize_size']) == 1 else "",                    # Optimize for size
-                    "-O3" if int(config['optimize_speed']) == 1 else "",                    # Optimize for speed (clang will use the most aggressive)
-                    "-ffunction-sections" if int(config['unique_function_sections']) == 1 else "",    # Place each function in its own section
-                    "-fdata-sections" if int(config['no_unwind_tables']) == 1 else "",        # Place each data in its own section
-                    "-fno-unwind-tables" if int(config['no_unwind_tables']) == 1 else "",     # Disable unwind tables (saves space)
-                    "-fno-asynchronous-unwind-tables" if int(config['no_async_unwind_tables']) == 1 else "",
-                    "-fmerge-all-constants" if int(config['merge_all_constants']) == 1 else "",  # Merge duplicate constants
-                                                # Enabling may cause undefined behavior for Flux programs
-                    "-fno-stack-protector" if int(config['disable_stack_protection']) == 1 else "",   # Disable stack protection
-                    "-fno-ident" if int(config['no_ident']) == 1 else "",             # Don't emit .ident directive
-                    "-march=" + config['architecture'],          # Optimize for current CPU
-                    "-Wno-override-module" if int(config['generic_triple']) == 1 else self.module_triple,   # Do not override triple presets
-                    "-mtune=" + config['architecture'],
-                    "-fomit-frame-pointer" if int(config['omit_frame_pointers']) == 1 else "",   # Omit frame pointers (smaller, faster)
+                # Use configuration to determine desired compiler.
+                compiler = config.get('compiler')
+                # TODO:
+                # match (compiler):   case "clang", case "llc", etc...
+                compiler_args = [
+                    "-O" + config['lto_optimization_level'],  # Aggressive optimization level
+                    "-filetype=obj",                    # Direct object file output
+                    "-mtriple=" + self.module_triple,   # Target triple
+                    #"-march=" + config['architecture'], # Architecture
+                    #"-mcpu=" + config['cpu'],           # Target CPU
+                    "-enable-misched",                  # Enable machine instruction scheduler
+                    "-enable-tail-merge",               # Merge similar tail code
+                    "-optimize-regalloc",               # Optimize register allocation
+                    "-relocation-model=static",         # Static relocation (no PIC)
+                    "-tail-dup-size=3",                 # Tail duplication threshold
+                    "-tailcallopt",                     # Enable tail call optimization
+                    "-x86-asm-syntax=intel",            # Intel syntax assembly
+                    "-x86-use-base-pointer",            # Use base pointer
+                    "-no-x86-call-frame-opt",           # Disable call frame optimization (smaller)
+                    "-disable-verify",                  # Disable verification for speed
                     str(ll_file),
                     "-o",
                     str(obj_file)
                 ]
 
-                # Compile LLVM IR to object file using Clang
-                cmd = [config.get('compiler')] + clang_args
-                self.logger.debug(f"Running: {' '.join(cmd)}", "clang")
+                # Compile LLVM IR to object file using desired compiler
+                cmd = [compiler] + compiler_args
+                self.logger.debug(f"Running: {' '.join(cmd)}", compiler)
                 
                 try:
                     result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                    self.logger.trace(f"Clang output: {result.stdout}", "clang")
+                    self.logger.trace(f"{compiler} output: {result.stdout}", compiler)
                     if result.stderr:
-                        self.logger.warning(f"Clang stderr: {result.stderr}", "clang")
+                        self.logger.warning(f"{compiler} stderr: {result.stderr}", compiler)
                     self.temp_files.append(obj_file)
                     
                 except subprocess.CalledProcessError as e:
-                    self.logger.error(f"Clang compilation failed: {e.stderr}", "clang")
+                    self.logger.error(f"{compiler} compilation failed: {e.stderr}", compiler)
                     raise
                     
             else:  # Linux and others - use traditional assembly step
@@ -337,7 +337,7 @@ class FluxCompiler:
                 cmd = [
                     "llc",
                     "-O3",                        # Maximum optimization level
-                    "-mtriple=x86_64-linux",      # Explicit target triple
+                    #"-mtriple=x86_64-linux",      # Explicit target triple
                     "-march=x86-64",
                     "-mcpu=native",               # Optimize for current CPU
                     "-enable-misched",            # Enable machine instruction scheduler
@@ -483,7 +483,7 @@ class FluxCompiler:
                     "--section-start", ".rodata=0x500000",  # Read-only data address
                     "--section-start", ".data=0x600000",    # Data section address
                     "--section-start", ".bss=0x700000",     # BSS section address
-                    "-e", "main",                       # Entry point
+                    "-e", "_start",                       # Entry point
                     str(obj_file),
                     # Runtime dependencies -- Enable if you want them in your code.
                     #"/usr/lib/x86_64-linux-gnu/Scrt1.o",        # Startup code
@@ -496,6 +496,7 @@ class FluxCompiler:
                     "--end-group",
                     "-o", output_bin
                 ]
+                #link_cmd = ["clang", "-static", str(obj_file), "-o", output_bin]
                 self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
                 
                 try:

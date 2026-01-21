@@ -15,7 +15,3 @@ namespace standard
 
 // Comment out after upgrade to full specification
 import "redio.fx";
-using standard::io::console;
-// Replace with this
-// import "io.fx";
-// using standard::io::console;

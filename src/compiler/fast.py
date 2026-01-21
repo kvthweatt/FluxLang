@@ -542,6 +542,95 @@ class Identifier(Expression):
         raise NameError(f"Unknown identifier: {self.name}")
 
 @dataclass
+class StringLiteral(Expression):
+    """
+    Represents a string literal.
+    
+    Unlike CHAR literals (single characters stored as i8),
+    string literals are arrays of i8.
+    
+    Storage location depends on context:
+    - In global scope or with 'global' storage class: stored as global constant
+    - In local scope (default): stored on stack (alloca)
+    - With 'heap' storage class: allocated on heap (not yet implemented)
+    
+    Attributes:
+        value: The string content (without quotes)
+        storage_class: Optional storage class override
+    """
+    value: str
+    storage_class: Optional[StorageClass] = None
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        string_bytes = self.value.encode('ascii')
+        
+        # Create array type for the string (no null terminator - Flux strings are not null-terminated)
+        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+        
+        # Create constant array with string bytes
+        str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+        
+        # Determine storage location
+        use_global = (
+            self.storage_class == StorageClass.GLOBAL or
+            builder.scope is None  # Global scope
+        )
+        
+        use_heap = self.storage_class == StorageClass.HEAP
+        use_stack = (
+            self.storage_class == StorageClass.STACK or
+            self.storage_class == StorageClass.LOCAL or
+            (builder.scope is not None and not use_global and not use_heap)
+        )
+        
+        if use_heap:
+            # TODO: Implement heap allocation for string literals
+            # Should call our custom malloc()
+            # For now, fall back to stack
+            use_stack = True
+        
+        if use_global:
+            # Create global variable for the string with unique name
+            str_name = f".str.{id(self)}"
+            gv = ir.GlobalVariable(module, str_val.type, name=str_name)
+            gv.linkage = 'internal'
+            gv.global_constant = True
+            gv.initializer = str_val
+            
+            # Return a pointer to the first element of the global array
+            # This converts [N x i8]* to i8*
+            zero = ir.Constant(ir.IntType(32), 0)
+            return builder.gep(gv, [zero, zero], inbounds=True, name="str_ptr")
+        
+        elif use_stack:
+            # Allocate string on stack
+            stack_alloca = builder.alloca(str_array_ty, name="str_stack")
+            
+            # Initialize stack array with string bytes
+            for i, byte_val in enumerate(string_bytes):
+                zero = ir.Constant(ir.IntType(32), 0)
+                index = ir.Constant(ir.IntType(32), i)
+                elem_ptr = builder.gep(stack_alloca, [zero, index], name=f"str_char_{i}")
+                char_val = ir.Constant(ir.IntType(8), byte_val)
+                builder.store(char_val, elem_ptr)
+            
+            # Return pointer to first element (converts [N x i8]* to i8*)
+            zero = ir.Constant(ir.IntType(32), 0)
+            return builder.gep(stack_alloca, [zero, zero], inbounds=True, name="str_ptr")
+        
+        else:
+            # Fallback: use global storage
+            str_name = f".str.{id(self)}"
+            gv = ir.GlobalVariable(module, str_val.type, name=str_name)
+            gv.linkage = 'internal'
+            gv.global_constant = True
+            gv.initializer = str_val
+            
+            # Return pointer to first element
+            zero = ir.Constant(ir.IntType(32), 0)
+            return builder.gep(gv, [zero, zero], inbounds=True, name="str_ptr")
+
+@dataclass
 class QualifiedName(Expression):
     """Represents qualified names with super:: or virtual:: or super::virtual:: for objects or structs"""
     qualifiers: List[str]
@@ -618,7 +707,9 @@ class BinaryOp(Expression):
         """Turn a string Literal(DataType.CHAR with python str value) into a pointer-to-array value preserving array semantics.
         Returns a pointer to the first element (via gep) of an internal global array. The pointee is an ArrayType(i8, N).
         """
-        if not isinstance(lit, Literal) or lit.type != DataType.CHAR or not isinstance(lit.value, str):
+        if not isinstance(lit, (Literal, StringLiteral)):
+            raise ValueError("Expected string Literal or StringLiteral for conversion")
+        if isinstance(lit, Literal) and (lit.type != DataType.CHAR or not isinstance(lit.value, str)):
             raise ValueError("Expected string Literal for conversion")
         string_bytes = lit.value.encode('ascii')
         arr_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
@@ -660,9 +751,10 @@ class BinaryOp(Expression):
             return result
         if self.operator in (Operator.ADD, Operator.SUB):
             # Fast path: both operands are string literals -> compile-time constant concat
-            if isinstance(left_expr, Literal) and isinstance(right_expr, Literal) \
-                and left_expr.type == DataType.CHAR and right_expr.type == DataType.CHAR \
-                and isinstance(left_expr.value, str) and isinstance(right_expr.value, str):
+            if ((isinstance(left_expr, StringLiteral) and isinstance(right_expr, StringLiteral)) or
+                (isinstance(left_expr, Literal) and isinstance(right_expr, Literal) \
+                 and left_expr.type == DataType.CHAR and right_expr.type == DataType.CHAR \
+                 and isinstance(left_expr.value, str) and isinstance(right_expr.value, str))):
                 # Build concatenated constant array
                 concat = left_expr.value + (right_expr.value if self.operator == Operator.ADD else '')
                 lit_concat = Literal(concat, DataType.CHAR)
@@ -2561,8 +2653,16 @@ class VariableDeclaration(ASTNode):
             # Normal type resolution using the improved get_llvm_type_with_array
             llvm_type = self.type_spec.get_llvm_type_with_array(module)
         
+        # FIXED: Check if this is global scope
+        # Global if: builder is None, is_global flag is set, OR builder.scope is None
+        is_global_scope = (
+            builder is None or 
+            self.is_global or 
+            (hasattr(builder, 'scope') and builder.scope is None)
+        )
+        
         # Handle global variables (either at module scope OR explicitly marked with 'global' keyword)
-        if builder.scope is None or self.is_global:
+        if is_global_scope:
             # Check if global already exists (handle both original name and potential namespaced names)
             if self.name in module.globals:
                 return module.globals[self.name]
@@ -2581,18 +2681,21 @@ class VariableDeclaration(ASTNode):
             
             # Set initializer
             if self.initial_value:
-                # Handle array literals specially
-                if isinstance(llvm_type, ir.ArrayType) and hasattr(self.initial_value, 'value') and isinstance(self.initial_value.value, list):
-                    element_values = []
-                    for item in self.initial_value.value:
-                        if hasattr(item, 'value'):
-                            element_values.append(ir.Constant(llvm_type.element, item.value))
-                        else:
-                            element_values.append(ir.Constant(llvm_type.element, item))
-                    gvar.initializer = ir.Constant(llvm_type, element_values)
+                # FIXED: For global scope with None builder, we need to handle initial values differently
+                # We can't call codegen on expressions that need a builder, so handle special cases
+                
                 # Handle string literals for char arrays
-                elif isinstance(llvm_type, ir.ArrayType) and isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8 and isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR:
-                    string_val = self.initial_value.value
+                if isinstance(self.initial_value, (StringLiteral, Literal)) and \
+                   isinstance(llvm_type, ir.ArrayType) and \
+                   isinstance(llvm_type.element, ir.IntType) and \
+                   llvm_type.element.width == 8:
+                    
+                    # Get string value
+                    if isinstance(self.initial_value, StringLiteral):
+                        string_val = self.initial_value.value
+                    else:
+                        string_val = self.initial_value.value
+                    
                     char_values = []
                     for i, char in enumerate(string_val):
                         if i >= llvm_type.count:
@@ -2601,31 +2704,47 @@ class VariableDeclaration(ASTNode):
                     while len(char_values) < llvm_type.count:
                         char_values.append(ir.Constant(ir.IntType(8), 0))
                     gvar.initializer = ir.Constant(llvm_type, char_values)
-                # Handle string literals for pointer types (global variables)
-                elif isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8 and isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR:
-                    string_val = self.initial_value.value
-                    string_bytes = string_val.encode('ascii')
-                    str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
-                    str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
                     
-                    str_gv = ir.GlobalVariable(module, str_val.type, name=f".str.{self.name}")
-                    str_gv.linkage = 'internal'
-                    str_gv.global_constant = True
-                    str_gv.initializer = str_val
-                    
-                    zero = ir.Constant(ir.IntType(1), 0)
-                    str_ptr = str_gv.gep([zero, zero])
-                    gvar.initializer = str_ptr
-                else:
-                    init_val = self.initial_value.codegen(builder, module)
-                    if init_val is not None:
-                        gvar.initializer = init_val
-                    else:
-                        if isinstance(llvm_type, ir.ArrayType):
-                            gvar.initializer = ir.Constant(llvm_type, ir.Undefined)
+                # Handle array literals
+                elif isinstance(llvm_type, ir.ArrayType) and \
+                     hasattr(self.initial_value, 'value') and \
+                     isinstance(self.initial_value.value, list):
+                    element_values = []
+                    for item in self.initial_value.value:
+                        if hasattr(item, 'value'):
+                            element_values.append(ir.Constant(llvm_type.element, item.value))
                         else:
+                            element_values.append(ir.Constant(llvm_type.element, item))
+                    gvar.initializer = ir.Constant(llvm_type, element_values)
+                    
+                # Handle simple literals (int, float, bool)
+                elif isinstance(self.initial_value, Literal):
+                    if self.initial_value.type == DataType.INT:
+                        gvar.initializer = ir.Constant(llvm_type, self.initial_value.value)
+                    elif self.initial_value.type == DataType.FLOAT:
+                        gvar.initializer = ir.Constant(llvm_type, self.initial_value.value)
+                    elif self.initial_value.type == DataType.BOOL:
+                        gvar.initializer = ir.Constant(llvm_type, 1 if self.initial_value.value else 0)
+                    else:
+                        # Default to zero
+                        if isinstance(llvm_type, ir.IntType):
                             gvar.initializer = ir.Constant(llvm_type, 0)
+                        elif isinstance(llvm_type, ir.FloatType):
+                            gvar.initializer = ir.Constant(llvm_type, 0.0)
+                        else:
+                            gvar.initializer = ir.Constant(llvm_type, None)
+                else:
+                    # For complex expressions, we'd need a builder - default to zero
+                    if isinstance(llvm_type, ir.IntType):
+                        gvar.initializer = ir.Constant(llvm_type, 0)
+                    elif isinstance(llvm_type, ir.FloatType):
+                        gvar.initializer = ir.Constant(llvm_type, 0.0)
+                    elif isinstance(llvm_type, ir.ArrayType):
+                        gvar.initializer = ir.Constant(llvm_type, ir.Undefined)
+                    else:
+                        gvar.initializer = ir.Constant(llvm_type, None)
             else:
+                # No initial value - use default
                 if isinstance(llvm_type, ir.ArrayType):
                     gvar.initializer = ir.Constant(llvm_type, ir.Undefined)
                 elif isinstance(llvm_type, ir.IntType):
@@ -2638,6 +2757,7 @@ class VariableDeclaration(ASTNode):
             gvar.linkage = 'internal'
             return gvar
         
+        # Everything below here requires a valid builder
         # Handle local variables
         alloca = builder.alloca(llvm_type, name=self.name)
         
@@ -2802,25 +2922,6 @@ class VariableDeclaration(ASTNode):
                 builder.volatile_vars = set()
             builder.volatile_vars.add(self.name)
         return alloca
-    
-    def get_llvm_type(self, module: ir.Module) -> ir.Type:
-        if infer_array_size:
-            inferred_type_spec = TypeSpec(
-                base_type=resolved_type_spec.base_type,
-                is_signed=resolved_type_spec.is_signed,
-                is_const=resolved_type_spec.is_const,
-                is_volatile=resolved_type_spec.is_volatile,
-                bit_width=resolved_type_spec.bit_width or 8,
-                alignment=resolved_type_spec.alignment,
-                is_array=True,
-                array_size=string_length,
-                is_pointer=resolved_type_spec.is_pointer,
-                custom_typename=resolved_type_spec.custom_typename,
-                storage_class=resolved_type_spec.storage_class  # NEW
-            )
-            llvm_type = inferred_type_spec.get_llvm_type_with_array(module)
-        else:
-            llvm_type = self.type_spec.get_llvm_type_with_array(module)
 
 # Type declarations
 @dataclass
@@ -5489,6 +5590,9 @@ class NamespaceDef(ASTNode):
         
         Namespaces in Flux are primarily a compile-time construct that affects name mangling.
         At the LLVM level, we'll mangle names with the namespace prefix.
+        
+        NOTE: Namespaces do NOT create a new builder scope - they only affect name mangling.
+        Variables in namespaces are still global-scope variables with mangled names.
         """
         # Register this namespace so using statements can reference it
         if not hasattr(module, '_namespaces'):
@@ -5505,58 +5609,117 @@ class NamespaceDef(ASTNode):
         # Enable type resolution within this namespace by adding it to _using_namespaces
         if not hasattr(module, '_using_namespaces'):
             module._using_namespaces = []
+        
+        # Save the current using namespaces list to restore later
+        old_using_namespaces = module._using_namespaces[:]
+        
         # Add the current namespace to the using list so types defined in this namespace
         # can reference each other (like 'byte' can be found when defining 'noopstr')
-        old_using_namespaces = module._using_namespaces[:]
         if self.name not in module._using_namespaces:
             module._using_namespaces.append(self.name)
         
-        # Save the current module state
-        old_module = module
-        
-        # Create a new module for the namespace if we want isolation
-        # Alternatively, we can just mangle names in the existing module
-        # For now, we'll use name mangling in the existing module
-        
         try:
             # Process all namespace members with name mangling
+            # All of these are global-scope items, just with mangled names
+            
+            # Process structs
             for struct in self.structs:
-                # Mangle the struct name with namespace
                 original_name = struct.name
                 struct.name = f"{self.name}__{struct.name}"
-                struct.codegen(builder, module)
-                struct.name = original_name  # Restore original name
+                try:
+                    struct.codegen(builder, module)
+                except Exception as e:
+                    print(f"\nError processing struct '{original_name}' in namespace '{self.name}':")
+                    import traceback
+                    traceback.print_exc()
+                    raise
+                finally:
+                    struct.name = original_name  # Restore original name
             
+            # Process objects
             for obj in self.objects:
-                # Mangle the object name with namespace
                 original_name = obj.name
                 obj.name = f"{self.name}__{obj.name}"
-                obj.codegen(builder, module)
-                obj.name = original_name
+                try:
+                    obj.codegen(builder, module)
+                except Exception as e:
+                    print(f"\nError processing object '{original_name}' in namespace '{self.name}':")
+                    import traceback
+                    traceback.print_exc()
+                    raise
+                finally:
+                    obj.name = original_name
             
+            # Process functions
             for func in self.functions:
-                # Mangle the function name with namespace
                 original_name = func.name
                 func.name = f"{self.name}__{func.name}"
-                func.codegen(builder, module)
-                func.name = original_name
+                try:
+                    func.codegen(builder, module)
+                except Exception as e:
+                    print(f"\nError processing function '{original_name}' in namespace '{self.name}':")
+                    import traceback
+                    traceback.print_exc()
+                    raise
+                finally:
+                    func.name = original_name
             
+            # Process variables (type declarations and variable declarations)
             for var in self.variables:
-                # Mangle the variable name with namespace
-                original_name = var.name
-                var.name = f"{self.name}__{var.name}"
-                var.codegen(builder, module)
-                var.name = original_name
+                try:
+                    # Check the type of variable declaration
+                    if hasattr(var, 'type_name'):
+                        # This is a TypeDeclaration (type alias)
+                        original_name = var.type_name
+                        var.type_name = f"{self.name}__{var.type_name}"
+                        
+                        # Type declarations are compile-time only, just register them
+                        # Pass None as builder since type declarations don't generate code
+                        var.codegen(None, module)
+                        
+                        var.type_name = original_name
+                    else:
+                        # This is a regular VariableDeclaration
+                        # Namespace variables are global variables with mangled names
+                        original_name = var.name
+                        var.name = f"{self.name}__{var.name}"
+                        
+                        # Mark as global so it generates a global variable
+                        old_is_global = getattr(var, 'is_global', False)
+                        var.is_global = True
+                        
+                        # Use None as builder for global scope
+                        var.codegen(None, module)
+                        
+                        var.is_global = old_is_global
+                        var.name = original_name
+                        
+                except Exception as e:
+                    # Better error reporting
+                    import traceback
+                    var_name = getattr(var, 'name', None) or getattr(var, 'type_name', '<unknown>')
+                    print(f"\nError processing variable '{var_name}' in namespace '{self.name}':")
+                    print(f"Variable type: {type(var).__name__}")
+                    print(f"Variable details: {var}")
+                    traceback.print_exc()
+                    raise
             
             # Process nested namespaces
             for nested_ns in self.nested_namespaces:
-                # Mangle the nested namespace name
                 original_name = nested_ns.name
                 nested_ns.name = f"{self.name}__{nested_ns.name}"
-                nested_ns.codegen(builder, module)
-                nested_ns.name = original_name
+                try:
+                    nested_ns.codegen(builder, module)
+                except Exception as e:
+                    print(f"\nError processing nested namespace '{original_name}' in namespace '{self.name}':")
+                    import traceback
+                    traceback.print_exc()
+                    raise
+                finally:
+                    nested_ns.name = original_name
             
-            # Handle inheritance here
+            # Handle inheritance here (TODO)
+            
         finally:
             # Restore original using namespaces list to avoid namespace pollution
             module._using_namespaces = old_using_namespaces

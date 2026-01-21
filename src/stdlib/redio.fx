@@ -1,8 +1,6 @@
 // Input/Output Operations
-
-import "redtypes.fx";
-
-using standard::types;
+import "redsys.fx";
+//import "redtypes.fx";
 
 namespace standard
 {
@@ -25,7 +23,7 @@ namespace standard
             def npnl() -> void;
             def mac_print(byte* msg, int x) -> void;
             def mpnl() -> void;
-            def print(noopstr s) -> void;
+            def print(noopstr s, int len) -> void;
             def reset_from_input() -> void;
 
             // INPUT DEFINITIONS
@@ -151,26 +149,27 @@ namespace standard
 
             };
 
-    		def print(noopstr s) -> void
+    		def print(noopstr s, int len) -> void
     		{
     			// GENERIC PRINT
     			//
-    			// Designed to use system.fx to determine which OS we're on
+    			// Designed to use sys.fx to determine which OS we're on
     			// and call the appropriate print function.
-    			if (def(WINDOWS))
+                switch (CURRENT_OS)
                 {
-    				int len = sizeof(s) / 8; // Leave as-is, will work once RTTI is functional 
-    				win_print(@s, len);      //// and passing type information across function calls & returns
-    			};
-                if (def(LINUX))
-                {
-                    int len = sizeof(s) / 8;
-                    nix_print(@s, len);
-                };
-                if (def(MAC))
-                {
-                    int len = sizeof(s) / 8;
-                    mac_print(@s, len);
+                    case (1) // Windows
+                    {
+                        win_print(@s, len);
+                    }
+                    case (2) // Linux
+                    {
+                        nix_print(@s, len);
+                    }
+                    case (3) // Darwin (Mac)
+                    {
+                        mac_print(@s, len);
+                    }
+                    default { return void; }; // Unknown - exit() for now
                 };
     			(void)s;
     			return;
@@ -178,3 +177,5 @@ namespace standard
         };
     };
 };
+
+using standard::io::console;

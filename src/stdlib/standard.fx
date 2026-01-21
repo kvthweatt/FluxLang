@@ -32,6 +32,3 @@ import "io.fx";
 namespace standard
 {
 };
-
-using standard::types;
-using standard::io;

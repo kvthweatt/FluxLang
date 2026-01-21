@@ -19,3 +19,5 @@ namespace standard
         unsigned data{64} as u64;
 	};
 };
+
+using standard::types;
