@@ -2,6 +2,7 @@
 
 def main() -> int
 {
-	print("Hello World!",12);
-	return 0;
+    print("Hello World!\n",13);
+
+    return 0;
 };

@@ -258,85 +258,72 @@ namespace standard
             {
                 i64 handle = INVALID_HANDLE_VALUE;
                 
-                volatile asm
-                {
-                    // HANDLE CreateFileA(
-                    //   LPCSTR lpFileName,                // RCX - path
-                    //   DWORD dwDesiredAccess,            // RDX - access mode
-                    //   DWORD dwShareMode,                // R8  - share mode
-                    //   LPSECURITY_ATTRIBUTES lpSA,       // R9  - security (NULL)
-                    //   DWORD dwCreationDisposition,      // stack+32 - creation mode
-                    //   DWORD dwFlagsAndAttributes,       // stack+40 - attributes
-                    //   HANDLE hTemplateFile              // stack+48 - template (NULL)
-                    // )
-                    
-                    movq $0, %rcx           // lpFileName (path)
-                    movl $1, %edx           // dwDesiredAccess (access)
-                    movl $2, %r8d           // dwShareMode (share)
-                    xorq %r9, %r9           // lpSecurityAttributes = NULL
-                    
-                    subq $$56, %rsp         // Shadow space (32) + 3 params (24)
-                    movl $3, %eax           // disposition
-                    movl %eax, 32(%rsp)     // dwCreationDisposition
-                    movl $4, %eax           // attributes
-                    movl %eax, 40(%rsp)     // dwFlagsAndAttributes
-                    xorq %rax, %rax
-                    movq %rax, 48(%rsp)     // hTemplateFile = NULL
-                    
-                    call CreateFileA
-                    
-                    addq $$56, %rsp
-                    movq %rax, $5           // Store handle result
-                } : : "r"(path), "r"(access), "r"(share), "r"(disposition), "r"(attributes), "r"(@handle)
-                  : "rax","rcx","rdx","r8","r9","r10","r11","memory";
+    volatile asm
+    {
+        // Save the input parameters to specific registers for the Windows x64 calling convention
+        // Windows x64: RCX, RDX, R8, R9, then stack
+        
+        movq $0, %rcx           // lpFileName (path) - already 64-bit
+        movl $1, %edx           // dwDesiredAccess (access) - 32-bit into lower EDX
+        movl $2, %r8d           // dwShareMode (share) - 32-bit into lower R8D
+        xorq %r9, %r9           // lpSecurityAttributes = NULL
+        
+        subq $$56, %rsp         // Shadow space (32) + 3 params (24)
+        
+        movl $3, %eax           // Get disposition into EAX
+        movl %eax, 32(%rsp)     // dwCreationDisposition on stack
+        
+        movl $4, %eax           // Get attributes into EAX
+        movl %eax, 40(%rsp)     // dwFlagsAndAttributes on stack
+        
+        xorq %rax, %rax
+        movq %rax, 48(%rsp)     // hTemplateFile = NULL
+        
+        call CreateFileA
+        
+        addq $$56, %rsp
+        movq %rax, $5           // Store handle result
+    } : : "r"(path), "r"(access), "r"(share), "r"(disposition), "r"(attributes), "m"(handle)
+      : "rax","rcx","rdx","r8","r9","r10","r11","memory";
                 
                 return handle;
             };
             
             // ReadFile - Reads data from a file
             // Returns: Number of bytes actually read, or -1 on error
-            def win_read(i64 handle, byte[] buffer, u32 bytes_to_read) -> i32
-            {
-                u32 bytes_read = 0;
-                u32* bytes_read_ptr = @bytes_read;
-                i32 success = 0;
-                i32* success_ptr = @success;
-                
-                volatile asm
-                {
-                    // BOOL ReadFile(
-                    //   HANDLE hFile,                    // RCX - handle
-                    //   LPVOID lpBuffer,                 // RDX - buffer
-                    //   DWORD nNumberOfBytesToRead,      // R8  - bytes to read
-                    //   LPDWORD lpNumberOfBytesRead,     // R9  - bytes read ptr
-                    //   LPOVERLAPPED lpOverlapped        // stack+32 - NULL
-                    // )
-                    
-                    movq $0, %rcx           // hFile (handle)
-                    movq $1, %rdx           // lpBuffer (buffer)
-                    movl $2, %r8d           // nNumberOfBytesToRead
-                    movq $3, %r9            // lpNumberOfBytesRead (bytes_read ptr)
-                    
-                    subq $$40, %rsp         // Shadow space + 1 param
-                    xorq %rax, %rax
-                    movq %rax, 32(%rsp)     // lpOverlapped = NULL
-                    
-                    call ReadFile
-                    
-                    addq $$40, %rsp
-                    movq $4, %rcx           // success_ptr
-                    movl %eax, (%rcx)       // Store success/failure
-                } : : "r"(handle), "r"(buffer), "r"(bytes_to_read), "r"(bytes_read_ptr), "r"(success_ptr)
-                  : "rax","rcx","rdx","r8","r9","r10","r11","memory";
-                
-                // Return bytes read if successful, -1 if failed
-                if (success == 0)
-                {
-                    return -1;
-                };
-                
-                return bytes_read;
-            };
+def win_read(i64 handle, byte* buffer, u32 bytes_to_read) -> i32
+{
+    u32 bytes_read = 0;
+    u32* bytes_read_ptr = @bytes_read;
+    
+    volatile asm
+    {
+        movq $0, %rcx           // hFile
+        movq $1, %rdx           // lpBuffer  
+        movl $2, %r8d           // nNumberOfBytesToRead
+        movq $3, %r9            // lpNumberOfBytesRead pointer
+        
+        subq $$40, %rsp
+        xorq %rax, %rax
+        movq %rax, 32(%rsp)     // lpOverlapped = NULL
+        
+        call ReadFile
+        
+        addq $$40, %rsp
+        
+        // ReadFile returns non-zero on success
+        // bytes_read is already populated by Windows at the memory location we passed
+    } : : "r"(handle), "r"(buffer), "r"(bytes_to_read), "r"(bytes_read_ptr)
+      : "rax","rcx","rdx","r8","r9","r10","r11","memory";
+    
+    // Check if we read anything
+    if (bytes_read == 0)
+    {
+        return -1;
+    };
+    
+    return bytes_read;
+};
             
             // WriteFile - Writes data to a file
             // Returns: Number of bytes actually written, or -1 on error
@@ -410,6 +397,8 @@ namespace standard
             // Open file for reading
             def open_read(byte* path) -> i64
             {
+                using standard::io::console;
+                print("In open_read()\n",15);
                 return win_open(path, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL);
             };
             
@@ -430,4 +419,4 @@ namespace standard
 };
 
 using standard::io::console;
-//using standard::io::file;
+using standard::io::file;
