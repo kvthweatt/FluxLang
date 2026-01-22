@@ -2034,7 +2034,7 @@ class FluxParser:
         
         if self.expect(TokenType.RIGHT_BRACKET):
             self.advance()
-            return Literal([], DataType.DATA)  # Empty array literal
+            return ArrayLiteral(elements=[])
         
         # Look ahead to see if this is an array comprehension
         saved_pos = self.position
@@ -2070,13 +2070,13 @@ class FluxParser:
             else:
                 # Regular array literal: [expr, expr, ...]
                 elements = [first_expr]
-                
+
                 while self.expect(TokenType.COMMA):
                     self.advance()
                     elements.append(self.expression())
-                
+
                 self.consume(TokenType.RIGHT_BRACKET)
-                return Literal(elements, DataType.DATA)  # Array literal
+                return ArrayLiteral(elements=elements)
                 
         except ParseError:
             # If parsing fails, restore position and try again
@@ -2084,7 +2084,7 @@ class FluxParser:
             self.current_token = saved_token
             # Fall back to empty array
             self.consume(TokenType.RIGHT_BRACKET)
-            return Literal([], DataType.DATA)
+            return ArrayLiteral(elements=[])
     
     def struct_literal(self) -> StructLiteral:
         """
