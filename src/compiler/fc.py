@@ -500,8 +500,9 @@ class FluxCompiler:
                     "/opt:icf" if int(config['comdat_folding']) == 1 else "",                    # Identical COMDAT folding
                     "/merge:.rdata=.text" if int(config['merge_read_only_w_text']) == 1 else "",         # Merge read-only data with code
                     "/merge:.data=.text" if int(config['marge_data_and_code']) == 1 else "",          # Merge data with code
-                    "/align:" + config['memory_alignment'],                    # 32-bit memory alignment (minimal padding)
-                    "/filealign:" + config['bin_disk_alignment'],                # 32-bit file alignment (tiny executable)
+                    "/align:" + config['memory_alignment'] if int(config['memory_alignment']) != 0 else "",                    # 32-bit memory alignment (minimal padding)
+                    "/filealign:" + config['bin_disk_alignment'] if int(config['bin_disk_alignment']) != 0 else "",                # 32-bit file alignment (tiny executable)
+                    "/driver" if int(config['driver_mode']) == 1 else "",      # Driver mode
                     "/" + config['mode'],                    # Release mode (no debug info)
                     "/fixed" if int(config['fixed_base_address']) == 1 else "",                      # Fixed base address
                     "/incremental:no" if int(config['incremental_linking']) == 1 else "",             # Disable incremental linking

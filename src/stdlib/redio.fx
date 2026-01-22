@@ -15,20 +15,33 @@ namespace standard
         namespace console
         {
     		// INPUT FORWARD DECLARATIONS
+#ifdef __WINDOWS__
             def win_input(byte[] buffer, int max_len) -> int;
+#endif;
+#ifdef __LINUX__
             def nix_input(byte[] buffer, int max_len) -> int;
+#endif;
+#ifdef __MACOS__
             def mac_input(byte[] buffer, int max_len) -> int;
+#endif;
             def input(byte[] buffer, int max_len) -> int;
             //def input(byte[] msg) -> byte[]; <-- overloading not working correctly.
 
             // OUTPUT FORWARD DECLARATIONS
+#ifdef __WINDOWS__
             def win_print(byte* msg, int x) -> void;
             def wpnl() -> void;
+#endif;
+#ifdef __LINUX__
             def nix_print(byte* msg, int x) -> void;
             def npnl() -> void;
+#endif;
+#ifdef __MACOS__
             def mac_print(byte* msg, int x) -> void;
             def mpnl() -> void;
+#endif;
             def print(noopstr s, int len) -> void;
+#ifdef __WINDOWS__
             def reset_from_input() -> void;
 
             // INPUT DEFINITIONS
@@ -140,7 +153,8 @@ namespace standard
                 win_print(@bs,1);
                 return void;
             };
-
+#endif; // Windows
+#ifdef __LINUX__
             def nix_print(byte* msg, int x) -> void
             {
                 // Convert count to 64-bit for syscall
@@ -162,11 +176,14 @@ namespace standard
                 } : : "r"(msg), "r"(count) : "rax","rdi","rsi","rdx","rcx","r8","r9","r10","r11","memory";
                 return void;
             };
+#endif;
 
+#ifdef __MACOS__
             def mac_print(byte* msg, int x) -> void
             {
 
             };
+#endif;
 
     		def print(noopstr s, int len) -> void
     		{
@@ -174,20 +191,26 @@ namespace standard
     			//
     			// Designed to use sys.fx to determine which OS we're on
     			// and call the appropriate print function.
-                switch (1)
+                switch (CURRENT_OS)
                 {
+#ifdef __WINDOWS__
                     case (1) // Windows
                     {
                         win_print(@s, len);
                     }
+#endif;
+#ifdef __LINUX__
                     case (2) // Linux
                     {
                         nix_print(@s, len);
                     }
+#endif;
+#ifdef __MACOS__
                     case (3) // Darwin (Mac)
                     {
                         mac_print(@s, len);
                     }
+#endif;
                     default { return void; }; // Unknown - exit() for now
                 };
     			(void)s;
@@ -197,6 +220,7 @@ namespace standard
 
         namespace file
         {
+#ifdef __WINDOWS__
             // File access modes (dwDesiredAccess)
             #def GENERIC_READ 0x80000000;
             #def GENERIC_WRITE 0x40000000;
@@ -219,7 +243,7 @@ namespace standard
             
             // Invalid handle value
             #def INVALID_HANDLE_VALUE -1;
-            
+       
             // FORWARD DECLARATIONS
             def win_open(byte* path, u32 access, u32 share, u32 disposition, u32 attributes) -> i64;
             def win_read(i64 handle, byte[] buffer, u32 bytes_to_read) -> i32;
@@ -400,9 +424,10 @@ namespace standard
             {
                 return win_open(path, GENERIC_READ_WRITE, FILE_SHARE_READ, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL);
             };
+#endif;
         };
     };
 };
 
 using standard::io::console;
-using standard::io::file;
+//using standard::io::file;
