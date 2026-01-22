@@ -19,14 +19,18 @@ namespace standard
             
             volatile asm
             {
-                // Check TEB/PEB for Windows (fs segment on x64)
-                // Windows always has gs:[0x30] pointing to PEB
-                movq %gs:0x30, %rax
-                testq %rax, %rax
-                jz not_windows
+                // Try Linux first
+                movq $$1, %rax      // sys_write syscall number
+                movq $$-1, %rdi     // invalid fd
+                movq $$0, %rsi      // null buffer
+                movq $$0, %rdx      // zero length
+                syscall
                 
-                // If we got here, likely Windows
-                movl $$1, %ebx
+                // Linux returns -EBADF (-9), others crash or return different
+                cmpq $$-9, %rax
+                jne not_linux
+                
+                movl $$2, %ebx   // return 2
                 jmp done
                 
             not_windows:
@@ -42,16 +46,21 @@ namespace standard
                 cmpq $$-9, %rax
                 jne not_linux
                 
-                movl $$2, %ebx
+                movl $$2, %ebx   // return 2
                 jmp done
                 
             not_linux:
-                // Default to macOS if not Windows or Linux
-                movl $$3, %ebx
+                movq %gs:0x30, %rax
+                testq %rax, %rax
+                jz not_windows
+                
+                // If we got here, likely Windows
+                movl $$1, %ebx   // return 1
+                jmp done
                 
             done:
                 movl %ebx, %eax
-                movl %eax, $0
+                movl %eax, $0    // return 0
             } : "=r"(result) : : "rax", "rbx", "rcx", "rdx", "rdi", "rsi", "memory";
             
             return result;

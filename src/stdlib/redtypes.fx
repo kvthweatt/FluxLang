@@ -10,7 +10,6 @@ namespace standard
         char nl = "\n";
 
         signed data{16} as i16;
-		signed data{16} as testi16;
         signed data{32} as i32;
         signed data{64} as i64;
 

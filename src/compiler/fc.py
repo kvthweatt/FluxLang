@@ -432,7 +432,9 @@ class FluxCompiler:
                     "/opt:lldltojobs=all" if int(config['all_cores_for_lto']) == 1 else "",         # Use all cores for LTO
                     str(obj_file),
                     # Only link essential libraries
-                    config['lib_files'],
+                    #config['lib_files'],
+                    "kernel32.lib",
+                    #"ntdll.lib",
                     #"msvcrt.lib",   # Optional, link with C runtime
                     # "user32.lib",  # Uncomment only if GUI functions are used
                     # "gdi32.lib",   # Uncomment only if drawing functions are used

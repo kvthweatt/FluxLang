@@ -13,7 +13,7 @@ namespace standard
             def win_input(byte[] buffer, int max_len) -> int;
             def nix_input(byte[] buffer, int max_len) -> int;
             def mac_input(byte[] buffer, int max_len) -> int;
-            def input() -> byte[];
+            def input(byte[] buffer, int max_len) -> int;
             //def input(byte[] msg) -> byte[]; <-- overloading not working correctly.
 
             // OUTPUT FORWARD DECLARATIONS
@@ -82,6 +82,20 @@ namespace standard
                   : "rax","rcx","rdx","r8","r9","r10","r11","r12","memory";
                 reset_from_input();
                 return bytes_read - 2;
+            };
+
+            def input(byte[] buffer, int max_len) -> int
+            {
+                switch (CURRENT_OS)
+                {
+                    case (1)
+                    {
+                        return win_input(buffer, max_len);
+                    }
+                    default
+                    { return 0; };
+                };
+                return 0;
             };
 
             // OUTPUT DEFINITIONS
