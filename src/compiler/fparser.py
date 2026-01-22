@@ -243,11 +243,10 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
         return UsingStatement(namespace_path)
     
-    def function_def(self) -> Union[FunctionDef, DefMacro]:
+    def function_def(self) -> Union[FunctionDef]:
         """
         function_def -> ('const')? ('volatile')? 'def' IDENTIFIER '(' parameter_list? ')' '->' type_spec ';'
         function_def -> ('const')? ('volatile')? 'def' IDENTIFIER '(' parameter_list? ')' '->' type_spec block ';'
-        macro_def -> 'def' IDENTIFIER LITERAL ';'
         """
         is_const = False
         is_volatile = False
@@ -262,36 +261,6 @@ class FluxParser:
         
         self.consume(TokenType.DEF)
         name = self.consume(TokenType.IDENTIFIER).value
-        
-        # Check if this is a macro definition: def IDENTIFIER LITERAL;
-        if (not self.expect(TokenType.LEFT_PAREN) and 
-            self.expect(TokenType.STRING_LITERAL, TokenType.INTEGER, TokenType.FLOAT, TokenType.CHAR, TokenType.TRUE, TokenType.FALSE)):
-            # This is a macro definition
-            if is_const or is_volatile:
-                self.error("Macro definitions cannot have const or volatile qualifiers")
-            
-            # Parse the literal value
-            if self.expect(TokenType.STRING_LITERAL):
-                value = self.current_token.value
-                self.advance()
-            elif self.expect(TokenType.INTEGER):
-                value = int(self.current_token.value, 0)
-                self.advance()
-            elif self.expect(TokenType.FLOAT):
-                value = float(self.current_token.value)
-                self.advance()
-            elif self.expect(TokenType.CHAR):
-                value = self.current_token.value
-                self.advance()
-            elif self.expect(TokenType.TRUE):
-                value = True
-                self.advance()
-            elif self.expect(TokenType.FALSE):
-                value = False
-                self.advance()
-            
-            self.consume(TokenType.SEMICOLON)
-            return MacroDefinition(name, value)
         
         # This is a function definition
         self.consume(TokenType.LEFT_PAREN)

@@ -1251,9 +1251,11 @@ class CastExpression(Expression):
             void_ptr = ptr_value
         
         # Check OS macros
-        is_windows = is_macro_defined(module, 'WINDOWS')
-        is_linux = is_macro_defined(module, 'LINUX')
-        is_macos = is_macro_defined(module, 'MACOS')
+        # FIX TO NOT DO THIS IS_MACRO_DEFINED CRAP
+        # GONNA HAVE TO FIGURE OUT A WAY AROUND THIS
+        is_windows = False#is_macro_defined(module, 'WINDOWS')
+        is_linux = False#is_macro_defined(module, 'LINUX')
+        is_macos = False#is_macro_defined(module, 'MACOS') #False#Temporary
         
         if is_windows:
             asm_code = """
@@ -1275,7 +1277,7 @@ class CastExpression(Expression):
             """
             constraints = "r,~{rax},~{memory}"
         else:
-            return
+            return # wut
         
         asm_type = ir.FunctionType(ir.VoidType(), [i8_ptr])
         inline_asm = ir.InlineAsm(asm_type, asm_code, constraints, side_effect=True)
@@ -1765,41 +1767,6 @@ class FStringLiteral(Expression):
             )
             builder.store(ir.Constant(ir.IntType(8), ord(char)), char_ptr)
         return start_pos + len(temp_str)
-
-# Utility functions for macro management
-def define_macro(module: ir.Module, macro_name: str) -> None:
-    """Define a macro in the module's macro registry"""
-    if not hasattr(module, '_defined_macros'):
-        module._defined_macros = set()
-    module._defined_macros.add(macro_name)
-
-def is_macro_defined(module: ir.Module, macro_name: str) -> bool:
-    """Check if a macro is defined in the module's macro registry"""
-    if not hasattr(module, '_defined_macros'):
-        return False
-    return macro_name in module._defined_macros
-
-def get_defined_macros(module: ir.Module) -> set:
-    """Get the set of currently defined macros"""
-    if not hasattr(module, '_defined_macros'):
-        return set()
-    return module._defined_macros.copy()
-
-@dataclass
-class DefMacro(Expression):
-    """AST node for def(MACRO_NAME) expressions - checks if a macro is defined"""
-    macro_name: str
-    
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        """Generate code that returns true if macro is defined, false otherwise"""
-        # Check if the macro is defined in the module's macro registry
-        if not hasattr(module, '_defined_macros'):
-            module._defined_macros = set()
-        
-        is_defined = self.macro_name in module._defined_macros
-        # Return a boolean constant (i1 type in LLVM)
-        return ir.Constant(ir.IntType(1), is_defined)
-
 
 @dataclass
 class FunctionCall(Expression):
@@ -3001,51 +2968,6 @@ class TypeDeclaration(Expression):
 @dataclass
 class Statement(ASTNode):
     pass
-
-@dataclass
-class MacroDefinition(Statement):
-    """AST node for def IDENTIFIER LITERAL; statements - defines a macro"""
-    macro_name: str
-    macro_value: Union[str, int, float, bool]
-    
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
-        """Generate code to define a macro and create a global constant"""
-        # Add macro to the module's macro registry
-        define_macro(module, self.macro_name)
-        
-        # Create a global constant for the macro value
-        if isinstance(self.macro_value, str):
-            # String literal - create global string constant
-            string_bytes = self.macro_value.encode('ascii') #+ b'\0'  # NEVER NULL TERMINATE
-            str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
-            str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
-            
-            # Create global variable
-            gv = ir.GlobalVariable(module, str_val.type, name=self.macro_name)
-            gv.linkage = 'internal'
-            gv.global_constant = True
-            gv.initializer = str_val
-        elif isinstance(self.macro_value, int):
-            # Integer literal - create global integer constant
-            int_val = ir.Constant(ir.IntType(32), self.macro_value)
-            gv = ir.GlobalVariable(module, int_val.type, name=self.macro_name)
-            gv.linkage = 'internal'
-            gv.global_constant = True
-            gv.initializer = int_val
-        elif isinstance(self.macro_value, float):
-            # Float literal - create global float constant
-            float_val = ir.Constant(ir.FloatType(), self.macro_value)
-            gv = ir.GlobalVariable(module, float_val.type, name=self.macro_name)
-            gv.linkage = 'internal'
-            gv.global_constant = True
-            gv.initializer = float_val
-        elif isinstance(self.macro_value, bool):
-            # Boolean literal - create global boolean constant
-            bool_val = ir.Constant(ir.IntType(1), self.macro_value)
-            gv = ir.GlobalVariable(module, bool_val.type, name=self.macro_name)
-            gv.linkage = 'internal'
-            gv.global_constant = True
-            gv.initializer = bool_val
 
 @dataclass
 class ExpressionStatement(Statement):

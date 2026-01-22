@@ -1,10 +1,9 @@
 
-Merging program properties
-
-
 Discarded input sections
 
  .data          0x0000000000000000        0xc build/helloworld/helloworld.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 build/helloworld/helloworld.o
 
 Memory Configuration
 
@@ -21,18 +20,13 @@ LOAD build/helloworld/helloworld.o
 START GROUP
 END GROUP
                 [!provide]                        PROVIDE (__executable_start = SEGMENT_START ("text-segment", 0x400000))
-                0x0000000000400158                . = (SEGMENT_START ("text-segment", 0x400000) + SIZEOF_HEADERS)
-
-.note.gnu.build-id
- *(SORT_BY_ALIGNMENT(.note.gnu.build-id))
+                0x00000000004000e8                . = (SEGMENT_START ("text-segment", 0x400000) + SIZEOF_HEADERS)
 
 .interp
  *(SORT_BY_ALIGNMENT(.interp))
 
-.note.gnu.property
-                0x0000000000400158       0x30
- .note.gnu.property
-                0x0000000000400158       0x30 build/helloworld/helloworld.o
+.note.gnu.build-id
+ *(SORT_BY_ALIGNMENT(.note.gnu.build-id))
 
 .hash
  *(SORT_BY_ALIGNMENT(.hash))
@@ -55,7 +49,7 @@ END GROUP
 .gnu.version_r
  *(SORT_BY_ALIGNMENT(.gnu.version_r))
 
-.rela.dyn       0x0000000000400188        0x0
+.rela.dyn       0x00000000004000e8        0x0
  *(SORT_BY_ALIGNMENT(.rela.init))
  *(SORT_BY_ALIGNMENT(.rela.text) SORT_BY_ALIGNMENT(.rela.text.*) SORT_BY_ALIGNMENT(.rela.gnu.linkonce.t.*))
  *(SORT_BY_ALIGNMENT(.rela.fini))
@@ -66,18 +60,18 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.rela.ctors))
  *(SORT_BY_ALIGNMENT(.rela.dtors))
  *(SORT_BY_ALIGNMENT(.rela.got))
- .rela.got      0x0000000000400188        0x0 build/helloworld/helloworld.o
+ .rela.got      0x00000000004000e8        0x0 build/helloworld/helloworld.o
  *(SORT_BY_ALIGNMENT(.rela.bss) SORT_BY_ALIGNMENT(.rela.bss.*) SORT_BY_ALIGNMENT(.rela.gnu.linkonce.b.*))
  *(SORT_BY_ALIGNMENT(.rela.ldata) SORT_BY_ALIGNMENT(.rela.ldata.*) SORT_BY_ALIGNMENT(.rela.gnu.linkonce.l.*))
  *(SORT_BY_ALIGNMENT(.rela.lbss) SORT_BY_ALIGNMENT(.rela.lbss.*) SORT_BY_ALIGNMENT(.rela.gnu.linkonce.lb.*))
  *(SORT_BY_ALIGNMENT(.rela.lrodata) SORT_BY_ALIGNMENT(.rela.lrodata.*) SORT_BY_ALIGNMENT(.rela.gnu.linkonce.lr.*))
  *(SORT_BY_ALIGNMENT(.rela.ifunc))
 
-.rela.plt       0x0000000000400188        0x0
+.rela.plt       0x00000000004000e8        0x0
  *(SORT_BY_ALIGNMENT(.rela.plt))
                 [!provide]                        PROVIDE (__rela_iplt_start = .)
  *(SORT_BY_ALIGNMENT(.rela.iplt))
- .rela.iplt     0x0000000000400188        0x0 build/helloworld/helloworld.o
+ .rela.iplt     0x00000000004000e8        0x0 build/helloworld/helloworld.o
                 [!provide]                        PROVIDE (__rela_iplt_end = .)
 
 .relr.dyn
@@ -86,10 +80,10 @@ END GROUP
 .init
  *(SORT_NONE(.init))
 
-.plt            0x0000000000400188        0x0
+.plt            0x00000000004000e8        0x0
  *(SORT_BY_ALIGNMENT(.plt))
  *(SORT_BY_ALIGNMENT(.iplt))
- .iplt          0x0000000000400188        0x0 build/helloworld/helloworld.o
+ .iplt          0x00000000004000e8        0x0 build/helloworld/helloworld.o
 
 .plt.got
  *(SORT_BY_ALIGNMENT(.plt.got))
@@ -97,27 +91,27 @@ END GROUP
 .plt.sec
  *(SORT_BY_ALIGNMENT(.plt.sec))
 
-.text           0x0000000000400190      0x377
+.text           0x00000000004000f0      0x3a7
  *(SORT_BY_ALIGNMENT(.text.unlikely) SORT_BY_ALIGNMENT(.text.*_unlikely) SORT_BY_ALIGNMENT(.text.unlikely.*))
  *(SORT_BY_ALIGNMENT(.text.exit) SORT_BY_ALIGNMENT(.text.exit.*))
  *(SORT_BY_ALIGNMENT(.text.startup) SORT_BY_ALIGNMENT(.text.startup.*))
  *(SORT_BY_ALIGNMENT(.text.hot) SORT_BY_ALIGNMENT(.text.hot.*))
  *(SORT_BY_NAME(SORT_BY_ALIGNMENT(.text.sorted.*)))
  *(SORT_BY_ALIGNMENT(.text) SORT_BY_ALIGNMENT(.stub) SORT_BY_ALIGNMENT(.text.*) SORT_BY_ALIGNMENT(.gnu.linkonce.t.*))
- .text          0x0000000000400190      0x377 build/helloworld/helloworld.o
-                0x0000000000400190                standard__system__get_os
-                0x0000000000400220                standard__io__console__win_input
-                0x00000000004002f0                standard__io__console__input
-                0x0000000000400320                standard__io__console__win_print
-                0x0000000000400360                standard__io__console__wpnl
-                0x0000000000400380                standard__io__console__nix_print
-                0x00000000004003c0                standard__io__console__mac_print
-                0x00000000004003d0                standard__io__console__print
-                0x0000000000400430                standard__io__console__reset_from_input
-                0x0000000000400460                _start
-                0x0000000000400470                main
-                0x0000000000400480                exit
-                0x00000000004004c0                FRTStartup
+ .text          0x00000000004000f0      0x3a7 build/helloworld/helloworld.o
+                0x00000000004000f0                standard__system__get_os
+                0x0000000000400180                standard__io__console__win_input
+                0x0000000000400250                standard__io__console__input
+                0x0000000000400280                standard__io__console__win_print
+                0x00000000004002c0                standard__io__console__wpnl
+                0x00000000004002e0                standard__io__console__nix_print
+                0x0000000000400320                standard__io__console__mac_print
+                0x0000000000400330                standard__io__console__print
+                0x0000000000400390                standard__io__console__reset_from_input
+                0x00000000004003c0                _start
+                0x00000000004003d0                main
+                0x0000000000400410                exit
+                0x0000000000400450                FRTStartup
  *(SORT_BY_ALIGNMENT(.gnu.warning))
 
 .fini
@@ -136,9 +130,10 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.eh_frame_hdr))
  *(SORT_BY_ALIGNMENT(.eh_frame_entry) SORT_BY_ALIGNMENT(.eh_frame_entry.*))
 
-.eh_frame       0x0000000000400508      0x190
+.eh_frame       0x0000000000400498      0x194
  *(SORT_BY_ALIGNMENT(.eh_frame))
- .eh_frame      0x0000000000400508      0x190 build/helloworld/helloworld.o
+ .eh_frame      0x0000000000400498      0x194 build/helloworld/helloworld.o
+                                        0x198 (size before relaxing)
  *(SORT_BY_ALIGNMENT(.eh_frame.*))
 
 .sframe
@@ -153,33 +148,6 @@ END GROUP
 
 .exception_ranges
  *(SORT_BY_ALIGNMENT(.exception_ranges*))
-
-.note.build-id
- *(SORT_BY_ALIGNMENT(.note.build-id))
-
-.note.GNU-stack
-                0x0000000000400698        0x0
- *(SORT_BY_ALIGNMENT(.note.GNU-stack))
- .note.GNU-stack
-                0x0000000000400698        0x0 build/helloworld/helloworld.o
-
-.note.gnu-property
- *(SORT_BY_ALIGNMENT(.note.gnu-property))
-
-.note.ABI-tag
- *(SORT_BY_ALIGNMENT(.note.ABI-tag))
-
-.note.package
- *(SORT_BY_ALIGNMENT(.note.package))
-
-.note.dlopen
- *(SORT_BY_ALIGNMENT(.note.dlopen))
-
-.note.netbsd.ident
- *(SORT_BY_ALIGNMENT(.note.netbsd.ident))
-
-.note.openbsd.ident
- *(SORT_BY_ALIGNMENT(.note.openbsd.ident))
                 0x0000000000401000                . = DATA_SEGMENT_ALIGN (CONSTANT (MAXPAGESIZE), CONSTANT (COMMONPAGESIZE))
 
 .eh_frame
@@ -408,7 +376,6 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.note.GNU-stack))
  *(SORT_BY_ALIGNMENT(.gnu_debuglink))
  *(SORT_BY_ALIGNMENT(.gnu.lto_*))
- *(SORT_BY_ALIGNMENT(.gnu_object_only))
 OUTPUT(./helloworld elf64-x86-64)
 
 Cross Reference Table
@@ -433,16 +400,3 @@ standard__io__console__win_input                  build/helloworld/helloworld.o
 standard__io__console__win_print                  build/helloworld/helloworld.o
 standard__io__console__wpnl                       build/helloworld/helloworld.o
 standard__system__get_os                          build/helloworld/helloworld.o
-Stats: linker version: (GNU Binutils) 2.45.1
-Stats: linker started: Wed Jan 21 19:39:10 2026
-Stats: args: ld --gc-sections --as-needed --strip-all --build-id=none --no-eh-frame-hdr --no-ld-generated-unwind-info -z noseparate-code -z norelro -z now -z noexecstack -z max-page-size=0x1000 -z common-page-size=0x1000 -z defs --hash-style=gnu --sort-section=alignment --compress-debug-sections=none --fatal-warnings --stats --cref -Map ./helloworld.map --orphan-handling=place --unresolved-symbols=ignore-all -Ttext-segment=0x400000 --section-start .rodata=0x500000 --section-start .data=0x600000 --section-start .bss=0x700000 -e _start build/helloworld/helloworld.o --start-group --end-group -o ./helloworld 
-
-Stats: phase               cpu time    memory      user time    system time    
-Stats: name                (microsec)   (KiB)      (seconds)      (seconds)    
-Stats: ALL                     3779     18540              0              0    
-Stats: ctf processing            12         0              0              0    
-Stats: string merge               3         0              0              0    
-Stats: parsing                  983         0              0              0    
-Stats: plugins                    1         0              0              0    
-Stats: processing files        1860         0              0              0    
-Stats: write                    303         0              0              0    

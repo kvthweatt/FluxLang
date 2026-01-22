@@ -423,7 +423,7 @@ class FluxCompiler:
                     "/" + config['mode'],                    # Release mode (no debug info)
                     "/fixed" if int(config['fixed_base_address']) == 1 else "",                      # Fixed base address
                     "/incremental:no" if int(config['incremental_linking']) == 1 else "",             # Disable incremental linking
-                    "/strip:all" if int(config['strip_executable']) == 1 else "",                  # Remove all symbols
+                    "/strip" if int(config['strip_executable']) == 1 else "",                  # Remove all symbols
                     "/guard:no" if int(config['control_flow_guard']) == 1 else "",                   # Disable CFG (Control Flow Guard)
                     "/dynamicbase:no" if int(config['aslr']) == 1 else "",             # Disable ASLR (for smaller size)
                     #"/highentropyva:no" if int(config['no_default_libraries']) == 0 else "",           # Disable high entropy ASLR
@@ -435,7 +435,8 @@ class FluxCompiler:
                     #config['lib_files'],
                     "kernel32.lib",
                     #"ntdll.lib",
-                    #"msvcrt.lib",   # Optional, link with C runtime
+                    "msvcrt.lib",   # Optional, link with C runtime
+                    #"ntdll.lib",
                     # "user32.lib",  # Uncomment only if GUI functions are used
                     # "gdi32.lib",   # Uncomment only if drawing functions are used
                     f"/out:{output_bin}"

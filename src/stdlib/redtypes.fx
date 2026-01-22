@@ -1,4 +1,7 @@
 // Reduced Specification Standard Library `types.fx` -> `redtypes.fx`
+#ifndef FLUX_STANDARD
+#def FLUX_STANDARD 1;
+#endif;
 
 namespace standard
 {

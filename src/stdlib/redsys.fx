@@ -1,8 +1,10 @@
 // OS Detection Library
+#ifndef FLUX_STANDARD
+#def FLUX_STANDARD 1;
+#endif;
 
 import "redtypes.fx";
 
-global const int CURRENT_OS;
 global const int OS_UNKNOWN = 0;
 global const int OS_WINDOWS = 1;
 global const int OS_LINUX = 2;

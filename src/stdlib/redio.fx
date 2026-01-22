@@ -1,6 +1,10 @@
 // Input/Output Operations
-import "redsys.fx";
-//import "redtypes.fx";
+//import "redsys.fx";
+#ifndef FLUX_STANDARD
+#def FLUX_STANDARD 1;
+#endif;
+
+import "redtypes.fx";
 
 namespace standard
 {

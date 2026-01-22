@@ -1,17 +1,31 @@
 import "redstandard.fx";
 
+
+def strlen(byte* ps) -> int
+{
+    int c = 0;
+    while (true)
+    {
+        ++c;
+        if (*ps++ == 0)
+        {
+            c += 1;
+            break;
+        };
+    };
+    return c;
+};
+
+
 def main() -> int
 {
-	int[4] arr = [10, 20, 30, 40];
+    byte[] s = "Test\0";
 
-    int x = 1;
-	if (arr[x*2] == 30) // Should print, arrays not working.
-	{
-		win_print("30",2);
-	};
-    if (x == 2)
+    byte* ps = @s;
+    int c = strlen(ps);
+    if (c == 4)
     {
-        win_print("X",1);
+        print("\nSuccess.\n", 11);
     };
 
     return 0;
