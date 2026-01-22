@@ -4315,6 +4315,120 @@ class InlineAsm(Expression):
     is_volatile: bool = False
     constraints: str = ""
 
+    def _extract_clobbered_registers(self, asm: str, output_constraints: list, input_constraints: list) -> list:
+        """Extract registers that are modified by the assembly and build a clobber list.
+
+        Scans the assembly for register references and returns those that should be clobbered,
+        excluding registers that are already specified in output/input constraints.
+        """
+        import re
+
+        # Common x86/x86_64 registers to look for
+        x86_registers = {
+            # 32-bit general purpose
+            'eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'esp',
+            # 64-bit general purpose
+            'rax', 'rbx', 'rcx', 'rdx', 'rsi', 'rdi', 'rbp', 'rsp',
+            'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15',
+            # 8/16-bit variants
+            'al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh',
+            'ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp',
+            # 64-bit low 8-bit and 16-bit variants
+            'r8b', 'r9b', 'r10b', 'r11b', 'r12b', 'r13b', 'r14b', 'r15b',
+            'r8w', 'r9w', 'r10w', 'r11w', 'r12w', 'r13w', 'r14w', 'r15w',
+            'r8d', 'r9d', 'r10d', 'r11d', 'r12d', 'r13d', 'r14d', 'r15d',
+            'sil', 'dil', 'bpl', 'spl',
+        }
+
+        # Map register variants to their canonical clobber name
+        register_canonical = {
+            # eax family
+            'al': 'eax', 'ah': 'eax', 'ax': 'eax', 'eax': 'eax', 'rax': 'rax',
+            # ebx family
+            'bl': 'ebx', 'bh': 'ebx', 'bx': 'ebx', 'ebx': 'ebx', 'rbx': 'rbx',
+            # ecx family
+            'cl': 'ecx', 'ch': 'ecx', 'cx': 'ecx', 'ecx': 'ecx', 'rcx': 'rcx',
+            # edx family
+            'dl': 'edx', 'dh': 'edx', 'dx': 'edx', 'edx': 'edx', 'rdx': 'rdx',
+            # esi family
+            'sil': 'esi', 'si': 'esi', 'esi': 'esi', 'rsi': 'rsi',
+            # edi family
+            'dil': 'edi', 'di': 'edi', 'edi': 'edi', 'rdi': 'rdi',
+            # ebp family
+            'bpl': 'ebp', 'bp': 'ebp', 'ebp': 'ebp', 'rbp': 'rbp',
+            # esp family
+            'spl': 'esp', 'sp': 'esp', 'esp': 'esp', 'rsp': 'rsp',
+            # r8-r15 families
+            'r8': 'r8', 'r8b': 'r8', 'r8w': 'r8', 'r8d': 'r8',
+            'r9': 'r9', 'r9b': 'r9', 'r9w': 'r9', 'r9d': 'r9',
+            'r10': 'r10', 'r10b': 'r10', 'r10w': 'r10', 'r10d': 'r10',
+            'r11': 'r11', 'r11b': 'r11', 'r11w': 'r11', 'r11d': 'r11',
+            'r12': 'r12', 'r12b': 'r12', 'r12w': 'r12', 'r12d': 'r12',
+            'r13': 'r13', 'r13b': 'r13', 'r13w': 'r13', 'r13d': 'r13',
+            'r14': 'r14', 'r14b': 'r14', 'r14w': 'r14', 'r14d': 'r14',
+            'r15': 'r15', 'r15b': 'r15', 'r15w': 'r15', 'r15d': 'r15',
+        }
+
+        # Find all register references in the assembly (with % prefix for AT&T syntax or without for Intel)
+        # Match patterns like %eax, %rax, eax, rax, etc.
+        found_registers = set()
+
+        # AT&T syntax: %register
+        att_matches = re.findall(r'%([a-z][a-z0-9]*)', asm.lower())
+        for reg in att_matches:
+            if reg in register_canonical:
+                found_registers.add(register_canonical[reg])
+
+        # Intel syntax: register without prefix (but be careful not to match labels/identifiers)
+        # Look for registers as operands in instructions
+        for reg in x86_registers:
+            # Match register as a word boundary
+            if re.search(r'\b' + reg + r'\b', asm.lower()):
+                if reg in register_canonical:
+                    found_registers.add(register_canonical[reg])
+
+        # Check for memory operations (any store/load could clobber memory)
+        memory_ops = ['mov', 'store', 'push', 'pop', 'call', 'lea']
+        has_memory_op = any(op in asm.lower() for op in memory_ops)
+
+        # Check for syscall/int instructions that may clobber specific registers
+        if 'syscall' in asm.lower() or 'int' in asm.lower():
+            # syscall clobbers rcx, r11, and potentially rax (return value)
+            found_registers.update(['rcx', 'r11'])
+
+        # Remove registers that are specified in output/input constraints
+        # (these are handled by the constraint system)
+        constraint_regs = set()
+        for constraint in output_constraints + input_constraints:
+            # Extract register from constraint like "=a" (eax), "=b" (ebx), etc.
+            if constraint in ['a', '=a', '+a']:
+                constraint_regs.add('eax')
+                constraint_regs.add('rax')
+            elif constraint in ['b', '=b', '+b']:
+                constraint_regs.add('ebx')
+                constraint_regs.add('rbx')
+            elif constraint in ['c', '=c', '+c']:
+                constraint_regs.add('ecx')
+                constraint_regs.add('rcx')
+            elif constraint in ['d', '=d', '+d']:
+                constraint_regs.add('edx')
+                constraint_regs.add('rdx')
+            elif constraint in ['S', '=S', '+S']:
+                constraint_regs.add('esi')
+                constraint_regs.add('rsi')
+            elif constraint in ['D', '=D', '+D']:
+                constraint_regs.add('edi')
+                constraint_regs.add('rdi')
+
+        # Build final clobber list
+        clobber_list = list(found_registers - constraint_regs)
+
+        # Add memory clobber if we detected memory operations
+        if has_memory_op:
+            clobber_list.append('memory')
+
+        return sorted(clobber_list)
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Clean and format the assembly string - remove comment lines
         asm_lines = []
@@ -4339,11 +4453,11 @@ class InlineAsm(Expression):
             #print(f"DEBUG: Parsing constraints: {self.constraints}")
             constraint_parts = self.constraints.split(':')
             #print(f"DEBUG: Split into parts: {constraint_parts}")
-            
+
             # Ensure we have at least 3 parts (outputs:inputs:clobbers)
             while len(constraint_parts) < 3:
                 constraint_parts.append('')
-            
+
             # Handle outputs (first part)
             output_part = constraint_parts[0].strip()
             if output_part:
@@ -4360,7 +4474,7 @@ class InlineAsm(Expression):
                         var_ptr = module.globals[var_name]
                         output_operands.append(var_ptr)
                         output_constraints.append(constraint)
-                            
+
             # Handle inputs (second part)
             input_part = constraint_parts[1].strip()
             #print(f"DEBUG: Input part: '{input_part}'")
@@ -4394,7 +4508,7 @@ class InlineAsm(Expression):
                             input_operands.append(var_val)
                             #print(f"DEBUG: Found in globals, loaded value: {var_val}")
                         input_constraints.append(constraint)
-                            
+
             # Handle clobbers (third part)
             clobber_part = constraint_parts[2].strip()
             if clobber_part:
@@ -4402,6 +4516,12 @@ class InlineAsm(Expression):
                 import re
                 clobber_matches = re.findall(r'"([^"]+)"', clobber_part)
                 clobber_list = clobber_matches
+            else:
+                # Auto-generate clobber list by scanning the assembly for register usage
+                clobber_list = self._extract_clobbered_registers(asm, output_constraints, input_constraints)
+        else:
+            # No constraints provided - auto-generate clobber list from assembly
+            clobber_list = self._extract_clobbered_registers(asm, [], [])
         
         # Build the final constraint string in LLVM format
         # LLVM inline assembly constraint format:
