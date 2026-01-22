@@ -8,6 +8,7 @@
 #endif;
 
 #ifndef FLUX_RUNTIME
+// Disable with 0 to not include the Flux runtime.
 #def FLUX_RUNTIME 1;
 #endif;
 

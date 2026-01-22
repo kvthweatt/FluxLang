@@ -6,6 +6,8 @@
 #def FLUX_RUNTIME 1;
 #endif
 
+def main() -> int;
+
 #ifdef __LINUX__
 def _start() -> int;
 def exit() -> void;
@@ -24,8 +26,6 @@ def exit() -> void
     } : : : "rax", "rdi";
 };
 #endif; // Linux
-
-def main() -> int;
 
 #ifdef FLUX_RUNTIME
 def FRTStartup() -> void
