@@ -11,6 +11,9 @@ def main() -> int
     {
         print("\nSuccess.\n", 11);
     };
+    #ifdef __WINDOWS__
+    print("Windows detected.",17);
+    #endif;
 
     return 0;
 };

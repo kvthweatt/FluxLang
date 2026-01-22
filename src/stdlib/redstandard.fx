@@ -7,19 +7,11 @@
 #def FLUX_STANDARD 1;
 #endif;
 
+#ifndef FLUX_RUNTIME
 #def FLUX_RUNTIME 1;
-
-#ifndef CURRENT_OS
-#ifndef WINDOWS
-#def WINDOWS 1;
-#endif;
-#def CURRENT_OS WINDOWS;
 #endif;
 
 #import "redio.fx";
-#ifdef FLUX_RUNTIME
-#import "redruntime.fx";
-#endif;
 
 namespace standard
 {

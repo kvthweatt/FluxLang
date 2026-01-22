@@ -5,6 +5,7 @@
 #endif;
 
 #import "redtypes.fx";
+#import "redsys.fx";
 
 namespace standard
 {
@@ -90,7 +91,7 @@ namespace standard
 
             def input(byte[] buffer, int max_len) -> int
             {
-                switch (CURRENT_OS)
+                switch (1)
                 {
                     case (1)
                     {
@@ -173,7 +174,7 @@ namespace standard
     			//
     			// Designed to use sys.fx to determine which OS we're on
     			// and call the appropriate print function.
-                switch (CURRENT_OS)
+                switch (1)
                 {
                     case (1) // Windows
                     {

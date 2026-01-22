@@ -151,7 +151,89 @@ class FluxCompiler:
         """
         try:
             self.logger.section(f"Preprocessing Flux file: {filename}", LogLevel.INFO)
-            preprocessor = FluxPreprocessor()
+            self.predefined_macros = {
+                # Compiler identification
+                '__FLUX__': '1',
+                '__FLUX_MAJOR__': '1',
+                '__FLUX_MINOR__': '0',
+                '__FLUX_PATCH__': '0',
+                '__FLUX_VERSION__': '1',
+                
+                # LLVM backend info
+                # Remove when we're no longer using LLVM
+                '__LLVM__': '1',
+                
+                # Architecture detection
+                '__ARCH_X86__': '0',
+                '__ARCH_X86_64__': '0',
+                '__ARCH_ARM__': '0',
+                '__ARCH_ARM64__': '0',
+                '__ARCH_RISCV__': '0',
+                
+                # Platform detection
+                '__WINDOWS__': '0',
+                '__LINUX__': '0',
+                '__MACOS__': '0',
+                '__POSIX__': '0',
+                
+                # Feature detection
+                '__LITTLE_ENDIAN__': '0',  # Switch if desired.
+                '__BIG_ENDIAN__': '1',     # Always big-endian.
+                '__SIZEOF_PTR__': '8',     # Assume 64-bit.
+                '__SIZEOF_INT__': '4',     # Always 32-bit
+                '__SIZEOF_LONG__': '8',    # Always 64-bit
+                
+                # Compilation mode
+                '__DEBUG__': '1' if config.get('debug', False) else '0',
+                '__RELEASE__': '0' if config.get('debug', True) else '1',
+                '__OPTIMIZE__': config.get('optimization_level', '0'),
+            }
+            
+            # Set platform-specific values
+            if self.platform == "Windows":
+                self.predefined_macros.update({
+                    '__WINDOWS__': '1',
+                    '__WIN32__': '1',
+                    '__WIN64__': '1' if 'x86_64' in self.module_triple else '0',
+                })
+            elif self.platform == "Darwin":  # macOS
+                self.predefined_macros.update({
+                    '__MACOS__': '1',
+                    '__APPLE__': '1',
+                    '__MACH__': '1',
+                    '__POSIX__': '1',
+                })
+            else:  # Linux/Unix
+                self.predefined_macros.update({
+                    '__LINUX__': '1',
+                    '__UNIX__': '1',
+                    '__POSIX__': '1',
+                    '__gnu_linux__': '1',
+                })
+            
+            # Set architecture
+            if 'x86_64' in self.module_triple or 'amd64' in self.module_triple:
+                self.predefined_macros.update({
+                    '__ARCH_X86_64__': '1',
+                    '__x86_64__': '1',
+                    '__amd64__': '1',
+                })
+            elif 'i386' in self.module_triple or 'i686' in self.module_triple:
+                self.predefined_macros.update({
+                    '__ARCH_X86__': '1',
+                    '__i386__': '1',
+                    '__i686__': '1',
+                })
+            elif 'arm64' in self.module_triple or 'aarch64' in self.module_triple:
+                self.predefined_macros.update({
+                    '__ARCH_ARM64__': '1',
+                    '__arm64__': '1',
+                    '__aarch64__': '1',
+                })
+            
+            # Pass to preprocessor
+            preprocessor = FluxPreprocessor(compiler_macros=self.predefined_macros)
+            preprocessor.macros.update(self.predefined_macros)
             result = preprocessor.preprocess(filename)
             self.logger.section(f"Compiling Flux file: {filename}", LogLevel.INFO)
             base_name = Path(filename).stem
