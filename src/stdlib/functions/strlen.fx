@@ -3,17 +3,13 @@ def strlen(byte* ps) -> int
     int c = 0;
     while (true)
     {
-        byte ch = *ps;
+        byte* ch = ps++;
 
-        if (ch == 0)
+        if (*ch == 0)
         {
             break;
         };
-        // Anonymous block to visually separate the increments.
-        {
-            c++;
-            ps++;        // ONE increment, in one place
-        };
+        c++;
     };
-    return c - 4;        // Need to do this for some reason?
+    return c;
 };

@@ -3,16 +3,20 @@
 
 def main() -> int
 {
-    byte[] s = "Testing a random string!?\n\0";
+    byte[] s1 = "Testing a random string!?\n\0";
+    byte[] s2 = "Another string?\n\0";
 
-    byte* ps = @s;
-    int c = strlen(ps);
-    print(@s, c);
+    int c1 = strlen(@s1);
+    int c2 = strlen(@s2);
+    print(@s1, c1);
+    (void)s1;
+    //print(@s2, c2);
+    (void)s2;
     #ifdef __WINDOWS__
-    win_print("Windows detected.",17);
+    print("Windows detected.",17);
     #endif;
     #ifdef __LINUX__
-    nix_print("Linux detected.",15);
+    print("Linux detected.",15);
     #endif;
 
     return 0;

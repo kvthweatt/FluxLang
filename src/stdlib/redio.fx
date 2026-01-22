@@ -173,7 +173,7 @@ namespace standard
                     movq $0, %rsi           // buf = msg
                     movq $1, %rdx           // count = count (64-bit)
                     syscall                 // invoke syscall
-                } : : "r"(msg), "r"(count) : "rax","rdi","rsi","rdx","rcx","r8","r9","r10","r11","memory";
+                } : : "r"(msg), "r"(count) : "rax","rdi","rsi","rdx","rcx","r11","memory";
                 return void;
             };
 #endif;

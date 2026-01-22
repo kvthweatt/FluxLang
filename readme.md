@@ -16,7 +16,40 @@ Flux is a compiled systems language that combines C-like performance with Python
 - Compile-time execution capabilities
 - Clean, readable syntax
 
+```
+// Single-line comments
+
+///
+Multi
+line
+comments
+///
+```
+
 ## Core Features
+
+### Very simple preprocessor
+```
+#import "standard.fx";
+
+#ifdef __WINDOWS__
+def some_win_generic() -> LPCSTR*;
+#else
+#ifdef __LINUX__
+def some_nix_generic() -> void*;
+#endif;
+#endif;
+```
+
+Macro definitions must have a value, 0 included. Example:
+```
+// Defined:
+#def MY_MACRO 1;
+#def NOT_DEFINED 0;
+
+#ifdef NOT_DEFINED // False
+#ifndef MY_MACRO   // False
+```
 
 ### Bit-Precise Data Types
 

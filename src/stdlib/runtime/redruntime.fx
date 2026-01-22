@@ -7,6 +7,7 @@
 #endif
 
 def main() -> int;
+def FRTStartup() -> int;
 
 #ifdef __LINUX__
 def _start() -> int;
@@ -14,7 +15,7 @@ def exit() -> void;
 
 def _start() -> int
 {
-    return main();
+    return FRTStartup();
 };
 def exit() -> void
 {
@@ -28,25 +29,27 @@ def exit() -> void
 #endif; // Linux
 
 #ifdef FLUX_RUNTIME
-def FRTStartup() -> void
+def FRTStartup() -> int
 {
     int return_code;
     switch (CURRENT_OS)
     {
+        #ifdef __WINDOWS__
         case (1)
         {
             return_code = main();
         }
+        #endif;
         #ifdef __LINUX__
         case (2)
         {
-            return_code = _start();
+            return_code = main();
         }
         #endif;
         #ifdef __MACOS__
         case (3)
         {
-            return_code = _start();
+            return_code = main();
         }
         #endif;
         default
@@ -54,7 +57,7 @@ def FRTStartup() -> void
             #ifdef __LINUX__
             exit();
             #endif;
-            return;
+            return return_code;
         };
     };
     if (return_code != 0)
@@ -64,6 +67,6 @@ def FRTStartup() -> void
     #ifdef __LINUX__
     exit();  // Should pass return_code
     #endif;
-    return void;
+    return return_code;
 };
 #endif;
