@@ -542,95 +542,6 @@ class Identifier(Expression):
         raise NameError(f"Unknown identifier: {self.name}")
 
 @dataclass
-class StringLiteral(Expression):
-    """
-    Represents a string literal.
-    
-    Unlike CHAR literals (single characters stored as i8),
-    string literals are arrays of i8.
-    
-    Storage location depends on context:
-    - In global scope or with 'global' storage class: stored as global constant
-    - In local scope (default): stored on stack (alloca)
-    - With 'heap' storage class: allocated on heap (not yet implemented)
-    
-    Attributes:
-        value: The string content (without quotes)
-        storage_class: Optional storage class override
-    """
-    value: str
-    storage_class: Optional[StorageClass] = None
-    
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        string_bytes = self.value.encode('ascii')
-        
-        # Create array type for the string (no null terminator - Flux strings are not null-terminated)
-        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
-        
-        # Create constant array with string bytes
-        str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
-        
-        # Determine storage location
-        use_global = (
-            self.storage_class == StorageClass.GLOBAL or
-            builder.scope is None  # Global scope
-        )
-        
-        use_heap = self.storage_class == StorageClass.HEAP
-        use_stack = (
-            self.storage_class == StorageClass.STACK or
-            self.storage_class == StorageClass.LOCAL or
-            (builder.scope is not None and not use_global and not use_heap)
-        )
-        
-        if use_heap:
-            # TODO: Implement heap allocation for string literals
-            # Should call our custom malloc()
-            # For now, fall back to stack
-            use_stack = True
-        
-        if use_global:
-            # Create global variable for the string with unique name
-            str_name = f".str.{id(self)}"
-            gv = ir.GlobalVariable(module, str_val.type, name=str_name)
-            gv.linkage = 'internal'
-            gv.global_constant = True
-            gv.initializer = str_val
-            
-            # Return a pointer to the first element of the global array
-            # This converts [N x i8]* to i8*
-            zero = ir.Constant(ir.IntType(32), 0)
-            return builder.gep(gv, [zero, zero], inbounds=True, name="str_ptr")
-        
-        elif use_stack:
-            # Allocate string on stack
-            stack_alloca = builder.alloca(str_array_ty, name="str_stack")
-            
-            # Initialize stack array with string bytes
-            for i, byte_val in enumerate(string_bytes):
-                zero = ir.Constant(ir.IntType(32), 0)
-                index = ir.Constant(ir.IntType(32), i)
-                elem_ptr = builder.gep(stack_alloca, [zero, index], name=f"str_char_{i}")
-                char_val = ir.Constant(ir.IntType(8), byte_val)
-                builder.store(char_val, elem_ptr)
-            
-            # Return pointer to first element (converts [N x i8]* to i8*)
-            zero = ir.Constant(ir.IntType(32), 0)
-            return builder.gep(stack_alloca, [zero, zero], inbounds=True, name="str_ptr")
-        
-        else:
-            # Fallback: use global storage
-            str_name = f".str.{id(self)}"
-            gv = ir.GlobalVariable(module, str_val.type, name=str_name)
-            gv.linkage = 'internal'
-            gv.global_constant = True
-            gv.initializer = str_val
-            
-            # Return pointer to first element
-            zero = ir.Constant(ir.IntType(32), 0)
-            return builder.gep(gv, [zero, zero], inbounds=True, name="str_ptr")
-
-@dataclass
 class ArrayLiteral(Expression):
     """
     Represents an array literal (e.g., [1, 2, 3] or [1.0, 2.0, 3.0]).
@@ -773,6 +684,95 @@ class ArrayLiteral(Expression):
                 builder.store(val, elem_ptr)
 
             return stack_alloca
+
+@dataclass
+class StringLiteral(Expression):
+    """
+    Represents a string literal.
+
+    Unlike CHAR literals (single characters stored as i8),
+    string literals are arrays of i8.
+    
+    Storage location depends on context:
+    - In global scope or with 'global' storage class: stored as global constant
+    - In local scope (default): stored on stack (alloca)
+    - With 'heap' storage class: allocated on heap (not yet implemented)
+    
+    Attributes:
+        value: The string content (without quotes)
+        storage_class: Optional storage class override
+    """
+    value: str
+    storage_class: Optional[StorageClass] = None
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        string_bytes = self.value.encode('ascii')
+        
+        # Create array type for the string (no null terminator - Flux strings are not null-terminated)
+        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+        
+        # Create constant array with string bytes
+        str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+        
+        # Determine storage location
+        use_global = (
+            self.storage_class == StorageClass.GLOBAL or
+            builder.scope is None  # Global scope
+        )
+        
+        use_heap = self.storage_class == StorageClass.HEAP
+        use_stack = (
+            self.storage_class == StorageClass.STACK or
+            self.storage_class == StorageClass.LOCAL or
+            (builder.scope is not None and not use_global and not use_heap)
+        )
+        
+        if use_heap:
+            # TODO: Implement heap allocation for string literals
+            # Should call our custom malloc()
+            # For now, fall back to stack
+            use_stack = True
+        
+        if use_global:
+            # Create global variable for the string with unique name
+            str_name = f".str.{id(self)}"
+            gv = ir.GlobalVariable(module, str_val.type, name=str_name)
+            gv.linkage = 'internal'
+            gv.global_constant = True
+            gv.initializer = str_val
+            
+            # Return a pointer to the first element of the global array
+            # This converts [N x i8]* to i8*
+            zero = ir.Constant(ir.IntType(32), 0)
+            return builder.gep(gv, [zero, zero], inbounds=True, name="str_ptr")
+        
+        elif use_stack:
+            # Allocate string on stack
+            stack_alloca = builder.alloca(str_array_ty, name="str_stack")
+            
+            # Initialize stack array with string bytes
+            for i, byte_val in enumerate(string_bytes):
+                zero = ir.Constant(ir.IntType(32), 0)
+                index = ir.Constant(ir.IntType(32), i)
+                elem_ptr = builder.gep(stack_alloca, [zero, index], name=f"str_char_{i}")
+                char_val = ir.Constant(ir.IntType(8), byte_val)
+                builder.store(char_val, elem_ptr)
+            
+            # Return pointer to first element (converts [N x i8]* to i8*)
+            zero = ir.Constant(ir.IntType(32), 0)
+            return builder.gep(stack_alloca, [zero, zero], inbounds=True, name="str_ptr")
+        
+        else:
+            # Fallback: use global storage
+            str_name = f".str.{id(self)}"
+            gv = ir.GlobalVariable(module, str_val.type, name=str_name)
+            gv.linkage = 'internal'
+            gv.global_constant = True
+            gv.initializer = str_val
+            
+            # Return pointer to first element
+            zero = ir.Constant(ir.IntType(32), 0)
+            return builder.gep(gv, [zero, zero], inbounds=True, name="str_ptr")
 
 @dataclass
 class QualifiedName(Expression):
