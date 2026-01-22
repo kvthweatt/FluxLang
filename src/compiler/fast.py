@@ -631,6 +631,150 @@ class StringLiteral(Expression):
             return builder.gep(gv, [zero, zero], inbounds=True, name="str_ptr")
 
 @dataclass
+class ArrayLiteral(Expression):
+    """
+    Represents an array literal (e.g., [1, 2, 3] or [1.0, 2.0, 3.0]).
+
+    Storage location depends on context:
+    - In global scope or with 'global' storage class: stored as global constant
+    - In local scope (default): stored on stack (alloca)
+    - With 'heap' storage class: allocated on heap (not yet implemented)
+
+    Attributes:
+        elements: List of expressions representing array elements
+        element_type: Optional TypeSpec specifying the element type
+        storage_class: Optional storage class override
+    """
+    elements: List[Expression]
+    element_type: Optional[TypeSpec] = None
+    storage_class: Optional[StorageClass] = None
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        if not self.elements:
+            raise ValueError("Empty array literals are not supported")
+
+        # Generate code for all elements first to determine types
+        element_values = []
+        for elem in self.elements:
+            val = elem.codegen(builder, module)
+            element_values.append(val)
+
+        # Determine element type from first element or explicit type
+        if self.element_type:
+            elem_llvm_type = self.element_type.get_llvm_type(module)
+        else:
+            elem_llvm_type = element_values[0].type
+
+        # Create array type
+        array_len = len(element_values)
+        array_ty = ir.ArrayType(elem_llvm_type, array_len)
+
+        # Determine storage location
+        use_global = (
+            self.storage_class == StorageClass.GLOBAL or
+            builder.scope is None  # Global scope
+        )
+
+        use_heap = self.storage_class == StorageClass.HEAP
+        use_stack = (
+            self.storage_class == StorageClass.STACK or
+            self.storage_class == StorageClass.LOCAL or
+            (builder.scope is not None and not use_global and not use_heap)
+        )
+
+        if use_heap:
+            # TODO: Implement heap allocation for array literals
+            # Should call our custom malloc()
+            # For now, fall back to stack
+            use_stack = True
+
+        # Check if all elements are constants (for global storage optimization)
+        all_constants = all(isinstance(v, ir.Constant) for v in element_values)
+
+        if use_global and all_constants:
+            # Create global constant array
+            # Convert elements to proper type if needed
+            const_elements = []
+            for val in element_values:
+                if val.type != elem_llvm_type:
+                    # Type conversion needed
+                    if isinstance(elem_llvm_type, ir.IntType) and isinstance(val.type, ir.IntType):
+                        if elem_llvm_type.width > val.type.width:
+                            const_elements.append(ir.Constant(elem_llvm_type, val.constant))
+                        else:
+                            const_elements.append(ir.Constant(elem_llvm_type, val.constant & ((1 << elem_llvm_type.width) - 1)))
+                    elif isinstance(elem_llvm_type, ir.FloatType) and isinstance(val.type, (ir.IntType, ir.FloatType)):
+                        const_elements.append(ir.Constant(elem_llvm_type, float(val.constant)))
+                    else:
+                        const_elements.append(val)
+                else:
+                    const_elements.append(val)
+
+            # Create constant array
+            const_array = ir.Constant(array_ty, const_elements)
+
+            # Create global variable
+            arr_name = f".arr.{id(self)}"
+            gv = ir.GlobalVariable(module, array_ty, name=arr_name)
+            gv.linkage = 'internal'
+            gv.global_constant = True
+            gv.initializer = const_array
+
+            # Return pointer to the array
+            return gv
+
+        elif use_stack or (use_global and not all_constants):
+            # Allocate array on stack and initialize element by element
+            stack_alloca = builder.alloca(array_ty, name="arr_stack")
+
+            # Initialize each element
+            zero = ir.Constant(ir.IntType(32), 0)
+            for i, val in enumerate(element_values):
+                index = ir.Constant(ir.IntType(32), i)
+                elem_ptr = builder.gep(stack_alloca, [zero, index], name=f"arr_elem_{i}")
+
+                # Convert value to element type if needed
+                if val.type != elem_llvm_type:
+                    if isinstance(elem_llvm_type, ir.IntType) and isinstance(val.type, ir.IntType):
+                        if elem_llvm_type.width > val.type.width:
+                            val = builder.zext(val, elem_llvm_type, name=f"elem_zext_{i}")
+                        else:
+                            val = builder.trunc(val, elem_llvm_type, name=f"elem_trunc_{i}")
+                    elif isinstance(elem_llvm_type, ir.FloatType) and isinstance(val.type, ir.IntType):
+                        val = builder.sitofp(val, elem_llvm_type, name=f"elem_itof_{i}")
+                    elif isinstance(elem_llvm_type, ir.IntType) and isinstance(val.type, ir.FloatType):
+                        val = builder.fptosi(val, elem_llvm_type, name=f"elem_ftoi_{i}")
+
+                builder.store(val, elem_ptr)
+
+            # Return pointer to the array
+            return stack_alloca
+
+        else:
+            # Fallback: use stack storage
+            stack_alloca = builder.alloca(array_ty, name="arr_stack")
+
+            zero = ir.Constant(ir.IntType(32), 0)
+            for i, val in enumerate(element_values):
+                index = ir.Constant(ir.IntType(32), i)
+                elem_ptr = builder.gep(stack_alloca, [zero, index], name=f"arr_elem_{i}")
+
+                if val.type != elem_llvm_type:
+                    if isinstance(elem_llvm_type, ir.IntType) and isinstance(val.type, ir.IntType):
+                        if elem_llvm_type.width > val.type.width:
+                            val = builder.zext(val, elem_llvm_type, name=f"elem_zext_{i}")
+                        else:
+                            val = builder.trunc(val, elem_llvm_type, name=f"elem_trunc_{i}")
+                    elif isinstance(elem_llvm_type, ir.FloatType) and isinstance(val.type, ir.IntType):
+                        val = builder.sitofp(val, elem_llvm_type, name=f"elem_itof_{i}")
+                    elif isinstance(elem_llvm_type, ir.IntType) and isinstance(val.type, ir.FloatType):
+                        val = builder.fptosi(val, elem_llvm_type, name=f"elem_ftoi_{i}")
+
+                builder.store(val, elem_ptr)
+
+            return stack_alloca
+
+@dataclass
 class QualifiedName(Expression):
     """Represents qualified names with super:: or virtual:: or super::virtual:: for objects or structs"""
     qualifiers: List[str]
