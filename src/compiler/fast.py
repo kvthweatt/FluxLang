@@ -4315,6 +4315,182 @@ class InlineAsm(Expression):
     is_volatile: bool = False
     constraints: str = ""
 
+    def _infer_clobbers_from_asm(self, asm: str) -> List[str]:
+        """
+        Analyze assembly code and infer which registers are clobbered.
+        Returns a list of clobber strings (e.g., ["eax", "memory"]).
+        """
+        import re
+        clobbers = set()
+
+        # x86/x86-64 register sets
+        # 32-bit registers
+        x86_32_regs = {'eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'esp'}
+        # 64-bit registers
+        x86_64_regs = {'rax', 'rbx', 'rcx', 'rdx', 'rsi', 'rdi', 'rbp', 'rsp',
+                       'r8', 'r9', 'r10', 'r11', 'r12', 'r13', 'r14', 'r15'}
+        # 8-bit and 16-bit sub-registers (map to parent)
+        sub_reg_map = {
+            'al': 'eax', 'ah': 'eax', 'ax': 'eax',
+            'bl': 'ebx', 'bh': 'ebx', 'bx': 'ebx',
+            'cl': 'ecx', 'ch': 'ecx', 'cx': 'ecx',
+            'dl': 'edx', 'dh': 'edx', 'dx': 'edx',
+            'sil': 'esi', 'si': 'esi',
+            'dil': 'edi', 'di': 'edi',
+            'bpl': 'ebp', 'bp': 'ebp',
+            'spl': 'esp', 'sp': 'esp',
+        }
+        # 64-bit sub-register mappings
+        sub_reg_map_64 = {
+            'al': 'rax', 'ah': 'rax', 'ax': 'rax', 'eax': 'rax',
+            'bl': 'rbx', 'bh': 'rbx', 'bx': 'rbx', 'ebx': 'rbx',
+            'cl': 'rcx', 'ch': 'rcx', 'cx': 'rcx', 'ecx': 'rcx',
+            'dl': 'rdx', 'dh': 'rdx', 'dx': 'rdx', 'edx': 'rdx',
+            'sil': 'rsi', 'si': 'rsi', 'esi': 'rsi',
+            'dil': 'rdi', 'di': 'rdi', 'edi': 'rdi',
+            'bpl': 'rbp', 'bp': 'rbp', 'ebp': 'rbp',
+            'spl': 'rsp', 'sp': 'rsp', 'esp': 'rsp',
+            'r8d': 'r8', 'r8w': 'r8', 'r8b': 'r8',
+            'r9d': 'r9', 'r9w': 'r9', 'r9b': 'r9',
+            'r10d': 'r10', 'r10w': 'r10', 'r10b': 'r10',
+            'r11d': 'r11', 'r11w': 'r11', 'r11b': 'r11',
+            'r12d': 'r12', 'r12w': 'r12', 'r12b': 'r12',
+            'r13d': 'r13', 'r13w': 'r13', 'r13b': 'r13',
+            'r14d': 'r14', 'r14w': 'r14', 'r14b': 'r14',
+            'r15d': 'r15', 'r15w': 'r15', 'r15b': 'r15',
+        }
+
+        # Instructions that modify flags
+        flag_modifying_instrs = {
+            'add', 'sub', 'mul', 'imul', 'div', 'idiv', 'inc', 'dec', 'neg',
+            'and', 'or', 'xor', 'not', 'shl', 'shr', 'sal', 'sar', 'rol', 'ror',
+            'cmp', 'test', 'bt', 'bts', 'btr', 'btc', 'bsf', 'bsr',
+            'adc', 'sbb', 'rcl', 'rcr', 'shld', 'shrd',
+            'addq', 'subq', 'mulq', 'imulq', 'divq', 'idivq', 'incq', 'decq', 'negq',
+            'andq', 'orq', 'xorq', 'notq', 'shlq', 'shrq', 'salq', 'sarq',
+            'addl', 'subl', 'mull', 'imull', 'divl', 'idivl', 'incl', 'decl', 'negl',
+            'andl', 'orl', 'xorl', 'notl', 'shll', 'shrl', 'sall', 'sarl',
+        }
+
+        # Instructions that modify memory
+        memory_modifying_instrs = {
+            'mov', 'movl', 'movq', 'movb', 'movw',
+            'push', 'pop', 'pushq', 'popq', 'pushl', 'popl',
+            'stosb', 'stosw', 'stosd', 'stosq', 'stos',
+            'movsb', 'movsw', 'movsd', 'movsq', 'movs',
+        }
+
+        # Instructions that implicitly use specific registers
+        implicit_clobbers = {
+            'mul': ['edx'],  # mul clobbers edx (high part)
+            'imul': ['edx'],  # imul (one-operand form) clobbers edx
+            'div': ['edx'],  # div uses and clobbers edx
+            'idiv': ['edx'],  # idiv uses and clobbers edx
+            'mulq': ['rdx'],
+            'imulq': ['rdx'],
+            'divq': ['rdx'],
+            'idivq': ['rdx'],
+            'cpuid': ['eax', 'ebx', 'ecx', 'edx'],
+            'rdtsc': ['eax', 'edx'],
+            'rdtscp': ['eax', 'ecx', 'edx'],
+            'cwd': ['edx'],
+            'cdq': ['edx'],
+            'cqo': ['rdx'],
+            'syscall': ['rcx', 'r11'],  # syscall clobbers rcx and r11
+            'int': ['memory'],  # interrupts can modify memory
+        }
+
+        # Parse each line
+        for line in asm.split('\n'):
+            # Remove comments
+            line = re.sub(r'//.*$', '', line)
+            line = re.sub(r'/\*.*?\*/', '', line)
+            line = re.sub(r'#.*$', '', line)  # GAS-style comments
+            line = line.strip()
+
+            if not line:
+                continue
+
+            # Extract instruction and operands
+            # Handle AT&T syntax (instruction src, dst) and Intel syntax (instruction dst, src)
+            parts = line.split(None, 1)
+            if not parts:
+                continue
+
+            instr = parts[0].lower().rstrip(':')  # Handle labels
+
+            # Skip labels and directives
+            if instr.endswith(':') or instr.startswith('.'):
+                continue
+
+            operands_str = parts[1] if len(parts) > 1 else ''
+
+            # Check for flag-modifying instructions
+            base_instr = re.sub(r'[bwlq]$', '', instr)  # Remove size suffix
+            if base_instr in flag_modifying_instrs or instr in flag_modifying_instrs:
+                clobbers.add('cc')  # condition codes / flags
+
+            # Check for implicit clobbers
+            if instr in implicit_clobbers:
+                clobbers.update(implicit_clobbers[instr])
+            elif base_instr in implicit_clobbers:
+                clobbers.update(implicit_clobbers[base_instr])
+
+            # Check for memory-modifying instructions with memory operands
+            if instr in memory_modifying_instrs or base_instr in memory_modifying_instrs:
+                # Check if destination is memory (contains parentheses or brackets)
+                if '(' in operands_str or '[' in operands_str:
+                    clobbers.add('memory')
+
+            # Find all register references in the operands
+            # Match registers with % prefix (AT&T) or without (Intel)
+            reg_pattern = r'%?(' + '|'.join(
+                list(x86_32_regs) + list(x86_64_regs) +
+                list(sub_reg_map.keys()) + list(sub_reg_map_64.keys())
+            ) + r')\b'
+
+            found_regs = re.findall(reg_pattern, operands_str, re.IGNORECASE)
+
+            # Check if this is a write instruction (destination register is clobbered)
+            # In AT&T syntax, destination is last; in Intel syntax, destination is first
+            # We'll be conservative and mark destination registers as clobbered
+
+            # For mov-like instructions, the destination is clobbered
+            write_instrs = {'mov', 'movl', 'movq', 'movb', 'movw', 'movzx', 'movsx',
+                          'lea', 'leal', 'leaq', 'xchg', 'add', 'sub', 'and', 'or',
+                          'xor', 'shl', 'shr', 'inc', 'dec', 'neg', 'not', 'pop',
+                          'addl', 'subl', 'andl', 'orl', 'xorl', 'shll', 'shrl',
+                          'addq', 'subq', 'andq', 'orq', 'xorq', 'shlq', 'shrq',
+                          'imul', 'imull', 'imulq', 'mul', 'mull', 'mulq'}
+
+            if instr in write_instrs or base_instr in write_instrs:
+                # Parse operands (comma-separated)
+                operand_list = [op.strip() for op in operands_str.split(',')]
+
+                if operand_list:
+                    # AT&T syntax: destination is last
+                    # Intel syntax: destination is first
+                    # We check both to be safe
+                    for operand in operand_list:
+                        regs_in_operand = re.findall(reg_pattern, operand, re.IGNORECASE)
+                        for reg in regs_in_operand:
+                            reg_lower = reg.lower()
+                            # Map sub-registers to their parent
+                            if reg_lower in sub_reg_map_64:
+                                clobbers.add(sub_reg_map_64[reg_lower])
+                            elif reg_lower in sub_reg_map:
+                                clobbers.add(sub_reg_map[reg_lower])
+                            elif reg_lower in x86_64_regs:
+                                clobbers.add(reg_lower)
+                            elif reg_lower in x86_32_regs:
+                                clobbers.add(reg_lower)
+
+        # Remove stack pointer from clobbers (usually should not be listed)
+        clobbers.discard('esp')
+        clobbers.discard('rsp')
+
+        return list(clobbers)
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Clean and format the assembly string - remove comment lines
         asm_lines = []
@@ -4324,14 +4500,15 @@ class InlineAsm(Expression):
             if stripped and not stripped.startswith('//'):
                 asm_lines.append(line)
         asm = '\n'.join(asm_lines)
-        
+
         # Parse constraints and extract operands
         output_operands = []
         input_operands = []
         output_constraints = []
         input_constraints = []
         clobber_list = []
-        
+        has_explicit_clobbers = False  # Track if clobbers were explicitly provided
+
         if self.constraints:
             # Parse the constraint string format: "outputs:inputs:clobbers"
             # Example: '"=r"(stdout_handle)::"eax","memory"'
@@ -4396,13 +4573,18 @@ class InlineAsm(Expression):
                         input_constraints.append(constraint)
                             
             # Handle clobbers (third part)
-            clobber_part = constraint_parts[2].strip()
+            clobber_part = constraint_parts[2].strip() if len(constraint_parts) > 2 else ''
             if clobber_part:
                 # Parse clobbers like '"eax", "ecx", "edx", "memory"'
                 import re
                 clobber_matches = re.findall(r'"([^"]+)"', clobber_part)
                 clobber_list = clobber_matches
-        
+                has_explicit_clobbers = True
+
+        # If no explicit clobbers were provided, infer them from the assembly code
+        if not has_explicit_clobbers:
+            clobber_list = self._infer_clobbers_from_asm(asm)
+
         # Build the final constraint string in LLVM format
         # LLVM inline assembly constraint format:
         # - Each operand gets one constraint
