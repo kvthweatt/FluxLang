@@ -3,7 +3,7 @@
 #def FLUX_STANDARD 1;
 #endif;
 
-import "redtypes.fx";
+#import "redtypes.fx";
 
 global const int OS_UNKNOWN = 0;
 global const int OS_WINDOWS = 1;

@@ -77,7 +77,7 @@ class FluxPreprocessor:
             line = lines[i].rstrip()
             
             # Check for import statement
-            import_match = re.match(r'^\s*import\s+"([^"]+)"\s*;', line)
+            import_match = re.match(r'^\s*#import\s+"([^"]+)"\s*;', line)
             if import_match:
                 import_file = import_match.group(1)
                 self._process_file(import_file)
@@ -197,6 +197,7 @@ class FluxPreprocessor:
             Path.cwd(),
             Path.cwd() / "src" / "stdlib",
             Path.cwd() / "src" / "stdlib" / "runtime",
+            Path.cwd() / "src" / "stdlib" / "functions",
             Path(__file__).parent.parent / "stdlib",
             Path(__file__).parent / "stdlib",
             Path.home() / ".flux" / "stdlib",

@@ -16,9 +16,9 @@
 #def CURRENT_OS WINDOWS;
 #endif;
 
-import "redio.fx";
+#import "redio.fx";
 #ifdef FLUX_RUNTIME
-import "redruntime.fx";
+#import "redruntime.fx";
 #endif;
 
 namespace standard

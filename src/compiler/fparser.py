@@ -78,7 +78,7 @@ class FluxParser:
                 return
             if self.expect(TokenType.DEF, TokenType.STRUCT, TokenType.OBJECT, 
                          TokenType.NAMESPACE, TokenType.IF, TokenType.WHILE,
-                         TokenType.FOR, TokenType.RETURN, TokenType.IMPORT):
+                         TokenType.FOR, TokenType.RETURN):
                 return
             self.advance()
 
