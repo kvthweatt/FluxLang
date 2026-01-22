@@ -5,72 +5,249 @@ file_extensions: [fx]
 scope: source.flux
 
 variables:
-  isuffix: '(?="|;)'
-
+  identifier: '\b[a-zA-Z_][a-zA-Z0-9_]*\b'
+  
 contexts:
   main:
-    # Comments (must come first)
+    - match: '///'
+      scope: punctuation.definition.comment.begin.flux
+      push: multiline_comment
+
+    # Single-line comments
     - match: '//.*$\n?'
       scope: comment.line.double-slash.flux
 
-    # i-strings (fixed)
+    # Preprocessor directives
+    - match: '^\s*(#)(def|ifdef|ifndef|else|endif)\b'
+      captures:
+        1: punctuation.definition.preprocessor.flux
+        2: keyword.control.preprocessor.flux
+      scope: meta.preprocessor.flux
+
+    # i-strings (interpolated strings)
     - match: 'i"'
       scope: string.quoted.double.flux punctuation.definition.string.begin.flux
-      push:
-        - meta_scope: string.quoted.double.flux
-        - match: '"'
-          scope: punctuation.definition.string.end.flux
-          pop: true
-        - match: '\{'
-          scope: punctuation.section.interpolation.begin.flux
-          push: interpolation_scope
-        - match: '[^"{]+'
-          scope: string.quoted.double.flux
+      push: i_string_body
+
+    # f-strings (formatted strings)
+    - match: 'f"'
+      scope: string.quoted.double.flux punctuation.definition.string.begin.flux
+      push: f_string_body
 
     # Regular strings
     - match: '"'
       scope: string.quoted.double.flux punctuation.definition.string.begin.flux
-      push:
-        - meta_scope: string.quoted.double.flux
-        - match: '"'
-          scope: punctuation.definition.string.end.flux
-          pop: true
-        - match: '\\[\\"nrt]'
-          scope: constant.character.escape.flux
+      push: string_body
 
-    # Keywords
-    - match: '\b(alignof|and|as|asm|assert|auto|break|bool|case|catch|char|contract|compt|const|continue|data|def|default|do|elif|else|extern|false|float|for|from|global|heap|if|import|in|is|int|local|namespace|not|object|operator|or|private|public|register|return|signed|sizeof|stack|struct|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|void|volatile|while|xor)\b'
+    # Character literals
+    - match: "'"
+      scope: string.quoted.single.flux punctuation.definition.string.begin.flux
+      push: char_body
+
+    # Namespace/scope resolution (check this BEFORE keywords)
+    - match: '({{identifier}})(::)'
+      captures:
+        1: entity.name.namespace.flux
+        2: punctuation.accessor.double-colon.flux
+
+    # Data type definitions (must come before keywords to avoid matching 'data' keyword)
+    - match: '\b(const\s+)?(signed|unsigned)?\s*data\s*\{[^}]+\}(\s*\[\])?\s+as\s+({{identifier}})'
+      captures:
+        1: storage.modifier.flux
+        2: storage.modifier.flux
+        3: storage.type.data.flux
+        5: entity.name.type.flux
+
+    # Primitive types (MUST come before keywords)
+    - match: '\b(int|float|void|bool|char)\b'
+      scope: storage.type.primitive.flux
+
+    # Storage types
+    - match: '\b(struct|object|union|trait|contract)\b'
+      scope: storage.type.flux
+    
+    # 'data' keyword when not part of type definition
+    - match: '\bdata\b(?!\s*\{)'
+      scope: storage.type.data.flux
+
+    # Keywords (but NOT types)
+    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|contract|compt|const|continue|def|default|do|elif|else|extern|false|for|from|global|heap|if|in|is|local|namespace|not|operator|or|private|public|register|return|signed|sizeof|stack|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|volatile|while|xor)\b'
       scope: keyword.control.flux
 
-    # Types
-    - match: '\b(struct|object|union|int|float|void|data|const|volatile|char|byte|i16|u16|i32|u32|i64|u64)\b'
-      scope: storage.type.flux
+    # Type modifiers
+    - match: '\b(const|volatile|signed|unsigned|heap|stack|register)\b'
+      scope: storage.modifier.flux
 
-    # Functions
-    - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()'
-      scope: entity.name.function.flux
+    # Special methods (dunder methods)
+    - match: '\b__[a-z]+__\b'
+      scope: entity.name.function.special.flux
 
-    # Special methods
-    - match: '__[a-z]+__'
-      scope: keyword.operator.special-method.flux
+    # Function definitions
+    - match: '\b(def)\s+({{identifier}})'
+      captures:
+        1: keyword.control.flux
+        2: entity.name.function.flux
 
-    # Numbers
-    - match: '\b\d+(\.\d+)?([eE][+-]?\d+)?\b'
-      scope: constant.numeric.flux
+    # Function calls
+    - match: '{{identifier}}(?=\s*\()'
+      scope: entity.name.function.call.flux
 
-    # Hex/Binary
+    # Variables and identifiers (catch-all, must be near the end)
+    - match: '{{identifier}}'
+      scope: variable.other.flux
+
+    # Member access
+    - match: '\.'
+      scope: punctuation.accessor.dot.flux
+
+    # Address-of operator
+    - match: '@'
+      scope: keyword.operator.address.flux
+
+    # Pointer dereference
+    - match: '\*(?=[a-zA-Z_])'
+      scope: keyword.operator.dereference.flux
+
+    # Numbers - Hex
     - match: '\b0x[0-9a-fA-F]+\b'
       scope: constant.numeric.hex.flux
+
+    # Numbers - Binary
     - match: '\b0b[01]+\b'
       scope: constant.numeric.binary.flux
 
-    # Operators
-    - match: '(\+|\-|\*|\/|\%|\=\=|\!\=|\>\=|\<\=|\>\>|\<\<|\&\&|\|\||\&|\||\^|\~|\!\=|\=|\+|\-|\*\*|\:)'
-      scope: keyword.operator.flux
+    # Numbers - Float
+    - match: '\b\d+\.\d+([eE][+-]?\d+)?\b'
+      scope: constant.numeric.float.flux
+
+    # Numbers - Integer
+    - match: '\b\d+\b'
+      scope: constant.numeric.integer.flux
+
+    # Operators - Custom operator definition
+    - match: '\[([~!@#$%^&*\-+=|<>]+)\]'
+      scope: keyword.operator.custom.flux
+
+    # Operators - Custom operator usage (3+ character combinations that aren't standard)
+    - match: '(>>>|<<<|<->|<<=|>>=|\^\^|~~|!=|<=|>=)'
+      scope: keyword.operator.custom.flux
+
+    # Operators - Comparison
+    - match: '(==|!=|>=|<=|>|<)'
+      scope: keyword.operator.comparison.flux
+
+    # Operators - Logical
+    - match: '(\&\&|\|\||!|and|or|not|xor)'
+      scope: keyword.operator.logical.flux
+
+    # Operators - Bitwise
+    - match: '(\&|\||\^|~|<<|>>)'
+      scope: keyword.operator.bitwise.flux
+
+    # Operators - Arithmetic
+    - match: '(\+\+|\-\-|\+|\-|\*\*|\*|/|%)'
+      scope: keyword.operator.arithmetic.flux
+
+    # Operators - Assignment
+    - match: '(\+=|\-=|\*=|/=|%=|<<=|>>=|\&=|\|=|\^=|=)'
+      scope: keyword.operator.assignment.flux
+
+    # Range operator
+    - match: '\.\.'
+      scope: keyword.operator.range.flux
+
+    # Arrow for return types
+    - match: '->'
+      scope: keyword.operator.arrow.flux
+
+    # Brackets
+    - match: '\{'
+      scope: punctuation.section.block.begin.flux
+    - match: '\}'
+      scope: punctuation.section.block.end.flux
+    - match: '\['
+      scope: punctuation.section.brackets.begin.flux
+    - match: '\]'
+      scope: punctuation.section.brackets.end.flux
+    - match: '\('
+      scope: punctuation.section.parens.begin.flux
+    - match: '\)'
+      scope: punctuation.section.parens.end.flux
+
+    # Punctuation
+    - match: ';'
+      scope: punctuation.terminator.flux
+    - match: ','
+      scope: punctuation.separator.flux
+    - match: ':'
+      scope: punctuation.separator.colon.flux
+
+  # String contexts
+  string_body:
+    - meta_scope: string.quoted.double.flux
+    - match: '"'
+      scope: punctuation.definition.string.end.flux
+      pop: true
+    - match: '\\[\\"nrt]'
+      scope: constant.character.escape.flux
+
+  i_string_body:
+    - meta_scope: string.quoted.double.flux
+    - match: '"'
+      scope: punctuation.definition.string.end.flux
+      set: i_string_statement_block
+    - match: '\{'
+      scope: punctuation.section.interpolation.begin.flux
+      push: interpolation_scope
+    - match: '\\[\\"nrt]'
+      scope: constant.character.escape.flux
+
+  f_string_body:
+    - meta_scope: string.quoted.double.flux
+    - match: '"'
+      scope: punctuation.definition.string.end.flux
+      pop: true
+    - match: '\{[^}]*\}'
+      scope: meta.interpolation.flux
+
+  i_string_statement_block:
+    - match: ':'
+      scope: punctuation.separator.colon.flux
+      set: i_string_statements
+    - match: '(?=\S)'
+      pop: true
+
+  i_string_statements:
+    - match: '\{'
+      scope: punctuation.section.block.begin.flux
+      set: i_string_statements_inner
+    - match: '(?=\S)'
+      pop: true
+
+  i_string_statements_inner:
+    - include: main
+    - match: '\}'
+      scope: punctuation.section.block.end.flux
+      pop: true
+
+  char_body:
+    - meta_scope: string.quoted.single.flux
+    - match: "'"
+      scope: punctuation.definition.string.end.flux
+      pop: true
+    - match: '\\[\\''nrt]'
+      scope: constant.character.escape.flux
+    - match: '.'
+      scope: string.quoted.single.flux
 
   interpolation_scope:
     - match: '\}'
       scope: punctuation.section.interpolation.end.flux
       pop: true
-    - match: '[^\}]+'
-      scope: source.flux
+    - include: main
+
+  multiline_comment:
+    - meta_scope: comment.block.flux
+    - match: '///'
+      scope: punctuation.definition.comment.end.flux
+      pop: true

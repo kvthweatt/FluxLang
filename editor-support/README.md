@@ -9,3 +9,9 @@ Files in `sublime/` directory:
 - Copy files to your Sublime Text `Packages/User/` directory
 - Provides syntax highlighting for `.fx` files
 - Includes proper indentation settings
+
+## VSCode
+
+Files in `vscode/` directory:
+
+- todo -

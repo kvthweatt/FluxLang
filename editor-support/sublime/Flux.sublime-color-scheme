@@ -1,0 +1,270 @@
+{
+    "name": "Flux Retro Terminal",
+    "author": "Flux Language",
+    "variables": {
+        // Base colors - Classic terminal aesthetic
+        "background": "#000000",
+        "foreground": "#00ff00",
+        "caret": "#00ff00",
+        "selection": "#003300",
+        "line_highlight": "#001100",
+        
+        // Retro terminal color palette
+        "bright_green": "#00ff00",
+        "lime": "#00ff00",
+        "green": "#00cc00",
+        "dark_green": "#008800",
+        "forest_green": "#006600",
+        
+        // Complementary retro colors
+        "cyan": "#00ffff",
+        "bright_cyan": "#00ffff",
+        "aqua": "#00cccc",
+        "teal": "#008888",
+        
+        "yellow": "#ffff00",
+        "bright_yellow": "#ffff00",
+        "gold": "#ffcc00",
+        "amber": "#ff9900",
+        
+        "magenta": "#ff00ff",
+        "bright_magenta": "#ff00ff",
+        "pink": "#ff1fa2",
+        "hot_pink": "#ff0099",
+        
+        "red": "#ff0000",
+        "bright_red": "#ff0000",
+        "orange": "#ff6600",
+        "coral": "#ff3300",
+        
+        "blue": "#0099ff",
+        "electric_blue": "#0066ff",
+        "sky_blue": "#00ccff",
+        
+        "white": "#ffffff",
+        "light_gray": "#cccccc",
+        "gray": "#888888",
+        "dark_gray": "#444444"
+    },
+    "globals": {
+        "background": "var(background)",
+        "foreground": "var(foreground)",
+        "caret": "var(caret)",
+        "line_highlight": "var(line_highlight)",
+        "selection": "var(selection)",
+        "selection_border": "var(dark_green)",
+        "inactive_selection": "#002200",
+        "misspelling": "var(red)",
+        "shadow": "#00000080",
+        "active_guide": "var(forest_green)",
+        "stack_guide": "var(dark_green)",
+        "highlight": "var(yellow)",
+        "find_highlight_foreground": "var(background)",
+        "find_highlight": "var(yellow)",
+        "brackets_options": "underline",
+        "brackets_foreground": "var(bright_yellow)",
+        "bracket_contents_options": "underline",
+        "bracket_contents_foreground": "var(gold)",
+        "tags_options": "stippled_underline"
+    },
+    "rules": [
+        // Comments
+        {
+            "name": "Comment",
+            "scope": "comment",
+            "foreground": "var(gray)",
+            "font_style": "italic"
+        },
+        
+        // Strings
+        {
+            "name": "String",
+            "scope": "string.quoted",
+            "foreground": "var(blue)"
+        },
+        {
+            "name": "String i-string/f-string",
+            "scope": "string.quoted.double.flux",
+            "foreground": "var(blue)"
+        },
+        {
+            "name": "String Escape",
+            "scope": "constant.character.escape",
+            "foreground": "var(sky_blue)"
+        },
+        {
+            "name": "String Interpolation",
+            "scope": "punctuation.section.interpolation",
+            "foreground": "var(hot_pink)",
+            "font_style": "bold"
+        },
+        
+        // Numbers
+        {
+            "name": "Number",
+            "scope": "constant.numeric",
+            "foreground": "var(red)"
+        },
+        {
+            "name": "Number Hex",
+            "scope": "constant.numeric.hex",
+            "foreground": "var(red)"
+        },
+        {
+            "name": "Number Binary",
+            "scope": "constant.numeric.binary",
+            "foreground": "var(red)"
+        },
+        
+        // Keywords
+        {
+            "name": "Keyword Control",
+            "scope": "keyword.control",
+            "foreground": "var(amber)",
+            "font_style": "bold"
+        },
+        {
+            "name": "Keyword Operator",
+            "scope": "keyword.operator",
+            "foreground": "var(bright_yellow)"
+        },
+        {
+            "name": "Keyword Operator Special (@ and *)",
+            "scope": "keyword.operator.address, keyword.operator.dereference",
+            "foreground": "var(pink)",
+            "font_style": "bold"
+        },
+        {
+            "name": "Keyword Operator Custom",
+            "scope": "keyword.operator.custom",
+            "foreground": "var(bright_yellow)",
+            "font_style": "bold"
+        },
+        {
+            "name": "Keyword Operator Arrow",
+            "scope": "keyword.operator.arrow",
+            "foreground": "var(electric_blue)",
+            "font_style": "bold"
+        },
+        {
+            "name": "Keyword Operator Range",
+            "scope": "keyword.operator.range",
+            "foreground": "var(sky_blue)"
+        },
+        
+        // Storage (types, modifiers)
+        {
+            "name": "Storage Type",
+            "scope": "storage.type",
+            "foreground": "var(electric_blue)",
+            "font_style": "bold"
+        },
+        {
+            "name": "Storage Type Primitive",
+            "scope": "storage.type.primitive",
+            "foreground": "var(sky_blue)"
+        },
+        {
+            "name": "Storage Type Data",
+            "scope": "storage.type.data",
+            "foreground": "var(sky_blue)",
+            "font_style": "bold"
+        },
+        {
+            "name": "Storage Modifier",
+            "scope": "storage.modifier",
+            "foreground": "var(pink)"
+        },
+        
+        // Functions
+        {
+            "name": "Function Definition",
+            "scope": "entity.name.function.flux",
+            "foreground": "var(aqua)",
+            "font_style": "bold"
+        },
+        {
+            "name": "Function Call",
+            "scope": "entity.name.function.call.flux",
+            "foreground": "var(aqua)"
+        },
+        {
+            "name": "Special Methods (dunder)",
+            "scope": "entity.name.function.special",
+            "foreground": "var(aqua)",
+            "font_style": "bold"
+        },
+        
+        // Namespaces and Types
+        {
+            "name": "Namespace",
+            "scope": "entity.name.namespace",
+            "foreground": "var(teal)"
+        },
+        {
+            "name": "Type Name",
+            "scope": "entity.name.type",
+            "foreground": "var(cyan)",
+            "font_style": "bold"
+        },
+        
+        // Variables
+        {
+            "name": "Variable",
+            "scope": "variable.other",
+            "foreground": "var(cyan)"
+        },
+        {
+            "name": "Variable Parameter",
+            "scope": "variable.parameter",
+            "foreground": "var(dark_green)",
+            "font_style": "italic"
+        },
+        
+        // Punctuation
+        {
+            "name": "Punctuation",
+            "scope": "punctuation",
+            "foreground": "var(bright_magenta)"
+        },
+        {
+            "name": "Punctuation Accessor (:: and .)",
+            "scope": "punctuation.accessor",
+            "foreground": "var(bright_magenta)"
+        },
+        {
+            "name": "Punctuation Separator",
+            "scope": "punctuation.separator",
+            "foreground": "var(bright_magenta)"
+        },
+        {
+            "name": "Punctuation Section (Blocks)",
+            "scope": "punctuation.section.block",
+            "foreground": "var(bright_magenta)"
+        },
+        {
+            "name": "Punctuation Section (Brackets)",
+            "scope": "punctuation.section.brackets",
+            "foreground": "var(bright_magenta)"
+        },
+        {
+            "name": "Punctuation Section (Parens)",
+            "scope": "punctuation.section.parens",
+            "foreground": "var(bright_magenta)"
+        },
+        
+        // Meta
+        {
+            "name": "Invalid",
+            "scope": "invalid",
+            "foreground": "var(bright_red)",
+            "background": "#330000"
+        },
+        {
+            "name": "Invalid Deprecated",
+            "scope": "invalid.deprecated",
+            "foreground": "var(coral)",
+            "font_style": "italic"
+        }
+    ]
+}
