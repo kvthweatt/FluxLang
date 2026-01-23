@@ -16,7 +16,7 @@
 - contract ❌ Incomplete, deferred for full specification
 - continue ✅
 - data ✅
-- def ⚠️ Incomplete, macros not behaving
+- def ✅
 - default ✅
 - do ✅
 - elif ✅
