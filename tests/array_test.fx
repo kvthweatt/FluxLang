@@ -6,6 +6,10 @@ def main() -> int
     byte[] s1 = "Testing a random string!?\n\0";
     byte[] s2 = "Another string?\n\0";
 
+    byte[5] test = ["a", "b", "c", "d", "\n"];
+    test[0] = "x";
+    print(@test,5);
+
     int c1 = strlen(@s1);
     int c2 = strlen(@s2);
     print(@s1, c1);

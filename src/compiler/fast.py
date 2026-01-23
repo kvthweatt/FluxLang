@@ -542,6 +542,577 @@ class Identifier(Expression):
         raise NameError(f"Unknown identifier: {self.name}")
 
 @dataclass
+class ArrayLiteral(Expression):
+    """
+    Centralized class for all array literal operations.
+    
+    Handles:
+    - String literals (char arrays)
+    - Array literals like [1, 2, 3]
+    - Array concatenation
+    - Array slicing
+    - Memory operations (memcpy, memset)
+    - Array information and type checking
+    - Compile-time vs runtime array creation
+    """
+    elements: List[Expression] = field(default_factory=list)
+    element_type: Optional[TypeSpec] = None
+    is_string: bool = False
+    string_value: Optional[str] = None
+    storage_class: Optional[StorageClass] = None
+    
+    # Class-level counter for unique names
+    _string_counter: ClassVar[int] = 0
+    
+    def __post_init__(self):
+        """Initialize array literal properties."""
+        # Handle string literal conversion
+        if not self.is_string and self.elements:
+            # Check if all elements are char literals
+            all_chars = all(
+                isinstance(elem, Literal) and elem.type == DataType.CHAR 
+                for elem in self.elements
+            )
+            if all_chars:
+                self.is_string = True
+                # Build string from char literals
+                chars = []
+                for elem in self.elements:
+                    if isinstance(elem.value, str):
+                        chars.append(elem.value)
+                    else:
+                        chars.append(chr(elem.value))
+                self.string_value = ''.join(chars)
+    
+    @staticmethod
+    def is_array_or_array_pointer(val: ir.Value) -> bool:
+        """Check if value is an array type or a pointer to an array type."""
+        return (isinstance(val.type, ir.ArrayType) or 
+                (isinstance(val.type, ir.PointerType) and 
+                 isinstance(val.type.pointee, ir.ArrayType)))
+    
+    @staticmethod
+    def is_array_pointer(val: ir.Value) -> bool:
+        """Check if value is a pointer to an array type."""
+        return (isinstance(val.type, ir.PointerType) and 
+                isinstance(val.type.pointee, ir.ArrayType))
+    
+    @staticmethod
+    def get_array_info(val: ir.Value) -> tuple:
+        """Get (element_type, length) for array or array pointer."""
+        if isinstance(val.type, ir.ArrayType):
+            # Direct array type (loaded from a pointer)
+            return (val.type.element, val.type.count)
+        elif isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType):
+            # Pointer to array type
+            array_type = val.type.pointee
+            return (array_type.element, array_type.count)
+        else:
+            raise ValueError(f"Value is not an array or array pointer: {val.type}")
+    
+    @staticmethod
+    def emit_memcpy(builder: ir.IRBuilder, module: ir.Module, dst_ptr: ir.Value, src_ptr: ir.Value, bytes: int) -> None:
+        """Emit llvm.memcpy intrinsic call."""
+        # Declare llvm.memcpy.p0i8.p0i8.i64 if not already declared
+        memcpy_name = "llvm.memcpy.p0i8.p0i8.i64"
+        if memcpy_name not in module.globals:
+            memcpy_type = ir.FunctionType(
+                ir.VoidType(),
+                [ir.PointerType(ir.IntType(8)),  # dst
+                 ir.PointerType(ir.IntType(8)),  # src
+                 ir.IntType(64),                 # len
+                 ir.IntType(1)]                  # volatile
+            )
+            memcpy_func = ir.Function(module, memcpy_type, name=memcpy_name)
+            memcpy_func.attributes.add('nounwind')
+        else:
+            memcpy_func = module.globals[memcpy_name]
+        
+        # Cast pointers to i8* if needed
+        i8_ptr = ir.PointerType(ir.IntType(8))
+        if dst_ptr.type != i8_ptr:
+            dst_ptr = builder.bitcast(dst_ptr, i8_ptr)
+        if src_ptr.type != i8_ptr:
+            src_ptr = builder.bitcast(src_ptr, i8_ptr)
+        
+        # Call memcpy
+        builder.call(memcpy_func, [
+            dst_ptr,
+            src_ptr,
+            ir.Constant(ir.IntType(64), bytes),
+            ir.Constant(ir.IntType(1), 0)  # not volatile
+        ])
+    
+    @staticmethod
+    def emit_memset(builder: ir.IRBuilder, module: ir.Module, dst_ptr: ir.Value, value: int, bytes: int) -> None:
+        """Emit llvm.memset intrinsic call."""
+        memset_name = "llvm.memset.p0i8.i64"
+        if memset_name not in module.globals:
+            memset_type = ir.FunctionType(
+                ir.VoidType(),
+                [ir.PointerType(ir.IntType(8)),  # dst
+                 ir.IntType(8),                  # val
+                 ir.IntType(64),                 # len
+                 ir.IntType(1)]                  # volatile
+            )
+            memset_func = ir.Function(module, memset_type, name=memset_name)
+            memset_func.attributes.add('nounwind')
+        else:
+            memset_func = module.globals[memset_name]
+        
+        # Cast pointer to i8* if needed
+        i8_ptr = ir.PointerType(ir.IntType(8))
+        if dst_ptr.type != i8_ptr:
+            dst_ptr = builder.bitcast(dst_ptr, i8_ptr)
+        
+        # Call memset
+        builder.call(memset_func, [
+            dst_ptr,
+            ir.Constant(ir.IntType(8), value),
+            ir.Constant(ir.IntType(64), bytes),
+            ir.Constant(ir.IntType(1), 0)  # not volatile
+        ])
+    
+    def create_global_string(self, module: ir.Module, string_val: str, name_hint: str = "") -> ir.Value:
+        """Create a global string constant."""
+        string_bytes = string_val.encode('ascii')
+        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+        str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+        
+        # Create unique name
+        if not name_hint:
+            name_hint = f"str_{ArrayLiteral._string_counter}"
+            ArrayLiteral._string_counter += 1
+        
+        gname = f".str.{name_hint}"
+        gv = ir.GlobalVariable(module, str_val.type, name=gname)
+        gv.linkage = 'internal'
+        gv.global_constant = True
+        gv.initializer = str_val
+        
+        # Mark as array pointer for downstream logic
+        gv.type._is_array_pointer = True
+        
+        return gv
+    
+    def literal_string_to_array_ptr(self, builder: ir.IRBuilder, module: ir.Module, 
+                                   lit: Union[Literal, 'ArrayLiteral'], name_hint: str) -> ir.Value:
+        """Turn a string literal into a pointer-to-array value preserving array semantics."""
+        if isinstance(lit, Literal):
+            if lit.type != DataType.CHAR or not isinstance(lit.value, str):
+                raise ValueError("Expected string Literal for conversion")
+            string_val = lit.value
+        elif isinstance(lit, ArrayLiteral):
+            if not lit.is_string or lit.string_value is None:
+                raise ValueError("Expected string ArrayLiteral for conversion")
+            string_val = lit.string_value
+        else:
+            raise ValueError("Expected Literal or ArrayLiteral for conversion")
+        
+        # Create global array
+        gv = self.create_global_string(module, string_val, name_hint)
+        
+        # Return pointer to first element
+        zero = ir.Constant(ir.IntType(32), 0)
+        ptr = builder.gep(gv, [zero, zero], name=f"{name_hint}_str_ptr")
+        ptr.type._is_array_pointer = True
+        return ptr
+    
+    def create_global_array_concat(self, module: ir.Module, left_val: ir.Value, right_val: ir.Value, 
+                                  result_array_type: ir.ArrayType, operator: Operator) -> ir.Value:
+        """Create compile-time array concatenation for global constants."""
+        # Get the initializers from both global constants
+        left_init = left_val.initializer if hasattr(left_val, 'initializer') else None
+        right_init = right_val.initializer if hasattr(right_val, 'initializer') else None
+        
+        if left_init is None or right_init is None:
+            raise ValueError("Both operands must be global constants for compile-time concatenation")
+        
+        # Extract array elements
+        left_elements = list(left_init.constant)
+        right_elements = list(right_init.constant) if operator == Operator.ADD else []
+        
+        # Create new array with concatenated elements
+        if operator == Operator.ADD:
+            new_elements = left_elements + right_elements
+        else:  # SUB
+            left_len = len(left_elements)
+            right_len = len(right_elements)
+            new_len = max(left_len - right_len, 0)
+            new_elements = left_elements[:new_len]
+        
+        # Create global constant
+        global_name = f".array_concat_{id(self)}"
+        global_array = ir.GlobalVariable(module, result_array_type, name=global_name)
+        global_array.linkage = 'internal'
+        global_array.global_constant = True
+        global_array.initializer = ir.Constant(result_array_type, new_elements)
+        
+        # Mark as array pointer
+        global_array.type._is_array_pointer = True
+        
+        return global_array
+    
+    def create_runtime_array_concat(self, builder: ir.IRBuilder, module: ir.Module, 
+                                   left_val: ir.Value, right_val: ir.Value, 
+                                   result_array_type: ir.ArrayType, operator: Operator) -> ir.Value:
+        """Create runtime array concatenation using memcpy."""
+        # Get array info
+        left_elem_type, left_len = self.get_array_info(left_val)
+        right_elem_type, right_len = self.get_array_info(right_val)
+        
+        # Calculate element size in bytes
+        elem_size_bytes = left_elem_type.width // 8
+        
+        # Allocate new array for result
+        result_ptr = builder.alloca(result_array_type, name="array_concat_result")
+        
+        # Copy left array to result
+        if left_len > 0:
+            # Get pointer to first element of result array
+            zero = ir.Constant(ir.IntType(32), 0)
+            result_start = builder.gep(result_ptr, [zero, zero], name="result_start")
+            
+            # Get pointer to source array start
+            left_start = builder.gep(left_val, [zero, zero], name="left_start")
+            
+            # Copy left array
+            left_bytes = left_len * elem_size_bytes
+            self.emit_memcpy(builder, module, result_start, left_start, left_bytes)
+        
+        # Copy right array to result (for ADD operation)
+        if operator == Operator.ADD and right_len > 0:
+            # Get pointer to position after left array in result
+            left_len_const = ir.Constant(ir.IntType(32), left_len)
+            result_right_start = builder.gep(result_ptr, [zero, left_len_const], name="result_right_start")
+            
+            # Get pointer to source array start
+            right_start = builder.gep(right_val, [zero, zero], name="right_start")
+            
+            # Copy right array
+            right_bytes = right_len * elem_size_bytes
+            self.emit_memcpy(builder, module, result_right_start, right_start, right_bytes)
+        
+        # Mark as array pointer
+        result_ptr.type._is_array_pointer = True
+        
+        return result_ptr
+    
+    def resize_array_if_needed(self, builder: ir.IRBuilder, module: ir.Module, 
+                              ptr: ir.Value, val: ir.Value, var_name: str = None) -> ir.Value:
+        """Dynamically resize arrays to accommodate new values during assignment."""
+        # Get array information
+        val_elem_type, val_len = self.get_array_info(val)
+        ptr_elem_type, ptr_len = self.get_array_info(ptr)
+        
+        # If the new array is larger, we need to reallocate
+        if val_len > ptr_len:
+            # Create new array type with the larger size
+            new_array_type = ir.ArrayType(val_elem_type, val_len)
+            
+            # Allocate new storage for the resized array
+            new_alloca = builder.alloca(new_array_type, name=f"{var_name}_resized" if var_name else "array_resized")
+            
+            # Copy existing data from old array to new array (first ptr_len elements)
+            if ptr_len > 0:
+                elem_size_bytes = ptr_elem_type.width // 8
+                old_bytes = ptr_len * elem_size_bytes
+                
+                # Get pointer to start of old array
+                zero = ir.Constant(ir.IntType(32), 0)
+                old_start = builder.gep(ptr, [zero, zero], name="old_start")
+                
+                # Get pointer to start of new array
+                new_start = builder.gep(new_alloca, [zero, zero], name="new_start")
+                
+                # Copy old data
+                self.emit_memcpy(builder, module, new_start, old_start, old_bytes)
+            
+            # Copy new data to the new array (overwriting all elements)
+            new_bytes = val_len * (val_elem_type.width // 8)
+            zero = ir.Constant(ir.IntType(32), 0)
+            new_start = builder.gep(new_alloca, [zero, zero], name="new_start")
+            val_start = builder.gep(val, [zero, zero], name="val_start")
+            self.emit_memcpy(builder, module, new_start, val_start, new_bytes)
+            
+            # Update the original variable to point to the new array
+            if var_name and builder.scope and var_name in builder.scope:
+                builder.scope[var_name] = new_alloca
+            
+            return new_alloca
+        else:
+            # If new array is smaller or same size, just copy the data
+            copy_len = min(val_len, ptr_len)
+            copy_bytes = copy_len * (val_elem_type.width // 8)
+            
+            zero = ir.Constant(ir.IntType(32), 0)
+            ptr_start = builder.gep(ptr, [zero, zero], name="ptr_start")
+            val_start = builder.gep(val, [zero, zero], name="val_start")
+            
+            # Copy the data
+            self.emit_memcpy(builder, module, ptr_start, val_start, copy_bytes)
+            
+            # If the new array is smaller, zero out the remaining elements
+            if val_len < ptr_len:
+                remaining_bytes = (ptr_len - val_len) * (ptr_elem_type.width // 8)
+                if remaining_bytes > 0:
+                    # Get pointer to remaining area
+                    val_len_const = ir.Constant(ir.IntType(32), val_len)
+                    remaining_start = builder.gep(ptr, [zero, val_len_const], name="remaining_start")
+                    
+                    # Zero out remaining bytes
+                    self.emit_memset(builder, module, remaining_start, 0, remaining_bytes)
+            
+            return ptr
+    
+    def _find_common_type(self, types: List[ir.Type]) -> ir.Type:
+        """Find a common type that all elements can be cast to."""
+        if not types:
+            return ir.IntType(32)  # Default to i32
+        
+        # Check if all are integer types
+        if all(isinstance(t, ir.IntType) for t in types):
+            # Use the widest integer type
+            max_width = max(t.width for t in types)
+            return ir.IntType(max_width)
+        
+        # Check if any are float types
+        if any(isinstance(t, ir.FloatType) for t in types):
+            # Promote all to float
+            return ir.FloatType()
+        
+        # Check for pointer types
+        if all(isinstance(t, ir.PointerType) for t in types):
+            # All pointers - use void* as common type
+            return ir.PointerType(ir.IntType(8))
+        
+        # Default to first type
+        return types[0]
+    
+    def _cast_to_type(self, builder: ir.IRBuilder, value: ir.Value, target_type: ir.Type) -> ir.Value:
+        """Cast value to target type."""
+        if value.type == target_type:
+            return value
+        
+        # Integer type conversions
+        if isinstance(value.type, ir.IntType) and isinstance(target_type, ir.IntType):
+            if value.type.width < target_type.width:
+                return builder.sext(value, target_type)
+            elif value.type.width > target_type.width:
+                return builder.trunc(value, target_type)
+            else:
+                return value
+        
+        # Integer to float
+        if isinstance(value.type, ir.IntType) and isinstance(target_type, ir.FloatType):
+            return builder.sitofp(value, target_type)
+        
+        # Float to integer
+        if isinstance(value.type, ir.FloatType) and isinstance(target_type, ir.IntType):
+            return builder.fptosi(value, target_type)
+        
+        # Pointer casts
+        if isinstance(value.type, ir.PointerType) and isinstance(target_type, ir.PointerType):
+            return builder.bitcast(value, target_type)
+        
+        # Array to pointer decay (for function arguments)
+        if (isinstance(value.type, ir.PointerType) and isinstance(value.type.pointee, ir.ArrayType) and
+            isinstance(target_type, ir.PointerType) and value.type.pointee.element == target_type.pointee):
+            zero = ir.Constant(ir.IntType(32), 0)
+            return builder.gep(value, [zero, zero], name="array_decay")
+        
+        raise ValueError(f"Cannot cast {value.type} to {target_type}")
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Generate code for array literal."""
+        if self.is_string:
+            return self._codegen_string_literal(builder, module)
+        else:
+            return self._codegen_array_literal(builder, module)
+    
+    def _codegen_string_literal(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Handle string literals (both single and multiple chars)."""
+        if self.string_value is None:
+            # Should not happen if is_string is True
+            return self._codegen_array_literal(builder, module)
+        
+        string_bytes = self.string_value.encode('ascii')
+        
+        # Create array type for the string
+        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+        
+        # Create constant array with string bytes
+        str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+        
+        # Determine storage location based on storage_class and context
+        use_global = (
+            self.storage_class == StorageClass.GLOBAL or
+            builder.scope is None  # Global scope
+        )
+        
+        use_heap = self.storage_class == StorageClass.HEAP
+        use_stack = (
+            self.storage_class == StorageClass.STACK or
+            self.storage_class == StorageClass.LOCAL or
+            (builder.scope is not None and not use_global and not use_heap)
+        )
+        
+        if use_heap:
+            # TODO: Implement heap allocation for string literals
+            # For now, fall back to stack
+            use_stack = True
+        
+        if use_global:
+            # Create global variable for the string with unique name
+            str_name = f".str.{id(self)}"
+            gv = ir.GlobalVariable(module, str_val.type, name=str_name)
+            gv.linkage = 'internal'
+            gv.global_constant = True
+            gv.initializer = str_val
+            
+            # Return a pointer to the first element of the global array
+            zero = ir.Constant(ir.IntType(32), 0)
+            return builder.gep(gv, [zero, zero], inbounds=True, name="str_ptr")
+        
+        elif use_stack:
+            # Allocate string on stack
+            stack_alloca = builder.alloca(str_array_ty, name="str_stack")
+            
+            # Initialize stack array with string bytes
+            for i, byte_val in enumerate(string_bytes):
+                zero = ir.Constant(ir.IntType(32), 0)
+                index = ir.Constant(ir.IntType(32), i)
+                elem_ptr = builder.gep(stack_alloca, [zero, index], name=f"str_char_{i}")
+                char_val = ir.Constant(ir.IntType(8), byte_val)
+                builder.store(char_val, elem_ptr)
+            
+            # Return pointer to first element
+            zero = ir.Constant(ir.IntType(32), 0)
+            return builder.gep(stack_alloca, [zero, zero], inbounds=True, name="str_ptr")
+        
+        else:
+            # Fallback: use global storage
+            str_name = f".str.{id(self)}"
+            gv = ir.GlobalVariable(module, str_val.type, name=str_name)
+            gv.linkage = 'internal'
+            gv.global_constant = True
+            gv.initializer = str_val
+            
+            # Return pointer to first element
+            zero = ir.Constant(ir.IntType(32), 0)
+            return builder.gep(gv, [zero, zero], inbounds=True, name="str_ptr")
+    
+    def _codegen_array_literal(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Handle regular array literals like [1, 2, 3]."""
+        if not self.elements:
+            # Empty array - need element type to determine size
+            if self.element_type:
+                element_llvm_type = self.element_type.get_llvm_type(module)
+                # Create zero-length array
+                array_type = ir.ArrayType(element_llvm_type, 0)
+                if builder.scope is None:
+                    # Global empty array
+                    gvar = ir.GlobalVariable(module, array_type, name=f".empty_array.{id(self)}")
+                    gvar.linkage = 'internal'
+                    gvar.global_constant = True
+                    gvar.initializer = ir.Constant(array_type, [])
+                    return gvar
+                else:
+                    # Local empty array
+                    alloca = builder.alloca(array_type, name="empty_array")
+                    return alloca
+            else:
+                raise ValueError("Cannot create empty array without element type")
+        
+        # Generate elements and infer common type
+        element_values = []
+        element_types = set()
+        
+        for elem in self.elements:
+            elem_val = elem.codegen(builder, module)
+            element_values.append(elem_val)
+            element_types.add(elem_val.type)
+        
+        # Determine common element type
+        if len(element_types) == 1:
+            element_type = next(iter(element_types))
+        else:
+            # Try to find a common type
+            element_type = self._find_common_type(list(element_types))
+            # Cast all elements to common type
+            for i in range(len(element_values)):
+                if element_values[i].type != element_type:
+                    element_values[i] = self._cast_to_type(builder, element_values[i], element_type)
+        
+        # Create array type and constant
+        array_type = ir.ArrayType(element_type, len(element_values))
+        
+        if builder.scope is None or all(isinstance(val, ir.Constant) for val in element_values):
+            # Global or compile-time constant array
+            const_elements = [val if isinstance(val, ir.Constant) else 
+                            ir.Constant(element_type, 0) for val in element_values]
+            const_array = ir.Constant(array_type, const_elements)
+            
+            if builder.scope is None:
+                # Global constant
+                gvar = ir.GlobalVariable(module, array_type, name=f".array_literal.{id(self)}")
+                gvar.linkage = 'internal'
+                gvar.global_constant = True
+                gvar.initializer = const_array
+                # Mark as array pointer
+                gvar.type._is_array_pointer = True
+                return gvar
+            else:
+                # Compile-time constant used locally
+                alloca = builder.alloca(array_type, name="array_literal_const")
+                builder.store(const_array, alloca)
+                # Mark as array pointer
+                alloca.type._is_array_pointer = True
+                return alloca
+        else:
+            # Runtime array creation
+            alloca = builder.alloca(array_type, name="array_literal")
+            
+            # Initialize each element
+            zero = ir.Constant(ir.IntType(32), 0)
+            for i, elem_val in enumerate(element_values):
+                index = ir.Constant(ir.IntType(32), i)
+                elem_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"elem_{i}")
+                builder.store(elem_val, elem_ptr)
+            
+            # Mark as array pointer
+            alloca.type._is_array_pointer = True
+            return alloca
+    
+    @classmethod
+    def from_string_literal(cls, string_value: str, storage_class: Optional[StorageClass] = None) -> 'ArrayLiteral':
+        """Create an ArrayLiteral from a string value."""
+        # Convert string to list of char literals
+        elements = []
+        for char in string_value:
+            elements.append(Literal(char, DataType.CHAR))
+        
+        return cls(
+            elements=elements,
+            is_string=True,
+            string_value=string_value,
+            storage_class=storage_class
+        )
+    
+    @classmethod
+    def from_char_literal(cls, lit: Literal, storage_class: Optional[StorageClass] = None) -> 'ArrayLiteral':
+        """Create an ArrayLiteral from a single char literal."""
+        if lit.type != DataType.CHAR:
+            raise ValueError("Expected char literal")
+        
+        return cls(
+            elements=[lit],
+            is_string=True,
+            string_value=lit.value if isinstance(lit.value, str) else chr(lit.value),
+            storage_class=storage_class
+        )
+
+@dataclass
 class StringLiteral(Expression):
     """
     Represents a string literal.
@@ -2570,15 +3141,13 @@ class VariableDeclaration(ASTNode):
         
         # Direct array type check
         if (self.type_spec.is_array and self.type_spec.array_size is None and
-            self.initial_value and isinstance(self.initial_value, Literal) and
-            self.initial_value.type == DataType.CHAR):
+            self.initial_value and isinstance(self.initial_value, StringLiteral)):
             infer_array_size = True
             string_length = len(self.initial_value.value)
         
         # Type alias check - if custom_typename exists, check if it resolves to an array
         elif (self.type_spec.custom_typename and
-              self.initial_value and isinstance(self.initial_value, Literal) and
-              self.initial_value.type == DataType.CHAR):
+              self.initial_value and isinstance(self.initial_value, StringLiteral)):
             try:
                 resolved_llvm_type = self.type_spec.get_llvm_type(module)
                 # If it's a pointer to i8 (string type), we can infer size
@@ -2620,17 +3189,16 @@ class VariableDeclaration(ASTNode):
             # Normal type resolution using the improved get_llvm_type_with_array
             llvm_type = self.type_spec.get_llvm_type_with_array(module)
         
-        # FIXED: Check if this is global scope
-        # Global if: builder is None, is_global flag is set, OR builder.scope is None
+        # Check if this is global scope
         is_global_scope = (
             builder is None or 
             self.is_global or 
             (hasattr(builder, 'scope') and builder.scope is None)
         )
         
-        # Handle global variables (either at module scope OR explicitly marked with 'global' keyword)
+        # Handle global variables
         if is_global_scope:
-            # Check if global already exists (handle both original name and potential namespaced names)
+            # Check if global already exists
             if self.name in module.globals:
                 return module.globals[self.name]
             
@@ -2648,21 +3216,13 @@ class VariableDeclaration(ASTNode):
             
             # Set initializer
             if self.initial_value:
-                # FIXED: For global scope with None builder, we need to handle initial values differently
-                # We can't call codegen on expressions that need a builder, so handle special cases
-                
-                # Handle string literals for char arrays
-                if isinstance(self.initial_value, (StringLiteral, Literal)) and \
+                # Handle StringLiteral for char arrays
+                if isinstance(self.initial_value, StringLiteral) and \
                    isinstance(llvm_type, ir.ArrayType) and \
                    isinstance(llvm_type.element, ir.IntType) and \
                    llvm_type.element.width == 8:
                     
-                    # Get string value
-                    if isinstance(self.initial_value, StringLiteral):
-                        string_val = self.initial_value.value
-                    else:
-                        string_val = self.initial_value.value
-                    
+                    string_val = self.initial_value.value
                     char_values = []
                     for i, char in enumerate(string_val):
                         if i >= llvm_type.count:
@@ -2672,16 +3232,24 @@ class VariableDeclaration(ASTNode):
                         char_values.append(ir.Constant(ir.IntType(8), 0))
                     gvar.initializer = ir.Constant(llvm_type, char_values)
                     
-                # Handle array literals
+                # Handle array literals (Literal with list value)
                 elif isinstance(llvm_type, ir.ArrayType) and \
-                     hasattr(self.initial_value, 'value') and \
+                     isinstance(self.initial_value, Literal) and \
                      isinstance(self.initial_value.value, list):
                     element_values = []
                     for item in self.initial_value.value:
-                        if hasattr(item, 'value'):
+                        # Each item is a StringLiteral or other expression
+                        if isinstance(item, StringLiteral):
+                            # For byte arrays like ["a", "b", "c"], extract first char
+                            if len(item.value) > 0:
+                                element_values.append(ir.Constant(llvm_type.element, ord(item.value[0])))
+                            else:
+                                element_values.append(ir.Constant(llvm_type.element, 0))
+                        elif isinstance(item, Literal):
                             element_values.append(ir.Constant(llvm_type.element, item.value))
                         else:
-                            element_values.append(ir.Constant(llvm_type.element, item))
+                            # Can't evaluate non-constant expressions in global scope
+                            element_values.append(ir.Constant(llvm_type.element, 0))
                     gvar.initializer = ir.Constant(llvm_type, element_values)
                     
                 # Handle simple literals (int, float, bool)
@@ -2701,7 +3269,7 @@ class VariableDeclaration(ASTNode):
                         else:
                             gvar.initializer = ir.Constant(llvm_type, None)
                 else:
-                    # For complex expressions, we'd need a builder - default to zero
+                    # For complex expressions, default to zero
                     if isinstance(llvm_type, ir.IntType):
                         gvar.initializer = ir.Constant(llvm_type, 0)
                     elif isinstance(llvm_type, ir.FloatType):
@@ -2724,8 +3292,7 @@ class VariableDeclaration(ASTNode):
             gvar.linkage = 'internal'
             return gvar
         
-        # Everything below here requires a valid builder
-        # Handle local variables
+        # LOCAL VARIABLES - Everything below requires a valid builder
         alloca = builder.alloca(llvm_type, name=self.name)
         
         # Store type information in scope metadata
@@ -2734,7 +3301,7 @@ class VariableDeclaration(ASTNode):
         builder.scope_type_info[self.name] = self.type_spec
         
         if self.initial_value:
-            # CRITICAL FIX: Handle array literals with proper element-by-element initialization
+            # FIXED: Handle array literals with proper element-by-element initialization
             if (isinstance(self.initial_value, Literal) and 
                 self.initial_value.type == DataType.DATA and
                 isinstance(self.initial_value.value, list) and
@@ -2746,8 +3313,18 @@ class VariableDeclaration(ASTNode):
                     index = ir.Constant(ir.IntType(32), i)
                     elem_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"{self.name}[{i}]")
                     
-                    # Generate the element value
-                    if isinstance(elem, Literal):
+                    # FIXED: Handle StringLiteral elements properly
+                    if isinstance(elem, StringLiteral):
+                        # For byte arrays, we want the first character as i8
+                        if isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8:
+                            if len(elem.value) > 0:
+                                elem_val = ir.Constant(ir.IntType(8), ord(elem.value[0]))
+                            else:
+                                elem_val = ir.Constant(ir.IntType(8), 0)
+                        else:
+                            # For other types, this is an error
+                            raise ValueError(f"Cannot store string literal in non-byte array")
+                    elif isinstance(elem, Literal):
                         elem_val = elem.codegen(builder, module)
                     elif isinstance(elem, (int, float)):
                         elem_val = ir.Constant(llvm_type.element, elem)
@@ -2765,7 +3342,7 @@ class VariableDeclaration(ASTNode):
                     builder.store(elem_val, elem_ptr)
             
             # Handle string literals specially
-            elif (isinstance(self.initial_value, Literal) and self.initial_value.type == DataType.CHAR):
+            elif isinstance(self.initial_value, StringLiteral):
                 if isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8:
                     # Store string data on stack
                     string_val = self.initial_value.value
@@ -2815,7 +3392,7 @@ class VariableDeclaration(ASTNode):
                 
                 for i, arg_expr in enumerate(self.initial_value.arguments):
                     param_index = i + 1
-                    if (isinstance(arg_expr, Literal) and arg_expr.type == DataType.CHAR and
+                    if (isinstance(arg_expr, StringLiteral) and
                         param_index < len(constructor_func.args) and
                         isinstance(constructor_func.args[param_index].type, ir.PointerType) and
                         isinstance(constructor_func.args[param_index].type.pointee, ir.IntType) and
@@ -3007,7 +3584,7 @@ class Assignment(Statement):
                     return val
                 else:
                     # For global variables, we can't easily resize, so convert to element pointer
-                    zero = ir.Constant(ir.IntType(32), 0)
+                    zero = ir.Constant(ir.IntType(1), 0)
                     array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
                     builder.store(array_ptr, ptr)
                     return array_ptr
@@ -3019,7 +3596,7 @@ class Assignment(Statement):
                     isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.PointerType)):
                     # This is assigning an array to a pointer type (like noopstr)
                     # Get pointer to first element of array
-                    zero = ir.Constant(ir.IntType(32), 0)
+                    zero = ir.Constant(ir.IntType(1), 0)
                     array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
                     builder.store(array_ptr, ptr)
                     return array_ptr
@@ -3093,7 +3670,7 @@ class Assignment(Statement):
                         #print(f"DEBUG Assignment: Found member '{member_name}' at index {idx}")
                         member_ptr = builder.gep(
                             obj,
-                            [ir.Constant(ir.IntType(32), 0),
+                            [ir.Constant(ir.IntType(1), 0),
                              ir.Constant(ir.IntType(32), idx)],
                             inbounds=True
                         )
@@ -3113,8 +3690,21 @@ class Assignment(Statement):
             
             if isinstance(array.type, ir.PointerType) and isinstance(array.type.pointee, ir.ArrayType):
                 # Calculate element pointer
-                zero = ir.Constant(ir.IntType(32), 0)
+                zero = ir.Constant(ir.IntType(1), 0)
                 elem_ptr = builder.gep(array, [zero, index], inbounds=True)
+                
+                # FIX: Handle StringLiteral assignment to byte array elements
+                element_type = array.type.pointee.element
+                if isinstance(self.value, StringLiteral) and isinstance(element_type, ir.IntType) and element_type.width == 8:
+                    # Extract first character from string literal
+                    if len(self.value.value) > 0:
+                        val = ir.Constant(ir.IntType(8), ord(self.value.value[0]))
+                    else:
+                        val = ir.Constant(ir.IntType(8), 0)
+                else:
+                    # Generate value normally
+                    val = self.value.codegen(builder, module)
+                
                 builder.store(val, elem_ptr)
                 return val
             else:
