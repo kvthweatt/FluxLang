@@ -92,21 +92,21 @@ END GROUP
 .plt.sec
  *(SORT_BY_ALIGNMENT(.plt.sec))
 
-.text           0x00000000004000f0      0x1b9
+.text           0x00000000004000f0      0x1c9
  *(SORT_BY_ALIGNMENT(.text.unlikely) SORT_BY_ALIGNMENT(.text.*_unlikely) SORT_BY_ALIGNMENT(.text.unlikely.*))
  *(SORT_BY_ALIGNMENT(.text.exit) SORT_BY_ALIGNMENT(.text.exit.*))
  *(SORT_BY_ALIGNMENT(.text.startup) SORT_BY_ALIGNMENT(.text.startup.*))
  *(SORT_BY_ALIGNMENT(.text.hot) SORT_BY_ALIGNMENT(.text.hot.*))
  *(SORT_BY_NAME(SORT_BY_ALIGNMENT(.text.sorted.*)))
  *(SORT_BY_ALIGNMENT(.text) SORT_BY_ALIGNMENT(.stub) SORT_BY_ALIGNMENT(.text.*) SORT_BY_ALIGNMENT(.gnu.linkonce.t.*))
- .text          0x00000000004000f0      0x1b9 build/array_test/array_test.o
+ .text          0x00000000004000f0      0x1c9 build/array_test/array_test.o
                 0x00000000004000f0                main
-                0x00000000004001b0                _start
-                0x00000000004001c0                exit
-                0x00000000004001e0                FRTStartup
-                0x0000000000400200                standard__io__console__nix_print
-                0x0000000000400240                standard__io__console__print
-                0x0000000000400260                strlen
+                0x00000000004001d0                FRTStartup
+                0x00000000004001f0                _start
+                0x0000000000400200                exit
+                0x0000000000400220                standard__io__console__nix_print
+                0x0000000000400250                standard__io__console__print
+                0x0000000000400270                strlen
  *(SORT_BY_ALIGNMENT(.gnu.warning))
 
 .fini
@@ -126,9 +126,10 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.eh_frame_hdr))
  *(SORT_BY_ALIGNMENT(.eh_frame_entry) SORT_BY_ALIGNMENT(.eh_frame_entry.*))
 
-.eh_frame       0x0000000000500020       0xd0
+.eh_frame       0x0000000000500020       0xcc
  *(SORT_BY_ALIGNMENT(.eh_frame))
- .eh_frame      0x0000000000500020       0xd0 build/array_test/array_test.o
+ .eh_frame      0x0000000000500020       0xcc build/array_test/array_test.o
+                                         0xd0 (size before relaxing)
  *(SORT_BY_ALIGNMENT(.eh_frame.*))
 
 .sframe
@@ -143,7 +144,7 @@ END GROUP
 
 .exception_ranges
  *(SORT_BY_ALIGNMENT(.exception_ranges*))
-                0x00000000005010f0                . = DATA_SEGMENT_ALIGN (CONSTANT (MAXPAGESIZE), CONSTANT (COMMONPAGESIZE))
+                0x00000000005010ec                . = DATA_SEGMENT_ALIGN (CONSTANT (MAXPAGESIZE), CONSTANT (COMMONPAGESIZE))
 
 .eh_frame
  *(SORT_BY_ALIGNMENT(.eh_frame))
@@ -162,7 +163,7 @@ END GROUP
 .exception_ranges
  *(SORT_BY_ALIGNMENT(.exception_ranges*))
 
-.tdata          0x00000000005010f0        0x0
+.tdata          0x00000000005010ec        0x0
                 [!provide]                        PROVIDE (__tdata_start = .)
  *(SORT_BY_ALIGNMENT(.tdata) SORT_BY_ALIGNMENT(.tdata.*) SORT_BY_ALIGNMENT(.gnu.linkonce.td.*))
 
@@ -170,18 +171,18 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.tbss) SORT_BY_ALIGNMENT(.tbss.*) SORT_BY_ALIGNMENT(.gnu.linkonce.tb.*))
  *(SORT_BY_ALIGNMENT(.tcommon))
 
-.preinit_array  0x00000000005010f0        0x0
+.preinit_array  0x00000000005010ec        0x0
                 [!provide]                        PROVIDE (__preinit_array_start = .)
  *(SORT_BY_ALIGNMENT(.preinit_array))
                 [!provide]                        PROVIDE (__preinit_array_end = .)
 
-.init_array     0x00000000005010f0        0x0
+.init_array     0x00000000005010ec        0x0
                 [!provide]                        PROVIDE (__init_array_start = .)
  *(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*))
  *(SORT_BY_ALIGNMENT(.init_array) SORT_BY_ALIGNMENT(EXCLUDE_FILE(*crtend?.o *crtend.o *crtbegin?.o *crtbegin.o) .ctors))
                 [!provide]                        PROVIDE (__init_array_end = .)
 
-.fini_array     0x00000000005010f0        0x0
+.fini_array     0x00000000005010ec        0x0
                 [!provide]                        PROVIDE (__fini_array_start = .)
  *(SORT_BY_INIT_PRIORITY(.fini_array.*) SORT_BY_INIT_PRIORITY(.dtors.*))
  *(SORT_BY_ALIGNMENT(.fini_array) SORT_BY_ALIGNMENT(EXCLUDE_FILE(*crtend?.o *crtend.o *crtbegin?.o *crtbegin.o) .dtors))
@@ -228,10 +229,10 @@ END GROUP
 
 .data1
  *(SORT_BY_ALIGNMENT(.data1))
-                0x00000000005010f0                _edata = .
+                0x00000000005010ec                _edata = .
                 [!provide]                        PROVIDE (edata = .)
                 0x0000000000600000                . = ALIGN (ALIGNOF (NEXT_SECTION))
-                0x00000000005010f0                __bss_start = .
+                0x00000000005010ec                __bss_start = .
 
 .bss            0x0000000000700000        0x0
  *(SORT_BY_ALIGNMENT(.dynbss))

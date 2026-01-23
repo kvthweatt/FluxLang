@@ -363,8 +363,8 @@ class FluxLexer:
             if self.current_char() == '\\':
                 self.advance()
                 escape_char = self.current_char()
-                if escape_char in 'ntr\\''"':
-                    escape_map = {'n': '\n', 't': '\t', 'r': '\r', '\\': '\\', "'": "'", '"': '"'}
+                if escape_char in 'ntr0\\''"':
+                    escape_map = {'n': '\n', 't': '\t', 'r': '\r', '\\': '\\', '0':'\0', "'": "'", '"': '"'}
                     result += escape_map.get(escape_char, escape_char)
                 elif escape_char == 'x':
                     # Hex escape

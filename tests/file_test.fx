@@ -11,12 +11,12 @@ def main() -> i32
     // Check if file opened successfully
     if (file_handle == -1)
     {
-        byte[] error_msg = "Error opening file\n\0";
+        byte[] error_msg = "Error opening file\n";
         print(@error_msg, 19);
         return 1;
     };
     
-    print("File opened!\n\0", 13);
+    print("File opened!\n", 13);
     
     // Create a buffer to read into
     byte[1024] buffer = void; // zero out with = void

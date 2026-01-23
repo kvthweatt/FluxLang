@@ -10,7 +10,7 @@ def main() -> int
     int c2 = strlen(@s2);
     print(@s1, c1);
     (void)s1;
-    //print(@s2, c2);
+    print(@s2, c2);
     (void)s2;
     #ifdef __WINDOWS__
     print("Windows detected.",17);
