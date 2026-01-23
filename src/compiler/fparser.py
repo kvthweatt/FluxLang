@@ -1900,6 +1900,9 @@ class FluxParser:
             f_string_content = self.current_token.value
             self.advance()
             return self.parse_f_string(f_string_content)
+        elif self.expect(TokenType.I_STRING):
+            print("GOT I-STRING")
+            return
         elif self.expect(TokenType.TRUE):
             self.advance()
             return Literal(True, DataType.BOOL)
