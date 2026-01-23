@@ -6,9 +6,9 @@ def main() -> int
     byte[] s1 = "Testing a random string printed with strlen()!?\n\0";
     byte[] s2 = "Another string sized by strlen()?\n\0";
 
-    byte[5] test = "abcd\n";
+    byte[7] test = "abcde\n\0";
     test[0] = "x";
-    print(@test,5);
+    print(@test,6);
     noopstr test2 = "test!\n";
     test2[4] = "?";
     print(@test2,6);
@@ -17,7 +17,7 @@ def main() -> int
     int c2 = strlen(@s2);
     for (int x = 0; x < c1 - 1; x++)
     {
-        s1[x] = (byte)x + (byte)97;
+        s1[x] = (byte)x + (byte)(x<<2);
     };
     print(@s1, c1);
     (void)s1;

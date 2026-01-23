@@ -1485,15 +1485,6 @@ class StringLiteral(Expression):
     
     Unlike CHAR literals (single characters stored as i8),
     string literals are arrays of i8.
-    
-    Storage location depends on context:
-    - In global scope or with 'global' storage class: stored as global constant
-    - In local scope (default): stored on stack (alloca)
-    - With 'heap' storage class: allocated on heap (not yet implemented)
-    
-    Attributes:
-        value: The string content (without quotes)
-        storage_class: Optional storage class override
     """
     value: str
     storage_class: Optional[StorageClass] = None
@@ -1534,10 +1525,12 @@ class StringLiteral(Expression):
             gv.global_constant = True
             gv.initializer = str_val
             
-            # Return a pointer to the first element of the global array
-            # This converts [N x i8]* to i8*
-            zero = ir.Constant(ir.IntType(32), 0)
-            return builder.gep(gv, [zero, zero], inbounds=True, name="str_ptr")
+            # IMPORTANT: Mark this as an array pointer for downstream logic
+            gv.type._is_array_pointer = True
+            
+            # Return the global variable itself (pointer to array)
+            # The GEP to get i8* will be done at the use site if needed
+            return gv
         
         elif use_stack:
             # Allocate string on stack
@@ -1551,9 +1544,12 @@ class StringLiteral(Expression):
                 char_val = ir.Constant(ir.IntType(8), byte_val)
                 builder.store(char_val, elem_ptr)
             
-            # Return pointer to first element (converts [N x i8]* to i8*)
-            zero = ir.Constant(ir.IntType(32), 0)
-            return builder.gep(stack_alloca, [zero, zero], inbounds=True, name="str_ptr")
+            # IMPORTANT: Mark this as an array pointer for downstream logic
+            stack_alloca.type._is_array_pointer = True
+            
+            # Return the alloca itself (pointer to array)
+            # The GEP to get i8* will be done at the use site if needed
+            return stack_alloca
         
         else:
             # Fallback: use global storage
@@ -1563,9 +1559,11 @@ class StringLiteral(Expression):
             gv.global_constant = True
             gv.initializer = str_val
             
-            # Return pointer to first element
-            zero = ir.Constant(ir.IntType(32), 0)
-            return builder.gep(gv, [zero, zero], inbounds=True, name="str_ptr")
+            # IMPORTANT: Mark this as an array pointer for downstream logic
+            gv.type._is_array_pointer = True
+            
+            # Return the global variable itself (pointer to array)
+            return gv
 
 @dataclass
 class QualifiedName(Expression):
@@ -1641,55 +1639,48 @@ class BinaryOp(Expression):
     right: Expression
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        # Attempt to promote string literals to array pointers when using + or - for concatenation
-        left_expr, right_expr = self.left, self.right
-        
-        # Handle pointer arithmetic - treat pointers as integers
+        # Generate left and right operands
         left_val = self.left.codegen(builder, module)
         right_val = self.right.codegen(builder, module)
         
-        # Fix this
-        # Needs to check type of both operands
-        # If both are [n x iz]* where iz = i8,i32,... 
-        if isinstance(left_val.type, ir.PointerType) or isinstance(right_val.type, ir.PointerType):
-            if isinstance(left_val.type, ir.PointerType):
-                print("HERE1")
-                left_val = builder.ptrtoint(left_val, ir.IntType(8), name="ptr_to_int")
-            
-            if isinstance(right_val.type, ir.PointerType):
-                print("HERE2")
-                right_val = builder.ptrtoint(right_val, ir.IntType(8), name="ptr_to_int")
-            
-            # Now do the arithmetic on integers
-            if self.operator == Operator.ADD:
-                print("HERE3")
-                result = builder.add(left_val, right_val, name="ptr_add")
-            elif self.operator == Operator.SUB:
-                result = builder.sub(left_val, right_val, name="ptr_sub")
-            
-            # Return as integer - let Assignment cast back to pointer if needed
-            return result
+        # Check if this is array concatenation (both operands are array pointers)
+        # Array pointers are: [N x T]* (pointer to array type)
+        left_is_array = ArrayLiteral.is_array_or_array_pointer(left_val)
+        right_is_array = ArrayLiteral.is_array_or_array_pointer(right_val)
         
         # Handle array concatenation (ADD) and subtraction (SUB)
         if (self.operator in (Operator.ADD, Operator.SUB) and 
-            ArrayLiteral.is_array_or_array_pointer(left_val) and 
-            ArrayLiteral.is_array_or_array_pointer(right_val)):
-            
+            left_is_array and right_is_array):
             # Delegate to ArrayLiteral for concatenation
             return ArrayLiteral.concatenate(builder, module, left_val, right_val, self.operator)
         
-        # Ensure types match by casting if necessary
-        if left_val.type != right_val.type:
-            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                # Promote to the wider type
-                if left_val.type.width > right_val.type.width:
-                    right_val = builder.zext(right_val, left_val.type)
+        # Handle pointer arithmetic (ptr + int or int + ptr)
+        # This is for cases like: ptr + 5, ptr - 2, etc.
+        # NOT for array concatenation (which is handled above)
+        left_is_ptr = isinstance(left_val.type, ir.PointerType)
+        right_is_ptr = isinstance(right_val.type, ir.PointerType)
+        left_is_int = isinstance(left_val.type, ir.IntType)
+        right_is_int = isinstance(right_val.type, ir.IntType)
+        
+        if self.operator in (Operator.ADD, Operator.SUB):
+            # ptr + int or int + ptr -> use GEP
+            if left_is_ptr and right_is_int and not left_is_array:
+                if self.operator == Operator.SUB:
+                    # Negate the offset for subtraction
+                    right_val = builder.sub(ir.Constant(right_val.type, 0), right_val, name="neg_offset")
+                return builder.gep(left_val, [right_val], name="ptr_arith")
+            elif right_is_ptr and left_is_int and not right_is_array:
+                if self.operator == Operator.ADD:
+                    return builder.gep(right_val, [left_val], name="ptr_arith")
                 else:
-                    left_val = builder.zext(left_val, right_val.type)
-            elif isinstance(left_val.type, ir.FloatType) and isinstance(right_val.type, ir.IntType):
-                right_val = builder.sitofp(right_val, left_val.type)
-            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.FloatType):
-                left_val = builder.sitofp(left_val, right_val.type)
+                    # int - ptr doesn't make sense
+                    raise ValueError("Cannot subtract pointer from integer")
+            # ptr - ptr -> ptrtoint both, subtract, return int
+            elif left_is_ptr and right_is_ptr and not (left_is_array or right_is_array):
+                intptr_type = ir.IntType(64)  # Use 64-bit for pointer arithmetic
+                left_int = builder.ptrtoint(left_val, intptr_type, name="ptr_to_int_l")
+                right_int = builder.ptrtoint(right_val, intptr_type, name="ptr_to_int_r")
+                return builder.sub(left_int, right_int, name="ptr_diff")
         
         # Standard arithmetic and logical operations
         if self.operator == Operator.ADD:
@@ -2648,6 +2639,9 @@ class ArrayAccess(Expression):
     index: Expression
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # CRITICAL
+        # REFACTOR
+        # ARRAY SLICING HANDLED IN ArrayLiteral
         # Get the array (should be a pointer to array or global)
         array_val = self.array.codegen(builder, module)
         
