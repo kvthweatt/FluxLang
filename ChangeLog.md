@@ -6,6 +6,8 @@
 - Solved an issue with array access and assignment, can now do `array[index] = value;`
 - Refactored the runtime a bit. Prepared for `GetStdHandle` so `win_print()` doesn't have to call it every time.
 - Fixed runtime for Linux so programs no longer `SEGFAULT` after execution.
+### Additional
+- Fixed `StringLiteral` such that strings now properly register as array types.
 
 ## 1/22/2026
 - Began some runtime implementation.  
