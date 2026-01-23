@@ -3,10 +3,10 @@
 
 def main() -> int
 {
-    byte[] s1 = "Testing a random string!?\n\0";
-    byte[] s2 = "Another string?\n\0";
+    byte[] s1 = "Testing a random string printed with strlen()!?\n\0";
+    byte[] s2 = "Another string sized by strlen()?\n\0";
 
-    byte[5] test = ["a", "b", "c", "d", "\n"];
+    byte[5] test = "abcd\n";
     test[0] = "x";
     print(@test,5);
     noopstr test2 = "test!\n";
@@ -15,6 +15,10 @@ def main() -> int
 
     int c1 = strlen(@s1);
     int c2 = strlen(@s2);
+    for (int x = 0; x < c1 - 1; x++)
+    {
+        s1[x] = (byte)x + (byte)97;
+    };
     print(@s1, c1);
     (void)s1;
     print(@s2, c2);
@@ -23,7 +27,7 @@ def main() -> int
     print("Windows detected.",17);
     #endif;
     #ifdef __LINUX__
-    print("Linux detected.",15);
+    print("Linux detected.\n",16);
     #endif;
 
     return 0;

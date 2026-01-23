@@ -92,20 +92,30 @@ END GROUP
 .plt.sec
  *(SORT_BY_ALIGNMENT(.plt.sec))
 
-.text           0x00000000004000f0       0xc7
+.text           0x00000000004000f0      0x2d1
  *(SORT_BY_ALIGNMENT(.text.unlikely) SORT_BY_ALIGNMENT(.text.*_unlikely) SORT_BY_ALIGNMENT(.text.unlikely.*))
  *(SORT_BY_ALIGNMENT(.text.exit) SORT_BY_ALIGNMENT(.text.exit.*))
  *(SORT_BY_ALIGNMENT(.text.startup) SORT_BY_ALIGNMENT(.text.startup.*))
  *(SORT_BY_ALIGNMENT(.text.hot) SORT_BY_ALIGNMENT(.text.hot.*))
  *(SORT_BY_NAME(SORT_BY_ALIGNMENT(.text.sorted.*)))
  *(SORT_BY_ALIGNMENT(.text) SORT_BY_ALIGNMENT(.stub) SORT_BY_ALIGNMENT(.text.*) SORT_BY_ALIGNMENT(.gnu.linkonce.t.*))
- .text          0x00000000004000f0       0xc7 build/os_detect/os_detect.o
-                0x00000000004000f0                main
-                0x0000000000400120                FRTStartup
-                0x0000000000400140                _start
-                0x0000000000400150                exit
-                0x0000000000400170                standard__io__console__nix_print
-                0x00000000004001a0                standard__io__console__print
+ .text          0x00000000004000f0      0x2d1 build/os_detect/os_detect.o
+                0x00000000004000f0                standard__io__console__nix_print
+                0x0000000000400120                standard__io__console__print
+                0x0000000000400140                standard__io__file__nix_open
+                0x0000000000400190                standard__io__file__nix_read
+                0x00000000004001f0                standard__io__file__nix_write
+                0x0000000000400250                standard__io__file__nix_close
+                0x0000000000400290                standard__io__file__open_read
+                0x00000000004002a0                standard__io__file__open_write
+                0x00000000004002c0                standard__io__file__open_read_write
+                0x00000000004002e0                standard__io__file__read
+                0x0000000000400310                standard__io__file__write
+                0x0000000000400340                standard__io__file__close
+                0x0000000000400350                main
+                0x0000000000400380                FRTStartup
+                0x00000000004003a0                _start
+                0x00000000004003b0                exit
  *(SORT_BY_ALIGNMENT(.gnu.warning))
 
 .fini
@@ -125,9 +135,9 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.eh_frame_hdr))
  *(SORT_BY_ALIGNMENT(.eh_frame_entry) SORT_BY_ALIGNMENT(.eh_frame_entry.*))
 
-.eh_frame       0x0000000000500010       0xa0
+.eh_frame       0x0000000000500010      0x1d0
  *(SORT_BY_ALIGNMENT(.eh_frame))
- .eh_frame      0x0000000000500010       0xa0 build/os_detect/os_detect.o
+ .eh_frame      0x0000000000500010      0x1d0 build/os_detect/os_detect.o
  *(SORT_BY_ALIGNMENT(.eh_frame.*))
 
 .sframe
@@ -142,7 +152,7 @@ END GROUP
 
 .exception_ranges
  *(SORT_BY_ALIGNMENT(.exception_ranges*))
-                0x00000000005010b0                . = DATA_SEGMENT_ALIGN (CONSTANT (MAXPAGESIZE), CONSTANT (COMMONPAGESIZE))
+                0x00000000005011e0                . = DATA_SEGMENT_ALIGN (CONSTANT (MAXPAGESIZE), CONSTANT (COMMONPAGESIZE))
 
 .eh_frame
  *(SORT_BY_ALIGNMENT(.eh_frame))
@@ -161,7 +171,7 @@ END GROUP
 .exception_ranges
  *(SORT_BY_ALIGNMENT(.exception_ranges*))
 
-.tdata          0x00000000005010b0        0x0
+.tdata          0x00000000005011e0        0x0
                 [!provide]                        PROVIDE (__tdata_start = .)
  *(SORT_BY_ALIGNMENT(.tdata) SORT_BY_ALIGNMENT(.tdata.*) SORT_BY_ALIGNMENT(.gnu.linkonce.td.*))
 
@@ -169,18 +179,18 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.tbss) SORT_BY_ALIGNMENT(.tbss.*) SORT_BY_ALIGNMENT(.gnu.linkonce.tb.*))
  *(SORT_BY_ALIGNMENT(.tcommon))
 
-.preinit_array  0x00000000005010b0        0x0
+.preinit_array  0x00000000005011e0        0x0
                 [!provide]                        PROVIDE (__preinit_array_start = .)
  *(SORT_BY_ALIGNMENT(.preinit_array))
                 [!provide]                        PROVIDE (__preinit_array_end = .)
 
-.init_array     0x00000000005010b0        0x0
+.init_array     0x00000000005011e0        0x0
                 [!provide]                        PROVIDE (__init_array_start = .)
  *(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*))
  *(SORT_BY_ALIGNMENT(.init_array) SORT_BY_ALIGNMENT(EXCLUDE_FILE(*crtend?.o *crtend.o *crtbegin?.o *crtbegin.o) .ctors))
                 [!provide]                        PROVIDE (__init_array_end = .)
 
-.fini_array     0x00000000005010b0        0x0
+.fini_array     0x00000000005011e0        0x0
                 [!provide]                        PROVIDE (__fini_array_start = .)
  *(SORT_BY_INIT_PRIORITY(.fini_array.*) SORT_BY_INIT_PRIORITY(.dtors.*))
  *(SORT_BY_ALIGNMENT(.fini_array) SORT_BY_ALIGNMENT(EXCLUDE_FILE(*crtend?.o *crtend.o *crtbegin?.o *crtbegin.o) .dtors))
@@ -210,27 +220,27 @@ END GROUP
 .dynamic
  *(SORT_BY_ALIGNMENT(.dynamic))
 
-.got            0x00000000005010b0        0x0
+.got            0x00000000005011e0        0x0
  *(SORT_BY_ALIGNMENT(.got))
- .got           0x00000000005010b0        0x0 build/os_detect/os_detect.o
+ .got           0x00000000005011e0        0x0 build/os_detect/os_detect.o
  *(SORT_BY_ALIGNMENT(.igot))
-                0x00000000005010b0                . = DATA_SEGMENT_RELRO_END (., (SIZEOF (.got.plt) >= 0x18)?0x18:0x0)
+                0x00000000005011e0                . = DATA_SEGMENT_RELRO_END (., (SIZEOF (.got.plt) >= 0x18)?0x18:0x0)
 
-.got.plt        0x00000000005010b0        0x0
+.got.plt        0x00000000005011e0        0x0
  *(SORT_BY_ALIGNMENT(.got.plt))
- .got.plt       0x00000000005010b0        0x0 build/os_detect/os_detect.o
+ .got.plt       0x00000000005011e0        0x0 build/os_detect/os_detect.o
  *(SORT_BY_ALIGNMENT(.igot.plt))
- .igot.plt      0x00000000005010b0        0x0 build/os_detect/os_detect.o
+ .igot.plt      0x00000000005011e0        0x0 build/os_detect/os_detect.o
 
 .data           0x0000000000600000        0x0
  *(SORT_BY_ALIGNMENT(.data) SORT_BY_ALIGNMENT(.data.*) SORT_BY_ALIGNMENT(.gnu.linkonce.d.*))
 
 .data1
  *(SORT_BY_ALIGNMENT(.data1))
-                0x00000000005010b0                _edata = .
+                0x00000000005011e0                _edata = .
                 [!provide]                        PROVIDE (edata = .)
                 0x0000000000600000                . = ALIGN (ALIGNOF (NEXT_SECTION))
-                0x00000000005010b0                __bss_start = .
+                0x00000000005011e0                __bss_start = .
 
 .bss            0x0000000000700000        0x0
  *(SORT_BY_ALIGNMENT(.dynbss))
@@ -252,7 +262,7 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.ldata) SORT_BY_ALIGNMENT(.ldata.*) SORT_BY_ALIGNMENT(.gnu.linkonce.l.*))
                 0x0000000000700000                . = ALIGN ((. != 0x0)?0x8:0x1)
                 0x0000000000700000                . = ALIGN (0x8)
-                0x00000000005010b0                _end = .
+                0x00000000005011e0                _end = .
                 [!provide]                        PROVIDE (end = .)
                 0x0000000000700000                . = DATA_SEGMENT_END (.)
 
@@ -380,3 +390,13 @@ exit                                              build/os_detect/os_detect.o
 main                                              build/os_detect/os_detect.o
 standard__io__console__nix_print                  build/os_detect/os_detect.o
 standard__io__console__print                      build/os_detect/os_detect.o
+standard__io__file__close                         build/os_detect/os_detect.o
+standard__io__file__nix_close                     build/os_detect/os_detect.o
+standard__io__file__nix_open                      build/os_detect/os_detect.o
+standard__io__file__nix_read                      build/os_detect/os_detect.o
+standard__io__file__nix_write                     build/os_detect/os_detect.o
+standard__io__file__open_read                     build/os_detect/os_detect.o
+standard__io__file__open_read_write               build/os_detect/os_detect.o
+standard__io__file__open_write                    build/os_detect/os_detect.o
+standard__io__file__read                          build/os_detect/os_detect.o
+standard__io__file__write                         build/os_detect/os_detect.o

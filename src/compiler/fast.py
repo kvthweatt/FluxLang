@@ -1648,19 +1648,21 @@ class BinaryOp(Expression):
         left_val = self.left.codegen(builder, module)
         right_val = self.right.codegen(builder, module)
         
+        # Fix this
+        # Needs to check type of both operands
+        # If both are [n x iz]* where iz = i8,i32,... 
         if isinstance(left_val.type, ir.PointerType) or isinstance(right_val.type, ir.PointerType):
-            # For pointer arithmetic, convert to intptr and back
-            
-            intptr_type = ir.IntType(32)  # Use 32-bit for addresses
-            
             if isinstance(left_val.type, ir.PointerType):
-                left_val = builder.ptrtoint(left_val, intptr_type, name="ptr_to_int")
+                print("HERE1")
+                left_val = builder.ptrtoint(left_val, ir.IntType(8), name="ptr_to_int")
             
             if isinstance(right_val.type, ir.PointerType):
-                right_val = builder.ptrtoint(right_val, intptr_type, name="ptr_to_int")
+                print("HERE2")
+                right_val = builder.ptrtoint(right_val, ir.IntType(8), name="ptr_to_int")
             
             # Now do the arithmetic on integers
             if self.operator == Operator.ADD:
+                print("HERE3")
                 result = builder.add(left_val, right_val, name="ptr_add")
             elif self.operator == Operator.SUB:
                 result = builder.sub(left_val, right_val, name="ptr_sub")
@@ -2244,330 +2246,129 @@ class ArrayComprehension(Expression):
 
 @dataclass
 class FStringLiteral(Expression):
-    """Represents an f-string - parsing only, evaluation happens at codegen"""
+    """Represents an f-string - evaluated at compile time when possible"""
     parts: List[Union[str, Expression]]
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        # For simple f-strings with only string parts (no expressions), 
-        # we can create a compile-time string literal
-        if all(isinstance(part, str) for part in self.parts):
-            return self._create_string_literal(builder, module)
-        else:
-            # For f-strings with expressions, we need runtime evaluation
-            return self._create_runtime_fstring(builder, module)
+        # Try to evaluate ALL parts at compile time
+        try:
+            # Concatenate all parts, evaluating expressions if needed
+            full_string = ""
+            for part in self.parts:
+                if isinstance(part, str):
+                    # Clean string literal part
+                    clean_part = part
+                    if clean_part.startswith('f"'):
+                        clean_part = clean_part[2:]
+                    if clean_part.endswith('"'):
+                        clean_part = clean_part[:-1]
+                    full_string += clean_part
+                else:
+                    # Try to evaluate the expression at compile time
+                    # This only works for simple literals and constants
+                    part_val = self._evaluate_compile_time_expression(part, builder, module)
+                    full_string += str(part_val)
+            
+            # Use ArrayLiteral to create the compile-time string
+            return ArrayLiteral.from_string(full_string).codegen(builder, module)
+            
+        except (ValueError, NotImplementedError):
+            # If we can't evaluate at compile time, fall back to runtime
+            # TODO: Implement runtime f-string evaluation
+            raise NotImplementedError("Runtime f-string evaluation not yet implemented. Use simple literals or compile-time constants.")
     
-    def _create_string_literal(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        """Create a compile-time string literal for f-strings without expressions"""
-        # Concatenate all string parts
-        full_string = ""
-        for part in self.parts:
-            clean_part = part
-            if clean_part.startswith('f"'):
-                clean_part = clean_part[2:]
-            if clean_part.endswith('"'):
-                clean_part = clean_part[:-1]
-            full_string += clean_part
+    def _evaluate_compile_time_expression(self, expr: Expression, builder: ir.IRBuilder, module: ir.Module) -> Any:
+        """Try to evaluate an expression at compile time"""
         
-        # Create string literal similar to how regular string literals are handled
-        string_bytes = full_string.encode('ascii')
-        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
-        str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
-        
-        # Create global variable for the string
-        gv = ir.GlobalVariable(module, str_val.type, name=f".fstr.{id(self)}")
-        gv.linkage = 'internal'
-        gv.global_constant = True
-        gv.initializer = str_val
-        
-        # Return the global array directly (not a pointer to first element)
-        # This preserves the array type information [N x i8] instead of decaying to i8*
-        return gv
-    
-    def _create_runtime_fstring(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        """Create runtime-evaluated f-string by building string dynamically"""
-        # Estimate maximum buffer size we might need
-        max_size = 0
-        for part in self.parts:
-            if isinstance(part, str):
-                clean_part = part
-                if clean_part.startswith('f"'):
-                    clean_part = clean_part[2:]
-                if clean_part.endswith('"'):
-                    clean_part = clean_part[:-1]
-                max_size += len(clean_part)
+        # Handle literals
+        if isinstance(expr, Literal):
+            if expr.type == DataType.INT:
+                return int(expr.value)
+            elif expr.type == DataType.FLOAT:
+                return float(expr.value)
+            elif expr.type == DataType.BOOL:
+                return bool(expr.value)
+            elif expr.type == DataType.CHAR:
+                return str(expr.value) if isinstance(expr.value, str) else chr(expr.value)
             else:
-                # Assume expressions can generate up to 32 characters
-                max_size += 32
+                raise ValueError(f"Cannot convert {expr.type} literal to string at compile time")
         
-        # Allocate buffer with maximum estimated size
-        buffer_array_type = ir.ArrayType(ir.IntType(8), max_size)
-        buffer_ptr = builder.alloca(buffer_array_type, name="fstring_buffer")
-        
-        # Track current position in buffer
-        pos_ptr = builder.alloca(ir.IntType(32), name="fstring_pos")
-        builder.store(ir.Constant(ir.IntType(32), 0), pos_ptr)
-        
-        # Process each part of the f-string
-        for part in self.parts:
-            if isinstance(part, str):
-                # Copy string literal
-                current_pos = builder.load(pos_ptr, name="current_pos")
-                new_pos = self._copy_string_to_buffer(builder, buffer_ptr, current_pos, part)
-                builder.store(new_pos, pos_ptr)
+        # Handle simple binary operations with compile-time constants
+        elif isinstance(expr, BinaryOp):
+            left = self._evaluate_compile_time_expression(expr.left, builder, module)
+            right = self._evaluate_compile_time_expression(expr.right, builder, module)
+            
+            if expr.operator == Operator.ADD:
+                return left + right
+            elif expr.operator == Operator.SUB:
+                return left - right
+            elif expr.operator == Operator.MUL:
+                return left * right
+            elif expr.operator == Operator.DIV:
+                return left / right
+            elif expr.operator == Operator.MOD:
+                return left % right
+            elif expr.operator == Operator.EQUAL:
+                return left == right
+            elif expr.operator == Operator.NOT_EQUAL:
+                return left != right
+            elif expr.operator == Operator.LESS_THAN:
+                return left < right
+            elif expr.operator == Operator.LESS_EQUAL:
+                return left <= right
+            elif expr.operator == Operator.GREATER_THAN:
+                return left > right
+            elif expr.operator == Operator.GREATER_EQUAL:
+                return left >= right
             else:
-                # Evaluate expression and convert to string at runtime
-                current_pos = builder.load(pos_ptr, name="current_pos")
-                new_pos = self._append_expression_to_buffer(builder, module, buffer_ptr, current_pos, part)
-                builder.store(new_pos, pos_ptr)
+                raise NotImplementedError(f"Operator {expr.operator} not supported for compile-time f-string evaluation")
         
-        # Get final size
-        final_size = builder.load(pos_ptr, name="final_size")
+        # Handle unary operations
+        elif isinstance(expr, UnaryOp):
+            operand = self._evaluate_compile_time_expression(expr.operand, builder, module)
+            
+            if expr.operator == Operator.NOT:
+                return not operand
+            elif expr.operator == Operator.SUB:
+                return -operand
+            else:
+                raise NotImplementedError(f"Unary operator {expr.operator} not supported for compile-time f-string evaluation")
         
-        # Create properly sized result array
-        # Since LLVM needs compile-time array sizes, we'll allocate based on final_size at runtime
-        result_ptr = builder.alloca(ir.IntType(8), final_size, name="fstring_result")
+        # Handle identifiers that refer to compile-time constants
+        elif isinstance(expr, Identifier):
+            # Check if this is a global constant
+            if expr.name in module.globals:
+                gvar = module.globals[expr.name]
+                if hasattr(gvar, 'initializer') and gvar.initializer is not None:
+                    # Try to extract constant value
+                    if hasattr(gvar.initializer, 'constant'):
+                        const_val = gvar.initializer.constant
+                        if isinstance(const_val, int):
+                            return const_val
+                        elif isinstance(const_val, float):
+                            return const_val
+                        elif isinstance(const_val, bool):
+                            return const_val
         
-        # Copy the constructed string to the final buffer
-        self._runtime_memcpy(builder, result_ptr, 
-                           builder.gep(buffer_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)]), 
-                           final_size)
+        # Handle sizeof/alignof with compile-time types
+        elif isinstance(expr, SizeOf):
+            if isinstance(expr.target, TypeSpec):
+                # We can compute sizeof for TypeSpec at compile time
+                llvm_type = expr.target.get_llvm_type_with_array(module)
+                if isinstance(llvm_type, ir.IntType):
+                    return llvm_type.width // 8  # Convert bits to bytes
+                elif isinstance(llvm_type, ir.ArrayType):
+                    element_bits = llvm_type.element.width
+                    total_bits = element_bits * llvm_type.count
+                    return total_bits // 8  # Convert bits to bytes
         
-        # Return the final buffer - this preserves the runtime-computed size
-        return result_ptr
-    
-    def _copy_string(self, builder: ir.IRBuilder, buffer_ptr: ir.Value, 
-                   start_pos: int, string: str) -> int:
-        """Copy string literal to buffer"""
-        # Clean string by removing f" prefix and " suffix if present
-        clean_string = string
-        if clean_string.startswith('f"'):
-            clean_string = clean_string[2:]
-        if clean_string.endswith('"'):
-            clean_string = clean_string[:-1]
+        # Handle function calls to constexpr functions (future enhancement)
+        # elif isinstance(expr, FunctionCall):
+        #     # Could check if function is marked as constexpr
+        #     pass
         
-        for i, char in enumerate(clean_string):
-            char_ptr = builder.gep(
-                buffer_ptr,
-                [ir.Constant(ir.IntType(32), 0),
-                 ir.Constant(ir.IntType(32), start_pos + i)],
-                inbounds=True
-            )
-            builder.store(ir.Constant(ir.IntType(8), ord(char)), char_ptr)
-        return start_pos + len(clean_string)
-    
-    def _append_expression(self, builder: ir.IRBuilder, module: ir.Module,
-                         buffer_ptr: ir.Value, start_pos: int, expr: Expression) -> int:
-        """Evaluate expression and convert to string - happens at runtime"""
-        # This is where the actual evaluation occurs, during codegen
-        value = expr.codegen(builder, module)
-        
-        # Convert value to string using runtime functions
-        # (This would call itoa, ftoa, etc. based on type)
-        # For now, implement proper runtime string conversion based on type
-        if isinstance(value.type, ir.IntType):
-            # Call runtime itoa function to convert integer to string
-            # This is where we'd implement or call actual runtime conversion
-            # For now, store the actual converted integer as a placeholder
-            return self._convert_integer_to_string(builder, module, buffer_ptr, start_pos, value)
-        elif isinstance(value.type, ir.FloatType):
-            # Call runtime ftoa function to convert float to string
-            return self._convert_float_to_string(builder, module, buffer_ptr, start_pos, value)
-        else:
-            # For other types, just store placeholder for now
-            temp_str = "[value]"
-            for i, char in enumerate(temp_str):
-                char_ptr = builder.gep(
-                    buffer_ptr,
-                    [ir.Constant(ir.IntType(32), 0),
-                     ir.Constant(ir.IntType(32), start_pos + i)],
-                    inbounds=True
-                )
-                builder.store(ir.Constant(ir.IntType(8), ord(char)), char_ptr)
-            return start_pos + len(temp_str)
-    
-    def _convert_integer_to_string(self, builder: ir.IRBuilder, module: ir.Module,
-                                 buffer_ptr: ir.Value, start_pos: int, value: ir.Value) -> int:
-        """Convert integer to string at runtime using LLVM IR"""
-        # This implements a simple integer-to-string conversion in LLVM IR
-        # We'll use a divide-by-10 approach to extract digits
-        
-        func = builder.block.function
-        
-        # Create blocks for the conversion algorithm
-        entry_block = builder.block
-        negative_block = func.append_basic_block('negative_block')
-        positive_block = func.append_basic_block('positive_block')
-        zero_check_block = func.append_basic_block('zero_check')
-        zero_block = func.append_basic_block('zero_block')
-        conversion_cond = func.append_basic_block('conversion_cond')
-        conversion_loop = func.append_basic_block('conversion_loop')
-        reverse_cond = func.append_basic_block('reverse_cond')
-        reverse_loop = func.append_basic_block('reverse_loop')
-        done_block = func.append_basic_block('conversion_done')
-        
-        # Allocate temporary buffer for digits (max 12 digits for 32-bit int + sign)
-        temp_buffer_type = ir.ArrayType(ir.IntType(8), 12)
-        temp_buffer = builder.alloca(temp_buffer_type, name="temp_digits")
-        
-        # Position counter for writing into the final buffer
-        pos_counter = builder.alloca(ir.IntType(32), name="pos_counter")
-        builder.store(ir.Constant(ir.IntType(32), start_pos), pos_counter)
-        
-        # Digit counter and working value
-        digit_count = builder.alloca(ir.IntType(32), name="digit_count")
-        builder.store(ir.Constant(ir.IntType(32), 0), digit_count)
-        working_val = builder.alloca(value.type, name="working_val")
-        
-        # Check if the number is negative
-        zero = ir.Constant(value.type, 0)
-        is_negative = builder.icmp_signed('<', value, zero, name="is_negative")
-        builder.cbranch(is_negative, negative_block, positive_block)
-        
-        # Handle negative numbers
-        builder.position_at_start(negative_block)
-        # Store minus sign
-        current_pos = builder.load(pos_counter, name="current_pos")
-        minus_ptr = builder.gep(
-            buffer_ptr,
-            [ir.Constant(ir.IntType(32), 0), current_pos],
-            inbounds=True
-        )
-        builder.store(ir.Constant(ir.IntType(8), ord('-')), minus_ptr)
-        # Increment position
-        new_pos = builder.add(current_pos, ir.Constant(ir.IntType(32), 1), name="new_pos")
-        builder.store(new_pos, pos_counter)
-        # Store absolute value
-        abs_val = builder.sub(zero, value, name="abs_val")
-        builder.store(abs_val, working_val)
-        builder.branch(zero_check_block)
-        
-        # Handle positive numbers
-        builder.position_at_start(positive_block)
-        builder.store(value, working_val)
-        builder.branch(zero_check_block)
-        
-        # Handle special case of zero
-        builder.position_at_start(zero_check_block)
-        current_val = builder.load(working_val, name="current_val")
-        is_zero = builder.icmp_signed('==', current_val, zero, name="is_zero")
-        builder.cbranch(is_zero, zero_block, conversion_cond)
-        
-        # Zero case
-        builder.position_at_start(zero_block)
-        current_pos = builder.load(pos_counter, name="current_pos")
-        zero_ptr = builder.gep(
-            buffer_ptr,
-            [ir.Constant(ir.IntType(32), 0), current_pos],
-            inbounds=True
-        )
-        builder.store(ir.Constant(ir.IntType(8), ord('0')), zero_ptr)
-        # Increment position and jump to done
-        new_pos = builder.add(current_pos, ir.Constant(ir.IntType(32), 1), name="new_pos")
-        builder.store(new_pos, pos_counter)
-        builder.branch(done_block)
-        
-        # Conversion condition: while working_val > 0
-        builder.position_at_start(conversion_cond)
-        current_val = builder.load(working_val, name="current_val")
-        is_nonzero = builder.icmp_signed('>', current_val, zero, name="is_nonzero")
-        builder.cbranch(is_nonzero, conversion_loop, reverse_cond)
-        
-        # Conversion loop: extract digit
-        builder.position_at_start(conversion_loop)
-        current_val = builder.load(working_val, name="current_val")
-        current_count = builder.load(digit_count, name="current_count")
-        
-        # Get remainder (digit) and quotient
-        ten = ir.Constant(value.type, 10)
-        digit_val = builder.srem(current_val, ten, name="digit_val")
-        quotient = builder.sdiv(current_val, ten, name="quotient")
-        
-        # Convert digit to ASCII and store in temp buffer
-        digit_char = builder.add(digit_val, ir.Constant(value.type, ord('0')), name="digit_char")
-        digit_char_i8 = builder.trunc(digit_char, ir.IntType(8), name="digit_char_i8")
-        
-        # Store in temporary buffer
-        temp_ptr = builder.gep(
-            temp_buffer,
-            [ir.Constant(ir.IntType(32), 0), current_count],
-            inbounds=True
-        )
-        builder.store(digit_char_i8, temp_ptr)
-        
-        # Update counters
-        builder.store(quotient, working_val)
-        new_count = builder.add(current_count, ir.Constant(ir.IntType(32), 1), name="new_count")
-        builder.store(new_count, digit_count)
-        
-        builder.branch(conversion_cond)
-        
-        # Reverse the digits into the final buffer
-        builder.position_at_start(reverse_cond)
-        final_count = builder.load(digit_count, name="final_count")
-        reverse_index = builder.alloca(ir.IntType(32), name="reverse_index")
-        builder.store(final_count, reverse_index)
-        
-        # Check if we have digits to reverse
-        has_digits = builder.icmp_signed('>', final_count, ir.Constant(ir.IntType(32), 0), name="has_digits")
-        builder.cbranch(has_digits, reverse_loop, done_block)
-        
-        # Reverse loop: copy digits from temp buffer to final buffer in reverse order
-        builder.position_at_start(reverse_loop)
-        current_reverse_index = builder.load(reverse_index, name="current_reverse_index")
-        current_pos = builder.load(pos_counter, name="current_pos")
-        
-        # Decrement reverse index (we're going backwards)
-        prev_reverse_index = builder.sub(current_reverse_index, ir.Constant(ir.IntType(32), 1), name="prev_reverse_index")
-        builder.store(prev_reverse_index, reverse_index)
-        
-        # Load digit from temp buffer
-        temp_digit_ptr = builder.gep(
-            temp_buffer,
-            [ir.Constant(ir.IntType(32), 0), prev_reverse_index],
-            inbounds=True
-        )
-        temp_digit = builder.load(temp_digit_ptr, name="temp_digit")
-        
-        # Store in final buffer
-        final_ptr = builder.gep(
-            buffer_ptr,
-            [ir.Constant(ir.IntType(32), 0), current_pos],
-            inbounds=True
-        )
-        builder.store(temp_digit, final_ptr)
-        
-        # Increment final position
-        new_pos = builder.add(current_pos, ir.Constant(ir.IntType(32), 1), name="new_pos")
-        builder.store(new_pos, pos_counter)
-        
-        # Check if more digits to reverse
-        is_more = builder.icmp_signed('>', prev_reverse_index, ir.Constant(ir.IntType(32), 0), name="is_more")
-        builder.cbranch(is_more, reverse_loop, done_block)
-        
-        # Done
-        builder.position_at_start(done_block)
-        final_pos = builder.load(pos_counter, name="final_pos")
-        
-        # Return the final position (as an integer, not an LLVM Value)
-        # Since we can't return a dynamic value from this function, we need to 
-        # return a conservative estimate and fix this differently
-        return start_pos + 11  # Maximum possible digits for a 32-bit integer
-    
-    def _convert_float_to_string(self, builder: ir.IRBuilder, module: ir.Module,
-                               buffer_ptr: ir.Value, start_pos: int, value: ir.Value) -> int:
-        """Convert float to string at runtime - proper implementation needed"""
-        # For now, just store "1.23" as placeholder
-        # In a real implementation, this would call ftoa or similar runtime function
-        temp_str = "1.23"
-        for i, char in enumerate(temp_str):
-            char_ptr = builder.gep(
-                buffer_ptr,
-                [ir.Constant(ir.IntType(32), 0),
-                 ir.Constant(ir.IntType(32), start_pos + i)],
-                inbounds=True
-            )
-            builder.store(ir.Constant(ir.IntType(8), ord(char)), char_ptr)
-        return start_pos + len(temp_str)
+        # If we get here, we can't evaluate at compile time
+        raise NotImplementedError(f"Cannot evaluate {type(expr).__name__} at compile time for f-string")
 
 @dataclass
 class FunctionCall(Expression):
