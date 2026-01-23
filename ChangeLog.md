@@ -1,5 +1,12 @@
 # Change Log
 
+## 1/23/2026
+- Implemented `ArrayLiteral` in the AST, solving many issues.
+- Made `StringLiteral` use `ArrayLiteral`
+- Solved an issue with array access and assignment, can now do `array[index] = value;`
+- Refactored the runtime a bit. Prepared for `GetStdHandle` so `win_print()` doesn't have to call it every time.
+- Fixed runtime for Linux so programs no longer `SEGFAULT` after execution.
+
 ## 1/22/2026
 - Began some runtime implementation.  
 - `strlen()` in `tests\strlen.fx` is a working example. Requires including the C runtime (for now).  

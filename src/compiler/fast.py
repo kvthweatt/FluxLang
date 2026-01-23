@@ -672,6 +672,372 @@ class ArrayLiteral(Expression):
             ir.Constant(ir.IntType(64), bytes),
             ir.Constant(ir.IntType(1), 0)  # not volatile
         ])
+
+    @staticmethod
+    def concatenate(builder: ir.IRBuilder, module: ir.Module, 
+                   left_val: ir.Value, right_val: ir.Value, 
+                   operator: Operator) -> ir.Value:
+        """
+        Handle array concatenation (+ and -) operations.
+        
+        Args:
+            builder: IR builder
+            module: LLVM module
+            left_val: Left operand (array or array pointer)
+            right_val: Right operand (array or array pointer)
+            operator: ADD for concatenation, SUB for truncation
+            
+        Returns:
+            Pointer to new concatenated/truncated array
+        """
+        # Get array information
+        left_elem_type, left_len = ArrayLiteral.get_array_info(left_val)
+        right_elem_type, right_len = ArrayLiteral.get_array_info(right_val)
+        
+        # Type compatibility check
+        if left_elem_type != right_elem_type:
+            raise ValueError(f"Cannot {operator.value} arrays with different element types: {left_elem_type} vs {right_elem_type}")
+        
+        # Calculate result length
+        if operator == Operator.ADD:
+            result_len = left_len + right_len
+        else:  # SUB
+            result_len = max(left_len - right_len, 0)
+        
+        # Create result array type
+        result_array_type = ir.ArrayType(left_elem_type, result_len)
+        
+        # Check if both operands are global constants for compile-time concatenation
+        if (isinstance(left_val, ir.GlobalVariable) and 
+            isinstance(right_val, ir.GlobalVariable) and 
+            getattr(left_val, 'global_constant', False) and 
+            getattr(right_val, 'global_constant', False)):
+            # Compile-time concatenation
+            return ArrayLiteral._create_global_array_concat(
+                module, left_val, right_val, result_array_type, operator
+            )
+        else:
+            # Runtime concatenation
+            return ArrayLiteral._create_runtime_array_concat(
+                builder, module, left_val, right_val, result_array_type, operator
+            )
+    
+    @staticmethod
+    def _create_global_array_concat(module: ir.Module, left_val: ir.Value, 
+                                    right_val: ir.Value, result_array_type: ir.ArrayType, 
+                                    operator: Operator) -> ir.Value:
+        """Create compile-time array concatenation for global constants."""
+        # Get the initializers from both global constants
+        left_init = left_val.initializer if hasattr(left_val, 'initializer') else None
+        right_init = right_val.initializer if hasattr(right_val, 'initializer') else None
+        
+        if left_init is None or right_init is None:
+            raise ValueError("Both operands must be global constants for compile-time concatenation")
+        
+        # Extract array elements
+        left_elements = list(left_init.constant)
+        right_elements = list(right_init.constant) if operator == Operator.ADD else []
+        
+        # Create new array with concatenated elements
+        if operator == Operator.ADD:
+            new_elements = left_elements + right_elements
+        else:  # SUB
+            left_len = len(left_elements)
+            right_len = len(right_elements)
+            new_len = max(left_len - right_len, 0)
+            new_elements = left_elements[:new_len]
+        
+        # Create global constant
+        global_name = f".array_concat_{id(module)}_{id(left_val)}_{id(right_val)}"
+        global_array = ir.GlobalVariable(module, result_array_type, name=global_name)
+        global_array.linkage = 'internal'
+        global_array.global_constant = True
+        global_array.initializer = ir.Constant(result_array_type, new_elements)
+        
+        # Mark as array pointer
+        global_array.type._is_array_pointer = True
+        
+        return global_array
+    
+    @staticmethod
+    def _create_runtime_array_concat(builder: ir.IRBuilder, module: ir.Module, 
+                                     left_val: ir.Value, right_val: ir.Value, 
+                                     result_array_type: ir.ArrayType, 
+                                     operator: Operator) -> ir.Value:
+        """Create runtime array concatenation using memcpy."""
+        # Get array info
+        left_elem_type, left_len = ArrayLiteral.get_array_info(left_val)
+        right_elem_type, right_len = ArrayLiteral.get_array_info(right_val)
+        
+        # Calculate element size in bytes
+        elem_size_bytes = left_elem_type.width // 8
+        
+        # Allocate new array for result
+        result_ptr = builder.alloca(result_array_type, name="array_concat_result")
+        
+        # Copy left array to result
+        if left_len > 0:
+            # Get pointer to first element of result array
+            zero = ir.Constant(ir.IntType(32), 0)
+            result_start = builder.gep(result_ptr, [zero, zero], name="result_start")
+            
+            # Get pointer to source array start
+            left_start = builder.gep(left_val, [zero, zero], name="left_start")
+            
+            # Copy left array
+            left_bytes = left_len * elem_size_bytes
+            ArrayLiteral.emit_memcpy(builder, module, result_start, left_start, left_bytes)
+        
+        # Copy right array to result (for ADD operation)
+        if operator == Operator.ADD and right_len > 0:
+            zero = ir.Constant(ir.IntType(32), 0)
+            # Get pointer to position after left array in result
+            left_len_const = ir.Constant(ir.IntType(32), left_len)
+            result_right_start = builder.gep(result_ptr, [zero, left_len_const], name="result_right_start")
+            
+            # Get pointer to source array start
+            right_start = builder.gep(right_val, [zero, zero], name="right_start")
+            
+            # Copy right array
+            right_bytes = right_len * elem_size_bytes
+            ArrayLiteral.emit_memcpy(builder, module, result_right_start, right_start, right_bytes)
+        
+        # Mark as array pointer
+        result_ptr.type._is_array_pointer = True
+        
+        return result_ptr
+    
+    @staticmethod
+    def resize_for_assignment(builder: ir.IRBuilder, module: ir.Module, 
+                             ptr: ir.Value, val: ir.Value, 
+                             var_name: str = None) -> ir.Value:
+        """
+        Dynamically resize arrays to accommodate new values during assignment.
+        
+        Args:
+            builder: IR builder
+            module: LLVM module
+            ptr: Pointer to existing array
+            val: New value to assign (array)
+            var_name: Optional variable name for scope updates
+            
+        Returns:
+            Pointer to resized array (may be same as ptr if no resize needed)
+        """
+        # Get array information
+        val_elem_type, val_len = ArrayLiteral.get_array_info(val)
+        ptr_elem_type, ptr_len = ArrayLiteral.get_array_info(ptr)
+        
+        # If the new array is larger, we need to reallocate
+        if val_len > ptr_len:
+            # Create new array type with the larger size
+            new_array_type = ir.ArrayType(val_elem_type, val_len)
+            
+            # Allocate new storage for the resized array
+            new_alloca = builder.alloca(new_array_type, name=f"{var_name}_resized" if var_name else "array_resized")
+            
+            # Copy existing data from old array to new array (first ptr_len elements)
+            if ptr_len > 0:
+                elem_size_bytes = ptr_elem_type.width // 8
+                old_bytes = ptr_len * elem_size_bytes
+                
+                # Get pointer to start of old array
+                zero = ir.Constant(ir.IntType(32), 0)
+                old_start = builder.gep(ptr, [zero, zero], name="old_start")
+                
+                # Get pointer to start of new array
+                new_start = builder.gep(new_alloca, [zero, zero], name="new_start")
+                
+                # Copy old data
+                ArrayLiteral.emit_memcpy(builder, module, new_start, old_start, old_bytes)
+            
+            # Copy new data to the new array (overwriting all elements)
+            new_bytes = val_len * (val_elem_type.width // 8)
+            zero = ir.Constant(ir.IntType(32), 0)
+            new_start = builder.gep(new_alloca, [zero, zero], name="new_start")
+            val_start = builder.gep(val, [zero, zero], name="val_start")
+            ArrayLiteral.emit_memcpy(builder, module, new_start, val_start, new_bytes)
+            
+            # Update the original variable to point to the new array
+            if var_name and builder.scope and var_name in builder.scope:
+                builder.scope[var_name] = new_alloca
+            
+            return new_alloca
+        else:
+            # If new array is smaller or same size, just copy the data
+            copy_len = min(val_len, ptr_len)
+            copy_bytes = copy_len * (val_elem_type.width // 8)
+            
+            zero = ir.Constant(ir.IntType(32), 0)
+            ptr_start = builder.gep(ptr, [zero, zero], name="ptr_start")
+            val_start = builder.gep(val, [zero, zero], name="val_start")
+            
+            # Copy the data
+            ArrayLiteral.emit_memcpy(builder, module, ptr_start, val_start, copy_bytes)
+            
+            # If the new array is smaller, zero out the remaining elements
+            if val_len < ptr_len:
+                remaining_bytes = (ptr_len - val_len) * (ptr_elem_type.width // 8)
+                if remaining_bytes > 0:
+                    # Get pointer to remaining area
+                    val_len_const = ir.Constant(ir.IntType(32), val_len)
+                    remaining_start = builder.gep(ptr, [zero, val_len_const], name="remaining_start")
+                    
+                    # Zero out remaining bytes
+                    ArrayLiteral.emit_memset(builder, module, remaining_start, 0, remaining_bytes)
+            
+            return ptr
+    
+    @staticmethod
+    def slice_array(builder: ir.IRBuilder, module: ir.Module, 
+                   array_val: ir.Value, start_val: ir.Value, end_val: ir.Value,
+                   is_reverse: bool = False) -> ir.Value:
+        """
+        Extract array slice with optional reverse.
+        
+        Args:
+            builder: IR builder
+            module: LLVM module
+            array_val: Source array
+            start_val: Start index (i32)
+            end_val: End index (i32, inclusive)
+            is_reverse: True for reverse slicing (e.g., s[3..0])
+            
+        Returns:
+            Pointer to new array containing the slice
+        """
+        # Calculate slice length based on direction
+        if is_reverse:
+            # Reverse range: length = (start - end) + 1
+            slice_len_exclusive = builder.sub(start_val, end_val, name="slice_len_exclusive")
+            slice_len = builder.add(slice_len_exclusive, ir.Constant(ir.IntType(32), 1), name="slice_len")
+        else:
+            # Forward range: length = (end - start) + 1
+            slice_len_exclusive = builder.sub(end_val, start_val, name="slice_len_exclusive")
+            slice_len = builder.add(slice_len_exclusive, ir.Constant(ir.IntType(32), 1), name="slice_len")
+        
+        # Determine the element type
+        if isinstance(array_val, ir.GlobalVariable):
+            if isinstance(array_val.type.pointee, ir.ArrayType):
+                element_type = array_val.type.pointee.element
+            else:
+                raise ValueError("Cannot slice non-array global variable")
+        elif isinstance(array_val.type, ir.PointerType):
+            if isinstance(array_val.type.pointee, ir.ArrayType):
+                element_type = array_val.type.pointee.element
+            else:
+                # For pointer types like i8*, the element type is the pointee
+                element_type = array_val.type.pointee
+        else:
+            raise ValueError(f"Cannot slice type: {array_val.type}")
+        
+        # Create fixed-size array to hold the slice
+        max_slice_size = 256  # Should be enough for most string operations
+        slice_array_type = ir.ArrayType(element_type, max_slice_size)
+        slice_ptr = builder.alloca(slice_array_type, name="slice_array")
+        
+        # Get pointer to the start of the source array/string
+        zero = ir.Constant(ir.IntType(32), 0)
+        if isinstance(array_val, ir.GlobalVariable):
+            # Global array access
+            source_start_ptr = builder.gep(array_val, [zero, start_val], inbounds=True, name="source_start")
+        elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
+            # Local array access
+            source_start_ptr = builder.gep(array_val, [zero, start_val], inbounds=True, name="source_start")
+        elif isinstance(array_val.type, ir.PointerType):
+            # Pointer arithmetic for strings (char*, etc.)
+            source_start_ptr = builder.gep(array_val, [start_val], inbounds=True, name="source_start")
+        else:
+            raise ValueError(f"Unsupported array type for slicing: {array_val.type}")
+        
+        # Get pointer to the start of the slice array
+        slice_start_ptr = builder.gep(slice_ptr, [zero, zero], inbounds=True, name="slice_start")
+        
+        # Copy the slice using a loop that handles both forward and reverse directions
+        func = builder.block.function
+        loop_cond = func.append_basic_block('slice_loop_cond')
+        loop_body = func.append_basic_block('slice_loop_body')
+        loop_end = func.append_basic_block('slice_loop_end')
+        
+        # Create loop counter
+        counter_ptr = builder.alloca(ir.IntType(32), name="slice_counter")
+        builder.store(ir.Constant(ir.IntType(32), 0), counter_ptr)
+        builder.branch(loop_cond)
+        
+        # Loop condition: counter < slice_len
+        builder.position_at_start(loop_cond)
+        counter = builder.load(counter_ptr, name="counter")
+        cond = builder.icmp_signed('<', counter, slice_len, name="slice_cond")
+        builder.cbranch(cond, loop_body, loop_end)
+        
+        # Loop body: copy one element with direction-aware indexing
+        builder.position_at_start(loop_body)
+        
+        if is_reverse:
+            # For reverse slices: source index goes backwards from start to end
+            source_offset = builder.sub(start_val, counter, name="reverse_source_offset")
+        else:
+            # For forward slices: source index goes forwards from start
+            source_offset = builder.add(start_val, counter, name="forward_source_offset")
+        
+        # Get source element at calculated offset
+        if isinstance(array_val, ir.GlobalVariable):
+            # Global array access
+            source_elem_ptr = builder.gep(array_val, [zero, source_offset], inbounds=True, name="source_elem")
+        elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
+            # Local array access
+            source_elem_ptr = builder.gep(array_val, [zero, source_offset], inbounds=True, name="source_elem")
+        elif isinstance(array_val.type, ir.PointerType):
+            # Pointer arithmetic for strings (char*, etc.)
+            source_elem_ptr = builder.gep(array_val, [source_offset], inbounds=True, name="source_elem")
+        
+        source_elem = builder.load(source_elem_ptr, name="source_val")
+        
+        # Store in slice array at sequential destination index (always forward)
+        dest_elem_ptr = builder.gep(slice_start_ptr, [counter], inbounds=True, name="dest_elem")
+        builder.store(source_elem, dest_elem_ptr)
+        
+        # Increment counter
+        next_counter = builder.add(counter, ir.Constant(ir.IntType(32), 1), name="next_counter")
+        builder.store(next_counter, counter_ptr)
+        builder.branch(loop_cond)
+        
+        # End of loop - add null terminator for strings
+        builder.position_at_start(loop_end)
+        if element_type == ir.IntType(8):  # For string slices, add null terminator
+            final_counter = builder.load(counter_ptr, name="final_counter")
+            null_ptr = builder.gep(slice_start_ptr, [final_counter], inbounds=True, name="null_pos")
+            null_char = ir.Constant(ir.IntType(8), 0)
+            builder.store(null_char, null_ptr)
+        
+        return slice_ptr
+    
+    @staticmethod
+    def from_string(string_value: str, storage_class: Optional[StorageClass] = None) -> 'ArrayLiteral':
+        """
+        Create an ArrayLiteral from a string value.
+        
+        This is a convenience factory method for creating array literals from strings.
+        The actual code generation happens in the codegen() method.
+        
+        Args:
+            string_value: The string content
+            storage_class: Optional storage class (GLOBAL, STACK, etc.)
+            
+        Returns:
+            ArrayLiteral configured as a string
+        """
+        # Convert string to list of char literals
+        elements = []
+        for char in string_value:
+            elements.append(Literal(char, DataType.CHAR))
+        
+        return ArrayLiteral(
+            elements=elements,
+            is_string=True,
+            string_value=string_value,
+            storage_class=storage_class
+        )
     
     def create_global_string(self, module: ir.Module, string_val: str, name_hint: str = "") -> ir.Value:
         """Create a global string constant."""
@@ -1274,37 +1640,18 @@ class BinaryOp(Expression):
     operator: Operator
     right: Expression
 
-    def _literal_string_to_array_ptr(self, builder: ir.IRBuilder, module: ir.Module, lit: Literal, name_hint: str) -> ir.Value:
-        """Turn a string Literal(DataType.CHAR with python str value) into a pointer-to-array value preserving array semantics.
-        Returns a pointer to the first element (via gep) of an internal global array. The pointee is an ArrayType(i8, N).
-        """
-        if not isinstance(lit, (Literal, StringLiteral)):
-            raise ValueError("Expected string Literal or StringLiteral for conversion")
-        if isinstance(lit, Literal) and (lit.type != DataType.CHAR or not isinstance(lit.value, str)):
-            raise ValueError("Expected string Literal for conversion")
-        string_bytes = lit.value.encode('ascii')
-        arr_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
-        const_arr = ir.Constant(arr_ty, bytearray(string_bytes))
-        gname = f".str.binop.{name_hint}.{id(lit)}"
-        gv = ir.GlobalVariable(module, const_arr.type, name=gname)
-        gv.linkage = 'internal'
-        gv.global_constant = True
-        gv.initializer = const_arr
-        zero = ir.Constant(ir.IntType(32), 0)
-        ptr = builder.gep(gv, [zero, zero], name=f"{name_hint}_str_ptr")
-        # Mark as array pointer for downstream logic that preserves array semantics
-        ptr.type._is_array_pointer = True
-        return ptr
-
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Attempt to promote string literals to array pointers when using + or - for concatenation
         left_expr, right_expr = self.left, self.right
+        
+        # Handle pointer arithmetic - treat pointers as integers
         left_val = self.left.codegen(builder, module)
         right_val = self.right.codegen(builder, module)
-        # Handle pointer arithmetic - treat pointers as integers
+        
         if isinstance(left_val.type, ir.PointerType) or isinstance(right_val.type, ir.PointerType):
             # For pointer arithmetic, convert to intptr and back
-            intptr_type = ir.IntType(32)  # Use 64-bit for addresses
+            
+            intptr_type = ir.IntType(32)  # Use 32-bit for addresses
             
             if isinstance(left_val.type, ir.PointerType):
                 left_val = builder.ptrtoint(left_val, intptr_type, name="ptr_to_int")
@@ -1320,58 +1667,14 @@ class BinaryOp(Expression):
             
             # Return as integer - let Assignment cast back to pointer if needed
             return result
-        if self.operator in (Operator.ADD, Operator.SUB):
-            # Fast path: both operands are string literals -> compile-time constant concat
-            if ((isinstance(left_expr, StringLiteral) and isinstance(right_expr, StringLiteral)) or
-                (isinstance(left_expr, Literal) and isinstance(right_expr, Literal) \
-                 and left_expr.type == DataType.CHAR and right_expr.type == DataType.CHAR \
-                 and isinstance(left_expr.value, str) and isinstance(right_expr.value, str))):
-                # Build concatenated constant array
-                concat = left_expr.value + (right_expr.value if self.operator == Operator.ADD else '')
-                lit_concat = Literal(concat, DataType.CHAR)
-                return self._literal_string_to_array_ptr(builder, module, lit_concat, "concat")
-            # Otherwise, codegen operands first
-            left_val = left_expr.codegen(builder, module)
-            right_val = right_expr.codegen(builder, module)
-            # Promote any string literal that resulted in scalar i8 into array pointer
-            def promote_if_scalar_char(val, expr, hint):
-                if isinstance(expr, Literal) and expr.type == DataType.CHAR and isinstance(expr.value, str):
-                    # If val is i8, promote to array pointer using the literal content
-                    if isinstance(val.type, ir.IntType) and val.type.width == 8:
-                        return self._literal_string_to_array_ptr(builder, module, expr, hint)
-                return val
-            left_val = promote_if_scalar_char(left_val, left_expr, "lhs")
-            right_val = promote_if_scalar_char(right_val, right_expr, "rhs")
-        else:
-            # Non-concat operators: regular codegen
-            left_val = left_expr.codegen(builder, module)
-            right_val = right_expr.codegen(builder, module)
         
         # Handle array concatenation (ADD) and subtraction (SUB)
         if (self.operator in (Operator.ADD, Operator.SUB) and 
-            is_array_or_array_pointer(left_val) and is_array_or_array_pointer(right_val)):
-            # Get array information
-            left_elem_type, left_len = get_array_info(left_val)
-            right_elem_type, right_len = get_array_info(right_val)
-            # Type compatibility check
-            if left_elem_type != right_elem_type:
-                raise ValueError(f"Cannot {self.operator.value} arrays with different element types: {left_elem_type} vs {right_elem_type}")
-            # Calculate result length
-            if self.operator == Operator.ADD:
-                result_len = left_len + right_len
-            else:  # SUB
-                result_len = max(left_len - right_len, 0)
-            # Create result array type
-            result_array_type = ir.ArrayType(left_elem_type, result_len)
-            # Check if both operands are global constants for compile-time concatenation
-            if (isinstance(left_val, ir.GlobalVariable) and 
-                isinstance(right_val, ir.GlobalVariable) and 
-                getattr(left_val, 'global_constant', False) and getattr(right_val, 'global_constant', False)):
-                # Compile-time concatenation of global constants
-                return self._create_global_array_concat(module, left_val, right_val, result_array_type, self.operator)
-            else:
-                # Runtime concatenation
-                return self._create_runtime_array_concat(builder, module, left_val, right_val, result_array_type, self.operator)
+            ArrayLiteral.is_array_or_array_pointer(left_val) and 
+            ArrayLiteral.is_array_or_array_pointer(right_val)):
+            
+            # Delegate to ArrayLiteral for concatenation
+            return ArrayLiteral.concatenate(builder, module, left_val, right_val, self.operator)
         
         # Ensure types match by casting if necessary
         if left_val.type != right_val.type:
@@ -1386,6 +1689,7 @@ class BinaryOp(Expression):
             elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.FloatType):
                 left_val = builder.sitofp(left_val, right_val.type)
         
+        # Standard arithmetic and logical operations
         if self.operator == Operator.ADD:
             if isinstance(left_val.type, ir.FloatType):
                 return builder.fadd(left_val, right_val)
@@ -1492,80 +1796,6 @@ class BinaryOp(Expression):
                 return builder.fptosi(result_fp, left_val.type)
         else:
             raise ValueError(f"Unsupported operator: {self.operator}")
-    
-    def _create_global_array_concat(self, module: ir.Module, left_val: ir.Value, right_val: ir.Value, result_array_type: ir.ArrayType, operator: Operator) -> ir.Value:
-        """Create compile-time array concatenation for global constants"""
-        # Get the initializers from both global constants
-        left_init = left_val.initializer
-        right_init = right_val.initializer
-        
-        # Extract array elements
-        left_elements = list(left_init.constant)
-        right_elements = list(right_init.constant) if operator == Operator.ADD else []
-        
-        # Create new array with concatenated elements
-        if operator == Operator.ADD:
-            new_elements = left_elements + right_elements
-        else:  # SUB
-            left_len = len(left_elements)
-            right_len = len(right_elements)
-            new_len = max(left_len - right_len, 0)
-            new_elements = left_elements[:new_len]
-        
-        # Create global constant
-        global_name = f".array_concat_{id(self)}"
-        global_array = ir.GlobalVariable(module, result_array_type, name=global_name)
-        global_array.linkage = 'internal'
-        global_array.global_constant = True
-        global_array.initializer = ir.Constant(result_array_type, new_elements)
-        
-        # CRITICAL: Mark as array pointer to preserve type information
-        global_array.type._is_array_pointer = True
-        
-        return global_array
-    
-    def _create_runtime_array_concat(self, builder: ir.IRBuilder, module: ir.Module, left_val: ir.Value, right_val: ir.Value, result_array_type: ir.ArrayType, operator: Operator) -> ir.Value:
-        """Create runtime array concatenation using memcpy"""
-        # Allocate new array for result
-        result_ptr = builder.alloca(result_array_type, name="array_concat_result")
-        
-        # Get array info
-        left_elem_type, left_len = get_array_info(left_val)
-        right_elem_type, right_len = get_array_info(right_val)
-        
-        # Calculate element size in bytes
-        elem_size_bytes = left_elem_type.width // 8
-        
-        # Copy left array to result
-        if left_len > 0:
-            # Get pointer to first element of result array
-            zero = ir.Constant(ir.IntType(32), 0)
-            result_start = builder.gep(result_ptr, [zero, zero], name="result_start")
-            
-            # Get pointer to source array start
-            left_start = builder.gep(left_val, [zero, zero], name="left_start")
-            
-            # Copy left array
-            left_bytes = left_len * elem_size_bytes
-            emit_memcpy(builder, module, result_start, left_start, left_bytes)
-        
-        # Copy right array to result (for ADD operation)
-        if operator == Operator.ADD and right_len > 0:
-            # Get pointer to position after left array in result
-            left_len_const = ir.Constant(ir.IntType(32), left_len)
-            result_right_start = builder.gep(result_ptr, [zero, left_len_const], name="result_right_start")
-            
-            # Get pointer to source array start
-            right_start = builder.gep(right_val, [zero, zero], name="right_start")
-            
-            # Copy right array
-            right_bytes = right_len * elem_size_bytes
-            emit_memcpy(builder, module, result_right_start, right_start, right_bytes)
-        
-        # CRITICAL: Mark as array pointer to preserve type information
-        result_ptr.type._is_array_pointer = True
-        
-        return result_ptr
 
 @dataclass
 class UnaryOp(Expression):

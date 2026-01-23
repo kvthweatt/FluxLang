@@ -9,6 +9,9 @@ def main() -> int
     byte[5] test = ["a", "b", "c", "d", "\n"];
     test[0] = "x";
     print(@test,5);
+    noopstr test2 = "test!\n";
+    test2[4] = "?";
+    print(@test2,6);
 
     int c1 = strlen(@s1);
     int c2 = strlen(@s2);

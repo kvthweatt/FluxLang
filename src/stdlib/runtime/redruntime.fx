@@ -56,20 +56,7 @@ def FRTStartup() -> int
         #ifdef __WINDOWS__
         case (1)
         {
-            global i64 WIN_STANDARD_HANDLE = win_get_std_handle();
-            if (WIN_STANDARD_HANDLE == 0)
-            {
-                print("zero\n",5);
-            };
-            if (WIN_STANDARD_HANDLE < 0)
-            {
-                print("Negative\n",9);
-            };
-            if (WIN_STANDARD_HANDLE == -1)
-            {
-                print("Negative 1\n",11);
-            };
-            print("before main\n",12);
+            //global i64 WIN_STANDARD_HANDLE = win_get_std_handle();
             return_code = main();
         }
         #endif;
