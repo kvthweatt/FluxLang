@@ -3,7 +3,7 @@
 
 def main() -> int
 {
-	byte[] x = f"Testing f-string.\0";
+	byte[] x = f"Testing f-string." + f"\nConcatenation?\0";
     int len = strlen(@x);
     print(@x,len);
 	return 0;

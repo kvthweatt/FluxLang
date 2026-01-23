@@ -52,11 +52,11 @@ def rsub(int x, int y) -> int
 ## **Import:**
 Import works by replacing the code of the import statement with the imported file.
 ```
-import "standard.fx";
+#import "standard.fx";
 ```
 Multi-line imports work in the order they appear.
 ```
-import "types.fx", "binops.fx";
+#import "types.fx", "binops.fx";
 ```
 
 **types.fx module:**  
@@ -66,13 +66,13 @@ This is an excerpt and not a complete list of all types defined in the standard 
 **32-bit wide types**
 ```
 signed   data{32} as  i32;
-unsigned data{32} as ui32;
+unsigned data{32} as u32;
 ```
 
 **64-bit wide types**
 ```
 signed   data{64} as  i64;
-unsigned data{64} as ui64;
+unsigned data{64} as u64;
 ```
 
 ---
@@ -263,23 +263,21 @@ Flux uses f-strings, similar to Python but without formatting.
 
 **i-string Example:**
 ```
-import "standard.fx";
-
-using standard::io, standard::types;
+#import "standard.fx";
 
 def bar() -> string { return "World"; };  // string defined in the types module
 print(i"Hello {} {}":
 		              {
 		              	bar() + "!";
 		                "test";
-		              }  // This is the only block which does not require a semicolon
+		              };
      );
 ```
 This allows you to write clean interpolated strings without strange formatting.
 
 **f-string Example:**
 ```
-import "standard.fx";
+#import "standard.fx";
 
 using standard::io, standard::types;
 
@@ -341,10 +339,11 @@ Data is a variable bit width, primitive binary data type. Anything can cast to i
 It is intended to allow Flux programmers to build complex flexible custom types to fit their needs.  
 Data types use big-endian byte order by default. Manipulate bits as needed.  
 Bit-width bust always be specified.
+Endianness is 1 for Big-Endian, 0 for Little-Endian. Obviously.
 
 Syntax for declaring a datatype:
 ```
-    (const) (signed | unsigned) data {bit-width:alignment} as your_new_type
+    (const) (signed | unsigned) data {bit-width:alignment:endianness} as your_new_type
 
 //    Example of a non-OOP string:
 
@@ -363,7 +362,7 @@ For example, you can just keep type-chaining:
 Data decays to an integer type under the hood. All data is binary, and is therefore an integer.
 
 ```
-import "standard.fx";
+#import "standard.fx";
 
 unsigned data{8} as byte;   // optionally `unsigned data{8}[] as noopstr;`
 byte[] as noopstring;
@@ -406,7 +405,7 @@ Casting anything to `void` is the functional equivalent of freeing the memory oc
 If the width of the data type is 512 bits, that many bits will be freed.  
 This is dangerous on purpose, it is equivalent to free(ptr) in C. This syntax is considered explicit in Flux once you understand the convention.
 
-This goes for functions which return void. If you declare a function's return type as void, you're explicitly saying **"this function frees its return value"**.
+This goes for functions which return void. If you declare a function's return type as `void`, you're explicitly saying **"this function frees its return value"**.
 
 Example:
 ```
@@ -426,16 +425,17 @@ If you try to return data with the `return` statement and the function definitio
 **Void casting in relation to the stack and heap:**
 ```
 def example() -> void {
-    int stackVar = 42;                    // Stack allocated
-    int* heapVar = malloc(sizeof(int));   // Heap allocated
+    stack int stackVar = 42;      // Stack allocated
+    heap int heapVar = 5;         // Heap allocated
 
     (void)stackVar;  // What happens here?
     (void)heapVar;   // And here?
-}
+    return void;
+};
 ```
 
 In either place, the stack or the heap, the memory is freed.  
-(void) is essentially a "free this memory now" no matter where it is or how it got there.  
+`(void)` is essentially a "free this memory now" no matter where it is or how it got there.  
 If you want to free something early, you can, but if you attempt to use it later you'll get a use-after-free bug.  
 If you're not familiar with a use-after-free, it is something that shows up in runtime, not comptime.  
 However in Flux, they can show up in comptime as well.  
@@ -520,9 +520,7 @@ int[]* pi_array = @i_array;         // Pointer
 
 **Pointer Arithmetic:**
 ```
-import "standard.fx";
-
-using standard::io, standard::types;
+#import "standard.fx";
 
 def main() -> int
 {
@@ -546,9 +544,7 @@ def main() -> int
 
 **Extending an array:**
 ```
-import "standard.fx";
-
-using standard::io, standard::types;
+#import "standard.fx";
 
 def main() -> int
 {
@@ -558,6 +554,7 @@ def main() -> int
 	arr1 += arr2;             // Invalid
 
 	int[] arr3 = arr1 + arr2; // Correct!
+	return 0;
 };
 ```
 
@@ -577,11 +574,11 @@ If you don't want the compiler to optimize/touch your assembly, use `volatile`:
 ```
 volatile asm
 {
-	// The compiler will not touch anything in here.
+	// The compiler will not attempt to optimize this block.
 };
 ```
 
-You can also write volatile constant expressions like so,  
+You can also write const-volatile expressions like so,  
 `const volatile def foo() -> void {};`
 
 ---
@@ -605,7 +602,7 @@ typeof(strange);  // signed data{13:16}
 
 ## **Arrays:**
 ```
-import "standard.fx";
+#import "standard.fx";
 using standard::io, standard::types;
 
 int[] ia_myArray = [3, 92, 14, 30, 6, 5, 11, 400];
@@ -647,6 +644,11 @@ for (x,y in z)                   // Python style
 };
 
 for (int c = 0; c < 10; c++)     // C++ style
+{
+	// ... code ...
+};
+
+do                               // Simple do-loop
 {
 	// ... code ...
 };
@@ -724,6 +726,7 @@ def myErr(int e) -> void
 			throw("Default error from function myErr()");
 		};                                                  // Semicolons only follow the default case.
 	};
+	return void;
 };
 
 def thisFails() -> bool
@@ -778,7 +781,7 @@ compt {
 	def test1() -> void
 	{
 		global def MY_MACRO 1;
-	    return;
+	    return void;
 	};
 
 	if (!def(MY_MACRO))
@@ -789,9 +792,9 @@ compt {
 ```
 
 **Macros:**  
-The `def` keyword has two abilities, making functions, and making macros. Example:
+The `#def` preprocessor command makes macros. Example:
 ```
-def SOME_MACRO 0x4000000;
+#def SOME_MACRO 0x4000000;
 
 def myFunc() -> int
 {
@@ -805,9 +808,9 @@ def myFunc() -> int
 
 **You can also macro operators like so:**
 ```
-def MASK_SET `&;       // Set bits with mask
-def MASK_CLEAR `!&;    // Clear bits with mask
-def TOGGLE `^^;        // Toggle bits
+#def MASK_SET `&;       // Set bits with mask
+#def MASK_CLEAR `!&;    // Clear bits with mask
+#def TOGGLE `^^;        // Toggle bits
 
 // Usage becomes incredibly clean
 gpio_control MASK_SET 0x0F;     // Set lower 4 bits
@@ -815,39 +818,20 @@ status_reg MASK_CLEAR 0xF0;     // Clear upper 4 bits
 led_state TOGGLE 0x01;          // Toggle LED bit
 
 // Network byte order operations
-def HTONSL <<8;
-def HTONSR >>8;    // Host to network short
-def ROTL <<;       // Rotate left
-def ROTR >>;       // Rotate right
-def SBOX `^;       // S-box substitution
-def PERMUTE `!&;   // Bit permutation
-def NTOHSR >>8;    // Network to host short
-def NTOHSL <<8;    // Network to host short
+#def HTONSL <<8;
+#def HTONSR >>8;    // Host to network short
+#def ROTL <<;       // Rotate left
+#def ROTR >>;       // Rotate right
+#def SBOX `^;       // S-box substitution
+#def PERMUTE `!&;   // Bit permutation
+#def NTOHSR >>8;    // Network to host short
+#def NTOHSL <<8;    // Network to host short
 
 // Checksum operations
-def CHECKSUM_ADD `+;
-def CHECKSUM_XOR `^^;
+#def CHECKSUM_ADD `+;
+#def CHECKSUM_XOR `^^;
 ```
 
-It can also work to act like C++'s `#ifdef` and `#ifndef`, in Flux you do `if(def)` and `if(!def)` inside a compt block:
-```
-compt
-{
-	if (def(MY_CONST_MACRO))
-	{
-		// Do something ...
-	}
-	elif (!def(MY_CONST_MACRO))
-	{
-		global def MY_CONST_MACRO 1;
-	};
-};
-```
-
-If you define a macro inside a function, it will not be global because it is locally scoped to the function. You must use `global` to make the macro global.  
-
-This means if you want pre-processor behavior, just wrap all your behavior inside an anonymous block marked `compt` anywhere in your code.  
-This also means you can write entire compile-time programs, the Flux runtime is built into the compiler for this purpose.  
 `compt` gives you more access to zero-cost abstractions and build time validation to catch errors before deployment.  
 Bad comptime code will result in slow compile times, example writing an infinite loop in a `compt` block that doesn't resolve means it never compiles.  
 If you want to write an entire Bitcoin miner in compile time, that's up to you. Your miner will run, but it will never compile unless a natural program end is reached.
@@ -879,28 +863,28 @@ def main() -> int
 Flux will support FFI to make adoption easier.  
 You may only place extern blocks globally.  
 ```
-extern("C")
+extern   // No need to specify a language, you match the ABI
 {
     // Memory management
-    def malloc(ui64 size) -> void*;
+    def malloc(u64 size) -> void*;
     def free(void* ptr) -> void;
-    def memcpy(void* dest, void* src, ui64 n) -> void*;
-    def memset(void* s, int c, ui64 n) -> void*;
+    def memcpy(void* dest, void* src, u64 n) -> void*;
+    def memset(void* s, int c, u64 n) -> void*;
 
     // File I/O
     def fopen(string filename, string mode) -> void*;
     def fclose(void* stream) -> int;
-    def fread(void* ptr, ui64 size, ui64 count, void* stream) -> ui64;
-    def fwrite(void* ptr, ui64 size, ui64 count, void* stream) -> ui64;
+    def fread(void* ptr, u64 size, u64 count, void* stream) -> u64;
+    def fwrite(void* ptr, u64 size, u64 count, void* stream) -> u64;
 
     // String operations
-    def strlen(string s) -> ui64;
+    def strlen(string s) -> u64;
     def strcpy(string dest, string src) -> string;
     def strcmp(string s1, string s2) -> int;
 };
 ```
 
-extern will make these definitions global. You can only prototype functions inside extern blocks, nothing else.
+`extern` will make these definitions global. Only function prototypes can be placed within `extern` blocks.
 
 ---
 
@@ -1000,6 +984,7 @@ Drawable object myObj
 	def draw() -> void
 	{
 		// Implementation code, if the block is empty the compiler throws an error.
+		return void;
 	};
 
 	// ... other methods ...
@@ -1018,14 +1003,22 @@ To make it guaranteed, use `volatile`:
 ---
 
 Keyword list:
-
 ```
 alignof, and, as, asm, assert, auto, break, bool, case, catch, char, compt, const, contract, continue, data, def, default,
-do, elif, else, extern, false, float, for, from, global, heap, if, import, in, is, int, lext, local, namespace, not, object,
+do, elif, else, extern, false, float, for, from, global, heap, if, in, is, int, lext, local, namespace, not, object,
 operator, or, private, public, register, return, signed, sizeof, stack, struct, super, switch, this, throw, true, try, trait,
 typeof, union, unsigned, using, void, volatile, while, xor
 ```
-Count: 62 keywords
+Count: 61 keywords
+
+Preprocessor directives:
+```
+#def
+#ifdef
+#ifndef
+#else
+#endif
+```
 
 Literal types:
 bool, int `5`, float `3.14`, char `"B"` == `66` - `65` == `'A'`, data
