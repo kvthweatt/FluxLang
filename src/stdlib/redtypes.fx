@@ -3,6 +3,10 @@
 #def FLUX_STANDARD 1;
 #endif;
 
+#ifndef FLUX_STANDARD_TYPES
+#def FLUX_STANDARD_TYPES 1;
+#endif;
+
 namespace standard
 {
 	namespace types

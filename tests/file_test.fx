@@ -9,7 +9,7 @@ def main() -> i32
     i64 file_handle = open_read(@path);
     
     // Check if file opened successfully
-    if (file_handle == -1)
+    if (file_handle == -1 or file_handle == 0)
     {
         byte[] error_msg = "Error opening file\n";
         print(@error_msg, 19);

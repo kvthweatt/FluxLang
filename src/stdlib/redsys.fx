@@ -3,6 +3,10 @@
 #def FLUX_STANDARD 1;
 #endif;
 
+#ifndef FLUX_STANDARD_SYSTEM
+#def FLUX_STANDARD_SYSTEM 1;
+#endif;
+
 #ifdef __WINDOWS__
 #def CURRENT_OS 1;
 #endif;
@@ -14,10 +18,6 @@
 #ifdef __MACOS__
 #def CURRENT_OS 3;
 #endif;
-
-#ifdef FLUX_RUNTIME
-#import "redruntime.fx";
-#endif; // Flux Runtime
 
 global const int OS_UNKNOWN = 0;
 global const int OS_WINDOWS = 1;

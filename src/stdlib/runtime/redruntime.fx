@@ -4,7 +4,26 @@
 
 #ifndef FLUX_RUNTIME
 #def FLUX_RUNTIME 1;
-#endif
+#endif;
+
+#ifdef __WIN64__
+// Undefine WIN32, because 64-bit.
+#def __WIN32__ 0;
+#else
+#ifndef __WIN32__
+#def __WIN32__ 1;
+#endif;
+#endif;
+
+#ifndef FLUX_STANDARD_TYPES
+#import "redtypes.fx";
+#endif;
+#ifndef FLUX_STANDARD_SYSTEM
+#import "redsys.fx";
+#endif;
+#ifndef FLUX_STANDARD_IO
+#import "redio.fx";
+#endif;
 
 def main() -> int;
 def FRTStartup() -> int;
@@ -37,6 +56,20 @@ def FRTStartup() -> int
         #ifdef __WINDOWS__
         case (1)
         {
+            global i64 WIN_STANDARD_HANDLE = win_get_std_handle();
+            if (WIN_STANDARD_HANDLE == 0)
+            {
+                print("zero\n",5);
+            };
+            if (WIN_STANDARD_HANDLE < 0)
+            {
+                print("Negative\n",9);
+            };
+            if (WIN_STANDARD_HANDLE == -1)
+            {
+                print("Negative 1\n",11);
+            };
+            print("before main\n",12);
             return_code = main();
         }
         #endif;

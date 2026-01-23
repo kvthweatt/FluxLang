@@ -96,7 +96,7 @@ class FluxPreprocessor:
                 macro_name = parts[1]
                 macro_value = ' '.join(parts[2:]).rstrip(';').strip()
                 self.macros[macro_name] = macro_value
-                print(f"[PREPROCESSOR] Defined macro: {macro_name} = {macro_value}")
+                #print(f"[PREPROCESSOR] Defined macro: {macro_name} = {macro_value}")
             return i + 1
         
         # Check for #ifdef
@@ -129,7 +129,7 @@ class FluxPreprocessor:
         else:
             condition_true = macro_value is not None and macro_value == '1'
         
-        directive = "#ifndef" if is_ifndef else "#ifdef"
+        directive = "#def"
         print(f"[PREPROCESSOR] {directive} {macro_name} (value={macro_value}): {'TRUE' if condition_true else 'FALSE'}")
         
         i = start_i + 1

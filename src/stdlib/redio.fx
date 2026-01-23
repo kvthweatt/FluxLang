@@ -4,8 +4,9 @@
 #def FLUX_STANDARD 1;
 #endif;
 
-#import "redtypes.fx";
-#import "redsys.fx";
+#ifndef FLUX_STANDARD_IO
+#def FLUX_STANDARD_IO 1;
+#endif;
 
 namespace standard
 {
@@ -29,6 +30,7 @@ namespace standard
 
             // OUTPUT FORWARD DECLARATIONS
 #ifdef __WINDOWS__
+            def win_get_std_handle() -> i64;
             def win_print(byte* msg, int x) -> void;
             def wpnl() -> void;
 #endif;
@@ -117,6 +119,23 @@ namespace standard
             };
 
             // OUTPUT DEFINITIONS
+def win_get_std_handle() -> i64
+{
+    i64 handle = 0;
+    
+    volatile asm
+    {
+        movq $$-11, %rcx
+        subq $$32, %rsp
+        call GetStdHandle
+        addq $$32, %rsp
+        movq %rax, $0           // Store result in handle memory location
+    } : : "m"(handle)
+      : "rax", "rcx", "rdx", "r8", "r9", "r10", "r11", "memory";
+    
+    return handle;
+};
+
             def win_print(byte* msg, int x) -> void
             {
                 volatile asm
@@ -246,7 +265,7 @@ namespace standard
        
             // FORWARD DECLARATIONS
             def win_open(byte* path, u32 access, u32 share, u32 disposition, u32 attributes) -> i64;
-            def win_read(i64 handle, byte[] buffer, u32 bytes_to_read) -> i32;
+            def win_read(i64 handle, byte* buffer, u32 bytes_to_read) -> i32;
             def win_write(i64 handle, byte* buffer, u32 bytes_to_write) -> i32;
             def win_close(i64 handle) -> i32;
             
@@ -295,14 +314,15 @@ namespace standard
             {
                 u32 bytes_read = 0;
                 u32* bytes_read_ptr = @bytes_read;
-                i64 readfile_result = 0;  // 64-bit to match RAX
+                i64 readfile_result = 0;
+                i64* readfile_result_ptr = @readfile_result;
+                i64 error_code = 0;
+                i64* error_code_ptr = @error_code;
                 
                 volatile asm
                 {
-                    // $0 = handle, $1 = buffer, $2 = bytes_to_read, $3 = bytes_read_ptr
-                    // $4 will store the ReadFile return value
                     movq $0, %rcx           // hFile
-                    movq $1, %rdx           // lpBuffer  
+                    movq $1, %rdx           // lpBuffer
                     movl $2, %r8d           // nNumberOfBytesToRead
                     movq $3, %r9            // lpNumberOfBytesRead pointer
                     
@@ -314,14 +334,28 @@ namespace standard
                     
                     addq $$40, %rsp
                     
-                    // Store RAX (return value) into our variable
-                    movq %rax, $4
-                } : : "r"(handle), "r"(buffer), "r"(bytes_to_read), "r"(bytes_read_ptr), "m"(readfile_result)
+                    movq $4, %r10           // readfile_result_ptr
+                    movq %rax, (%r10)       // Store result
+                    
+                    // If ReadFile failed, get the error code
+                    cmpq $$0, %rax
+                    jne skip_error
+                    
+                    subq $$32, %rsp
+                    call GetLastError
+                    addq $$32, %rsp
+                    
+                    movq $5, %r10           // error_code_ptr  
+                    movq %rax, (%r10)       // Store error
+                    
+                skip_error:
+                } : : "r"(handle), "r"(buffer), "r"(bytes_to_read), "r"(bytes_read_ptr), "r"(readfile_result_ptr), "r"(error_code_ptr)
                   : "rax","rcx","rdx","r8","r9","r10","r11","memory";
                 
-                // Check if we read anything
                 if (readfile_result == 0)
                 {
+                    // error_code now contains the Windows error code
+                    // Common errors: 6 = invalid handle, 87 = invalid parameter
                     return -1;
                 };
                 
@@ -415,6 +449,180 @@ namespace standard
             def open_read_write(byte* path) -> i64
             {
                 return win_open(path, GENERIC_READ_WRITE, FILE_SHARE_READ, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL);
+            };
+#endif;
+
+#ifdef __LINUX__
+            // File I/O functions for Linux
+
+            // File open flags (o_flags)
+            #def O_RDONLY 0x0000;
+            #def O_WRONLY 0x0001;
+            #def O_RDWR 0x0002;
+            #def O_CREAT 0x0040;
+            #def O_TRUNC 0x0200;
+            #def O_APPEND 0x0400;
+            
+            // File permission modes (mode)
+            #def S_IRUSR 0x0400;  // user read
+            #def S_IWUSR 0x0200;  // user write
+            #def S_IXUSR 0x0100;  // user execute
+            #def S_IRGRP 0x0040;  // group read
+            #def S_IWGRP 0x0020;  // group write
+            #def S_IXGRP 0x0010;  // group execute
+            #def S_IROTH 0x0004;  // other read
+            #def S_IWOTH 0x0002;  // other write
+            #def S_IXOTH 0x0001;  // other execute
+            
+            // Common permission combinations
+            #def S_IRWXU (S_IRUSR || S_IWUSR || S_IXUSR);  // rwx for user
+            #def S_IRWXG (S_IRGRP || S_IWGRP || S_IXGRP);  // rwx for group
+            #def S_IRWXO (S_IROTH || S_IWOTH || S_IXOTH);  // rwx for other
+            #def DEFAULT_PERM 0x0000);  // rw-r--r--
+            
+            // File descriptor constants
+            #def INVALID_FD -1;
+            
+            // FORWARD DECLARATIONS
+            def nix_open(byte* path, i32 flags, i32 mode) -> i64;
+            def nix_read(i64 fd, byte* buffer, u64 bytes_to_read) -> i64;
+            def nix_write(i64 fd, byte* buffer, u64 bytes_to_write) -> i64;
+            def nix_close(i64 fd) -> i64;
+            
+            // IMPLEMENTATIONS
+            
+            // open - Opens or creates a file
+            // Returns: File descriptor (i64), or -1 on failure
+            // Linux syscall: open(const char *pathname, int flags, mode_t mode)
+            // syscall number: 2 (open)
+            def nix_open(byte* path, i32 flags, i32 mode) -> i64
+            {
+                i64 result = INVALID_FD;
+                
+                volatile asm
+                {
+                    // Linux x64 calling convention for syscalls:
+                    // syscall number: rax
+                    // arg1: rdi, arg2: rsi, arg3: rdx, arg4: r10, arg5: r8, arg6: r9
+                    
+                    movq $$2, %rax          // syscall number: open = 2
+                    movq $0, %rdi           // pathname (path)
+                    movl $1, %esi           // flags (lower 32-bit)
+                    movl $2, %edx           // mode (lower 32-bit)
+                    syscall                 // invoke syscall
+                    
+                    movq %rax, $3           // Store result
+                } : : "r"(path), "r"(flags), "r"(mode), "m"(result)
+                  : "rax","rdi","rsi","rdx","r10","r8","r9","r11","rcx","memory";
+                
+                return result;
+            };
+            
+            // read - Reads data from a file
+            // Returns: Number of bytes actually read, or -1 on error
+            // Linux syscall: read(int fd, void *buf, size_t count)
+            // syscall number: 0 (read)
+            def nix_read(i64 fd, byte* buffer, u64 bytes_to_read) -> i64
+            {
+                i64 result = 0;
+                
+                volatile asm
+                {
+                    movq $$0, %rax          // syscall number: read = 0
+                    movq $0, %rdi           // fd
+                    movq $1, %rsi           // buf (buffer)
+                    movq $2, %rdx           // count (bytes_to_read)
+                    syscall                 // invoke syscall
+                    
+                    movq %rax, $3           // Store result
+                } : : "r"(fd), "r"(buffer), "r"(bytes_to_read), "m"(result)
+                  : "rax","rdi","rsi","rdx","r10","r8","r9","r11","rcx","memory";
+                
+                return result;
+            };
+            
+            // write - Writes data to a file
+            // Returns: Number of bytes actually written, or -1 on error
+            // Linux syscall: write(int fd, const void *buf, size_t count)
+            // syscall number: 1 (write)
+            def nix_write(i64 fd, byte* buffer, u64 bytes_to_write) -> i64
+            {
+                i64 result = 0;
+                
+                volatile asm
+                {
+                    movq $$1, %rax           // syscall number: write = 1
+                    movq $0, %rdi           // fd
+                    movq $1, %rsi           // buf (buffer)
+                    movq $2, %rdx           // count (bytes_to_write)
+                    syscall                 // invoke syscall
+                    
+                    movq %rax, $3           // Store result
+                } : : "r"(fd), "r"(buffer), "r"(bytes_to_write), "m"(result)
+                  : "rax","rdi","rsi","rdx","r10","r8","r9","r11","rcx","memory";
+                
+                return result;
+            };
+            
+            // close - Closes a file descriptor
+            // Returns: 0 on success, -1 on failure
+            // Linux syscall: close(int fd)
+            // syscall number: 3 (close)
+            def nix_close(i64 fd) -> i64
+            {
+                i64 result = 0;
+                
+                volatile asm
+                {
+                    movq $$3, %rax           // syscall number: close = 3
+                    movq $0, %rdi           // fd
+                    syscall                 // invoke syscall
+                    
+                    movq %rax, $1           // Store result
+                } : : "r"(fd), "m"(result)
+                  : "rax","rdi","rsi","rdx","r10","r8","r9","r11","rcx","memory";
+                
+                return result;
+            };
+            
+            // HELPER FUNCTIONS - Simplified wrappers to match Windows API
+            
+            // Open file for reading
+            def open_read(byte* path) -> i64
+            {
+                return nix_open(path, O_RDONLY, 0);
+            };
+            
+            // Open file for writing (creates if doesn't exist, truncates if exists)
+            def open_write(byte* path) -> i64
+            {
+                return nix_open(path, O_WRONLY || O_CREAT || O_TRUNC, DEFAULT_PERM);
+            };
+            
+            // Open file for reading and writing
+            def open_read_write(byte* path) -> i64
+            {
+                return nix_open(path, O_RDWR || O_CREAT, DEFAULT_PERM);
+            };
+            
+            // Read from file (wrapper with 32-bit count)
+            def read(i64 fd, byte* buffer, u32 bytes_to_read) -> i64
+            {
+                i64 result = nix_read(fd, buffer, (u64)bytes_to_read);
+                return result;
+            };
+            
+            // Write to file (wrapper with 32-bit count)
+            def write(i64 fd, byte* buffer, u32 bytes_to_write) -> i64
+            {
+                i64 result = nix_write(fd, buffer, (u64)bytes_to_write);
+                return result;
+            };
+            
+            // Close file
+            def close(i64 fd) -> i64
+            {
+                return nix_close(fd);
             };
 #endif;
         };

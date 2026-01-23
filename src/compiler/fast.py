@@ -206,7 +206,7 @@ class Literal(ASTNode):
                         gv.initializer = str_val
                         
                         # Get pointer to first character
-                        zero = ir.Constant(ir.IntType(1), 0)
+                        zero = ir.Constant(ir.IntType(32), 0)
                         str_ptr = gv.gep([zero, zero])
                         field_values.append(str_ptr)
                     else:
@@ -264,7 +264,7 @@ class Literal(ASTNode):
                     gv.initializer = str_val
                     
                     # Get pointer to first character
-                    zero = ir.Constant(ir.IntType(1), 0)
+                    zero = ir.Constant(ir.IntType(32), 0)
                     str_ptr = builder.gep(gv, [zero, zero], name=f"{field_name}_str_ptr")
                     field_value = str_ptr
                 else:
@@ -719,7 +719,7 @@ class BinaryOp(Expression):
         gv.linkage = 'internal'
         gv.global_constant = True
         gv.initializer = const_arr
-        zero = ir.Constant(ir.IntType(1), 0)
+        zero = ir.Constant(ir.IntType(32), 0)
         ptr = builder.gep(gv, [zero, zero], name=f"{name_hint}_str_ptr")
         # Mark as array pointer for downstream logic that preserves array semantics
         ptr.type._is_array_pointer = True
@@ -968,7 +968,7 @@ class BinaryOp(Expression):
         # Copy left array to result
         if left_len > 0:
             # Get pointer to first element of result array
-            zero = ir.Constant(ir.IntType(1), 0)
+            zero = ir.Constant(ir.IntType(32), 0)
             result_start = builder.gep(result_ptr, [zero, zero], name="result_start")
             
             # Get pointer to source array start
@@ -1075,7 +1075,7 @@ class UnaryOp(Expression):
         if isinstance(base_address.type, ir.PointerType):
             if isinstance(base_address.type.pointee, ir.ArrayType):
                 # For array pointers, get pointer to first element, then increment
-                zero = ir.Constant(ir.IntType(1), 0)
+                zero = ir.Constant(ir.IntType(32), 0)
                 array_start = builder.gep(base_address, [zero, zero], name="array_start")
                 
                 # Now increment this element pointer
@@ -1828,7 +1828,7 @@ class FunctionCall(Expression):
                 gv.initializer = str_val
                 
                 # Get pointer to the first character of the string
-                zero = ir.Constant(ir.IntType(1), 0)
+                zero = ir.Constant(ir.IntType(32), 0)
                 str_ptr = builder.gep(gv, [zero, zero], name=f"arg{i}_str_ptr")
                 arg_val = str_ptr
             else:
@@ -1845,7 +1845,7 @@ class FunctionCall(Expression):
                         isinstance(expected_type, ir.PointerType) and
                         arg_val.type.pointee.element == expected_type.pointee):
                         # Array to pointer decay: [4 x i8]* -> i8*
-                        zero = ir.Constant(ir.IntType(1), 0)
+                        zero = ir.Constant(ir.IntType(32), 0)
                         arg_val = builder.gep(arg_val, [zero, zero], name=f"arg{i}_decay")
                     
                     # Check if this is an object type that has a __expr method for automatic conversion
@@ -2156,7 +2156,7 @@ class ArrayAccess(Expression):
         slice_ptr = builder.alloca(slice_array_type, name="slice_array")
         
         # Get pointer to the start of the source array/string
-        zero = ir.Constant(ir.IntType(1), 0)
+        zero = ir.Constant(ir.IntType(32), 0)
         if isinstance(array_val, ir.GlobalVariable):
             # Global array access
             source_start_ptr = builder.gep(array_val, [zero, start_val], inbounds=True, name="source_start")
@@ -2340,7 +2340,7 @@ class AddressOf(Expression):
             index = self.expression.index.codegen(builder, module)
             
             if isinstance(array.type, ir.PointerType):
-                zero = ir.Constant(ir.IntType(1), 0)
+                zero = ir.Constant(ir.IntType(32), 0)
                 # FIXED: Pass indices as a single list
                 return builder.gep(array, [zero, index], inbounds=True)
         
@@ -2742,7 +2742,7 @@ class VariableDeclaration(ASTNode):
                 
                 # Initialize each array element individually
                 for i, elem in enumerate(self.initial_value.value):
-                    zero = ir.Constant(ir.IntType(1), 0)
+                    zero = ir.Constant(ir.IntType(32), 0)
                     index = ir.Constant(ir.IntType(32), i)
                     elem_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"{self.name}[{i}]")
                     
@@ -2775,13 +2775,13 @@ class VariableDeclaration(ASTNode):
                     str_alloca = builder.alloca(str_array_ty, name=f"{self.name}_str_data")
                     
                     for i, byte_val in enumerate(string_bytes):
-                        zero = ir.Constant(ir.IntType(1), 0)
+                        zero = ir.Constant(ir.IntType(32), 0)
                         index = ir.Constant(ir.IntType(32), i)
                         elem_ptr = builder.gep(str_alloca, [zero, index], name=f"{self.name}_char{i}")
                         char_val = ir.Constant(ir.IntType(8), byte_val)
                         builder.store(char_val, elem_ptr)
                     
-                    zero = ir.Constant(ir.IntType(1), 0)
+                    zero = ir.Constant(ir.IntType(32), 0)
                     str_ptr = builder.gep(str_alloca, [zero, zero], name=f"{self.name}_str_ptr")
                     builder.store(str_ptr, alloca)
                     
@@ -2792,7 +2792,7 @@ class VariableDeclaration(ASTNode):
                         if i >= llvm_type.count:
                             break
                         
-                        zero = ir.Constant(ir.IntType(1), 0)
+                        zero = ir.Constant(ir.IntType(32), 0)
                         index = ir.Constant(ir.IntType(32), i)
                         elem_ptr = builder.gep(alloca, [zero, index], name=f"{self.name}[{i}]")
                         
@@ -2800,7 +2800,7 @@ class VariableDeclaration(ASTNode):
                         builder.store(char_val, elem_ptr)
                     
                     for i in range(len(string_val), llvm_type.count):
-                        zero = ir.Constant(ir.IntType(1), 0)
+                        zero = ir.Constant(ir.IntType(32), 0)
                         index = ir.Constant(ir.IntType(32), i)
                         elem_ptr = builder.gep(alloca, [zero, index], name=f"{self.name}[{i}]")
                         zero_char = ir.Constant(ir.IntType(8), 0)
@@ -2827,13 +2827,13 @@ class VariableDeclaration(ASTNode):
                         str_alloca = builder.alloca(str_array_ty, name=f"ctor_arg{i}_str_data")
                         
                         for j, byte_val in enumerate(string_bytes):
-                            zero = ir.Constant(ir.IntType(1), 0)
+                            zero = ir.Constant(ir.IntType(32), 0)
                             index = ir.Constant(ir.IntType(32), j)
                             elem_ptr = builder.gep(str_alloca, [zero, index])
                             char_val = ir.Constant(ir.IntType(8), byte_val)
                             builder.store(char_val, elem_ptr)
                         
-                        zero = ir.Constant(ir.IntType(1), 0)
+                        zero = ir.Constant(ir.IntType(32), 0)
                         str_ptr = builder.gep(str_alloca, [zero, zero], name=f"ctor_arg{i}_str_ptr")
                         arg_val = str_ptr
                     else:
@@ -2860,7 +2860,7 @@ class VariableDeclaration(ASTNode):
                                 isinstance(init_val.type.pointee, ir.ArrayType) and
                                 isinstance(llvm_type, ir.PointerType) and 
                                 isinstance(llvm_type.pointee, ir.IntType)):
-                                zero = ir.Constant(ir.IntType(1), 0)
+                                zero = ir.Constant(ir.IntType(32), 0)
                                 array_ptr = builder.gep(init_val, [zero, zero], name="concat_array_to_ptr")
                                 builder.store(array_ptr, alloca)
                                 builder.scope[self.name] = alloca
@@ -3007,7 +3007,7 @@ class Assignment(Statement):
                     return val
                 else:
                     # For global variables, we can't easily resize, so convert to element pointer
-                    zero = ir.Constant(ir.IntType(1), 0)
+                    zero = ir.Constant(ir.IntType(32), 0)
                     array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
                     builder.store(array_ptr, ptr)
                     return array_ptr
@@ -3019,7 +3019,7 @@ class Assignment(Statement):
                     isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.PointerType)):
                     # This is assigning an array to a pointer type (like noopstr)
                     # Get pointer to first element of array
-                    zero = ir.Constant(ir.IntType(1), 0)
+                    zero = ir.Constant(ir.IntType(32), 0)
                     array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
                     builder.store(array_ptr, ptr)
                     return array_ptr
@@ -3113,7 +3113,7 @@ class Assignment(Statement):
             
             if isinstance(array.type, ir.PointerType) and isinstance(array.type.pointee, ir.ArrayType):
                 # Calculate element pointer
-                zero = ir.Constant(ir.IntType(1), 0)
+                zero = ir.Constant(ir.IntType(32), 0)
                 elem_ptr = builder.gep(array, [zero, index], inbounds=True)
                 builder.store(val, elem_ptr)
                 return val
@@ -3229,7 +3229,7 @@ class CompoundAssignment(Statement):
                         return concat_result
                     else:
                         # For global variables, we can't easily resize, so convert to element pointer
-                        zero = ir.Constant(ir.IntType(1), 0)
+                        zero = ir.Constant(ir.IntType(32), 0)
                         array_ptr = builder.gep(concat_result, [zero, zero], name="array_to_ptr")
                         builder.store(array_ptr, target_ptr)
                         return array_ptr
@@ -3262,7 +3262,7 @@ class CompoundAssignment(Statement):
                 old_bytes = ptr_len * elem_size_bytes
                 
                 # Get pointer to start of old array
-                zero = ir.Constant(ir.IntType(1), 0)
+                zero = ir.Constant(ir.IntType(32), 0)
                 old_start = builder.gep(ptr, [zero, zero], name="old_start")
                 
                 # Get pointer to start of new array
@@ -3273,7 +3273,7 @@ class CompoundAssignment(Statement):
             
             # Copy new data to the new array (overwriting all elements)
             new_bytes = val_len * (val_elem_type.width // 8)
-            zero = ir.Constant(ir.IntType(1), 0)
+            zero = ir.Constant(ir.IntType(32), 0)
             new_start = builder.gep(new_alloca, [zero, zero], name="new_start")
             val_start = builder.gep(val, [zero, zero], name="val_start")
             emit_memcpy(builder, module, new_start, val_start, new_bytes)
@@ -3288,7 +3288,7 @@ class CompoundAssignment(Statement):
             copy_len = min(val_len, ptr_len)
             copy_bytes = copy_len * (val_elem_type.width // 8)
             
-            zero = ir.Constant(ir.IntType(1), 0)
+            zero = ir.Constant(ir.IntType(32), 0)
             ptr_start = builder.gep(ptr, [zero, zero], name="ptr_start")
             val_start = builder.gep(val, [zero, zero], name="val_start")
             
@@ -3738,7 +3738,7 @@ class ForInLoop(Statement):
             
         elif isinstance(collection.type, ir.PointerType) and isinstance(collection.type.pointee, ir.IntType(8)):
             # String iteration (char*)
-            zero = ir.Constant(ir.IntType(1), 0)
+            zero = ir.Constant(ir.IntType(32), 0)
             current_ptr = builder.alloca(collection.type, name='char.ptr')
             builder.store(collection, current_ptr)
             
@@ -3853,7 +3853,7 @@ class ReturnStatement(Statement):
                 gv.initializer = str_val
                 
                 # Get pointer to the first character of the string
-                zero = ir.Constant(ir.IntType(1), 0)
+                zero = ir.Constant(ir.IntType(32), 0)
                 str_ptr = builder.gep(gv, [zero, zero], name="empty_str_ptr")
                 return str_ptr
         
@@ -4199,7 +4199,7 @@ class AssertStatement(Statement):
             msg_gv.global_constant = True
             
             # Get pointer to message
-            zero = ir.Constant(ir.IntType(1), 0)
+            zero = ir.Constant(ir.IntType(32), 0)
             msg_ptr = builder.gep(msg_gv, [zero, zero], inbounds=True)
             
             # Declare puts if not already present
