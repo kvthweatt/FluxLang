@@ -1,48 +1,83 @@
-#!/usr/bin/env python3
-"""
-Flux Import Preprocessor with Macro Support
-Simple line-by-line processing without regex overcomplication.
-"""
-
 import os
 from pathlib import Path
-from typing import Set, Dict, Optional, List, Tuple
+from typing import Set, Dict, Optional, List
 
-class FluxPreprocessor:
-    def __init__(self, compiler_macros=None):
+class FXPreprocessor:
+    def __init__(self, source_file, compiler_macros=None):
+        self.source_file = source_file
         self.processed_files: Set[str] = set()
         self.output_lines = []
-        self.macros: Dict[str, str] = {}  # macro_name -> value
-
+        self.macros: Dict[str, str] = {}
+        
         if compiler_macros:
             self.macros.update(compiler_macros)
-
-    def preprocess(self, source_file: str) -> str:
-        """
-        Preprocess a Flux source file, resolving all imports and macros.
-        """
-        # Reset state
-        self.processed_files.clear()
-        self.output_lines = []
+    
+    def process(self) -> str:
+        """Main processing pipeline"""
+        # Step 1: Process all imports and build content in memory
+        self._process_file(self.source_file)
         
-        # Process the main file and all its imports
-        self._process_file(source_file)
+        # Step 2: Build combined source
+        combined_source = '\n'.join(self.output_lines)
         
-        # Write output to build directory
+        # Step 3: Keep replacing macros until no more replacements occur
+        replaced = True
+        iteration = 0
+        while replaced:
+            iteration += 1
+            print(f"[PREPROCESSOR] Macro substitution pass {iteration}")
+            replaced = False
+            lines = combined_source.split('\n')
+            new_lines = []
+            
+            for line in lines:
+                new_line = self._substitute_macros(line)
+                if new_line != line:
+                    replaced = True
+                new_lines.append(new_line)
+            
+            combined_source = '\n'.join(new_lines)
+        
+        print(f"[PREPROCESSOR] Completed after {iteration} macro passes")
+        
+        # Step 4: Write to build/tmp.fx
         build_dir = Path("build")
         build_dir.mkdir(exist_ok=True)
         output_file = build_dir / "tmp.fx"
         
-        # Write the combined output
-        combined_source = '\n'.join(self.output_lines)
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(combined_source)
         
         print(f"[PREPROCESSOR] Generated: {output_file}")
         print(f"[PREPROCESSOR] Processed {len(self.processed_files)} file(s)")
-        print(f"[PREPROCESSOR] Defined {len(self.macros)} macro(s)")
         
         return combined_source
+    
+    def _resolve_path(self, filepath: str) -> Optional[Path]:
+        """Resolve import path"""
+        path = Path(filepath)
+        
+        # If it exists as given, return it
+        if path.exists():
+            return path
+        
+        # Try relative to current directory
+        cwd = Path.cwd()
+        
+        # Common locations to check
+        locations = [
+            filepath,
+            cwd / "src" / "stdlib" / filepath,
+            cwd / "src" / "stdlib" / "runtime" / filepath,
+            cwd / "src" / "stdlib" / "functions" / filepath,
+        ]
+        
+        for location in locations:
+            loc_path = Path(location)
+            if loc_path.exists():
+                return loc_path
+        
+        return None
     
     def _process_file(self, filepath: str):
         """Process a file and its imports"""
@@ -51,7 +86,7 @@ class FluxPreprocessor:
         if not resolved_path:
             raise FileNotFoundError(f"Could not find import: {filepath}")
         
-        # Avoid circular imports and duplicate processing
+        # Avoid circular imports
         abs_path = str(resolved_path.resolve())
         if abs_path in self.processed_files:
             return
@@ -96,7 +131,6 @@ class FluxPreprocessor:
                 macro_name = parts[1]
                 macro_value = ' '.join(parts[2:]).rstrip(';').strip()
                 self.macros[macro_name] = macro_value
-                #print(f"[PREPROCESSOR] Defined macro: {macro_name} = {macro_value}")
             return i + 1
         
         # Check for #ifdef
@@ -127,10 +161,7 @@ class FluxPreprocessor:
         if is_ifndef:
             condition_true = macro_value is None or macro_value == '0'
         else:
-            condition_true = macro_value is not None and macro_value == '1'
-        
-        directive = "#def"
-        print(f"[PREPROCESSOR] {directive} {macro_name} (value={macro_value}): {'TRUE' if condition_true else 'FALSE'}")
+            condition_true = macro_value is not None and macro_value != '0'
         
         i = start_i + 1
         depth = 1
@@ -146,8 +177,6 @@ class FluxPreprocessor:
             
             # Handle nested conditionals
             if stripped.startswith("#ifdef") or stripped.startswith("#ifndef"):
-                # We need to process nested conditionals regardless of current state
-                # because they might define their own macros
                 nested_end = self._skip_conditional_block(lines, i)
                 
                 if condition_true and not in_else:
@@ -172,9 +201,7 @@ class FluxPreprocessor:
                 if depth == 0:
                     # Process the collected lines
                     if lines_to_process:
-                        # Create a temporary processor for this block
-                        # to handle nested directives properly
-                        temp_processor = FluxPreprocessor(self.macros.copy())
+                        temp_processor = FXPreprocessor("", self.macros.copy())
                         temp_processor.output_lines = []
                         j = 0
                         while j < len(lines_to_process):
@@ -199,11 +226,10 @@ class FluxPreprocessor:
                 lines_to_process.append(line)
             elif not condition_true and in_else:
                 lines_to_process.append(line)
-            # Otherwise skip the line
             
             i += 1
         
-        raise SyntaxError(f"Unclosed {directive} block starting at line {start_i + 1}")
+        raise SyntaxError(f"Unclosed conditional block starting at line {start_i + 1}")
     
     def _skip_conditional_block(self, lines: List[str], start_i: int) -> int:
         """Skip over a conditional block without processing it, return index after #endif"""
@@ -226,7 +252,7 @@ class FluxPreprocessor:
     
     def _substitute_macros(self, line: str) -> str:
         """Simple macro substitution - replace macro names with their values"""
-        if not line or ';' in line and line.strip() == ';':
+        if not line or line.strip() == ';':
             return line
         
         # Split line into tokens, preserving whitespace structure
@@ -243,7 +269,7 @@ class FluxPreprocessor:
                 # Check for comment start
                 if current_token.endswith('/'):
                     in_comment = True
-                    current_token = current_token[:-1]  # Remove the /
+                    current_token = current_token[:-1]
                     result_parts.append(current_token)
                     current_token = "//"
                 else:
@@ -271,48 +297,15 @@ class FluxPreprocessor:
                 result_parts.append(current_token)
         
         return ''.join(result_parts)
-    
-    def _resolve_path(self, filepath: str) -> Optional[Path]:
-        """Resolve import path - SIMPLE VERSION"""
-        # Convert to Path object
-        path = Path(filepath)
-        
-        # If it exists as given, return it
-        if path.exists():
-            return path
-        
-        # Try relative to current directory
-        cwd = Path.cwd()
-        
-        # Common locations to check
-        locations = [
-            filepath,  # original
-            cwd / "src" / "stdlib" / filepath,
-            cwd / "src" / "stdlib" / "runtime" / filepath,
-            cwd / "src" / "stdlib" / "functions" / filepath,
-            #cwd / "tests" / filepath,
-        ]
-        
-        for location in locations:
-            loc_path = Path(location)
-            if loc_path.exists():
-                return loc_path
-        
-        return None
 
 
-# Example usage
+# Usage
 if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 2:
-        print("Usage: python fpreprocess.py [input.fx]")
-        print("Output will be written to build/tmp.fx")
+        print("Usage: python preprocessor.py <source_file.fx>")
         sys.exit(1)
     
-    input_file = sys.argv[1]
-    
-    preprocessor = FluxPreprocessor()
-    result = preprocessor.preprocess(input_file)
-    
-    print("\n=== Preprocessing Complete ===")
+    preprocessor = FXPreprocessor(sys.argv[1])
+    preprocessor.process()

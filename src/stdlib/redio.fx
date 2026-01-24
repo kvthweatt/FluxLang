@@ -4,9 +4,8 @@
 #def FLUX_STANDARD 1;
 #endif;
 
-#ifndef FLUX_STANDARD_IO
-#def FLUX_STANDARD_IO 1;
-#endif;
+#import "redtypes.fx";
+#import "redsys.fx";
 
 namespace standard
 {
@@ -30,7 +29,6 @@ namespace standard
 
             // OUTPUT FORWARD DECLARATIONS
 #ifdef __WINDOWS__
-            def win_get_std_handle() -> i64;
             def win_print(byte* msg, int x) -> void;
             def wpnl() -> void;
 #endif;
@@ -119,23 +117,6 @@ namespace standard
             };
 
             // OUTPUT DEFINITIONS
-def win_get_std_handle() -> i64
-{
-    i64 handle = 0;
-    
-    volatile asm
-    {
-        movq $$-11, %rcx
-        subq $$32, %rsp
-        call GetStdHandle
-        addq $$32, %rsp
-        movq %rax, $0           // Store result in handle memory location
-    } : : "m"(handle)
-      : "rax", "rcx", "rdx", "r8", "r9", "r10", "r11", "memory";
-    
-    return handle;
-};
-
             def win_print(byte* msg, int x) -> void
             {
                 volatile asm
@@ -464,21 +445,21 @@ def win_get_std_handle() -> i64
             #def O_APPEND 0x0400;
             
             // File permission modes (mode)
-            #def S_IRUSR 0x0400;  // user read
-            #def S_IWUSR 0x0200;  // user write
-            #def S_IXUSR 0x0100;  // user execute
-            #def S_IRGRP 0x0040;  // group read
-            #def S_IWGRP 0x0020;  // group write
-            #def S_IXGRP 0x0010;  // group execute
-            #def S_IROTH 0x0004;  // other read
-            #def S_IWOTH 0x0002;  // other write
-            #def S_IXOTH 0x0001;  // other execute
+            #def S_IRUSR 0x0400;
+            #def S_IWUSR 0x0200;
+            #def S_IXUSR 0x0100;
+            #def S_IRGRP 0x0040;
+            #def S_IWGRP 0x0020;
+            #def S_IXGRP 0x0010;
+            #def S_IROTH 0x0004;
+            #def S_IWOTH 0x0002;
+            #def S_IXOTH 0x0001;
             
             // Common permission combinations
-            #def S_IRWXU (S_IRUSR || S_IWUSR || S_IXUSR);  // rwx for user
-            #def S_IRWXG (S_IRGRP || S_IWGRP || S_IXGRP);  // rwx for group
-            #def S_IRWXO (S_IROTH || S_IWOTH || S_IXOTH);  // rwx for other
-            #def DEFAULT_PERM 0x0000);  // rw-r--r--
+            #def S_IRWXU (S_IRUSR || S_IWUSR || S_IXUSR);
+            #def S_IRWXG (S_IRGRP || S_IWGRP || S_IXGRP);
+            #def S_IRWXO (S_IROTH || S_IWOTH || S_IXOTH);
+            #def DEFAULT_PERM (S_IRUSR || S_IWUSR || S_IRGRP || S_IROTH);
             
             // File descriptor constants
             #def INVALID_FD -1;
@@ -487,7 +468,7 @@ def win_get_std_handle() -> i64
             def nix_open(byte* path, i32 flags, i32 mode) -> i64;
             def nix_read(i64 fd, byte* buffer, u64 bytes_to_read) -> i64;
             def nix_write(i64 fd, byte* buffer, u64 bytes_to_write) -> i64;
-            def nix_close(i64 fd) -> i64;
+            def nix_close(i64 fd) -> i32;
             
             // IMPLEMENTATIONS
             
@@ -505,7 +486,7 @@ def win_get_std_handle() -> i64
                     // syscall number: rax
                     // arg1: rdi, arg2: rsi, arg3: rdx, arg4: r10, arg5: r8, arg6: r9
                     
-                    movq $$2, %rax          // syscall number: open = 2
+                    movq $$2, %rax           // syscall number: open = 2
                     movq $0, %rdi           // pathname (path)
                     movl $1, %esi           // flags (lower 32-bit)
                     movl $2, %edx           // mode (lower 32-bit)
@@ -528,7 +509,7 @@ def win_get_std_handle() -> i64
                 
                 volatile asm
                 {
-                    movq $$0, %rax          // syscall number: read = 0
+                    movq $$0, %rax           // syscall number: read = 0
                     movq $0, %rdi           // fd
                     movq $1, %rsi           // buf (buffer)
                     movq $2, %rdx           // count (bytes_to_read)
@@ -568,7 +549,7 @@ def win_get_std_handle() -> i64
             // Returns: 0 on success, -1 on failure
             // Linux syscall: close(int fd)
             // syscall number: 3 (close)
-            def nix_close(i64 fd) -> i64
+            def nix_close(i64 fd) -> i32
             {
                 i64 result = 0;
                 
@@ -582,7 +563,7 @@ def win_get_std_handle() -> i64
                 } : : "r"(fd), "m"(result)
                   : "rax","rdi","rsi","rdx","r10","r8","r9","r11","rcx","memory";
                 
-                return result;
+                return (i32)result;
             };
             
             // HELPER FUNCTIONS - Simplified wrappers to match Windows API
@@ -606,21 +587,21 @@ def win_get_std_handle() -> i64
             };
             
             // Read from file (wrapper with 32-bit count)
-            def read(i64 fd, byte* buffer, u32 bytes_to_read) -> i64
+            def read(i64 fd, byte* buffer, u32 bytes_to_read) -> i32
             {
                 i64 result = nix_read(fd, buffer, (u64)bytes_to_read);
-                return result;
+                return (i32)result;
             };
             
             // Write to file (wrapper with 32-bit count)
-            def write(i64 fd, byte* buffer, u32 bytes_to_write) -> i64
+            def write(i64 fd, byte* buffer, u32 bytes_to_write) -> i32
             {
                 i64 result = nix_write(fd, buffer, (u64)bytes_to_write);
-                return result;
+                return (i32)result;
             };
             
             // Close file
-            def close(i64 fd) -> i64
+            def close(i64 fd) -> i32
             {
                 return nix_close(fd);
             };

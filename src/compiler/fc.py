@@ -236,12 +236,11 @@ class FluxCompiler:
             
             # Pass to preprocessor
             print("\n[PREPROCESSOR] Standard library / user-defined macros:\n")
-            preprocessor = FluxPreprocessor(compiler_macros=self.predefined_macros)
-            preprocessor.macros.update(self.predefined_macros)
+            preprocessor = FXPreprocessor(filename, compiler_macros=self.predefined_macros)
             #print("[PREPROCESSOR] All Macros:")
             #for key, value in preprocessor.macros.items():
             #    print("[PREPROCESSOR]", key, value)
-            result = preprocessor.preprocess(filename)
+            result = preprocessor.process()
             self.logger.section(f"Compiling Flux file: {filename}", LogLevel.INFO)
             base_name = Path(filename).stem
             

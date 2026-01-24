@@ -1,11 +1,10 @@
 
 Discarded input sections
 
- .text          0x0000000000000000        0x0 build/helloworld/helloworld.o
- .data          0x0000000000000000        0x0 build/helloworld/helloworld.o
- .bss           0x0000000000000000        0x0 build/helloworld/helloworld.o
+ .data          0x0000000000000000        0xc build/array_test/array_test.o
+ .bss           0x0000000000000000        0x8 build/array_test/array_test.o
  .note.GNU-stack
-                0x0000000000000000        0x0 build/helloworld/helloworld.o
+                0x0000000000000000        0x0 build/array_test/array_test.o
 
 Memory Configuration
 
@@ -18,11 +17,11 @@ Address of section .text-segment set to 0x400000
 Address of section .rodata set to 0x500000
 Address of section .data set to 0x600000
 Address of section .bss set to 0x700000
-LOAD build/helloworld/helloworld.o
+LOAD build/array_test/array_test.o
 START GROUP
 END GROUP
                 [!provide]                        PROVIDE (__executable_start = SEGMENT_START ("text-segment", 0x400000))
-                0x0000000000400040                . = (SEGMENT_START ("text-segment", 0x400000) + SIZEOF_HEADERS)
+                0x00000000004000e8                . = (SEGMENT_START ("text-segment", 0x400000) + SIZEOF_HEADERS)
 
 .interp
  *(SORT_BY_ALIGNMENT(.interp))
@@ -51,7 +50,7 @@ END GROUP
 .gnu.version_r
  *(SORT_BY_ALIGNMENT(.gnu.version_r))
 
-.rela.dyn       0x0000000000400040        0x0
+.rela.dyn       0x00000000004000e8        0x0
  *(SORT_BY_ALIGNMENT(.rela.init))
  *(SORT_BY_ALIGNMENT(.rela.text) SORT_BY_ALIGNMENT(.rela.text.*) SORT_BY_ALIGNMENT(.rela.gnu.linkonce.t.*))
  *(SORT_BY_ALIGNMENT(.rela.fini))
@@ -62,18 +61,18 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.rela.ctors))
  *(SORT_BY_ALIGNMENT(.rela.dtors))
  *(SORT_BY_ALIGNMENT(.rela.got))
- .rela.got      0x0000000000400040        0x0 build/helloworld/helloworld.o
+ .rela.got      0x00000000004000e8        0x0 build/array_test/array_test.o
  *(SORT_BY_ALIGNMENT(.rela.bss) SORT_BY_ALIGNMENT(.rela.bss.*) SORT_BY_ALIGNMENT(.rela.gnu.linkonce.b.*))
  *(SORT_BY_ALIGNMENT(.rela.ldata) SORT_BY_ALIGNMENT(.rela.ldata.*) SORT_BY_ALIGNMENT(.rela.gnu.linkonce.l.*))
  *(SORT_BY_ALIGNMENT(.rela.lbss) SORT_BY_ALIGNMENT(.rela.lbss.*) SORT_BY_ALIGNMENT(.rela.gnu.linkonce.lb.*))
  *(SORT_BY_ALIGNMENT(.rela.lrodata) SORT_BY_ALIGNMENT(.rela.lrodata.*) SORT_BY_ALIGNMENT(.rela.gnu.linkonce.lr.*))
  *(SORT_BY_ALIGNMENT(.rela.ifunc))
 
-.rela.plt       0x0000000000400040        0x0
+.rela.plt       0x00000000004000e8        0x0
  *(SORT_BY_ALIGNMENT(.rela.plt))
                 [!provide]                        PROVIDE (__rela_iplt_start = .)
  *(SORT_BY_ALIGNMENT(.rela.iplt))
- .rela.iplt     0x0000000000400040        0x0 build/helloworld/helloworld.o
+ .rela.iplt     0x00000000004000e8        0x0 build/array_test/array_test.o
                 [!provide]                        PROVIDE (__rela_iplt_end = .)
 
 .relr.dyn
@@ -82,10 +81,10 @@ END GROUP
 .init
  *(SORT_NONE(.init))
 
-.plt            0x0000000000400040        0x0
+.plt            0x00000000004000e8        0x0
  *(SORT_BY_ALIGNMENT(.plt))
  *(SORT_BY_ALIGNMENT(.iplt))
- .iplt          0x0000000000400040        0x0 build/helloworld/helloworld.o
+ .iplt          0x00000000004000e8        0x0 build/array_test/array_test.o
 
 .plt.got
  *(SORT_BY_ALIGNMENT(.plt.got))
@@ -93,13 +92,31 @@ END GROUP
 .plt.sec
  *(SORT_BY_ALIGNMENT(.plt.sec))
 
-.text
+.text           0x00000000004000f0      0x409
  *(SORT_BY_ALIGNMENT(.text.unlikely) SORT_BY_ALIGNMENT(.text.*_unlikely) SORT_BY_ALIGNMENT(.text.unlikely.*))
  *(SORT_BY_ALIGNMENT(.text.exit) SORT_BY_ALIGNMENT(.text.exit.*))
  *(SORT_BY_ALIGNMENT(.text.startup) SORT_BY_ALIGNMENT(.text.startup.*))
  *(SORT_BY_ALIGNMENT(.text.hot) SORT_BY_ALIGNMENT(.text.hot.*))
  *(SORT_BY_NAME(SORT_BY_ALIGNMENT(.text.sorted.*)))
  *(SORT_BY_ALIGNMENT(.text) SORT_BY_ALIGNMENT(.stub) SORT_BY_ALIGNMENT(.text.*) SORT_BY_ALIGNMENT(.gnu.linkonce.t.*))
+ .text          0x00000000004000f0      0x409 build/array_test/array_test.o
+                0x00000000004000f0                standard__io__console__nix_print
+                0x0000000000400120                standard__io__console__print
+                0x0000000000400140                standard__io__file__nix_open
+                0x0000000000400190                standard__io__file__nix_read
+                0x00000000004001f0                standard__io__file__nix_write
+                0x0000000000400250                standard__io__file__nix_close
+                0x0000000000400290                standard__io__file__open_read
+                0x00000000004002a0                standard__io__file__open_write
+                0x00000000004002c0                standard__io__file__open_read_write
+                0x00000000004002e0                standard__io__file__read
+                0x0000000000400310                standard__io__file__write
+                0x0000000000400340                standard__io__file__close
+                0x0000000000400350                main
+                0x0000000000400460                FRTStartup
+                0x0000000000400480                _start
+                0x0000000000400490                exit
+                0x00000000004004b0                strlen
  *(SORT_BY_ALIGNMENT(.gnu.warning))
 
 .fini
@@ -108,8 +125,10 @@ END GROUP
                 [!provide]                        PROVIDE (_etext = .)
                 [!provide]                        PROVIDE (etext = .)
 
-.rodata         0x0000000000500000        0x0
+.rodata         0x0000000000500000       0x60
  *(SORT_BY_ALIGNMENT(.rodata) SORT_BY_ALIGNMENT(.rodata.*) SORT_BY_ALIGNMENT(.gnu.linkonce.r.*))
+ .rodata.cst32  0x0000000000500000       0x40 build/array_test/array_test.o
+ .rodata.cst16  0x0000000000500040       0x20 build/array_test/array_test.o
 
 .rodata1
  *(SORT_BY_ALIGNMENT(.rodata1))
@@ -118,8 +137,9 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.eh_frame_hdr))
  *(SORT_BY_ALIGNMENT(.eh_frame_entry) SORT_BY_ALIGNMENT(.eh_frame_entry.*))
 
-.eh_frame
+.eh_frame       0x0000000000500060      0x1f8
  *(SORT_BY_ALIGNMENT(.eh_frame))
+ .eh_frame      0x0000000000500060      0x1f8 build/array_test/array_test.o
  *(SORT_BY_ALIGNMENT(.eh_frame.*))
 
 .sframe
@@ -134,7 +154,7 @@ END GROUP
 
 .exception_ranges
  *(SORT_BY_ALIGNMENT(.exception_ranges*))
-                0x0000000000500000                . = DATA_SEGMENT_ALIGN (CONSTANT (MAXPAGESIZE), CONSTANT (COMMONPAGESIZE))
+                0x0000000000501258                . = DATA_SEGMENT_ALIGN (CONSTANT (MAXPAGESIZE), CONSTANT (COMMONPAGESIZE))
 
 .eh_frame
  *(SORT_BY_ALIGNMENT(.eh_frame))
@@ -153,7 +173,7 @@ END GROUP
 .exception_ranges
  *(SORT_BY_ALIGNMENT(.exception_ranges*))
 
-.tdata          0x0000000000500000        0x0
+.tdata          0x0000000000501258        0x0
                 [!provide]                        PROVIDE (__tdata_start = .)
  *(SORT_BY_ALIGNMENT(.tdata) SORT_BY_ALIGNMENT(.tdata.*) SORT_BY_ALIGNMENT(.gnu.linkonce.td.*))
 
@@ -161,18 +181,18 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.tbss) SORT_BY_ALIGNMENT(.tbss.*) SORT_BY_ALIGNMENT(.gnu.linkonce.tb.*))
  *(SORT_BY_ALIGNMENT(.tcommon))
 
-.preinit_array  0x0000000000500000        0x0
+.preinit_array  0x0000000000501258        0x0
                 [!provide]                        PROVIDE (__preinit_array_start = .)
  *(SORT_BY_ALIGNMENT(.preinit_array))
                 [!provide]                        PROVIDE (__preinit_array_end = .)
 
-.init_array     0x0000000000500000        0x0
+.init_array     0x0000000000501258        0x0
                 [!provide]                        PROVIDE (__init_array_start = .)
  *(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*))
  *(SORT_BY_ALIGNMENT(.init_array) SORT_BY_ALIGNMENT(EXCLUDE_FILE(*crtend?.o *crtend.o *crtbegin?.o *crtbegin.o) .ctors))
                 [!provide]                        PROVIDE (__init_array_end = .)
 
-.fini_array     0x0000000000500000        0x0
+.fini_array     0x0000000000501258        0x0
                 [!provide]                        PROVIDE (__fini_array_start = .)
  *(SORT_BY_INIT_PRIORITY(.fini_array.*) SORT_BY_INIT_PRIORITY(.dtors.*))
  *(SORT_BY_ALIGNMENT(.fini_array) SORT_BY_ALIGNMENT(EXCLUDE_FILE(*crtend?.o *crtend.o *crtbegin?.o *crtbegin.o) .dtors))
@@ -202,27 +222,27 @@ END GROUP
 .dynamic
  *(SORT_BY_ALIGNMENT(.dynamic))
 
-.got            0x0000000000500000        0x0
+.got            0x0000000000501258        0x0
  *(SORT_BY_ALIGNMENT(.got))
- .got           0x0000000000500000        0x0 build/helloworld/helloworld.o
+ .got           0x0000000000501258        0x0 build/array_test/array_test.o
  *(SORT_BY_ALIGNMENT(.igot))
-                0x0000000000500000                . = DATA_SEGMENT_RELRO_END (., (SIZEOF (.got.plt) >= 0x18)?0x18:0x0)
+                0x0000000000501258                . = DATA_SEGMENT_RELRO_END (., (SIZEOF (.got.plt) >= 0x18)?0x18:0x0)
 
-.got.plt        0x0000000000500000        0x0
+.got.plt        0x0000000000501258        0x0
  *(SORT_BY_ALIGNMENT(.got.plt))
- .got.plt       0x0000000000500000        0x0 build/helloworld/helloworld.o
+ .got.plt       0x0000000000501258        0x0 build/array_test/array_test.o
  *(SORT_BY_ALIGNMENT(.igot.plt))
- .igot.plt      0x0000000000500000        0x0 build/helloworld/helloworld.o
+ .igot.plt      0x0000000000501258        0x0 build/array_test/array_test.o
 
 .data           0x0000000000600000        0x0
  *(SORT_BY_ALIGNMENT(.data) SORT_BY_ALIGNMENT(.data.*) SORT_BY_ALIGNMENT(.gnu.linkonce.d.*))
 
 .data1
  *(SORT_BY_ALIGNMENT(.data1))
-                0x0000000000401040                _edata = .
+                0x0000000000501258                _edata = .
                 [!provide]                        PROVIDE (edata = .)
                 0x0000000000600000                . = ALIGN (ALIGNOF (NEXT_SECTION))
-                0x0000000000401040                __bss_start = .
+                0x0000000000501258                __bss_start = .
 
 .bss            0x0000000000700000        0x0
  *(SORT_BY_ALIGNMENT(.dynbss))
@@ -244,7 +264,7 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.ldata) SORT_BY_ALIGNMENT(.ldata.*) SORT_BY_ALIGNMENT(.gnu.linkonce.l.*))
                 0x0000000000700000                . = ALIGN ((. != 0x0)?0x8:0x1)
                 0x0000000000700000                . = ALIGN (0x8)
-                0x0000000000401040                _end = .
+                0x0000000000501258                _end = .
                 [!provide]                        PROVIDE (end = .)
                 0x0000000000700000                . = DATA_SEGMENT_END (.)
 
@@ -360,9 +380,26 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.note.GNU-stack))
  *(SORT_BY_ALIGNMENT(.gnu_debuglink))
  *(SORT_BY_ALIGNMENT(.gnu.lto_*))
-OUTPUT(./helloworld elf64-x86-64)
+OUTPUT(./array_test elf64-x86-64)
 
 Cross Reference Table
 
 Symbol                                            File
-_GLOBAL_OFFSET_TABLE_                             build/helloworld/helloworld.o
+FRTStartup                                        build/array_test/array_test.o
+_GLOBAL_OFFSET_TABLE_                             build/array_test/array_test.o
+_start                                            build/array_test/array_test.o
+exit                                              build/array_test/array_test.o
+main                                              build/array_test/array_test.o
+standard__io__console__nix_print                  build/array_test/array_test.o
+standard__io__console__print                      build/array_test/array_test.o
+standard__io__file__close                         build/array_test/array_test.o
+standard__io__file__nix_close                     build/array_test/array_test.o
+standard__io__file__nix_open                      build/array_test/array_test.o
+standard__io__file__nix_read                      build/array_test/array_test.o
+standard__io__file__nix_write                     build/array_test/array_test.o
+standard__io__file__open_read                     build/array_test/array_test.o
+standard__io__file__open_read_write               build/array_test/array_test.o
+standard__io__file__open_write                    build/array_test/array_test.o
+standard__io__file__read                          build/array_test/array_test.o
+standard__io__file__write                         build/array_test/array_test.o
+strlen                                            build/array_test/array_test.o
