@@ -2370,27 +2370,121 @@ class FunctionCall(Expression):
     _string_counter = 0
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        # Look up the function in the module
-        func = module.globals.get(self.name, None)
+        """
+        Generate code for function calls with full overload resolution support.
         
-        # If not found directly, check for namespace-qualified names using 'using' statements
+        Resolution order:
+        1. Check direct name in module.globals
+        2. Check for overloaded functions in _function_overloads
+        3. Check namespace-qualified names via _using_namespaces
+        4. Check namespace-qualified overloads
+        5. Raise error if still not found
+        """
+        
+        # Step 1: Try direct lookup
+        func = module.globals.get(self.name, None)
+        print("FUNCTION CALL:",self.name)
+        
+        # Step 2: If not found or not a function, check for overloads BEFORE namespace search
+        if func is None or not isinstance(func, ir.Function):
+            # Check if this is an overloaded function
+            if hasattr(module, '_function_overloads') and self.name in module._function_overloads:
+                func = self._resolve_overload(builder, module, self.name, module._function_overloads[self.name])
+                if func is not None:
+                    # Found via overload resolution
+                    return self._generate_call(builder, module, func)
+        
+        # Step 3: Try namespace-qualified names
         if func is None or not isinstance(func, ir.Function):
             if hasattr(module, '_using_namespaces'):
                 for namespace in module._using_namespaces:
+                    #print(namespace)
                     # Convert namespace path to mangled name format
                     mangled_prefix = namespace.replace('::', '__') + '__'
                     mangled_name = mangled_prefix + self.name
                     
-                    # Check for mangled function name
+                    # Check for direct mangled function name
                     if mangled_name in module.globals:
                         candidate_func = module.globals[mangled_name]
                         if isinstance(candidate_func, ir.Function):
                             func = candidate_func
                             break
+                    
+                    # Step 4: Check for namespace-qualified overloads
+                    if hasattr(module, '_function_overloads') and mangled_name in module._function_overloads:
+                        func = self._resolve_overload(builder, module, mangled_name, module._function_overloads[mangled_name])
+                        if func is not None:
+                            break
         
+        # Step 5: Error if still not found
         if func is None or not isinstance(func, ir.Function):
             raise NameError(f"Unknown function: {self.name}")
         
+        # Generate the actual function call
+        return self._generate_call(builder, module, func)
+
+    def _resolve_overload(self, builder: ir.IRBuilder, module: ir.Module, base_name: str, overloads: list) -> ir.Function:
+        """
+        Resolve function overload by matching argument count and types.
+        
+        Returns:
+            Matching function or None if no match found
+        """
+        arg_count = len(self.arguments)
+        
+        # Filter by argument count first
+        candidates = [o for o in overloads if o['param_count'] == arg_count]
+        
+        if len(candidates) == 0:
+            return None
+        elif len(candidates) == 1:
+            # Only one candidate - use it
+            return candidates[0]['function']
+        else:
+            # Multiple candidates - need type matching
+            # Generate argument values to determine their types
+            arg_vals = []
+            for arg in self.arguments:
+                arg_vals.append(arg.codegen(builder, module))
+            
+            # Try to find exact type match
+            for candidate in candidates:
+                param_types = candidate['param_types']
+                if len(param_types) != len(arg_vals):
+                    continue
+                
+                # Check if types match (with compatibility rules)
+                match = True
+                for i, (param_type, arg_val) in enumerate(zip(param_types, arg_vals)):
+                    expected_llvm_type = param_type.get_llvm_type(module)
+                    
+                    # Handle array/pointer compatibility
+                    if isinstance(arg_val.type, ir.PointerType) and isinstance(arg_val.type.pointee, ir.ArrayType):
+                        # Array pointer - check element type compatibility
+                        if isinstance(expected_llvm_type, ir.PointerType):
+                            if arg_val.type.pointee.element != expected_llvm_type.pointee:
+                                match = False
+                                break
+                        else:
+                            match = False
+                            break
+                    elif arg_val.type != expected_llvm_type:
+                        # Type mismatch
+                        match = False
+                        break
+                
+                if match:
+                    return candidate['function']
+            
+            # No exact match found
+            return None
+
+    def _generate_call(self, builder: ir.IRBuilder, module: ir.Module, func: ir.Function) -> ir.Value:
+        """
+        Generate the actual function call with argument processing.
+        
+        This is the second half of the original codegen() method.
+        """
         # Check if this is a method call (has dot in name)
         is_method_call = '.' in self.name
         parameter_offset = 1 if is_method_call else 0  # Account for implicit 'this' parameter
@@ -2639,24 +2733,30 @@ class ArrayAccess(Expression):
     index: Expression
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        # CRITICAL
-        # REFACTOR
-        # ARRAY SLICING HANDLED IN ArrayLiteral
         # Get the array (should be a pointer to array or global)
         array_val = self.array.codegen(builder, module)
         
         # Check if this is a range expression (array slicing)
         if isinstance(self.index, RangeExpression):
-            return self._handle_array_slice(builder, module, array_val)
+            # Delegate to ArrayLiteral for slicing
+            start_val = self.index.start.codegen(builder, module)
+            end_val = self.index.end.codegen(builder, module)
+            
+            # Determine if this is a reverse range
+            is_reverse = False
+            if isinstance(start_val, ir.Constant) and isinstance(end_val, ir.Constant):
+                is_reverse = start_val.constant > end_val.constant
+            
+            return ArrayLiteral.slice_array(
+                builder, module, array_val, start_val, end_val, is_reverse
+            )
         
         # Regular single element access - generate the index expression
         index_val = self.index.codegen(builder, module)
         
-        # CRITICAL FIX: Ensure index is i32 for GEP
-        # GEP expects i32 indices, but expressions might return i64
+        # Ensure index is i32 for GEP (LLVM requirement)
         if index_val.type != ir.IntType(32):
             if isinstance(index_val.type, ir.IntType):
-                # Truncate or extend to i32 as needed
                 if index_val.type.width > 32:
                     index_val = builder.trunc(index_val, ir.IntType(32), name="idx_trunc")
                 else:
@@ -2664,168 +2764,23 @@ class ArrayAccess(Expression):
         
         # Handle global arrays (like const arrays)
         if isinstance(array_val, ir.GlobalVariable):
-            # Create GEP to access array element
-            # Need two indices: [0] to dereference pointer, [index] to access element
-            zero = ir.Constant(ir.IntType(32), 0)  # CHANGED from IntType(1) to IntType(32)
+            zero = ir.Constant(ir.IntType(32), 0)
             gep = builder.gep(array_val, [zero, index_val], inbounds=True, name="array_gep")
             return builder.load(gep, name="array_load")
         
         # Handle local arrays
         elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
-            # Local array allocated with alloca
-            # Need two indices: [0] to dereference the alloca pointer, [index] to access element
-            zero = ir.Constant(ir.IntType(32), 0)  # CHANGED from IntType(1) to IntType(32)
+            zero = ir.Constant(ir.IntType(32), 0)
             gep = builder.gep(array_val, [zero, index_val], inbounds=True, name="array_gep")
             return builder.load(gep, name="array_load")
         
         # Handle pointer types (like char*)
         elif isinstance(array_val.type, ir.PointerType):
-            # For pointers, we only need one index (direct pointer arithmetic)
             gep = builder.gep(array_val, [index_val], inbounds=True, name="ptr_gep")
             return builder.load(gep, name="ptr_load")
         
         else:
             raise ValueError(f"Cannot access array element for type: {array_val.type}")
-    
-    def _handle_array_slice(self, builder: ir.IRBuilder, module: ir.Module, array_val: ir.Value) -> ir.Value:
-        """Handle array slicing with range expressions like s[0..3] or s[3..0] (inclusive on both ends)"""
-        start_val = self.index.start.codegen(builder, module)
-        end_val = self.index.end.codegen(builder, module)
-        
-        # Ensure indices are i32
-        if start_val.type != ir.IntType(32):
-            if isinstance(start_val.type, ir.IntType):
-                if start_val.type.width > 32:
-                    start_val = builder.trunc(start_val, ir.IntType(32), name="start_trunc")
-                else:
-                    start_val = builder.sext(start_val, ir.IntType(32), name="start_ext")
-        
-        if end_val.type != ir.IntType(32):
-            if isinstance(end_val.type, ir.IntType):
-                if end_val.type.width > 32:
-                    end_val = builder.trunc(end_val, ir.IntType(32), name="end_trunc")
-                else:
-                    end_val = builder.sext(end_val, ir.IntType(32), name="end_ext")
-        
-        # Determine if this is a forward or reverse range
-        # For compile-time constants, we can check directly
-        is_reverse = False
-        if (isinstance(start_val, ir.Constant) and isinstance(end_val, ir.Constant)):
-            is_reverse = start_val.constant > end_val.constant
-        else:
-            # For runtime values, generate a comparison
-            reverse_cmp = builder.icmp_signed('>', start_val, end_val, name="is_reverse")
-            # For now, we'll handle only compile-time constants to keep it simple
-            # Runtime reverse detection would require conditional logic
-            raise ValueError("Runtime reverse range detection not yet implemented")
-        
-        # Calculate slice length based on direction
-        if is_reverse:
-            # Reverse range: length = (start - end) + 1
-            slice_len_exclusive = builder.sub(start_val, end_val, name="slice_len_exclusive")
-            slice_len = builder.add(slice_len_exclusive, ir.Constant(ir.IntType(32), 1), name="slice_len")
-        else:
-            # Forward range: length = (end - start) + 1
-            slice_len_exclusive = builder.sub(end_val, start_val, name="slice_len_exclusive")
-            slice_len = builder.add(slice_len_exclusive, ir.Constant(ir.IntType(32), 1), name="slice_len")
-        
-        # Determine the element type
-        if isinstance(array_val, ir.GlobalVariable):
-            if isinstance(array_val.type.pointee, ir.ArrayType):
-                element_type = array_val.type.pointee.element
-            else:
-                raise ValueError("Cannot slice non-array global variable")
-        elif isinstance(array_val.type, ir.PointerType):
-            if isinstance(array_val.type.pointee, ir.ArrayType):
-                element_type = array_val.type.pointee.element
-            else:
-                # For pointer types like i8*, the element type is the pointee
-                element_type = array_val.type.pointee
-        else:
-            raise ValueError(f"Cannot slice type: {array_val.type}")
-        
-        # For now, we'll create a fixed-size array to hold the slice
-        # In a full implementation, this could be dynamically sized
-        # We'll use a maximum reasonable slice size
-        max_slice_size = 256  # Should be enough for most string operations
-        slice_array_type = ir.ArrayType(element_type, max_slice_size)
-        slice_ptr = builder.alloca(slice_array_type, name="slice_array")
-        
-        # Get pointer to the start of the source array/string
-        zero = ir.Constant(ir.IntType(32), 0)
-        if isinstance(array_val, ir.GlobalVariable):
-            # Global array access
-            source_start_ptr = builder.gep(array_val, [zero, start_val], inbounds=True, name="source_start")
-        elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
-            # Local array access
-            source_start_ptr = builder.gep(array_val, [zero, start_val], inbounds=True, name="source_start")
-        elif isinstance(array_val.type, ir.PointerType):
-            # Pointer arithmetic for strings (char*, etc.)
-            source_start_ptr = builder.gep(array_val, [start_val], inbounds=True, name="source_start")
-        else:
-            raise ValueError(f"Unsupported array type for slicing: {array_val.type}")
-        
-        # Get pointer to the start of the slice array
-        slice_start_ptr = builder.gep(slice_ptr, [zero, zero], inbounds=True, name="slice_start")
-        
-        # Copy the slice using a loop that handles both forward and reverse directions
-        func = builder.block.function
-        loop_cond = func.append_basic_block('slice_loop_cond')
-        loop_body = func.append_basic_block('slice_loop_body')
-        loop_end = func.append_basic_block('slice_loop_end')
-        
-        # Create loop counter
-        counter_ptr = builder.alloca(ir.IntType(32), name="slice_counter")
-        builder.store(ir.Constant(ir.IntType(32), 0), counter_ptr)
-        builder.branch(loop_cond)
-        
-        # Loop condition: counter < slice_len
-        builder.position_at_start(loop_cond)
-        counter = builder.load(counter_ptr, name="counter")
-        cond = builder.icmp_signed('<', counter, slice_len, name="slice_cond")
-        builder.cbranch(cond, loop_body, loop_end)
-        
-        # Loop body: copy one element with direction-aware indexing
-        builder.position_at_start(loop_body)
-        
-        if is_reverse:
-            # For reverse slices: source index goes backwards from start to end
-            source_offset = builder.sub(start_val, counter, name="reverse_source_offset")
-        else:
-            # For forward slices: source index goes forwards from start
-            source_offset = builder.add(start_val, counter, name="forward_source_offset")
-        
-        # Get source element at calculated offset
-        if isinstance(array_val, ir.GlobalVariable):
-            # Global array access
-            source_elem_ptr = builder.gep(array_val, [zero, source_offset], inbounds=True, name="source_elem")
-        elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
-            # Local array access
-            source_elem_ptr = builder.gep(array_val, [zero, source_offset], inbounds=True, name="source_elem")
-        elif isinstance(array_val.type, ir.PointerType):
-            # Pointer arithmetic for strings (char*, etc.)
-            source_elem_ptr = builder.gep(array_val, [source_offset], inbounds=True, name="source_elem")
-        
-        source_elem = builder.load(source_elem_ptr, name="source_val")
-        
-        # Store in slice array at sequential destination index (always forward)
-        dest_elem_ptr = builder.gep(slice_start_ptr, [counter], inbounds=True, name="dest_elem")
-        builder.store(source_elem, dest_elem_ptr)
-        
-        # Increment counter
-        next_counter = builder.add(counter, ir.Constant(ir.IntType(32), 1), name="next_counter")
-        builder.store(next_counter, counter_ptr)
-        builder.branch(loop_cond)
-        
-        # End of loop - add null terminator for strings
-        builder.position_at_start(loop_end)
-        if element_type == ir.IntType(8):  # For string slices, add null terminator
-            final_counter = builder.load(counter_ptr, name="final_counter")
-            null_ptr = builder.gep(slice_start_ptr, [final_counter], inbounds=True, name="null_pos")
-            null_char = ir.Constant(ir.IntType(8), 0)
-            builder.store(null_char, null_ptr)
-        
-        return slice_ptr
 
 @dataclass
 class PointerDeref(Expression):
@@ -5055,34 +5010,50 @@ class FunctionDef(ASTNode):
         # Create function type
         func_type = ir.FunctionType(ret_type, param_types)
         
-        # Check if function already exists (from prototype)
-        if self.name in module.globals:
-            existing = module.globals[self.name]
-            if isinstance(existing, ir.Function):
-                # Verify the signatures match
-                if existing.ftype != func_type:
-                    raise ValueError(f"Function '{self.name}' redefined with different signature\nExisting: {existing.ftype}\nNew: {func_type}")
-                func = existing
-            else:
-                raise ValueError(f"Name '{self.name}' already used for non-function")
+        # Always generate mangled name for consistency
+        if self.name == "FRTStartup":
+            mangled_name = self.name
         else:
-            # Create new function
-            func = ir.Function(module, func_type, self.name)
+            mangled_name = self._mangle_name(module)
         
-        # Store parameter metadata on the function for later retrieval
-        if not hasattr(module, '_function_param_metadata'):
-            module._function_param_metadata = {}
-        module._function_param_metadata[self.name] = param_metadata
+        # Check if this exact mangled function already exists
+        if mangled_name in module.globals:
+            existing_func = module.globals[mangled_name]
+            if isinstance(existing_func, ir.Function):
+                # Function with this exact signature already exists
+                if self.is_prototype:
+                    # This is just another prototype/declaration - that's fine, use the existing one
+                    func = existing_func
+                elif existing_func.is_declaration:
+                    # This is providing the body for a previously declared function - that's fine
+                    func = existing_func
+                else:
+                    # Both existing and new are definitions - that's an error
+                    raise ValueError(f"Function '{self.name}' with signature '{mangled_name}' redefined")
+            else:
+                raise ValueError(f"Name '{mangled_name}' already used for non-function")
+        else:
+            # Create new function with mangled name
+            func = ir.Function(module, func_type, mangled_name)
+            
+            # Register this as an overload if needed
+            if not hasattr(module, '_function_overloads'):
+                module._function_overloads = {}
+            
+            if self.name not in module._function_overloads:
+                module._function_overloads[self.name] = []
+            
+            # Add overload info
+            overload_info = {
+                'mangled_name': mangled_name,
+                'param_types': [p.type_spec for p in self.parameters],
+                'return_type': self.return_type,
+                'function': func,
+                'param_count': len(self.parameters)
+            }
+            module._function_overloads[self.name].append(overload_info)
         
-        # Store return type metadata
-        if not hasattr(module, '_function_return_metadata'):
-            module._function_return_metadata = {}
-        module._function_return_metadata[self.name] = {
-            'original_type': self.return_type.custom_typename if self.return_type.custom_typename else None,
-            'type_spec': self.return_type
-        }
-        
-        if self.is_prototype == True:
+        if self.is_prototype:
             return func
         
         # Set parameter names
@@ -5128,6 +5099,53 @@ class FunctionDef(ASTNode):
         builder.scope = old_scope
         builder.scope_type_info = old_scope_type_info
         return func
+    
+    def _mangle_name(self, module: ir.Module) -> str:
+        """Generate a mangled name for overloaded functions based on signature"""
+        # Start with base name
+        mangled = self.name
+        
+        # Add parameter count for quick filtering
+        mangled += f"__{len(self.parameters)}"
+        
+        # Add parameter type information
+        for param in self.parameters:
+            type_spec = param.type_spec
+            
+            # Handle custom type names
+            if type_spec.custom_typename:
+                # For custom types, use the type name (sanitized)
+                type_name = type_spec.custom_typename.replace(':', '_').replace('.', '_')
+                mangled += f"__{type_name}"
+            else:
+                # For built-in types, use base type
+                mangled += f"__{type_spec.base_type.value}"
+            
+            # Add array/pointer qualifiers
+            if type_spec.is_array:
+                if type_spec.array_size:
+                    mangled += f"_arr{type_spec.array_size}"
+                else:
+                    mangled += "_arr"
+            
+            if type_spec.is_pointer:
+                mangled += f"_ptr{type_spec.pointer_depth}"
+            
+            # Add bit width for DATA types
+            if type_spec.base_type == DataType.DATA and type_spec.bit_width:
+                mangled += f"_bits{type_spec.bit_width}"
+        
+        # Add return type information
+        if self.return_type.custom_typename:
+            ret_name = self.return_type.custom_typename.replace(':', '_').replace('.', '_')
+            mangled += f"__ret_{ret_name}"
+        else:
+            mangled += f"__ret_{self.return_type.base_type.value}"
+        # Hard-coded main replacement until we fix FunctionCall
+        if mangled == "main__0__ret_int":
+            mangled = "main"
+        print("MANGLED:", mangled)
+        return mangled
     
     def _convert_type(self, type_spec: TypeSpec, module: ir.Module = None) -> ir.Type:
         # Use the proper method that handles arrays and pointers
@@ -6158,6 +6176,8 @@ class NamespaceDef(ASTNode):
         try:
             # Process all namespace members with name mangling
             # All of these are global-scope items, just with mangled names
+            # MASSIVE ISSUE: NONE OF THIS SHOULD BE GLOBAL UNLESS
+            # THE PROGRAMMER TYPED GLOBAL.
             
             # Process structs
             for struct in self.structs:
@@ -6192,14 +6212,16 @@ class NamespaceDef(ASTNode):
                 original_name = func.name
                 func.name = f"{self.name}__{func.name}"
                 try:
+                    if original_name == "print":
+                        print("PRINT FOUND")
                     func.codegen(builder, module)
                 except Exception as e:
                     print(f"\nError processing function '{original_name}' in namespace '{self.name}':")
                     import traceback
                     traceback.print_exc()
                     raise
-                finally:
-                    func.name = original_name
+                #finally:
+                    #func.name = original_name
             
             # Process variables (type declarations and variable declarations)
             for var in self.variables:
@@ -6252,8 +6274,8 @@ class NamespaceDef(ASTNode):
                     import traceback
                     traceback.print_exc()
                     raise
-                finally:
-                    nested_ns.name = original_name
+                #finally:
+                    #nested_ns.name = original_name
             
             # Handle inheritance here (TODO)
             

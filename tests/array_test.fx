@@ -1,5 +1,4 @@
 #import "redstandard.fx";
-#import "strlen.fx";        // src\stdlib\functions
 
 def main() -> int
 {

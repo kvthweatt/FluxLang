@@ -7,7 +7,6 @@
 #endif;
 
 #ifdef __WIN64__
-// Undefine WIN32, because 64-bit.
 #def __WIN32__ 0;
 #else
 #ifndef __WIN32__
@@ -18,6 +17,11 @@
 #ifndef FLUX_STANDARD_TYPES
 #import "redtypes.fx";
 #endif;
+
+// Import raw functions & builtins
+#import "strlen.fx";
+// ---------------------------
+
 #ifndef FLUX_STANDARD_SYSTEM
 #import "redsys.fx";
 #endif;
@@ -25,8 +29,18 @@
 #import "redio.fx";
 #endif;
 
+// >Mains
 def main() -> int;
-def FRTStartup() -> int;
+def main(int argc, char** argv) -> int;
+// /Mains
+
+  ///                                   ///
+  //DO NOT REDEFINE THIS FUNCTION SIGNATURE
+///                                   ///
+def FRTStartup() -> int; // GO AWAY, SHOO
+  ///                                   ///
+  //DO NOT REDEFINE THIS FUNCTION SIGNATURE
+///                                   ///
 
 #ifdef __LINUX__
 def _start() -> int;

@@ -1607,7 +1607,7 @@ class FluxParser:
         elif self.expect(TokenType.MULTIPLY):
             # Pointer dereference - this handles *x, **x, ***x, etc.
             self.advance()
-            operand = self.unary_expression()  # <-- FIX: Use unary_expression, not postfix_expression
+            operand = self.unary_expression()
             return PointerDeref(operand)
         elif self.expect(TokenType.ADDRESS_OF):
             # Address-of operator
@@ -1654,93 +1654,7 @@ class FluxParser:
                     args = self.argument_list()
                 self.consume(TokenType.RIGHT_PAREN)
                 if isinstance(expr, Identifier):
-                    # Special case: def(MACRO_NAME) creates a DefMacro node
-                    if expr.name == "def":
-                        if len(args) != 1:
-                            self.error("def() macro check requires exactly one argument (the macro name)")
-                        
-                        if not isinstance(args[0], Identifier):
-                            self.error("def() macro check requires a macro name identifier as argument")
-                        
-                        macro_name = args[0].name
-                        expr = DefMacro(macro_name)
-                    else:
-                        expr = FunctionCall(expr.name, args)
-                elif isinstance(expr, MemberAccess):
-                    # Method call: obj.method() -> call obj_type.method with obj as first arg
-                    method_name = f"{{obj_type}}.{expr.member}"
-                    expr = MethodCall(expr.object, expr.member, args)
-                else:
-                    raise SyntaxError(f"Cannot call function on complex expression: {type(expr).__name__}")
-            elif self.expect(TokenType.DOT):
-                # Member access - could be struct field or object method/member
-                self.advance()
-                member = self.consume(TokenType.IDENTIFIER).value
-                
-                # Create MemberAccess node - codegen will determine if it's
-                # StructFieldAccess or object member based on type
-                expr = MemberAccess(expr, member)
-            elif self.expect(TokenType.INCREMENT):
-                # Postfix increment
-                self.advance()
-                expr = UnaryOp(Operator.INCREMENT, expr, is_postfix=True)
-            elif self.expect(TokenType.DECREMENT):
-                # Postfix decrement
-                self.advance()
-                expr = UnaryOp(Operator.DECREMENT, expr, is_postfix=True)
-            elif self.expect(TokenType.AS):
-                # AS cast expression (postfix) - support all type casts
-                self.advance()
-                target_type = self.type_spec()
-                
-                # Check if this is a struct cast
-                if target_type.custom_typename:
-                    expr = StructRecast(target_type.custom_typename, expr)
-                else:
-                    expr = CastExpression(target_type, expr)
-            else:
-                break
-        
-        return expr
-    def postfix_expression(self) -> Expression:
-        """
-        postfix_expression -> primary_expression (postfix_operator)*
-        postfix_operator -> '[' expression ']'
-                         | '(' argument_list? ')'
-                         | '.' IDENTIFIER        # Field access for structs
-                         | '->' IDENTIFIER
-                         | '++'
-                         | '--'
-        """
-        expr = self.primary_expression()
-        
-        while True:
-            if self.expect(TokenType.LEFT_BRACKET):
-                # Array access
-                self.advance()
-                index = self.expression()
-                self.consume(TokenType.RIGHT_BRACKET)
-                expr = ArrayAccess(expr, index)
-            elif self.expect(TokenType.LEFT_PAREN):
-                # Function call
-                self.advance()
-                args = []
-                if not self.expect(TokenType.RIGHT_PAREN):
-                    args = self.argument_list()
-                self.consume(TokenType.RIGHT_PAREN)
-                if isinstance(expr, Identifier):
-                    # Special case: def(MACRO_NAME) creates a DefMacro node
-                    if expr.name == "def":
-                        if len(args) != 1:
-                            self.error("def() macro check requires exactly one argument (the macro name)")
-                        
-                        if not isinstance(args[0], Identifier):
-                            self.error("def() macro check requires a macro name identifier as argument")
-                        
-                        macro_name = args[0].name
-                        expr = DefMacro(macro_name)
-                    else:
-                        expr = FunctionCall(expr.name, args)
+                    expr = FunctionCall(expr.name, args)
                 elif isinstance(expr, MemberAccess):
                     # Method call: obj.method() -> call obj_type.method with obj as first arg
                     method_name = f"{{obj_type}}.{expr.member}"
@@ -1854,23 +1768,6 @@ class FluxParser:
             name = self.current_token.value
             self.advance()
             return Identifier(name)
-        elif self.expect(TokenType.DEF) and self.peek() and self.peek().type == TokenType.LEFT_PAREN:
-            # Handle def() macro function calls directly
-            self.advance()  # consume DEF
-            self.consume(TokenType.LEFT_PAREN)
-            args = []
-            if not self.expect(TokenType.RIGHT_PAREN):
-                args = self.argument_list()
-            self.consume(TokenType.RIGHT_PAREN)
-            
-            if len(args) != 1:
-                self.error("def() macro check requires exactly one argument (the macro name)")
-            
-            if not isinstance(args[0], Identifier):
-                self.error("def() macro check requires a macro name identifier as argument")
-            
-            macro_name = args[0].name
-            return DefMacro(macro_name)
         elif self.expect(TokenType.XOR):
             # Handle XOR as a function call
             self.advance()

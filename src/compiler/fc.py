@@ -258,7 +258,7 @@ class FluxCompiler:
             self.logger.step("Lexical analysis", LogLevel.INFO, "lexer")
             try:
                 lexer = FluxLexer(result)
-                tokens = lexer.tokenize()               
+                tokens = lexer.tokenize()
                 # Log tokens if requested (legacy compatibility + new system)
                 debugger(self.debug_levels, [1,8], ["Lexer",tokens])
             except Exception as e:

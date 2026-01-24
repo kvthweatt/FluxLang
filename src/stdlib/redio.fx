@@ -41,6 +41,7 @@ namespace standard
             def mpnl() -> void;
 #endif;
             def print(noopstr s, int len) -> void;
+            def print(noopstr s) -> void;
 #ifdef __WINDOWS__
             def reset_from_input() -> void;
 
@@ -216,6 +217,39 @@ namespace standard
     			(void)s;
     			return;
     		};
+
+            def print(noopstr s) -> void
+            {
+                int len = strlen(@s);
+                // GENERIC PRINT
+                //
+                // Designed to use sys.fx to determine which OS we're on
+                // and call the appropriate print function.
+                switch (CURRENT_OS)
+                {
+#ifdef __WINDOWS__
+                    case (1) // Windows
+                    {
+                        win_print(@s, len);
+                    }
+#endif;
+#ifdef __LINUX__
+                    case (2) // Linux
+                    {
+                        nix_print(@s, len);
+                    }
+#endif;
+#ifdef __MACOS__
+                    case (3) // Darwin (Mac)
+                    {
+                        mac_print(@s, len);
+                    }
+#endif;
+                    default { return void; }; // Unknown - exit() for now
+                };
+                (void)s;
+                return;
+            };
         };
 
         namespace file
