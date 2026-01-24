@@ -14,7 +14,6 @@ namespace standard
 		unsigned data{4} as nybble;
         unsigned data{8} as byte;
         byte[] as noopstr;
-        char nl = "\n";
 
         signed data{16} as i16;
         signed data{32} as i32;

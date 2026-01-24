@@ -113,8 +113,34 @@ class FXPreprocessor:
             self.output_lines.append("")
             return i + 1
         
+        stripped = line.strip()
+        
+        # Check for #def
+        if stripped.startswith("#def"):
+            parts = line.split()
+            if len(parts) >= 3:
+                macro_name = parts[1]
+                macro_value = ' '.join(parts[2:]).rstrip(';').strip()
+                self.macros[macro_name] = macro_value
+                print(f"[PREPROCESSOR] Defined macro: {macro_name} = {macro_value}")
+            return i + 1
+        
+        # Check for #ifdef
+        if stripped.startswith("#ifdef"):
+            parts = line.split()
+            if len(parts) >= 2:
+                macro_name = parts[1]
+                return self._process_conditional_block(lines, i, macro_name, False)
+        
+        # Check for #ifndef
+        if stripped.startswith("#ifndef"):
+            parts = line.split()
+            if len(parts) >= 2:
+                macro_name = parts[1]
+                return self._process_conditional_block(lines, i, macro_name, True)
+        
         # Check for import
-        if line.strip().startswith("#import"):
+        if stripped.startswith("#import"):
             # Get the file path between quotes
             if '"' in line:
                 import_start = line.find('"') + 1
@@ -124,28 +150,13 @@ class FXPreprocessor:
                     self._process_file(import_file)
             return i + 1
         
-        # Check for #def
-        if line.strip().startswith("#def"):
-            parts = line.split()
-            if len(parts) >= 3:
-                macro_name = parts[1]
-                macro_value = ' '.join(parts[2:]).rstrip(';').strip()
-                self.macros[macro_name] = macro_value
+        # Check for #endif - skip it
+        if stripped.startswith("#endif"):
             return i + 1
         
-        # Check for #ifdef
-        if line.strip().startswith("#ifdef"):
-            parts = line.split()
-            if len(parts) >= 2:
-                macro_name = parts[1]
-                return self._process_conditional_block(lines, i, macro_name, False)
-        
-        # Check for #ifndef
-        if line.strip().startswith("#ifndef"):
-            parts = line.split()
-            if len(parts) >= 2:
-                macro_name = parts[1]
-                return self._process_conditional_block(lines, i, macro_name, True)
+        # Check for #else - skip it (handled in conditional processing)
+        if stripped == "#else":
+            return i + 1
         
         # Regular line - do macro substitution
         processed_line = self._substitute_macros(line)
@@ -163,13 +174,15 @@ class FXPreprocessor:
         else:
             condition_true = macro_value is not None and macro_value != '0'
         
+        print(f"[PREPROCESSOR] {'#ifndef' if is_ifndef else '#ifdef'} {macro_name}: {'TRUE' if condition_true else 'FALSE'} (value={macro_value})")
+        
         i = start_i + 1
         depth = 1
         in_else = False
         else_seen = False
         
         # Store lines that should be included
-        lines_to_process = []
+        lines_to_include = []
         
         while i < len(lines):
             line = lines[i].rstrip()
@@ -177,17 +190,10 @@ class FXPreprocessor:
             
             # Handle nested conditionals
             if stripped.startswith("#ifdef") or stripped.startswith("#ifndef"):
-                nested_end = self._skip_conditional_block(lines, i)
-                
-                if condition_true and not in_else:
-                    # Include the nested block if we're in the active branch
-                    for j in range(i, nested_end):
-                        lines_to_process.append(lines[j].rstrip())
-                i = nested_end
-                continue
+                depth += 1
             
-            # Check for #else
-            elif stripped == "#else" and depth == 1:
+            # Check for #else at our depth level
+            if stripped == "#else" and depth == 1:
                 if else_seen:
                     raise SyntaxError("Multiple #else directives in same conditional block")
                 else_seen = True
@@ -196,55 +202,25 @@ class FXPreprocessor:
                 continue
             
             # Check for #endif
-            elif stripped.startswith("#endif"):
+            if stripped.startswith("#endif"):
                 depth -= 1
                 if depth == 0:
-                    # Process the collected lines
-                    if lines_to_process:
-                        temp_processor = FXPreprocessor("", self.macros.copy())
-                        temp_processor.output_lines = []
+                    # End of our block - process collected lines
+                    if lines_to_include:
                         j = 0
-                        while j < len(lines_to_process):
-                            j = temp_processor._process_line(lines_to_process, j)
-                        
-                        # Add the processed lines to our output
-                        self.output_lines.extend(temp_processor.output_lines)
-                        
-                        # Update our macros with any new ones defined in the block
-                        self.macros.update(temp_processor.macros)
-                    
+                        while j < len(lines_to_include):
+                            j = self._process_line(lines_to_include, j)
                     return i + 1
-                else:
-                    # Nested #endif
-                    if condition_true and not in_else:
-                        lines_to_process.append(line)
-                    i += 1
-                    continue
             
-            # Regular line
-            if condition_true and not in_else:
-                lines_to_process.append(line)
-            elif not condition_true and in_else:
-                lines_to_process.append(line)
-            
-            i += 1
-        
-        raise SyntaxError(f"Unclosed conditional block starting at line {start_i + 1}")
-    
-    def _skip_conditional_block(self, lines: List[str], start_i: int) -> int:
-        """Skip over a conditional block without processing it, return index after #endif"""
-        i = start_i
-        depth = 0
-        
-        while i < len(lines):
-            stripped = lines[i].strip()
-            
-            if stripped.startswith("#ifdef") or stripped.startswith("#ifndef"):
-                depth += 1
-            elif stripped.startswith("#endif"):
-                depth -= 1
-                if depth == 0:
-                    return i + 1
+            # Collect lines based on condition
+            if depth > 1:
+                # Inside nested block - always include
+                if (condition_true and not in_else) or (not condition_true and in_else):
+                    lines_to_include.append(line)
+            else:
+                # Our depth level
+                if (condition_true and not in_else) or (not condition_true and in_else):
+                    lines_to_include.append(line)
             
             i += 1
         

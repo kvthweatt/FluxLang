@@ -62,6 +62,8 @@ class Operator(Enum):
     XOR = "^^"
     OR = "|"
     AND = "&"
+    BITOR = "`|"
+    BITAND = "`&"
     NOR = "!|"
     NAND = "!&"
     INCREMENT = "++"
@@ -308,36 +310,66 @@ class TypeSpec:
     def get_llvm_type(self, module: ir.Module) -> ir.Type:
         """Get LLVM type for this TypeSpec, resolving custom type names"""
         
-        # URGENT
-        # MAYBE HERE? MAYBE THERE? MAYBE Z:\LOST\FOLDER
-        # MAYBE THE MOON!
-        # TODO -> FIX THIS BULLSHIT VVV WHAT THE FUCK IS THIS
         if self.custom_typename:
-            # Look up the type alias with various namespace prefixes
-            potential_names = [
-                self.custom_typename,
-                f"standard__types__{self.custom_typename}",
-                f"standard__{self.custom_typename}",
-                f"types__{self.custom_typename}"
-            ]
+            # First try direct lookup (unqualified or fully-qualified)
+            if hasattr(module, '_type_aliases') and self.custom_typename in module._type_aliases:
+                base_type = module._type_aliases[self.custom_typename]
+                if isinstance(base_type, ir.ArrayType) and not self.is_array:
+                    return ir.PointerType(base_type.element)
+                return base_type
             
-            for name in potential_names:
-                if hasattr(module, '_type_aliases') and name in module._type_aliases:
-                    base_type = module._type_aliases[name]
+            if hasattr(module, '_struct_types') and self.custom_typename in module._struct_types:
+                return module._struct_types[self.custom_typename]
+            
+            # Use _using_namespaces to resolve
+            if hasattr(module, '_using_namespaces'):
+                for namespace in module._using_namespaces:
+                    mangled_name = namespace.replace('::', '__') + '__' + self.custom_typename
                     
-                    # If it's an array type with no size specified, return pointer to element
-                    if isinstance(base_type, ir.ArrayType) and not self.is_array:
-                        return ir.PointerType(base_type.element)
+                    if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
+                        base_type = module._type_aliases[mangled_name]
+                        if isinstance(base_type, ir.ArrayType) and not self.is_array:
+                            return ir.PointerType(base_type.element)
+                        return base_type
                     
-                    return base_type
+                    if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
+                        return module._struct_types[mangled_name]
             
-            # Check struct types
-            for name in potential_names:
-                if hasattr(module, '_struct_types') and name in module._struct_types:
-                    return module._struct_types[name]
+            # Search ALL registered namespaces (allows cross-namespace type resolution)
+            if hasattr(module, '_namespaces'):
+                for registered_namespace in module._namespaces:
+                    mangled_name = registered_namespace.replace('::', '__') + '__' + self.custom_typename
+                    
+                    if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
+                        base_type = module._type_aliases[mangled_name]
+                        if isinstance(base_type, ir.ArrayType) and not self.is_array:
+                            return ir.PointerType(base_type.element)
+                        return base_type
+                    
+                    if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
+                        return module._struct_types[mangled_name]
             
-            # If not found, raise error
-            raise NameError(f"Unknown type: {self.custom_typename} (searched: {potential_names})")
+            # **NEW: Also try common parent namespaces**
+            # For nested namespaces like standard::io::console, try parent paths
+            if hasattr(module, '_using_namespaces'):
+                for namespace in module._using_namespaces:
+                    namespace_parts = namespace.split('::')
+                    # Try each parent level (e.g., for "standard::io::console", try "standard::io", "standard")
+                    for i in range(len(namespace_parts), 0, -1):
+                        parent_namespace = '::'.join(namespace_parts[:i])
+                        mangled_name = parent_namespace.replace('::', '__') + '__' + self.custom_typename
+                        
+                        if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
+                            base_type = module._type_aliases[mangled_name]
+                            if isinstance(base_type, ir.ArrayType) and not self.is_array:
+                                return ir.PointerType(base_type.element)
+                            return base_type
+                        
+                        if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
+                            return module._struct_types[mangled_name]
+            
+            # Not found - raise error
+            raise NameError(f"Unknown type: {self.custom_typename}")
         
         # Handle built-in types
         if self.base_type == DataType.INT:
@@ -393,11 +425,6 @@ class TypeSpec:
             return ir.PointerType(base_type)
         
         return base_type
-
-@dataclass
-class CustomType(ASTNode):
-    name: str
-    type_spec: TypeSpec
 
 # Expressions (built up from simple to complex)
 @dataclass
@@ -2383,7 +2410,6 @@ class FunctionCall(Expression):
         
         # Step 1: Try direct lookup
         func = module.globals.get(self.name, None)
-        print("FUNCTION CALL:",self.name)
         
         # Step 2: If not found or not a function, check for overloads BEFORE namespace search
         if func is None or not isinstance(func, ir.Function):
@@ -3194,62 +3220,139 @@ class VariableDeclaration(ASTNode):
             # Create new global
             gvar = ir.GlobalVariable(module, llvm_type, self.name)
             
-            # Set initializer
+            # Set initializer - must be compile-time constant
             if self.initial_value:
-                # Handle StringLiteral for char arrays
-                if isinstance(self.initial_value, StringLiteral) and \
-                   isinstance(llvm_type, ir.ArrayType) and \
-                   isinstance(llvm_type.element, ir.IntType) and \
-                   llvm_type.element.width == 8:
-                    
-                    string_val = self.initial_value.value
-                    char_values = []
-                    for i, char in enumerate(string_val):
-                        if i >= llvm_type.count:
-                            break
-                        char_values.append(ir.Constant(ir.IntType(8), ord(char)))
-                    while len(char_values) < llvm_type.count:
-                        char_values.append(ir.Constant(ir.IntType(8), 0))
-                    gvar.initializer = ir.Constant(llvm_type, char_values)
-                    
-                # Handle array literals (Literal with list value)
-                elif isinstance(llvm_type, ir.ArrayType) and \
-                     isinstance(self.initial_value, Literal) and \
-                     isinstance(self.initial_value.value, list):
-                    element_values = []
-                    for item in self.initial_value.value:
-                        # Each item is a StringLiteral or other expression
-                        if isinstance(item, StringLiteral):
-                            # For byte arrays like ["a", "b", "c"], extract first char
-                            if len(item.value) > 0:
-                                element_values.append(ir.Constant(llvm_type.element, ord(item.value[0])))
-                            else:
-                                element_values.append(ir.Constant(llvm_type.element, 0))
-                        elif isinstance(item, Literal):
-                            element_values.append(ir.Constant(llvm_type.element, item.value))
-                        else:
-                            # Can't evaluate non-constant expressions in global scope
-                            element_values.append(ir.Constant(llvm_type.element, 0))
-                    gvar.initializer = ir.Constant(llvm_type, element_values)
-                    
-                # Handle simple literals (int, float, bool)
-                elif isinstance(self.initial_value, Literal):
+                # Evaluate expression at compile time to get constant
+                init_const = None
+                
+                # Handle different expression types
+                if isinstance(self.initial_value, Literal):
                     if self.initial_value.type == DataType.INT:
-                        gvar.initializer = ir.Constant(llvm_type, self.initial_value.value)
+                        init_const = ir.Constant(llvm_type, self.initial_value.value)
                     elif self.initial_value.type == DataType.FLOAT:
-                        gvar.initializer = ir.Constant(llvm_type, self.initial_value.value)
+                        init_const = ir.Constant(llvm_type, self.initial_value.value)
                     elif self.initial_value.type == DataType.BOOL:
-                        gvar.initializer = ir.Constant(llvm_type, 1 if self.initial_value.value else 0)
-                    else:
-                        # Default to zero
-                        if isinstance(llvm_type, ir.IntType):
-                            gvar.initializer = ir.Constant(llvm_type, 0)
-                        elif isinstance(llvm_type, ir.FloatType):
-                            gvar.initializer = ir.Constant(llvm_type, 0.0)
-                        else:
-                            gvar.initializer = ir.Constant(llvm_type, None)
+                        init_const = ir.Constant(llvm_type, 1 if self.initial_value.value else 0)
+                
+                elif isinstance(self.initial_value, Identifier):
+                    # Reference to another global constant
+                    var_name = self.initial_value.name
+                    if var_name in module.globals:
+                        other_global = module.globals[var_name]
+                        if hasattr(other_global, 'initializer') and other_global.initializer:
+                            init_const = other_global.initializer
+                    
+                    # Check namespace-qualified names
+                    if init_const is None and hasattr(module, '_using_namespaces'):
+                        for namespace in module._using_namespaces:
+                            mangled_name = namespace.replace('::', '__') + '__' + var_name
+                            if mangled_name in module.globals:
+                                other_global = module.globals[mangled_name]
+                                if hasattr(other_global, 'initializer') and other_global.initializer:
+                                    init_const = other_global.initializer
+                                    break
+                
+                elif isinstance(self.initial_value, BinaryOp):
+                    # Compile-time evaluation of binary operation
+                    # Recursively evaluate left and right operands
+                    left_const = self._eval_const_expr(self.initial_value.left, module)
+                    right_const = self._eval_const_expr(self.initial_value.right, module)
+                    
+                    if left_const is not None and right_const is not None:
+                        op = self.initial_value.operator
+                        
+                        if isinstance(left_const.type, ir.IntType):
+                            # Integer arithmetic
+                            if op == Operator.ADD:
+                                result = left_const.constant + right_const.constant
+                            elif op == Operator.SUB:
+                                result = left_const.constant - right_const.constant
+                            elif op == Operator.MUL:
+                                result = left_const.constant * right_const.constant
+                            elif op == Operator.DIV:
+                                result = left_const.constant // right_const.constant
+                            elif op == Operator.MOD:
+                                result = left_const.constant % right_const.constant
+                            elif op == Operator.POWER:
+                                result = left_const.constant ** right_const.constant
+                            elif op == Operator.AND:
+                                result = left_const.constant & right_const.constant
+                            elif op == Operator.OR:
+                                result = left_const.constant | right_const.constant
+                            elif op == Operator.XOR:
+                                result = left_const.constant ^ right_const.constant
+                            elif op == Operator.BITSHIFT_LEFT:
+                                result = left_const.constant << right_const.constant
+                            elif op == Operator.BITSHIFT_RIGHT:
+                                result = left_const.constant >> right_const.constant
+                            else:
+                                result = 0
+                            
+                            init_const = ir.Constant(llvm_type, result)
+                        
+                        elif isinstance(left_const.type, ir.FloatType):
+                            # Float arithmetic
+                            if op == Operator.ADD:
+                                result = left_const.constant + right_const.constant
+                            elif op == Operator.SUB:
+                                result = left_const.constant - right_const.constant
+                            elif op == Operator.MUL:
+                                result = left_const.constant * right_const.constant
+                            elif op == Operator.DIV:
+                                result = left_const.constant / right_const.constant
+                            elif op == Operator.POWER:
+                                result = left_const.constant ** right_const.constant
+                            else:
+                                result = 0.0
+                            
+                            init_const = ir.Constant(llvm_type, result)
+                
+                elif isinstance(self.initial_value, UnaryOp):
+                    # Compile-time evaluation of unary operation
+                    operand_const = self._eval_const_expr(self.initial_value.operand, module)
+                    
+                    if operand_const is not None:
+                        op = self.initial_value.operator
+                        
+                        if isinstance(operand_const.type, ir.IntType):
+                            if op == Operator.SUB:
+                                result = -operand_const.constant
+                            elif op == Operator.NOT:
+                                result = ~operand_const.constant
+                            else:
+                                result = operand_const.constant
+                            
+                            init_const = ir.Constant(llvm_type, result)
+                        
+                        elif isinstance(operand_const.type, ir.FloatType):
+                            if op == Operator.SUB:
+                                result = -operand_const.constant
+                            else:
+                                result = operand_const.constant
+                            
+                            init_const = ir.Constant(llvm_type, result)
+                
+                elif isinstance(self.initial_value, StringLiteral):
+                    # Handle string literals for char arrays
+                    if isinstance(llvm_type, ir.ArrayType) and \
+                       isinstance(llvm_type.element, ir.IntType) and \
+                       llvm_type.element.width == 8:
+                        
+                        string_val = self.initial_value.value
+                        char_values = []
+                        for i, char in enumerate(string_val):
+                            if i >= llvm_type.count:
+                                break
+                            char_values.append(ir.Constant(ir.IntType(8), ord(char)))
+                        while len(char_values) < llvm_type.count:
+                            char_values.append(ir.Constant(ir.IntType(8), 0))
+                        init_const = ir.Constant(llvm_type, char_values)
+                
+                # Set the initializer or default to zero
+                if init_const is not None:
+                    gvar.initializer = init_const
                 else:
-                    # For complex expressions, default to zero
+                    # Default initialization
                     if isinstance(llvm_type, ir.IntType):
                         gvar.initializer = ir.Constant(llvm_type, 0)
                     elif isinstance(llvm_type, ir.FloatType):
@@ -3446,6 +3549,118 @@ class VariableDeclaration(ASTNode):
                 builder.volatile_vars = set()
             builder.volatile_vars.add(self.name)
         return alloca
+    
+    def _eval_const_expr(self, expr: Expression, module: ir.Module) -> Optional[ir.Constant]:
+        """Recursively evaluate constant expressions at compile time"""
+        if isinstance(expr, Literal):
+            if expr.type == DataType.INT:
+                return ir.Constant(ir.IntType(32), expr.value)
+            elif expr.type == DataType.FLOAT:
+                return ir.Constant(ir.FloatType(), expr.value)
+            elif expr.type == DataType.BOOL:
+                return ir.Constant(ir.IntType(1), 1 if expr.value else 0)
+            return None
+        
+        elif isinstance(expr, Identifier):
+            var_name = expr.name
+            if var_name in module.globals:
+                other_global = module.globals[var_name]
+                if hasattr(other_global, 'initializer') and other_global.initializer:
+                    return other_global.initializer
+            
+            # Check namespace-qualified names
+            if hasattr(module, '_using_namespaces'):
+                for namespace in module._using_namespaces:
+                    mangled_name = namespace.replace('::', '__') + '__' + var_name
+                    if mangled_name in module.globals:
+                        other_global = module.globals[mangled_name]
+                        if hasattr(other_global, 'initializer') and other_global.initializer:
+                            return other_global.initializer
+            
+            return None
+        
+        elif isinstance(expr, BinaryOp):
+            left = self._eval_const_expr(expr.left, module)
+            right = self._eval_const_expr(expr.right, module)
+            
+            if left is None or right is None:
+                return None
+            
+            op = expr.operator
+            
+            if isinstance(left.type, ir.IntType):
+                if op == Operator.ADD:
+                    result = left.constant + right.constant
+                elif op == Operator.SUB:
+                    result = left.constant - right.constant
+                elif op == Operator.MUL:
+                    result = left.constant * right.constant
+                elif op == Operator.DIV:
+                    result = left.constant // right.constant
+                elif op == Operator.MOD:
+                    result = left.constant % right.constant
+                elif op == Operator.POWER:
+                    result = left.constant ** right.constant
+                elif op == Operator.AND:
+                    result = left.constant & right.constant
+                elif op == Operator.OR:
+                    result = left.constant | right.constant
+                elif op == Operator.XOR:
+                    result = left.constant ^ right.constant
+                elif op == Operator.BITSHIFT_LEFT:
+                    result = left.constant << right.constant
+                elif op == Operator.BITSHIFT_RIGHT:
+                    result = left.constant >> right.constant
+                else:
+                    return None
+                
+                return ir.Constant(left.type, result)
+            
+            elif isinstance(left.type, ir.FloatType):
+                if op == Operator.ADD:
+                    result = left.constant + right.constant
+                elif op == Operator.SUB:
+                    result = left.constant - right.constant
+                elif op == Operator.MUL:
+                    result = left.constant * right.constant
+                elif op == Operator.DIV:
+                    result = left.constant / right.constant
+                elif op == Operator.MOD:
+                    result = left.constant % right.constant
+                elif op == Operator.POWER:
+                    result = left.constant ** right.constant
+                else:
+                    return None
+                
+                return ir.Constant(left.type, result)
+        
+        elif isinstance(expr, UnaryOp):
+            operand = self._eval_const_expr(expr.operand, module)
+            
+            if operand is None:
+                return None
+            
+            op = expr.operator
+            
+            if isinstance(operand.type, ir.IntType):
+                if op == Operator.SUB:
+                    result = -operand.constant
+                elif op == Operator.NOT:
+                    result = ~operand.constant
+                else:
+                    return None
+                
+                return ir.Constant(operand.type, result)
+            
+            elif isinstance(operand.type, ir.FloatType):
+                if op == Operator.SUB:
+                    result = -operand.constant
+                else:
+                    return None
+                
+                return ir.Constant(operand.type, result)
+        
+        return None
 
 # Type declarations
 @dataclass
@@ -3460,15 +3675,11 @@ class TypeDeclaration(Expression):
         return f"TypeDeclaration({self.base_type} as {self.name}{init_str})"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        #print(f"DEBUG TypeDeclaration: Creating alias '{self.name}' for base_type '{self.base_type}'")
-        #print(f"DEBUG TypeDeclaration: base_type={self.base_type}")
         llvm_type = self.base_type.get_llvm_type_with_array(module)
-        #print(f"DEBUG TypeDeclaration: resolved llvm_type={llvm_type}")
         
         if not hasattr(module, '_type_aliases'):
             module._type_aliases = {}
         module._type_aliases[self.name] = llvm_type
-        #print(f"DEBUG TypeDeclaration: Added alias '{self.name}' -> {llvm_type}")
         
         if self.initial_value:
             init_val = self.initial_value.codegen(builder, module)
@@ -3609,19 +3820,6 @@ class Assignment(Statement):
                 obj = self.target.object.codegen(builder, module)
             
             member_name = self.target.member
-            
-            #print(f"DEBUG Assignment: obj = {obj}")
-            #print(f"DEBUG Assignment: obj.type = {obj.type}")
-            #if hasattr(obj.type, 'pointee'):
-                #print(f"DEBUG Assignment: obj.type.pointee = {obj.type.pointee}")
-            #print(f"DEBUG Assignment: member_name = {member_name}")
-            #print(f"DEBUG Assignment: isinstance(obj.type, ir.PointerType) = {isinstance(obj.type, ir.PointerType)}")
-            #if isinstance(obj.type, ir.PointerType):
-                #print(f"DEBUG Assignment: isinstance(obj.type.pointee, ir.LiteralStructType) = {isinstance(obj.type.pointee, ir.LiteralStructType)}")
-            #if hasattr(module, '_union_types'):
-                #print(f"DEBUG Assignment: Union types available: {list(module._union_types.keys())}")
-                #for union_name, union_type in module._union_types.items():
-                    #print(f"DEBUG Assignment: Union {union_name} type: {union_type}")
             
             # Handle both literal struct types and identified struct types
             is_struct_pointer = (isinstance(obj.type, ir.PointerType) and 
@@ -5011,7 +5209,7 @@ class FunctionDef(ASTNode):
         func_type = ir.FunctionType(ret_type, param_types)
         
         # Always generate mangled name for consistency
-        if self.name == "FRTStartup":
+        if self.name == "FRTStartup" or self.name == "main":
             mangled_name = self.name
         else:
             mangled_name = self._mangle_name(module)
@@ -5141,10 +5339,9 @@ class FunctionDef(ASTNode):
             mangled += f"__ret_{ret_name}"
         else:
             mangled += f"__ret_{self.return_type.base_type.value}"
-        # Hard-coded main replacement until we fix FunctionCall
-        if mangled == "main__0__ret_int":
-            mangled = "main"
-        print("MANGLED:", mangled)
+        # Hard-coded main replacement
+        #if mangled == "main__0__ret_int":
+            #mangled = "main"
         return mangled
     
     def _convert_type(self, type_spec: TypeSpec, module: ir.Module = None) -> ir.Type:
@@ -6140,157 +6337,138 @@ class NamespaceDef(ASTNode):
     base_namespaces: List[str] = field(default_factory=list)  # inheritance
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
-        """
-        Generate LLVM IR for a namespace definition.
-        
-        Namespaces in Flux are primarily a compile-time construct that affects name mangling.
-        At the LLVM level, we'll mangle names with the namespace prefix.
-        
-        NOTE: Namespaces do NOT create a new builder scope - they only affect name mangling.
-        Variables in namespaces are still global-scope variables with mangled names.
-        """
-        # Register this namespace so using statements can reference it
+        """Generate LLVM IR for a namespace definition."""
+        # Register this namespace for symbol resolution
         if not hasattr(module, '_namespaces'):
             module._namespaces = set()
         module._namespaces.add(self.name)
         
-        # Also register nested namespaces with their full qualified names
+        # Register nested namespaces
         for nested_ns in self.nested_namespaces:
             full_nested_name = f"{self.name}::{nested_ns.name}"
             module._namespaces.add(full_nested_name)
-            # Recursively register deeper nested namespaces
             self._register_nested_namespaces(nested_ns, full_nested_name, module)
         
-        # Enable type resolution within this namespace by adding it to _using_namespaces
+        # Setup namespace context for type resolution
         if not hasattr(module, '_using_namespaces'):
             module._using_namespaces = []
         
-        # Save the current using namespaces list to restore later
-        old_using_namespaces = module._using_namespaces[:]
-        
-        # Add the current namespace to the using list so types defined in this namespace
-        # can reference each other (like 'byte' can be found when defining 'noopstr')
         if self.name not in module._using_namespaces:
             module._using_namespaces.append(self.name)
         
-        try:
-            # Process all namespace members with name mangling
-            # All of these are global-scope items, just with mangled names
-            # MASSIVE ISSUE: NONE OF THIS SHOULD BE GLOBAL UNLESS
-            # THE PROGRAMMER TYPED GLOBAL.
-            
-            # Process structs
-            for struct in self.structs:
-                original_name = struct.name
-                struct.name = f"{self.name}__{struct.name}"
-                try:
-                    struct.codegen(builder, module)
-                except Exception as e:
-                    print(f"\nError processing struct '{original_name}' in namespace '{self.name}':")
-                    import traceback
-                    traceback.print_exc()
-                    raise
-                finally:
-                    struct.name = original_name  # Restore original name
-            
-            # Process objects
-            for obj in self.objects:
-                original_name = obj.name
-                obj.name = f"{self.name}__{obj.name}"
-                try:
-                    obj.codegen(builder, module)
-                except Exception as e:
-                    print(f"\nError processing object '{original_name}' in namespace '{self.name}':")
-                    import traceback
-                    traceback.print_exc()
-                    raise
-                finally:
-                    obj.name = original_name
-            
-            # Process functions
-            for func in self.functions:
-                original_name = func.name
-                func.name = f"{self.name}__{func.name}"
-                try:
-                    if original_name == "print":
-                        print("PRINT FOUND")
-                    func.codegen(builder, module)
-                except Exception as e:
-                    print(f"\nError processing function '{original_name}' in namespace '{self.name}':")
-                    import traceback
-                    traceback.print_exc()
-                    raise
-                #finally:
-                    #func.name = original_name
-            
-            # Process variables (type declarations and variable declarations)
-            for var in self.variables:
-                try:
-                    # Check the type of variable declaration
-                    if hasattr(var, 'type_name'):
-                        # This is a TypeDeclaration (type alias)
-                        original_name = var.type_name
-                        var.type_name = f"{self.name}__{var.type_name}"
-                        
-                        # Type declarations are compile-time only, just register them
-                        # Pass None as builder since type declarations don't generate code
-                        var.codegen(None, module)
-                        
-                        var.type_name = original_name
-                    else:
-                        # This is a regular VariableDeclaration
-                        # Namespace variables are global variables with mangled names
-                        original_name = var.name
+        # Create builder context if we're at module level
+        if builder is None or not hasattr(builder, 'block') or builder.block is None:
+            work_builder = self._create_init_builder(module)
+        else:
+            work_builder = builder
+
+        # Process nested namespaces FIRST (they may contain types we need)
+        for nested_ns in self.nested_namespaces:
+            original_name = nested_ns.name
+            nested_ns.name = f"{self.name}__{nested_ns.name}"
+            try:
+                nested_ns.codegen(work_builder, module)
+            finally:
+                nested_ns.name = original_name
+
+        # Process variables (including type declarations)
+        for var in self.variables:
+            try:
+                if isinstance(var, TypeDeclaration):
+                    original_name = var.name
+                    if var.base_type.custom_typename is None:
                         var.name = f"{self.name}__{var.name}"
-                        
-                        # Mark as global so it generates a global variable
-                        old_is_global = getattr(var, 'is_global', False)
-                        var.is_global = True
-                        
-                        # Use None as builder for global scope
                         var.codegen(None, module)
-                        
-                        var.is_global = old_is_global
                         var.name = original_name
-                        
-                except Exception as e:
-                    # Better error reporting
-                    import traceback
-                    var_name = getattr(var, 'name', None) or getattr(var, 'type_name', '<unknown>')
-                    print(f"\nError processing variable '{var_name}' in namespace '{self.name}':")
-                    print(f"Variable type: {type(var).__name__}")
-                    print(f"Variable details: {var}")
-                    traceback.print_exc()
-                    raise
-            
-            # Process nested namespaces
-            for nested_ns in self.nested_namespaces:
-                original_name = nested_ns.name
-                nested_ns.name = f"{self.name}__{nested_ns.name}"
-                try:
-                    nested_ns.codegen(builder, module)
-                except Exception as e:
-                    print(f"\nError processing nested namespace '{original_name}' in namespace '{self.name}':")
-                    import traceback
-                    traceback.print_exc()
-                    raise
-                #finally:
-                    #nested_ns.name = original_name
-            
-            # Handle inheritance here (TODO)
-            
-        finally:
-            # Restore original using namespaces list to avoid namespace pollution
-            module._using_namespaces = old_using_namespaces
+                    else:
+                        var.name = f"{self.name}__{var.name}"
+                        var.codegen(None, module)
+                        var.name = original_name
+                elif isinstance(var, VariableDeclaration):
+                    original_name = var.name
+                    if var.is_global:
+                        var.codegen(None, module)
+                    else:
+                        var.name = f"{self.name}__{var.name}"
+                        var.codegen(work_builder, module)
+                        var.name = original_name
+            except Exception as e:
+                var_name = getattr(var, 'name', '<unknown>')
+                print(f"\nError processing variable '{var_name}' in namespace '{self.name}':")
+                import traceback
+                traceback.print_exc()
+                raise
+
+        # Process functions
+        for func in self.functions:
+            original_name = func.name
+            func.name = f"{self.name}__{func.name}"
+            func.codegen(work_builder, module)
+            func.name = original_name
+
+        # Process structs
+        for struct in self.structs:
+            original_name = struct.name
+            struct.name = f"{self.name}__{struct.name}"
+            try:
+                struct.codegen(work_builder, module)
+            finally:
+                struct.name = original_name
         
+        # Process objects
+        for obj in self.objects:
+            original_name = obj.name
+            obj.name = f"{self.name}__{obj.name}"
+            try:
+                obj.codegen(work_builder, module)
+            finally:
+                obj.name = original_name
+
+        if "__static_init" in module.globals:
+            init_func = module.globals["__static_init"]
+            if init_func.blocks and not init_func.blocks[-1].is_terminated:
+                # Get a builder positioned at the end of the last block
+                final_builder = ir.IRBuilder(init_func.blocks[-1])
+                final_builder.ret_void()
+                
         return None
-    
+
     def _register_nested_namespaces(self, namespace, parent_path, module):
-        """Recursively register all nested namespaces with their full qualified names"""
+        """Recursively register all nested namespaces"""
         for nested_ns in namespace.nested_namespaces:
             full_nested_name = f"{parent_path}::{nested_ns.name}"
             module._namespaces.add(full_nested_name)
             self._register_nested_namespaces(nested_ns, full_nested_name, module)
+
+    def _create_init_builder(self, module: ir.Module) -> ir.IRBuilder:
+        """Create builder for static init function"""
+        init_func_name = "__static_init"
+        
+        if init_func_name not in module.globals:
+            func_type = ir.FunctionType(ir.VoidType(), [])
+            init_func = ir.Function(module, func_type, init_func_name)
+            entry_block = init_func.append_basic_block('entry')
+            temp_builder = ir.IRBuilder(entry_block)
+            temp_builder.scope = {}
+            temp_builder.initialized_unions = set()
+            # **NEW: Add terminator to empty init function**
+            if not temp_builder.block.is_terminated:
+                temp_builder.ret_void()
+            return temp_builder
+        else:
+            init_func = module.globals[init_func_name]
+            if not init_func.blocks:
+                entry_block = init_func.append_basic_block('entry')
+            else:
+                entry_block = init_func.blocks[0]
+            
+            temp_builder = ir.IRBuilder(entry_block)
+            if not hasattr(temp_builder, 'scope'):
+                temp_builder.scope = {}
+            if not hasattr(temp_builder, 'initialized_unions'):
+                temp_builder.initialized_unions = set()
+            
+            return temp_builder
 
 # Import statement
 @dataclass

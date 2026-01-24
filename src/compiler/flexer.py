@@ -120,6 +120,8 @@ class TokenType(Enum):
     DECREMENT = auto()      # --
     LOGICAL_AND = auto()    # &
     LOGICAL_OR = auto()     # |
+    BITAND_OP = auto()      # `&
+    BITOR_OP = auto()       # `|
     
     # Comparison
     EQUAL = auto()          # ==
@@ -639,6 +641,15 @@ class FluxLexer:
             
             # Bitwise operators AND with backtick prefix (TODO - VERY EXTENSIVE)
             # Must add corresponding keywords.
+            if char == '`':
+                if self.peek_char() == "&":
+                    tokens.append(Token(TokenType.BITAND_OP, '`&', start_post[0], start_post[1]))
+                    self.advance(count=2)
+                    continue
+                elif self.peek_char() == "|":
+                    tokens.append(Token(TokenType.BITOR_OP, '`|', start_post[0], start_post[1]))
+                    self.advance(count=2)
+                    continue
             
             # Two-character operators
             if char == '=' and self.peek_char() == '=':

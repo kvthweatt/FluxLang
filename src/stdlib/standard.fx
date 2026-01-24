@@ -27,7 +27,15 @@
 //    using standard::system;
 //};
 
-import "io.fx";
+#def FLUX_REDUCED_SPECIFICATION 1;
+
+#ifndef FLUX_STANDARD
+#def FLUX_STANDARD 1;
+#endif;
+
+#ifdef FLUX_REDUCED_SPECIFICATION
+#import "redstandard.fx";
+#endif;
 
 namespace standard
 {

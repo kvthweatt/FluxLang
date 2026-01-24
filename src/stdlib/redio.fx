@@ -4,7 +4,6 @@
 #def FLUX_STANDARD 1;
 #endif;
 
-#import "redtypes.fx";
 #import "redsys.fx";
 
 namespace standard
@@ -30,15 +29,12 @@ namespace standard
             // OUTPUT FORWARD DECLARATIONS
 #ifdef __WINDOWS__
             def win_print(byte* msg, int x) -> void;
-            def wpnl() -> void;
 #endif;
 #ifdef __LINUX__
             def nix_print(byte* msg, int x) -> void;
-            def npnl() -> void;
 #endif;
 #ifdef __MACOS__
             def mac_print(byte* msg, int x) -> void;
-            def mpnl() -> void;
 #endif;
             def print(noopstr s, int len) -> void;
             def print(noopstr s) -> void;
@@ -138,12 +134,6 @@ namespace standard
                     call WriteFile
                     addq $$40, %rsp
                 } : : "r"(msg), "r"(x) : "rax","rcx","rdx","r8","r9","r10","r11","memory";
-                return void;
-            };
-
-            def wpnl() -> void
-            {
-                win_print(@nl,1);
                 return void;
             };
 

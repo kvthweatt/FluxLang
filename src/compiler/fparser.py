@@ -537,7 +537,11 @@ class FluxParser:
         namespace_def -> 'namespace' IDENTIFIER  '{' namespace_body* '}'
         """
         self.consume(TokenType.NAMESPACE)
-        name = self.consume(TokenType.IDENTIFIER).value
+        namespace_parts = [self.consume(TokenType.IDENTIFIER).value]
+        while self.expect(TokenType.SCOPE):
+            self.consume(TokenType.SCOPE)
+            namespace_parts.append(self.consume(TokenType.IDENTIFIER).value)
+        name = '__'.join(namespace_parts)
         
         # INHERITANCE - TODO after v1 Flux
         base_namespaces = []
@@ -547,11 +551,11 @@ class FluxParser:
         objects = []
         variables = []
         nested_namespaces = []
-
+        
         if self.expect(TokenType.SEMICOLON):
             self.advance()
             return NamespaceDef(name, functions, structs, objects, variables, nested_namespaces, base_namespaces)
-
+        
         self.consume(TokenType.LEFT_BRACE)
         
         while not self.expect(TokenType.RIGHT_BRACE):
@@ -559,7 +563,6 @@ class FluxParser:
             if self.expect(TokenType.GLOBAL, TokenType.LOCAL, TokenType.HEAP, 
                            TokenType.STACK, TokenType.REGISTER,
                            TokenType.CONST, TokenType.VOLATILE):
-                # Storage class means variable declaration
                 var_decl = self.variable_declaration()
                 variables.append(var_decl)
                 self.consume(TokenType.SEMICOLON)
@@ -570,7 +573,22 @@ class FluxParser:
             elif self.expect(TokenType.OBJECT):
                 objects.append(self.object_def())
             elif self.expect(TokenType.NAMESPACE):
-                nested_namespaces.append(self.namespace_def())
+                nested_ns = self.namespace_def()
+                # MERGE NESTED NAMESPACES WITH SAME NAME
+                merged = False
+                for existing_ns in nested_namespaces:
+                    if existing_ns.name == nested_ns.name:
+                        # Merge content into existing namespace
+                        existing_ns.functions.extend(nested_ns.functions)
+                        existing_ns.structs.extend(nested_ns.structs)
+                        existing_ns.objects.extend(nested_ns.objects)
+                        existing_ns.variables.extend(nested_ns.variables)
+                        existing_ns.nested_namespaces.extend(nested_ns.nested_namespaces)
+                        existing_ns.base_namespaces.extend(nested_ns.base_namespaces)
+                        merged = True
+                        break
+                if not merged:
+                    nested_namespaces.append(nested_ns)
             elif self.expect(TokenType.IF):
                 if_stmt = self.if_statement()
                 pass
@@ -653,6 +671,8 @@ class FluxParser:
                 if self.expect(TokenType.COLON):
                     self.advance()
                     alignment = int(self.consume(TokenType.INTEGER).value)
+                else:
+                    alignment = bit_width
                 
                 self.consume(TokenType.RIGHT_BRACE)
         
@@ -682,7 +702,7 @@ class FluxParser:
         while self.expect(TokenType.MULTIPLY):
             pointer_depth += 1
             self.advance()
-        
+
         return TypeSpec(
             base_type=base_type,
             is_signed=is_signed,
@@ -1385,6 +1405,7 @@ class FluxParser:
                 return Assignment(expr, value)
             else:
                 return Assignment(expr, value)
+        # NOTE: MUST ADD BITWISE ASSIGNMENTS
         elif self.expect(TokenType.PLUS_ASSIGN, TokenType.MINUS_ASSIGN, TokenType.MULTIPLY_ASSIGN, 
                          TokenType.DIVIDE_ASSIGN, TokenType.MODULO_ASSIGN, TokenType.POWER_ASSIGN,
                          TokenType.XOR_ASSIGN, TokenType.BITSHIFT_LEFT_ASSIGN, TokenType.BITSHIFT_RIGHT_ASSIGN):
@@ -1402,7 +1423,7 @@ class FluxParser:
         """
         expr = self.logical_and_expression()
         
-        while self.expect(TokenType.OR):
+        while self.expect(TokenType.LOGICAL_OR):
             operator = Operator.OR
             self.advance()
             right = self.logical_and_expression()
@@ -1412,28 +1433,28 @@ class FluxParser:
     
     def logical_and_expression(self) -> Expression:
         """
-        logical_and_expression -> logical_xor_expression ('and' equality_expression)*
+        logical_and_expression -> bitwise_or_expression ('and' bitwise_or_expression)*
         """
-        expr = self.logical_xor_expression()
+        expr = self.bitwise_or_expression()
         
-        while self.expect(TokenType.AND) or self.expect(TokenType.LOGICAL_AND):
+        while self.expect(TokenType.LOGICAL_AND):
             operator = Operator.AND
             self.advance()
-            right = self.logical_xor_expression()
+            right = self.bitwise_or_expression()
             expr = BinaryOp(expr, operator, right)
         
         return expr
 
     def logical_xor_expression(self) -> Expression:
         """
-        logical_xor_expression -> equality_expression ('xor' equality_expression)*
+        logical_xor_expression -> bitwise_or_expression ('xor' bitwise_or_expression)*
         """
-        expr = self.equality_expression()
+        expr = self.bitwise_or_expression()
 
-        while (self.expect(TokenType.XOR)):
+        while self.expect(TokenType.XOR_OP):
             operator = Operator.XOR
             self.advance()
-            right = self.equality_expression()
+            right = self.bitwise_or_expression()
             expr = BinaryOp(expr, operator, right)
 
         return expr
@@ -1452,6 +1473,48 @@ class FluxParser:
             
             self.advance()
             right = self.relational_expression()
+            expr = BinaryOp(expr, operator, right)
+        
+        return expr
+
+    def bitwise_or_expression(self) -> Expression:
+        """
+        bitwise_or_expression -> bitwise_xor_expression ('|' bitwise_xor_expression)*
+        """
+        expr = self.bitwise_xor_expression()
+        
+        while self.expect(TokenType.BITOR_OP):
+            operator = Operator.BITOR
+            self.advance()
+            right = self.bitwise_xor_expression()
+            expr = BinaryOp(expr, operator, right)
+        
+        return expr
+
+    def bitwise_xor_expression(self) -> Expression:
+        """
+        bitwise_xor_expression -> bitwise_and_expression ('^' bitwise_and_expression)*
+        """
+        expr = self.bitwise_and_expression()
+        
+        while self.expect(TokenType.XOR):
+            operator = Operator.XOR
+            self.advance()
+            right = self.bitwise_and_expression()
+            expr = BinaryOp(expr, operator, right)
+        
+        return expr
+
+    def bitwise_and_expression(self) -> Expression:
+        """
+        bitwise_and_expression -> equality_expression ('&' equality_expression)*
+        """
+        expr = self.equality_expression()
+        
+        while self.expect(TokenType.BITAND_OP):
+            operator = Operator.BITAND
+            self.advance()
+            right = self.equality_expression()
             expr = BinaryOp(expr, operator, right)
         
         return expr
@@ -1535,17 +1598,20 @@ class FluxParser:
     
     def multiplicative_expression(self) -> Expression:
         """
-        multiplicative_expression -> cast_expression (('*' | '/' | '%') cast_expression)*
+        multiplicative_expression -> cast_expression (('*' | '/' | '%' | '^') cast_expression)*
         """
         expr = self.cast_expression()
         
-        while self.expect(TokenType.MULTIPLY, TokenType.DIVIDE, TokenType.MODULO):
+        while self.expect(TokenType.MULTIPLY, TokenType.DIVIDE, TokenType.MODULO, TokenType.POWER):
             if self.current_token.type == TokenType.MULTIPLY:
                 operator = Operator.MUL
             elif self.current_token.type == TokenType.DIVIDE:
                 operator = Operator.DIV
-            else:  # MODULO
+            elif self.current_token.type == TokenType.MODULO:
                 operator = Operator.MOD
+            else:
+                operator = Operator.POWER
+
             
             self.advance()
             right = self.cast_expression()
@@ -1765,18 +1831,7 @@ class FluxParser:
                            | struct_literal  # Returns StructLiteral, not old Literal
         """
         if self.expect(TokenType.IDENTIFIER):
-            name = self.current_token.value
-            self.advance()
-            return Identifier(name)
-        elif self.expect(TokenType.XOR):
-            # Handle XOR as a function call
-            self.advance()
-            self.consume(TokenType.LEFT_PAREN)
-            args = []
-            if not self.expect(TokenType.RIGHT_PAREN):
-                args = self.argument_list()
-            self.consume(TokenType.RIGHT_PAREN)
-            return FunctionCall("xor", args)
+            return self.scoped_identifier()
         elif self.expect(TokenType.INTEGER):
             value = int(self.current_token.value, 0)
             self.advance()
@@ -1831,7 +1886,32 @@ class FluxParser:
             return self.alignof_expression()
         else:
             self.error(f"Unexpected token: {self.current_token.type.name if self.current_token else 'EOF'}")
-    
+
+    def scoped_identifier(self) -> Expression:
+        """
+        scoped_identifier -> IDENTIFIER ('::' IDENTIFIER)*
+        
+        Handles:
+        - Simple identifier: x
+        - Scoped identifier: namespace::x
+        - Nested scope: namespace::subnamespace::x
+        - Type member: Type::static_member
+        """
+        parts = [self.consume(TokenType.IDENTIFIER).value]
+        
+        while self.expect(TokenType.SCOPE):
+            self.advance()
+            parts.append(self.consume(TokenType.IDENTIFIER).value)
+        
+        # If we have multiple parts, it's a scoped identifier
+        if len(parts) > 1:
+            # Join with :: to create the full scoped name
+            full_name = "__".join(parts)
+            return Identifier(full_name)
+        else:
+            # Single identifier
+            return Identifier(parts[0])
+
     def alignof_expression(self) -> AlignOf:
         """
         alignof_expression -> 'alignof' '(' (type_spec | expression) ')'
@@ -1903,57 +1983,45 @@ class FluxParser:
         
         if self.expect(TokenType.RIGHT_BRACKET):
             self.advance()
-            return Literal([], DataType.DATA)  # Empty array literal
+            return ArrayLiteral([])  # Empty array literal
         
-        # Look ahead to see if this is an array comprehension
-        saved_pos = self.position
-        saved_token = self.current_token
+        # Parse first expression
+        first_expr = self.expression()
         
-        try:
-            # Try to parse first expression and check for 'for' keyword
-            first_expr = self.expression()
+        # Check if this is an array comprehension
+        if self.expect(TokenType.FOR):
+            # This is an array comprehension: [expr for (type var in iterable)]
+            self.advance()  # consume 'for'
+            self.consume(TokenType.LEFT_PAREN)
             
-            if self.expect(TokenType.FOR):
-                # This is an array comprehension: [expr for (type var in iterable)]
-                self.advance()  # consume 'for'
-                self.consume(TokenType.LEFT_PAREN)
-                
-                # Parse variable type and name
-                variable_type = self.type_spec()
-                variable_name = self.consume(TokenType.IDENTIFIER).value
-                
-                self.consume(TokenType.IN)
-                
-                # Parse iterable expression
-                iterable = self.expression()
-                
-                self.consume(TokenType.RIGHT_PAREN)
-                self.consume(TokenType.RIGHT_BRACKET)
-                
-                return ArrayComprehension(
-                    expression=first_expr,
-                    variable=variable_name,
-                    variable_type=variable_type,
-                    iterable=iterable
-                )
-            else:
-                # Regular array literal: [expr, expr, ...]
-                elements = [first_expr]
-                
-                while self.expect(TokenType.COMMA):
-                    self.advance()
-                    elements.append(self.expression())
-                
-                self.consume(TokenType.RIGHT_BRACKET)
-                return Literal(elements, DataType.DATA)  # Array literal
-                
-        except ParseError:
-            # If parsing fails, restore position and try again
-            self.position = saved_pos
-            self.current_token = saved_token
-            # Fall back to empty array
+            # Parse variable type and name
+            variable_type = self.type_spec()
+            variable_name = self.consume(TokenType.IDENTIFIER).value
+            
+            self.consume(TokenType.IN)
+            
+            # Parse iterable expression
+            iterable = self.expression()
+            
+            self.consume(TokenType.RIGHT_PAREN)
             self.consume(TokenType.RIGHT_BRACKET)
-            return Literal([], DataType.DATA)
+            
+            return ArrayComprehension(
+                expression=first_expr,
+                variable=variable_name,
+                variable_type=variable_type,
+                iterable=iterable
+            )
+        else:
+            # Regular array literal: [expr, expr, ...]
+            elements = [first_expr]
+            
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                elements.append(self.expression())
+            
+            self.consume(TokenType.RIGHT_BRACKET)
+            return ArrayLiteral(elements)  # Array literal
     
     def struct_literal(self) -> StructLiteral:
         """
