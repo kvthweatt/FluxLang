@@ -395,6 +395,12 @@ class TypeSpec:
         
         # Get base type (this handles custom type names)
         base_type = self.get_llvm_type(module)
+
+        if self.is_pointer:
+            # Special case: void* is i8* in LLVM
+            if self.base_type == DataType.VOID:
+                return ir.PointerType(ir.IntType(8))
+            return ir.PointerType(base_type)
         
         # Handle array types - support multi-dimensional arrays
         if self.is_array and self.array_dimensions:
@@ -2189,6 +2195,17 @@ class CastExpression(Expression):
         # If source and target are the same type, no cast needed
         if source_val.type == target_llvm_type:
             return source_val
+
+        #Handle void pointer casts
+        void_ptr_type = ir.PointerType(ir.IntType(8))
+
+        # Cast TO void* from any pointer type
+        if (target_llvm_type == void_ptr_type and isinstance(source_val.type, ir.PointerType)):
+            return builder.bitcast(source_val, void_ptr_type, name="to_void_ptr")
+        
+        # Cast FROM void* to any pointer type
+        if (source_val.type == void_ptr_type and isinstance(target_llvm_type, ir.PointerType)):
+            return builder.bitcast(source_val, target_llvm_type, name="from_void_ptr")
         
         # Now check if RESOLVED types are structs (after alias resolution)
         # This prevents treating "byte" (which resolves to i8) as a struct
@@ -2317,37 +2334,79 @@ class CastExpression(Expression):
             void_ptr = ptr_value
         
         # Check OS macros
-        # FIX TO NOT DO THIS IS_MACRO_DEFINED CRAP
-        # GONNA HAVE TO FIGURE OUT A WAY AROUND THIS
-        is_windows = False#is_macro_defined(module, 'WINDOWS')
-        is_linux = False#is_macro_defined(module, 'LINUX')
-        is_macos = False#is_macro_defined(module, 'MACOS') #False#Temporary
+        is_windows = is_macro_defined(module, '__WINDOWS__')
+        is_linux = is_macro_defined(module, '__LINUX__')
+        is_macos = is_macro_defined(module, '__MACOS__')
         
         if is_windows:
+            # Windows free syscall - use proper Intel syntax with size suffixes
             asm_code = """
-                mov r10, rcx
-                mov eax, 0x1E
+                movq %rcx, %r10
+                movl $$0x1E, %eax
                 syscall
             """
+            # Note: Using AT&T syntax (source, dest) which LLVM expects
+            # %rcx contains the pointer (first argument)
+            # Move to r10 (Windows syscall convention)
+            # 0x1E is the syscall number for NtFreeVirtualMemory
             constraints = "r,~{rax},~{r10},~{r11},~{memory}"
+            
         elif is_linux:
+            # Linux munmap syscall
             asm_code = """
-                mov rax, 11
+                movq $$11, %rax
                 syscall
             """
+            # 11 is the syscall number for munmap on x86_64
             constraints = "r,~{rax},~{r11},~{memory}"
+            
         elif is_macos:
+            # macOS munmap syscall
             asm_code = """
-                mov rax, 0x2000049
+                movq $$0x2000049, %rax
                 syscall
             """
+            # 0x2000049 is the syscall number for munmap on macOS
             constraints = "r,~{rax},~{memory}"
+            
         else:
-            return # wut
+            # Unknown platform - skip free
+            return
         
         asm_type = ir.FunctionType(ir.VoidType(), [i8_ptr])
         inline_asm = ir.InlineAsm(asm_type, asm_code, constraints, side_effect=True)
         builder.call(inline_asm, [void_ptr])
+
+def is_macro_defined(module: ir.Module, macro_name: str) -> bool:
+    """
+    Check if a preprocessor macro is defined in the module.
+    
+    Args:
+        module: LLVM IR module containing preprocessor macros
+        macro_name: Name of the macro to check
+        
+    Returns:
+        True if macro is defined and evaluates to truthy value, False otherwise
+    """
+    if not hasattr(module, '_preprocessor_macros'):
+        return False
+    
+    if macro_name not in module._preprocessor_macros:
+        return False
+    
+    # Get macro value
+    value = module._preprocessor_macros[macro_name]
+    
+    # Handle string values - check if it's "1" or other truthy string
+    if isinstance(value, str):
+        # Empty string or "0" are falsy
+        if value == "" or value == "0":
+            return False
+        # Everything else is truthy
+        return True
+    
+    # Handle other types (shouldn't happen but be defensive)
+    return bool(value)
 
 @dataclass
 class RangeExpression(Expression):
@@ -2660,21 +2719,21 @@ class FunctionCall(Expression):
         mangled_names = []
         for x in module._function_overloads.items():
             mangled_names.append(x[1][0]["mangled_name"].lstrip())
-        print(f"MANGLED LIST:\n{'\n'.join(mangled_names)}")
+        #print(f"MANGLED LIST:\n{'\n'.join(mangled_names)}")
         
         for x in module._function_overloads.items():
             # Step 2: If not found or not a function, check for overloads BEFORE namespace search
             if func is None or not isinstance(func, ir.Function):
                 # Check if this is an overloaded function
                 if hasattr(module, '_function_overloads') and self.name in module._function_overloads:
-                    print("FUNCTION OVERLOADS:")
+                    #print("FUNCTION OVERLOADS:")
                     for y in x:
                         if (type(y) == str):
                             continue
                         mangled_name = y[0]["mangled_name"]
                         func = self._resolve_overload(builder, module, mangled_name, module._function_overloads[self.name])
                         if func is not None:
-                            print("CREATED FUNCTION!")
+                            #print("CREATED FUNCTION!")
                             # Found via overload resolution
                             return self._generate_call(builder, module, func)
             
@@ -2702,7 +2761,7 @@ class FunctionCall(Expression):
             # Step 5: Error if still not found
             if func is None or not isinstance(func, ir.Function):
                 available_counts = [o['param_count'] for o in module._function_overloads[self.name]]
-                print("AVAILABLE COUNTS:",available_counts)
+                #print("AVAILABLE COUNTS:",available_counts)
                 if len(self.arguments) > len(available_counts):
                     raise ValueError(f"Function {self.name} accepts {available_counts} arguments but [{len(self.arguments)}] arguments were passed.")
         
@@ -2716,7 +2775,7 @@ class FunctionCall(Expression):
         Returns:
             Matching function or None if no match found
         """
-        print("IN _RESOLVE_OVERLOAD() FOR",base_name,"\n")
+        #print("IN _RESOLVE_OVERLOAD() FOR",base_name,"\n")
         arg_count = len(self.arguments)
         
         # Filter by argument count first
@@ -2813,6 +2872,23 @@ class FunctionCall(Expression):
                 expected_type = func.args[param_index].type
                 
                 if arg_val.type != expected_type:
+                    # Handle void* conversions
+                    if (isinstance(expected_type, ir.PointerType) and 
+                        isinstance(expected_type.pointee, ir.IntType) and 
+                        expected_type.pointee.width == 8):
+                        # Expected type is void* (i8*)
+                        if isinstance(arg_val.type, ir.PointerType):
+                            # Any pointer can be cast to void*
+                            arg_val = builder.bitcast(arg_val, expected_type, name=f"arg{i}_to_void_ptr")
+                    
+                    # Handle casting FROM void* to specific pointer type
+                    elif (isinstance(arg_val.type, ir.PointerType) and 
+                          isinstance(arg_val.type.pointee, ir.IntType) and 
+                          arg_val.type.pointee.width == 8 and
+                          isinstance(expected_type, ir.PointerType)):
+                        # arg_val is void* (i8*), cast to expected pointer type
+                        arg_val = builder.bitcast(arg_val, expected_type, name=f"arg{i}_from_void_ptr")
+
                     # If we have [N x T]* and expect T*, convert via GEP
                     if (isinstance(arg_val.type, ir.PointerType) and 
                         isinstance(arg_val.type.pointee, ir.ArrayType) and
@@ -5612,8 +5688,88 @@ class FunctionDef(ASTNode):
         return type_spec.get_llvm_type_with_array(module)
 
 @dataclass
-class FunctionPointer(ASTNode):
-    pass
+class FunctionPointer(Expression):
+    """
+    Function pointer type and operations.
+    
+    Supports:
+    - Function pointer declarations: int (*fp)(int, int)
+    - Function pointer assignments: fp = @my_function
+    - Function pointer calls: result = fp(arg1, arg2)
+    """
+    name: str
+    return_type: TypeSpec
+    parameter_types: List[TypeSpec]
+    
+    def get_function_type(self, module: ir.Module) -> ir.FunctionType:
+        """Get LLVM function type for this function pointer"""
+        ret_type = self.return_type.get_llvm_type(module)
+        param_types = [param.get_llvm_type(module) for param in self.parameter_types]
+        return ir.FunctionType(ret_type, param_types)
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Generate function pointer variable"""
+        func_type = self.get_function_type(module)
+        ptr_type = ir.PointerType(func_type)
+        
+        # Allocate space for function pointer
+        if builder.scope is None:
+            # Global function pointer
+            gvar = ir.GlobalVariable(module, ptr_type, self.name)
+            gvar.initializer = ir.Constant(ptr_type, None)
+            gvar.linkage = 'internal'
+            return gvar
+        else:
+            # Local function pointer
+            alloca = builder.alloca(ptr_type, name=self.name)
+            builder.scope[self.name] = alloca
+            return alloca
+
+@dataclass
+class FunctionPointerCall(Expression):
+    """Call through a function pointer"""
+    pointer: Expression  # Expression that evaluates to function pointer
+    arguments: List[Expression]
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Generate indirect function call through pointer"""
+        # Get the function pointer value
+        func_ptr = self.pointer.codegen(builder, module)
+        
+        # If it's stored in memory, load it
+        if isinstance(func_ptr.type, ir.PointerType):
+            if isinstance(func_ptr.type.pointee, ir.PointerType):
+                # Double pointer - load once to get function pointer
+                func_ptr = builder.load(func_ptr, name="func_ptr_load")
+        
+        # Generate arguments
+        args = [arg.codegen(builder, module) for arg in self.arguments]
+        
+        # Perform indirect call
+        return builder.call(func_ptr, args, name="indirect_call")
+
+@dataclass
+class FunctionPointerAssignment(Statement):
+    """Assign a function to a function pointer"""
+    pointer_name: str
+    function_expr: Expression  # Usually AddressOf(Identifier("function_name"))
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Assign function address to function pointer"""
+        # Get the function pointer storage location
+        if builder.scope and self.pointer_name in builder.scope:
+            ptr_storage = builder.scope[self.pointer_name]
+        elif self.pointer_name in module.globals:
+            ptr_storage = module.globals[self.pointer_name]
+        else:
+            raise NameError(f"Function pointer '{self.pointer_name}' not found")
+        
+        # Evaluate the function expression (should be a function address)
+        func_value = self.function_expr.codegen(builder, module)
+        
+        # Store function address in the pointer
+        builder.store(func_value, ptr_storage)
+        return func_value
 
 @dataclass
 class DestructuringAssignment(Statement):

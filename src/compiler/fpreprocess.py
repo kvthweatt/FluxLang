@@ -25,7 +25,7 @@ class FXPreprocessor:
         iteration = 0
         while replaced:
             iteration += 1
-            print(f"[PREPROCESSOR] Macro substitution pass {iteration}")
+            print(f"[PREPROCESSOR] Macro substitution passes: {iteration}")
             replaced = False
             lines = combined_source.split('\n')
             new_lines = []
@@ -37,8 +37,8 @@ class FXPreprocessor:
                 new_lines.append(new_line)
             
             combined_source = '\n'.join(new_lines)
-        
-        print(f"[PREPROCESSOR] Completed after {iteration} macro passes")
+        ending = "es." if iteration > 1 else "."
+        print(f"[PREPROCESSOR] Completed after {iteration} macro pass{ending}")
         
         # Step 4: Write to build/tmp.fx
         build_dir = Path("build")

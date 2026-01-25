@@ -237,11 +237,21 @@ class FluxCompiler:
             # Pass to preprocessor
             print("\n[PREPROCESSOR] Standard library / user-defined macros:\n")
             preprocessor = FXPreprocessor(filename, compiler_macros=self.predefined_macros)
+            result = preprocessor.process()
+            # NOTE: ADD DEBUG LEVEL IN COMPILER & CONFIG FOR PREPROCESSOR
+            # WRAP IN DEBUGGER
             #print("[PREPROCESSOR] All Macros:")
             #for key, value in preprocessor.macros.items():
             #    print("[PREPROCESSOR]", key, value)
-            result = preprocessor.process()
+            # /WRAP
+            
+            # Store macros in AST
+            if not hasattr(self.module, '_preprocessor_macros'):
+                self.module._preprocessor_macros = {}
+            self.module._preprocessor_macros.update(preprocessor.macros)
+            self.module._preprocessor_macros.update(self.predefined_macros)
             self.logger.section(f"Compiling Flux file: {filename}", LogLevel.INFO)
+
             base_name = Path(filename).stem
             
             # Step 1: Read source code
