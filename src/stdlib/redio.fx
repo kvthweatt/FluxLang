@@ -101,12 +101,26 @@ namespace standard
 
             def input(byte[] buffer, int max_len) -> int
             {
-                switch (1)
+                switch (CURRENT_OS)
                 {
+#ifdef __WINDOWS__
                     case (1)
                     {
                         return win_input(buffer, max_len);
                     }
+#endif;
+#ifdef __LINUX__
+                    case (2)
+                    {
+                        return nix_input(buffer, max_len);
+                    }
+#endif;
+#ifdef __MACOS__
+                    case (3)
+                    {
+                        return mac_input(buffer, max_len);
+                    }
+#endif;
                     default
                     { return 0; };
                 };

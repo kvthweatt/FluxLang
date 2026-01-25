@@ -36,7 +36,3 @@
 #ifdef FLUX_REDUCED_SPECIFICATION
 #import "redstandard.fx";
 #endif;
-
-namespace standard
-{
-};

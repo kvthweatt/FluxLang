@@ -1423,7 +1423,7 @@ class FluxParser:
         """
         expr = self.logical_and_expression()
         
-        while self.expect(TokenType.LOGICAL_OR):
+        while self.expect(TokenType.LOGICAL_OR, TokenType.OR):
             operator = Operator.OR
             self.advance()
             right = self.logical_and_expression()
@@ -1437,7 +1437,7 @@ class FluxParser:
         """
         expr = self.bitwise_or_expression()
         
-        while self.expect(TokenType.LOGICAL_AND):
+        while self.expect(TokenType.LOGICAL_AND, TokenType.AND):
             operator = Operator.AND
             self.advance()
             right = self.bitwise_or_expression()

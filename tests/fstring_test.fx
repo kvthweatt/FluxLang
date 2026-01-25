@@ -27,18 +27,10 @@ def pow(int l, int r) -> int
 	return x;
 };
 
-namespace test
-{
-	int z = 5;
-};
+int z = 5 ^ 5;
 
 def main() -> int
 {
-	int z = (pow(test::z, 2)) / 25;
-	if (z == 1)
-	{
-		print("z\0");
-	};
 	int j = 0;
 	int k = 1;
 	j = k;
@@ -46,8 +38,8 @@ def main() -> int
 	{
 		print("j\n\0");
 	};
-	byte[] x = f"Testing f-string.\n{a} {b} {c} {d} {e}\0";
-    int len = strlen(@x);
-    print(@x,len);
+	byte[] x = f"Testing f-string.\n{a} {b} {c} {d} {e} {z}\0";
+	int len = strlen(@x);
+	print(@x,len);
 	return 0;
 };

@@ -18,13 +18,13 @@ def main() -> int
 
 	foo(px,py);
 
-	if (!*py `| !y)
+	if (!*py or !y)
 	{
-		print("y unchanged",11);
+		print("y unchanged\0");
 	}
     else
     {
-        print("y changed",9);
+        print("y changed\0");
     };
 	return 0;
 };

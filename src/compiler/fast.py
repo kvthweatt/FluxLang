@@ -1666,8 +1666,6 @@ class BinaryOp(Expression):
     right: Expression
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        # NOTE
-        #
         # Generate left and right operands
         left_val = self.left.codegen(builder, module)
         right_val = self.right.codegen(builder, module)
@@ -1733,65 +1731,304 @@ class BinaryOp(Expression):
             else:
                 return builder.sdiv(left_val, right_val)
         elif self.operator == Operator.EQUAL:
-            if isinstance(left_val.type, ir.FloatType):
+            # Handle pointer-to-integer comparison
+            if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
+                # Cast pointer to integer
+                left_val = builder.ptrtoint(left_val, ir.IntType(64))
+                if right_val.type.width != 64:
+                    right_val = builder.sext(right_val, ir.IntType(64))
+                return builder.icmp_signed('==', left_val, right_val)
+            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.PointerType):
+                # Cast pointer to integer
+                right_val = builder.ptrtoint(right_val, ir.IntType(64))
+                if left_val.type.width != 64:
+                    left_val = builder.sext(left_val, ir.IntType(64))
+                return builder.icmp_signed('==', left_val, right_val)
+            # Pointer-to-pointer comparison
+            elif isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.PointerType):
+                return builder.icmp_signed('==', left_val, right_val)
+            # Integer-to-integer comparison with width matching
+            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width != right_val.type.width:
+                    # Extend both to the wider width
+                    target_width = max(left_val.type.width, right_val.type.width)
+                    target_type = ir.IntType(target_width)
+                    if left_val.type.width < target_width:
+                        left_val = builder.zext(left_val, target_type)
+                    if right_val.type.width < target_width:
+                        right_val = builder.zext(right_val, target_type)
+                return builder.icmp_signed('==', left_val, right_val)
+            # Float comparison
+            elif isinstance(left_val.type, ir.FloatType):
                 return builder.fcmp_ordered('==', left_val, right_val)
+            # Integer comparison
             else:
                 return builder.icmp_signed('==', left_val, right_val)
         elif self.operator == Operator.NOT_EQUAL:
-            if isinstance(left_val.type, ir.FloatType):
+            # Handle pointer-to-integer comparison
+            if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
+                # Cast pointer to integer
+                left_val = builder.ptrtoint(left_val, ir.IntType(64))
+                if right_val.type.width != 64:
+                    right_val = builder.sext(right_val, ir.IntType(64))
+                return builder.icmp_signed('!=', left_val, right_val)
+            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.PointerType):
+                # Cast pointer to integer
+                right_val = builder.ptrtoint(right_val, ir.IntType(64))
+                if left_val.type.width != 64:
+                    left_val = builder.sext(left_val, ir.IntType(64))
+                return builder.icmp_signed('!=', left_val, right_val)
+            # Pointer-to-pointer comparison
+            elif isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.PointerType):
+                return builder.icmp_signed('!=', left_val, right_val)
+            # Integer-to-integer comparison with width matching
+            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width != right_val.type.width:
+                    # Extend both to the wider width
+                    target_width = max(left_val.type.width, right_val.type.width)
+                    target_type = ir.IntType(target_width)
+                    if left_val.type.width < target_width:
+                        left_val = builder.zext(left_val, target_type)
+                    if right_val.type.width < target_width:
+                        right_val = builder.zext(right_val, target_type)
+                return builder.icmp_signed('!=', left_val, right_val)
+            # Float comparison
+            elif isinstance(left_val.type, ir.FloatType):
                 return builder.fcmp_ordered('!=', left_val, right_val)
+            # Integer comparison
             else:
                 return builder.icmp_signed('!=', left_val, right_val)
         elif self.operator == Operator.LESS_THAN:
-            if isinstance(left_val.type, ir.FloatType):
+            # Handle pointer-to-integer comparison
+            if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
+                # Cast pointer to integer
+                left_val = builder.ptrtoint(left_val, ir.IntType(64))
+                if right_val.type.width != 64:
+                    right_val = builder.sext(right_val, ir.IntType(64))
+                return builder.icmp_signed('<', left_val, right_val)
+            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.PointerType):
+                # Cast pointer to integer
+                right_val = builder.ptrtoint(right_val, ir.IntType(64))
+                if left_val.type.width != 64:
+                    left_val = builder.sext(left_val, ir.IntType(64))
+                return builder.icmp_signed('<', left_val, right_val)
+            # Pointer-to-pointer comparison
+            elif isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.PointerType):
+                return builder.icmp_unsigned('<', left_val, right_val)
+            # Integer-to-integer comparison with width matching
+            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width != right_val.type.width:
+                    # Extend both to the wider width
+                    target_width = max(left_val.type.width, right_val.type.width)
+                    target_type = ir.IntType(target_width)
+                    if left_val.type.width < target_width:
+                        left_val = builder.zext(left_val, target_type)
+                    if right_val.type.width < target_width:
+                        right_val = builder.zext(right_val, target_type)
+                return builder.icmp_signed('<', left_val, right_val)
+            # Float comparison
+            elif isinstance(left_val.type, ir.FloatType):
                 return builder.fcmp_ordered('<', left_val, right_val)
+            # Integer comparison
             else:
                 return builder.icmp_signed('<', left_val, right_val)
         elif self.operator == Operator.LESS_EQUAL:
-            if isinstance(left_val.type, ir.FloatType):
+            # Handle pointer-to-integer comparison
+            if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
+                # Cast pointer to integer
+                left_val = builder.ptrtoint(left_val, ir.IntType(64))
+                if right_val.type.width != 64:
+                    right_val = builder.sext(right_val, ir.IntType(64))
+                return builder.icmp_signed('<=', left_val, right_val)
+            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.PointerType):
+                # Cast pointer to integer
+                right_val = builder.ptrtoint(right_val, ir.IntType(64))
+                if left_val.type.width != 64:
+                    left_val = builder.sext(left_val, ir.IntType(64))
+                return builder.icmp_signed('<=', left_val, right_val)
+            # Pointer-to-pointer comparison
+            elif isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.PointerType):
+                return builder.icmp_unsigned('<=', left_val, right_val)
+            # Integer-to-integer comparison with width matching
+            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width != right_val.type.width:
+                    # Extend both to the wider width
+                    target_width = max(left_val.type.width, right_val.type.width)
+                    target_type = ir.IntType(target_width)
+                    if left_val.type.width < target_width:
+                        left_val = builder.zext(left_val, target_type)
+                    if right_val.type.width < target_width:
+                        right_val = builder.zext(right_val, target_type)
+                return builder.icmp_signed('<=', left_val, right_val)
+            # Float comparison
+            elif isinstance(left_val.type, ir.FloatType):
                 return builder.fcmp_ordered('<=', left_val, right_val)
+            # Integer comparison
             else:
                 return builder.icmp_signed('<=', left_val, right_val)
         elif self.operator == Operator.GREATER_THAN:
-            if isinstance(left_val.type, ir.FloatType):
+            # Handle pointer-to-integer comparison
+            if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
+                # Cast pointer to integer
+                left_val = builder.ptrtoint(left_val, ir.IntType(64))
+                if right_val.type.width != 64:
+                    right_val = builder.sext(right_val, ir.IntType(64))
+                return builder.icmp_signed('>', left_val, right_val)
+            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.PointerType):
+                # Cast pointer to integer
+                right_val = builder.ptrtoint(right_val, ir.IntType(64))
+                if left_val.type.width != 64:
+                    left_val = builder.sext(left_val, ir.IntType(64))
+                return builder.icmp_signed('>', left_val, right_val)
+            # Pointer-to-pointer comparison
+            elif isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.PointerType):
+                return builder.icmp_unsigned('>', left_val, right_val)
+            # Integer-to-integer comparison with width matching
+            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width != right_val.type.width:
+                    # Extend both to the wider width
+                    target_width = max(left_val.type.width, right_val.type.width)
+                    target_type = ir.IntType(target_width)
+                    if left_val.type.width < target_width:
+                        left_val = builder.zext(left_val, target_type)
+                    if right_val.type.width < target_width:
+                        right_val = builder.zext(right_val, target_type)
+                return builder.icmp_signed('>', left_val, right_val)
+            # Float comparison
+            elif isinstance(left_val.type, ir.FloatType):
                 return builder.fcmp_ordered('>', left_val, right_val)
+            # Integer comparison
             else:
                 return builder.icmp_signed('>', left_val, right_val)
         elif self.operator == Operator.GREATER_EQUAL:
-            if isinstance(left_val.type, ir.FloatType):
+            # Handle pointer-to-integer comparison
+            if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
+                # Cast pointer to integer
+                left_val = builder.ptrtoint(left_val, ir.IntType(64))
+                if right_val.type.width != 64:
+                    right_val = builder.sext(right_val, ir.IntType(64))
+                return builder.icmp_signed('>=', left_val, right_val)
+            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.PointerType):
+                # Cast pointer to integer
+                right_val = builder.ptrtoint(right_val, ir.IntType(64))
+                if left_val.type.width != 64:
+                    left_val = builder.sext(left_val, ir.IntType(64))
+                return builder.icmp_signed('>=', left_val, right_val)
+            # Pointer-to-pointer comparison
+            elif isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.PointerType):
+                return builder.icmp_unsigned('>=', left_val, right_val)
+            # Integer-to-integer comparison with width matching
+            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width != right_val.type.width:
+                    # Extend both to the wider width
+                    target_width = max(left_val.type.width, right_val.type.width)
+                    target_type = ir.IntType(target_width)
+                    if left_val.type.width < target_width:
+                        left_val = builder.zext(left_val, target_type)
+                    if right_val.type.width < target_width:
+                        right_val = builder.zext(right_val, target_type)
+                return builder.icmp_signed('>=', left_val, right_val)
+            # Float comparison
+            elif isinstance(left_val.type, ir.FloatType):
                 return builder.fcmp_ordered('>=', left_val, right_val)
+            # Integer comparison
             else:
                 return builder.icmp_signed('>=', left_val, right_val)
         elif self.operator == Operator.AND:
+            # Ensure both operands have same width for bitwise AND
+            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width != right_val.type.width:
+                    target_width = max(left_val.type.width, right_val.type.width)
+                    target_type = ir.IntType(target_width)
+                    if left_val.type.width < target_width:
+                        left_val = builder.zext(left_val, target_type)
+                    if right_val.type.width < target_width:
+                        right_val = builder.zext(right_val, target_type)
             return builder.and_(left_val, right_val)
         elif self.operator == Operator.OR:
+            # Ensure both operands have same width for bitwise OR
+            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width != right_val.type.width:
+                    target_width = max(left_val.type.width, right_val.type.width)
+                    target_type = ir.IntType(target_width)
+                    if left_val.type.width < target_width:
+                        left_val = builder.zext(left_val, target_type)
+                    if right_val.type.width < target_width:
+                        right_val = builder.zext(right_val, target_type)
             return builder.or_(left_val, right_val)
         elif self.operator == Operator.XOR:
+            # Ensure both operands have same width for bitwise XOR
+            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width != right_val.type.width:
+                    target_width = max(left_val.type.width, right_val.type.width)
+                    target_type = ir.IntType(target_width)
+                    if left_val.type.width < target_width:
+                        left_val = builder.zext(left_val, target_type)
+                    if right_val.type.width < target_width:
+                        right_val = builder.zext(right_val, target_type)
             return builder.xor(left_val, right_val)
         elif self.operator == Operator.BITOR:
-            # Bitwise OR operation
+            # Bitwise OR operation with width matching
+            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width != right_val.type.width:
+                    target_width = max(left_val.type.width, right_val.type.width)
+                    target_type = ir.IntType(target_width)
+                    if left_val.type.width < target_width:
+                        left_val = builder.zext(left_val, target_type)
+                    if right_val.type.width < target_width:
+                        right_val = builder.zext(right_val, target_type)
             return builder.or_(left_val, right_val)
         elif self.operator == Operator.BITAND:
-            # Bitwise AND operation
+            # Bitwise AND operation with width matching
+            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width != right_val.type.width:
+                    target_width = max(left_val.type.width, right_val.type.width)
+                    target_type = ir.IntType(target_width)
+                    if left_val.type.width < target_width:
+                        left_val = builder.zext(left_val, target_type)
+                    if right_val.type.width < target_width:
+                        right_val = builder.zext(right_val, target_type)
             return builder.and_(left_val, right_val)
         elif self.operator == Operator.MOD:
+            # TODO: ADD TYPE COERCION LIKE ABOVE
             if isinstance(left_val.type, ir.FloatType):
                 return builder.frem(left_val, right_val)
             else:
                 return builder.srem(left_val, right_val)
         elif self.operator == Operator.BITSHIFT_LEFT:
+            # TODO: ADD TYPE COERCION LIKE ABOVE
+            # Ensure both operands have same width
+            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width != right_val.type.width:
+                    # Extend shift amount to match left operand width
+                    if right_val.type.width < left_val.type.width:
+                        right_val = builder.zext(right_val, left_val.type)
+                    else:
+                        right_val = builder.trunc(right_val, left_val.type)
             return builder.shl(left_val, right_val)
         elif self.operator == Operator.BITSHIFT_RIGHT:
+            # TODO: ADD TYPE COERCION LIKE ABOVE
+            # Ensure both operands have same width
+            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width != right_val.type.width:
+                    # Extend shift amount to match left operand width
+                    if right_val.type.width < left_val.type.width:
+                        right_val = builder.zext(right_val, left_val.type)
+                    else:
+                        right_val = builder.trunc(right_val, left_val.type)
             return builder.ashr(left_val, right_val)
         elif self.operator == Operator.NOR:
+            # TODO: ADD TYPE COERCION LIKE ABOVE
             # NOR is !(A | B) = NOT(OR(A, B))
             or_result = builder.or_(left_val, right_val)
             return builder.not_(or_result)
         elif self.operator == Operator.NAND:
+            # TODO: ADD TYPE COERCION LIKE ABOVE
             # NAND is !(A & B) = NOT(AND(A, B))
             and_result = builder.and_(left_val, right_val)
             return builder.not_(and_result)
         elif self.operator == Operator.POWER:
+            # TODO: ADD TYPE COERCION LIKE ABOVE
             # Power operator using LLVM intrinsics
             if isinstance(left_val.type, ir.FloatType):
                 # For floating point, use llvm.pow
@@ -2418,41 +2655,56 @@ class FunctionCall(Expression):
         
         # Step 1: Try direct lookup
         func = module.globals.get(self.name, None)
+        mangled_name = None
+
+        mangled_names = []
+        for x in module._function_overloads.items():
+            mangled_names.append(x[1][0]["mangled_name"].lstrip())
+        print(f"MANGLED LIST:\n{'\n'.join(mangled_names)}")
         
-        # Step 2: If not found or not a function, check for overloads BEFORE namespace search
-        if func is None or not isinstance(func, ir.Function):
-            # Check if this is an overloaded function
-            if hasattr(module, '_function_overloads') and self.name in module._function_overloads:
-                func = self._resolve_overload(builder, module, self.name, module._function_overloads[self.name])
-                if func is not None:
-                    # Found via overload resolution
-                    return self._generate_call(builder, module, func)
-        
-        # Step 3: Try namespace-qualified names
-        if func is None or not isinstance(func, ir.Function):
-            if hasattr(module, '_using_namespaces'):
-                for namespace in module._using_namespaces:
-                    #print(namespace)
-                    # Convert namespace path to mangled name format
-                    mangled_prefix = namespace.replace('::', '__') + '__'
-                    mangled_name = mangled_prefix + self.name
-                    
-                    # Check for direct mangled function name
-                    if mangled_name in module.globals:
-                        candidate_func = module.globals[mangled_name]
-                        if isinstance(candidate_func, ir.Function):
-                            func = candidate_func
-                            break
-                    
-                    # Step 4: Check for namespace-qualified overloads
-                    if hasattr(module, '_function_overloads') and mangled_name in module._function_overloads:
-                        func = self._resolve_overload(builder, module, mangled_name, module._function_overloads[mangled_name])
+        for x in module._function_overloads.items():
+            # Step 2: If not found or not a function, check for overloads BEFORE namespace search
+            if func is None or not isinstance(func, ir.Function):
+                # Check if this is an overloaded function
+                if hasattr(module, '_function_overloads') and self.name in module._function_overloads:
+                    print("FUNCTION OVERLOADS:")
+                    for y in x:
+                        if (type(y) == str):
+                            continue
+                        mangled_name = y[0]["mangled_name"]
+                        func = self._resolve_overload(builder, module, mangled_name, module._function_overloads[self.name])
                         if func is not None:
-                            break
-        
-        # Step 5: Error if still not found
-        if func is None or not isinstance(func, ir.Function):
-            raise NameError(f"Unknown function: {self.name}")
+                            print("CREATED FUNCTION!")
+                            # Found via overload resolution
+                            return self._generate_call(builder, module, func)
+            
+            # Step 3: Try namespace-qualified names
+            if func is None or not isinstance(func, ir.Function):
+                if hasattr(module, '_using_namespaces'):
+                    for namespace in module._using_namespaces:
+                        # Convert namespace path to mangled name format
+                        mangled_prefix = namespace.replace('::', '__') + '__'
+                        mangled_name = mangled_prefix + self.name
+                        
+                        # Check for direct mangled function name
+                        if mangled_name in module.globals:
+                            candidate_func = module.globals[mangled_name]
+                            if isinstance(candidate_func, ir.Function):
+                                func = candidate_func
+                                break
+                        
+                        # Step 4: Check for namespace-qualified overloads
+                        if hasattr(module, '_function_overloads') and mangled_name in module._function_overloads:
+                            func = self._resolve_overload(builder, module, mangled_name, module._function_overloads[mangled_name])
+                            if func is not None:
+                                break
+
+            # Step 5: Error if still not found
+            if func is None or not isinstance(func, ir.Function):
+                available_counts = [o['param_count'] for o in module._function_overloads[self.name]]
+                print("AVAILABLE COUNTS:",available_counts)
+                if len(self.arguments) > len(available_counts):
+                    raise ValueError(f"Function {self.name} accepts {available_counts} arguments but [{len(self.arguments)}] arguments were passed.")
         
         # Generate the actual function call
         return self._generate_call(builder, module, func)
@@ -2464,6 +2716,7 @@ class FunctionCall(Expression):
         Returns:
             Matching function or None if no match found
         """
+        print("IN _RESOLVE_OVERLOAD() FOR",base_name,"\n")
         arg_count = len(self.arguments)
         
         # Filter by argument count first

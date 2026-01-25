@@ -13,6 +13,8 @@
 #import "redruntime.fx";
 #endif;
 
+///
 namespace standard
 {
 };
+///
