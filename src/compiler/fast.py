@@ -1666,6 +1666,8 @@ class BinaryOp(Expression):
     right: Expression
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # NOTE
+        #
         # Generate left and right operands
         left_val = self.left.codegen(builder, module)
         right_val = self.right.codegen(builder, module)
@@ -1766,6 +1768,12 @@ class BinaryOp(Expression):
             return builder.or_(left_val, right_val)
         elif self.operator == Operator.XOR:
             return builder.xor(left_val, right_val)
+        elif self.operator == Operator.BITOR:
+            # Bitwise OR operation
+            return builder.or_(left_val, right_val)
+        elif self.operator == Operator.BITAND:
+            # Bitwise AND operation
+            return builder.and_(left_val, right_val)
         elif self.operator == Operator.MOD:
             if isinstance(left_val.type, ir.FloatType):
                 return builder.frem(left_val, right_val)

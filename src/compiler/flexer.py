@@ -643,11 +643,11 @@ class FluxLexer:
             # Must add corresponding keywords.
             if char == '`':
                 if self.peek_char() == "&":
-                    tokens.append(Token(TokenType.BITAND_OP, '`&', start_post[0], start_post[1]))
+                    tokens.append(Token(TokenType.BITAND_OP, '`&', start_pos[0], start_pos[1]))
                     self.advance(count=2)
                     continue
                 elif self.peek_char() == "|":
-                    tokens.append(Token(TokenType.BITOR_OP, '`|', start_post[0], start_post[1]))
+                    tokens.append(Token(TokenType.BITOR_OP, '`|', start_pos[0], start_pos[1]))
                     self.advance(count=2)
                     continue
             

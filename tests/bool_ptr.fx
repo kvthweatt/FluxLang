@@ -18,7 +18,7 @@ def main() -> int
 
 	foo(px,py);
 
-	if (!*py or !y)
+	if (!*py `| !y)
 	{
 		print("y unchanged",11);
 	}
