@@ -3,7 +3,7 @@
 
 def foo(bool* src, bool* dst) -> void
 {
-	src = dst;
+	*dst = *src;
 	return void;
 };
 
