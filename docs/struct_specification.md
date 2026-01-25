@@ -457,49 +457,7 @@ store volatile i8 %pin_set, i8* %gpio, align 4
 
 ## 6. Performance Characteristics
 
-### 6.1 Theoretical Analysis
-
-| Operation | C/C++ Cost | Flux Cost | Notes |
-|-----------|------------|-----------|-------|
-| Struct declaration | O(1) compile | O(1) compile + TLD | Negligible difference |
-| Instance creation | O(n) (init) | O(1) (raw alloc) | Flux faster for large structs |
-| Field access (aligned) | O(1) | O(1) | Identical |
-| Field access (unaligned) | O(1)* | O(log n) bit ops | *Compiler may insert shifts anyway |
-| Type cast | O(n) (memcpy) | O(1) (bitcast) | **Flux: zero-cost** |
-| Destructive consume | N/A | O(1) (ptr arith) | **Flux: unique feature** |
-
-### 6.2 Empirical Benchmarks
-
-#### Network Packet Processing
-
-**Test**: Parse Ethernet → IP → TCP headers from 1500-byte packet
-
-**C Implementation**:
-```c
-struct ethernet* eth = (struct ethernet*)buffer;
-struct ip* ip_hdr = (struct ip*)(buffer + sizeof(struct ethernet));
-struct tcp* tcp_hdr = (struct tcp*)(buffer + sizeof(struct ethernet) + sizeof(struct ip));
-// Manual offset calculation, potential alignment issues
-```
-
-**Flux Implementation**:
-```flux
-EthernetHeader eth = (EthernetHeader)buffer[0:13];
-IPHeader ip = (IPHeader)buffer[0:19];
-TCPHeader tcp = (TCPHeader)buffer[0:19];
-// Automatic consumption, zero-cost casts
-```
-
-**Results** (x86_64, Clang 15, -O3):
-
-| Implementation | Cycles/Packet | Instructions | L1 Cache Misses |
-|----------------|---------------|--------------|-----------------|
-| C (manual)     | 847           | 312          | 12              |
-| Flux (cast)    | 723           | 289          | 11              |
-
-**Analysis**: Flux eliminates redundant offset calculations and enables better instruction scheduling due to explicit consumption semantics.
-
-### 6.3 Memory Bandwidth Utilization
+### 6.1 Memory Bandwidth Utilization
 
 Destructive consumption enables **streaming data processing** at memory bandwidth:
 
@@ -512,8 +470,6 @@ def process_stream(byte[] data) -> void {
     }
 };
 ```
-
-**Measured throughput**: 94.3% of theoretical DRAM bandwidth (DDR4-3200)
 
 ---
 
