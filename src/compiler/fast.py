@@ -5470,7 +5470,7 @@ class FunctionDef(ASTNode):
         func_type = ir.FunctionType(ret_type, param_types)
         
         # Always generate mangled name for consistency
-        if self.name == "FRTStartup" or self.name == "main":
+        if self.name == "FRTStartup" or self.name == "main" or self.name == "_start" or self.name == "exit":
             mangled_name = self.name
         else:
             mangled_name = self._mangle_name(module)
