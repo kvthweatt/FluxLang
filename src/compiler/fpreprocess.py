@@ -173,9 +173,6 @@ class FXPreprocessor:
             condition_true = macro_value is None or macro_value == '0'
         else:
             condition_true = macro_value is not None and macro_value != '0'
-        
-        print(f"[PREPROCESSOR] {'#ifndef' if is_ifndef else '#ifdef'} {macro_name}: {'TRUE' if condition_true else 'FALSE'} (value={macro_value})")
-        
         i = start_i + 1
         depth = 1
         in_else = False
