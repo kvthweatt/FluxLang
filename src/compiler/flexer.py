@@ -158,7 +158,7 @@ class TokenType(Enum):
     # Directionals
     RETURN_ARROW = auto()   # ->
     CHAIN_ARROW = auto()    # <-
-    #RECURSE_ARROW = auto()  # <~
+    RECURSE_ARROW = auto()  # <~
     FUNCTION_POINTER = auto() # {}*
     
     # Delimiters
@@ -621,14 +621,15 @@ class FluxLexer:
             
             # Multi-character operators (order matters - longest first)
             if char == '{' and self.peek_char() == '}' and self.peek_char(2) == '*':
-                tokens.append(Token(TokenType.FUNCTION_POINTER, '<<=', start_pos[0], start_pos[1]))
+                tokens.append(Token(TokenType.FUNCTION_POINTER, '{}*', start_pos[0], start_pos[1]))
                 self.advance(count=3)
                 continue
+
+            # BITSHIFT ASSIGN
             if char == '<' and self.peek_char() == '<' and self.peek_char(2) == '=':
                 tokens.append(Token(TokenType.BITSHIFT_LEFT_ASSIGN, '<<=', start_pos[0], start_pos[1]))
                 self.advance(count=3)
                 continue
-            
             if char == '>' and self.peek_char() == '>' and self.peek_char(2) == '=':
                 tokens.append(Token(TokenType.BITSHIFT_RIGHT_ASSIGN, '>>=', start_pos[0], start_pos[1]))
                 self.advance(count=3)

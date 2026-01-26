@@ -282,7 +282,121 @@ class FluxParser:
             self.consume(TokenType.SEMICOLON)
         
         return FunctionDef(name, parameters, return_type, body, is_const, is_volatile, is_prototype)
-    
+
+    def _is_function_pointer_declaration(self) -> bool:
+        """
+        Check if current position starts a function pointer declaration.
+        
+        Pattern: return_type{}* identifier(param_types)
+        Example: void{}* fp()
+        """
+        saved_pos = self.position
+        try:
+            # Skip storage class and qualifiers
+            if self.expect(TokenType.GLOBAL, TokenType.LOCAL, TokenType.HEAP, 
+                          TokenType.STACK, TokenType.REGISTER):
+                self.advance()
+            if self.expect(TokenType.CONST):
+                self.advance()
+            if self.expect(TokenType.VOLATILE):
+                self.advance()
+            if self.expect(TokenType.SIGNED, TokenType.UNSIGNED):
+                self.advance()
+            
+            # Must have a base type
+            if not self.expect(TokenType.INT, TokenType.FLOAT_KW, TokenType.CHAR, 
+                              TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
+                              TokenType.IDENTIFIER):
+                return False
+            
+            self.advance()
+            
+            # Check for {}* pattern
+            if not self.expect(TokenType.LEFT_BRACE):
+                return False
+            self.advance()
+            
+            if not self.expect(TokenType.RIGHT_BRACE):
+                return False
+            self.advance()
+            
+            if not self.expect(TokenType.MULTIPLY):
+                return False
+            self.advance()
+            
+            # Must have identifier
+            if not self.expect(TokenType.IDENTIFIER):
+                return False
+            self.advance()
+            
+            # Must have parameter list
+            if not self.expect(TokenType.LEFT_PAREN):
+                return False
+            
+            # This is a function pointer!
+            return True
+        finally:
+            # Always restore position
+            self.position = saved_pos
+            self.current_token = self.tokens[self.position] if self.position < len(self.tokens) else None
+
+
+    def function_pointer_type(self) -> FunctionPointerType:
+        """
+        Parse function pointer type specification.
+        
+        Syntax: return_type{}* (param_types)
+        Example: void{}* x(int, int)
+        """
+        # Parse return type
+        return_type = self.peek(-2)
+        
+        # Parse parameter types in parentheses
+        self.consume(TokenType.IDENTIFIER)
+        self.consume(TokenType.LEFT_PAREN)
+        
+        parameter_types = []
+        if not self.expect(TokenType.RIGHT_PAREN):
+            # Parse first parameter type
+            parameter_types.append(self.type_spec())
+            
+            # Parse remaining parameter types
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                parameter_types.append(self.type_spec())
+        
+        self.consume(TokenType.RIGHT_PAREN)
+        print("GOT FUNCTION POINTER")
+        
+        return FunctionPointerType(return_type, parameter_types)
+
+
+    def function_pointer_declaration(self) -> FunctionPointerDeclaration:
+        """
+        Parse function pointer declaration.
+        
+        Syntax: return_type{}* name(param_types) = @function_name;
+        Example: void{}* fp() = @foo;
+        """
+        # Parse the function pointer type (return type + {}* + param types)
+        fp_type = self.function_pointer_type()
+        
+        # Get the name
+        name = self.consume(TokenType.IDENTIFIER).value
+        
+        # Optional initializer
+        initializer = None
+        if self.expect(TokenType.ASSIGN):
+            self.advance()
+            
+            # Expect @ followed by function name
+            self.consume(TokenType.ADDRESS_OF, "Expected '@' for function address")
+            func_name = self.consume(TokenType.IDENTIFIER).value
+            
+            initializer = AddressOf(Identifier(func_name))
+        
+        return FunctionPointerDeclaration(name, fp_type, initializer)
+
     def parameter_list(self) -> List[Parameter]:
         """
         parameter_list -> parameter (',' parameter)*
@@ -651,6 +765,11 @@ class FluxParser:
         # Base type parsing
         base_type_result = self.base_type()
         custom_typename = None
+
+        # Handle function pointer types
+        if self.expect(TokenType.FUNCTION_POINTER):
+            self.advance()
+            return self.function_pointer_type()
         
         # Handle custom type names
         if isinstance(base_type_result, list):
@@ -658,7 +777,7 @@ class FluxParser:
             custom_typename = base_type_result[1]
         else:
             base_type = base_type_result
-        
+
         # Bit width and alignment for data types
         bit_width = None
         alignment = None
@@ -724,12 +843,7 @@ class FluxParser:
         base_type -> 'int' | 'float' | 'char' | 'bool' | 'data' | 'void' | IDENTIFIER
         Returns DataType for built-in types, or [DataType.DATA, typename] for custom types
         """
-        # ADD {}* function pointer support
-        # URGENT
         if self.expect(TokenType.INT):
-            if self.expect(TokenType.FUNCTION_POINTER):
-                # Do function_pointer_declaration() returns FunctionPointer <- Add to AST
-                print(self.current_token.type)
             self.advance()
             return DataType.INT
         elif self.expect(TokenType.FLOAT_KW):
@@ -839,6 +953,7 @@ class FluxParser:
         variable_declaration -> type_spec IDENTIFIER ('=' expression)?
                              | type_spec 'as' IDENTIFIER ('=' expression)?
                              | type_spec IDENTIFIER '{' struct_init '}'  # Struct literal init
+                             | type_spec FUNCTION_POINTER IDENTIFIER PARAMS = @FUNCTION
         
         Note: Array dimensions must be part of type_spec, not after IDENTIFIER
         """
@@ -863,6 +978,9 @@ class FluxParser:
                         self.error("Struct literal initialization requires a custom type")
             
             return TypeDeclaration(type_name, type_spec, initial_value)
+        elif self.expect(TokenType.ASSIGN):
+            self.advance()
+            return self.assignment_expression()
         else:
             # Regular variable declaration
             name = self.consume(TokenType.IDENTIFIER).value

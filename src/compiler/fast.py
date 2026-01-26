@@ -3196,6 +3196,37 @@ class AddressOf(Expression):
                     return result
                 return gvar
             
+            # **NEW: Check for functions (including mangled names)**
+            # Try direct lookup first
+            if var_name in module.globals:
+                func_or_var = module.globals[var_name]
+                if isinstance(func_or_var, ir.Function):
+                    return func_or_var
+            
+            # Try function overload resolution
+            if hasattr(module, '_function_overloads') and var_name in module._function_overloads:
+                overloads = module._function_overloads[var_name]
+                # For function pointer assignment with @func (no arguments),
+                # we need to pick the right overload
+                # If there's only one overload, use it
+                if len(overloads) == 1:
+                    return overloads[0]['function']
+                else:
+                    # Multiple overloads - need to disambiguate
+                    # For now, we'll require explicit type annotation or pick 0-arg version
+                    zero_arg_overload = next(
+                        (o for o in overloads if o['param_count'] == 0),
+                        None
+                    )
+                    if zero_arg_overload:
+                        return zero_arg_overload['function']
+                    else:
+                        raise ValueError(
+                            f"Ambiguous function reference '@{var_name}': "
+                            f"multiple overloads exist. Please use explicit cast or "
+                            f"specify parameter types."
+                        )
+            
             # Check for namespace-qualified names using 'using' statements
             if hasattr(module, '_using_namespaces'):
                 for namespace in module._using_namespaces:
@@ -3206,6 +3237,11 @@ class AddressOf(Expression):
                     # Check in global variables with mangled name
                     if mangled_name in module.globals:
                         gvar = module.globals[mangled_name]
+                        
+                        # Check if it's a function
+                        if isinstance(gvar, ir.Function):
+                            return gvar
+                        
                         if isinstance(gvar.type, ir.PointerType):
                             # For arrays (including string arrays like noopstr), return the global directly
                             # For other pointer types, check if it's a pointer to pointer
@@ -3215,9 +3251,22 @@ class AddressOf(Expression):
                                 result = builder.load(gvar, name=f"{var_name}_ptr")
                                 return result
                         return gvar
+                    
+                    # **NEW: Check for mangled function overloads**
+                    if hasattr(module, '_function_overloads') and mangled_name in module._function_overloads:
+                        overloads = module._function_overloads[mangled_name]
+                        if len(overloads) == 1:
+                            return overloads[0]['function']
+                        else:
+                            zero_arg_overload = next(
+                                (o for o in overloads if o['param_count'] == 0),
+                                None
+                            )
+                            if zero_arg_overload:
+                                return zero_arg_overload['function']
             
-            # If we get here, the variable hasn't been declared yet
-            raise NameError(f"Unknown variable: {var_name}")
+            # If we get here, the variable/function hasn't been declared yet
+            raise NameError(f"Unknown identifier: {var_name}")
         
         # Handle pointer dereference - @(*ptr) is equivalent to ptr
         if isinstance(self.expression, PointerDeref):
@@ -5723,6 +5772,68 @@ class FunctionPointer(Expression):
             # Local function pointer
             alloca = builder.alloca(ptr_type, name=self.name)
             builder.scope[self.name] = alloca
+            return alloca
+
+@dataclass
+class FunctionPointerType:
+    """
+    Represents a function pointer type specification.
+    
+    Used for parsing function pointer type syntax like: void{}* (int, int)
+    This is the TYPE, not a declaration or expression.
+    """
+    return_type: TypeSpec
+    parameter_types: List[TypeSpec]
+    
+    def get_llvm_type(self, module: ir.Module) -> ir.FunctionType:
+        """Convert to LLVM function type"""
+        ret_type = self.return_type.get_llvm_type(module)
+        param_types = [param.get_llvm_type(module) for param in self.parameter_types]
+        return ir.FunctionType(ret_type, param_types)
+    
+    def get_llvm_pointer_type(self, module: ir.Module) -> ir.PointerType:
+        """Get pointer to this function type"""
+        func_type = self.get_llvm_type(module)
+        return ir.PointerType(func_type)
+
+@dataclass
+class FunctionPointerDeclaration(Statement):
+    """
+    Function pointer variable declaration.
+    
+    Syntax: void{}* fp() = @foo;
+    """
+    name: str
+    fp_type: FunctionPointerType
+    initializer: Optional[Expression] = None
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Generate function pointer variable"""
+        ptr_type = self.fp_type.get_llvm_pointer_type(module)
+        
+        # Allocate storage
+        if builder.scope is None:
+            # Global function pointer
+            gvar = ir.GlobalVariable(module, ptr_type, self.name)
+            gvar.linkage = 'internal'
+            
+            if self.initializer:
+                # Evaluate initializer
+                init_val = self.initializer.codegen(builder, module)
+                gvar.initializer = init_val
+            else:
+                gvar.initializer = ir.Constant(ptr_type, None)
+            
+            return gvar
+        else:
+            # Local function pointer
+            alloca = builder.alloca(ptr_type, name=self.name)
+            builder.scope[self.name] = alloca
+            
+            if self.initializer:
+                init_val = self.initializer.codegen(builder, module)
+                builder.store(init_val, alloca)
+            
             return alloca
 
 @dataclass

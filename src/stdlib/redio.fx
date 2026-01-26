@@ -16,15 +16,16 @@ namespace standard
     		// INPUT FORWARD DECLARATIONS
 #ifdef __WINDOWS__
             def win_input(byte[] buffer, int max_len) -> int;
-#endif;
+#endif; // Windows
 #ifdef __LINUX__
             def nix_input(byte[] buffer, int max_len) -> int;
-#endif;
+#endif; // Linux
 #ifdef __MACOS__
             def mac_input(byte[] buffer, int max_len) -> int;
-#endif;
+#endif; // Mac
+            // GENERIC
             def input(byte[] buffer, int max_len) -> int;
-            //def input(byte[] msg) -> byte[]; <-- overloading not working correctly.
+            
 
             // OUTPUT FORWARD DECLARATIONS
 #ifdef __WINDOWS__
@@ -36,11 +37,16 @@ namespace standard
 #ifdef __MACOS__
             def mac_print(byte* msg, int x) -> void;
 #endif;
+            // GENERIC
             def print(noopstr s, int len) -> void;
             def print(noopstr s) -> void;
+
+
+// INPUT DEFINITIONS BEGIN
 #ifdef __WINDOWS__
             def reset_from_input() -> void;
 
+#ifdef __ARCH_X86_64__
             // INPUT DEFINITIONS
             def win_input(byte[] buf, int max_len) -> int
             {
@@ -98,6 +104,10 @@ namespace standard
                 reset_from_input();
                 return bytes_read - 2;
             };
+#endif; // ARCH 86 64
+#ifdef __ARCH_ARM__
+#endif // ARCH ARM
+#endif; // WINDOWS
 
             def input(byte[] buffer, int max_len) -> int
             {
@@ -126,7 +136,11 @@ namespace standard
                 };
                 return 0;
             };
+// INPUT DEFINITIONS END
 
+// OUTPUT FUNCTIONS BEGIN
+#ifdef __WINDOWS__
+#ifdef __ARCH_X86_64__
             // OUTPUT DEFINITIONS
             def win_print(byte* msg, int x) -> void
             {
@@ -158,8 +172,45 @@ namespace standard
                 win_print(@bs,1);
                 return void;
             };
-#endif; // Windows
+#endif; // ARCH 86 64
+#ifdef __ARCH_ARM__
+            def win_print(byte* msg, int x) -> void
+            {
+                volatile asm
+                {
+                    // Windows ARM64 calling convention:
+                    // x0: Return value, also first parameter
+                    // x1-x7: Parameters 2-8
+                    // x8: Indirect result location / syscall number
+                    // x9-x15: Temporary registers
+                    // x16-x17: Intra-procedure-call scratch registers
+                    // x18: Platform register (avoid)
+                    // x19-x28: Callee-saved
+                    // x29: Frame pointer
+                    // x30: Link register
+                    
+                    // GetStdHandle(STD_OUTPUT_HANDLE = -11)
+                    mov x0, #-11              // STD_OUTPUT_HANDLE
+                    bl GetStdHandle          // Call GetStdHandle
+                    
+                    mov x19, x0              // Save handle in callee-saved register
+                    mov x0, x19              // hFile = handle
+                    ldr x1, [sp]             // Get msg from stack (first parameter after x0)
+                    ldr w2, [sp, #8]         // Get x from stack (32-bit)
+                    mov x3, #0               // lpNumberOfBytesWritten = NULL
+                    mov x4, #0               // lpOverlapped = NULL
+                    
+                    bl WriteFile             // Call WriteFile
+                } : : "r"(msg), "r"(x) : "x0","x1","x2","x3","x4","x5","x6","x7",
+                                           "x8","x9","x10","x11","x12","x13",
+                                           "x14","x15","x16","x17","x19","memory";
+                return void;
+            };
+#endif; // ARCH ARM
+#endif; // WINDOWS
+
 #ifdef __LINUX__
+#ifdef __ARCH_X86_64__
             def nix_print(byte* msg, int x) -> void
             {
                 // Convert count to 64-bit for syscall
@@ -173,27 +224,119 @@ namespace standard
                     // buf: msg
                     // count: count (64-bit)
                     
-                    movq $$1, %rax           // syscall number: write = 1
-                    movq $$1, %rdi           // fd = STDOUT_FILENO = 1
-                    movq $0, %rsi           // buf = msg
-                    movq $1, %rdx           // count = count (64-bit)
-                    syscall                 // invoke syscall
+                    movq $$1, %rax
+                    movq $$1, %rdi
+                    movq $0, %rsi
+                    movq $1, %rdx
+                    syscall
                 } : : "r"(msg), "r"(count) : "rax","rdi","rsi","rdx","rcx","r11","memory";
                 return void;
             };
-#endif;
+#endif; // ARCH 86 64
+#ifdef __ARCH_ARM__
+            def nix_print(byte* msg, int x) -> void
+            {
+                // Convert count to 64-bit for syscall
+                i64 count = x;
+                
+                volatile asm
+                {
+                    // Linux ARM64 syscall convention:
+                    // x8: syscall number
+                    // x0-x5: parameters
+                    // Return value in x0
+                    
+                    // Linux syscall: write(int fd, const void *buf, size_t count)
+                    // syscall number: 64 (write)
+                    // fd: 1 (STDOUT_FILENO)
+                    // buf: msg
+                    // count: count (64-bit)
+                    
+                    mov x8, #64
+                    mov x0, #1
+                    ldr x1, [sp]
+                    ldr x2, [sp, #8]
+                    svc #0
+                } : : "r"(msg), "r"(count) : "x0","x1","x2","x3","x4","x5",
+                                              "x6","x7","x8","x9","x10","x11",
+                                              "x12","x13","x14","x15","x16",
+                                              "x17","memory";
+                return void;
+            };
+#endif; // ARCH ARM
+#endif; // LINUX
 
 #ifdef __MACOS__
+#ifdef __ARCH_X86_64__
             def mac_print(byte* msg, int x) -> void
             {
-
+                // Convert count to 64-bit for syscall
+                i64 count = x;
+                
+                volatile asm
+                {
+                    // macOS x86_64 (Darwin) syscall convention:
+                    // - Syscall number in rax
+                    // - Parameters: rdi, rsi, rdx, r10, r8, r9 (similar to Linux)
+                    // - Use syscall instruction (same as Linux)
+                    // - Syscall numbers are different from Linux
+                    
+                    // macOS syscall: write(int fd, const void *buf, size_t count)
+                    // syscall number: 0x2000004 (write)
+                    // Note: macOS adds 0x2000000 to BSD syscall numbers
+                    // BSD write syscall is 4, so macOS = 0x2000004
+                    // fd: 1 (STDOUT_FILENO)
+                    // buf: msg
+                    // count: count (64-bit)
+                    
+                    movq $$0x2000004, %rax
+                    movq $$1, %rdi
+                    movq $0, %rsi
+                    movq $1, %rdx
+                    syscall
+                } : : "r"(msg), "r"(count) : "rax","rdi","rsi","rdx","r10","r8","r9","rcx","r11","memory";
+                return void;
             };
-#endif;
+#endif; // ARCH 86 64
+#ifdef __ARCH_ARM__
+            def mac_print(byte* msg, int x) -> void
+            {
+                // Convert count to 64-bit for syscall
+                i64 count = x;
+                
+                volatile asm
+                {
+                    // macOS ARM64 (Darwin) syscall convention:
+                    // x16: syscall number
+                    // x0-x8: parameters (up to 9)
+                    // Return value in x0
+                    // System calls use svc #0x80
+                    
+                    // macOS syscall: write(int fd, const void *buf, size_t count)
+                    // syscall number: 0x2000004 (write)
+                    // Note: macOS adds 0x2000000 to BSD syscall numbers
+                    // BSD write syscall is 4, so macOS = 0x2000004
+                    // fd: 1 (STDOUT_FILENO)
+                    // buf: msg
+                    // count: count (64-bit)
+                    
+                    mov x16, #0x2000004
+                    mov x0, #1
+                    ldr x1, [sp]
+                    ldr x2, [sp, #8]
+                    svc #0x80
+                } : : "r"(msg), "r"(count) : "x0","x1","x2","x3","x4","x5",
+                                              "x6","x7","x8","x9","x10","x11",
+                                              "x12","x13","x14","x15","x16",
+                                              "x17","memory";
+                return void;
+            };
+#endif; // ARCH ARM
+#endif; // MACOS
 
+            // GENERIC
     		def print(noopstr s, int len) -> void
     		{
-    			// GENERIC PRINT
-    			//
     			// Designed to use sys.fx to determine which OS we're on
     			// and call the appropriate print function.
                 switch (CURRENT_OS)
