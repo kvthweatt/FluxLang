@@ -1428,14 +1428,6 @@ class ArrayLiteral(Expression):
         element_values = []
         element_types = set()
 
-        print(f"DEBUG: ArrayLiteral has {len(self.elements)} elements")
-        for i, elem in enumerate(self.elements):
-            print(f"DEBUG: Element {i}: type={type(elem).__name__}, value={elem}")
-            if isinstance(elem, StringLiteral):
-                print(f"  -> StringLiteral value: {elem.value}")
-            elif isinstance(elem, Literal):
-                print(f"  -> Literal type: {elem.type}, value: {elem.value}")
-
         for elem in self.elements:
             # Special case: Pack StringLiteral into integer
             if isinstance(elem, StringLiteral):
@@ -1541,6 +1533,190 @@ class ArrayLiteral(Expression):
             string_value=lit.value if isinstance(lit.value, str) else chr(lit.value),
             storage_class=storage_class
         )
+
+    @staticmethod
+    def create_global_string_initializer(string_value: str, llvm_type: ir.Type) -> Optional[ir.Constant]:
+        """Create a compile-time constant initializer for a global string."""
+        if isinstance(llvm_type, ir.ArrayType) and \
+           isinstance(llvm_type.element, ir.IntType) and \
+           llvm_type.element.width == 8:
+            
+            string_val = string_value
+            char_values = []
+            for i, char in enumerate(string_val):
+                if i >= llvm_type.count:
+                    break
+                char_values.append(ir.Constant(ir.IntType(8), ord(char)))
+            while len(char_values) < llvm_type.count:
+                char_values.append(ir.Constant(ir.IntType(8), 0))
+            return ir.Constant(llvm_type, char_values)
+        
+        return None
+
+    @staticmethod
+    def create_global_array_initializer(array_literal: 'ArrayLiteral', llvm_type: ir.Type, 
+                                        module: ir.Module) -> Optional[ir.Constant]:
+        """Create a compile-time constant initializer for a global array."""
+        if not isinstance(llvm_type, ir.ArrayType):
+            return None
+        
+        const_elements = []
+        for elem in array_literal.elements:
+            # Pack StringLiteral into integer
+            if isinstance(elem, StringLiteral) and isinstance(llvm_type.element, ir.IntType):
+                string_val = elem.value
+                byte_count = min(len(string_val), llvm_type.element.width // 8)
+                packed_value = 0
+                for j in range(byte_count):
+                    packed_value |= (ord(string_val[j]) << (j * 8))
+                const_elements.append(ir.Constant(llvm_type.element, packed_value))
+            elif isinstance(elem, Literal):
+                if elem.type == DataType.INT:
+                    const_elements.append(ir.Constant(llvm_type.element, elem.value))
+                elif elem.type == DataType.FLOAT:
+                    const_elements.append(ir.Constant(llvm_type.element, elem.value))
+                elif elem.type == DataType.BOOL:
+                    const_elements.append(ir.Constant(llvm_type.element, 1 if elem.value else 0))
+            else:
+                # Can't evaluate at compile time
+                const_elements.append(ir.Constant(llvm_type.element, 0))
+        
+        return ir.Constant(llvm_type, const_elements)
+
+    @staticmethod
+    def initialize_local_array(builder: ir.IRBuilder, module: ir.Module, 
+                              alloca: ir.Value, llvm_type: ir.Type, 
+                              array_literal: 'ArrayLiteral') -> None:
+        """Initialize a local array variable with an array literal."""
+        if not isinstance(llvm_type, ir.ArrayType):
+            raise ValueError(f"ArrayLiteral can only initialize array types, got {llvm_type}")
+        
+        # Initialize each array element individually
+        for i, elem in enumerate(array_literal.elements):
+            zero = ir.Constant(ir.IntType(32), 0)
+            index = ir.Constant(ir.IntType(32), i)
+            elem_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"elem_{i}")
+            
+            # Generate code for each element
+            if isinstance(elem, StringLiteral) and isinstance(llvm_type.element, ir.IntType):
+                string_val = elem.value
+                byte_count = min(len(string_val), llvm_type.element.width // 8)
+                packed_value = 0
+                for j in range(byte_count):
+                    packed_value |= (ord(string_val[j]) << (j * 8))
+                elem_val = ir.Constant(llvm_type.element, packed_value)
+            else:
+                elem_val = elem.codegen(builder, module)
+            
+            # Ensure type matches
+            if elem_val.type != llvm_type.element:
+                if isinstance(elem_val.type, ir.IntType) and isinstance(llvm_type.element, ir.IntType):
+                    if elem_val.type.width > llvm_type.element.width:
+                        elem_val = builder.trunc(elem_val, llvm_type.element)
+                    elif elem_val.type.width < llvm_type.element.width:
+                        elem_val = builder.sext(elem_val, llvm_type.element)
+            
+            builder.store(elem_val, elem_ptr)
+
+    @staticmethod
+    def initialize_local_string(builder: ir.IRBuilder, module: ir.Module, 
+                               alloca: ir.Value, llvm_type: ir.Type, 
+                               string_literal: 'StringLiteral') -> None:
+        """Initialize a local variable with a string literal."""
+        string_val = string_literal.value
+        
+        # Case 1: Pointer to i8 (char*)
+        if isinstance(llvm_type, ir.PointerType) and \
+           isinstance(llvm_type.pointee, ir.IntType) and \
+           llvm_type.pointee.width == 8:
+            
+            # Store string data on stack
+            string_bytes = string_val.encode('ascii')
+            str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+            
+            str_alloca = builder.alloca(str_array_ty, name="str_data")
+            
+            for i, byte_val in enumerate(string_bytes):
+                zero = ir.Constant(ir.IntType(32), 0)
+                index = ir.Constant(ir.IntType(32), i)
+                elem_ptr = builder.gep(str_alloca, [zero, index], name=f"char_{i}")
+                char_val = ir.Constant(ir.IntType(8), byte_val)
+                builder.store(char_val, elem_ptr)
+            
+            zero = ir.Constant(ir.IntType(32), 0)
+            str_ptr = builder.gep(str_alloca, [zero, zero], name="str_ptr")
+            builder.store(str_ptr, alloca)
+        
+        # Case 2: Array of i8 (char[N])
+        elif isinstance(llvm_type, ir.ArrayType) and \
+             isinstance(llvm_type.element, ir.IntType) and \
+             llvm_type.element.width == 8:
+            
+            for i, char in enumerate(string_val):
+                if i >= llvm_type.count:
+                    break
+                
+                zero = ir.Constant(ir.IntType(32), 0)
+                index = ir.Constant(ir.IntType(32), i)
+                elem_ptr = builder.gep(alloca, [zero, index], name=f"char_{i}")
+                
+                char_val = ir.Constant(ir.IntType(8), ord(char))
+                builder.store(char_val, elem_ptr)
+            
+            # Null-terminate remaining
+            for i in range(len(string_val), llvm_type.count):
+                zero = ir.Constant(ir.IntType(32), 0)
+                index = ir.Constant(ir.IntType(32), i)
+                elem_ptr = builder.gep(alloca, [zero, index], name=f"char_{i}")
+                zero_char = ir.Constant(ir.IntType(8), 0)
+                builder.store(zero_char, elem_ptr)
+
+    @staticmethod
+    def create_local_string_for_arg(builder: ir.IRBuilder, module: ir.Module, 
+                                    string_value: str, name_hint: str) -> ir.Value:
+        """Create a local string on the stack for passing as an argument."""
+        string_bytes = string_value.encode('ascii')
+        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+        
+        str_alloca = builder.alloca(str_array_ty, name=f"{name_hint}_str_data")
+        
+        for j, byte_val in enumerate(string_bytes):
+            zero = ir.Constant(ir.IntType(32), 0)
+            index = ir.Constant(ir.IntType(32), j)
+            elem_ptr = builder.gep(str_alloca, [zero, index])
+            char_val = ir.Constant(ir.IntType(8), byte_val)
+            builder.store(char_val, elem_ptr)
+        
+        zero = ir.Constant(ir.IntType(32), 0)
+        str_ptr = builder.gep(str_alloca, [zero, zero], name=f"{name_hint}_str_ptr")
+        return str_ptr
+
+    @staticmethod
+    def copy_array_to_local(builder: ir.IRBuilder, module: ir.Module, 
+                           alloca: ir.Value, llvm_type: ir.Type, 
+                           source_identifier: 'Identifier') -> None:
+        """Copy an array from one variable to another."""
+        # Get the source array
+        init_val = source_identifier.codegen(builder, module)
+        
+        # Check if it's an array type
+        if not (isinstance(init_val.type, ir.PointerType) and 
+                isinstance(init_val.type.pointee, ir.ArrayType)):
+            raise ValueError(f"Cannot initialize array from non-array type: {init_val.type}")
+        
+        # Copy array element by element
+        source_array_type = init_val.type.pointee
+        copy_count = min(llvm_type.count, source_array_type.count)
+        
+        zero = ir.Constant(ir.IntType(32), 0)
+        for i in range(copy_count):
+            index = ir.Constant(ir.IntType(32), i)
+            # Load from source
+            src_ptr = builder.gep(init_val, [zero, index], inbounds=True, name=f"src_{i}")
+            src_val = builder.load(src_ptr, name=f"val_{i}")
+            # Store to destination
+            dst_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"dst_{i}")
+            builder.store(src_val, dst_ptr)
 
 @dataclass
 class StringLiteral(Expression):
@@ -3558,60 +3734,9 @@ class VariableDeclaration(ASTNode):
     is_global: bool = False
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-
-        # Check for automatic array size inference with string literals
-        infer_array_size = False
-        resolved_type_spec = self.type_spec
-        
-        # Direct array type check
-        if (self.type_spec.is_array and self.type_spec.array_size is None and
-            self.initial_value and isinstance(self.initial_value, StringLiteral)):
-            infer_array_size = True
-            string_length = len(self.initial_value.value)
-        
-        # Type alias check - if custom_typename exists, check if it resolves to an array
-        elif (self.type_spec.custom_typename and
-              self.initial_value and isinstance(self.initial_value, StringLiteral)):
-            try:
-                resolved_llvm_type = self.type_spec.get_llvm_type(module)
-                # If it's a pointer to i8 (string type), we can infer size
-                if isinstance(resolved_llvm_type, ir.PointerType) and \
-                   isinstance(resolved_llvm_type.pointee, ir.IntType) and \
-                   resolved_llvm_type.pointee.width == 8:
-                    infer_array_size = True
-                    string_length = len(self.initial_value.value)
-                    resolved_type_spec = TypeSpec(
-                        base_type=DataType.DATA,
-                        is_signed=False,
-                        is_const=self.type_spec.is_const,
-                        is_volatile=self.type_spec.is_volatile,
-                        bit_width=8,
-                        alignment=self.type_spec.alignment,
-                        is_array=True,
-                        array_size=string_length,
-                        is_pointer=False
-                    )
-            except (NameError, AttributeError):
-                pass  # Type not found, continue with normal processing
-        
-        if infer_array_size:
-            # Create TypeSpec with inferred array size
-            inferred_type_spec = TypeSpec(
-                base_type=resolved_type_spec.base_type,
-                is_signed=resolved_type_spec.is_signed,
-                is_const=resolved_type_spec.is_const,
-                is_volatile=resolved_type_spec.is_volatile,
-                bit_width=resolved_type_spec.bit_width or 8,
-                alignment=resolved_type_spec.alignment,
-                is_array=True,
-                array_size=string_length,
-                is_pointer=resolved_type_spec.is_pointer,
-                custom_typename=resolved_type_spec.custom_typename
-            )
-            llvm_type = inferred_type_spec.get_llvm_type_with_array(module)
-        else:
-            # Normal type resolution using the improved get_llvm_type_with_array
-            llvm_type = self.type_spec.get_llvm_type_with_array(module)
+        # Resolve type (with automatic array size inference if needed)
+        resolved_type_spec = self._resolve_type_spec(module)
+        llvm_type = resolved_type_spec.get_llvm_type_with_array(module)
         
         # Check if this is global scope
         is_global_scope = (
@@ -3622,395 +3747,287 @@ class VariableDeclaration(ASTNode):
         
         # Handle global variables
         if is_global_scope:
-            # Check if global already exists
-            if self.name in module.globals:
-                return module.globals[self.name]
-            
-            # For namespaced variables, check if any existing global has the same effective name
-            base_name = self.name.split('__')[-1]
-            for existing_name in list(module.globals.keys()):
-                existing_base_name = existing_name.split('__')[-1]
-                if existing_base_name == base_name and existing_name != self.name:
-                    return module.globals[existing_name]
-                elif existing_name == self.name:
-                    return module.globals[existing_name]
-                
-            # Create new global
-            gvar = ir.GlobalVariable(module, llvm_type, self.name)
-            
-            # Set initializer - must be compile-time constant
-            if self.initial_value:
-                # Evaluate expression at compile time to get constant
-                init_const = None
-                
-                # Handle different expression types
-                if isinstance(self.initial_value, Literal):
-                    if self.initial_value.type == DataType.INT:
-                        init_const = ir.Constant(llvm_type, self.initial_value.value)
-                    elif self.initial_value.type == DataType.FLOAT:
-                        init_const = ir.Constant(llvm_type, self.initial_value.value)
-                    elif self.initial_value.type == DataType.BOOL:
-                        init_const = ir.Constant(llvm_type, 1 if self.initial_value.value else 0)
-                
-                elif isinstance(self.initial_value, Identifier):
-                    # Reference to another global constant
-                    var_name = self.initial_value.name
-                    if var_name in module.globals:
-                        other_global = module.globals[var_name]
-                        if hasattr(other_global, 'initializer') and other_global.initializer:
-                            init_const = other_global.initializer
-                    
-                    # Check namespace-qualified names
-                    if init_const is None and hasattr(module, '_using_namespaces'):
-                        for namespace in module._using_namespaces:
-                            mangled_name = namespace.replace('::', '__') + '__' + var_name
-                            if mangled_name in module.globals:
-                                other_global = module.globals[mangled_name]
-                                if hasattr(other_global, 'initializer') and other_global.initializer:
-                                    init_const = other_global.initializer
-                                    break
-                
-                elif isinstance(self.initial_value, BinaryOp):
-                    # Compile-time evaluation of binary operation
-                    # Recursively evaluate left and right operands
-                    left_const = self._eval_const_expr(self.initial_value.left, module)
-                    right_const = self._eval_const_expr(self.initial_value.right, module)
-                    
-                    if left_const is not None and right_const is not None:
-                        op = self.initial_value.operator
-                        
-                        if isinstance(left_const.type, ir.IntType):
-                            # Integer arithmetic
-                            if op == Operator.ADD:
-                                result = left_const.constant + right_const.constant
-                            elif op == Operator.SUB:
-                                result = left_const.constant - right_const.constant
-                            elif op == Operator.MUL:
-                                result = left_const.constant * right_const.constant
-                            elif op == Operator.DIV:
-                                result = left_const.constant // right_const.constant
-                            elif op == Operator.MOD:
-                                result = left_const.constant % right_const.constant
-                            elif op == Operator.POWER:
-                                result = left_const.constant ** right_const.constant
-                            elif op == Operator.AND:
-                                result = left_const.constant & right_const.constant
-                            elif op == Operator.OR:
-                                result = left_const.constant | right_const.constant
-                            elif op == Operator.XOR:
-                                result = left_const.constant ^ right_const.constant
-                            elif op == Operator.BITSHIFT_LEFT:
-                                result = left_const.constant << right_const.constant
-                            elif op == Operator.BITSHIFT_RIGHT:
-                                result = left_const.constant >> right_const.constant
-                            else:
-                                result = 0
-                            
-                            init_const = ir.Constant(llvm_type, result)
-                        
-                        elif isinstance(left_const.type, ir.FloatType):
-                            # Float arithmetic
-                            if op == Operator.ADD:
-                                result = left_const.constant + right_const.constant
-                            elif op == Operator.SUB:
-                                result = left_const.constant - right_const.constant
-                            elif op == Operator.MUL:
-                                result = left_const.constant * right_const.constant
-                            elif op == Operator.DIV:
-                                result = left_const.constant / right_const.constant
-                            elif op == Operator.POWER:
-                                result = left_const.constant ** right_const.constant
-                            else:
-                                result = 0.0
-                            
-                            init_const = ir.Constant(llvm_type, result)
-                
-                elif isinstance(self.initial_value, UnaryOp):
-                    # Compile-time evaluation of unary operation
-                    operand_const = self._eval_const_expr(self.initial_value.operand, module)
-                    
-                    if operand_const is not None:
-                        op = self.initial_value.operator
-                        
-                        if isinstance(operand_const.type, ir.IntType):
-                            if op == Operator.SUB:
-                                result = -operand_const.constant
-                            elif op == Operator.NOT:
-                                result = ~operand_const.constant
-                            else:
-                                result = operand_const.constant
-                            
-                            init_const = ir.Constant(llvm_type, result)
-                        
-                        elif isinstance(operand_const.type, ir.FloatType):
-                            if op == Operator.SUB:
-                                result = -operand_const.constant
-                            else:
-                                result = operand_const.constant
-                            
-                            init_const = ir.Constant(llvm_type, result)
-                
-                elif isinstance(self.initial_value, StringLiteral):
-                    # Handle string literals for char arrays
-                    if isinstance(llvm_type, ir.ArrayType) and \
-                       isinstance(llvm_type.element, ir.IntType) and \
-                       llvm_type.element.width == 8:
-                        
-                        string_val = self.initial_value.value
-                        char_values = []
-                        for i, char in enumerate(string_val):
-                            if i >= llvm_type.count:
-                                break
-                            char_values.append(ir.Constant(ir.IntType(8), ord(char)))
-                        while len(char_values) < llvm_type.count:
-                            char_values.append(ir.Constant(ir.IntType(8), 0))
-                        init_const = ir.Constant(llvm_type, char_values)
-
-                elif isinstance(self.initial_value, ArrayLiteral):
-                    # Handle array literals for global arrays
-                    if isinstance(llvm_type, ir.ArrayType):
-                        const_elements = []
-                        for elem in self.initial_value.elements:
-                            # Pack StringLiteral into integer
-                            if isinstance(elem, StringLiteral) and isinstance(llvm_type.element, ir.IntType):
-                                string_val = elem.value
-                                byte_count = min(len(string_val), llvm_type.element.width // 8)
-                                packed_value = 0
-                                for j in range(byte_count):
-                                    packed_value |= (ord(string_val[j]) << (j * 8))
-                                const_elements.append(ir.Constant(llvm_type.element, packed_value))
-                            elif isinstance(elem, Literal):
-                                if elem.type == DataType.INT:
-                                    const_elements.append(ir.Constant(llvm_type.element, elem.value))
-                                elif elem.type == DataType.FLOAT:
-                                    const_elements.append(ir.Constant(llvm_type.element, elem.value))
-                                elif elem.type == DataType.BOOL:
-                                    const_elements.append(ir.Constant(llvm_type.element, 1 if elem.value else 0))
-                            else:
-                                # Can't evaluate at compile time
-                                const_elements.append(ir.Constant(llvm_type.element, 0))
-                        
-                        init_const = ir.Constant(llvm_type, const_elements)
-                
-                # Set the initializer or default to zero
-                if init_const is not None:
-                    gvar.initializer = init_const
-                else:
-                    # Default initialization
-                    if isinstance(llvm_type, ir.IntType):
-                        gvar.initializer = ir.Constant(llvm_type, 0)
-                    elif isinstance(llvm_type, ir.FloatType):
-                        gvar.initializer = ir.Constant(llvm_type, 0.0)
-                    elif isinstance(llvm_type, ir.ArrayType):
-                        gvar.initializer = ir.Constant(llvm_type, ir.Undefined)
-                    else:
-                        gvar.initializer = ir.Constant(llvm_type, None)
-            else:
-                # No initial value - use default
-                if isinstance(llvm_type, ir.ArrayType):
-                    gvar.initializer = ir.Constant(llvm_type, ir.Undefined)
-                elif isinstance(llvm_type, ir.IntType):
-                    gvar.initializer = ir.Constant(llvm_type, 0)
-                elif isinstance(llvm_type, ir.FloatType):
-                    gvar.initializer = ir.Constant(llvm_type, 0.0)
-                else:
-                    gvar.initializer = ir.Constant(llvm_type, None)
-            
-            gvar.linkage = 'internal'
-            return gvar
+            return self._codegen_global(module, llvm_type, resolved_type_spec)
         
-        # LOCAL VARIABLES - Everything below requires a valid builder
+        # Handle local variables
+        return self._codegen_local(builder, module, llvm_type, resolved_type_spec)
+    
+    def _resolve_type_spec(self, module: ir.Module) -> TypeSpec:
+        """Resolve type spec with automatic array size inference for string literals."""
+        if not (self.initial_value and isinstance(self.initial_value, StringLiteral)):
+            return self.type_spec
+        
+        # Direct array type check
+        if self.type_spec.is_array and self.type_spec.array_size is None:
+            return TypeSpec(
+                base_type=self.type_spec.base_type,
+                is_signed=self.type_spec.is_signed,
+                is_const=self.type_spec.is_const,
+                is_volatile=self.type_spec.is_volatile,
+                bit_width=self.type_spec.bit_width or 8,
+                alignment=self.type_spec.alignment,
+                is_array=True,
+                array_size=len(self.initial_value.value),
+                is_pointer=self.type_spec.is_pointer,
+                custom_typename=self.type_spec.custom_typename
+            )
+        
+        # Type alias check
+        if self.type_spec.custom_typename:
+            try:
+                resolved_llvm_type = self.type_spec.get_llvm_type(module)
+                if (isinstance(resolved_llvm_type, ir.PointerType) and 
+                    isinstance(resolved_llvm_type.pointee, ir.IntType) and 
+                    resolved_llvm_type.pointee.width == 8):
+                    return TypeSpec(
+                        base_type=DataType.DATA,
+                        is_signed=False,
+                        is_const=self.type_spec.is_const,
+                        is_volatile=self.type_spec.is_volatile,
+                        bit_width=8,
+                        alignment=self.type_spec.alignment,
+                        is_array=True,
+                        array_size=len(self.initial_value.value),
+                        is_pointer=False
+                    )
+            except (NameError, AttributeError):
+                pass
+        
+        return self.type_spec
+    
+    def _codegen_global(self, module: ir.Module, llvm_type: ir.Type, 
+                       resolved_type_spec: TypeSpec) -> ir.Value:
+        """Generate code for global variable."""
+        # Check if global already exists
+        if self.name in module.globals:
+            return module.globals[self.name]
+        
+        # Check for namespaced duplicates
+        base_name = self.name.split('__')[-1]
+        for existing_name in list(module.globals.keys()):
+            existing_base_name = existing_name.split('__')[-1]
+            if existing_base_name == base_name and existing_name != self.name:
+                return module.globals[existing_name]
+            elif existing_name == self.name:
+                return module.globals[existing_name]
+        
+        # Create new global
+        gvar = ir.GlobalVariable(module, llvm_type, self.name)
+        
+        # Set initializer
+        if self.initial_value:
+            init_const = self._create_global_initializer(module, llvm_type)
+            if init_const is not None:
+                gvar.initializer = init_const
+            else:
+                gvar.initializer = self._get_default_initializer(llvm_type)
+        else:
+            gvar.initializer = self._get_default_initializer(llvm_type)
+        
+        gvar.linkage = 'internal'
+        return gvar
+    
+    def _create_global_initializer(self, module: ir.Module, llvm_type: ir.Type) -> Optional[ir.Constant]:
+        """Create compile-time constant initializer for global variable."""
+        # Handle different expression types
+        if isinstance(self.initial_value, Literal):
+            return self._literal_to_constant(self.initial_value, llvm_type)
+        
+        elif isinstance(self.initial_value, Identifier):
+            return self._identifier_to_constant(self.initial_value, module)
+        
+        elif isinstance(self.initial_value, BinaryOp):
+            return self._eval_const_expr(self.initial_value, module)
+        
+        elif isinstance(self.initial_value, UnaryOp):
+            return self._eval_const_expr(self.initial_value, module)
+        
+        elif isinstance(self.initial_value, StringLiteral):
+            return ArrayLiteral.create_global_string_initializer(
+                self.initial_value.value, llvm_type
+            )
+        
+        elif isinstance(self.initial_value, ArrayLiteral):
+            return ArrayLiteral.create_global_array_initializer(
+                self.initial_value, llvm_type, module
+            )
+        
+        return None
+    
+    def _literal_to_constant(self, lit: Literal, llvm_type: ir.Type) -> ir.Constant:
+        """Convert literal to LLVM constant."""
+        if lit.type == DataType.INT:
+            return ir.Constant(llvm_type, lit.value)
+        elif lit.type == DataType.FLOAT:
+            return ir.Constant(llvm_type, lit.value)
+        elif lit.type == DataType.BOOL:
+            return ir.Constant(llvm_type, 1 if lit.value else 0)
+        return None
+    
+    def _identifier_to_constant(self, ident: Identifier, module: ir.Module) -> Optional[ir.Constant]:
+        """Get constant from identifier (reference to another global)."""
+        var_name = ident.name
+        if var_name in module.globals:
+            other_global = module.globals[var_name]
+            if hasattr(other_global, 'initializer') and other_global.initializer:
+                return other_global.initializer
+        
+        # Check namespace-qualified names
+        if hasattr(module, '_using_namespaces'):
+            for namespace in module._using_namespaces:
+                mangled_name = namespace.replace('::', '__') + '__' + var_name
+                if mangled_name in module.globals:
+                    other_global = module.globals[mangled_name]
+                    if hasattr(other_global, 'initializer') and other_global.initializer:
+                        return other_global.initializer
+        
+        return None
+    
+    def _get_default_initializer(self, llvm_type: ir.Type) -> ir.Constant:
+        """Get default initializer for a type."""
+        if isinstance(llvm_type, ir.IntType):
+            return ir.Constant(llvm_type, 0)
+        elif isinstance(llvm_type, ir.FloatType):
+            return ir.Constant(llvm_type, 0.0)
+        elif isinstance(llvm_type, ir.ArrayType):
+            return ir.Constant(llvm_type, ir.Undefined)
+        else:
+            return ir.Constant(llvm_type, None)
+    
+    def _codegen_local(self, builder: ir.IRBuilder, module: ir.Module, 
+                      llvm_type: ir.Type, resolved_type_spec: TypeSpec) -> ir.Value:
+        """Generate code for local variable."""
         alloca = builder.alloca(llvm_type, name=self.name)
         
         # Store type information in scope metadata
         if not hasattr(builder, 'scope_type_info'):
             builder.scope_type_info = {}
-        builder.scope_type_info[self.name] = self.type_spec
+        builder.scope_type_info[self.name] = resolved_type_spec
         
+        # Initialize variable if needed
         if self.initial_value:
-            if isinstance(self.initial_value, ArrayLiteral):
-                if isinstance(llvm_type, ir.ArrayType):
-                    # Initialize each array element individually
-                    for i, elem in enumerate(self.initial_value.elements):
-                        zero = ir.Constant(ir.IntType(32), 0)
-                        index = ir.Constant(ir.IntType(32), i)
-                        elem_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"{self.name}[{i}]")
-                        
-                        # Generate code for each element
-                        # Handles packing strings to integers, need to handle any type.
-                        # URGENT
-                        if isinstance(elem, StringLiteral) and isinstance(llvm_type.element, ir.IntType):
-                            string_val = elem.value
-                            byte_count = min(len(string_val), llvm_type.element.width // 8)
-                            packed_value = 0
-                            for j in range(byte_count):
-                                packed_value |= (ord(string_val[j]) << (j * 8))
-                            elem_val = ir.Constant(llvm_type.element, packed_value)
-                        else:
-                            elem_val = elem.codegen(builder, module)
-                        
-                        # Ensure type matches
-                        if elem_val.type != llvm_type.element:
-                            if isinstance(elem_val.type, ir.IntType) and isinstance(llvm_type.element, ir.IntType):
-                                if elem_val.type.width > llvm_type.element.width:
-                                    elem_val = builder.trunc(elem_val, llvm_type.element)
-                                elif elem_val.type.width < llvm_type.element.width:
-                                    elem_val = builder.sext(elem_val, llvm_type.element)
-                        
-                        builder.store(elem_val, elem_ptr)
-                else:
-                    raise ValueError(f"ArrayLiteral can only initialize array types, got {llvm_type}")
-            
-            # Handle string literals specially
-            elif isinstance(self.initial_value, StringLiteral):
-                if isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8:
-                    # Store string data on stack
-                    string_val = self.initial_value.value
-                    string_bytes = string_val.encode('ascii')
-                    str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
-                    
-                    str_alloca = builder.alloca(str_array_ty, name=f"{self.name}_str_data")
-                    
-                    for i, byte_val in enumerate(string_bytes):
-                        zero = ir.Constant(ir.IntType(32), 0)
-                        index = ir.Constant(ir.IntType(32), i)
-                        elem_ptr = builder.gep(str_alloca, [zero, index], name=f"{self.name}_char{i}")
-                        char_val = ir.Constant(ir.IntType(8), byte_val)
-                        builder.store(char_val, elem_ptr)
-                    
-                    zero = ir.Constant(ir.IntType(32), 0)
-                    str_ptr = builder.gep(str_alloca, [zero, zero], name=f"{self.name}_str_ptr")
-                    builder.store(str_ptr, alloca)
-                    
-                elif isinstance(llvm_type, ir.ArrayType) and isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8:
-                    string_val = self.initial_value.value
-                    
-                    for i, char in enumerate(string_val):
-                        if i >= llvm_type.count:
-                            break
-                        
-                        zero = ir.Constant(ir.IntType(32), 0)
-                        index = ir.Constant(ir.IntType(32), i)
-                        elem_ptr = builder.gep(alloca, [zero, index], name=f"{self.name}[{i}]")
-                        
-                        char_val = ir.Constant(ir.IntType(8), ord(char))
-                        builder.store(char_val, elem_ptr)
-                    
-                    for i in range(len(string_val), llvm_type.count):
-                        zero = ir.Constant(ir.IntType(32), 0)
-                        index = ir.Constant(ir.IntType(32), i)
-                        elem_ptr = builder.gep(alloca, [zero, index], name=f"{self.name}[{i}]")
-                        zero_char = ir.Constant(ir.IntType(8), 0)
-                        builder.store(zero_char, elem_ptr)
-                        
-            elif isinstance(self.initial_value, FunctionCall) and self.initial_value.name.endswith('.__init'):
-                constructor_func = module.globals.get(self.initial_value.name)
-                if constructor_func is None:
-                    raise NameError(f"Constructor not found: {self.initial_value.name}")
-                
-                args = [alloca]
-                
-                for i, arg_expr in enumerate(self.initial_value.arguments):
-                    param_index = i + 1
-                    if (isinstance(arg_expr, StringLiteral) and
-                        param_index < len(constructor_func.args) and
-                        isinstance(constructor_func.args[param_index].type, ir.PointerType) and
-                        isinstance(constructor_func.args[param_index].type.pointee, ir.IntType) and
-                        constructor_func.args[param_index].type.pointee.width == 8):
-                        string_val = arg_expr.value
-                        string_bytes = string_val.encode('ascii')
-                        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
-                        
-                        str_alloca = builder.alloca(str_array_ty, name=f"ctor_arg{i}_str_data")
-                        
-                        for j, byte_val in enumerate(string_bytes):
-                            zero = ir.Constant(ir.IntType(32), 0)
-                            index = ir.Constant(ir.IntType(32), j)
-                            elem_ptr = builder.gep(str_alloca, [zero, index])
-                            char_val = ir.Constant(ir.IntType(8), byte_val)
-                            builder.store(char_val, elem_ptr)
-                        
-                        zero = ir.Constant(ir.IntType(32), 0)
-                        str_ptr = builder.gep(str_alloca, [zero, zero], name=f"ctor_arg{i}_str_ptr")
-                        arg_val = str_ptr
-                    else:
-                        arg_val = arg_expr.codegen(builder, module)
-                    
-                    args.append(arg_val)
-                
-                init_val = builder.call(constructor_func, args)
-            elif (isinstance(llvm_type, ir.ArrayType) and 
-                  isinstance(self.initial_value, Identifier)):
-                # Get the source array
-                init_val = self.initial_value.codegen(builder, module)
-                
-                # Check if it's an array type
-                if isinstance(init_val.type, ir.PointerType) and isinstance(init_val.type.pointee, ir.ArrayType):
-                    # Copy array element by element
-                    source_array_type = init_val.type.pointee
-                    copy_count = min(llvm_type.count, source_array_type.count)
-                    
-                    zero = ir.Constant(ir.IntType(32), 0)
-                    for i in range(copy_count):
-                        index = ir.Constant(ir.IntType(32), i)
-                        # Load from source
-                        src_ptr = builder.gep(init_val, [zero, index], inbounds=True, name=f"src_{i}")
-                        src_val = builder.load(src_ptr, name=f"val_{i}")
-                        # Store to destination
-                        dst_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"dst_{i}")
-                        builder.store(src_val, dst_ptr)
-                else:
-                    raise ValueError(f"Cannot initialize array from non-array type: {init_val.type}")
-            else:
-                init_val = self.initial_value.codegen(builder, module)
-                if init_val is not None:
-                    if (isinstance(self.initial_value, CastExpression) and
-                        isinstance(init_val.type, ir.PointerType) and
-                        isinstance(llvm_type, ir.ArrayType)):
-                        array_ptr_type = ir.PointerType(llvm_type)
-                        casted_ptr = builder.bitcast(init_val, array_ptr_type, name="cast_to_array_ptr")
-                        array_value = builder.load(casted_ptr, name="loaded_array")
-                        builder.store(array_value, alloca)
-                    else:
-                        if init_val.type != llvm_type:
-                            if (isinstance(self.initial_value, BinaryOp) and 
-                                self.initial_value.operator in (Operator.ADD, Operator.SUB) and
-                                isinstance(init_val.type, ir.PointerType) and 
-                                isinstance(init_val.type.pointee, ir.ArrayType) and
-                                isinstance(llvm_type, ir.PointerType) and 
-                                isinstance(llvm_type.pointee, ir.IntType)):
-                                zero = ir.Constant(ir.IntType(32), 0)
-                                array_ptr = builder.gep(init_val, [zero, zero], name="concat_array_to_ptr")
-                                builder.store(array_ptr, alloca)
-                                builder.scope[self.name] = alloca
-                                if self.type_spec.is_volatile:
-                                    if not hasattr(builder, 'volatile_vars'):
-                                        builder.volatile_vars = set()
-                                    builder.volatile_vars.add(self.name)
-                                return alloca
-                            elif isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
-                                if llvm_type.pointee != init_val.type.pointee:
-                                    init_val = builder.bitcast(init_val, llvm_type)
-                            elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.IntType):
-                                if init_val.type.width > llvm_type.width:
-                                    init_val = builder.trunc(init_val, llvm_type)
-                                elif init_val.type.width < llvm_type.width:
-                                    init_val = builder.sext(init_val, llvm_type)
-                            elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.FloatType):
-                                init_val = builder.sitofp(init_val, llvm_type)
-                            elif isinstance(init_val.type, ir.FloatType) and isinstance(llvm_type, ir.IntType):
-                                init_val = builder.fptosi(init_val, llvm_type)
-                        builder.store(init_val, alloca)
+            self._initialize_local(builder, module, alloca, llvm_type)
         
+        # Register in scope
         builder.scope[self.name] = alloca
-        if self.type_spec.is_volatile:
+        if resolved_type_spec.is_volatile:
             if not hasattr(builder, 'volatile_vars'):
                 builder.volatile_vars = set()
             builder.volatile_vars.add(self.name)
+        
         return alloca
     
+    def _initialize_local(self, builder: ir.IRBuilder, module: ir.Module, 
+                         alloca: ir.Value, llvm_type: ir.Type) -> None:
+        """Initialize local variable with initial value."""
+        # Delegate array literal initialization to ArrayLiteral
+        if isinstance(self.initial_value, ArrayLiteral):
+            ArrayLiteral.initialize_local_array(
+                builder, module, alloca, llvm_type, self.initial_value
+            )
+            return
+        
+        # Delegate string literal initialization to ArrayLiteral
+        if isinstance(self.initial_value, StringLiteral):
+            ArrayLiteral.initialize_local_string(
+                builder, module, alloca, llvm_type, self.initial_value
+            )
+            return
+        
+        # Handle constructor calls
+        if isinstance(self.initial_value, FunctionCall) and self.initial_value.name.endswith('.__init'):
+            self._call_constructor(builder, module, alloca)
+            return
+        
+        # Handle array-to-array copy
+        if isinstance(llvm_type, ir.ArrayType) and isinstance(self.initial_value, Identifier):
+            ArrayLiteral.copy_array_to_local(
+                builder, module, alloca, llvm_type, self.initial_value
+            )
+            return
+        
+        # Handle regular initialization
+        init_val = self.initial_value.codegen(builder, module)
+        if init_val is not None:
+            self._store_with_type_conversion(builder, alloca, llvm_type, init_val)
+    
+    def _call_constructor(self, builder: ir.IRBuilder, module: ir.Module, alloca: ir.Value) -> None:
+        """Call constructor for object initialization."""
+        constructor_func = module.globals.get(self.initial_value.name)
+        if constructor_func is None:
+            raise NameError(f"Constructor not found: {self.initial_value.name}")
+        
+        args = [alloca]
+        
+        for i, arg_expr in enumerate(self.initial_value.arguments):
+            param_index = i + 1
+            if (isinstance(arg_expr, StringLiteral) and
+                param_index < len(constructor_func.args) and
+                isinstance(constructor_func.args[param_index].type, ir.PointerType) and
+                isinstance(constructor_func.args[param_index].type.pointee, ir.IntType) and
+                constructor_func.args[param_index].type.pointee.width == 8):
+                
+                arg_val = ArrayLiteral.create_local_string_for_arg(
+                    builder, module, arg_expr.value, f"ctor_arg{i}"
+                )
+            else:
+                arg_val = arg_expr.codegen(builder, module)
+            
+            args.append(arg_val)
+        
+        builder.call(constructor_func, args)
+    
+    def _store_with_type_conversion(self, builder: ir.IRBuilder, alloca: ir.Value, 
+                                    llvm_type: ir.Type, init_val: ir.Value) -> None:
+        """Store value with automatic type conversion if needed."""
+        # Handle special case: cast expression to array
+        if (isinstance(self.initial_value, CastExpression) and
+            isinstance(init_val.type, ir.PointerType) and
+            isinstance(llvm_type, ir.ArrayType)):
+            array_ptr_type = ir.PointerType(llvm_type)
+            casted_ptr = builder.bitcast(init_val, array_ptr_type, name="cast_to_array_ptr")
+            array_value = builder.load(casted_ptr, name="loaded_array")
+            builder.store(array_value, alloca)
+            return
+        
+        # Handle type mismatch
+        if init_val.type != llvm_type:
+            # Special case: array concatenation result
+            if (isinstance(self.initial_value, BinaryOp) and 
+                self.initial_value.operator in (Operator.ADD, Operator.SUB) and
+                isinstance(init_val.type, ir.PointerType) and 
+                isinstance(init_val.type.pointee, ir.ArrayType) and
+                isinstance(llvm_type, ir.PointerType) and 
+                isinstance(llvm_type.pointee, ir.IntType)):
+                zero = ir.Constant(ir.IntType(32), 0)
+                array_ptr = builder.gep(init_val, [zero, zero], name="concat_array_to_ptr")
+                builder.store(array_ptr, alloca)
+                return
+            
+            # Pointer type conversion
+            if isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
+                if llvm_type.pointee != init_val.type.pointee:
+                    init_val = builder.bitcast(init_val, llvm_type)
+            
+            # Integer type conversion
+            elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.IntType):
+                if init_val.type.width > llvm_type.width:
+                    init_val = builder.trunc(init_val, llvm_type)
+                elif init_val.type.width < llvm_type.width:
+                    init_val = builder.sext(init_val, llvm_type)
+            
+            # Int to float conversion
+            elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.FloatType):
+                init_val = builder.sitofp(init_val, llvm_type)
+            
+            # Float to int conversion
+            elif isinstance(init_val.type, ir.FloatType) and isinstance(llvm_type, ir.IntType):
+                init_val = builder.fptosi(init_val, llvm_type)
+        
+        builder.store(init_val, alloca)
+    
     def _eval_const_expr(self, expr: Expression, module: ir.Module) -> Optional[ir.Constant]:
-        """Recursively evaluate constant expressions at compile time"""
+        """Recursively evaluate constant expressions at compile time."""
         if isinstance(expr, Literal):
             if expr.type == DataType.INT:
                 return ir.Constant(ir.IntType(32), expr.value)
@@ -4021,22 +4038,7 @@ class VariableDeclaration(ASTNode):
             return None
         
         elif isinstance(expr, Identifier):
-            var_name = expr.name
-            if var_name in module.globals:
-                other_global = module.globals[var_name]
-                if hasattr(other_global, 'initializer') and other_global.initializer:
-                    return other_global.initializer
-            
-            # Check namespace-qualified names
-            if hasattr(module, '_using_namespaces'):
-                for namespace in module._using_namespaces:
-                    mangled_name = namespace.replace('::', '__') + '__' + var_name
-                    if mangled_name in module.globals:
-                        other_global = module.globals[mangled_name]
-                        if hasattr(other_global, 'initializer') and other_global.initializer:
-                            return other_global.initializer
-            
-            return None
+            return self._identifier_to_constant(expr, module)
         
         elif isinstance(expr, BinaryOp):
             left = self._eval_const_expr(expr.left, module)
@@ -4045,53 +4047,7 @@ class VariableDeclaration(ASTNode):
             if left is None or right is None:
                 return None
             
-            op = expr.operator
-            
-            if isinstance(left.type, ir.IntType):
-                if op == Operator.ADD:
-                    result = left.constant + right.constant
-                elif op == Operator.SUB:
-                    result = left.constant - right.constant
-                elif op == Operator.MUL:
-                    result = left.constant * right.constant
-                elif op == Operator.DIV:
-                    result = left.constant // right.constant
-                elif op == Operator.MOD:
-                    result = left.constant % right.constant
-                elif op == Operator.POWER:
-                    result = left.constant ** right.constant
-                elif op == Operator.AND:
-                    result = left.constant & right.constant
-                elif op == Operator.OR:
-                    result = left.constant | right.constant
-                elif op == Operator.XOR:
-                    result = left.constant ^ right.constant
-                elif op == Operator.BITSHIFT_LEFT:
-                    result = left.constant << right.constant
-                elif op == Operator.BITSHIFT_RIGHT:
-                    result = left.constant >> right.constant
-                else:
-                    return None
-                
-                return ir.Constant(left.type, result)
-            
-            elif isinstance(left.type, ir.FloatType):
-                if op == Operator.ADD:
-                    result = left.constant + right.constant
-                elif op == Operator.SUB:
-                    result = left.constant - right.constant
-                elif op == Operator.MUL:
-                    result = left.constant * right.constant
-                elif op == Operator.DIV:
-                    result = left.constant / right.constant
-                elif op == Operator.MOD:
-                    result = left.constant % right.constant
-                elif op == Operator.POWER:
-                    result = left.constant ** right.constant
-                else:
-                    return None
-                
-                return ir.Constant(left.type, result)
+            return self._eval_binary_op(left, right, expr.operator)
         
         elif isinstance(expr, UnaryOp):
             operand = self._eval_const_expr(expr.operand, module)
@@ -4099,25 +4055,63 @@ class VariableDeclaration(ASTNode):
             if operand is None:
                 return None
             
-            op = expr.operator
-            
-            if isinstance(operand.type, ir.IntType):
-                if op == Operator.SUB:
-                    result = -operand.constant
-                elif op == Operator.NOT:
-                    result = ~operand.constant
-                else:
-                    return None
-                
-                return ir.Constant(operand.type, result)
-            
-            elif isinstance(operand.type, ir.FloatType):
-                if op == Operator.SUB:
-                    result = -operand.constant
-                else:
-                    return None
-                
-                return ir.Constant(operand.type, result)
+            return self._eval_unary_op(operand, expr.operator)
+        
+        return None
+    
+    def _eval_binary_op(self, left: ir.Constant, right: ir.Constant, 
+                       op: Operator) -> Optional[ir.Constant]:
+        """Evaluate binary operation on constants."""
+        if isinstance(left.type, ir.IntType):
+            ops = {
+                Operator.ADD: lambda l, r: l + r,
+                Operator.SUB: lambda l, r: l - r,
+                Operator.MUL: lambda l, r: l * r,
+                Operator.DIV: lambda l, r: l // r,
+                Operator.MOD: lambda l, r: l % r,
+                Operator.POWER: lambda l, r: l ** r,
+                Operator.AND: lambda l, r: l & r,
+                Operator.OR: lambda l, r: l | r,
+                Operator.XOR: lambda l, r: l ^ r,
+                Operator.BITSHIFT_LEFT: lambda l, r: l << r,
+                Operator.BITSHIFT_RIGHT: lambda l, r: l >> r,
+            }
+            if op in ops:
+                result = ops[op](left.constant, right.constant)
+                return ir.Constant(left.type, result)
+        
+        elif isinstance(left.type, ir.FloatType):
+            ops = {
+                Operator.ADD: lambda l, r: l + r,
+                Operator.SUB: lambda l, r: l - r,
+                Operator.MUL: lambda l, r: l * r,
+                Operator.DIV: lambda l, r: l / r,
+                Operator.MOD: lambda l, r: l % r,
+                Operator.POWER: lambda l, r: l ** r,
+            }
+            if op in ops:
+                result = ops[op](left.constant, right.constant)
+                return ir.Constant(left.type, result)
+        
+        return None
+    
+    def _eval_unary_op(self, operand: ir.Constant, op: Operator) -> Optional[ir.Constant]:
+        """Evaluate unary operation on constant."""
+        if isinstance(operand.type, ir.IntType):
+            if op == Operator.SUB:
+                result = -operand.constant
+            elif op == Operator.NOT:
+                result = ~operand.constant
+            else:
+                return None
+            return ir.Constant(operand.type, result)
+        
+        elif isinstance(operand.type, ir.FloatType):
+            if op == Operator.SUB:
+                result = -operand.constant
+            else:
+                return None
+            return ir.Constant(operand.type, result)
         
         return None
 

@@ -1,6 +1,7 @@
 #import "standard.fx";
 
 int[5] arr1 = ["AAAA","BBBB","CCCC","DDDD","EEEE"];
+int[5] arr3 = arr1;
 
 def main() -> int
 {
@@ -12,6 +13,10 @@ def main() -> int
     if (arr2[1] == 0x42424242)
     {
         print("BBBB\0");
+    };
+    if (arr3[2] == 0x43434343)
+    {
+        print("CCCC\0");
     };
 	return 0;
 };
