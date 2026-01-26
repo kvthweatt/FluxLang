@@ -1711,6 +1711,55 @@ class ArrayLiteral(Expression):
         return result
 
     @staticmethod
+    def _pack_array_pointer_to_integer(builder: ir.IRBuilder, module: ir.Module,
+                                       array_ptr: ir.Value, target_type: ir.IntType) -> ir.Value:
+        """Pack an array (via pointer) into a single integer at runtime."""
+        if not isinstance(array_ptr.type, ir.PointerType):
+            raise ValueError("Expected pointer to array")
+        
+        if not isinstance(array_ptr.type.pointee, ir.ArrayType):
+            raise ValueError("Expected pointer to array type")
+        
+        array_type = array_ptr.type.pointee
+        elem_type = array_type.element
+        
+        if not isinstance(elem_type, ir.IntType):
+            raise ValueError(f"Cannot pack array of non-integer type {elem_type}")
+        
+        # Calculate expected total bits
+        total_bits = array_type.count * elem_type.width
+        if total_bits != target_type.width:
+            raise ValueError(
+                f"Array packing size mismatch: {array_type.count} x {elem_type.width} = {total_bits} bits "
+                f"into {target_type.width}-bit integer"
+            )
+        
+        # Pack at runtime
+        result = ir.Constant(target_type, 0)
+        bit_offset = 0
+        
+        zero = ir.Constant(ir.IntType(32), 0)
+        for i in range(array_type.count):
+            index = ir.Constant(ir.IntType(32), i)
+            elem_ptr = builder.gep(array_ptr, [zero, index], inbounds=True)
+            elem_val = builder.load(elem_ptr)
+            
+            # Extend to target width
+            if elem_type.width != target_type.width:
+                elem_val = builder.zext(elem_val, target_type)
+            
+            # Shift into position
+            if bit_offset > 0:
+                shift_amount = ir.Constant(target_type, bit_offset)
+                elem_val = builder.shl(elem_val, shift_amount)
+            
+            # OR into result
+            result = builder.or_(result, elem_val)
+            bit_offset += elem_type.width
+        
+        return result
+
+    @staticmethod
     def initialize_local_string(builder: ir.IRBuilder, module: ir.Module, 
                                alloca: ir.Value, llvm_type: ir.Type, 
                                string_literal: 'StringLiteral') -> None:
