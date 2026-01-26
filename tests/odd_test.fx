@@ -1,12 +1,20 @@
 #import "standard.fx";
 
+unsigned data{7} as i7;
+unsigned data{21} as i21;
+i7 a = 4;
+i7 b = 8;
+i7 c = 16;
+i21[1] test1 = [[a, b, c]];
+i21 test2 = test1[0];
+
 def main() -> int
 {
-	unsigned data{7} as i7;
-    unsigned data{21} as i21;
-	i7 a = 4;
-    i7 b = 8;
-    i7 c = 16;
-	i21[1] test = [[a, b, c]];
+    noopstr x = f"{test2}\n\0";
+    print(x);
+    if (test1[0] == 0b000010000010000010000)
+    {
+        print("Success!\0");
+    };
 	return 0;
 };

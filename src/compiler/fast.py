@@ -1570,6 +1570,63 @@ class ArrayLiteral(Expression):
                 for j in range(byte_count):
                     packed_value |= (ord(string_val[j]) << (j * 8))
                 const_elements.append(ir.Constant(llvm_type.element, packed_value))
+            
+            # NEW: Pack nested ArrayLiteral into integer
+            elif isinstance(elem, ArrayLiteral) and isinstance(llvm_type.element, ir.IntType):
+                # Pack the array elements into a single integer constant
+                packed_value = 0
+                bit_offset = llvm_type.element.width  # Start from high bits
+                
+                print(f"DEBUG: Packing nested ArrayLiteral with {len(elem.elements)} elements into {llvm_type.element}")
+                
+                for inner_elem in elem.elements:
+                    # For global constants, we need constant values
+                    if isinstance(inner_elem, Literal):
+                        if inner_elem.type == DataType.INT:
+                            elem_val = inner_elem.value
+                            elem_width = 32  # This is wrong - need to infer from context
+                        else:
+                            raise ValueError(f"Cannot pack {inner_elem.type} in global array initializer")
+                    elif isinstance(inner_elem, Identifier):
+                        # Look up the global constant value
+                        var_name = inner_elem.name
+                        if var_name in module.globals:
+                            global_var = module.globals[var_name]
+                            if hasattr(global_var, 'initializer') and global_var.initializer:
+                                elem_val = global_var.initializer.constant
+                                # FIX: Get the actual type width from the global variable's type
+                                if isinstance(global_var.type, ir.PointerType):
+                                    actual_type = global_var.type.pointee
+                                else:
+                                    actual_type = global_var.type
+                                
+                                if isinstance(actual_type, ir.IntType):
+                                    elem_width = actual_type.width
+                                else:
+                                    raise ValueError(f"Global {var_name} is not an integer type: {actual_type}")
+                                
+                                print(f"DEBUG: Packing {var_name} = {elem_val} ({elem_width} bits) at offset {bit_offset - elem_width}")
+                            else:
+                                raise ValueError(f"Global {var_name} has no initializer")
+                        else:
+                            raise ValueError(f"Global {var_name} not found")
+                    else:
+                        raise ValueError(f"Cannot evaluate {type(inner_elem)} at compile time for global array")
+                    
+                    # CHANGED: Pack from high bits to low bits (reverse order)
+                    bit_offset -= elem_width
+                    packed_value |= (elem_val << bit_offset)
+                
+                print(f"DEBUG: Final packed value: {packed_value} ({bin(packed_value)}) = {llvm_type.element.width} bits")
+                
+                # Verify we used all the bits
+                if bit_offset != 0:
+                    raise ValueError(
+                        f"Bit offset mismatch after packing: expected 0, got {bit_offset}"
+                    )
+                
+                const_elements.append(ir.Constant(llvm_type.element, packed_value))
+            
             elif isinstance(elem, Literal):
                 if elem.type == DataType.INT:
                     const_elements.append(ir.Constant(llvm_type.element, elem.value))
@@ -3992,6 +4049,38 @@ class VariableDeclaration(ASTNode):
             return ArrayLiteral.create_global_array_initializer(
                 self.initial_value, llvm_type, module
             )
+        
+        # NEW: Handle array indexing at compile time
+        elif isinstance(self.initial_value, ArrayAccess):
+            return self._eval_array_access_const(self.initial_value, module)
+        
+        return None
+
+    def _eval_array_access_const(self, array_access, module: ir.Module) -> Optional[ir.Constant]:
+        """Evaluate array indexing at compile time for global initialization."""
+        # Get the array being indexed
+        if not isinstance(array_access.array, Identifier):
+            return None  # Can only index into named globals at compile time
+        
+        array_name = array_access.array.name
+        if array_name not in module.globals:
+            return None
+        
+        global_array = module.globals[array_name]
+        if not hasattr(global_array, 'initializer') or global_array.initializer is None:
+            return None
+        
+        # Get the index
+        if not isinstance(array_access.index, Literal) or array_access.index.type != DataType.INT:
+            return None  # Can only use constant integer indices at compile time
+        
+        index_value = array_access.index.value
+        
+        # Extract the element from the constant array
+        array_const = global_array.initializer
+        if isinstance(array_const.type, ir.ArrayType):
+            if 0 <= index_value < len(array_const.constant):
+                return array_const.constant[index_value]
         
         return None
     
