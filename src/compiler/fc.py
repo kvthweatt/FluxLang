@@ -339,12 +339,16 @@ class FluxCompiler:
             
             # Step 7: Compile to object file (platform-specific)
             self.logger.step(f"Compiling to object file ({self.platform})", LogLevel.INFO, "compiler")
-            
+
+            # Check for default configuration
+            compiler = config.get('compiler')
+            if compiler == "none":
+                raise RuntimeError("Compiler not set! Please set your compiler in config\\flux_config.cfg")
+
             if self.platform == "Darwin":  # macOS
                 obj_file = temp_dir / f"{base_name}.o"
                 
                 # Try llc first, fallback to clang if not available
-                compiler = config.get('compiler')
                 command_line = None
                 match (compiler):
                     case "llc":
