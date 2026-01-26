@@ -781,7 +781,7 @@ class FluxParser:
         # Bit width and alignment for data types
         bit_width = None
         alignment = None
-        endianness = 1 # Default is big-endian in Flux
+        endianness = 0 # Default is little-endian in Flux
         
         if base_type == DataType.DATA and custom_typename is None:
             if self.expect(TokenType.LEFT_BRACE):

@@ -1403,6 +1403,7 @@ class ArrayLiteral(Expression):
     
     def _codegen_array_literal(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Handle regular array literals like [1, 2, 3]."""
+
         if not self.elements:
             # Empty array - need element type to determine size
             if self.element_type:
@@ -1426,9 +1427,39 @@ class ArrayLiteral(Expression):
         # Generate elements and infer common type
         element_values = []
         element_types = set()
-        
+
+        print(f"DEBUG: ArrayLiteral has {len(self.elements)} elements")
+        for i, elem in enumerate(self.elements):
+            print(f"DEBUG: Element {i}: type={type(elem).__name__}, value={elem}")
+            if isinstance(elem, StringLiteral):
+                print(f"  -> StringLiteral value: {elem.value}")
+            elif isinstance(elem, Literal):
+                print(f"  -> Literal type: {elem.type}, value: {elem.value}")
+
         for elem in self.elements:
-            elem_val = elem.codegen(builder, module)
+            # Special case: Pack StringLiteral into integer
+            if isinstance(elem, StringLiteral):
+                # Determine target type - default to i32 if not specified
+                if self.element_type:
+                    target_type = self.element_type.get_llvm_type(module)
+                else:
+                    target_type = ir.IntType(32)  # Default to 32-bit int
+                
+                # Pack string into integer (little endian)
+                if isinstance(target_type, ir.IntType):
+                    print("PACKING STRING")
+                    string_val = elem.value
+                    byte_count = min(len(string_val), target_type.width // 8)
+                    packed_value = 0
+                    for j in range(byte_count):
+                        packed_value |= (ord(string_val[j]) << (j * 8))
+                    elem_val = ir.Constant(target_type, packed_value)
+                else:
+                    # Not an integer target, use normal codegen
+                    elem_val = elem.codegen(builder, module)
+            else:
+                elem_val = elem.codegen(builder, module)
+            
             element_values.append(elem_val)
             element_types.add(elem_val.type)
         
@@ -3527,6 +3558,7 @@ class VariableDeclaration(ASTNode):
     is_global: bool = False
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+
         # Check for automatic array size inference with string literals
         infer_array_size = False
         resolved_type_spec = self.type_spec
@@ -3733,6 +3765,32 @@ class VariableDeclaration(ASTNode):
                         while len(char_values) < llvm_type.count:
                             char_values.append(ir.Constant(ir.IntType(8), 0))
                         init_const = ir.Constant(llvm_type, char_values)
+
+                elif isinstance(self.initial_value, ArrayLiteral):
+                    # Handle array literals for global arrays
+                    if isinstance(llvm_type, ir.ArrayType):
+                        const_elements = []
+                        for elem in self.initial_value.elements:
+                            # Pack StringLiteral into integer
+                            if isinstance(elem, StringLiteral) and isinstance(llvm_type.element, ir.IntType):
+                                string_val = elem.value
+                                byte_count = min(len(string_val), llvm_type.element.width // 8)
+                                packed_value = 0
+                                for j in range(byte_count):
+                                    packed_value |= (ord(string_val[j]) << (j * 8))
+                                const_elements.append(ir.Constant(llvm_type.element, packed_value))
+                            elif isinstance(elem, Literal):
+                                if elem.type == DataType.INT:
+                                    const_elements.append(ir.Constant(llvm_type.element, elem.value))
+                                elif elem.type == DataType.FLOAT:
+                                    const_elements.append(ir.Constant(llvm_type.element, elem.value))
+                                elif elem.type == DataType.BOOL:
+                                    const_elements.append(ir.Constant(llvm_type.element, 1 if elem.value else 0))
+                            else:
+                                # Can't evaluate at compile time
+                                const_elements.append(ir.Constant(llvm_type.element, 0))
+                        
+                        init_const = ir.Constant(llvm_type, const_elements)
                 
                 # Set the initializer or default to zero
                 if init_const is not None:
@@ -3770,7 +3828,6 @@ class VariableDeclaration(ASTNode):
         builder.scope_type_info[self.name] = self.type_spec
         
         if self.initial_value:
-            # FIXED: Handle array literals with proper element-by-element initialization
             if isinstance(self.initial_value, ArrayLiteral):
                 if isinstance(llvm_type, ir.ArrayType):
                     # Initialize each array element individually
@@ -3780,7 +3837,17 @@ class VariableDeclaration(ASTNode):
                         elem_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"{self.name}[{i}]")
                         
                         # Generate code for each element
-                        elem_val = elem.codegen(builder, module)
+                        # Handles packing strings to integers, need to handle any type.
+                        # URGENT
+                        if isinstance(elem, StringLiteral) and isinstance(llvm_type.element, ir.IntType):
+                            string_val = elem.value
+                            byte_count = min(len(string_val), llvm_type.element.width // 8)
+                            packed_value = 0
+                            for j in range(byte_count):
+                                packed_value |= (ord(string_val[j]) << (j * 8))
+                            elem_val = ir.Constant(llvm_type.element, packed_value)
+                        else:
+                            elem_val = elem.codegen(builder, module)
                         
                         # Ensure type matches
                         if elem_val.type != llvm_type.element:
@@ -4039,18 +4106,21 @@ class TypeDeclaration(Expression):
     name: str
     base_type: TypeSpec
     initial_value: Optional[Expression] = None
-
+    
     def __repr__(self):
         init_str = f" = {self.initial_value}" if self.initial_value else ""
         return f"TypeDeclaration({self.base_type} as {self.name}{init_str})"
-
+    
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Use TypeSpec's proper resolution instead of guessing
         llvm_type = self.base_type.get_llvm_type_with_array(module)
         
+        # Register the type alias
         if not hasattr(module, '_type_aliases'):
             module._type_aliases = {}
         module._type_aliases[self.name] = llvm_type
         
+        # If there's an initial value, create a global constant
         if self.initial_value:
             init_val = self.initial_value.codegen(builder, module)
             gvar = ir.GlobalVariable(module, llvm_type, self.name)
@@ -4058,51 +4128,8 @@ class TypeDeclaration(Expression):
             gvar.global_constant = True
             gvar.initializer = init_val
             return gvar
-        return None
-    
-    def get_llvm_type(self, module: ir.Module) -> ir.Type:
-        # Handle custom type names (type aliases)
-        if self.custom_typename:
-            # Look up the type alias
-            if hasattr(module, '_type_aliases') and self.custom_typename in module._type_aliases:
-                return module._type_aliases[self.custom_typename]
-            
-            # Check for namespaced types (e.g., standard__types__noopstr)
-            # URGENT: WTF KARAC
-            # FIX THIS SHIT
-            potential_names = [
-                self.custom_typename,
-                f"standard__types__{self.custom_typename}",
-                f"standard__{self.custom_typename}"
-            ]
-            
-            for name in potential_names:
-                if hasattr(module, '_type_aliases') and name in module._type_aliases:
-                    return module._type_aliases[name]
-            
-            # If not found in aliases, check struct types
-            if hasattr(module, '_struct_types') and self.custom_typename in module._struct_types:
-                return module._struct_types[self.custom_typename]
-            
-            raise NameError(f"Unknown type: {self.custom_typename}")
         
-        # Handle built-in types
-        if self.base_type == DataType.INT:
-            return ir.IntType(32)
-        elif self.base_type == DataType.FLOAT:
-            return ir.FloatType()
-        elif self.base_type == DataType.BOOL:
-            return ir.IntType(1)
-        elif self.base_type == DataType.CHAR:
-            return ir.IntType(8)
-        elif self.base_type == DataType.VOID:
-            return ir.VoidType()
-        elif self.base_type == DataType.DATA:
-            if self.bit_width is None:
-                raise ValueError(f"DATA type missing bit_width for {self}")
-            return ir.IntType(self.bit_width)
-        else:
-            raise ValueError(f"Unsupported type: {self.base_type}")
+        return None
 
 # Statements
 @dataclass
