@@ -3939,6 +3939,28 @@ class VariableDeclaration(ASTNode):
                     args.append(arg_val)
                 
                 init_val = builder.call(constructor_func, args)
+            elif (isinstance(llvm_type, ir.ArrayType) and 
+                  isinstance(self.initial_value, Identifier)):
+                # Get the source array
+                init_val = self.initial_value.codegen(builder, module)
+                
+                # Check if it's an array type
+                if isinstance(init_val.type, ir.PointerType) and isinstance(init_val.type.pointee, ir.ArrayType):
+                    # Copy array element by element
+                    source_array_type = init_val.type.pointee
+                    copy_count = min(llvm_type.count, source_array_type.count)
+                    
+                    zero = ir.Constant(ir.IntType(32), 0)
+                    for i in range(copy_count):
+                        index = ir.Constant(ir.IntType(32), i)
+                        # Load from source
+                        src_ptr = builder.gep(init_val, [zero, index], inbounds=True, name=f"src_{i}")
+                        src_val = builder.load(src_ptr, name=f"val_{i}")
+                        # Store to destination
+                        dst_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"dst_{i}")
+                        builder.store(src_val, dst_ptr)
+                else:
+                    raise ValueError(f"Cannot initialize array from non-array type: {init_val.type}")
             else:
                 init_val = self.initial_value.codegen(builder, module)
                 if init_val is not None:
