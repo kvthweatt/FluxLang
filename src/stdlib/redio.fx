@@ -105,7 +105,7 @@ namespace standard
                 return bytes_read - 2;
             };
 #endif; // ARCH 86 64
-#ifdef __ARCH_ARM__
+#ifdef __ARCH_ARM64__
 #endif // ARCH ARM
 #endif; // WINDOWS
 
@@ -173,7 +173,7 @@ namespace standard
                 return void;
             };
 #endif; // ARCH 86 64
-#ifdef __ARCH_ARM__
+#ifdef __ARCH_ARM64__
             def win_print(byte* msg, int x) -> void
             {
                 volatile asm
@@ -233,7 +233,7 @@ namespace standard
                 return void;
             };
 #endif; // ARCH 86 64
-#ifdef __ARCH_ARM__
+#ifdef __ARCH_ARM64__
             def nix_print(byte* msg, int x) -> void
             {
                 // Convert count to 64-bit for syscall
@@ -298,7 +298,7 @@ namespace standard
                 return void;
             };
 #endif; // ARCH 86 64
-#ifdef __ARCH_ARM__
+#ifdef __ARCH_ARM64__
             def mac_print(byte* msg, int x) -> void
             {
                 // Convert count to 64-bit for syscall
