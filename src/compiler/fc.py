@@ -344,41 +344,46 @@ class FluxCompiler:
                 obj_file = temp_dir / f"{base_name}.o"
                 
                 # Try llc first, fallback to clang if not available
-                llc_cmd = ["llc", "-O2", "-filetype=obj", str(ll_file), "-o", str(obj_file)]
-                clang_cmd = [
-                    config.get('compiler'),
-                    "-c",
-                    "-Os",                    # Optimize for size
-                    "-O3",                    # Optimize for speed (clang will use the most aggressive)
-                    "-ffunction-sections",    # Place each function in its own section
-                    "-fdata-sections",        # Place each data in its own section
-                    "-fno-unwind-tables",     # Disable unwind tables (saves space)
-                    "-fno-asynchronous-unwind-tables",
-                    "-fmerge-all-constants",  # Merge duplicate constants
-                    "-fno-stack-protector",   # Disable stack protection
-                    "-fno-ident",             # Don't emit .ident directive
-                    "-Wl,--gc-sections",      # Remove unused sections during linking
-                    "-march=native",          # Optimize for current CPU
-                    "-mtune=native",
-                    "-fomit-frame-pointer",   # Omit frame pointers (smaller, faster)
-                    str(ll_file),
-                    "-o",
-                    str(obj_file)
-                ]
+                compiler = config.get('compiler')
+                command_line = None
+                match (compiler):
+                    case "llc":
+                        command_line = [
+                            "-O" + config['lto_optimization_level'],  # Aggressive optimization level
+                            "-filetype=obj",                    # Direct object file output
+                            "-mtriple=" + self.module_triple,   # Target triple
+                            #"-march=" + config['architecture'], # Architecture
+                            #"-mcpu=" + config['cpu'],           # Target CPU
+                            "-enable-misched",                  # Enable machine instruction scheduler
+                            "-enable-tail-merge",               # Merge similar tail code
+                            "-optimize-regalloc",               # Optimize register allocation
+                            "-relocation-model=static",         # Static relocation (no PIC)
+                            "-tail-dup-size=3",                 # Tail duplication threshold
+                            "-tailcallopt",                     # Enable tail call optimization
+                            "-x86-asm-syntax=intel",            # Intel syntax assembly
+                            "-x86-use-base-pointer",            # Use base pointer
+                            "-no-x86-call-frame-opt",           # Disable call frame optimization (smaller)
+                            "-disable-verify",                  # Disable verification for speed
+                            str(ll_file),
+                            "-o",
+                            str(obj_file)
+                        ]
+                    case "clang":
+                        command_line = [
+                            "clang",
+                            "-c",
+                            "-O3",
+                            str(ll_file),
+                            "-o",
+                            str(obj_file)
+                        ]
                 
                 success = False
-                for cmd, tool_name in [(llc_cmd, "llc"), (clang_cmd, "clang")]:
-                    self.logger.debug(f"Trying {tool_name}: {' '.join(cmd)}", "compiler")
-                    try:
-                        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-                        self.logger.trace(f"{tool_name} output: {result.stdout}", "compiler")
-                        if result.stderr:
-                            self.logger.warning(f"{tool_name} stderr: {result.stderr}", "compiler")
-                        success = True
-                        break
-                    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-                        self.logger.debug(f"{tool_name} failed: {e}", "compiler")
-                        continue
+                try:
+                    result = subprocess.run(command_line, check=True, capture_output=True, text=True)
+                    success = True
+                except Exception as e:
+                    self.logger.warning(f"{compiler}: {e}", "compiler")
                 
                 if not success:
                     self.logger.error("Neither llc nor clang could compile LLVM IR", "compiler")
