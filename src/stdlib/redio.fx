@@ -301,34 +301,15 @@ namespace standard
 #ifdef __ARCH_ARM64__
             def mac_print(byte* msg, int x) -> void
             {
-                // Convert count to 64-bit for syscall
-                i64 count = x;
-                
                 volatile asm
                 {
-                    // macOS ARM64 (Darwin) syscall convention:
-                    // x16: syscall number
-                    // x0-x8: parameters (up to 9)
-                    // Return value in x0
-                    // System calls use svc #0x80
-                    
-                    // macOS syscall: write(int fd, const void *buf, size_t count)
-                    // syscall number: 0x2000004 (write)
-                    // Note: macOS adds 0x2000000 to BSD syscall numbers
-                    // BSD write syscall is 4, so macOS = 0x2000004
-                    // fd: 1 (STDOUT_FILENO)
-                    // buf: msg
-                    // count: count (64-bit)
-                    
-                    mov x16, #0x2000004
+                    movz x16, #0x4
+                    movk x16, #0x2000, lsl #16
                     mov x0, #1
                     ldr x1, [sp]
                     ldr x2, [sp, #8]
                     svc #0x80
-                } : : "r"(msg), "r"(count) : "x0","x1","x2","x3","x4","x5",
-                                              "x6","x7","x8","x9","x10","x11",
-                                              "x12","x13","x14","x15","x16",
-                                              "x17","memory";
+                } : : "r"(msg), "r"(x) : "x0","x1","x2","x16","memory";
                 return void;
             };
 #endif; // ARCH ARM

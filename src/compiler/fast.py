@@ -3771,44 +3771,28 @@ class VariableDeclaration(ASTNode):
         
         if self.initial_value:
             # FIXED: Handle array literals with proper element-by-element initialization
-            if (isinstance(self.initial_value, Literal) and 
-                self.initial_value.type == DataType.DATA and
-                isinstance(self.initial_value.value, list) and
-                isinstance(llvm_type, ir.ArrayType)):
-                
-                # Initialize each array element individually
-                for i, elem in enumerate(self.initial_value.value):
-                    zero = ir.Constant(ir.IntType(32), 0)
-                    index = ir.Constant(ir.IntType(32), i)
-                    elem_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"{self.name}[{i}]")
-                    
-                    # FIXED: Handle StringLiteral elements properly
-                    if isinstance(elem, StringLiteral):
-                        # For byte arrays, we want the first character as i8
-                        if isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8:
-                            if len(elem.value) > 0:
-                                elem_val = ir.Constant(ir.IntType(8), ord(elem.value[0]))
-                            else:
-                                elem_val = ir.Constant(ir.IntType(8), 0)
-                        else:
-                            # For other types, this is an error
-                            raise ValueError(f"Cannot store string literal in non-byte array")
-                    elif isinstance(elem, Literal):
+            if isinstance(self.initial_value, ArrayLiteral):
+                if isinstance(llvm_type, ir.ArrayType):
+                    # Initialize each array element individually
+                    for i, elem in enumerate(self.initial_value.elements):
+                        zero = ir.Constant(ir.IntType(32), 0)
+                        index = ir.Constant(ir.IntType(32), i)
+                        elem_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"{self.name}[{i}]")
+                        
+                        # Generate code for each element
                         elem_val = elem.codegen(builder, module)
-                    elif isinstance(elem, (int, float)):
-                        elem_val = ir.Constant(llvm_type.element, elem)
-                    else:
-                        elem_val = elem.codegen(builder, module)
-                    
-                    # Ensure the element value matches the array element type
-                    if elem_val.type != llvm_type.element:
-                        if isinstance(elem_val.type, ir.IntType) and isinstance(llvm_type.element, ir.IntType):
-                            if elem_val.type.width > llvm_type.element.width:
-                                elem_val = builder.trunc(elem_val, llvm_type.element)
-                            elif elem_val.type.width < llvm_type.element.width:
-                                elem_val = builder.sext(elem_val, llvm_type.element)
-                    
-                    builder.store(elem_val, elem_ptr)
+                        
+                        # Ensure type matches
+                        if elem_val.type != llvm_type.element:
+                            if isinstance(elem_val.type, ir.IntType) and isinstance(llvm_type.element, ir.IntType):
+                                if elem_val.type.width > llvm_type.element.width:
+                                    elem_val = builder.trunc(elem_val, llvm_type.element)
+                                elif elem_val.type.width < llvm_type.element.width:
+                                    elem_val = builder.sext(elem_val, llvm_type.element)
+                        
+                        builder.store(elem_val, elem_ptr)
+                else:
+                    raise ValueError(f"ArrayLiteral can only initialize array types, got {llvm_type}")
             
             # Handle string literals specially
             elif isinstance(self.initial_value, StringLiteral):
@@ -4084,6 +4068,8 @@ class TypeDeclaration(Expression):
                 return module._type_aliases[self.custom_typename]
             
             # Check for namespaced types (e.g., standard__types__noopstr)
+            # URGENT: WTF KARAC
+            # FIX THIS SHIT
             potential_names = [
                 self.custom_typename,
                 f"standard__types__{self.custom_typename}",

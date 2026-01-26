@@ -781,6 +781,7 @@ class FluxParser:
         # Bit width and alignment for data types
         bit_width = None
         alignment = None
+        endianness = 1 # Default is big-endian in Flux
         
         if base_type == DataType.DATA and custom_typename is None:
             if self.expect(TokenType.LEFT_BRACE):
@@ -790,6 +791,9 @@ class FluxParser:
                 if self.expect(TokenType.COLON):
                     self.advance()
                     alignment = int(self.consume(TokenType.INTEGER).value)
+                    if self.expect(TokenType.COLON):
+                        self.advance()
+                        endianness = int(self.consume(TokenType.INTEGER).value)
                 else:
                     alignment = bit_width
                 
@@ -984,49 +988,6 @@ class FluxParser:
         else:
             # Regular variable declaration
             name = self.consume(TokenType.IDENTIFIER).value
-            
-            # Check for array dimensions AFTER the identifier (C-style: int arr[4])
-            # This extends the type_spec that was already parsed
-            if self.expect(TokenType.LEFT_BRACKET):
-                array_dims = []
-                while self.expect(TokenType.LEFT_BRACKET):
-                    self.advance()
-                    if not self.expect(TokenType.RIGHT_BRACKET):
-                        try:
-                            array_size = int(self.consume(TokenType.INTEGER).value)
-                            array_dims.append(array_size)
-                        except:
-                            expr = self.expression()
-                            array_dims.append(expr)
-                    else:
-                        array_dims.append(None)
-                    self.consume(TokenType.RIGHT_BRACKET)
-                
-                # Update type_spec with array information
-                type_spec.is_array = True
-                type_spec.array_size = array_dims[0] if array_dims else None
-                type_spec.array_dimensions = array_dims if array_dims else None
-            
-            # Check for struct literal initialization: StructName var {fields}
-            if self.expect(TokenType.LEFT_BRACE):
-                # This is struct literal initialization without explicit cast
-                struct_literal = self.struct_literal()
-                
-                # Get struct name from type_spec
-                if type_spec.custom_typename:
-                    struct_name = type_spec.custom_typename
-                else:
-                    self.error("Struct initialization requires a custom type name")
-                
-                # Set the struct type on the literal (inferred from declaration)
-                struct_literal.struct_type = struct_name
-                
-                # Create StructInstance with the literal's field values
-                var_decl = VariableDeclaration(name, type_spec, struct_literal)
-                # Mark as global if storage_class is GLOBAL
-                if type_spec.storage_class == StorageClass.GLOBAL:
-                    var_decl.is_global = True
-                return var_decl
             
             # Check for object instantiation: identifier(args)
             if self.expect(TokenType.LEFT_PAREN):
