@@ -1598,6 +1598,7 @@ class ArrayLiteral(Expression):
             elem_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"elem_{i}")
             
             # Generate code for each element
+            # Handle packing strings to integers
             if isinstance(elem, StringLiteral) and isinstance(llvm_type.element, ir.IntType):
                 string_val = elem.value
                 byte_count = min(len(string_val), llvm_type.element.width // 8)
@@ -1605,8 +1606,24 @@ class ArrayLiteral(Expression):
                 for j in range(byte_count):
                     packed_value |= (ord(string_val[j]) << (j * 8))
                 elem_val = ir.Constant(llvm_type.element, packed_value)
+            
+            # NEW: Handle packing array literals to integers
+            elif isinstance(elem, ArrayLiteral) and isinstance(llvm_type.element, ir.IntType):
+                # This is an array that needs to be packed into an integer
+                # Calculate expected bit width
+                elem_val = ArrayLiteral._pack_array_to_integer(builder, module, elem, llvm_type.element)
+            
             else:
                 elem_val = elem.codegen(builder, module)
+                
+                # NEW: Handle result being an array pointer that needs packing
+                if (isinstance(elem_val.type, ir.PointerType) and 
+                    isinstance(elem_val.type.pointee, ir.ArrayType) and
+                    isinstance(llvm_type.element, ir.IntType)):
+                    # Load and pack the array into the target integer
+                    elem_val = ArrayLiteral._pack_array_pointer_to_integer(
+                        builder, module, elem_val, llvm_type.element
+                    )
             
             # Ensure type matches
             if elem_val.type != llvm_type.element:
@@ -1617,6 +1634,81 @@ class ArrayLiteral(Expression):
                         elem_val = builder.sext(elem_val, llvm_type.element)
             
             builder.store(elem_val, elem_ptr)
+
+    @staticmethod
+    def _pack_array_to_integer(builder: ir.IRBuilder, module: ir.Module, 
+                               array_lit: 'ArrayLiteral', target_type: ir.IntType) -> ir.Value:
+        """Pack an array literal's elements into a single integer."""
+        packed_value = 0
+        bit_offset = 0
+        
+        for elem in array_lit.elements:
+            elem_val = elem.codegen(builder, module)
+            
+            # Load if it's a pointer
+            if isinstance(elem_val.type, ir.PointerType):
+                elem_val = builder.load(elem_val)
+            
+            # Must be an integer
+            if not isinstance(elem_val.type, ir.IntType):
+                raise ValueError(f"Cannot pack non-integer type {elem_val.type} into integer")
+            
+            elem_width = elem_val.type.width
+            
+            # Convert to runtime packing if not constant
+            if not isinstance(elem_val, ir.Constant):
+                return ArrayLiteral._pack_array_to_integer_runtime(
+                    builder, module, array_lit, target_type
+                )
+            
+            # Pack constant value
+            packed_value |= (elem_val.constant << bit_offset)
+            bit_offset += elem_width
+        
+        # Verify total width matches target
+        if bit_offset != target_type.width:
+            raise ValueError(
+                f"Array packing size mismatch: packed {bit_offset} bits into {target_type.width}-bit integer"
+            )
+        
+        return ir.Constant(target_type, packed_value)
+
+    @staticmethod
+    def _pack_array_to_integer_runtime(builder: ir.IRBuilder,
+                                       module: ir.Module,
+                                       array_lit: 'ArrayLiteral', 
+                                       target_type: ir.IntType) -> ir.Value:
+        """Pack array elements into integer at runtime."""
+        result = ir.Constant(target_type, 0)
+        bit_offset = 0
+        
+        for elem in array_lit.elements:
+            elem_val = elem.codegen(builder, module)
+            
+            # Load if it's a pointer
+            if isinstance(elem_val.type, ir.PointerType):
+                elem_val = builder.load(elem_val)
+            
+            # Must be an integer
+            if not isinstance(elem_val.type, ir.IntType):
+                raise ValueError(f"Cannot pack non-integer type {elem_val.type} into integer")
+            
+            elem_width = elem_val.type.width
+            
+            # Extend/truncate to target width if needed
+            if elem_val.type.width != target_type.width:
+                elem_val = builder.zext(elem_val, target_type)
+            
+            # Shift into position
+            if bit_offset > 0:
+                shift_amount = ir.Constant(target_type, bit_offset)
+                elem_val = builder.shl(elem_val, shift_amount)
+            
+            # OR into result
+            result = builder.or_(result, elem_val)
+            bit_offset += elem_width
+        
+        return result
 
     @staticmethod
     def initialize_local_string(builder: ir.IRBuilder, module: ir.Module, 
