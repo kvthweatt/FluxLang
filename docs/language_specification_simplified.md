@@ -49,6 +49,59 @@ def rsub(int x, int y) -> int
 };
 ```
 
+Ternary logic:
+```
+#import "standard.fx";
+
+def main() -> int
+{
+    int x = 0;
+    int y = 5;
+
+    int z = x < y ? y : 0;
+
+    if (z is 5)
+    {
+        print("Success!\0");
+    };
+    return 0;
+};
+```
+
+Null coalesce operator:
+```
+#import "standard.fx";
+
+def main() -> int
+{
+    int x = 0;
+    int y = 5;
+
+    int z = y ?? 0;
+
+    if (z is 5)
+    {
+        print("Success!\0");
+    };
+    return 0;
+};
+```
+
+Chain functions:
+```
+def foo(int x) -> int
+{
+    return x / 2;
+};
+
+def bar () -> int
+{
+    return 0xFF;
+};
+
+int z = foo() <- bar(); // == // int z = foo(bar());
+```
+
 ---
 
 ## **Importing with `import`:**
