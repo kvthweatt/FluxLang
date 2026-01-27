@@ -83,7 +83,7 @@ class TokenType(Enum):
     SIZEOF = auto()
     STACK = auto()
     STRUCT = auto()
-    SUPER = auto()
+    #SUPER = auto() #DEFERRED FOR BOOTSTRAP
     SWITCH = auto()
     THIS = auto()
     THROW = auto()
@@ -153,13 +153,14 @@ class TokenType(Enum):
     ADDRESS_OF = auto()     # @
     RANGE = auto()          # ..
     SCOPE = auto()          # ::
-    QUESTION = auto()       # ?
+    QUESTION = auto()       # ?     ?: = Parse as ternary
     COLON = auto()          # :
 
     # Directionals
     RETURN_ARROW = auto()   # ->
     CHAIN_ARROW = auto()    # <-
     RECURSE_ARROW = auto()  # <~
+    NULL_COALESCE = auto()  # ??
 
     # SPECIAL
     FUNCTION_POINTER = auto() # {}*
@@ -243,7 +244,7 @@ class FluxLexer:
             'sizeof': TokenType.SIZEOF,
             'stack': TokenType.STACK,
             'struct': TokenType.STRUCT,
-            'super': TokenType.SUPER,
+            #'super': TokenType.SUPER, #DEFERRED FOR BOOTSTRAP
             'switch': TokenType.SWITCH,
             'this': TokenType.THIS,
             'throw': TokenType.THROW,
@@ -690,6 +691,11 @@ class FluxLexer:
             
             if char == '!' and self.peek_char() == '=':
                 tokens.append(Token(TokenType.NOT_EQUAL, '!=', start_pos[0], start_pos[1]))
+                self.advance(count=2)
+                continue
+
+            if char == '?' and self.peek_char() == '?':
+                tokens.append(Token(TokenType.NULL_COALESCE, '??', start_pos[0], start_pos[1]))
                 self.advance(count=2)
                 continue
             

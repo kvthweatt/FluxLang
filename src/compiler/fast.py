@@ -4982,6 +4982,172 @@ class IfStatement(Statement):
         return None
 
 @dataclass
+class TernaryOp(Expression):
+    """
+    Ternary conditional operator: condition ? true_expr : false_expr
+    
+    Example:
+        x > 0 ? x : -x  // Absolute value
+        a == b ? 1 : 0  // Boolean to int
+    """
+    condition: Expression
+    true_expr: Expression
+    false_expr: Expression
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """
+        Generate code for ternary operator.
+        
+        Creates:
+        1. Evaluate condition
+        2. Branch to true_block or false_block
+        3. Evaluate true_expr in true_block
+        4. Evaluate false_expr in false_block
+        5. Use phi node to merge results
+        """
+        # Evaluate condition
+        cond_val = self.condition.codegen(builder, module)
+        
+        # Convert to i1 if needed
+        if isinstance(cond_val.type, ir.IntType) and cond_val.type.width != 1:
+            cond_val = builder.icmp_signed('!=', cond_val, ir.Constant(cond_val.type, 0))
+        
+        # Create blocks
+        func = builder.block.function
+        true_block = func.append_basic_block('ternary_true')
+        false_block = func.append_basic_block('ternary_false')
+        merge_block = func.append_basic_block('ternary_merge')
+        
+        # Branch based on condition
+        builder.cbranch(cond_val, true_block, false_block)
+        
+        # Generate true branch
+        builder.position_at_start(true_block)
+        true_val = self.true_expr.codegen(builder, module)
+        true_end_block = builder.block  # May have changed due to nested control flow
+        builder.branch(merge_block)
+        
+        # Generate false branch
+        builder.position_at_start(false_block)
+        false_val = self.false_expr.codegen(builder, module)
+        false_end_block = builder.block  # May have changed due to nested control flow
+        builder.branch(merge_block)
+        
+        # Merge results with phi node
+        builder.position_at_start(merge_block)
+        
+        # Type compatibility check
+        if true_val.type != false_val.type:
+            # Try to convert types
+            if isinstance(true_val.type, ir.IntType) and isinstance(false_val.type, ir.IntType):
+                # Integer type mismatch - extend to larger type
+                if true_val.type.width < false_val.type.width:
+                    builder.position_at_end(true_end_block)
+                    true_val = builder.sext(true_val, false_val.type)
+                    builder.branch(merge_block)
+                    builder.position_at_start(merge_block)
+                elif false_val.type.width < true_val.type.width:
+                    builder.position_at_end(false_end_block)
+                    false_val = builder.sext(false_val, true_val.type)
+                    builder.branch(merge_block)
+                    builder.position_at_start(merge_block)
+            else:
+                raise TypeError(
+                    f"Ternary operator branches have incompatible types: "
+                    f"{true_val.type} vs {false_val.type}"
+                )
+        
+        # Create phi node to select result
+        phi = builder.phi(true_val.type, name='ternary_result')
+        phi.add_incoming(true_val, true_end_block)
+        phi.add_incoming(false_val, false_end_block)
+        
+        return phi
+
+@dataclass
+class NullCoalesce(Expression):
+    """
+    Null coalescing operator: value ?? default
+    
+    Returns the left operand if it's not null/zero, otherwise returns the right operand.
+    
+    Example:
+        ptr ?? default_ptr     // Use ptr if non-null, else default_ptr
+        x ?? 0                 // Use x if non-zero, else 0
+    """
+    left: Expression
+    right: Expression
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """
+        Generate code for null coalesce operator.
+        
+        Similar to: left != null ? left : right
+        But we only evaluate left once.
+        """
+        # Evaluate left operand
+        left_val = self.left.codegen(builder, module)
+        
+        # Check if left is null/zero
+        if isinstance(left_val.type, ir.PointerType):
+            # Pointer - compare to null pointer
+            null_ptr = ir.Constant(left_val.type, None)
+            is_null = builder.icmp_unsigned('==', left_val, null_ptr, name='is_null')
+        elif isinstance(left_val.type, ir.IntType):
+            # Integer - compare to zero
+            zero = ir.Constant(left_val.type, 0)
+            is_null = builder.icmp_signed('==', left_val, zero, name='is_zero')
+        else:
+            raise TypeError(f"Null coalesce not supported for type: {left_val.type}")
+        
+        # Create blocks
+        func = builder.block.function
+        right_block = func.append_basic_block('coalesce_right')
+        merge_block = func.append_basic_block('coalesce_merge')
+        left_block = builder.block
+        
+        # Branch: if null, evaluate right; else skip to merge
+        builder.cbranch(is_null, right_block, merge_block)
+        
+        # Right block - evaluate default value
+        builder.position_at_start(right_block)
+        right_val = self.right.codegen(builder, module)
+        right_end_block = builder.block
+        builder.branch(merge_block)
+        
+        # Merge block - phi node
+        builder.position_at_start(merge_block)
+        
+        # Type compatibility check
+        if left_val.type != right_val.type:
+            # Try to convert types
+            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
+                if left_val.type.width < right_val.type.width:
+                    # Extend left to match right
+                    builder.position_at_end(left_block)
+                    left_val = builder.sext(left_val, right_val.type)
+                    builder.branch(merge_block)
+                    builder.position_at_start(merge_block)
+                elif right_val.type.width < left_val.type.width:
+                    # Extend right to match left
+                    builder.position_at_end(right_end_block)
+                    right_val = builder.sext(right_val, left_val.type)
+                    builder.branch(merge_block)
+                    builder.position_at_start(merge_block)
+            else:
+                raise TypeError(
+                    f"Null coalesce operands have incompatible types: "
+                    f"{left_val.type} vs {right_val.type}"
+                )
+        
+        # Phi node to select result
+        phi = builder.phi(left_val.type, name='coalesce_result')
+        phi.add_incoming(left_val, left_block)
+        phi.add_incoming(right_val, right_end_block)
+        
+        return phi
+
+@dataclass
 class WhileLoop(Statement):
     condition: Expression
     body: Block

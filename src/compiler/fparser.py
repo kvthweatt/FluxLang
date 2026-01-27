@@ -1484,7 +1484,7 @@ class FluxParser:
         Now handles struct field assignment:
             struct_instance.field = value
         """
-        expr = self.logical_or_expression()
+        expr = self.ternary_expression()
         
         if self.expect(TokenType.ASSIGN):
             self.advance()
@@ -1507,6 +1507,33 @@ class FluxParser:
             self.advance()
             value = self.assignment_expression()
             return CompoundAssignment(expr, op_token, value)
+        
+        return expr
+
+    def ternary_expression(self) -> Expression:
+        """
+        ternary_expression -> logical_or_expression ('?' expression ':' ternary_expression)?
+        """
+        expr = self.null_coalesce_expression()
+        
+        if self.expect(TokenType.QUESTION):
+            self.advance()
+            true_expr = self.expression()  # The value if true
+            self.consume(TokenType.COLON, "Expected ':' in ternary expression")
+            false_expr = self.ternary_expression()  # Right associative
+            return TernaryOp(expr, true_expr, false_expr)
+        
+        return expr
+
+    def null_coalesce_expression(self) -> Expression:
+        """null_coalesce_expression -> logical_or_expression ('??' null_coalesce_expression)?"""
+        expr = self.logical_or_expression()
+        
+        if self.expect(TokenType.NULL_COALESCE):
+            self.advance()
+            print("GOT NULL COALESCE")
+            right = self.null_coalesce_expression()  # Right associative
+            return NullCoalesce(expr, right)
         
         return expr
     
@@ -1554,9 +1581,9 @@ class FluxParser:
     
     def equality_expression(self) -> Expression:
         """
-        equality_expression -> relational_expression (('==' | '!=') relational_expression)*
+        equality_expression -> chain_expression (('==' | '!=') chain_expression)*
         """
-        expr = self.relational_expression()
+        expr = self.chain_expression()
         
         while self.expect(TokenType.IS, TokenType.EQUAL, TokenType.NOT_EQUAL):
             if self.current_token.type == TokenType.EQUAL:
@@ -1567,8 +1594,27 @@ class FluxParser:
                 operator = Operator.NOT_EQUAL
             
             self.advance()
-            right = self.relational_expression()
+            right = self.chain_expression()
             expr = BinaryOp(expr, operator, right)
+        
+        return expr
+
+    def chain_expression(self) -> Expression:
+        """
+        chain_expression -> relational_expression ('<-' chain_expression)?
+        Right associative chain arrow
+        """
+        expr = self.relational_expression()
+        
+        if self.expect(TokenType.CHAIN_ARROW):
+            self.advance()
+            right = self.chain_expression()
+            
+            if isinstance(expr, FunctionCall):
+                expr.arguments.insert(0, right)
+                return expr
+            else:
+                self.error("Chain arrow requires function call on left side")
         
         return expr
 
@@ -1991,9 +2037,9 @@ class FluxParser:
         elif self.expect(TokenType.THIS):
             self.advance()
             return Identifier("this")
-        elif self.expect(TokenType.SUPER):
-            self.advance()
-            return Identifier("super")
+        #elif self.expect(TokenType.SUPER): # DEFERRED
+            #self.advance()
+            #return Identifier("super")
         elif self.expect(TokenType.LEFT_PAREN):
             self.advance()
             expr = self.expression()
