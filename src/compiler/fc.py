@@ -393,7 +393,7 @@ class FluxCompiler:
                     self.logger.warning(f"{compiler}: {e}", "compiler")
                 
                 if not success:
-                    self.logger.error("Neither llc nor clang could compile LLVM IR", "compiler")
+                    self.logger.error(f"{compiler} could compile LLVM IR", "compiler")
                     raise RuntimeError("Compilation failed - no suitable compiler found")
                     
             elif self.platform == "Windows":

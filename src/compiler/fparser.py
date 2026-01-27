@@ -1776,6 +1776,19 @@ class FluxParser:
             self.advance()
             operand = self.unary_expression()
             return AddressOf(operand)
+        elif self.expect(TokenType.ADDRESS_CAST):
+            print("HERE")
+            # Address cast operator (@) - converts integer literal to pointer
+            # Uses CastExpression with void* as target type
+            self.advance()
+            operand = self.unary_expression()
+            # Create a void pointer TypeSpec (i8*)
+            void_ptr_type = TypeSpec(
+                base_type=DataType.VOID,
+                is_pointer=True,
+                pointer_depth=1
+            )
+            return CastExpression(void_ptr_type, operand)
         elif self.expect(TokenType.INCREMENT):
             # Prefix increment
             self.advance()

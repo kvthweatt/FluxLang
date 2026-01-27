@@ -2700,13 +2700,14 @@ class CastExpression(Expression):
         elif isinstance(source_val.type, ir.PointerType) and isinstance(target_llvm_type, ir.PointerType):
             return builder.bitcast(source_val, target_llvm_type)
 
+        # Handle integer to pointer cast (ADDRESS_CAST support)
+        elif isinstance(source_val.type, ir.IntType) and isinstance(target_llvm_type, ir.PointerType):
+            return builder.inttoptr(source_val, target_llvm_type, name="int_to_ptr")
+
         # Handle pointer to integer cast (reinterpret cast like (i64*)ptr)
         elif isinstance(source_val.type, ir.PointerType) and isinstance(target_llvm_type, ir.IntType):
             return builder.ptrtoint(source_val, target_llvm_type, name="ptr_to_int")
 
-        # Handle integer to pointer cast
-        elif isinstance(source_val.type, ir.IntType) and isinstance(target_llvm_type, ir.PointerType):
-            return builder.inttoptr(source_val, target_llvm_type, name="int_to_ptr")
         else:
             raise ValueError(f"Unsupported cast from {source_val.type} to {target_llvm_type}")
     
