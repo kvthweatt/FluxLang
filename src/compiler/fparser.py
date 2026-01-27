@@ -1912,8 +1912,20 @@ class FluxParser:
         if self.expect(TokenType.IDENTIFIER):
             return self.scoped_identifier()
         elif self.expect(TokenType.INTEGER):
-            value = int(self.current_token.value, 0)
-            self.advance()
+            if self.current_token.value.startswith('0d'):
+                number_str = self.current_token.value[2:]
+                # Define the digits for base 32: 0-9, A-V
+                digits = '0123456789ABCDEFGHIJKLMNOPQRSTUV'
+                digits_map = {char: idx for idx, char in enumerate(digits)}
+                
+                value = 0
+                for char in number_str.upper():
+                    value = value * 32 + digits_map[char]
+                self.advance()
+                print(value)
+            else:
+                value = int(self.current_token.value, 0)
+                self.advance()
             return Literal(value, DataType.INT)
         elif self.expect(TokenType.FLOAT):
             value = float(self.current_token.value)

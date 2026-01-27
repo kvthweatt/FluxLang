@@ -434,16 +434,26 @@ class FluxLexer:
         result = ""
         is_float = False
         
-        # Handle hex (0x), octal (0o), and binary (0b) prefixes
+        # Handle duotrigesimal (0d), hex (0x), octal (0o), and binary (0b) prefixes
         if self.current_char() == '0':
             result += self.current_char()
             self.advance()
+
+            if self.current_char() and self.current_char().lower() == 'd':
+                print("DUOTRIGESIMAL")
+                # Duotrigesimal (Base 32)
+                result += self.current_char()
+                self.advance()
+                while self.current_char() and self.current_char() in '0123456789ABCDEFGHIJKLMNOPQRSTUV':
+                    result += self.current_char()
+                    self.advance()
+                return Token(TokenType.INTEGER, result, start_pos[0], start_pos[1])
             
             if self.current_char() and self.current_char().lower() == 'x':
                 # Hexadecimal
                 result += self.current_char()
                 self.advance()
-                while self.current_char() and self.current_char() in '0123456789abcdefABCDEF':
+                while self.current_char() and self.current_char() in '0123456789ABCDEF':
                     result += self.current_char()
                     self.advance()
                 return Token(TokenType.INTEGER, result, start_pos[0], start_pos[1])

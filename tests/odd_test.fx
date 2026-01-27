@@ -28,5 +28,9 @@ def main() -> int
     {
         print("Hexadecimal check success!\n\0");
     };
+    if (test1[0] == 0d210G)
+    {
+        print("Duotrigesimal check passed!\n\0");
+    };
 	return 0;
 };
