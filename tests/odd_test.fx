@@ -30,7 +30,7 @@ def main() -> int
     };
     if (test1[0] == 0d210G)
     {
-        print("Duotrigesimal check passed!\n\0");
+        print("[2;32mDuotrigesimal check passed![0m\n\0");
     };
 	return 0;
 };

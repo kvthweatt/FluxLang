@@ -914,8 +914,17 @@ class FluxParser:
             # Skip array specification - support multiple dimensions
             while self.expect(TokenType.LEFT_BRACKET):
                 self.advance()
-                if self.expect(TokenType.INTEGER):
-                    self.advance()
+                # Skip expression inside brackets (integer, identifier, or any expression)
+                if not self.expect(TokenType.RIGHT_BRACKET):
+                    bracket_depth = 1
+                    while bracket_depth > 0 and not self.expect(TokenType.EOF):
+                        if self.expect(TokenType.LEFT_BRACKET):
+                            bracket_depth += 1
+                        elif self.expect(TokenType.RIGHT_BRACKET):
+                            bracket_depth -= 1
+                            if bracket_depth == 0:
+                                break
+                        self.advance()
                 if self.expect(TokenType.RIGHT_BRACKET):
                     self.advance()
             
@@ -1545,8 +1554,10 @@ class FluxParser:
         """
         expr = self.relational_expression()
         
-        while self.expect(TokenType.EQUAL, TokenType.NOT_EQUAL):
+        while self.expect(TokenType.IS, TokenType.EQUAL, TokenType.NOT_EQUAL):
             if self.current_token.type == TokenType.EQUAL:
+                operator = Operator.EQUAL
+            elif self.current_token.type == TokenType.IS:
                 operator = Operator.EQUAL
             elif self.current_token.type == TokenType.NOT_EQUAL:
                 operator = Operator.NOT_EQUAL
@@ -1732,10 +1743,15 @@ class FluxParser:
     
     def unary_expression(self) -> Expression:
         """
-        unary_expression -> ('not' | '-' | '+' | '*' | '@' | '++' | '--') unary_expression
+        unary_expression -> ('is' 'not' | '-' | '+' | '*' | '@' | '++' | '--') unary_expression
                          | postfix_expression
         """
-        if self.expect(TokenType.NOT):
+        if self.expect(TokenType.IS):
+            operator = Operator.EQUAL
+            self.advance()
+            operand = self.unary_expression()
+            return UnaryOp(operator, operand)
+        elif self.expect(TokenType.NOT):
             operator = Operator.NOT
             self.advance()
             operand = self.unary_expression()
@@ -1753,7 +1769,7 @@ class FluxParser:
         elif self.expect(TokenType.MULTIPLY):
             # Pointer dereference - this handles *x, **x, ***x, etc.
             self.advance()
-            operand = self.unary_expression()
+            operand = self.cast_expression()
             return PointerDeref(operand)
         elif self.expect(TokenType.ADDRESS_OF):
             # Address-of operator
@@ -1955,7 +1971,7 @@ class FluxParser:
             return Literal(False, DataType.BOOL)
         elif self.expect(TokenType.VOID):
             self.advance()
-            return Literal(None, DataType.VOID)
+            return Literal(0, DataType.VOID)
         elif self.expect(TokenType.THIS):
             self.advance()
             return Identifier("this")

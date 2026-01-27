@@ -128,7 +128,7 @@ class Literal(ASTNode):
             else:
                 return ir.Constant(ir.IntType(8), self.value)
         elif self.type == DataType.VOID:
-            return None
+            return ir.Constant(ir.IntType(1), 0)
         elif self.type == DataType.DATA:
             # Handle array literals
             if isinstance(self.value, list):
@@ -2586,7 +2586,7 @@ class CastExpression(Expression):
         
         # CRITICAL: Use get_llvm_type() which handles type alias resolution
         # This must happen BEFORE any struct checking logic
-        target_llvm_type = self.target_type.get_llvm_type(module)
+        target_llvm_type = self.target_type.get_llvm_type_with_array(module)
         
         # Handle void casting - frees memory according to Flux specification
         if isinstance(target_llvm_type, ir.VoidType):
@@ -2699,7 +2699,14 @@ class CastExpression(Expression):
         # Handle pointer casts (pointer -> pointer)
         elif isinstance(source_val.type, ir.PointerType) and isinstance(target_llvm_type, ir.PointerType):
             return builder.bitcast(source_val, target_llvm_type)
-        
+
+        # Handle pointer to integer cast (reinterpret cast like (i64*)ptr)
+        elif isinstance(source_val.type, ir.PointerType) and isinstance(target_llvm_type, ir.IntType):
+            return builder.ptrtoint(source_val, target_llvm_type, name="ptr_to_int")
+
+        # Handle integer to pointer cast
+        elif isinstance(source_val.type, ir.IntType) and isinstance(target_llvm_type, ir.PointerType):
+            return builder.inttoptr(source_val, target_llvm_type, name="int_to_ptr")
         else:
             raise ValueError(f"Unsupported cast from {source_val.type} to {target_llvm_type}")
     
@@ -2779,6 +2786,9 @@ class CastExpression(Expression):
         inline_asm = ir.InlineAsm(asm_type, asm_code, constraints, side_effect=True)
         builder.call(inline_asm, [void_ptr])
 
+# ALERT
+# DO NOT REMOVE IS_MACRO_DEFINED DO NOT REMOVE
+# ALERT
 def is_macro_defined(module: ir.Module, macro_name: str) -> bool:
     """
     Check if a preprocessor macro is defined in the module.
@@ -3051,7 +3061,9 @@ class FStringLiteral(Expression):
         elif isinstance(expr, UnaryOp):
             operand = self._evaluate_compile_time_expression(expr.operand, builder, module)
             
-            if expr.operator == Operator.NOT:
+            if expr.operator == Operator.IS:
+                return operand
+            elif expr.operator == Operator.NOT:
                 return not operand
             elif expr.operator == Operator.SUB:
                 return -operand

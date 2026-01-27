@@ -68,6 +68,7 @@ class TokenType(Enum):
     HEAP = auto()
     IF = auto()
     IN = auto()
+    IS = auto()
     INT = auto()
     LOCAL = auto()
     NAMESPACE = auto()
@@ -224,6 +225,7 @@ class FluxLexer:
             'global': TokenType.GLOBAL,
             'heap': TokenType.HEAP,
             'in': TokenType.IN,
+            'is': TokenType.IS,
             'int': TokenType.INT,
             'local': TokenType.LOCAL,
             'namespace': TokenType.NAMESPACE,
