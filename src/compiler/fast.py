@@ -3579,6 +3579,14 @@ class AddressOf(Expression):
     expression: Expression
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Handle address of literal (integers, bools, floats, and void for now).
+        # @4 @true @3.14 @void
+        if isinstance(self.expression, Literal):
+            # Create storage for the literal
+            literal_val = self.expression.codegen(builder, module)
+            temp = builder.alloca(literal_val.type)
+            builder.store(literal_val, temp)
+            return temp
         # Special case: Handle Identifier directly to avoid the codegen call that might fail
         if isinstance(self.expression, Identifier):
             var_name = self.expression.name
