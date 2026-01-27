@@ -347,7 +347,7 @@ class FluxCompiler:
 
             if self.platform == "Darwin":  # macOS
                 obj_file = temp_dir / f"{base_name}.o"
-                compiler_path = subprocess.check_output(["where", compiler], text=True, stderr=subprocess.DEVNULL).strip()
+                compiler_path = subprocess.check_output(["which", compiler], text=True, stderr=subprocess.DEVNULL).strip()
                 
                 # Try llc first, fallback to clang if not available
                 command_line = None
