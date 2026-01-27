@@ -14,7 +14,19 @@ def main() -> int
     print(x);
     if (test1[0] == 0b000010000010000010000)
     {
-        print("Success!\0");
+        print("Binary check success!\n\0");
+    };
+    if (test1[0] == 0o202020)
+    {
+        print("Octal check success!\n\0");
+    };
+    if (test1[0] == 66576)
+    {
+        print("Decimal check success!\n\0");
+    };
+    if (test1[0] == 0x10410)
+    {
+        print("Hexadecimal check success!\n\0");
     };
 	return 0;
 };

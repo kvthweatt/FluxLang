@@ -1576,9 +1576,7 @@ class ArrayLiteral(Expression):
                 # Pack the array elements into a single integer constant
                 packed_value = 0
                 bit_offset = llvm_type.element.width  # Start from high bits
-                
-                print(f"DEBUG: Packing nested ArrayLiteral with {len(elem.elements)} elements into {llvm_type.element}")
-                
+                                
                 for inner_elem in elem.elements:
                     # For global constants, we need constant values
                     if isinstance(inner_elem, Literal):
@@ -1604,8 +1602,6 @@ class ArrayLiteral(Expression):
                                     elem_width = actual_type.width
                                 else:
                                     raise ValueError(f"Global {var_name} is not an integer type: {actual_type}")
-                                
-                                print(f"DEBUG: Packing {var_name} = {elem_val} ({elem_width} bits) at offset {bit_offset - elem_width}")
                             else:
                                 raise ValueError(f"Global {var_name} has no initializer")
                         else:
@@ -1613,13 +1609,13 @@ class ArrayLiteral(Expression):
                     else:
                         raise ValueError(f"Cannot evaluate {type(inner_elem)} at compile time for global array")
                     
-                    # CHANGED: Pack from high bits to low bits (reverse order)
                     bit_offset -= elem_width
                     packed_value |= (elem_val << bit_offset)
-                
-                print(f"DEBUG: Final packed value: {packed_value} ({bin(packed_value)}) = {llvm_type.element.width} bits")
-                
+                                
                 # Verify we used all the bits
+                # TODO:
+                # This should not be a compilation error.
+                # Instead, fill the rest of the bits with 0.
                 if bit_offset != 0:
                     raise ValueError(
                         f"Bit offset mismatch after packing: expected 0, got {bit_offset}"

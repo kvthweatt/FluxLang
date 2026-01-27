@@ -434,7 +434,7 @@ class FluxLexer:
         result = ""
         is_float = False
         
-        # Handle hex (0x) and binary (0b) prefixes
+        # Handle hex (0x), octal (0o), and binary (0b) prefixes
         if self.current_char() == '0':
             result += self.current_char()
             self.advance()
@@ -444,6 +444,15 @@ class FluxLexer:
                 result += self.current_char()
                 self.advance()
                 while self.current_char() and self.current_char() in '0123456789abcdefABCDEF':
+                    result += self.current_char()
+                    self.advance()
+                return Token(TokenType.INTEGER, result, start_pos[0], start_pos[1])
+
+            if self.current_char() and self.current_char().lower() == 'o':
+                # Octal
+                result += self.current_char()
+                self.advance()
+                while self.current_char() and self.current_char() in '01234567':
                     result += self.current_char()
                     self.advance()
                 return Token(TokenType.INTEGER, result, start_pos[0], start_pos[1])
