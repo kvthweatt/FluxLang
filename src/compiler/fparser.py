@@ -781,7 +781,7 @@ class FluxParser:
         # Bit width and alignment for data types
         bit_width = None
         alignment = None
-        endianness = 0 # Default is little-endian in Flux
+        endianness = 0 # Default is little-endian in Flux. Primary guarantee, second in AST.
         
         if base_type == DataType.DATA and custom_typename is None:
             if self.expect(TokenType.LEFT_BRACE):
@@ -833,6 +833,7 @@ class FluxParser:
             is_volatile=is_volatile,
             bit_width=bit_width,
             alignment=alignment,
+            endianness=endianness,
             is_array=is_array,
             array_size=array_size,
             array_dimensions=array_dimensions,

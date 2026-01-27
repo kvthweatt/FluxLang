@@ -18,7 +18,7 @@ contexts:
       scope: comment.line.double-slash.flux
 
     # Preprocessor directives
-    - match: '^\s*(#)(def|ifdef|ifndef|else|endif)\b'
+    - match: '^\s*(#)(import|def|ifdef|ifndef|else|endif)\b'
       captures:
         1: punctuation.definition.preprocessor.flux
         2: keyword.control.preprocessor.flux
@@ -108,9 +108,17 @@ contexts:
     - match: '\*(?=[a-zA-Z_])'
       scope: keyword.operator.dereference.flux
 
+    # Numbers - Duotrigesimal
+    - match: '\b0d[0-9A-V]+\b'
+      scope: constant.numeric.duotrigesimal.flux
+
     # Numbers - Hex
-    - match: '\b0x[0-9a-fA-F]+\b'
+    - match: '\b0x[0-9A-F]+\b'
       scope: constant.numeric.hex.flux
+
+    # Numbers - Octal
+    - match: '\b0o[0-7]+\b'
+      scope: constant.numeric.octal.flux
 
     # Numbers - Binary
     - match: '\b0b[01]+\b'

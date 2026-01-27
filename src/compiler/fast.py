@@ -299,6 +299,7 @@ class TypeSpec:
     is_volatile: bool = False
     bit_width: Optional[int] = None
     alignment: Optional[int] = None
+    endianness: Optional[int] = 0 # Little-endian by default. Secondary guarantee.
     is_array: bool = False
     array_size: Optional[int] = None
     array_dimensions: Optional[List[Optional[int]]] = None
