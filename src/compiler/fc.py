@@ -385,7 +385,7 @@ class FluxCompiler:
                 
                 success = False
                 try:
-                    result = subprocess.run(command_line, check=True, capture_output=True, text=True)
+                    result = subprocess.run(' '.join(command_line), check=True, capture_output=True, text=True)
                     print(result)
                     success = True
                 except Exception as e:
