@@ -347,13 +347,14 @@ class FluxCompiler:
 
             if self.platform == "Darwin":  # macOS
                 obj_file = temp_dir / f"{base_name}.o"
+                compiler_path = subprocess.check_output(["where", compiler], text=True, stderr=subprocess.DEVNULL).strip()
                 
                 # Try llc first, fallback to clang if not available
                 command_line = None
                 match (compiler):
                     case "llc":
                         command_line = [
-                            f"$(where {compiler})",
+                            compiler_path,
                             "-O" + config['lto_optimization_level'],  # Aggressive optimization level
                             "-filetype=obj",                    # Direct object file output
                             "-mtriple=" + self.module_triple,   # Target triple
@@ -375,7 +376,7 @@ class FluxCompiler:
                         ]
                     case "clang":
                         command_line = [
-                            f"$(where {compiler})",
+                            compiler_path,
                             "-c",
                             "-O3",
                             str(ll_file),
@@ -385,7 +386,7 @@ class FluxCompiler:
                 
                 success = False
                 try:
-                    result = subprocess.run(' '.join(command_line), check=True, capture_output=True, text=True)
+                    result = subprocess.run(command_line, check=True, capture_output=True, text=True)
                     print(result)
                     success = True
                 except Exception as e:
