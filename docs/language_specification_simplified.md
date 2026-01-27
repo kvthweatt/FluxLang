@@ -51,7 +51,7 @@ def rsub(int x, int y) -> int
 
 Ternary logic:
 ```
-#import "standard.fx";
+#import "standard.fx\0";
 
 def main() -> int
 {
@@ -62,7 +62,7 @@ def main() -> int
 
     if (z is 5)
     {
-        print("Success!\0");
+        print("Success!\0\0");
     };
     return 0;
 };
@@ -70,7 +70,7 @@ def main() -> int
 
 Null coalesce operator:
 ```
-#import "standard.fx";
+#import "standard.fx\0";
 
 def main() -> int
 {
@@ -81,7 +81,7 @@ def main() -> int
 
     if (z is 5)
     {
-        print("Success!\0");
+        print("Success!\0\0");
     };
     return 0;
 };
@@ -109,8 +109,8 @@ int z = foo() <- bar(); // == // int z = foo(bar());
 Any file you import will take the place of the import statement.
 
 ```
-#import "standard.fx";
-#import "mylib.fx", "foobar.fx";  // Multi-line imports are processed from left to right in the order they appear.
+#import "standard.fx\0";
+#import "mylib.fx", "foobar.fx\0";  // Multi-line imports are processed from left to right in the order they appear.
 ```
 
 Example:  
@@ -123,7 +123,7 @@ int myVar = 10;
 **`main.fx`**
 
 ```
-#import "somefile.fx";  // int myVar = 10;
+#import "somefile.fx\0";  // int myVar = 10;
 
 def main() -> int
 {
@@ -137,7 +137,7 @@ def main() -> int
 
 ### Very simple preprocessor
 ```
-#import "standard.fx";
+#import "standard.fx\0";
 
 #ifdef __WINDOWS__
 def some_win_generic() -> LPCSTR*;
@@ -337,44 +337,44 @@ def main() -> int
 
 ## **i-Strings and f-Strings:**
 
-The syntax in Flux would be: `i"{}{}{}":{x;y;z;};` for an i-string, and `f"{var1}{var2}";` for an f-string.
+The syntax in Flux would be: `i"{}{}{}":{x;y;z;};` for an i-string, and `f"{var1}{var2}\0";` for an f-string.
 
 The brackets are replaced with the results of the statements in order respective to the statements' position in the statement array in i-strings.  
 **i-string Example:**
 
 ```
-#import "standard.fx";
+#import "standard.fx\0";
 
 using standard::io;
 
 unsigned data{8}[] as string;
 
-def bar() -> string { return "World"; };    // We get the basic string type from the types module
+def bar() -> string { return "World\0"; };    // We get the basic string type from the types module
 print(i"Hello {} {}" : // whitespace is ignored
               {
-                  bar() + "!";
-                "test";
+                  bar() + "!\0";
+                "test\0";
               }                             // Whitespace is ignored, this is just for positioning
      );
 x = i"Bar {}":{bar()};                      // "Bar World!"
 
-string a = "Hello", b = "World!";
-string y = f"{a} {b}";                      // "Hello World!"
+string a = "Hello", b = "World!\0";
+string y = f"{a} {b}\0";                      // "Hello World!"
 ```
 
 This allows you to write clean interpolated strings without strange formatting.  
 **f-string Example:**
 
 ```
-#import "standard.fx"; // standard::io::print()
+#import "standard.fx\0"; // standard::io::print()
 
 unsigned data{8}[] as string;
 
 def main() -> int
 {
-    string h = "Hello";
-    string w = "World!";
-    print(f"{h} {w}");
+    string h = "Hello\0";
+    string w = "World!\0";
+    print(f"{h} {w}\0");
     return 0;
 };
 ```
@@ -386,9 +386,9 @@ def main() -> int
 ## **Pointers:**
 
 ```
-string a = "Test";
+string a = "Test\0";
 string* pa = @a;
-*pa += "ing!";
+*pa += "ing!\0";
 print(a);
 // Result: "Testing!"
 
@@ -424,7 +424,7 @@ int[]   i_array;                    // Definition
 int[]* pi_array = @i_array;         // Pointer
 
 // Pointer Arithmetic:
-#import "standard.fx";
+#import "standard.fx\0";
 
 using standard::io, standard::types;
 
@@ -433,16 +433,16 @@ def main() -> int
     int[] arr = [10, 20, 30, 40, 50];
     int[]* ptr = @arr;                         // ptr points to the first element of arr
 
-    print(f"Value at ptr: {*ptr}");            // Output: 10
+    print(f"Value at ptr: {*ptr}\0");            // Output: 10
 
     ptr++;    // Increment ptr to point to the next element
-    print(f"Value at ptr: {*ptr}");            // Output: 20
+    print(f"Value at ptr: {*ptr}\0");            // Output: 20
 
     ptr += 2; // Increment ptr by 2 positions
-    print(f"Value at ptr: {*ptr}");            // Output: 40
+    print(f"Value at ptr: {*ptr}\0");            // Output: 40
 
     int *ptr2 = @arr[4]; // ptr2 points to the last element of arr
-    print(f"Elements between ptr and ptr2: {ptr2 - ptr}"); // Output: 1
+    print(f"Elements between ptr and ptr2: {ptr2 - ptr}\0"); // Output: 1
 
     return 0;
 };
@@ -509,7 +509,7 @@ For example, you can just keep type-chaining:
 Data decays to an integer type under the hood. All data is binary, and is therefore an integer.
 
 ```
-#import "standard.fx";
+#import "standard.fx\0";
 
 unsigned data{8} as byte;   // optionally `unsigned data{8}[] as noopstr;`
 byte[] as noopstring;
@@ -518,7 +518,7 @@ byte someByte = 0x41;                         // "A" but in binary
 noopstring somestring = (noopstring)((char)someByte); // "A"
 // Back to data
 somestring = (data)somestring;                // 01000001b
-string anotherstring = "B";                   // 01000010b
+string anotherstring = "B\0";                   // 01000010b
 
 somestring<<;                                 // 10000100b  // Bit-shift left  (binary doubling)
 somestring>>;                                 // 01000010b  // Bit-shift right (binary halving)
@@ -665,7 +665,7 @@ if (x == !void) {...code...};   // If it's not nothing, do something
 ## **Arrays:**
 
 ```
-#import "standard.fx";
+#import "standard.fx\0";
 using standard::io, standard::types;
 
 int[] ia_myArray = [3, 92, 14, 30, 6, 5, 11, 400];
@@ -785,12 +785,12 @@ def myErr(int e) -> void
     {
         case (0)
         {
-            ERR myErrObj("Custom error from object myE");
+            ERR myErrObj("Custom error from object myE\0");
             throw(myErrObj);
         }
         default
         {
-            throw("Default error from function myErr()");
+            throw("Default error from function myErr()\0");
         };                                                  // Semicolons only follow the default case.
     };
 };
@@ -802,7 +802,7 @@ def thisFails() -> bool
 
 def main() -> int
 {
-    string error = "";
+    string error = "\0";
     try
     {
         try
@@ -869,7 +869,7 @@ def main() -> int
     int x = 0;
     try
     {
-        assert(x == 0, "Something is fatally wrong with your computer.");
+        assert(x == 0, "Something is fatally wrong with your computer.\0");
     }
     catch (string e)
     {
@@ -1000,7 +1000,7 @@ def traverse_as_bytes(int* ptr, int count) -> void
     
     for (int i = 0; i < count * sizeof(int); i++)
     {
-        print(f"Byte {i}: 0x{*(bp + i):02X}\0");
+        print(f"Byte {i}: 0x{*(bp + i):02X}\0\0");
     };
 };
 
@@ -1036,7 +1036,7 @@ def bits_to_float(unsigned data{32} bits) -> float
 // Usage: Inspect IEEE-754 representation
 float pi = 3.14159;
 u32 pi_bits = float_to_bits(pi);
-print(f"Pi as bits: 0x{pi_bits:08X}");  // 0x40490FD0
+print(f"Pi as bits: 0x{pi_bits:08X}\0");  // 0x40490FD0
 
 // Manipulate sign bit
 uint32 negative_pi_bits = pi_bits ^ 0x80000000;
@@ -1197,12 +1197,12 @@ u32 result2 = (u32)a + b;    // 4294967286 + 20 (unsigned, wraps)
 // Comparison with mixed signs
 if (a < (i32)b)  // true: -10 < 20
 {
-    print("Signed comparison");
+    print("Signed comparison\0");
 };
 
 if ((u32)a < b)  // false: 4294967286 > 20
 {
-    print("Unsigned comparison\0");
+    print("Unsigned comparison\0\0");
 };
 ```
 
@@ -1223,25 +1223,25 @@ def classify_value(int x, int y) -> void
             {
                 case (0)
                 {
-                    print("Both zero\0");
+                    print("Both zero\0\0");
                 }
                 case (1)
                 {
-                    print("X zero, Y one\0");
+                    print("X zero, Y one\0\0");
                 }
                 default
                 {
-                    print("X zero, Y other\0");
+                    print("X zero, Y other\0\0");
                 };
             };
         }
         case (1)
         {
-            print("X is one\0");
+            print("X is one\0\0");
         }
         default
         {
-            print("X is other\0");
+            print("X is other\0\0");
         };
     };
 };
@@ -1272,11 +1272,11 @@ def risky_operation(int mode) -> void
     }
     elif (mode == 2)
     {
-        throw(ErrorB("Something failed\0"));
+        throw(ErrorB("Something failed\0\0"));
     }
     else
     {
-        throw("Generic error");
+        throw("Generic error\0");
     };
 };
 
@@ -1288,19 +1288,19 @@ def main() -> int
     }
     catch (ErrorA e)
     {
-        print(f"ErrorA caught: code {e.code}\0");
+        print(f"ErrorA caught: code {e.code}\0\0");
     }
     catch (ErrorB e)
     {
-        print(f"ErrorB caught: {e.message}\0");
+        print(f"ErrorB caught: {e.message}\0\0");
     }
     catch (string s)
     {
-        print(f"String error: {s}\0");
+        print(f"String error: {s}\0\0");
     }
     catch (auto x)
     {
-        print("Unknown error type\0");
+        print("Unknown error type\0\0");
     };
     
     return 0;
@@ -1318,7 +1318,7 @@ def find_in_matrix(int[][] matrix, int target) -> bool
         {
             if (matrix[i][j] == target)
             {
-                print(f"Found at [{i}][{j}]\0");
+                print(f"Found at [{i}][{j}]\0\0");
                 return true;  // Break out of both loops
             };
             
@@ -1386,7 +1386,7 @@ object Car
     
     def get_specs() -> string
     {
-        return f"{this.make} {this.model}: {this.engine.horsepower}hp, {this.trans.gears} gears\0";
+        return f"{this.make} {this.model}: {this.engine.horsepower}hp, {this.trans.gears} gears\0\0";
     };
 };
 
@@ -1418,7 +1418,7 @@ object Motorcycle
     
     def get_info() -> string
     {
-        return f"{this.base.make} {this.base.model}\0";
+        return f"{this.base.make} {this.base.model}\0\0";
     };
 };
 ```
@@ -1451,7 +1451,7 @@ object Database
             def connect() -> bool
             {
                 // Can access private members within same object
-                print(f"Connecting to {this.host}:{this.port}\0");
+                print(f"Connecting to {this.host}:{this.port}\0\0");
                 this.connected = true;
                 return true;
             };
@@ -1567,12 +1567,12 @@ object EventSystem
 // Handler functions
 def on_error(int code) -> void
 {
-    print(f"Error: {code}\0");
+    print(f"Error: {code}\0\0");
 };
 
 def on_warning(int code) -> void
 {
-    print(f"Warning: {code}\0");
+    print(f"Warning: {code}\0\0");
 };
 
 // Usage
@@ -1650,7 +1650,7 @@ def Circle::calc_perimeter(void* self_ptr) -> float
 // Usage
 Circle c = Circle(5.0);
 float area = *c.vtable.area_fn(@c);
-print(f"Area: {area}");  // approx 78.54
+print(f"Area: {area}\0");  // approx 78.54
 ```
 
 ---
@@ -1815,7 +1815,7 @@ def parse_ip_header(bytes* packet) -> IPHeader
 def format_ip(be32 addr) -> string
 {
     bytes* bp = (bytes*)@addr;
-    return f"{bp[0]}.{bp[1]}.{bp[2]}.{bp[3]}\0";
+    return f"{bp[0]}.{bp[1]}.{bp[2]}.{bp[3]}\0\0";
 };
 
 // Usage
@@ -1828,8 +1828,8 @@ bytes packet_data = [
 ];
 
 IPHeader hdr = parse_ip_header(@packet_data[0]);
-print(f"Source: {format_ip(hdr.src_addr)}");
-print(f"Dest: {format_ip(hdr.dst_addr)}");
+print(f"Source: {format_ip(hdr.src_addr)}\0");
+print(f"Dest: {format_ip(hdr.dst_addr)}\0");
 ```
 
 ### Fixed-Point Math
@@ -1930,7 +1930,7 @@ void x = void;
 
 if (x == void)
 {
-    print("x is void");
+    print("x is void\0");
 };
 
 // Conditional void assignment
@@ -1960,7 +1960,7 @@ def get_nullable() -> int*
 // Auto infers from right-hand side
 auto x = 42;           // int
 auto y = 3.14;         // float
-auto z = "hello\0";    // unsigned data{8}[]
+auto z = "hello\0\0";    // unsigned data{8}[]
 auto w = @x;           // int*
 
 // Auto with complex types
