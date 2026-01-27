@@ -353,6 +353,7 @@ class FluxCompiler:
                 match (compiler):
                     case "llc":
                         command_line = [
+                            f"$(where {compiler})",
                             "-O" + config['lto_optimization_level'],  # Aggressive optimization level
                             "-filetype=obj",                    # Direct object file output
                             "-mtriple=" + self.module_triple,   # Target triple
@@ -374,7 +375,7 @@ class FluxCompiler:
                         ]
                     case "clang":
                         command_line = [
-                            "clang",
+                            f"$(where {compiler})",
                             "-c",
                             "-O3",
                             str(ll_file),
@@ -385,6 +386,7 @@ class FluxCompiler:
                 success = False
                 try:
                     result = subprocess.run(command_line, check=True, capture_output=True, text=True)
+                    print(result)
                     success = True
                 except Exception as e:
                     self.logger.warning(f"{compiler}: {e}", "compiler")

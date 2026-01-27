@@ -160,7 +160,10 @@ class TokenType(Enum):
     RETURN_ARROW = auto()   # ->
     CHAIN_ARROW = auto()    # <-
     RECURSE_ARROW = auto()  # <~
+
+    # SPECIAL
     FUNCTION_POINTER = auto() # {}*
+    ADDRESS_CAST = auto()     # (@)
     
     # Delimiters
     LEFT_PAREN = auto()     # (
@@ -658,6 +661,12 @@ class FluxLexer:
             
             if char == '^' and self.peek_char() == '^' and self.peek_char(2) == '=':
                 tokens.append(Token(TokenType.XOR_ASSIGN, '^^=', start_pos[0], start_pos[1]))
+                self.advance(count=3)
+                continue
+
+            # ADDRESS CAST
+            if char == "(" and self.peek_char() == "@" and self.peek_char(2) == ")":
+                tokens.append(Token(TokenType.ADDRESS_CAST, '(@)', start_pos[0], start_pos[1]))
                 self.advance(count=3)
                 continue
             
