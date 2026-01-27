@@ -1777,7 +1777,6 @@ class FluxParser:
             operand = self.unary_expression()
             return AddressOf(operand)
         elif self.expect(TokenType.ADDRESS_CAST):
-            print("HERE")
             # Address cast operator (@) - converts integer literal to pointer
             # Uses CastExpression with void* as target type
             self.advance()
@@ -2111,6 +2110,7 @@ class FluxParser:
         
         # Check if this is an array comprehension
         if self.expect(TokenType.FOR):
+            print("DOING ARRAY ArrayComprehension")
             # This is an array comprehension: [expr for (type var in iterable)]
             self.advance()  # consume 'for'
             self.consume(TokenType.LEFT_PAREN)

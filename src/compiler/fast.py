@@ -2871,113 +2871,188 @@ class ArrayComprehension(Expression):
     expression: Expression  # The expression to evaluate for each element
     variable: str  # Loop variable name
     variable_type: Optional[TypeSpec]  # Type of loop variable
-    iterable: Expression  # What to iterate over (e.g., range expression)
+    iterable: Expression  # What to iterate over (e.g., range expression or ArrayLiteral)
     condition: Optional[Expression] = None  # Optional filter condition
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        """Generate code for array comprehension [expr for var in iterable]
-        Bit-width aware: use the declared loop variable type as the element type."""
-        # Resolve element type from the declared loop variable type; default to i32 if unspecified
+        """Generate code for array comprehension [expr for var in iterable]"""
+        # Resolve element type from the declared loop variable type
         if self.variable_type is not None:
             element_type = self.variable_type.get_llvm_type(module)
         else:
             element_type = ir.IntType(32)
         
-        # Generate the iterable (e.g., range) with the resolved element type
-        if isinstance(self.iterable, RangeExpression):
-            # Pass the element_type to the range expression codegen
-            _ = self.iterable.codegen(builder, module, element_type)
-        else:
-            _ = self.iterable.codegen(builder, module)
+        # Handle ArrayLiteral as iterable
+        if isinstance(self.iterable, ArrayLiteral):
+            iterable_elements = self.iterable.elements
+            num_elements = len(iterable_elements)
+            
+            # Allocate result array
+            array_type = ir.ArrayType(element_type, num_elements)
+            array_ptr = builder.alloca(array_type, name="comprehension_array")
+            
+            # Allocate iterable array and populate it
+            iterable_array_ptr = builder.alloca(array_type, name="iterable_array")
+            for i, elem_expr in enumerate(iterable_elements):
+                elem_val = elem_expr.codegen(builder, module)
+                
+                # Cast to element_type if needed
+                from llvmlite import ir as _ir
+                if isinstance(elem_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
+                    if elem_val.type.width > element_type.width:
+                        elem_val = builder.trunc(elem_val, element_type)
+                    elif elem_val.type.width < element_type.width:
+                        elem_val = builder.sext(elem_val, element_type)
+                
+                elem_ptr = builder.gep(iterable_array_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), i)])
+                builder.store(elem_val, elem_ptr)
+            
+            # Create loop variable and index
+            var_ptr = builder.alloca(element_type, name=self.variable)
+            builder.scope[self.variable] = var_ptr
+            index_ptr = builder.alloca(ir.IntType(32), name="comp_index")
+            builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
+            
+            # Loop blocks
+            func = builder.block.function
+            loop_cond = func.append_basic_block('comp_loop_cond')
+            loop_body = func.append_basic_block('comp_loop_body')
+            loop_end = func.append_basic_block('comp_loop_end')
+            
+            builder.branch(loop_cond)
+            
+            # Loop condition: index < num_elements
+            builder.position_at_start(loop_cond)
+            current_index = builder.load(index_ptr)
+            cond = builder.icmp_signed('<', current_index, ir.Constant(ir.IntType(32), num_elements))
+            builder.cbranch(cond, loop_body, loop_end)
+            
+            # Loop body
+            builder.position_at_start(loop_body)
+            
+            # Load current element from iterable
+            elem_ptr = builder.gep(iterable_array_ptr, [ir.Constant(ir.IntType(32), 0), current_index])
+            current_var = builder.load(elem_ptr)
+            builder.store(current_var, var_ptr)
+            
+            # Evaluate expression
+            expr_val = self.expression.codegen(builder, module)
+            
+            # Cast result to element_type if needed
+            from llvmlite import ir as _ir
+            if isinstance(expr_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
+                if expr_val.type.width > element_type.width:
+                    expr_val = builder.trunc(expr_val, element_type)
+                elif expr_val.type.width < element_type.width:
+                    expr_val = builder.sext(expr_val, element_type)
+            
+            # Store result
+            result_elem_ptr = builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), current_index])
+            builder.store(expr_val, result_elem_ptr)
+            
+            # Increment index
+            next_index = builder.add(current_index, ir.Constant(ir.IntType(32), 1))
+            builder.store(next_index, index_ptr)
+            builder.branch(loop_cond)
+            
+            # End of loop
+            builder.position_at_start(loop_end)
+            return array_ptr
         
-        # Determine the size of the result array (may be used for bounds, though we currently use a fixed-cap buffer)
-        if isinstance(self.iterable, RangeExpression):
-            # For ranges, calculate size = end - start using element_type consistently
+        # Handle RangeExpression (existing code)
+        elif isinstance(self.iterable, RangeExpression):
+            _ = self.iterable.codegen(builder, module, element_type)
+            
             start_val = self.iterable.start.codegen(builder, module)
             end_val = self.iterable.end.codegen(builder, module)
             
-            # Cast range bounds to element_type for size calculation
+            # Cast range bounds to element_type
             from llvmlite import ir as _ir
-            if isinstance(start_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType) and start_val.type.width != element_type.width:
-                start_val_sized = builder.trunc(start_val, element_type) if start_val.type.width > element_type.width else builder.sext(start_val, element_type)
+            if isinstance(start_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
+                if start_val.type.width > element_type.width:
+                    start_val_sized = builder.trunc(start_val, element_type)
+                elif start_val.type.width < element_type.width:
+                    start_val_sized = builder.sext(start_val, element_type)
+                else:
+                    start_val_sized = start_val
             else:
                 start_val_sized = start_val
                 
-            if isinstance(end_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType) and end_val.type.width != element_type.width:
-                end_val_sized = builder.trunc(end_val, element_type) if end_val.type.width > element_type.width else builder.sext(end_val, element_type)
+            if isinstance(end_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
+                if end_val.type.width > element_type.width:
+                    end_val_sized = builder.trunc(end_val, element_type)
+                elif end_val.type.width < element_type.width:
+                    end_val_sized = builder.sext(end_val, element_type)
+                else:
+                    end_val_sized = end_val
             else:
                 end_val_sized = end_val
                 
             size_val = builder.sub(end_val_sized, start_val_sized, name="range_size")
+            
+            max_size = 100
+            array_type = ir.ArrayType(element_type, max_size)
+            array_ptr = builder.alloca(array_type, name="comprehension_array")
+            
+            index_ptr = builder.alloca(ir.IntType(32), name="comp_index")
+            builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
+            
+            var_ptr = builder.alloca(element_type, name=self.variable)
+            builder.scope[self.variable] = var_ptr
+            
+            # Cast start_val if needed
+            if isinstance(start_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
+                if start_val.type.width > element_type.width:
+                    start_val = builder.trunc(start_val, element_type)
+                elif start_val.type.width < element_type.width:
+                    start_val = builder.sext(start_val, element_type)
+                    
+            if isinstance(end_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
+                if end_val.type.width > element_type.width:
+                    end_val = builder.trunc(end_val, element_type)
+                elif end_val.type.width < element_type.width:
+                    end_val = builder.sext(end_val, element_type)
+            
+            func = builder.block.function
+            loop_cond = func.append_basic_block('comp_loop_cond')
+            loop_body = func.append_basic_block('comp_loop_body')
+            loop_end = func.append_basic_block('comp_loop_end')
+            
+            builder.store(start_val, var_ptr)
+            builder.branch(loop_cond)
+            
+            builder.position_at_start(loop_cond)
+            current_var = builder.load(var_ptr, name="current_var")
+            cond = builder.icmp_signed('<', current_var, end_val, name="loop_cond")
+            builder.cbranch(cond, loop_body, loop_end)
+            
+            builder.position_at_start(loop_body)
+            
+            expr_val = self.expression.codegen(builder, module)
+            
+            if isinstance(expr_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
+                if expr_val.type.width > element_type.width:
+                    expr_val = builder.trunc(expr_val, element_type)
+                elif expr_val.type.width < element_type.width:
+                    expr_val = builder.sext(expr_val, element_type)
+            
+            current_index = builder.load(index_ptr, name="current_index")
+            array_elem_ptr = builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), current_index], inbounds=True)
+            builder.store(expr_val, array_elem_ptr)
+            
+            next_index = builder.add(current_index, ir.Constant(ir.IntType(32), 1), name="next_index")
+            builder.store(next_index, index_ptr)
+            
+            next_var = builder.add(current_var, ir.Constant(element_type, 1), name="next_var")
+            builder.store(next_var, var_ptr)
+            
+            builder.branch(loop_cond)
+            
+            builder.position_at_start(loop_end)
+            
+            return array_ptr
         else:
-            raise NotImplementedError("Array comprehension only supports range expressions for now")
-        
-        # Allocate result array buffer (fixed-capacity for now)
-        max_size = 100  # Fixed maximum for now
-        array_type = ir.ArrayType(element_type, max_size)
-        array_ptr = builder.alloca(array_type, name="comprehension_array")
-        
-        # Create index variable (use i32 for indexing into arrays)
-        index_ptr = builder.alloca(ir.IntType(32), name="comp_index")
-        builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
-        
-        # Create loop variable with element_type
-        var_ptr = builder.alloca(element_type, name=self.variable)
-        builder.scope[self.variable] = var_ptr
-        
-        # Cast range bounds to element_type if both are integers of differing widths
-        from llvmlite import ir as _ir
-        if isinstance(start_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType) and start_val.type.width != element_type.width:
-            start_val = builder.trunc(start_val, element_type) if start_val.type.width > element_type.width else builder.sext(start_val, element_type)
-        if isinstance(end_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType) and end_val.type.width != element_type.width:
-            end_val = builder.trunc(end_val, element_type) if end_val.type.width > element_type.width else builder.sext(end_val, element_type)
-        
-        # Create loop: for (var = start; var < end; var++)
-        func = builder.block.function
-        loop_cond = func.append_basic_block('comp_loop_cond')
-        loop_body = func.append_basic_block('comp_loop_body')
-        loop_end = func.append_basic_block('comp_loop_end')
-        
-        # Initialize loop variable with start value
-        builder.store(start_val, var_ptr)
-        builder.branch(loop_cond)
-        
-        # Loop condition: var < end (compare using element_type)
-        builder.position_at_start(loop_cond)
-        current_var = builder.load(var_ptr, name="current_var")
-        cond = builder.icmp_signed('<', current_var, end_val, name="loop_cond")
-        builder.cbranch(cond, loop_body, loop_end)
-        
-        # Loop body: evaluate expression and store in array
-        builder.position_at_start(loop_body)
-        
-        # Evaluate the comprehension expression
-        expr_val = self.expression.codegen(builder, module)
-        # Cast expression value to element_type if needed
-        if isinstance(expr_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType) and expr_val.type.width != element_type.width:
-            expr_val = builder.trunc(expr_val, element_type) if expr_val.type.width > element_type.width else builder.sext(expr_val, element_type)
-        
-        # Store in array at current index
-        current_index = builder.load(index_ptr, name="current_index")
-        array_elem_ptr = builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), current_index], inbounds=True)
-        builder.store(expr_val, array_elem_ptr)
-        
-        # Increment index (i32)
-        next_index = builder.add(current_index, ir.Constant(ir.IntType(32), 1), name="next_index")
-        builder.store(next_index, index_ptr)
-        
-        # Increment loop variable by 1 of element_type
-        next_var = builder.add(current_var, ir.Constant(element_type, 1), name="next_var")
-        builder.store(next_var, var_ptr)
-        
-        # Continue loop
-        builder.branch(loop_cond)
-        
-        # End of loop
-        builder.position_at_start(loop_end)
-        
-        # Return the array pointer
-        return array_ptr
+            raise NotImplementedError("Array comprehension only supports range expressions and array literals")
 
 @dataclass
 class FStringLiteral(Expression):
@@ -4173,6 +4248,14 @@ class VariableDeclaration(ASTNode):
             ArrayLiteral.initialize_local_array(
                 builder, module, alloca, llvm_type, self.initial_value
             )
+            return
+
+        if isinstance(self.initial_value, ArrayComprehension):
+            comp_result = self.initial_value.codegen(builder, module)
+            # comp_result is [5 x i32]*, alloca is [5 x i32]*
+            # Load from comp_result and store into alloca
+            loaded_array = builder.load(comp_result, name="comp_array_load")
+            builder.store(loaded_array, alloca)
             return
         
         # Delegate string literal initialization to ArrayLiteral
