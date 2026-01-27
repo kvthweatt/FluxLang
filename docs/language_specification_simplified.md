@@ -56,8 +56,8 @@ def rsub(int x, int y) -> int
 Any file you import will take the place of the import statement.
 
 ```
-import "standard.fx";
-import "mylib.fx", "foobar.fx";  // Multi-line imports are processed from left to right in the order they appear.
+#import "standard.fx";
+#import "mylib.fx", "foobar.fx";  // Multi-line imports are processed from left to right in the order they appear.
 ```
 
 Example:  
@@ -70,7 +70,7 @@ int myVar = 10;
 **`main.fx`**
 
 ```
-import "somefile.fx";  // int myVar = 10;
+#import "somefile.fx";  // int myVar = 10;
 
 def main() -> int
 {
@@ -80,6 +80,19 @@ def main() -> int
     };
     return 0;
 };
+```
+
+### Very simple preprocessor
+```
+#import "standard.fx";
+
+#ifdef __WINDOWS__
+def some_win_generic() -> LPCSTR*;
+#else
+#ifdef __LINUX__
+def some_nix_generic() -> void*;
+#endif;
+#endif;
 ```
 
 ---
@@ -277,7 +290,7 @@ The brackets are replaced with the results of the statements in order respective
 **i-string Example:**
 
 ```
-import "standard.fx";
+#import "standard.fx";
 
 using standard::io;
 
@@ -300,7 +313,7 @@ This allows you to write clean interpolated strings without strange formatting.
 **f-string Example:**
 
 ```
-import "standard.fx"; // standard::io::print()
+#import "standard.fx"; // standard::io::print()
 
 unsigned data{8}[] as string;
 
@@ -358,7 +371,7 @@ int[]   i_array;                    // Definition
 int[]* pi_array = @i_array;         // Pointer
 
 // Pointer Arithmetic:
-import "standard.fx";
+#import "standard.fx";
 
 using standard::io, standard::types;
 
@@ -443,7 +456,7 @@ For example, you can just keep type-chaining:
 Data decays to an integer type under the hood. All data is binary, and is therefore an integer.
 
 ```
-import "standard.fx";
+#import "standard.fx";
 
 unsigned data{8} as byte;   // optionally `unsigned data{8}[] as noopstr;`
 byte[] as noopstring;
@@ -599,7 +612,7 @@ if (x == !void) {...code...};   // If it's not nothing, do something
 ## **Arrays:**
 
 ```
-import "standard.fx";
+#import "standard.fx";
 using standard::io, standard::types;
 
 int[] ia_myArray = [3, 92, 14, 30, 6, 5, 11, 400];
@@ -1919,7 +1932,7 @@ auto {a, b} = p{first, second};  // a=10, b=20
 
 ```
 alignof, and, as, asm, assert, auto, break, bool, case, catch, const, continue, data, def, default,
-do, elif, else, false, float, for, global, heap, if, import, in, is, int, local, namespace, new, not, object, or,
+do, elif, else, false, float, for, global, heap, if, in, is, int, local, namespace, new, not, object, or,
 private, public, register, return, signed, sizeof, stack, struct, super, switch, this, throw, true, try, typeof,
 union, unsigned, void, volatile, while, xor
 ```
