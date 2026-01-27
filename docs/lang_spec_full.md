@@ -337,7 +337,7 @@ switch (e)
 
 Data is a variable bit width, primitive binary data type. Anything can cast to it, and it can cast to any primitive like char, int, float.  
 It is intended to allow Flux programmers to build complex flexible custom types to fit their needs.  
-Data types use big-endian byte order by default. Manipulate bits as needed.  
+Data types use little-endian byte order by default. Manipulate bits as needed.  
 Bit-width bust always be specified.
 Endianness is 1 for Big-Endian, 0 for Little-Endian. Obviously.
 
