@@ -26,7 +26,7 @@
 - false ✅
 - float ✅
 - for ✅
-- from ⚠️ Untested, implementation status unknown.
+- from ⚠️ Incomplete, implementation unfinished
 - global ✅
 - if ✅
 - import ✅

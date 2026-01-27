@@ -512,8 +512,8 @@ If you try to return data with the `return` statement and the function definitio
 
 ```
 def example() -> void {
-    int stackVar = 42;                    // Stack allocated
-    int* heapVar = malloc(sizeof(int));   // Heap allocated
+    int stackVar = 42;          // Stack allocated
+    heap int heapVar = 67;      // Heap allocated
 
     (void)stackVar;  // What happens here?
     (void)heapVar;   // And here?
@@ -838,7 +838,7 @@ const def myconstexpr(int x, int y) -> int {return x * y;};  // Basic syntax
 ## **Heap allocation:**
 
 ```
-int* ptr = new int;  // Allocate
+heap int x = 5;      // Allocate
 (void)ptr;           // Deallocate
 ```
 
@@ -846,13 +846,1129 @@ int* ptr = new int;  // Allocate
 
 ---
 
+## **Advanced Pointer Manipulation**
+
+### Taking Address of Literals
+
+```flux
+// You can take the address of a literal value
+int* p = @42;
+print(*p);  // 42
+
+// The address can be manipulated as an integer
+unsigned data{64}* as u64ptr;
+u64ptr addr = (u64ptr)p;
+addr += 8;  // Move 8 bytes forward in memory
+int* p2 = (int*)addr;
+
+// Pointer arithmetic on literal addresses
+int* base = @100;
+int* offset = base + 5;
+*offset = 200;  // Writing to calculated memory location
+```
+
+### Pointer-Integer Conversions
+
+```flux
+unsigned data{64} as u64ptr;
+unsigned data{32} as uint32;
+
+def manipulate_pointer(int* ptr) -> int*
+{
+    // Convert pointer to integer
+    u64ptr addr = (u64ptr)ptr;
+    
+    // Perform integer arithmetic
+    addr = addr & 0xFFFFFFF0;  // Align to 16-byte boundary
+    addr += 0x100;              // Offset by 256 bytes
+    
+    // Convert back to pointer
+    return (int*)addr;
+};
+
+// Round-trip pointer manipulation
+int x = 42;
+int* px = @x;
+u64ptr addr = (u64ptr)px;
+addr `&= `!0xF;  // Clear lower 4 bits (align to 16 bytes)
+int* aligned_px = (int*)addr;
+```
+
+### Manual Struct Offsetting
+
+```flux
+struct Vector3
+{
+    float x;
+    float y;
+    float z;
+};
+
+def get_y_ptr(Vector3* vec) -> float*
+{
+    unsigned data{64} as u64ptr;
+    
+    // Get base address
+    u64ptr base = (u64ptr)vec;
+    
+    // Manually calculate offset to 'y' (sizeof(float) = 4 bytes)
+    u64ptr y_addr = base + 4;
+    
+    // Return pointer to y member
+    return (float*)y_addr;
+};
+
+// Usage
+Vector3 v = {x = 1.0, y = 2.0, z = 3.0};
+float* py = get_y_ptr(@v);
+*py = 5.0;
+print(v.y);  // 5.0
+```
+
+### Pointer Array Traversal
+
+```flux
+def traverse_as_bytes(int* ptr, int count) -> void
+{
+    byte* bp = (byte*)ptr;
+    
+    for (int i = 0; i < count * sizeof(int); i++)
+    {
+        print(f"Byte {i}: 0x{*(bp + i):02X}\0");
+    };
+};
+
+int[4] data = [0x12345678, 0x9ABCDEF0, 0x11223344, 0x55667788];
+traverse_as_bytes(@data[0], 4);
+```
+
+---
+
+## **Memory Layout and Alignment Tricks**
+
+### Union Type Punning
+
+```flux
+union FloatInt
+{
+    float f;
+    u32 i;
+};
+
+def float_to_bits(float value) -> unsigned data{32}
+{
+    FloatInt converter = {f = value};
+    return converter.i;
+};
+
+def bits_to_float(unsigned data{32} bits) -> float
+{
+    FloatInt converter = {i = bits};
+    return converter.f;
+};
+
+// Usage: Inspect IEEE-754 representation
+float pi = 3.14159;
+u32 pi_bits = float_to_bits(pi);
+print(f"Pi as bits: 0x{pi_bits:08X}");  // 0x40490FD0
+
+// Manipulate sign bit
+uint32 negative_pi_bits = pi_bits ^ 0x80000000;
+float negative_pi = bits_to_float(negative_pi_bits);
+print(negative_pi);  // -3.14159
+```
+
+### Struct Packing with Custom Alignment
+
+```flux
+// Tightly packed struct (no padding)
+struct PackedRGB
+{
+    unsigned data{5:1} as r5 r;    // 5 bits, byte-aligned
+    unsigned data{6:1} as g6 g;    // 6 bits, byte-aligned
+    unsigned data{5:1} as b5 b;    // 5 bits, byte-aligned
+};  // Total: 16 bits (2 bytes)
+
+// Aligned struct with gaps
+struct AlignedData
+{
+    unsigned data{8:16} as byte16 flag;   // 8 bits, 16-bit aligned (1 byte data, 1 byte padding)
+    u32 value;                            // 32 bits, 32-bit aligned
+    unsigned data{8:16} as byte16 status; // 8 bits, 16-bit aligned
+};  // Total: 64 bits (8 bytes) with padding
+
+sizeof(PackedRGB);    // 2 bytes
+sizeof(AlignedData);  // 8 bytes
+
+// Verify alignment requirements
+alignof(PackedRGB);   // 1 byte
+alignof(AlignedData); // 4 bytes (strictest member alignment)
+```
+
+### Endianness Handling
+
+```flux
+unsigned data{16::0} as little16;  // Little-endian 16-bit
+unsigned data{16::1} as big16;     // Big-endian 16-bit
+
+def swap_endian_16(unsigned data{16} value) -> unsigned data{16}
+{
+    return ((value & 0xFF) << 8) | ((value >> 8) & 0xFF);
+};
+
+// Network byte order (big-endian) to host (little-endian)
+def network_to_host(big16 net_value) -> little16
+{
+    // Explicit byte swap
+    return (little16)swap_endian_16((unsigned data{16})net_value);
+};
+
+// Reading from network buffer
+unsigned data{8}[] as byte_array buffer = [0x12, 0x34, 0x56, 0x78];
+big16* net_ptr = (big16*)@buffer[0];
+
+print(*net_ptr);           // 0x1234 (interpreted as big-endian)
+print(*(net_ptr + 1));     // 0x5678
+
+// Convert to little-endian
+little16 host_value = network_to_host(*net_ptr);
+print(host_value);         // 0x3412 (byte-swapped for little-endian)
+```
+
+### Bit-Field Manipulation
+
+```flux
+// 13-bit signed value, 16-bit aligned
+signed data{13:16} as strange13;
+
+strange13 value = 0x1FFF;  // Max positive value for 13 bits
+print(value);               // 8191
+
+value = 0x1000;            // Sign bit set (bit 12)
+print(value);              // -4096 (two's complement)
+
+// Extract specific bit ranges
+u32 packed = 0x12345678;
+
+def extract_bits(uint32 value, int start, int length) -> uint32
+{
+    uint32 mask = ((1 << length) - 1) << start;
+    return (value & mask) >> start;
+};
+
+uint32 nibble0 = extract_bits(packed, 0, 4);   // 0x8
+uint32 nibble3 = extract_bits(packed, 12, 4);  // 0x5
+uint32 byte1 = extract_bits(packed, 8, 8);     // 0x56
+```
+
+---
+
+## **Advanced Data Type Features**
+
+### Unusual Bit Widths
+
+```flux
+// 3-bit unsigned value (0-7)
+unsigned data{3} as tiny = 5;
+
+// 17-bit signed value
+signed data{17} as weird17 = -1000;
+
+// 7-bit with 8-bit alignment (1 bit padding)
+unsigned data{7:8} as aligned7 = 127;
+
+// Array of 5-bit values
+unsigned data{5}[10] as nibble_array arr;
+arr[0] = 0x1F;  // Max value for 5 bits
+
+// Casting between weird widths
+unsigned data{13} as u13 a = 8191;
+unsigned data{17} as u17 b = (u17)a;  // Zero-extend
+signed data{13} as s13 c = (s13)a;    // Reinterpret bits
+```
+
+### Type Aliasing Chains
+
+```flux
+// Build complex type from primitives
+u16 as word;
+word as network_word;
+network_word as port_number;
+
+port_number http_port = 80;
+port_number https_port = 443;
+
+// Function takes the aliased type
+def validate_port(port_number port) -> bool
+{
+    return port > 0 && port < 65536;
+};
+
+// Multi-level pointer aliasing
+word* as word_ptr;
+word_ptr* as word_ptr_ptr;
+
+word value = 0x1234;
+word_ptr p1 = @value;
+word_ptr_ptr p2 = @p1;
+
+print(**p2);  // 0x1234
+```
+
+### Mixing Signed/Unsigned in Expressions
+
+```flux
+signed data{32} as i32;
+unsigned data{32} as u32;
+
+i32 a = -10;
+u32 b = 20;
+
+// Mixed arithmetic (result type determined by widest type)
+i32 result1 = a + (i32)b;    // -10 + 20 = 10 (signed)
+u32 result2 = (u32)a + b;    // 4294967286 + 20 (unsigned, wraps)
+
+// Comparison with mixed signs
+if (a < (i32)b)  // true: -10 < 20
+{
+    print("Signed comparison");
+};
+
+if ((u32)a < b)  // false: 4294967286 > 20
+{
+    print("Unsigned comparison\0");
+};
+```
+
+---
+
+## **Control Flow Edge Cases**
+
+### Nested Switches with Fallthrough
+
+```flux
+def classify_value(int x, int y) -> void
+{
+    switch (x)
+    {
+        case (0)
+        {
+            switch (y)
+            {
+                case (0)
+                {
+                    print("Both zero\0");
+                }
+                case (1)
+                {
+                    print("X zero, Y one\0");
+                }
+                default
+                {
+                    print("X zero, Y other\0");
+                };
+            };
+        }
+        case (1)
+        {
+            print("X is one\0");
+        }
+        default
+        {
+            print("X is other\0");
+        };
+    };
+};
+```
+
+### Complex Try/Catch with Multiple Types
+
+```flux
+object ErrorA
+{
+    int code;
+    def __init(int c) -> this { this.code = c; return this; };
+    def __exit() -> void {return void;};
+};
+
+object ErrorB
+{
+    string message;
+    def __init(string m) -> this { this.message = m; return this; };
+    def __exit() -> void {return void;};
+};
+
+def risky_operation(int mode) -> void
+{
+    if (mode == 1)
+    {
+        throw(ErrorA(100));
+    }
+    elif (mode == 2)
+    {
+        throw(ErrorB("Something failed\0"));
+    }
+    else
+    {
+        throw("Generic error");
+    };
+};
+
+def main() -> int
+{
+    try
+    {
+        risky_operation(1);
+    }
+    catch (ErrorA e)
+    {
+        print(f"ErrorA caught: code {e.code}\0");
+    }
+    catch (ErrorB e)
+    {
+        print(f"ErrorB caught: {e.message}\0");
+    }
+    catch (string s)
+    {
+        print(f"String error: {s}\0");
+    }
+    catch (auto x)
+    {
+        print("Unknown error type\0");
+    };
+    
+    return 0;
+};
+```
+
+### Nested Loops with Break/Continue
+
+```flux
+def find_in_matrix(int[][] matrix, int target) -> bool
+{
+    for (int i = 0; i < 10; i++)
+    {
+        for (int j = 0; j < 10; j++)
+        {
+            if (matrix[i][j] == target)
+            {
+                print(f"Found at [{i}][{j}]\0");
+                return true;  // Break out of both loops
+            };
+            
+            if (matrix[i][j] < 0)
+            {
+                continue;  // Skip negative values
+            };
+        };
+    };
+    
+    return false;
+};
+
+// Do-while with complex condition
+def wait_for_ready(int* status_reg) -> void
+{
+    int timeout = 1000;
+    do
+    {
+        if (*status_reg & 0x01)  // Ready bit
+        {
+            break;
+        };
+        timeout--;
+    }
+    while (timeout > 0 && !(*status_reg & 0x80));  // Not error bit
+};
+```
+
+---
+
+## **Object and Struct Composition Patterns**
+
+### Composition vs Inheritance
+
+```flux
+// Composition approach
+struct Engine
+{
+    int horsepower;
+    float displacement;
+};
+
+struct Transmission
+{
+    int gears;
+    bool automatic;
+};
+
+object Car
+{
+    Engine engine;
+    Transmission trans;
+    string make;
+    string model;
+    
+    def __init(string mk, string mdl) -> this
+    {
+        this.make = mk;
+        this.model = mdl;
+        this.engine = {horsepower = 200, displacement = 2.0};
+        this.trans = {gears = 6, automatic = true};
+        return this;
+    };
+    
+    def get_specs() -> string
+    {
+        return f"{this.make} {this.model}: {this.engine.horsepower}hp, {this.trans.gears} gears\0";
+    };
+};
+
+// Inheritance approach (via composition in reduced spec)
+object Vehicle
+{
+    string make;
+    string model;
+    
+    def __init(string mk, string mdl) -> this
+    {
+        this.make = mk;
+        this.model = mdl;
+        return this;
+    };
+};
+
+object Motorcycle
+{
+    Vehicle base;  // Simulated inheritance
+    bool has_sidecar;
+    
+    def __init(string mk, string mdl, bool sidecar) -> this
+    {
+        this.base = Vehicle(mk, mdl);
+        this.has_sidecar = sidecar;
+        return this;
+    };
+    
+    def get_info() -> string
+    {
+        return f"{this.base.make} {this.base.model}\0";
+    };
+};
+```
+
+### Nested Objects and Private Access
+
+```flux
+object Database
+{
+    object Connection
+    {
+        private
+        {
+            string host;
+            int port;
+        };
+        
+        public
+        {
+            bool connected;
+            
+            def __init(string h, int p) -> this
+            {
+                this.host = h;
+                this.port = p;
+                this.connected = false;
+                return this;
+            };
+            
+            def connect() -> bool
+            {
+                // Can access private members within same object
+                print(f"Connecting to {this.host}:{this.port}\0");
+                this.connected = true;
+                return true;
+            };
+        };
+    };
+    
+    Connection conn;
+    
+    def __init(string host, int port) -> this
+    {
+        this.conn = Connection(host, port);
+        return this;
+    };
+    
+    def get_connection() -> Connection
+    {
+        // Cannot access conn.host or conn.port (private to Connection)
+        return this.conn;
+    };
+};
+
+Database db = Database("localhost\0", 5432);
+db.get_connection().connect();
+// db.get_connection().host;  // ERROR: private member
+```
+
+### Struct-in-Object Patterns
+
+```flux
+struct Point2D
+{
+    float x;
+    float y;
+};
+
+struct BoundingBox
+{
+    Point2D min;
+    Point2D max;
+};
+
+object Shape
+{
+    BoundingBox bounds;
+    string name;
+    
+    def __init(string n) -> this
+    {
+        this.name = n;
+        this.bounds = {
+            min = {x = 0.0, y = 0.0},
+            max = {x = 1.0, y = 1.0}
+        };
+        return this;
+    };
+    
+    def area() -> float
+    {
+        float width = this.bounds.max.x - this.bounds.min.x;
+        float height = this.bounds.max.y - this.bounds.min.y;
+        return width * height;
+    };
+    
+    def contains(Point2D pt) -> bool
+    {
+        return pt.x >= this.bounds.min.x &&
+               pt.x <= this.bounds.max.x &&
+               pt.y >= this.bounds.min.y &&
+               pt.y <= this.bounds.max.y;
+    };
+};
+```
+
+---
+
+## **Function Pointer Patterns**
+
+### Callback Systems
+
+```flux
+// Function pointer type for callbacks
+void *callback(int) as EventHandler;
+
+object EventSystem
+{
+    EventHandler[10] handlers;
+    int handler_count;
+    
+    def __init() -> this
+    {
+        this.handler_count = 0;
+        return this;
+    };
+    
+    def register(EventHandler handler) -> void
+    {
+        if (this.handler_count < 10)
+        {
+            this.handlers[this.handler_count] = handler;
+            this.handler_count++;
+        };
+    };
+    
+    def trigger(int event_code) -> void
+    {
+        for (int i = 0; i < this.handler_count; i++)
+        {
+            *this.handlers[i](event_code);  // Call each handler
+        };
+    };
+};
+
+// Handler functions
+def on_error(int code) -> void
+{
+    print(f"Error: {code}\0");
+};
+
+def on_warning(int code) -> void
+{
+    print(f"Warning: {code}\0");
+};
+
+// Usage
+EventSystem events = EventSystem();
+events.register(@on_error);
+events.register(@on_warning);
+events.trigger(404);  // Calls both handlers
+```
+
+### Function Pointer Arrays (Jump Tables)
+
+```flux
+int *operations[4](int, int) as OpTable;
+
+def op_add(int a, int b) -> int { return a + b; };
+def op_sub(int a, int b) -> int { return a - b; };
+def op_mul(int a, int b) -> int { return a * b; };
+def op_div(int a, int b) -> int { return b != 0 ? a / b : 0; };
+
+OpTable ops = [@op_add, @op_sub, @op_mul, @op_div];
+
+def calculate(int opcode, int a, int b) -> int
+{
+    if (opcode >= 0 && opcode < 4)
+    {
+        return *ops[opcode](a, b);  // Jump table dispatch
+    };
+    return 0;
+};
+
+// Usage
+print(calculate(0, 10, 5));  // 15 (add)
+print(calculate(1, 10, 5));  // 5  (sub)
+print(calculate(2, 10, 5));  // 50 (mul)
+print(calculate(3, 10, 5));  // 2  (div)
+```
+
+### Vtable-like Structures
+
+```flux
+struct ShapeVTable
+{
+    float *area(void*) as area_fn;
+    float *perimeter(void*) as perim_fn;
+};
+
+object Circle
+{
+    float radius;
+    ShapeVTable* vtable;
+    
+    def __init(float r) -> this
+    {
+        this.radius = r;
+        this.vtable = @{
+            area_fn = @Circle::calc_area,
+            perim_fn = @Circle::calc_perimeter
+        };
+        return this;
+    };
+};
+
+def Circle::calc_area(void* self_ptr) -> float
+{
+    Circle* self = (Circle*)self_ptr;
+    return 3.14159 * self.radius * self.radius;
+};
+
+def Circle::calc_perimeter(void* self_ptr) -> float
+{
+    Circle* self = (Circle*)self_ptr;
+    return 2.0 * 3.14159 * self.radius;
+};
+
+// Usage
+Circle c = Circle(5.0);
+float area = *c.vtable.area_fn(@c);
+print(f"Area: {area}");  // approx 78.54
+```
+
+---
+
+## **Array Comprehension Advanced Examples**
+
+### Multi-dimensional Comprehension
+
+```flux
+// Generate 2D grid
+int[10][10] grid = [
+    [x * y for (int y = 0; y < 10; y++)]
+    for (int x = 0; x < 10; x++)
+];
+
+print(grid[5][5]);  // 25
+
+// Conditional 2D comprehension
+int[10][10] chess_pattern = [
+    [(x + y) % 2 for (int y = 0; y < 10; y++)]
+    for (int x = 0; x < 10; x++)
+];
+```
+
+### Comprehension with Complex Expressions
+
+```flux
+// Fibonacci sequence
+int[20] fib = [
+    x == 0 ? 0 : (x == 1 ? 1 : fib[x-1] + fib[x-2])
+    for (int x = 0; x < 20; x++)
+];
+
+// Prime number sieve (simplified)
+bool[100] is_prime = [
+    x < 2 ? false : (x == 2 ? true : x % 2 != 0)
+    for (int x = 0; x < 100; x++)
+];
+
+// Transformation with filtering
+int[] source = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+int[5] evens_squared = [
+    x * x 
+    for (int x in source) 
+    if (x % 2 == 0)
+];  // [4, 16, 36, 64, 100]
+```
+
+---
+
+## **Memory Management Patterns**
+
+### Manual Memory Pools
+
+```flux
+struct MemoryBlock
+{
+    unsigned data{8}[1024] as byte_array data;
+    bool in_use;
+};
+
+object MemoryPool
+{
+    MemoryBlock[100] blocks;
+    
+    def __init() -> this
+    {
+        for (int i = 0; i < 100; i++)
+        {
+            this.blocks[i].in_use = false;
+        };
+        return this;
+    };
+    
+    def allocate() -> unsigned data{8}*
+    {
+        for (int i = 0; i < 100; i++)
+        {
+            if (!this.blocks[i].in_use)
+            {
+                this.blocks[i].in_use = true;
+                return @this.blocks[i].data[0];
+            };
+        };
+        return (unsigned data{8}*)0;  // null
+    };
+    
+    def free(unsigned data{8}* ptr) -> void
+    {
+        unsigned data{64} as u64ptr;
+        u64ptr block_base = (u64ptr)@this.blocks[0];
+        u64ptr ptr_addr = (u64ptr)ptr;
+        
+        int index = (int)((ptr_addr - block_base) / sizeof(MemoryBlock));
+        if (index >= 0 && index < 100)
+        {
+            this.blocks[index].in_use = false;
+        };
+    };
+};
+```
+
+### Stack vs Heap Allocation
+
+```flux
+def test_allocation() -> void
+{
+    // Stack allocation (automatic)
+    stack int stack_var = 42;
+    stack int[1000] stack_array;
+    
+    // Heap allocation (manual)
+    heap int* heap_var = new int;
+    *heap_var = 42;
+    
+    heap int[]* heap_array = new int[1000];
+    
+    // Use the variables
+    print(stack_var);
+    print(*heap_var);
+    
+    // Manual cleanup for heap
+    (void)heap_var;
+    (void)heap_array;
+    
+    // stack_var automatically cleaned up on return
+};
+```
+
+---
+
+## **Practical Real-World Examples**
+
+### Simple Packet Parser
+
+```flux
+unsigned data{8}[] as bytes;
+unsigned data{16::1} as be16;  // Big-endian 16-bit
+unsigned data{32::1} as be32;  // Big-endian 32-bit
+
+struct IPHeader
+{
+    unsigned data{4} as nibble version;
+    unsigned data{4} as nibble ihl;
+    unsigned data{8} as byte tos;
+    be16 total_length;
+    be16 identification;
+    be16 flags_offset;
+    unsigned data{8} as byte ttl;
+    unsigned data{8} as byte protocol;
+    be16 checksum;
+    be32 src_addr;
+    be32 dst_addr;
+};
+
+def parse_ip_header(bytes* packet) -> IPHeader
+{
+    IPHeader* header = (IPHeader*)packet;
+    return *header;
+};
+
+def format_ip(be32 addr) -> string
+{
+    bytes* bp = (bytes*)@addr;
+    return f"{bp[0]}.{bp[1]}.{bp[2]}.{bp[3]}\0";
+};
+
+// Usage
+bytes packet_data = [
+    0x45, 0x00, 0x00, 0x3c,  // Version=4, IHL=5, ToS=0, Length=60
+    0x1c, 0x46, 0x40, 0x00,  // ID, Flags
+    0x40, 0x06, 0xb1, 0xe6,  // TTL=64, Protocol=TCP, Checksum
+    0xc0, 0xa8, 0x01, 0x01,  // Source: 192.168.1.1
+    0xc0, 0xa8, 0x01, 0x02   // Dest: 192.168.1.2
+];
+
+IPHeader hdr = parse_ip_header(@packet_data[0]);
+print(f"Source: {format_ip(hdr.src_addr)}");
+print(f"Dest: {format_ip(hdr.dst_addr)}");
+```
+
+### Fixed-Point Math
+
+```flux
+// 16.16 fixed-point format
+signed data{32} as fixed16_16;
+
+def to_fixed(float value) -> fixed16_16
+{
+    return (fixed16_16)(value * 65536.0);
+};
+
+def from_fixed(fixed16_16 value) -> float
+{
+    return (float)value / 65536.0;
+};
+
+def fixed_mul(fixed16_16 a, fixed16_16 b) -> fixed16_16
+{
+    signed data{64} as i64 temp = ((i64)a * (i64)b) >> 16;
+    return (fixed16_16)temp;
+};
+
+def fixed_div(fixed16_16 a, fixed16_16 b) -> fixed16_16
+{
+    signed data{64} as i64 temp = ((i64)a << 16) / (i64)b;
+    return (fixed16_16)temp;
+};
+
+// Usage
+fixed16_16 a = to_fixed(3.14159);
+fixed16_16 b = to_fixed(2.0);
+fixed16_16 result = fixed_mul(a, b);
+print(from_fixed(result));  // approx 6.28318
+```
+
+### Circular Buffer
+
+```flux
+object CircularBuffer
+{
+    unsigned data{8}[256] as byte buffer;
+    int read_pos;
+    int write_pos;
+    int count;
+    
+    def __init() -> this
+    {
+        this.read_pos = 0;
+        this.write_pos = 0;
+        this.count = 0;
+        return this;
+    };
+    
+    def write(unsigned data{8} value) -> bool
+    {
+        if (this.count >= 256)
+        {
+            return false;  // Buffer full
+        };
+        
+        this.buffer[this.write_pos] = value;
+        this.write_pos = (this.write_pos + 1) % 256;
+        this.count++;
+        return true;
+    };
+    
+    def read() -> unsigned data{8}
+    {
+        if (this.count == 0)
+        {
+            return 0;  // Buffer empty
+        };
+        
+        unsigned data{8} value = this.buffer[this.read_pos];
+        this.read_pos = (this.read_pos + 1) % 256;
+        this.count--;
+        return value;
+    };
+    
+    def available() -> int
+    {
+        return this.count;
+    };
+};
+```
+
+---
+
+## **Type System Edge Cases**
+
+### Void Semantics
+
+```flux
+// Void as a value
+void x = void;
+
+if (x == void)
+{
+    print("x is void");
+};
+
+// Conditional void assignment
+void y = condition ? void : some_value;
+
+// Void in arrays (creates holes)
+int[] sparse = [1, 2, void, 4, void, 6];
+if (sparse[2] == void)
+{
+    sparse[2] = 3;  // Fill the hole
+};
+
+// Function returning void pointer
+def get_nullable() -> int*
+{
+    if (error_condition)
+    {
+        return (int*)void;  // Return null
+    };
+    return @some_value;
+};
+```
+
+### Auto Type Inference
+
+```flux
+// Auto infers from right-hand side
+auto x = 42;           // int
+auto y = 3.14;         // float
+auto z = "hello\0";    // unsigned data{8}[]
+auto w = @x;           // int*
+
+// Auto with complex types
+auto result = calculate_something();  // Infers return type
+
+// Auto in loops
+for (auto val in array)
+{
+    // val type inferred from array element type
+    print(val);
+};
+
+// Auto destructuring
+struct Pair { int first; int second; };
+Pair p = {first = 10, second = 20};
+auto {a, b} = p{first, second};  // a=10, b=20
+```
+
+---
+
 # Keyword list:
 
 ```
 alignof, and, as, asm, assert, auto, break, bool, case, catch, const, continue, data, def, default,
-do, elif, else, false, float, for, global, if, import, in, is, int, namespace, new, not, object, or,
-private, public, return, signed, sizeof, struct, super, switch, this, throw, true, try, typeof,
+do, elif, else, false, float, for, global, heap, if, import, in, is, int, local, namespace, new, not, object, or,
+private, public, register, return, signed, sizeof, stack, struct, super, switch, this, throw, true, try, typeof,
 union, unsigned, void, volatile, while, xor
+```
+
+# Operator list:
+
+```
+ADD = "+"
+SUB = "-"
+MUL = "*"
+DIV = "/"
+MOD = "%"
+POWER = "^"
+XOR = "^^"
+OR = "|"
+AND = "&"
+NOR = "!|"
+NAND = "!&"
+
+INCREMENT = "++"
+DECREMENT = "--"
+
+EQUAL = "=="
+NOT_EQUAL = "!="
+LESS_THAN = "<"
+LESS_EQUAL = "<="
+GREATER_THAN = ">"
+GREATER_EQUAL = ">="
+
+BITSHIFT_LEFT = "<<"
+BITSHIFT_RIGHT = ">>"
+
+ASSIGN = "="
+PLUS_ASSIGN = "+="
+MINUS_ASSIGN = "-="
+MULTIPLY_ASSIGN = "*="
+DIVIDE_ASSIGN = "/="
+MODULO_ASSIGN = "%="
+POWER_ASSIGN = "^="
+XOR_ASSIGN = "^^="
+BITSHIFT_LEFT_ASSIGN = "<<="
+BITSHIFT_RIGHT_ASSIGN = ">>="
+
+ADDRESS_CAST = "(@)"
+ADDRESS_OF = "@"
+RANGE = ".."
+SCOPE = "::"
+TERNARY = "?:"
+NULL_COALESCE = "??"
 ```
 
 ---
