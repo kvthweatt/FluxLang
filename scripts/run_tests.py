@@ -174,7 +174,7 @@ class TestRunner:
                     print(f"   Output: {result.stdout.strip()}")
                 return True, result.stdout, elapsed
             else:
-                print(f"FAILED (exit code: {result.returncode})")
+                print(f"RAN (exit code: {result.returncode}) {"PASS" if result.returncode == 0 else "ERR"}")
                 if self.verbose:
                     if result.stdout.strip():
                         print(f"   Stdout: {result.stdout.strip()}")

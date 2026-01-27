@@ -13,7 +13,7 @@ def main() -> int
     
     // Dereference through the chaos
     //int sacrificed = @void_ptr;    // Causes another i32* != i32*
-    int* sacrificed = *sacrificed;
+    //int* sacrificed = *sacrificed;
     
     // Array comprehension that does nothing useful
     int[5] summoning = [i * cursed for (int i in [0, 1, 2, 3, 4])];
@@ -33,5 +33,5 @@ def main() -> int
         print("CURSED\0");
     };
     
-    return 0xDEAD;
+    return 0dCURSED;
 };

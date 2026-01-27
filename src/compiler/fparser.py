@@ -1032,6 +1032,10 @@ class FluxParser:
             if self.expect(TokenType.ASSIGN):
                 self.advance()
                 initial_value = self.expression()
+
+                if isinstance(initial_value, StructLiteral) and initial_value.struct_type is None:
+                    if type_spec.custom_typename:
+                        initial_value.struct_type = type_spec.custom_typename
             
             # Create variable declaration
             var_decl = VariableDeclaration(names[0], type_spec, initial_value)

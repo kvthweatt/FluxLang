@@ -6503,37 +6503,137 @@ class StructInstance(Expression):
 @dataclass
 class StructLiteral(Expression):
     """
-    Struct literal for inline initialization.
-    
-    Syntax: (StructType){field1 = value1, field2 = value2}
-    
-    Examples:
-        Data d = (Data){a = 10, b = 20};
-        process((Data){a = 100, b = 200});
-        d = (Data){a = 30, b = 40};  // Re-assign with new literal
-    
-    The struct type MUST be explicitly specified via cast syntax.
-    No implicit type inference - this is explicit Flux style.
+    Struct literal - inline struct initialization.
+    Can be either named fields {a=1, b=2} or positional {1, 2, 3}
     """
-    field_values: Dict[str, Expression]
-    positional_values: Dict[str, Expression]
-    struct_type: Optional[str] = None  # Set by CastExpression wrapper
+    field_values: Dict[str, Expression] = field(default_factory=dict)
+    positional_values: List[Expression] = field(default_factory=list)
+    struct_type: Optional[str] = None  # Can be inferred from context
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        """
-        Generate packed struct literal.
-        
-        The struct type must be explicitly specified via cast before codegen.
-        This should never be called directly - always wrapped in CastExpression.
-        """
+        """Generate code for struct literal."""
+        # Struct type MUST be known from context (variable declaration)
         if self.struct_type is None:
             raise ValueError(
-                "Struct literal must be cast to a type: (StructType){fields...}"
+                "Struct literal must have type context. "
+                "This should be set by VariableDeclaration during parsing."
             )
         
-        # Create StructInstance with explicit type
-        instance = StructInstance(self.struct_type, self.field_values)
-        return instance.codegen(builder, module)
+        # Get struct vtable
+        if not hasattr(module, '_struct_vtables'):
+            raise ValueError(f"Struct '{self.struct_type}' not defined")
+        
+        vtable = module._struct_vtables.get(self.struct_type)
+        if not vtable:
+            raise ValueError(f"Struct '{self.struct_type}' not defined")
+        
+        struct_type = module._struct_types[self.struct_type]
+        
+        # Handle positional initialization
+        if self.positional_values:
+            # Convert positional to named based on field order
+            if len(self.positional_values) > len(vtable.fields):
+                raise ValueError(
+                    f"Too many initializers for struct '{self.struct_type}': "
+                    f"got {len(self.positional_values)}, expected {len(vtable.fields)}"
+                )
+            
+            # Map positional values to field names
+            for i, value in enumerate(self.positional_values):
+                field_name = vtable.fields[i][0]
+                self.field_values[field_name] = value
+        
+        # Create zeroed instance
+        if isinstance(struct_type, ir.IntType):
+            instance = ir.Constant(struct_type, 0)
+        else:
+            instance = ir.Constant(struct_type, [ir.Constant(ir.IntType(8), 0)] * vtable.total_bytes)
+        
+        # Pack field values
+        for field_name, field_value_expr in self.field_values.items():
+            field_info = next(
+                (f for f in vtable.fields if f[0] == field_name),
+                None
+            )
+            if not field_info:
+                raise ValueError(f"Field '{field_name}' not found in struct '{self.struct_type}'")
+            
+            _, bit_offset, bit_width, alignment = field_info
+            
+            # Generate value
+            field_value = field_value_expr.codegen(builder, module)
+            
+            # Pack into instance
+            instance = self._pack_field_value(
+                builder, instance, field_value, 
+                bit_offset, bit_width, vtable.total_bits
+            )
+        
+        return instance
+    
+    def _pack_field_value(
+        self, 
+        builder: ir.IRBuilder, 
+        instance: ir.Value,
+        field_value: ir.Value,
+        bit_offset: int,
+        bit_width: int,
+        total_bits: int
+    ) -> ir.Value:
+        """Pack a field value into the struct at the correct bit offset."""
+        if isinstance(instance.type, ir.IntType):
+            instance_type = instance.type
+            
+            # Convert field value to instance width
+            if field_value.type.width < instance_type.width:
+                field_value_extended = builder.zext(field_value, instance_type)
+            elif field_value.type.width > instance_type.width:
+                field_value_extended = builder.trunc(field_value, instance_type)
+            else:
+                field_value_extended = field_value
+            
+            # Shift to position
+            if bit_offset > 0:
+                field_value_shifted = builder.shl(
+                    field_value_extended,
+                    ir.Constant(instance_type, bit_offset)
+                )
+            else:
+                field_value_shifted = field_value_extended
+            
+            # Create mask to clear the field
+            mask = ((1 << bit_width) - 1) << bit_offset
+            inverse_mask = (~mask) & ((1 << total_bits) - 1)
+            
+            # Clear the field and insert new value
+            cleared = builder.and_(instance, ir.Constant(instance_type, inverse_mask))
+            result = builder.or_(cleared, field_value_shifted)
+            
+            return result
+        else:
+            # Byte array - pack the field
+            byte_offset = bit_offset // 8
+            bit_in_byte = bit_offset % 8
+            
+            if bit_in_byte == 0 and bit_width % 8 == 0:
+                # Byte-aligned field - simple case
+                field_bytes = bit_width // 8
+                
+                # Convert field value to bytes and store
+                for i in range(field_bytes):
+                    # Extract byte from field value
+                    shift_amount = i * 8
+                    byte_mask = 0xFF << shift_amount
+                    byte_val = builder.lshr(field_value, ir.Constant(field_value.type, shift_amount))
+                    byte_val = builder.and_(byte_val, ir.Constant(field_value.type, 0xFF))
+                    byte_val = builder.trunc(byte_val, ir.IntType(8))
+                    
+                    # Insert into array
+                    instance = builder.insert_value(instance, byte_val, byte_offset + i)
+                
+                return instance
+            else:
+                raise NotImplementedError("Unaligned fields in large structs not yet supported")
 
 # Struct pointer vtable
 @dataclass
@@ -6600,79 +6700,55 @@ class StructVTable:
 @dataclass
 class StructDef(ASTNode):
     """
-    Struct definition - creates a type contract (vtable).
-    
-    Unlike traditional structs, this does NOT allocate data.
-    It creates compile-time metadata that describes memory layout.
-    
-    Actual struct instances are pure data with no overhead.
+    Struct definition - creates a Table Layout Descriptor (TLD).
+    Struct instances are pure data with no overhead.
     """
     name: str
     members: List[StructMember] = field(default_factory=list)
     base_structs: List[str] = field(default_factory=list)
     nested_structs: List['StructDef'] = field(default_factory=list)
-    vtable: Optional[StructVTable] = None  # Generated during codegen
+    storage_class: Optional[StorageClass] = None
+    vtable: Optional[StructVTable] = None
     
     def calculate_vtable(self, module: ir.Module) -> StructVTable:
-        """
-        Calculate struct layout and generate vtable.
-        
-        This determines:
-        - Bit offset for each field
-        - Total struct size in bits
-        - Required alignment
-        
-        Returns: StructVTable with all metadata
-        """
+        """Calculate struct layout and generate TLD."""
         fields = []
         current_offset = 0
         max_alignment = 1
         
         for member in self.members:
-            # Get member type information
             member_type = member.type_spec
             
-            # Calculate bit width
             if member_type.bit_width is not None:
                 bit_width = member_type.bit_width
-                alignment = member_type.alignment or bit_width
+                alignment = member_type.alignment if member_type.alignment is not None else bit_width
             elif member_type.custom_typename:
-                # Look up custom type in module's type table
-                custom_type_info = self._get_custom_type_info(
-                    member_type.custom_typename, module
-                )
+                custom_type_info = self._get_custom_type_info(member_type.custom_typename, module)
                 bit_width = custom_type_info['bit_width']
                 alignment = custom_type_info['alignment']
             else:
-                # Built-in types
                 bit_width = self._get_builtin_bit_width(member_type.base_type)
                 alignment = bit_width
             
-            # Handle alignment
             if alignment > 1:
-                # Align current offset to alignment boundary
                 misalignment = current_offset % alignment
                 if misalignment != 0:
                     current_offset += alignment - misalignment
             
-            # Record field metadata
             fields.append((member.name, current_offset, bit_width, alignment))
-            member.offset = current_offset  # Store in member for later use
+            member.offset = current_offset
             
-            # Advance offset
             current_offset += bit_width
             max_alignment = max(max_alignment, alignment)
         
-        # Calculate total size
         total_bits = current_offset
         
-        # Align total size to max alignment
         if max_alignment > 1:
             misalignment = total_bits % max_alignment
             if misalignment != 0:
                 total_bits += max_alignment - misalignment
         
-        total_bytes = (total_bits + 7) // 8  # Round up to bytes
+        total_bytes = (total_bits + 7) // 8
         
         return StructVTable(
             struct_name=self.name,
@@ -6694,51 +6770,37 @@ class StructDef(ASTNode):
         return widths.get(base_type, 32)
     
     def _get_custom_type_info(self, typename: str, module: ir.Module) -> Dict:
-        """
-        Look up custom type information from module's type registry.
-        
-        Returns: dict with 'bit_width' and 'alignment' keys
-        """
+        """Look up custom type information from module's type registry."""
         if not hasattr(module, '_custom_types'):
             raise NameError(f"Custom type '{typename}' not found")
         
         if typename not in module._custom_types:
-            raise NameError(f"Custom type '{typename}' not defined")
+            raise NameError(
+                f"Custom type '{typename}' not defined. "
+                f"Make sure the type is defined before the struct or imported properly."
+            )
         
         return module._custom_types[typename]
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
-        """
-        Generate LLVM IR for struct definition.
-        
-        This creates:
-        1. Global vtable constant with metadata
-        2. Type alias for instances (raw bits)
-        3. Helper functions for field access
-        
-        Returns: LLVM type representing struct instances (integer type)
-        """
-        # Calculate vtable
+        """Generate LLVM IR for struct definition."""
         self.vtable = self.calculate_vtable(module)
         
-        # Generate vtable global constant
+        # Generate TLD global constant
         vtable_constant = self.vtable.to_llvm_constant(module)
         vtable_global = ir.GlobalVariable(
             module,
             vtable_constant.type,
-            name=f"{self.name}.vtable"
+            name=f"{self.name}.TLD"
         )
         vtable_global.initializer = vtable_constant
         vtable_global.linkage = 'internal'
         vtable_global.global_constant = True
         
         # Create type alias for instances
-        # Instances are just raw bits - represented as integer type
         if self.vtable.total_bits <= 64:
-            # Small structs: use native integer type
             instance_type = ir.IntType(self.vtable.total_bits)
         else:
-            # Large structs: use byte array
             instance_type = ir.ArrayType(ir.IntType(8), self.vtable.total_bytes)
         
         # Store type information in module
@@ -6746,44 +6808,28 @@ class StructDef(ASTNode):
             module._struct_types = {}
         if not hasattr(module, '_struct_vtables'):
             module._struct_vtables = {}
+        if not hasattr(module, '_struct_storage_classes'):
+            module._struct_storage_classes = {}
         
         module._struct_types[self.name] = instance_type
         module._struct_vtables[self.name] = self.vtable
         
-        # Generate field access helpers
-        self._generate_field_accessors(module, instance_type)
+        if self.storage_class is not None:
+            module._struct_storage_classes[self.name] = self.storage_class
+        
+        # Handle member initial values
+        for member in self.members:
+            if member.initial_value is not None:
+                if not hasattr(module, '_struct_member_defaults'):
+                    module._struct_member_defaults = {}
+                member_key = f"{self.name}.{member.name}"
+                module._struct_member_defaults[member_key] = member.initial_value
         
         # Process nested structs
         for nested in self.nested_structs:
             nested.codegen(builder, module)
         
         return instance_type
-    
-    def _generate_field_accessors(self, module: ir.Module, struct_type: ir.Type):
-        """
-        Store field access information in vtable.
-        
-        Field access is done inline at the call site, not via helper functions.
-        The vtable metadata tells the compiler how to generate the correct
-        bit manipulation code for each field access.
-        
-        This function just validates the layout - actual access code is
-        generated on-demand when fields are accessed.
-        """
-        # No hidden functions generated - field access is always inline
-        # The vtable is sufficient metadata for the compiler to generate
-        # correct access code at each use site
-        pass
-    
-    def _get_field_llvm_type(self, type_spec: TypeSpec, module: ir.Module) -> ir.Type:
-        """Convert TypeSpec to LLVM type"""
-        try:
-            return type_spec.get_llvm_type(module)
-        except:
-            # Fallback for data types
-            if type_spec.bit_width:
-                return ir.IntType(type_spec.bit_width)
-            return ir.IntType(32)
 
 # ============================================================================
 # Struct Operations
@@ -6803,19 +6849,61 @@ class StructFieldAccess(Expression):
     field_name: str
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        """
-        Generate inline field access code.
-        
-        Uses vtable metadata to determine bit offset and generates
-        the appropriate shift/mask operations inline.
-        """
+        """Generate inline field access code."""
         # Get struct instance value
-        instance = self.struct_instance.codegen(builder, module)
+        instance_val = self.struct_instance.codegen(builder, module)
+
+        # If instance is a pointer, load it first
+        if isinstance(instance_val.type, ir.PointerType):
+            instance = builder.load(instance_val, name="struct_load")
+        else:
+            instance = instance_val
         
-        # Determine struct type from instance
-        # For now, we need the struct name - this should be tracked in type system
-        # TODO: Add type tracking to expressions
-        struct_name = self._infer_struct_name(instance, module)
+        # Determine struct type - check if instance is from a variable
+        struct_name = None
+        is_pointer = False
+        
+        # If accessing from an Identifier, look up its type in scope_type_info
+        if isinstance(self.struct_instance, Identifier):
+            var_name = self.struct_instance.name
+            if hasattr(builder, 'scope_type_info') and var_name in builder.scope_type_info:
+                type_spec = builder.scope_type_info[var_name]
+                if type_spec.custom_typename:
+                    struct_name = type_spec.custom_typename
+                    is_pointer = type_spec.is_pointer
+
+        # If it's a pointer, use GEP to access fields
+        if is_pointer and isinstance(instance_val.type, ir.PointerType):
+            # Get vtable to find field offset
+            vtable = module._struct_vtables.get(struct_name)
+            if not vtable:
+                raise ValueError(f"Cannot determine struct type for field access")
+            
+            # Find field index
+            field_index = None
+            for i, field_info in enumerate(vtable.fields):
+                if field_info[0] == self.field_name:
+                    field_index = i
+                    break
+            
+            if field_index is None:
+                raise ValueError(f"Field '{self.field_name}' not found in struct '{struct_name}'")
+            
+            # Use GEP to get pointer to field, then load
+            zero = ir.Constant(ir.IntType(32), 0)
+            field_idx = ir.Constant(ir.IntType(32), field_index)
+            field_ptr = builder.gep(instance_val, [zero, field_idx], name=f"{self.field_name}_ptr")
+            return builder.load(field_ptr, name=self.field_name)
+        
+        # Otherwise, handle as before (load if pointer to value)
+        if isinstance(instance_val.type, ir.PointerType):
+            instance = builder.load(instance_val, name="struct_load")
+        else:
+            instance = instance_val
+
+        # Fallback: try to infer from type
+        if struct_name is None:
+            struct_name = self._infer_struct_name(instance, module)
         
         # Get vtable
         vtable = module._struct_vtables.get(struct_name)
@@ -6890,12 +6978,18 @@ class StructFieldAccess(Expression):
                 )
     
     def _infer_struct_name(self, instance: ir.Value, module: ir.Module) -> str:
-        """
-        Infer struct name from instance type.
+        """Infer struct name from instance type."""
+        # Try to get from scope_type_info if accessing an Identifier
+        if isinstance(self.struct_instance, Identifier):
+            var_name = self.struct_instance.name
+            if hasattr(module, '_current_builder'):
+                builder = module._current_builder
+                if hasattr(builder, 'scope_type_info') and var_name in builder.scope_type_info:
+                    type_spec = builder.scope_type_info[var_name]
+                    if type_spec.custom_typename:
+                        return type_spec.custom_typename
         
-        TODO: This should be tracked in the type system properly.
-        For now, we match by type equality.
-        """
+        # Fallback: match by type
         if not hasattr(module, '_struct_types'):
             raise ValueError("No struct types defined")
         
@@ -7110,6 +7204,12 @@ class ObjectDef(ASTNode):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
         print(f"[codegen] Processing object: {self.name}")
+
+        if not hasattr(module, '_struct_vtables'):
+            module._struct_vtables = {}
+        if not hasattr(module, '_struct_types'):
+            module._struct_types = {}
+
         # First create a struct type for the object's data members
         member_types = []
         member_names = []
@@ -7129,7 +7229,34 @@ class ObjectDef(ASTNode):
         if not hasattr(module, '_struct_types'):
             module._struct_types = {}
         module._struct_types[self.name] = struct_type
-        
+
+        fields = []
+        for i, member in enumerate(self.members):
+            # Each field: (name, bit_offset, bit_width, alignment)
+            member_type = member_types[i]
+            if isinstance(member_type, ir.IntType):
+                bit_width = member_type.width
+                alignment = member_type.width
+            elif isinstance(member_type, ir.FloatType):
+                bit_width = 32
+                alignment = 32
+            else:
+                bit_width = 64  # pointer or other
+                alignment = 64
+            
+            bit_offset = i * bit_width  # Simple sequential layout for objects
+            fields.append((member.name, bit_offset, bit_width, alignment))
+
+        # Create vtable for the object
+        vtable = StructVTable(
+            struct_name=self.name,
+            total_bits=sum(f[2] for f in fields),
+            total_bytes=(sum(f[2] for f in fields) + 7) // 8,
+            alignment=max(f[3] for f in fields) if fields else 1,
+            fields=fields
+        )
+        module._struct_vtables[self.name] = vtable
+
         print(f"[codegen] Created struct type for {self.name}: {struct_type}")
         # Create methods as functions with 'this' parameter
         for method in self.methods:
@@ -7182,7 +7309,19 @@ class ObjectDef(ASTNode):
                     alloca = method_builder.alloca(param.type, name=f"{param.name}.addr")
                     method_builder.store(param, alloca)
                     method_builder.scope[method.parameters[i-1].name] = alloca
-            
+
+            # When generating method body, register 'this' parameter
+            if not hasattr(method_builder, 'scope_type_info'):
+                method_builder.scope_type_info = {}
+
+            # Create TypeSpec for 'this' pointing to the object type
+            this_type_spec = TypeSpec(
+                base_type=DataType.DATA,
+                custom_typename=self.name,
+                is_pointer=True
+            )
+            method_builder.scope_type_info['this'] = this_type_spec
+
             # Generate method body
             if isinstance(method, FunctionDef):
                 # Generate normal body for all methods, including __init
