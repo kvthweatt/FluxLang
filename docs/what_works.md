@@ -11,9 +11,9 @@
 - case ✅
 - catch
 - char ✅
-- compt ❌ Incomplete, requires bootstrapped compiler
+- compt ❌ Deferred for bootsrap
 - const ✅
-- contract ❌ Incomplete, deferred for full specification
+- contract ❌ Deferred for bootsrap
 - continue ✅
 - data ✅
 - def ✅
@@ -21,8 +21,8 @@
 - do ✅
 - elif ✅
 - else ✅
-- lext ❌ Incomplete, requires bootstrapped compiler
-- extern ❌ Incomplete, deferred for full specification
+- lext ❌ Deferred for bootsrap
+- extern ❌ Deferred for bootsrap
 - false ✅
 - float ✅
 - for ✅
@@ -38,21 +38,21 @@
 - namespace ✅
 - not ✅
 - object ✅
-- operator ❌ Not implemented, full specification feature
+- operator ❌ Deferred for bootsrap
 - or ✅
 - private ⚠️ Potentially incomplete, untested
 - public ⚠️ Potentially incomplete, untested
-- register ⚠️ Implemented, unverified
+- register ✅ Implemented, unverified
 - return ✅
 - signed ✅
 - sizeof ✅
 - stack ✅
-- struct ⚠️ Partially implemented, unverified
-- super ❌ Not implemented
+- struct ✅
+- super ❌ Deferred for bootsrap
 - switch ✅
 - this  ✅
 - throw ✅
-- trait ❌ Not implemented, full specification feature
+- trait ❌ Deferred for bootsrap
 - true ✅
 - try ✅
 - typeof ⚠️ Incomplete, requires full RTTI
@@ -107,10 +107,10 @@
 - ADDRESS_OF = "@" ✅
 - RANGE = ".." ✅
 - SCOPE = "::" ✅
-- QUESTION = "?" ⚠️ Not implemented, needs to be done
-- COLON = ":" ⚠️ Not implemented, needs to be done
+- TERMARY = "?:" ✅
+- NULL COALESCE = "??" ✅
 
 ## Directionals
 - RETURN_ARROW = "->" ✅
-- CHAIN_ARROW = "<-" ⚠️ Not implemented, can be done in reduced spec
+- CHAIN_ARROW = "<-" ✅
 - RECURSE_ARROW = "<~"  ⚠️ Not implemented, can be done in reduced spec
