@@ -378,13 +378,46 @@ namespace standard
                 (void)s;
                 return;
             };
-        };
 
+            def print() -> void
+            {
+                // No params = newline printed
+                // GENERIC PRINT
+                //
+                // Designed to use sys.fx to determine which OS we're on
+                // and call the appropriate print function.
+                switch (CURRENT_OS)
+                {
+#ifdef __WINDOWS__
+                    case (1) // Windows
+                    {
+                        win_print("\n", 1);
+                    }
+#endif;
+#ifdef __LINUX__
+                    case (2) // Linux
+                    {
+                        nix_print("\n", 1);
+                    }
+#endif;
+#ifdef __MACOS__
+                    case (3) // Darwin (Mac)
+                    {
+                        mac_print("\n", 1);
+                    }
+#endif;
+                    default { return void; }; // Unknown - exit() for now
+                };
+                return;
+            };
+        };      // CONSOLE //
+
+                // FILE //
         namespace file
         {
 #ifdef __WINDOWS__
             // File access modes (dwDesiredAccess)
-            #def GENERIC_READ 0x80000000;
+            #def GENERIC_READ 2147483648;
             #def GENERIC_WRITE 0x40000000;
             #def GENERIC_READ_WRITE 0xC0000000;
             
@@ -464,7 +497,8 @@ namespace standard
                 
                 volatile asm
                 {
-                    movq $0, %rcx           // hFile
+                    movq $0, %r12           // Save handle to callee-saved register
+                    movq %r12, %rcx         // hFile
                     movq $1, %rdx           // lpBuffer
                     movl $2, %r8d           // nNumberOfBytesToRead
                     movq $3, %r9            // lpNumberOfBytesRead pointer
@@ -493,10 +527,11 @@ namespace standard
                     
                 skip_error:
                 } : : "r"(handle), "r"(buffer), "r"(bytes_to_read), "r"(bytes_read_ptr), "r"(readfile_result_ptr), "r"(error_code_ptr)
-                  : "rax","rcx","rdx","r8","r9","r10","r11","memory";
+                  : "rax","rcx","rdx","r8","r9","r10","r11","r12","memory";
                 
                 if (readfile_result == 0)
                 {
+                    print("ReadFile syscall failed.\n\0");
                     // error_code now contains the Windows error code
                     // Common errors: 6 = invalid handle, 87 = invalid parameter
                     return -1;
@@ -577,9 +612,8 @@ namespace standard
             // Open file for reading
             def open_read(byte* path) -> i64
             {
-                using standard::io::console;
-                print("In open_read()\n",15);
-                return win_open(path, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL);
+                print("In open_read()...\n\0");
+                return win_open(path, (u32)GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL);
             };
             
             // Open file for writing (creates if doesn't exist)

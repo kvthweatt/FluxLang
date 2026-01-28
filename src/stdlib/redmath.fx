@@ -639,11 +639,13 @@ namespace standard
         ///
 
         // Bit manipulation utilities
+        // Signed
         def popcount(i8 x) -> i8
         {
             i8 count = 0;
             while (x != (i8)0)
             {
+                if (count == 8) { break; }; // Handle all 1s
                 count += x & (i8)1;
                 x >>= (i8)1;
             };
@@ -655,6 +657,7 @@ namespace standard
             i16 count = 0;
             while (x != (i16)0)
             {
+                if (count == 16) { break; }; // Handle all 1s
                 count += x & (i16)1;
                 x >>= (i16)1;
             };
@@ -666,23 +669,73 @@ namespace standard
             i32 count = 0;
             while (x != 0)
             {
+                if (count == 32) { break; }; // Handle all 1s
                 count += x & 1;
                 x >>= 1;
             };
             return count;
         };
-        /// 
+        
         def popcount(i64 x) -> i64
         {
             i64 count = 0;
             while (x != 0)
             {
+                if (count == 64) { break; }; // Handle all 1s
                 count += x & 1;
                 x >>= 1;
             };
             return count;
         };
-        ///
+        
+        // Unsigned
+        def popcount(byte x) -> byte
+        {
+            byte count = 0;
+            while (x != (byte)0)
+            {
+                if (count == 8) { break; }; // Handle all 1s
+                count += x & (byte)1;
+                x >>= (byte)1;
+            };
+            return count;
+        };
+        
+        def popcount(u16 x) -> u16
+        {
+            u16 count = 0;
+            while (x != (u16)0)
+            {
+                if (count == 16) { break; }; // Handle all 1s
+                count += x & (u16)1;
+                x >>= (u16)1;
+            };
+            return count;
+        };
+        
+        def popcount(u32 x) -> u32
+        {
+            u32 count = 0;
+            while (x != 0)
+            {
+                if (count == 32) { break; }; // Handle all 1s
+                count += x & 1;
+                x >>= 1;
+            };
+            return count;
+        };
+
+        def popcount(u64 x) -> u64
+        {
+            u64 count = 0;
+            while (x != 0)
+            {
+                if (count == 64) { break; }; // Handle all 1s
+                count += x & 1;
+                x >>= 1;
+            };
+            return count;
+        };
 
         def reverse_bits(i8 x) -> i8
         {

@@ -4613,12 +4613,30 @@ class Assignment(Statement):
             index = self.target.index.codegen(builder, module)
             
             if isinstance(array.type, ir.PointerType) and isinstance(array.type.pointee, ir.ArrayType):
-                # Calculate element pointer
+                # Calculate element pointer for pointer-to-array
                 zero = ir.Constant(ir.IntType(1), 0)
                 elem_ptr = builder.gep(array, [zero, index], inbounds=True)
                 
                 # FIX: Handle StringLiteral assignment to byte array elements
                 element_type = array.type.pointee.element
+                if isinstance(self.value, StringLiteral) and isinstance(element_type, ir.IntType) and element_type.width == 8:
+                    # Extract first character from string literal
+                    if len(self.value.value) > 0:
+                        val = ir.Constant(ir.IntType(8), ord(self.value.value[0]))
+                    else:
+                        val = ir.Constant(ir.IntType(8), 0)
+                else:
+                    # Generate value normally
+                    val = self.value.codegen(builder, module)
+                
+                builder.store(val, elem_ptr)
+                return val
+            elif isinstance(array.type, ir.PointerType):
+                # Handle plain pointer types (like byte*) - pointer arithmetic
+                elem_ptr = builder.gep(array, [index], inbounds=True)
+                
+                # FIX: Handle StringLiteral assignment to byte pointer elements
+                element_type = array.type.pointee
                 if isinstance(self.value, StringLiteral) and isinstance(element_type, ir.IntType) and element_type.width == 8:
                     # Extract first character from string literal
                     if len(self.value.value) > 0:
