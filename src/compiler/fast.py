@@ -113,25 +113,27 @@ class Literal(ASTNode):
 
     def _infer_int_width(self, value: int) -> int:
         if self.type == DataType.SINT:
-            return 32 if -(1 << 31) <= value <= (1 << 31) - 1 else 64
-        if self.type == DataType.UINT:
-            return 32 if 0 <= value <= (1 << 32) - 1 else 64
-        raise ValueError("Not an integer literal")
+            if -(1 << 31) <= value <= (1 << 31) - 1:
+                return 32
+            else:
+                return 64
+        elif self.type == DataType.UINT:
+            if 0 <= value <= (1 << 32) - 1:
+                return 32
+            else:
+                return 64
+        else:
+            raise ValueError("Not an integer literal")
 
     def _attach_type_metadata(self, llvm_value: ir.Value, type_spec: Optional['TypeSpec'] = None):
         '''Attach Flux type information to LLVM value for proper signedness tracking'''
+        bit_width = llvm_value.type.width if hasattr(llvm_value.type, 'width') else None
         if type_spec is None:
-            # Create a minimal TypeSpec from DataType
-            from dataclasses import dataclass as dc
-            @dc
-            class MinimalTypeSpec:
-                is_signed: bool = True
-                
-            type_spec = MinimalTypeSpec()
-            if self.type == DataType.UINT:
-                type_spec.is_signed = False
-            elif self.type == DataType.SINT:
-                type_spec.is_signed = True
+            type_spec = TypeSpec(
+                base_type=self.type,
+                is_signed=(self.type == DataType.SINT),
+                bit_width=bit_width
+            )
         
         llvm_value._flux_type_spec = type_spec
         return llvm_value
@@ -140,7 +142,15 @@ class Literal(ASTNode):
         if self.type in (DataType.SINT, DataType.UINT):
             val = int(self.value, 0) if isinstance(self.value, str) else int(self.value)
             width = self._infer_int_width(val)
-            llvm_val = ir.Constant(ir.IntType(width), val)
+            
+            # For unsigned types with values >= 2^63, ensure proper handling
+            if self.type == DataType.UINT and width == 64 and val >= (1 << 63):
+                # Convert to signed equivalent for LLVM (two's complement)
+                # LLVM stores 0xFFFFFFFFFFFFFFFF as -1 internally
+                signed_val = val if val < (1 << 63) else val - (1 << 64)
+                llvm_val = ir.Constant(ir.IntType(width), signed_val)
+            else:
+                llvm_val = ir.Constant(ir.IntType(width), val)
             
             # Attach type metadata for signedness tracking
             return self._attach_type_metadata(llvm_val)
@@ -2118,22 +2128,37 @@ class LoweringContext:
     # Integer normalization
     # --------------------------------------------------
 
-    def normalize_ints(self, a: ir.Value, b: ir.Value, *, unsigned: bool):
+    def normalize_ints(self, a: ir.Value, b: ir.Value, *, unsigned: bool, promote: bool):
+        """
+        Normalize two integer values to the same width.
+        
+        Args:
+            a, b: Integer values to normalize
+            unsigned: Whether to use unsigned extension semantics
+            promote: If True, normalize to MAXIMUM width (for arithmetic/comparisons).
+                     If False, normalize to MINIMUM width (for bitshifts/bools).
+        """
         assert isinstance(a.type, ir.IntType)
         assert isinstance(b.type, ir.IntType)
 
         if a.type.width == b.type.width:
             return a, b
 
-        width = max(a.type.width, b.type.width)
+        width = max(a.type.width, b.type.width) if promote else min(a.type.width, b.type.width)
         ty = ir.IntType(width)
 
-        def ext(v):
+        def convert(v):
+            print("LOWERING NORMALIZE", v.type, v.type.width, ty, width)
             if v.type.width == width:
                 return v
-            return self.b.zext(v, ty) if unsigned else self.b.sext(v, ty)
+            elif v.type.width < width:
+                # Extending to larger width (shouldn't happen with min, but handle it)
+                return self.b.zext(v, ty) if unsigned else self.b.sext(v, ty)
+            else:
+                # Truncating to smaller width
+                return self.b.trunc(v, ty)
 
-        return ext(a), ext(b)
+        return convert(a), convert(b)
 
     # --------------------------------------------------
     # Pointer helpers
@@ -2150,7 +2175,7 @@ class LoweringContext:
 
     def emit_int_cmp(self, op: str, a: ir.Value, b: ir.Value):
         unsigned = self.comparison_is_unsigned(a, b)
-        a, b = self.normalize_ints(a, b, unsigned=unsigned)
+        a, b = self.normalize_ints(a, b, unsigned=unsigned, promote=True)
         return (
             self.b.icmp_unsigned(op, a, b)
             if unsigned
@@ -2247,7 +2272,7 @@ class BinaryOp(Expression):
             # Normalize operand widths BEFORE operation
             if isinstance(lhs.type, ir.IntType) and isinstance(rhs.type, ir.IntType):
                 if lhs.type.width != rhs.type.width:
-                    lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=unsigned)
+                    lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=unsigned, promote=True)
 
             return {
                 Operator.ADD: builder.add,
@@ -2291,8 +2316,18 @@ class BinaryOp(Expression):
         # Bitwise
         # --------------------------------------------------
 
-        if self.operator in (Operator.AND, Operator.OR, Operator.XOR, Operator.BITAND, Operator.BITOR):
-            lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True)
+        if self.operator in (Operator.BITAND, Operator.BITOR):
+            lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=False)
+            return {
+                Operator.AND: builder.and_,
+                Operator.BITAND: builder.and_,
+                Operator.OR: builder.or_,
+                Operator.BITOR: builder.or_,
+                Operator.XOR: builder.xor,
+            }[self.operator](lhs, rhs)
+
+        if self.operator in (Operator.AND, Operator.OR, Operator.XOR):
+            lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=True)
             return {
                 Operator.AND: builder.and_,
                 Operator.BITAND: builder.and_,
@@ -2306,12 +2341,14 @@ class BinaryOp(Expression):
         # --------------------------------------------------
 
         if self.operator in (Operator.BITSHIFT_LEFT, Operator.BITSHIFT_RIGHT):
-            if lhs.type.width != rhs.type.width:
-                rhs = builder.zext(rhs, lhs.type)
-
+            # For bitshift operations, normalize to the LEFT operand's width (lower=True)
+            # This prevents promoting i8 << i32 to i32, which would be incorrect
+            # The shift amount should be truncated/extended to match the value being shifted
+            lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=False)
+            
             if self.operator is Operator.BITSHIFT_LEFT:
                 return builder.shl(lhs, rhs)
-
+            
             return (
                 builder.lshr(lhs, rhs)
                 if ctx.is_unsigned(lhs)
@@ -2517,16 +2554,22 @@ class CastExpression(Expression):
             if source_val.type.width > target_llvm_type.width:
                 result = builder.trunc(source_val, target_llvm_type)
             elif source_val.type.width < target_llvm_type.width:
-                is_unsigned = getattr(self.target_type, 'is_signed', True) == False
-                if isinstance(source_val, ir.Constant):
-                    # For constants, create new constant at target width directly
-                    result = ir.Constant(target_llvm_type, source_val.constant)
-                else:
-                    # For runtime values, use extension instructions
-                    if is_unsigned:
-                        result = builder.zext(source_val, target_llvm_type)
+                # Determine if we should zero extend or sign extend
+                if isinstance(self.expression, Literal):
+                    # Check the literal's type
+                    if self.expression.type == DataType.UINT:
+                        # Unsigned literal -> zero extend
+                        return builder.zext(source_val, target_llvm_type)
+                    elif self.expression.type == DataType.SINT:
+                        # Signed literal -> sign extend
+                        return builder.sext(source_val, target_llvm_type)
                     else:
-                        result = builder.sext(source_val, target_llvm_type)
+                        # Default to sign extend
+                        return builder.sext(source_val, target_llvm_type)
+                else:
+                    # Not a literal - need to check target type
+                    # For now, default to sign extend
+                    return builder.sext(source_val, target_llvm_type)
             else:
                 result = source_val
             
@@ -5400,16 +5443,30 @@ class ReturnStatement(Statement):
             return value
 
         # === ALLOWED IMPLICIT CASE ===
-        # Integer literal widening (e.g. return 0; in i64 function)
+        # Integer literal conversion (both widening and narrowing)
+        # This includes plain literals and unary operations on literals (like -1)
+        is_literal_int = (
+            isinstance(self.value, Literal) and 
+            self.value.type in (DataType.SINT, DataType.UINT)
+        )
+        is_unary_literal_int = (
+            isinstance(self.value, UnaryOp) and
+            isinstance(self.value.operand, Literal) and
+            self.value.operand.type in (DataType.SINT, DataType.UINT)
+        )
+        
         if (
-            isinstance(self.value, Literal)
-            and self.value.type in (DataType.SINT, DataType.UINT)
+            (is_literal_int or is_unary_literal_int)
             and isinstance(src, ir.IntType)
             and isinstance(expected, ir.IntType)
-            and src.width < expected.width
         ):
-            # Use sign-extension; zero also works with sext
-            return builder.sext(value, expected)
+            if src.width < expected.width:
+                # Widening: use sign-extension
+                return builder.sext(value, expected)
+            elif src.width > expected.width:
+                # Narrowing: truncate
+                return builder.trunc(value, expected)
+            # Same width already handled by exact match above
 
         # Pointer ABI cast
         if isinstance(src, ir.PointerType) and isinstance(expected, ir.PointerType):

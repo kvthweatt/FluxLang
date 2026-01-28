@@ -31,6 +31,14 @@ def test_direct() -> int
     u64str(combined, buf);
     print(buf);
     print(" (should be 5000000000)\n\0");
+    if (combined == 5000000000)
+    {
+        print("Success! :: Manual combine\n\n\0");
+    }
+    else
+    {
+        print("Failure! :: Manual combine\n\n\0");
+    };
     
     return 0;
 };

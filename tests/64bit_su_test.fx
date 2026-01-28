@@ -30,6 +30,8 @@ def signed_vs_unsigned() -> int
     
     print("\nUnsigned 0xFFFFFFFF % 257 = \0"); u64str(u_mod, buf); print(buf); print("\n\0");
     print("Signed 0xFFFFFFFF % 257 = \0"); i64str(s_mod, buf); print(buf); print("\n\0");
+
+    print();print();
     
     return 0;
 };

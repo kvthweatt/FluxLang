@@ -52,13 +52,12 @@ namespace standard
             if (x < 0) {return -x;};
             return x;
         };
-        ///
+
         def abs(float x) -> float
         {
             if (x < 0.0) {return -x;};
             return x;
         };
-        ///
 
         // Minimum overloads
         def min(i8 a, i8 b) -> i8
@@ -152,14 +151,14 @@ namespace standard
             if (value > high) {return high;};
             return value;
         };
-        ///
+        
         def clamp(float value, float low, float high) -> float
         {
             if (value < low) {return low;};
             if (value > high) {return high;};
             return value;
         };
-        ///
+        
 
         ///
         NOTE: These sqrt() functions reveal that type isn't auto-converted for literals
@@ -169,13 +168,13 @@ namespace standard
         {
             if (x <= 0) {return 0;};
             
-            i8 y = x / (i8)2;
+            i8 y = x / 2;
             i8 prev_y = 0;
             
             while (y != prev_y)
             {
                 prev_y = y;
-                y = (y + x / y) / (i8)2;
+                y = (y + x / y) / 2;
             };
             
             return y;
@@ -185,13 +184,13 @@ namespace standard
         {
             if (x <= 0) {return 0;};
             
-            i16 y = x / (i16)2;
+            i16 y = x / 2;
             i16 prev_y = 0;
             
             while (y != prev_y)
             {
                 prev_y = y;
-                y = (y + x / y) / (i16)2;
+                y = (y + x / y) / 2;
             };
             
             return y;
@@ -217,18 +216,18 @@ namespace standard
         {
             if (x <= 0) {return 0;};
             
-            i64 y = x / (i64)2;
+            i64 y = x / 2;
             i64 prev_y = 0;
             
             while (y != prev_y)
             {
                 prev_y = y;
-                y = (y + x / y) / (i64)2;
+                y = (y + x / y) / 2;
             };
             
             return y;
         };
-        ///
+        
         def sqrt(float x) -> float
         {
             if (x <= 0.0) {return 0.0;};
@@ -248,7 +247,7 @@ namespace standard
             
             return y;
         };
-        ///
+        
 
         // Factorial overloads
         def factorial(i8 n) -> i8
@@ -415,7 +414,6 @@ namespace standard
         def round(i64 x) -> i64 { return x; };
 
         // Trigonometric functions (simplified approximations)
-        ///
         def sin(float x) -> float
         {
             // Reduce to [-π, π]
@@ -435,20 +433,19 @@ namespace standard
             
             return result;
         };
+
         def cos(float x) -> float
         {
             // cos(x) = sin(π/2 - x)
             return sin((float)PIF / 2.0 - x);
         };
-        ///
-        /// depends on float-based abs()   
+ 
         def tan(float x) -> float
         {
             float c = cos(x);
             if (abs(c) < 0.000001) {return 0.0;};  // Avoid division by zero
             return sin(x) / c;
         };
-        ///
 
         // Exponential and logarithmic functions
         def exp(float x) -> float
@@ -512,7 +509,7 @@ namespace standard
             def next_i8() -> i8
             {
                 this.seed = (this.seed * 1103515245 + 12345) & 0x7FFFFFFF;
-                return (i8)(this.seed & 0xFF);
+                return (this.seed & 0xFF);
             };
             
             def next_i16() -> i16
@@ -577,9 +574,10 @@ namespace standard
         ///
 
         // Additional math utilities with overloads
+
         def lerp(i8 a, i8 b, float t) -> i8
         {
-            return (i8)((float)a + (float)(b - a) * t);
+            return ((float)a + (float)(b - a) * t);
         };
         
         def lerp(i16 a, i16 b, float t) -> i16
@@ -591,7 +589,7 @@ namespace standard
         {
             return (i32)((float)a + (float)(b - a) * t);
         };
-        
+
         def lerp(i64 a, i64 b, float t) -> i64
         {
             return (i64)((float)a + (float)(b - a) * t);
@@ -629,25 +627,24 @@ namespace standard
             if (x < 0) {return -1;};
             return 0;
         };
-        ///
+
         def sign(float x) -> float
         {
             if (x > 0.0) {return 1.0;};
             if (x < 0.0) {return -1.0;};
             return 0.0;
         };
-        ///
 
         // Bit manipulation utilities
         // Signed
         def popcount(i8 x) -> i8
         {
             i8 count = 0;
-            while (x != (i8)0)
+            while (x != 0)
             {
                 if (count == 8) { break; }; // Handle all 1s
-                count += x & (i8)1;
-                x >>= (i8)1;
+                count += x & 1;
+                x >>= 1;
             };
             return count;
         };
@@ -655,11 +652,11 @@ namespace standard
         def popcount(i16 x) -> i16
         {
             i16 count = 0;
-            while (x != (i16)0)
+            while (x != 0)
             {
                 if (count == 16) { break; }; // Handle all 1s
-                count += x & (i16)1;
-                x >>= (i16)1;
+                count += x & 1;
+                x >>= 1;
             };
             return count;
         };
@@ -692,11 +689,11 @@ namespace standard
         def popcount(byte x) -> byte
         {
             byte count = 0;
-            while (x != (byte)0)
+            while (x != 0)
             {
                 if (count == 8) { break; }; // Handle all 1s
-                count += x & (byte)1;
-                x >>= (byte)1;
+                count += x & 1;
+                x >>= 1;
             };
             return count;
         };
@@ -704,11 +701,11 @@ namespace standard
         def popcount(u16 x) -> u16
         {
             u16 count = 0;
-            while (x != (u16)0)
+            while (x != 0)
             {
                 if (count == 16) { break; }; // Handle all 1s
-                count += x & (u16)1;
-                x >>= (u16)1;
+                count += x & 1;
+                x >>= 1;
             };
             return count;
         };
@@ -735,6 +732,17 @@ namespace standard
                 x >>= 1;
             };
             return count;
+        };
+
+        def reverse_bits(byte x) -> byte
+        {
+            byte result = 0;
+            for (byte i = 0; i < 8; i++)
+            {
+                result = (result << 1) | (x & 1);
+                x >>= 1;
+            };
+            return result;
         };
 
         def reverse_bits(i8 x) -> i8

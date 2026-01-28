@@ -52,6 +52,8 @@ def test_64bit_arithmetic() -> int
     u64str(above_mod, buffer);
     print(buffer);
     print(" (expected: 6)\n\0");
+
+    print();print();
     
     return 0;
 };

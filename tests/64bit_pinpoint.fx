@@ -19,20 +19,69 @@ def pinpoint_llvm_bug() -> int
     u64 div_result = a / (u64)256u;      // Should be: udiv i64
     u64 mod_result = a % (u64)257u;      // Should be: urem i64  
     u64 and_result = a & (u64)0xFFFFu;   // Should be: and i64
-    u64 or_result = a | (u64)0x100000000u; // Should be: or i64
+    u64 or_result  = a | (u64)0x100000000u; // Should be: or i64
     u64 add_result = a + (u64)1u;        // Should be: add i64
     
     print("0xFFFFFFFF / 256 = \0"); u64str(div_result, buf); print(buf); print(" (expected: 16777215)\n\0");
-    print("0xFFFFFFFF % 257 = \0"); u64str(mod_result, buf); print(buf); print(" (expected: 254)\n\0");
+    if (div_result == 16777215)
+    {
+        print("Success! :: a / (u64)256u;\n\0");
+    }
+    else
+    {
+        print("Failure! :: a / (u64)256u;\n\0");
+    };
+    print("0xFFFFFFFF % 257 = \0"); u64str(mod_result, buf); print(buf); print(" (expected: 0)\n\0");
+    if (mod_result == 0)
+    {
+        print("Success! :: a % (u64)257u;\n\0");
+    }
+    else
+    {
+        print("Failure! :: a % (u64)257u;\n\0");
+    };
     print("0xFFFFFFFF & 0xFFFF = \0"); u64str(and_result, buf); print(buf); print(" (expected: 65535)\n\0");
+    if (and_result == 65535)
+    {
+        print("Success! :: a & (u64)0xFFFFu;\n\0");
+    }
+    else
+    {
+        print("Failure! :: a & (u64)0xFFFFu;\n\0");
+    };
     print("0xFFFFFFFF | 0x100000000 = \0"); u64str(or_result, buf); print(buf); print(" (expected: 8589934591)\n\0");
+    if (or_result == 8589934591)
+    {
+        print("Success! :: a | (u64)0x100000000u;\n\0");
+    }
+    else
+    {
+        print("Failure! :: a | (u64)0x100000000u;\n\0");
+    };
     print("0xFFFFFFFF + 1 = \0"); u64str(add_result, buf); print(buf); print(" (expected: 4294967296)\n\0");
-    
+    if (add_result == 4294967296)
+    {
+        print("Success! :: a + (u64)1u;\n\0");
+    }
+    else
+    {
+        print("Failure! :: a + (u64)1u;\n\0");
+    };
+
     // Test if it's value-dependent
     u64 small = (u64)255u;
     u64 small_div = small / (u64)2u;
-    print("\nSmall value test (255/2): \0"); u64str(small_div, buf); print(buf); print(" (expected: 127)\n\0");
-    
+    print("Small value test (255/2): \0"); u64str(small_div, buf); print(buf); print(" (expected: 127)\n\0");
+    if (small_div == 127)
+    {
+        print("Success! :: small / (u64)2u;\n\0");
+    }
+    else
+    {
+        print("Failure! :: small / (u64)2u;\n\0");
+    };
+    print();print();
+
     return 0;
 };
 
@@ -69,7 +118,7 @@ def isolate_the_bug() -> int
     // Test 1: Explicit 64-bit constant division
     // (Should work if literals are correct)
     u64 result1 = (u64)0xFFFFFFFFu / (u64)256u;
-    print("Literal 0xFFFFFFFF / 256 = \0"); 
+    print("Literal 0xFFFFFFFF / 256 = \0");
     u64str(result1, buf); print(buf); print("\n\0");
     
     // Test 2: Variable division (might be different code path)
@@ -118,10 +167,11 @@ def diagnose_variable_vs_literal() -> int
     u64 casted_result = casted / (u64)256;
     print("(u64)val / 256 = \0");
     u64str(casted_result, buffer); print(buffer); print("\n\0");
+    print();
     
     return 0;
 };
-///
+
 def test_implicit_conversions() -> int
 {
     byte[64] buffer;
@@ -146,10 +196,11 @@ def test_implicit_conversions() -> int
     u64 calc = (u64)(0xFFFFFFFF) / 256;
     print("(u64)(0xFFFFFFFF) / 256 = \0");
     u64str(calc, buffer); print(buffer); print("\n\0");
+    print();
     
     return 0;
 };
-///
+
 def main() -> int
 {
     test_64bit_arithmetic();
@@ -161,6 +212,6 @@ def main() -> int
     test_all_ops();
     isolate_the_bug();
     diagnose_variable_vs_literal();
-    //test_implicit_conversions();
+    test_implicit_conversions();
     return 0;
 };

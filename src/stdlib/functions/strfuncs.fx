@@ -154,12 +154,13 @@ def u64str(u64 value, byte* buffer) -> u64
     
     // Copy reversed string to buffer
     u64 write_pos = (u64)0;
-    u64 i = pos - (u64)1;
-    while (i >= (u64)0)
+    u64 remaining = pos;  // Track how many digits remain
+
+    while (remaining > (u64)0)
     {
-        buffer[write_pos] = temp[i];
+        remaining--;  // Decrement BEFORE using as index
+        buffer[write_pos] = temp[remaining];
         write_pos++;
-        i--;
     };
     
     buffer[write_pos] = (byte)0; // null terminator
