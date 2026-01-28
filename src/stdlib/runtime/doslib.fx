@@ -3,21 +3,21 @@
 #ifdef __MSDOS__
 // SPECIFICALLY MS-DOS
 
-#ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#ifndef FLUX_STANDARD_DOS_TYPES
+#import "dostypes.fx";
 #endif;
 
-def strlen(byte* s) -> int
+def strlen(byte* s) -> i16
 {
-    int len;
+    i16 len;
     len = 0;
     byte* ps;
     ps = s;
     
     while (*ps != 0)
     {
-        len = len + 1;
-        ps = ps + 1;
+        len = len + (i16)1;
+        ps = ps + (i16)1;
     };
     
     return len;

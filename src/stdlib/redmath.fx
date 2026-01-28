@@ -52,13 +52,14 @@ namespace standard
             if (x < 0) {return -x;};
             return x;
         };
-        
+        ///
         def abs(float x) -> float
         {
             if (x < 0.0) {return -x;};
             return x;
         };
-        
+        ///
+
         // Minimum overloads
         def min(i8 a, i8 b) -> i8
         {
@@ -83,13 +84,14 @@ namespace standard
             if (a < b) {return a;};
             return b;
         };
-        
+        ///
         def min(float a, float b) -> float
         {
             if (a < b) {return a;};
             return b;
         };
-        
+        ///
+
         // Maximum overloads
         def max(i8 a, i8 b) -> i8
         {
@@ -114,13 +116,14 @@ namespace standard
             if (a > b) {return a;};
             return b;
         };
-        
+        ///
         def max(float a, float b) -> float
         {
             if (a > b) {return a;};
             return b;
         };
-        
+        ///
+
         // Clamp overloads
         def clamp(i8 value, i8 low, i8 high) -> i8
         {
@@ -149,115 +152,30 @@ namespace standard
             if (value > high) {return high;};
             return value;
         };
-        
+        ///
         def clamp(float value, float low, float high) -> float
         {
             if (value < low) {return low;};
             if (value > high) {return high;};
             return value;
         };
-        
-        // Power overloads
-        def pow(i8 base, i8 exponent) -> i8
-        {
-            if (exponent < 0) {return 0;};
-            
-            i8 result = 1;
-            while (exponent > 0)
-            {
-                if (exponent & 1)
-                {
-                    result *= base;
-                };
-                base *= base;
-                exponent >>= 1;
-            };
-            return result;
-        };
-        
-        def pow(i16 base, i16 exponent) -> i16
-        {
-            if (exponent < 0) {return 0;};
-            
-            i16 result = 1;
-            while (exponent > 0)
-            {
-                if (exponent & 1)
-                {
-                    result *= base;
-                };
-                base *= base;
-                exponent >>= 1;
-            };
-            return result;
-        };
-        
-        def pow(i32 base, i32 exponent) -> i32
-        {
-            if (exponent < 0) {return 0;};
-            
-            i32 result = 1;
-            while (exponent > 0)
-            {
-                if (exponent & 1)
-                {
-                    result *= base;
-                };
-                base *= base;
-                exponent >>= 1;
-            };
-            return result;
-        };
-        
-        def pow(i64 base, i64 exponent) -> i64
-        {
-            if (exponent < 0) {return 0;};
-            
-            i64 result = 1;
-            while (exponent > 0)
-            {
-                if (exponent & 1)
-                {
-                    result *= base;
-                };
-                base *= base;
-                exponent >>= 1;
-            };
-            return result;
-        };
-        
-        def pow(float base, float exponent) -> float
-        {
-            // Simple implementation using logarithm for float
-            // For integer exponents, use iterative multiplication
-            i64 int_exp = (i64)exponent;
-            if (exponent == (float)int_exp && int_exp >= 0)
-            {
-                float result = 1.0;
-                for (i64 i = 0; i < int_exp; i++)
-                {
-                    result *= base;
-                };
-                return result;
-            };
-            
-            // Approximate using exp(log(x)*y)
-            // This is a simplified approximation
-            return base * exponent;  // Placeholder
-        };
-        
+        ///
+
+        ///
+        NOTE: These sqrt() functions reveal that type isn't auto-converted for literals
+        ///
         // Square root overloads
         def sqrt(i8 x) -> i8
         {
             if (x <= 0) {return 0;};
             
-            i8 y = x / 2;
+            i8 y = x / (i8)2;
             i8 prev_y = 0;
             
             while (y != prev_y)
             {
                 prev_y = y;
-                y = (y + x / y) / 2;
+                y = (y + x / y) / (i8)2;
             };
             
             return y;
@@ -267,13 +185,13 @@ namespace standard
         {
             if (x <= 0) {return 0;};
             
-            i16 y = x / 2;
+            i16 y = x / (i16)2;
             i16 prev_y = 0;
             
             while (y != prev_y)
             {
                 prev_y = y;
-                y = (y + x / y) / 2;
+                y = (y + x / y) / (i16)2;
             };
             
             return y;
@@ -299,18 +217,18 @@ namespace standard
         {
             if (x <= 0) {return 0;};
             
-            i64 y = x / 2;
+            i64 y = x / (i64)2;
             i64 prev_y = 0;
             
             while (y != prev_y)
             {
                 prev_y = y;
-                y = (y + x / y) / 2;
+                y = (y + x / y) / (i64)2;
             };
             
             return y;
         };
-        
+        ///
         def sqrt(float x) -> float
         {
             if (x <= 0.0) {return 0.0;};
@@ -330,7 +248,8 @@ namespace standard
             
             return y;
         };
-        
+        ///
+
         // Factorial overloads
         def factorial(i8 n) -> i8
         {
@@ -379,7 +298,7 @@ namespace standard
             };
             return result;
         };
-        
+
         // GCD overloads
         def gcd(i8 a, i8 b) -> i8
         {
@@ -424,7 +343,7 @@ namespace standard
             };
             return a;
         };
-        
+
         // LCM overloads
         def lcm(i8 a, i8 b) -> i8
         {
@@ -449,7 +368,7 @@ namespace standard
             if (a == 0 || b == 0) {return 0;};
             return abs(a * b) / gcd(a, b);
         };
-        
+
         // Rounding functions overloads
         def floor(float x) -> float
         {
@@ -458,7 +377,7 @@ namespace standard
             {
                 return (float)int_part;
             };
-            return (float)(int_part - 1);
+            return (float)(int_part - (i64)1);
         };
         
         def ceil(float x) -> float
@@ -468,7 +387,7 @@ namespace standard
             {
                 return (float)int_part;
             };
-            return (float)(int_part + 1);
+            return (float)(int_part + (i64)1);
         };
         
         def round(float x) -> float
@@ -479,7 +398,7 @@ namespace standard
             };
             return ceil(x - 0.5);
         };
-        
+
         def floor(i8 x) -> i8 { return x; };
         def floor(i16 x) -> i16 { return x; };
         def floor(i32 x) -> i32 { return x; };
@@ -494,13 +413,14 @@ namespace standard
         def round(i16 x) -> i16 { return x; };
         def round(i32 x) -> i32 { return x; };
         def round(i64 x) -> i64 { return x; };
-        
+
         // Trigonometric functions (simplified approximations)
+        ///
         def sin(float x) -> float
         {
             // Reduce to [-π, π]
-            while (x > PIF) { x -= 2.0 * PIF; };
-            while (x < -PIF) { x += 2.0 * PIF; };
+            while (x > (float)PIF) { x -= 2.0 * (float)PIF; };
+            while (x < (float)-PIF) { x += 2.0 * (float)PIF; };
             
             // Taylor series approximation
             float result = x;
@@ -509,26 +429,27 @@ namespace standard
             
             for (i32 i = 1; i <= 5; i++)
             {
-                term = -term * x2 / ((2 * i) * (2 * i + 1));
+                term = -term * x2 / (float)((2 * i) * (2 * i + 1));
                 result += term;
             };
             
             return result;
         };
-        
         def cos(float x) -> float
         {
             // cos(x) = sin(π/2 - x)
-            return sin(PIF / 2.0 - x);
+            return sin((float)PIF / 2.0 - x);
         };
-        
+        ///
+        /// depends on float-based abs()   
         def tan(float x) -> float
         {
             float c = cos(x);
             if (abs(c) < 0.000001) {return 0.0;};  // Avoid division by zero
             return sin(x) / c;
         };
-        
+        ///
+
         // Exponential and logarithmic functions
         def exp(float x) -> float
         {
@@ -558,7 +479,7 @@ namespace standard
             for (i32 i = 1; i <= 10; i += 2)
             {
                 term = term * y2;
-                result += (2.0 / (2 * i + 1)) * term;
+                result += (2.0 / (float)(2 * i + 1)) * term;
             };
             
             return result;
@@ -568,15 +489,16 @@ namespace standard
         {
             return log(x) / 2.30258509299404568402;  // ln(10)
         };
-        
-        // Random number generator with multiple overloads
+
+        // RNG
+        ///
         object Random
         {
             i64 seed;
             
             def __init() -> this
             {
-                this.seed = 12345;
+                this.seed = (i64*)12345;
                 return this;
             };
             
@@ -652,33 +574,34 @@ namespace standard
                 return (this.next_i32() & 1) == 1;
             };
         };
-        
+        ///
+
         // Additional math utilities with overloads
         def lerp(i8 a, i8 b, float t) -> i8
         {
-            return (i8)(a + (b - a) * t);
+            return (i8)((float)a + (float)(b - a) * t);
         };
         
         def lerp(i16 a, i16 b, float t) -> i16
         {
-            return (i16)(a + (b - a) * t);
+            return (i16)((float)a + (float)(b - a) * t);
         };
         
         def lerp(i32 a, i32 b, float t) -> i32
         {
-            return (i32)(a + (b - a) * t);
+            return (i32)((float)a + (float)(b - a) * t);
         };
         
         def lerp(i64 a, i64 b, float t) -> i64
         {
-            return (i64)(a + (b - a) * t);
+            return (i64)((float)a + (float)(b - a) * t);
         };
         
         def lerp(float a, float b, float t) -> float
         {
             return a + (b - a) * t;
         };
-        
+
         def sign(i8 x) -> i8
         {
             if (x > 0) {return 1;};
@@ -706,22 +629,23 @@ namespace standard
             if (x < 0) {return -1;};
             return 0;
         };
-        
+        ///
         def sign(float x) -> float
         {
             if (x > 0.0) {return 1.0;};
             if (x < 0.0) {return -1.0;};
             return 0.0;
         };
-        
+        ///
+
         // Bit manipulation utilities
         def popcount(i8 x) -> i8
         {
             i8 count = 0;
-            while (x != 0)
+            while (x != (i8)0)
             {
-                count += x & 1;
-                x >>= 1;
+                count += x & (i8)1;
+                x >>= (i8)1;
             };
             return count;
         };
@@ -729,10 +653,10 @@ namespace standard
         def popcount(i16 x) -> i16
         {
             i16 count = 0;
-            while (x != 0)
+            while (x != (i16)0)
             {
-                count += x & 1;
-                x >>= 1;
+                count += x & (i16)1;
+                x >>= (i16)1;
             };
             return count;
         };
@@ -747,7 +671,7 @@ namespace standard
             };
             return count;
         };
-        
+        /// 
         def popcount(i64 x) -> i64
         {
             i64 count = 0;
@@ -758,7 +682,8 @@ namespace standard
             };
             return count;
         };
-        
+        ///
+
         def reverse_bits(i8 x) -> i8
         {
             i8 result = 0;
