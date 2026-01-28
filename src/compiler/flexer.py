@@ -23,7 +23,8 @@ from typing import List, Optional, Iterator
 
 class TokenType(Enum):
     # Literals
-    INTEGER = auto()
+    SINT_LITERAL = auto()
+    UINT_LITERAL = auto() # Unsigned integer literal support `123u`
     FLOAT = auto()
     CHAR = auto()
     STRING_LITERAL = auto()
@@ -69,7 +70,8 @@ class TokenType(Enum):
     IF = auto()
     IN = auto()
     IS = auto()
-    INT = auto()
+    SINT = auto()  # int
+    UINT = auto()  # uint
     LOCAL = auto()
     NAMESPACE = auto()
     NOT = auto()
@@ -93,7 +95,7 @@ class TokenType(Enum):
     UNION = auto()
     UNSIGNED = auto()
     USING = auto()
-    VIRTUAL = auto()
+    #VIRTUAL = auto() #DEFERRED FOR BOOTSTRAP
     VOID = auto()
     VOLATILE = auto()
     WHILE = auto()
@@ -231,7 +233,7 @@ class FluxLexer:
             'heap': TokenType.HEAP,
             'in': TokenType.IN,
             'is': TokenType.IS,
-            'int': TokenType.INT,
+            'int': TokenType.SINT,
             'local': TokenType.LOCAL,
             'namespace': TokenType.NAMESPACE,
             'not': TokenType.NOT,
@@ -252,10 +254,11 @@ class FluxLexer:
             'true': TokenType.TRUE,
             'try': TokenType.TRY,
             'typeof': TokenType.TYPEOF,
+            'uint': TokenType.UINT,
             'union': TokenType.UNION,
             'unsigned': TokenType.UNSIGNED,
             'using': TokenType.USING,
-            'virtual': TokenType.VIRTUAL,
+            #'virtual': TokenType.VIRTUAL, #DEFERRED FOR BOOTSTRAP
             'void': TokenType.VOID,
             'volatile': TokenType.VOLATILE,
             'while': TokenType.WHILE,
@@ -440,6 +443,7 @@ class FluxLexer:
         start_pos = (self.line, self.column)
         result = ""
         is_float = False
+        is_unsigned = False
         
         # Handle duotrigesimal (0d), hex (0x), octal (0o), and binary (0b) prefixes
         if self.current_char() == '0':
@@ -447,14 +451,21 @@ class FluxLexer:
             self.advance()
 
             if self.current_char() and self.current_char().lower() == 'd':
-                print("DUOTRIGESIMAL")
                 # Duotrigesimal (Base 32)
                 result += self.current_char()
                 self.advance()
                 while self.current_char() and self.current_char() in '0123456789ABCDEFGHIJKLMNOPQRSTUV':
                     result += self.current_char()
                     self.advance()
-                return Token(TokenType.INTEGER, result, start_pos[0], start_pos[1])
+                
+                # Check for unsigned suffix (lowercase 'u' only)
+                if self.current_char() and self.current_char() == 'u':
+                    is_unsigned = True
+                    result += self.current_char()
+                    self.advance()
+                
+                return Token(TokenType.UINT_LITERAL if is_unsigned else TokenType.SINT_LITERAL, 
+                           result.replace("u",""), start_pos[0], start_pos[1])
             
             if self.current_char() and self.current_char().lower() == 'x':
                 # Hexadecimal
@@ -463,7 +474,15 @@ class FluxLexer:
                 while self.current_char() and self.current_char() in '0123456789ABCDEF':
                     result += self.current_char()
                     self.advance()
-                return Token(TokenType.INTEGER, result, start_pos[0], start_pos[1])
+                
+                # Check for unsigned suffix (lowercase 'u' only)
+                if self.current_char() and self.current_char() == 'u':
+                    is_unsigned = True
+                    result += self.current_char()
+                    self.advance()
+                
+                return Token(TokenType.UINT_LITERAL if is_unsigned else TokenType.SINT_LITERAL, 
+                           result.replace("u",""), start_pos[0], start_pos[1])
 
             if self.current_char() and self.current_char().lower() == 'o':
                 # Octal
@@ -472,7 +491,15 @@ class FluxLexer:
                 while self.current_char() and self.current_char() in '01234567':
                     result += self.current_char()
                     self.advance()
-                return Token(TokenType.INTEGER, result, start_pos[0], start_pos[1])
+                
+                # Check for unsigned suffix (lowercase 'u' only)
+                if self.current_char() and self.current_char() == 'u':
+                    is_unsigned = True
+                    result += self.current_char()
+                    self.advance()
+                
+                return Token(TokenType.UINT_LITERAL if is_unsigned else TokenType.SINT_LITERAL, 
+                           result.replace("u",""), start_pos[0], start_pos[1])
             
             elif self.current_char() and self.current_char().lower() == 'b':
                 # Binary
@@ -481,7 +508,15 @@ class FluxLexer:
                 while self.current_char() and self.current_char() in '01':
                     result += self.current_char()
                     self.advance()
-                return Token(TokenType.INTEGER, result, start_pos[0], start_pos[1])
+                
+                # Check for unsigned suffix (lowercase 'u' only)
+                if self.current_char() and self.current_char() == 'u':
+                    is_unsigned = True
+                    result += self.current_char()
+                    self.advance()
+                
+                return Token(TokenType.UINT_LITERAL if is_unsigned else TokenType.SINT_LITERAL, 
+                           result.replace("u",""), start_pos[0], start_pos[1])
         
         # Read decimal digits
         while self.current_char() and self.current_char().isdigit():
@@ -498,8 +533,15 @@ class FluxLexer:
                 self.advance()
 
         
-        token_type = TokenType.FLOAT if is_float else TokenType.INTEGER
-        return Token(token_type, result, start_pos[0], start_pos[1])
+        token_type = TokenType.FLOAT if is_float else TokenType.SINT_LITERAL
+        
+        # Check for unsigned suffix (lowercase 'u' only) - but NOT for floats
+        if not is_float and self.current_char() and self.current_char() == 'u':
+            token_type = TokenType.UINT_LITERAL
+            result += self.current_char()
+            self.advance()
+        
+        return Token(token_type, result.replace("u",""), start_pos[0], start_pos[1])
     
     def read_identifier(self) -> Token:
         start_pos = (self.line, self.column)

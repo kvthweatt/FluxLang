@@ -34,7 +34,8 @@ class ASTNode:
 
 # Enums and simple types
 class DataType(Enum):
-    INT = "int"
+    SINT = "int"
+    UINT = "uint"
     FLOAT = "float"
     CHAR = "char"
     BOOL = "bool"
@@ -111,8 +112,10 @@ class Literal(ASTNode):
     type: DataType
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        if self.type == DataType.INT:
-            # Always generate i32 for DataType.INT literals
+        #print("AST LITERAL:", self)
+        if self.type == DataType.SINT or self.type == DataType.UINT:
+            print(self)
+            # Always 32 bit for signed or unsigned integer literals.
             return ir.Constant(ir.IntType(32), int(self.value) if isinstance(self.value, str) else self.value)
         elif self.type == DataType.FLOAT:
             return ir.Constant(ir.FloatType(), float(self.value))
@@ -373,7 +376,7 @@ class TypeSpec:
             raise NameError(f"Unknown type: {self.custom_typename}")
         
         # Handle built-in types
-        if self.base_type == DataType.INT:
+        if self.base_type == DataType.SINT:
             return ir.IntType(32)
         elif self.base_type == DataType.FLOAT:
             return ir.FloatType()
@@ -1581,7 +1584,7 @@ class ArrayLiteral(Expression):
                 for inner_elem in elem.elements:
                     # For global constants, we need constant values
                     if isinstance(inner_elem, Literal):
-                        if inner_elem.type == DataType.INT:
+                        if inner_elem.type == DataType.SINT:
                             elem_val = inner_elem.value
                             elem_width = 32  # This is wrong - need to infer from context
                         else:
@@ -1625,7 +1628,7 @@ class ArrayLiteral(Expression):
                 const_elements.append(ir.Constant(llvm_type.element, packed_value))
             
             elif isinstance(elem, Literal):
-                if elem.type == DataType.INT:
+                if elem.type == DataType.SINT:
                     const_elements.append(ir.Constant(llvm_type.element, elem.value))
                 elif elem.type == DataType.FLOAT:
                     const_elements.append(ir.Constant(llvm_type.element, elem.value))
@@ -2073,6 +2076,22 @@ class BinaryOp(Expression):
     operator: Operator
     right: Expression
 
+    def _is_unsigned(self, val: ir.Value) -> bool:
+        """
+        Check if a value should be treated as unsigned based on its type metadata.
+        Returns True if unsigned, False if signed or unknown (default to signed).
+        """
+        if hasattr(val, '_flux_type_spec'):
+            return not val._flux_type_spec.is_signed
+        return False
+
+    def _get_comparison_signedness(self, left_val: ir.Value, right_val: ir.Value) -> bool:
+        """
+        Determine if comparison should be unsigned.
+        If either operand is unsigned, use unsigned comparison.
+        """
+        return self._is_unsigned(left_val) or self._is_unsigned(right_val)
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Generate left and right operands
         left_val = self.left.codegen(builder, module)
@@ -2117,27 +2136,54 @@ class BinaryOp(Expression):
                 right_int = builder.ptrtoint(right_val, intptr_type, name="ptr_to_int_r")
                 return builder.sub(left_int, right_int, name="ptr_diff")
         
-        # Standard arithmetic and logical operations
+        # =====================================================================
+        # STANDARD ARITHMETIC OPERATIONS
+        # =====================================================================
+        
         if self.operator == Operator.ADD:
             if isinstance(left_val.type, ir.FloatType):
                 return builder.fadd(left_val, right_val)
             else:
                 return builder.add(left_val, right_val)
+                
         elif self.operator == Operator.SUB:
             if isinstance(left_val.type, ir.FloatType):
                 return builder.fsub(left_val, right_val)
             else:
                 return builder.sub(left_val, right_val)
+                
         elif self.operator == Operator.MUL:
             if isinstance(left_val.type, ir.FloatType):
                 return builder.fmul(left_val, right_val)
             else:
                 return builder.mul(left_val, right_val)
+                
         elif self.operator == Operator.DIV:
             if isinstance(left_val.type, ir.FloatType):
                 return builder.fdiv(left_val, right_val)
             else:
-                return builder.sdiv(left_val, right_val)
+                # FIXED: Check signedness and use appropriate division
+                is_unsigned = self._is_unsigned(left_val) or self._is_unsigned(right_val)
+                if is_unsigned:
+                    return builder.udiv(left_val, right_val)
+                else:
+                    return builder.sdiv(left_val, right_val)
+                    
+        elif self.operator == Operator.MOD:
+            if isinstance(left_val.type, ir.FloatType):
+                return builder.frem(left_val, right_val)
+            else:
+                # FIXED: Check signedness and use appropriate modulo
+                is_unsigned = self._is_unsigned(left_val) or self._is_unsigned(right_val)
+                if is_unsigned:
+                    return builder.urem(left_val, right_val)
+                else:
+                    return builder.srem(left_val, right_val)
+        
+        # =====================================================================
+        # COMPARISON OPERATIONS
+        # =====================================================================
+        
         elif self.operator == Operator.EQUAL:
             # Handle pointer-to-integer comparison
             if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
@@ -2172,6 +2218,7 @@ class BinaryOp(Expression):
             # Integer comparison
             else:
                 return builder.icmp_signed('==', left_val, right_val)
+                
         elif self.operator == Operator.NOT_EQUAL:
             # Handle pointer-to-integer comparison
             if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
@@ -2206,6 +2253,7 @@ class BinaryOp(Expression):
             # Integer comparison
             else:
                 return builder.icmp_signed('!=', left_val, right_val)
+                
         elif self.operator == Operator.LESS_THAN:
             # Handle pointer-to-integer comparison
             if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
@@ -2229,17 +2277,22 @@ class BinaryOp(Expression):
                     # Extend both to the wider width
                     target_width = max(left_val.type.width, right_val.type.width)
                     target_type = ir.IntType(target_width)
+                    # FIXED: Use appropriate extension based on signedness
+                    is_unsigned = self._get_comparison_signedness(left_val, right_val)
                     if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type)
+                        left_val = builder.zext(left_val, target_type) if is_unsigned else builder.sext(left_val, target_type)
                     if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type)
-                return builder.icmp_signed('<', left_val, right_val)
+                        right_val = builder.zext(right_val, target_type) if is_unsigned else builder.sext(right_val, target_type)
+                # FIXED: Use unsigned or signed comparison based on type
+                is_unsigned = self._get_comparison_signedness(left_val, right_val)
+                return builder.icmp_unsigned('<', left_val, right_val) if is_unsigned else builder.icmp_signed('<', left_val, right_val)
             # Float comparison
             elif isinstance(left_val.type, ir.FloatType):
                 return builder.fcmp_ordered('<', left_val, right_val)
             # Integer comparison
             else:
                 return builder.icmp_signed('<', left_val, right_val)
+                
         elif self.operator == Operator.LESS_EQUAL:
             # Handle pointer-to-integer comparison
             if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
@@ -2263,17 +2316,22 @@ class BinaryOp(Expression):
                     # Extend both to the wider width
                     target_width = max(left_val.type.width, right_val.type.width)
                     target_type = ir.IntType(target_width)
+                    # FIXED: Use appropriate extension based on signedness
+                    is_unsigned = self._get_comparison_signedness(left_val, right_val)
                     if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type)
+                        left_val = builder.zext(left_val, target_type) if is_unsigned else builder.sext(left_val, target_type)
                     if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type)
-                return builder.icmp_signed('<=', left_val, right_val)
+                        right_val = builder.zext(right_val, target_type) if is_unsigned else builder.sext(right_val, target_type)
+                # FIXED: Use unsigned or signed comparison based on type
+                is_unsigned = self._get_comparison_signedness(left_val, right_val)
+                return builder.icmp_unsigned('<=', left_val, right_val) if is_unsigned else builder.icmp_signed('<=', left_val, right_val)
             # Float comparison
             elif isinstance(left_val.type, ir.FloatType):
                 return builder.fcmp_ordered('<=', left_val, right_val)
             # Integer comparison
             else:
                 return builder.icmp_signed('<=', left_val, right_val)
+                
         elif self.operator == Operator.GREATER_THAN:
             # Handle pointer-to-integer comparison
             if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
@@ -2297,17 +2355,22 @@ class BinaryOp(Expression):
                     # Extend both to the wider width
                     target_width = max(left_val.type.width, right_val.type.width)
                     target_type = ir.IntType(target_width)
+                    # FIXED: Use appropriate extension based on signedness
+                    is_unsigned = self._get_comparison_signedness(left_val, right_val)
                     if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type)
+                        left_val = builder.zext(left_val, target_type) if is_unsigned else builder.sext(left_val, target_type)
                     if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type)
-                return builder.icmp_signed('>', left_val, right_val)
+                        right_val = builder.zext(right_val, target_type) if is_unsigned else builder.sext(right_val, target_type)
+                # FIXED: Use unsigned or signed comparison based on type
+                is_unsigned = self._get_comparison_signedness(left_val, right_val)
+                return builder.icmp_unsigned('>', left_val, right_val) if is_unsigned else builder.icmp_signed('>', left_val, right_val)
             # Float comparison
             elif isinstance(left_val.type, ir.FloatType):
                 return builder.fcmp_ordered('>', left_val, right_val)
             # Integer comparison
             else:
                 return builder.icmp_signed('>', left_val, right_val)
+                
         elif self.operator == Operator.GREATER_EQUAL:
             # Handle pointer-to-integer comparison
             if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
@@ -2331,17 +2394,26 @@ class BinaryOp(Expression):
                     # Extend both to the wider width
                     target_width = max(left_val.type.width, right_val.type.width)
                     target_type = ir.IntType(target_width)
+                    # FIXED: Use appropriate extension based on signedness
+                    is_unsigned = self._get_comparison_signedness(left_val, right_val)
                     if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type)
+                        left_val = builder.zext(left_val, target_type) if is_unsigned else builder.sext(left_val, target_type)
                     if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type)
-                return builder.icmp_signed('>=', left_val, right_val)
+                        right_val = builder.zext(right_val, target_type) if is_unsigned else builder.sext(right_val, target_type)
+                # FIXED: Use unsigned or signed comparison based on type
+                is_unsigned = self._get_comparison_signedness(left_val, right_val)
+                return builder.icmp_unsigned('>=', left_val, right_val) if is_unsigned else builder.icmp_signed('>=', left_val, right_val)
             # Float comparison
             elif isinstance(left_val.type, ir.FloatType):
                 return builder.fcmp_ordered('>=', left_val, right_val)
             # Integer comparison
             else:
                 return builder.icmp_signed('>=', left_val, right_val)
+        
+        # =====================================================================
+        # BITWISE OPERATIONS
+        # =====================================================================
+        
         elif self.operator == Operator.AND:
             # Ensure both operands have same width for bitwise AND
             if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
@@ -2353,6 +2425,7 @@ class BinaryOp(Expression):
                     if right_val.type.width < target_width:
                         right_val = builder.zext(right_val, target_type)
             return builder.and_(left_val, right_val)
+            
         elif self.operator == Operator.OR:
             # Ensure both operands have same width for bitwise OR
             if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
@@ -2364,6 +2437,7 @@ class BinaryOp(Expression):
                     if right_val.type.width < target_width:
                         right_val = builder.zext(right_val, target_type)
             return builder.or_(left_val, right_val)
+            
         elif self.operator == Operator.XOR:
             # Ensure both operands have same width for bitwise XOR
             if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
@@ -2375,6 +2449,7 @@ class BinaryOp(Expression):
                     if right_val.type.width < target_width:
                         right_val = builder.zext(right_val, target_type)
             return builder.xor(left_val, right_val)
+            
         elif self.operator == Operator.BITOR:
             # Bitwise OR operation with width matching
             if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
@@ -2386,6 +2461,7 @@ class BinaryOp(Expression):
                     if right_val.type.width < target_width:
                         right_val = builder.zext(right_val, target_type)
             return builder.or_(left_val, right_val)
+            
         elif self.operator == Operator.BITAND:
             # Bitwise AND operation with width matching
             if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
@@ -2397,14 +2473,12 @@ class BinaryOp(Expression):
                     if right_val.type.width < target_width:
                         right_val = builder.zext(right_val, target_type)
             return builder.and_(left_val, right_val)
-        elif self.operator == Operator.MOD:
-            # TODO: ADD TYPE COERCION LIKE ABOVE
-            if isinstance(left_val.type, ir.FloatType):
-                return builder.frem(left_val, right_val)
-            else:
-                return builder.srem(left_val, right_val)
+        
+        # =====================================================================
+        # BIT SHIFT OPERATIONS
+        # =====================================================================
+        
         elif self.operator == Operator.BITSHIFT_LEFT:
-            # TODO: ADD TYPE COERCION LIKE ABOVE
             # Ensure both operands have same width
             if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
                 if left_val.type.width != right_val.type.width:
@@ -2414,9 +2488,9 @@ class BinaryOp(Expression):
                     else:
                         right_val = builder.trunc(right_val, left_val.type)
             return builder.shl(left_val, right_val)
+            
         elif self.operator == Operator.BITSHIFT_RIGHT:
-            # TODO: ADD TYPE COERCION LIKE ABOVE
-            # Ensure both operands have same width
+            # FIXED: Use logical shift for unsigned, arithmetic shift for signed
             if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
                 if left_val.type.width != right_val.type.width:
                     # Extend shift amount to match left operand width
@@ -2424,19 +2498,29 @@ class BinaryOp(Expression):
                         right_val = builder.zext(right_val, left_val.type)
                     else:
                         right_val = builder.trunc(right_val, left_val.type)
-            return builder.ashr(left_val, right_val)
+            
+            # Use lshr for unsigned, ashr for signed
+            is_unsigned = self._is_unsigned(left_val)
+            if is_unsigned:
+                return builder.lshr(left_val, right_val)
+            else:
+                return builder.ashr(left_val, right_val)
+        
+        # =====================================================================
+        # OTHER OPERATIONS
+        # =====================================================================
+        
         elif self.operator == Operator.NOR:
-            # TODO: ADD TYPE COERCION LIKE ABOVE
             # NOR is !(A | B) = NOT(OR(A, B))
             or_result = builder.or_(left_val, right_val)
             return builder.not_(or_result)
+            
         elif self.operator == Operator.NAND:
-            # TODO: ADD TYPE COERCION LIKE ABOVE
             # NAND is !(A & B) = NOT(AND(A, B))
             and_result = builder.and_(left_val, right_val)
             return builder.not_(and_result)
+            
         elif self.operator == Operator.POWER:
-            # TODO: ADD TYPE COERCION LIKE ABOVE
             # Power operator using LLVM intrinsics
             if isinstance(left_val.type, ir.FloatType):
                 # For floating point, use llvm.pow
@@ -2453,8 +2537,14 @@ class BinaryOp(Expression):
                 # For integers, implement as repeated multiplication (or call pow function)
                 # Convert to double, use pow, then convert back
                 double_type = ir.DoubleType()
-                left_fp = builder.sitofp(left_val, double_type)
-                right_fp = builder.sitofp(right_val, double_type)
+                # FIXED: Use appropriate int-to-float conversion
+                is_unsigned = self._is_unsigned(left_val) or self._is_unsigned(right_val)
+                if is_unsigned:
+                    left_fp = builder.uitofp(left_val, double_type)
+                    right_fp = builder.uitofp(right_val, double_type)
+                else:
+                    left_fp = builder.sitofp(left_val, double_type)
+                    right_fp = builder.sitofp(right_val, double_type)
                 
                 pow_name = "llvm.pow.f64"
                 if pow_name not in module.globals:
@@ -2466,7 +2556,11 @@ class BinaryOp(Expression):
                     pow_func = module.globals[pow_name]
                 
                 result_fp = builder.call(pow_func, [left_fp, right_fp])
-                return builder.fptosi(result_fp, left_val.type)
+                # FIXED: Use appropriate float-to-int conversion
+                if is_unsigned:
+                    return builder.fptoui(result_fp, left_val.type)
+                else:
+                    return builder.fptosi(result_fp, left_val.type)
         else:
             raise ValueError(f"Unsupported operator: {self.operator}")
 
@@ -3092,7 +3186,7 @@ class FStringLiteral(Expression):
         
         # Handle literals
         if isinstance(expr, Literal):
-            if expr.type == DataType.INT:
+            if expr.type == DataType.SINT:
                 return int(expr.value)
             elif expr.type == DataType.FLOAT:
                 return float(expr.value)
@@ -4164,7 +4258,7 @@ class VariableDeclaration(ASTNode):
             return None
         
         # Get the index
-        if not isinstance(array_access.index, Literal) or array_access.index.type != DataType.INT:
+        if not isinstance(array_access.index, Literal) or array_access.index.type != DataType.SINT:
             return None  # Can only use constant integer indices at compile time
         
         index_value = array_access.index.value
@@ -4179,7 +4273,7 @@ class VariableDeclaration(ASTNode):
     
     def _literal_to_constant(self, lit: Literal, llvm_type: ir.Type) -> ir.Constant:
         """Convert literal to LLVM constant."""
-        if lit.type == DataType.INT:
+        if lit.type == DataType.SINT:
             return ir.Constant(llvm_type, lit.value)
         elif lit.type == DataType.FLOAT:
             return ir.Constant(llvm_type, lit.value)
@@ -4360,7 +4454,7 @@ class VariableDeclaration(ASTNode):
     def _eval_const_expr(self, expr: Expression, module: ir.Module) -> Optional[ir.Constant]:
         """Recursively evaluate constant expressions at compile time."""
         if isinstance(expr, Literal):
-            if expr.type == DataType.INT:
+            if expr.type == DataType.SINT:
                 return ir.Constant(ir.IntType(32), expr.value)
             elif expr.type == DataType.FLOAT:
                 return ir.Constant(ir.FloatType(), expr.value)
@@ -6971,7 +7065,7 @@ class StructDef(ASTNode):
         widths = {
             DataType.BOOL: 1,
             DataType.CHAR: 8,
-            DataType.INT: 32,
+            DataType.SINT: 32,
             DataType.FLOAT: 32,
             DataType.VOID: 0
         }
@@ -7835,9 +7929,9 @@ if __name__ == "__main__":
     main_func = FunctionDef(
         name="main",
         parameters=[],
-        return_type=TypeSpec(base_type=DataType.INT),
+        return_type=TypeSpec(base_type=DataType.SINT),
         body=Block([
-            ReturnStatement(Literal(0, DataType.INT))
+            ReturnStatement(Literal(0, DataType.SINT))
         ])
     )
     

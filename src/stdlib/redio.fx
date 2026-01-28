@@ -188,9 +188,11 @@ namespace standard
                     // x19-x28: Callee-saved
                     // x29: Frame pointer
                     // x30: Link register
+                    //chcp 65001
+                    //utf8_test
                     
                     // GetStdHandle(STD_OUTPUT_HANDLE = -11)
-                    mov x0, #-11              // STD_OUTPUT_HANDLE
+                    mov x0, #-11             // STD_OUTPUT_HANDLE
                     bl GetStdHandle          // Call GetStdHandle
                     
                     mov x19, x0              // Save handle in callee-saved register
@@ -201,9 +203,9 @@ namespace standard
                     mov x4, #0               // lpOverlapped = NULL
                     
                     bl WriteFile             // Call WriteFile
-                } : : "r"(msg), "r"(x) : "x0","x1","x2","x3","x4","x5","x6","x7",
-                                           "x8","x9","x10","x11","x12","x13",
-                                           "x14","x15","x16","x17","x19","memory";
+                } : : "r"(msg), "r"(x) : "x0", "x1", "x2", "x3", "x4", "x5","x6","x7",
+                                         "x8", "x9", "x10","x11","x12","x13",
+                                         "x14","x15","x16","x17","x19","memory";
                 return void;
             };
 #endif; // ARCH ARM

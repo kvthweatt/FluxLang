@@ -209,7 +209,7 @@ class FluxParser:
             return self.variable_declaration_statement()
         elif self.expect(TokenType.SIGNED):
             return self.variable_declaration_statement()
-        elif self.expect(TokenType.INT, TokenType.DATA, TokenType.CHAR, 
+        elif self.expect(TokenType.SINT, TokenType.DATA, TokenType.CHAR, 
                          TokenType.FLOAT_KW, TokenType.BOOL_KW, TokenType.VOID):
             return self.variable_declaration_statement()
         elif self.expect(TokenType.SEMICOLON):
@@ -304,7 +304,7 @@ class FluxParser:
                 self.advance()
             
             # Must have a base type
-            if not self.expect(TokenType.INT, TokenType.FLOAT_KW, TokenType.CHAR, 
+            if not self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.CHAR, 
                               TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
                               TokenType.IDENTIFIER):
                 return False
@@ -786,14 +786,14 @@ class FluxParser:
         if base_type == DataType.DATA and custom_typename is None:
             if self.expect(TokenType.LEFT_BRACE):
                 self.advance()
-                bit_width = int(self.consume(TokenType.INTEGER).value)
+                bit_width = int(self.consume(TokenType.SINT_LITERAL).value)
                 
                 if self.expect(TokenType.COLON):
                     self.advance()
-                    alignment = int(self.consume(TokenType.INTEGER).value)
+                    alignment = int(self.consume(TokenType.SINT_LITERAL).value)
                     if self.expect(TokenType.COLON):
                         self.advance()
-                        endianness = int(self.consume(TokenType.INTEGER).value)
+                        endianness = int(self.consume(TokenType.SINT_LITERAL).value)
                 else:
                     alignment = bit_width
                 
@@ -805,7 +805,7 @@ class FluxParser:
         while self.expect(TokenType.LEFT_BRACKET):
             self.advance()
             if not self.expect(TokenType.RIGHT_BRACKET):
-                if self.expect(TokenType.INTEGER):
+                if self.expect(TokenType.SINT_LITERAL):
                     array_size = int(self.current_token.value)
                     array_dims.append(array_size)
                     self.advance()
@@ -845,12 +845,15 @@ class FluxParser:
     
     def base_type(self) -> Union[DataType, List]:
         """
-        base_type -> 'int' | 'float' | 'char' | 'bool' | 'data' | 'void' | IDENTIFIER
+        base_type -> 'int' | 'uint' | 'float' | 'char' | 'bool' | 'data' | 'void' | IDENTIFIER
         Returns DataType for built-in types, or [DataType.DATA, typename] for custom types
         """
-        if self.expect(TokenType.INT):
+        if self.expect(TokenType.SINT):
             self.advance()
-            return DataType.INT
+            return DataType.SINT
+        elif self.expect(TokenType.UINT):
+            self.advance()
+            return DataType.UINT
         elif self.expect(TokenType.FLOAT_KW):
             self.advance()
             return DataType.FLOAT
@@ -892,7 +895,7 @@ class FluxParser:
                 self.advance()
             
             # Must have a base type
-            if not self.expect(TokenType.INT, TokenType.FLOAT_KW, TokenType.CHAR, 
+            if not self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.CHAR, 
                              TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
                              TokenType.IDENTIFIER):
                 return False
@@ -902,11 +905,11 @@ class FluxParser:
             # Skip data type specification
             if self.expect(TokenType.LEFT_BRACE):
                 self.advance()
-                if self.expect(TokenType.INTEGER):
+                if self.expect(TokenType.SINT_LITERAL):
                     self.advance()
                 if self.expect(TokenType.COLON):
                     self.advance()
-                    if self.expect(TokenType.INTEGER):
+                    if self.expect(TokenType.SINT_LITERAL):
                         self.advance()
                 if self.expect(TokenType.RIGHT_BRACE):
                     self.advance()
@@ -1990,7 +1993,7 @@ class FluxParser:
         """
         if self.expect(TokenType.IDENTIFIER):
             return self.scoped_identifier()
-        elif self.expect(TokenType.INTEGER):
+        elif self.expect(TokenType.SINT_LITERAL):
             if self.current_token.value.startswith('0d'):
                 number_str = self.current_token.value[2:]
                 # Define the digits for base 32: 0-9, A-V
@@ -2001,11 +2004,28 @@ class FluxParser:
                 for char in number_str.upper():
                     value = value * 32 + digits_map[char]
                 self.advance()
-                print(value)
             else:
                 value = int(self.current_token.value, 0)
                 self.advance()
-            return Literal(value, DataType.INT)
+            return Literal(value, DataType.SINT)
+        elif self.expect(TokenType.UINT_LITERAL):
+            print("PARSER GOT UINT LITERAL")
+            #print(self.current_token.value)
+            if self.current_token.value.startswith('0d'):
+                number_str = self.current_token.value[2:]
+                # Define the digits for base 32: 0-9, A-V
+                digits = '0123456789ABCDEFGHIJKLMNOPQRSTUV'
+                digits_map = {char: idx for idx, char in enumerate(digits)}
+                
+                value = 0
+                for char in number_str.upper():
+                    value = value * 32 + digits_map[char]
+                self.advance()
+            else:
+                value = int(self.current_token.value, 0)
+                self.advance()
+            print(value)
+            return Literal(value, DataType.UINT)
         elif self.expect(TokenType.FLOAT):
             value = float(self.current_token.value)
             self.advance()
@@ -2115,7 +2135,7 @@ class FluxParser:
         saved_pos = self.position
         
         # Check if it starts with a known type keyword
-        if self.expect(TokenType.INT, TokenType.FLOAT_KW, TokenType.CHAR, 
+        if self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.CHAR, 
                       TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID,
                       TokenType.CONST, TokenType.VOLATILE, TokenType.SIGNED, TokenType.UNSIGNED):
             # Definitely a type, parse as type_spec
