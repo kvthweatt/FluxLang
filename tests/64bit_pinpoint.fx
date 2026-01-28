@@ -86,6 +86,70 @@ def isolate_the_bug() -> int
     return 0;
 };
 
+def diagnose_variable_vs_literal() -> int
+{
+    byte[64] buffer;
+    
+    print("=== Variable vs Literal Diagnosis ===\n\0");
+    
+    // Case 1: Literal directly in operation
+    u64 result1 = (u64)0xFFFFFFFF / (u64)256;
+    print("Literal: 0xFFFFFFFF / 256 = \0"); 
+    u64str(result1, buffer); print(buffer); print("\n\0");
+    
+    // Case 2: Store in variable first
+    u64 val = (u64)0xFFFFFFFF;
+    u64 result2 = val / (u64)256;
+    print("Variable: val / 256 = \0");
+    u64str(result2, buffer); print(buffer); print("\n\0");
+    
+    // Case 3: Check what's actually in the variable
+    print("val (as hex should be 0xFFFFFFFF) = \0");
+    u64str(val, buffer); print(buffer); print("\n\0");
+    
+    // Case 4: Test addition with variable
+    u64 add_result = val + (u64)1;
+    print("val + 1 = \0");
+    u64str(add_result, buffer); print(buffer); print(" (expected: 0x100000000)\n\0");
+    
+    // Case 5: What type does 'val' think it is?
+    // Let's test with explicit casts
+    u64 casted = (u64)val;
+    u64 casted_result = casted / (u64)256;
+    print("(u64)val / 256 = \0");
+    u64str(casted_result, buffer); print(buffer); print("\n\0");
+    
+    return 0;
+};
+///
+def test_implicit_conversions() -> int
+{
+    byte[64] buffer;
+    
+    print("=== Implicit Conversion Tests ===\n\0");
+    
+    // Test: u32 literal assigned to u64
+    u64 from_u32_literal = 0xFFFFFFFF;  // This is u32 max
+    print("u64 from u32 literal (0xFFFFFFFF) = \0");
+    u64str(from_u32_literal, buffer); print(buffer); print("\n\0");
+    
+    u64 div1 = from_u32_literal / 256;
+    print("  / 256 = \0"); u64str(div1, buffer); print(buffer); print("\n\0");
+    
+    // Test: explicit u64 cast
+    u64 explicit = (u64)0xFFFFFFFF;
+    u64 div2 = explicit / 256;
+    print("Explicit (u64)0xFFFFFFFF / 256 = \0");
+    u64str(div2, buffer); print(buffer); print("\n\0");
+    
+    // Test: intermediate calculations
+    u64 calc = (u64)(0xFFFFFFFF) / 256;
+    print("(u64)(0xFFFFFFFF) / 256 = \0");
+    u64str(calc, buffer); print(buffer); print("\n\0");
+    
+    return 0;
+};
+///
 def main() -> int
 {
     test_64bit_arithmetic();
@@ -96,5 +160,7 @@ def main() -> int
     pinpoint_llvm_bug();
     test_all_ops();
     isolate_the_bug();
+    diagnose_variable_vs_literal();
+    //test_implicit_conversions();
     return 0;
 };

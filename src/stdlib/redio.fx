@@ -162,7 +162,7 @@ namespace standard
                     call WriteFile
                     addq $$40, %rsp
                 } : : "r"(msg), "r"(x) : "rax","rcx","rdx","r8","r9","r10","r11","memory";
-                return void;
+                return;
             };
 
             def reset_from_input() -> void
@@ -170,7 +170,7 @@ namespace standard
                 char bs = 8;
                 win_print(@bs,1);
                 win_print(@bs,1);
-                return void;
+                return;
             };
 #endif; // ARCH 86 64
 #ifdef __ARCH_ARM64__
@@ -206,7 +206,7 @@ namespace standard
                 } : : "r"(msg), "r"(x) : "x0", "x1", "x2", "x3", "x4", "x5","x6","x7",
                                          "x8", "x9", "x10","x11","x12","x13",
                                          "x14","x15","x16","x17","x19","memory";
-                return void;
+                return;
             };
 #endif; // ARCH ARM
 #endif; // WINDOWS
@@ -232,7 +232,7 @@ namespace standard
                     movq $1, %rdx
                     syscall
                 } : : "r"(msg), "r"(count) : "rax","rdi","rsi","rdx","rcx","r11","memory";
-                return void;
+                return;
             };
 #endif; // ARCH 86 64
 #ifdef __ARCH_ARM64__
@@ -263,7 +263,7 @@ namespace standard
                                               "x6","x7","x8","x9","x10","x11",
                                               "x12","x13","x14","x15","x16",
                                               "x17","memory";
-                return void;
+                return;
             };
 #endif; // ARCH ARM
 #endif; // LINUX
@@ -297,7 +297,7 @@ namespace standard
                     movq $1, %rdx
                     syscall
                 } : : "r"(msg), "r"(count) : "rax","rdi","rsi","rdx","r10","r8","r9","rcx","r11","memory";
-                return void;
+                return;
             };
 #endif; // ARCH 86 64
 #ifdef __ARCH_ARM64__
@@ -312,7 +312,7 @@ namespace standard
                     ldr x2, [sp, #8]
                     svc #0x80
                 } : : "r"(msg), "r"(x) : "x0","x1","x2","x16","memory";
-                return void;
+                return;
             };
 #endif; // ARCH ARM
 #endif; // MACOS
@@ -342,7 +342,7 @@ namespace standard
                         mac_print(@s, len);
                     }
 #endif;
-                    default { return void; }; // Unknown - exit() for now
+                    default { return; }; // Unknown - exit() for now
                 };
     			(void)s;
     			return;
@@ -375,7 +375,7 @@ namespace standard
                         mac_print(@s, len);
                     }
 #endif;
-                    default { return void; }; // Unknown - exit() for now
+                    default { return; }; // Unknown - exit() for now
                 };
                 (void)s;
                 return;
@@ -408,7 +408,7 @@ namespace standard
                         mac_print("\n", 1);
                     }
 #endif;
-                    default { return void; }; // Unknown - exit() for now
+                    default { return; }; // Unknown - exit() for now
                 };
                 return;
             };
@@ -610,26 +610,27 @@ namespace standard
             };
             
             // HELPER FUNCTIONS - Simplified wrappers
-            
+            //
             // Open file for reading
             def open_read(byte* path) -> i64
             {
                 print("In open_read()...\n\0");
-                return win_open(path, (u32)GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL);
+                return win_open(path, (u32)GENERIC_READ, (u32)FILE_SHARE_READ, (u32)OPEN_EXISTING, (u32)FILE_ATTRIBUTE_NORMAL);
             };
-            
+            //
             // Open file for writing (creates if doesn't exist)
             def open_write(byte* path) -> i64
             {
-                return win_open(path, GENERIC_WRITE, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL);
+                return (i64)win_open(path, (u32)GENERIC_WRITE, 0, (u32)CREATE_ALWAYS, (u32)FILE_ATTRIBUTE_NORMAL);
             };
-            
+            //
             // Open file for reading and writing
             def open_read_write(byte* path) -> i64
             {
-                return win_open(path, GENERIC_READ_WRITE, FILE_SHARE_READ, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL);
+                return (i64)win_open(path, (u32)GENERIC_READ_WRITE, (u32)FILE_SHARE_READ, (u32)OPEN_ALWAYS, (u32)FILE_ATTRIBUTE_NORMAL);
             };
-#endif;
+            //
+#endif; // Windows
 
 #ifdef __LINUX__
             // File I/O functions for Linux

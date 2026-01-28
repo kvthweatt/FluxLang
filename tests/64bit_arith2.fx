@@ -5,10 +5,10 @@
 def check_literal_types() -> int
 {
     // Different ways to specify literals
-    u64 dec_large = (u64)5000000000;
-    u64 hex_large = (u64)0x12A05F200;  // 5000000000 in hex
-    u64 hex_max   = (u64)0xFFFFFFFFFFFFFFFF;
-    u64 just_over = (u64)4294967296;   // 2^32
+    u64 dec_large = (u64)5000000000u;
+    u64 hex_large = (u64)0x12A05F200u;         // 5000000000 in hex
+    u64 hex_max   = (u64)0xFFFFFFFFFFFFFFFFu;
+    u64 just_over = (u64)4294967296u;          // 2^32
     
     byte[32] buffer;
     

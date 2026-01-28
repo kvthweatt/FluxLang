@@ -215,7 +215,7 @@ object myObj
 
     def __exit() -> void
     {
-        return void;
+        return;
     };
 };
 
@@ -229,7 +229,7 @@ object anotherObj
 
     def __exit() -> void
     {
-        return void;
+        return;
     };
 };
 ```
@@ -560,7 +560,7 @@ Example:
 ```
 def foo() -> void
 {
-    return 5;     // Imagine you wrote `return void;` here instead. You could also imagine `return (void)5;` as well.
+    return 5;     // Imagine you wrote `return;` here instead. You could also imagine `return (void)5;` as well.
 };
 
 // This means a return type is syntactic sugar for casting the return value automatically,
@@ -1254,14 +1254,14 @@ object ErrorA
 {
     int code;
     def __init(int c) -> this { this.code = c; return this; };
-    def __exit() -> void {return void;};
+    def __exit() -> void {return;};
 };
 
 object ErrorB
 {
     string message;
     def __init(string m) -> this { this.message = m; return this; };
-    def __exit() -> void {return void;};
+    def __exit() -> void {return;};
 };
 
 def risky_operation(int mode) -> void

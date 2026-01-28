@@ -111,12 +111,19 @@ class Literal(ASTNode):
     value: Any
     type: DataType
 
+    def _infer_int_width(self, value: int) -> int:
+        if self.type == DataType.SINT:
+            return 32 if -(1 << 31) <= value <= (1 << 31) - 1 else 64
+        if self.type == DataType.UINT:
+            return 32 if 0 <= value <= (1 << 32) - 1 else 64
+        raise ValueError("Not an integer literal")
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         #print("AST LITERAL:", self)
-        if self.type == DataType.SINT or self.type == DataType.UINT:
-            print(self)
-            # Always 32 bit for signed or unsigned integer literals.
-            return ir.Constant(ir.IntType(32), int(self.value) if isinstance(self.value, str) else self.value)
+        if self.type in (DataType.SINT, DataType.UINT):
+            val = int(self.value, 0) if isinstance(self.value, str) else int(self.value)
+            width = self._infer_int_width(val)
+            return ir.Constant(ir.IntType(width), val)
         elif self.type == DataType.FLOAT:
             return ir.Constant(ir.FloatType(), float(self.value))
         elif self.type == DataType.BOOL:
@@ -2070,6 +2077,73 @@ def emit_memcpy(builder: ir.IRBuilder, module: ir.Module, dst_ptr: ir.Value, src
         ir.Constant(ir.IntType(1), 0)  # not volatile
     ])
 
+class LoweringContext:
+    def __init__(self, builder: ir.IRBuilder):
+        self.b = builder
+
+    # --------------------------------------------------
+    # Signedness
+    # --------------------------------------------------
+
+    @staticmethod
+    def is_unsigned(val: ir.Value) -> bool:
+        spec = getattr(val, "_flux_type_spec", None)
+        return spec is not None and not spec.is_signed
+
+    @staticmethod
+    def comparison_is_unsigned(a: ir.Value, b: ir.Value) -> bool:
+        return LoweringContext.is_unsigned(a) or LoweringContext.is_unsigned(b)
+
+    # --------------------------------------------------
+    # Integer normalization
+    # --------------------------------------------------
+
+    def normalize_ints(self, a: ir.Value, b: ir.Value, *, unsigned: bool):
+        assert isinstance(a.type, ir.IntType)
+        assert isinstance(b.type, ir.IntType)
+
+        if a.type.width == b.type.width:
+            return a, b
+
+        width = max(a.type.width, b.type.width)
+        ty = ir.IntType(width)
+
+        def ext(v):
+            if v.type.width == width:
+                return v
+            return self.b.zext(v, ty) if unsigned else self.b.sext(v, ty)
+
+        return ext(a), ext(b)
+
+    # --------------------------------------------------
+    # Pointer helpers
+    # --------------------------------------------------
+
+    def ptr_to_i64(self, v: ir.Value) -> ir.Value:
+        if isinstance(v.type, ir.PointerType):
+            return self.b.ptrtoint(v, ir.IntType(64))
+        return v
+
+    # --------------------------------------------------
+    # Comparisons
+    # --------------------------------------------------
+
+    def emit_int_cmp(self, op: str, a: ir.Value, b: ir.Value):
+        unsigned = self.comparison_is_unsigned(a, b)
+        a, b = self.normalize_ints(a, b, unsigned=unsigned)
+        return (
+            self.b.icmp_unsigned(op, a, b)
+            if unsigned
+            else self.b.icmp_signed(op, a, b)
+        )
+
+    def emit_ptr_cmp(self, op: str, a: ir.Value, b: ir.Value):
+        # Explicit raw-address semantics
+        a = self.ptr_to_i64(a)
+        b = self.ptr_to_i64(b)
+        return self.b.icmp_unsigned(op, a, b)
+
+
 @dataclass
 class BinaryOp(Expression):
     left: Expression
@@ -2093,476 +2167,142 @@ class BinaryOp(Expression):
         return self._is_unsigned(left_val) or self._is_unsigned(right_val)
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        # Generate left and right operands
-        left_val = self.left.codegen(builder, module)
-        right_val = self.right.codegen(builder, module)
-        
-        # Check if this is array concatenation (both operands are array pointers)
-        # Array pointers are: [N x T]* (pointer to array type)
-        left_is_array = ArrayLiteral.is_array_or_array_pointer(left_val)
-        right_is_array = ArrayLiteral.is_array_or_array_pointer(right_val)
-        
-        # Handle array concatenation (ADD) and subtraction (SUB)
-        if (self.operator in (Operator.ADD, Operator.SUB) and 
-            left_is_array and right_is_array):
-            # Delegate to ArrayLiteral for concatenation
-            return ArrayLiteral.concatenate(builder, module, left_val, right_val, self.operator)
-        
-        # Handle pointer arithmetic (ptr + int or int + ptr)
-        # This is for cases like: ptr + 5, ptr - 2, etc.
-        # NOT for array concatenation (which is handled above)
-        left_is_ptr = isinstance(left_val.type, ir.PointerType)
-        right_is_ptr = isinstance(right_val.type, ir.PointerType)
-        left_is_int = isinstance(left_val.type, ir.IntType)
-        right_is_int = isinstance(right_val.type, ir.IntType)
-        
+        ctx = LoweringContext(builder)
+
+        lhs = self.left.codegen(builder, module)
+        rhs = self.right.codegen(builder, module)
+
+        # --------------------------------------------------
+        # Array concatenation
+        # --------------------------------------------------
+
         if self.operator in (Operator.ADD, Operator.SUB):
-            # ptr + int or int + ptr -> use GEP
-            if left_is_ptr and right_is_int and not left_is_array:
-                if self.operator == Operator.SUB:
-                    # Negate the offset for subtraction
-                    right_val = builder.sub(ir.Constant(right_val.type, 0), right_val, name="neg_offset")
-                return builder.gep(left_val, [right_val], name="ptr_arith")
-            elif right_is_ptr and left_is_int and not right_is_array:
-                if self.operator == Operator.ADD:
-                    return builder.gep(right_val, [left_val], name="ptr_arith")
-                else:
-                    # int - ptr doesn't make sense
-                    raise ValueError("Cannot subtract pointer from integer")
-            # ptr - ptr -> ptrtoint both, subtract, return int
-            elif left_is_ptr and right_is_ptr and not (left_is_array or right_is_array):
-                intptr_type = ir.IntType(64)  # Use 64-bit for pointer arithmetic
-                left_int = builder.ptrtoint(left_val, intptr_type, name="ptr_to_int_l")
-                right_int = builder.ptrtoint(right_val, intptr_type, name="ptr_to_int_r")
-                return builder.sub(left_int, right_int, name="ptr_diff")
-        
-        # =====================================================================
-        # STANDARD ARITHMETIC OPERATIONS
-        # =====================================================================
-        
-        if self.operator == Operator.ADD:
-            if isinstance(left_val.type, ir.FloatType):
-                return builder.fadd(left_val, right_val)
-            else:
-                return builder.add(left_val, right_val)
-                
-        elif self.operator == Operator.SUB:
-            if isinstance(left_val.type, ir.FloatType):
-                return builder.fsub(left_val, right_val)
-            else:
-                return builder.sub(left_val, right_val)
-                
-        elif self.operator == Operator.MUL:
-            if isinstance(left_val.type, ir.FloatType):
-                return builder.fmul(left_val, right_val)
-            else:
-                return builder.mul(left_val, right_val)
-                
-        elif self.operator == Operator.DIV:
-            if isinstance(left_val.type, ir.FloatType):
-                return builder.fdiv(left_val, right_val)
-            else:
-                # FIXED: Check signedness and use appropriate division
-                is_unsigned = self._is_unsigned(left_val) or self._is_unsigned(right_val)
-                if is_unsigned:
-                    return builder.udiv(left_val, right_val)
-                else:
-                    return builder.sdiv(left_val, right_val)
-                    
-        elif self.operator == Operator.MOD:
-            if isinstance(left_val.type, ir.FloatType):
-                return builder.frem(left_val, right_val)
-            else:
-                # FIXED: Check signedness and use appropriate modulo
-                is_unsigned = self._is_unsigned(left_val) or self._is_unsigned(right_val)
-                if is_unsigned:
-                    return builder.urem(left_val, right_val)
-                else:
-                    return builder.srem(left_val, right_val)
-        
-        # =====================================================================
-        # COMPARISON OPERATIONS
-        # =====================================================================
-        
-        elif self.operator == Operator.EQUAL:
-            # Handle pointer-to-integer comparison
-            if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
-                # Cast pointer to integer
-                left_val = builder.ptrtoint(left_val, ir.IntType(64))
-                if right_val.type.width != 64:
-                    right_val = builder.sext(right_val, ir.IntType(64))
-                return builder.icmp_signed('==', left_val, right_val)
-            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.PointerType):
-                # Cast pointer to integer
-                right_val = builder.ptrtoint(right_val, ir.IntType(64))
-                if left_val.type.width != 64:
-                    left_val = builder.sext(left_val, ir.IntType(64))
-                return builder.icmp_signed('==', left_val, right_val)
-            # Pointer-to-pointer comparison
-            elif isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.PointerType):
-                return builder.icmp_signed('==', left_val, right_val)
-            # Integer-to-integer comparison with width matching
-            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                if left_val.type.width != right_val.type.width:
-                    # Extend both to the wider width
-                    target_width = max(left_val.type.width, right_val.type.width)
-                    target_type = ir.IntType(target_width)
-                    if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type)
-                    if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type)
-                return builder.icmp_signed('==', left_val, right_val)
-            # Float comparison
-            elif isinstance(left_val.type, ir.FloatType):
-                return builder.fcmp_ordered('==', left_val, right_val)
-            # Integer comparison
-            else:
-                return builder.icmp_signed('==', left_val, right_val)
-                
-        elif self.operator == Operator.NOT_EQUAL:
-            # Handle pointer-to-integer comparison
-            if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
-                # Cast pointer to integer
-                left_val = builder.ptrtoint(left_val, ir.IntType(64))
-                if right_val.type.width != 64:
-                    right_val = builder.sext(right_val, ir.IntType(64))
-                return builder.icmp_signed('!=', left_val, right_val)
-            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.PointerType):
-                # Cast pointer to integer
-                right_val = builder.ptrtoint(right_val, ir.IntType(64))
-                if left_val.type.width != 64:
-                    left_val = builder.sext(left_val, ir.IntType(64))
-                return builder.icmp_signed('!=', left_val, right_val)
-            # Pointer-to-pointer comparison
-            elif isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.PointerType):
-                return builder.icmp_signed('!=', left_val, right_val)
-            # Integer-to-integer comparison with width matching
-            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                if left_val.type.width != right_val.type.width:
-                    # Extend both to the wider width
-                    target_width = max(left_val.type.width, right_val.type.width)
-                    target_type = ir.IntType(target_width)
-                    if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type)
-                    if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type)
-                return builder.icmp_signed('!=', left_val, right_val)
-            # Float comparison
-            elif isinstance(left_val.type, ir.FloatType):
-                return builder.fcmp_ordered('!=', left_val, right_val)
-            # Integer comparison
-            else:
-                return builder.icmp_signed('!=', left_val, right_val)
-                
-        elif self.operator == Operator.LESS_THAN:
-            # Handle pointer-to-integer comparison
-            if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
-                # Cast pointer to integer
-                left_val = builder.ptrtoint(left_val, ir.IntType(64))
-                if right_val.type.width != 64:
-                    right_val = builder.sext(right_val, ir.IntType(64))
-                return builder.icmp_signed('<', left_val, right_val)
-            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.PointerType):
-                # Cast pointer to integer
-                right_val = builder.ptrtoint(right_val, ir.IntType(64))
-                if left_val.type.width != 64:
-                    left_val = builder.sext(left_val, ir.IntType(64))
-                return builder.icmp_signed('<', left_val, right_val)
-            # Pointer-to-pointer comparison
-            elif isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.PointerType):
-                return builder.icmp_unsigned('<', left_val, right_val)
-            # Integer-to-integer comparison with width matching
-            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                if left_val.type.width != right_val.type.width:
-                    # Extend both to the wider width
-                    target_width = max(left_val.type.width, right_val.type.width)
-                    target_type = ir.IntType(target_width)
-                    # FIXED: Use appropriate extension based on signedness
-                    is_unsigned = self._get_comparison_signedness(left_val, right_val)
-                    if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type) if is_unsigned else builder.sext(left_val, target_type)
-                    if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type) if is_unsigned else builder.sext(right_val, target_type)
-                # FIXED: Use unsigned or signed comparison based on type
-                is_unsigned = self._get_comparison_signedness(left_val, right_val)
-                return builder.icmp_unsigned('<', left_val, right_val) if is_unsigned else builder.icmp_signed('<', left_val, right_val)
-            # Float comparison
-            elif isinstance(left_val.type, ir.FloatType):
-                return builder.fcmp_ordered('<', left_val, right_val)
-            # Integer comparison
-            else:
-                return builder.icmp_signed('<', left_val, right_val)
-                
-        elif self.operator == Operator.LESS_EQUAL:
-            # Handle pointer-to-integer comparison
-            if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
-                # Cast pointer to integer
-                left_val = builder.ptrtoint(left_val, ir.IntType(64))
-                if right_val.type.width != 64:
-                    right_val = builder.sext(right_val, ir.IntType(64))
-                return builder.icmp_signed('<=', left_val, right_val)
-            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.PointerType):
-                # Cast pointer to integer
-                right_val = builder.ptrtoint(right_val, ir.IntType(64))
-                if left_val.type.width != 64:
-                    left_val = builder.sext(left_val, ir.IntType(64))
-                return builder.icmp_signed('<=', left_val, right_val)
-            # Pointer-to-pointer comparison
-            elif isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.PointerType):
-                return builder.icmp_unsigned('<=', left_val, right_val)
-            # Integer-to-integer comparison with width matching
-            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                if left_val.type.width != right_val.type.width:
-                    # Extend both to the wider width
-                    target_width = max(left_val.type.width, right_val.type.width)
-                    target_type = ir.IntType(target_width)
-                    # FIXED: Use appropriate extension based on signedness
-                    is_unsigned = self._get_comparison_signedness(left_val, right_val)
-                    if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type) if is_unsigned else builder.sext(left_val, target_type)
-                    if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type) if is_unsigned else builder.sext(right_val, target_type)
-                # FIXED: Use unsigned or signed comparison based on type
-                is_unsigned = self._get_comparison_signedness(left_val, right_val)
-                return builder.icmp_unsigned('<=', left_val, right_val) if is_unsigned else builder.icmp_signed('<=', left_val, right_val)
-            # Float comparison
-            elif isinstance(left_val.type, ir.FloatType):
-                return builder.fcmp_ordered('<=', left_val, right_val)
-            # Integer comparison
-            else:
-                return builder.icmp_signed('<=', left_val, right_val)
-                
-        elif self.operator == Operator.GREATER_THAN:
-            # Handle pointer-to-integer comparison
-            if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
-                # Cast pointer to integer
-                left_val = builder.ptrtoint(left_val, ir.IntType(64))
-                if right_val.type.width != 64:
-                    right_val = builder.sext(right_val, ir.IntType(64))
-                return builder.icmp_signed('>', left_val, right_val)
-            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.PointerType):
-                # Cast pointer to integer
-                right_val = builder.ptrtoint(right_val, ir.IntType(64))
-                if left_val.type.width != 64:
-                    left_val = builder.sext(left_val, ir.IntType(64))
-                return builder.icmp_signed('>', left_val, right_val)
-            # Pointer-to-pointer comparison
-            elif isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.PointerType):
-                return builder.icmp_unsigned('>', left_val, right_val)
-            # Integer-to-integer comparison with width matching
-            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                if left_val.type.width != right_val.type.width:
-                    # Extend both to the wider width
-                    target_width = max(left_val.type.width, right_val.type.width)
-                    target_type = ir.IntType(target_width)
-                    # FIXED: Use appropriate extension based on signedness
-                    is_unsigned = self._get_comparison_signedness(left_val, right_val)
-                    if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type) if is_unsigned else builder.sext(left_val, target_type)
-                    if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type) if is_unsigned else builder.sext(right_val, target_type)
-                # FIXED: Use unsigned or signed comparison based on type
-                is_unsigned = self._get_comparison_signedness(left_val, right_val)
-                return builder.icmp_unsigned('>', left_val, right_val) if is_unsigned else builder.icmp_signed('>', left_val, right_val)
-            # Float comparison
-            elif isinstance(left_val.type, ir.FloatType):
-                return builder.fcmp_ordered('>', left_val, right_val)
-            # Integer comparison
-            else:
-                return builder.icmp_signed('>', left_val, right_val)
-                
-        elif self.operator == Operator.GREATER_EQUAL:
-            # Handle pointer-to-integer comparison
-            if isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.IntType):
-                # Cast pointer to integer
-                left_val = builder.ptrtoint(left_val, ir.IntType(64))
-                if right_val.type.width != 64:
-                    right_val = builder.sext(right_val, ir.IntType(64))
-                return builder.icmp_signed('>=', left_val, right_val)
-            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.PointerType):
-                # Cast pointer to integer
-                right_val = builder.ptrtoint(right_val, ir.IntType(64))
-                if left_val.type.width != 64:
-                    left_val = builder.sext(left_val, ir.IntType(64))
-                return builder.icmp_signed('>=', left_val, right_val)
-            # Pointer-to-pointer comparison
-            elif isinstance(left_val.type, ir.PointerType) and isinstance(right_val.type, ir.PointerType):
-                return builder.icmp_unsigned('>=', left_val, right_val)
-            # Integer-to-integer comparison with width matching
-            elif isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                if left_val.type.width != right_val.type.width:
-                    # Extend both to the wider width
-                    target_width = max(left_val.type.width, right_val.type.width)
-                    target_type = ir.IntType(target_width)
-                    # FIXED: Use appropriate extension based on signedness
-                    is_unsigned = self._get_comparison_signedness(left_val, right_val)
-                    if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type) if is_unsigned else builder.sext(left_val, target_type)
-                    if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type) if is_unsigned else builder.sext(right_val, target_type)
-                # FIXED: Use unsigned or signed comparison based on type
-                is_unsigned = self._get_comparison_signedness(left_val, right_val)
-                return builder.icmp_unsigned('>=', left_val, right_val) if is_unsigned else builder.icmp_signed('>=', left_val, right_val)
-            # Float comparison
-            elif isinstance(left_val.type, ir.FloatType):
-                return builder.fcmp_ordered('>=', left_val, right_val)
-            # Integer comparison
-            else:
-                return builder.icmp_signed('>=', left_val, right_val)
-        
-        # =====================================================================
-        # BITWISE OPERATIONS
-        # =====================================================================
-        
-        elif self.operator == Operator.AND:
-            # Ensure both operands have same width for bitwise AND
-            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                if left_val.type.width != right_val.type.width:
-                    target_width = max(left_val.type.width, right_val.type.width)
-                    target_type = ir.IntType(target_width)
-                    if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type)
-                    if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type)
-            return builder.and_(left_val, right_val)
-            
-        elif self.operator == Operator.OR:
-            # Ensure both operands have same width for bitwise OR
-            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                if left_val.type.width != right_val.type.width:
-                    target_width = max(left_val.type.width, right_val.type.width)
-                    target_type = ir.IntType(target_width)
-                    if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type)
-                    if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type)
-            return builder.or_(left_val, right_val)
-            
-        elif self.operator == Operator.XOR:
-            # Ensure both operands have same width for bitwise XOR
-            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                if left_val.type.width != right_val.type.width:
-                    target_width = max(left_val.type.width, right_val.type.width)
-                    target_type = ir.IntType(target_width)
-                    if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type)
-                    if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type)
-            return builder.xor(left_val, right_val)
-            
-        elif self.operator == Operator.BITOR:
-            # Bitwise OR operation with width matching
-            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                if left_val.type.width != right_val.type.width:
-                    target_width = max(left_val.type.width, right_val.type.width)
-                    target_type = ir.IntType(target_width)
-                    if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type)
-                    if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type)
-            return builder.or_(left_val, right_val)
-            
-        elif self.operator == Operator.BITAND:
-            # Bitwise AND operation with width matching
-            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                if left_val.type.width != right_val.type.width:
-                    target_width = max(left_val.type.width, right_val.type.width)
-                    target_type = ir.IntType(target_width)
-                    if left_val.type.width < target_width:
-                        left_val = builder.zext(left_val, target_type)
-                    if right_val.type.width < target_width:
-                        right_val = builder.zext(right_val, target_type)
-            return builder.and_(left_val, right_val)
-        
-        # =====================================================================
-        # BIT SHIFT OPERATIONS
-        # =====================================================================
-        
-        elif self.operator == Operator.BITSHIFT_LEFT:
-            # Ensure both operands have same width
-            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                if left_val.type.width != right_val.type.width:
-                    # Extend shift amount to match left operand width
-                    if right_val.type.width < left_val.type.width:
-                        right_val = builder.zext(right_val, left_val.type)
-                    else:
-                        right_val = builder.trunc(right_val, left_val.type)
-            return builder.shl(left_val, right_val)
-            
-        elif self.operator == Operator.BITSHIFT_RIGHT:
-            # FIXED: Use logical shift for unsigned, arithmetic shift for signed
-            if isinstance(left_val.type, ir.IntType) and isinstance(right_val.type, ir.IntType):
-                if left_val.type.width != right_val.type.width:
-                    # Extend shift amount to match left operand width
-                    if right_val.type.width < left_val.type.width:
-                        right_val = builder.zext(right_val, left_val.type)
-                    else:
-                        right_val = builder.trunc(right_val, left_val.type)
-            
-            # Use lshr for unsigned, ashr for signed
-            is_unsigned = self._is_unsigned(left_val)
-            if is_unsigned:
-                return builder.lshr(left_val, right_val)
-            else:
-                return builder.ashr(left_val, right_val)
-        
-        # =====================================================================
-        # OTHER OPERATIONS
-        # =====================================================================
-        
-        elif self.operator == Operator.NOR:
-            # NOR is !(A | B) = NOT(OR(A, B))
-            or_result = builder.or_(left_val, right_val)
-            return builder.not_(or_result)
-            
-        elif self.operator == Operator.NAND:
-            # NAND is !(A & B) = NOT(AND(A, B))
-            and_result = builder.and_(left_val, right_val)
-            return builder.not_(and_result)
-            
-        elif self.operator == Operator.POWER:
-            # Power operator using LLVM intrinsics
-            if isinstance(left_val.type, ir.FloatType):
-                # For floating point, use llvm.pow
-                pow_name = "llvm.pow.f64" if left_val.type == ir.DoubleType() else "llvm.pow.f32"
-                if pow_name not in module.globals:
-                    pow_type = ir.FunctionType(left_val.type, [left_val.type, left_val.type])
-                    pow_func = ir.Function(module, pow_type, name=pow_name)
-                    pow_func.attributes.add('nounwind')
-                    pow_func.attributes.add('readonly')
-                else:
-                    pow_func = module.globals[pow_name]
-                return builder.call(pow_func, [left_val, right_val])
-            else:
-                # For integers, implement as repeated multiplication (or call pow function)
-                # Convert to double, use pow, then convert back
-                double_type = ir.DoubleType()
-                # FIXED: Use appropriate int-to-float conversion
-                is_unsigned = self._is_unsigned(left_val) or self._is_unsigned(right_val)
-                if is_unsigned:
-                    left_fp = builder.uitofp(left_val, double_type)
-                    right_fp = builder.uitofp(right_val, double_type)
-                else:
-                    left_fp = builder.sitofp(left_val, double_type)
-                    right_fp = builder.sitofp(right_val, double_type)
-                
-                pow_name = "llvm.pow.f64"
-                if pow_name not in module.globals:
-                    pow_type = ir.FunctionType(double_type, [double_type, double_type])
-                    pow_func = ir.Function(module, pow_type, name=pow_name)
-                    pow_func.attributes.add('nounwind')
-                    pow_func.attributes.add('readonly')
-                else:
-                    pow_func = module.globals[pow_name]
-                
-                result_fp = builder.call(pow_func, [left_fp, right_fp])
-                # FIXED: Use appropriate float-to-int conversion
-                if is_unsigned:
-                    return builder.fptoui(result_fp, left_val.type)
-                else:
-                    return builder.fptosi(result_fp, left_val.type)
-        else:
-            raise ValueError(f"Unsupported operator: {self.operator}")
+            if (
+                ArrayLiteral.is_array_or_array_pointer(lhs)
+                and ArrayLiteral.is_array_or_array_pointer(rhs)
+            ):
+                return ArrayLiteral.concatenate(builder, module, lhs, rhs, self.operator)
+
+        # --------------------------------------------------
+        # Pointer arithmetic
+        # --------------------------------------------------
+
+        lhs_ptr = isinstance(lhs.type, ir.PointerType)
+        rhs_ptr = isinstance(rhs.type, ir.PointerType)
+        lhs_int = isinstance(lhs.type, ir.IntType)
+        rhs_int = isinstance(rhs.type, ir.IntType)
+
+        if self.operator in (Operator.ADD, Operator.SUB):
+            if lhs_ptr and rhs_int:
+                offset = rhs
+                if self.operator is Operator.SUB:
+                    offset = builder.sub(ir.Constant(rhs.type, 0), rhs)
+                return builder.gep(lhs, [offset])
+
+            if rhs_ptr and lhs_int and self.operator is Operator.ADD:
+                return builder.gep(rhs, [lhs])
+
+            if lhs_ptr and rhs_ptr:
+                a = builder.ptrtoint(lhs, ir.IntType(64))
+                b = builder.ptrtoint(rhs, ir.IntType(64))
+                return builder.sub(a, b)
+
+        # --------------------------------------------------
+        # Arithmetic
+        # --------------------------------------------------
+
+        if self.operator in (Operator.ADD, Operator.SUB, Operator.MUL, Operator.DIV, Operator.MOD):
+            if isinstance(lhs.type, ir.FloatType):
+                return {
+                    Operator.ADD: builder.fadd,
+                    Operator.SUB: builder.fsub,
+                    Operator.MUL: builder.fmul,
+                    Operator.DIV: builder.fdiv,
+                    Operator.MOD: builder.frem,
+                }[self.operator](lhs, rhs)
+
+            unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
+
+            return {
+                Operator.ADD: builder.add,
+                Operator.SUB: builder.sub,
+                Operator.MUL: builder.mul,
+                Operator.DIV: builder.udiv if unsigned else builder.sdiv,
+                Operator.MOD: builder.urem if unsigned else builder.srem,
+            }[self.operator](lhs, rhs)
+
+        # --------------------------------------------------
+        # Comparisons
+        # --------------------------------------------------
+
+        if self.operator in {
+            Operator.EQUAL,
+            Operator.NOT_EQUAL,
+            Operator.LESS_THAN,
+            Operator.LESS_EQUAL,
+            Operator.GREATER_THAN,
+            Operator.GREATER_EQUAL,
+        }:
+            op_map = {
+                Operator.EQUAL: "==",
+                Operator.NOT_EQUAL: "!=",
+                Operator.LESS_THAN: "<",
+                Operator.LESS_EQUAL: "<=",
+                Operator.GREATER_THAN: ">",
+                Operator.GREATER_EQUAL: ">=",
+            }
+            op = op_map[self.operator]
+
+            if isinstance(lhs.type, ir.FloatType):
+                return builder.fcmp_ordered(op, lhs, rhs)
+
+            if isinstance(lhs.type, ir.PointerType) or isinstance(rhs.type, ir.PointerType):
+                return ctx.emit_ptr_cmp(op, lhs, rhs)
+
+            return ctx.emit_int_cmp(op, lhs, rhs)
+
+        # --------------------------------------------------
+        # Bitwise
+        # --------------------------------------------------
+
+        if self.operator in (Operator.AND, Operator.OR, Operator.XOR, Operator.BITAND, Operator.BITOR):
+            lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True)
+            return {
+                Operator.AND: builder.and_,
+                Operator.BITAND: builder.and_,
+                Operator.OR: builder.or_,
+                Operator.BITOR: builder.or_,
+                Operator.XOR: builder.xor,
+            }[self.operator](lhs, rhs)
+
+        # --------------------------------------------------
+        # Shifts
+        # --------------------------------------------------
+
+        if self.operator in (Operator.BITSHIFT_LEFT, Operator.BITSHIFT_RIGHT):
+            if lhs.type.width != rhs.type.width:
+                rhs = builder.zext(rhs, lhs.type)
+
+            if self.operator is Operator.BITSHIFT_LEFT:
+                return builder.shl(lhs, rhs)
+
+            return (
+                builder.lshr(lhs, rhs)
+                if ctx.is_unsigned(lhs)
+                else builder.ashr(lhs, rhs)
+            )
+
+        # --------------------------------------------------
+        # Boolean composites
+        # --------------------------------------------------
+
+        if self.operator is Operator.NOR:
+            return builder.not_(builder.or_(lhs, rhs))
+
+        if self.operator is Operator.NAND:
+            return builder.not_(builder.and_(lhs, rhs))
+
+        raise ValueError(f"Unsupported operator: {self.operator}")
 
 @dataclass
 class UnaryOp(Expression):
@@ -5585,96 +5325,70 @@ class ReturnStatement(Statement):
     value: Optional[Expression] = None
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        if self.value is not None:
-            ret_val = self.value.codegen(builder, module)
-            # Handle void literal returns
-            if ret_val is None or (isinstance(self.value, Literal) and self.value.type == DataType.VOID):
-                builder.ret_void()
-            else:
-                # Get the function's declared return type
-                func = builder.block.function
-                #print(f"DEBUG: func = {func}")
-                #print(f"DEBUG: func.type = {func.type}")
-                #print(f"DEBUG: type(func.type) = {type(func.type)}")
-                
-                # The function type is accessed differently in LLVM
-                if hasattr(func.type, 'return_type'):
-                    expected_ret_type = func.type.return_type
-                elif hasattr(func.type, 'pointee') and hasattr(func.type.pointee, 'return_type'):
-                    expected_ret_type = func.type.pointee.return_type
-                else:
-                    raise RuntimeError(f"Cannot determine return type from func.type: {func.type}")
-                
-                # Cast return value to match function signature if needed
-                if ret_val.type != expected_ret_type:
-                    ret_val = self._cast_to_return_type(builder, ret_val, expected_ret_type)
-                
-                builder.ret(ret_val)
-        else:
+        if self.value is None:
             builder.ret_void()
+            return None
+
+        ret_val = self.value.codegen(builder, module)
+
+        if ret_val is None:
+            builder.ret_void()
+            return None
+
+        func = builder.block.function
+
+        if hasattr(func.type, 'return_type'):
+            expected = func.type.return_type
+        elif hasattr(func.type, 'pointee') and hasattr(func.type.pointee, 'return_type'):
+            expected = func.type.pointee.return_type
+        else:
+            raise RuntimeError("Cannot determine function return type")
+
+        ret_val = self._coerce_return_value(builder, ret_val, expected)
+
+        builder.ret(ret_val)
         return None
     
-    def _cast_to_return_type(self, builder: ir.IRBuilder, value: ir.Value, target_type: ir.Type) -> ir.Value:
-        """Automatically cast return value to match function signature"""
-        source_type = value.type
-        
-        # If types already match, no cast needed
-        if source_type == target_type:
+    def _coerce_return_value(
+        self,
+        builder: ir.IRBuilder,
+        value: ir.Value,
+        expected: ir.Type
+    ) -> ir.Value:
+        src = value.type
+
+        # Exact match
+        if src == expected:
             return value
-        
-        # Handle string literal to pointer conversion
-        if (isinstance(source_type, ir.IntType) and source_type.width == 8 and 
-            isinstance(target_type, ir.PointerType) and isinstance(target_type.pointee, ir.IntType) and target_type.pointee.width == 8):
-            # Convert single character to string pointer
-            # Check if this is from an empty string literal by looking at the original expression
-            if (hasattr(self, 'value') and isinstance(self.value, Literal) and 
-                self.value.type == DataType.CHAR and self.value.value == ''):
-                # Create a global empty string constant
-                empty_str = "\0"  # Null terminated empty string
-                str_bytes = empty_str.encode('ascii')
-                str_array_ty = ir.ArrayType(ir.IntType(8), len(str_bytes))
-                str_val = ir.Constant(str_array_ty, bytearray(str_bytes))
-                
-                # Get module reference - need to pass it properly
-                func = builder.block.function
-                module = func.module
-                
-                gv = ir.GlobalVariable(module, str_val.type, name=".str.empty")
-                gv.linkage = 'internal'
-                gv.global_constant = True
-                gv.initializer = str_val
-                
-                # Get pointer to the first character of the string
-                zero = ir.Constant(ir.IntType(32), 0)
-                str_ptr = builder.gep(gv, [zero, zero], name="empty_str_ptr")
-                return str_ptr
-        
-        # Handle integer type conversions
-        if isinstance(source_type, ir.IntType) and isinstance(target_type, ir.IntType):
-            if source_type.width < target_type.width:
-                # Extend to larger integer type (sign extend)
-                return builder.sext(value, target_type)
-            elif source_type.width > target_type.width:
-                # Truncate to smaller integer type
-                return builder.trunc(value, target_type)
-            else:
-                # Same width, should not happen but return as-is
-                return value
-        
-        # Handle int to float conversion
-        elif isinstance(source_type, ir.IntType) and isinstance(target_type, ir.FloatType):
-            return builder.sitofp(value, target_type)
-        
-        # Handle float to int conversion
-        elif isinstance(source_type, ir.FloatType) and isinstance(target_type, ir.IntType):
-            return builder.fptosi(value, target_type)
-        
-        # Handle pointer casts
-        elif isinstance(source_type, ir.PointerType) and isinstance(target_type, ir.PointerType):
-            return builder.bitcast(value, target_type)
-        
-        else:
-            raise ValueError(f"Cannot automatically cast return value from {source_type} to {target_type}")
+
+        # === ALLOWED IMPLICIT CASE ===
+        # Integer literal widening (e.g. return 0; in i64 function)
+        if (
+            isinstance(self.value, Literal)
+            and self.value.type in (DataType.SINT, DataType.UINT)
+            and isinstance(src, ir.IntType)
+            and isinstance(expected, ir.IntType)
+            and src.width < expected.width
+        ):
+            # Use sign-extension; zero also works with sext
+            return builder.sext(value, expected)
+
+        # Pointer ABI cast
+        if isinstance(src, ir.PointerType) and isinstance(expected, ir.PointerType):
+            return builder.bitcast(value, expected)
+
+        # Struct exact match only
+        if isinstance(src, ir.LiteralStructType) and isinstance(expected, ir.LiteralStructType):
+            if src != expected:
+                raise TypeError(
+                    f"Return struct type mismatch: {src} != {expected}"
+                )
+            return value
+
+        # Everything else is illegal
+        raise TypeError(
+            f"Invalid return type: cannot return {src} from function returning {expected}"
+        )
 
 @dataclass
 class BreakStatement(Statement):
