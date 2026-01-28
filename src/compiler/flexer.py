@@ -144,6 +144,7 @@ class TokenType(Enum):
     DIVIDE_ASSIGN = auto()  # /=
     MODULO_ASSIGN = auto()  # %=
     AND_ASSIGN = auto()     # &=
+    OR_ASSIGN = auto()      # |=
     POWER_ASSIGN = auto()   # ^=
     XOR_ASSIGN = auto()     # ^^=
     BITSHIFT_LEFT_ASSIGN = auto()  # <<=

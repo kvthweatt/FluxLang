@@ -2312,9 +2312,14 @@ def main():
     try:
         with open(filename, 'r') as f:
             source = f.read()
+
+        print("\n[PREPROCESSOR] Standard library / user-defined macros:\n")
+        from fpreprocess import FXPreprocessor
+        preprocessor = FXPreprocessor(filename)
+        result = preprocessor.process()
         
         # Tokenize
-        lexer = FluxLexer(source)
+        lexer = FluxLexer(result)
         tokens = lexer.tokenize()
         
         if verbose:

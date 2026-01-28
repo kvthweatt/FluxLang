@@ -31,7 +31,7 @@
 
 // >Mains
 def main() -> int;
-def main(int argc, char** argv) -> int;
+def main(int argc, byte** argv) -> int;
 // /Mains
 
   ///                                   ///
@@ -77,7 +77,17 @@ def FRTStartup() -> int
         #ifdef __LINUX__
         case (2)
         {
-            return_code = main();
+            i64 argc = 0;
+            noopstr* argv = (noopstr*)0;
+            
+            volatile asm
+            {
+                movq %rdi, $0  // argc
+                movq %rsi, $1  // argv
+            } : : "m"(argc), "m"(argv) : "rdi","rsi","memory";
+            
+            // Try main with args first
+            return_code = main(argc, argv);
         }
         #endif;
         #ifdef __MACOS__

@@ -6058,7 +6058,7 @@ class InlineAsm(Expression):
         if has_register_output and output_operands:
             # Return the type of the first register output
             output_type = output_operands[0].type
-            if isinstance(output_type, ir.PointerType):
+            if isinstance(output_type, ir.PointerType(ir.IntType(16))):
                 output_type = output_type.pointee
             fn_type = ir.FunctionType(output_type, input_types)
         else:
@@ -6877,52 +6877,76 @@ class StructDef(ASTNode):
     vtable: Optional[StructVTable] = None
     
     def calculate_vtable(self, module: ir.Module) -> StructVTable:
-        """Calculate struct layout and generate TLD."""
-        fields = []
-        current_offset = 0
-        max_alignment = 1
-        
-        for member in self.members:
-            member_type = member.type_spec
+            """Calculate struct layout and generate TLD."""
+            fields = []
+            current_offset = 0
+            max_alignment = 1
             
-            if member_type.bit_width is not None:
-                bit_width = member_type.bit_width
-                alignment = member_type.alignment if member_type.alignment is not None else bit_width
-            elif member_type.custom_typename:
-                custom_type_info = self._get_custom_type_info(member_type.custom_typename, module)
-                bit_width = custom_type_info['bit_width']
-                alignment = custom_type_info['alignment']
-            else:
-                bit_width = self._get_builtin_bit_width(member_type.base_type)
-                alignment = bit_width
+            for member in self.members:
+                member_type = member.type_spec
+                
+                if member_type.bit_width is not None:
+                    bit_width = member_type.bit_width
+                    alignment = member_type.alignment if member_type.alignment is not None else bit_width
+                elif member_type.custom_typename:
+                    # Use TypeSpec.get_llvm_type() which handles all type lookups properly
+                    llvm_type = member_type.get_llvm_type(module)
+                    
+                    # Calculate bit width and alignment from the LLVM type
+                    if isinstance(llvm_type, ir.IntType):
+                        bit_width = llvm_type.width
+                        alignment = llvm_type.width
+                    elif isinstance(llvm_type, ir.FloatType):
+                        bit_width = 32
+                        alignment = 32
+                    elif isinstance(llvm_type, ir.DoubleType):
+                        bit_width = 64
+                        alignment = 64
+                    elif isinstance(llvm_type, ir.ArrayType):
+                        # For arrays, calculate total bit width
+                        element_type = llvm_type.element
+                        if isinstance(element_type, ir.IntType):
+                            bit_width = element_type.width * llvm_type.count
+                            alignment = element_type.width
+                        else:
+                            # Default fallback
+                            bit_width = 8 * llvm_type.count
+                            alignment = 8
+                    else:
+                        # Default fallback for other types
+                        bit_width = 32
+                        alignment = 32
+                else:
+                    bit_width = self._get_builtin_bit_width(member_type.base_type)
+                    alignment = bit_width
+                
+                if alignment > 1:
+                    misalignment = current_offset % alignment
+                    if misalignment != 0:
+                        current_offset += alignment - misalignment
+                
+                fields.append((member.name, current_offset, bit_width, alignment))
+                member.offset = current_offset
+                
+                current_offset += bit_width
+                max_alignment = max(max_alignment, alignment)
             
-            if alignment > 1:
-                misalignment = current_offset % alignment
+            total_bits = current_offset
+            
+            if max_alignment > 1:
+                misalignment = total_bits % max_alignment
                 if misalignment != 0:
-                    current_offset += alignment - misalignment
+                    total_bits += max_alignment - misalignment
             
-            fields.append((member.name, current_offset, bit_width, alignment))
-            member.offset = current_offset
+            total_bytes = (total_bits + 7) // 8
             
-            current_offset += bit_width
-            max_alignment = max(max_alignment, alignment)
-        
-        total_bits = current_offset
-        
-        if max_alignment > 1:
-            misalignment = total_bits % max_alignment
-            if misalignment != 0:
-                total_bits += max_alignment - misalignment
-        
-        total_bytes = (total_bits + 7) // 8
-        
-        return StructVTable(
-            struct_name=self.name,
-            total_bits=total_bits,
-            total_bytes=total_bytes,
-            alignment=max_alignment,
-            fields=fields
-        )
+            return StructVTable(
+                struct_name=self.name,
+                total_bits=total_bits,
+                total_bytes=total_bytes,
+                alignment=max_alignment,
+                fields=fields
+            )
     
     def _get_builtin_bit_width(self, base_type: DataType) -> int:
         """Get bit width for built-in types"""
@@ -6937,16 +6961,49 @@ class StructDef(ASTNode):
     
     def _get_custom_type_info(self, typename: str, module: ir.Module) -> Dict:
         """Look up custom type information from module's type registry."""
-        if not hasattr(module, '_custom_types'):
-            raise NameError(f"Custom type '{typename}' not found")
+        # First check _custom_types (for types registered via register_struct_type)
+        if hasattr(module, '_custom_types') and typename in module._custom_types:
+            return module._custom_types[typename]
         
-        if typename not in module._custom_types:
-            raise NameError(
-                f"Custom type '{typename}' not defined. "
-                f"Make sure the type is defined before the struct or imported properly."
-            )
+        # Fall back to _type_aliases (for types registered via TypeDeclaration)
+        if hasattr(module, '_type_aliases') and typename in module._type_aliases:
+            llvm_type = module._type_aliases[typename]
+            
+            # Calculate bit width and alignment from the LLVM type
+            if isinstance(llvm_type, ir.IntType):
+                bit_width = llvm_type.width
+                alignment = llvm_type.width
+            elif isinstance(llvm_type, ir.FloatType):
+                bit_width = 32
+                alignment = 32
+            elif isinstance(llvm_type, ir.DoubleType):
+                bit_width = 64
+                alignment = 64
+            elif isinstance(llvm_type, ir.ArrayType):
+                # For arrays, calculate total bit width
+                element_type = llvm_type.element
+                if isinstance(element_type, ir.IntType):
+                    bit_width = element_type.width * llvm_type.count
+                    alignment = element_type.width
+                else:
+                    # Default fallback
+                    bit_width = 8 * llvm_type.count
+                    alignment = 8
+            else:
+                # Default fallback for other types
+                bit_width = 32
+                alignment = 32
+            
+            return {
+                'bit_width': bit_width,
+                'alignment': alignment
+            }
         
-        return module._custom_types[typename]
+        # Type not found in either registry
+        raise NameError(
+            f"Custom type '{typename}' not defined. "
+            f"Make sure the type is defined before the struct or imported properly."
+        )
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
         """Generate LLVM IR for struct definition."""

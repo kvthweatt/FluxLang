@@ -1,6 +1,0 @@
-namespace standard
-{
-    namespace types
-    {
-    };	
-};

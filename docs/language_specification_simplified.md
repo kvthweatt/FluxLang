@@ -1533,7 +1533,7 @@ object Shape
 
 ```flux
 // Function pointer type for callbacks
-void *callback(int) as EventHandler;
+void{}* callback(int) = eventHandler(int)->void;
 
 object EventSystem
 {
@@ -1708,7 +1708,7 @@ int[5] evens_squared = [
 ```flux
 struct MemoryBlock
 {
-    unsigned data{8}[1024] as byte_array data;
+    unsigned data{8}[1024] as byte_array bytes;
     bool in_use;
 };
 
@@ -1725,22 +1725,22 @@ object MemoryPool
         return this;
     };
     
-    def allocate() -> unsigned data{8}*
+    def allocate() -> byte*
     {
         for (int i = 0; i < 100; i++)
         {
             if (!this.blocks[i].in_use)
             {
                 this.blocks[i].in_use = true;
-                return @this.blocks[i].data[0];
+                return @this.blocks[i].bytes[0];
             };
         };
-        return (unsigned data{8}*)0;  // null
+        return (byte*)0;  // null
     };
     
-    def free(unsigned data{8}* ptr) -> void
+    def free(byte* ptr) -> void
     {
-        unsigned data{64} as u64ptr;
+        unsigned data{64}* as u64ptr;
         u64ptr block_base = (u64ptr)@this.blocks[0];
         u64ptr ptr_addr = (u64ptr)ptr;
         
@@ -1960,7 +1960,7 @@ def get_nullable() -> int*
 // Auto infers from right-hand side
 auto x = 42;           // int
 auto y = 3.14;         // float
-auto z = "hello\0\0";    // unsigned data{8}[]
+auto z = "hello\0\0";  // unsigned data{8}[]
 auto w = @x;           // int*
 
 // Auto with complex types

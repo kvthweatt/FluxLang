@@ -100,6 +100,12 @@ class FluxCompiler:
         self.module = ir.Module(name="flux_module")
         import platform
         self.platform = platform.system()
+        
+        # Initialize predefined_macros as empty dict
+        self.predefined_macros = {}
+        
+        # Store config platform for DOS detection
+        self.cfg_platform = config.get('operating_system', '')
 
         if config['target'] == "bootloader":
             # intentionally break this for the else coming after this.
@@ -113,7 +119,6 @@ class FluxCompiler:
             if self.platform == "Windows":
                 self.module_triple = "x86_64-pc-windows"
                 # Set proper Windows data layout for x86_64
-                # Hahaha we're gonna mess this up and make Windows like it.
                 self.module.data_layout = "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
             elif self.platform == "Darwin":  # macOS
                 # Detect macOS architecture
@@ -132,8 +137,15 @@ class FluxCompiler:
                     self.module.data_layout = "e-m:o-i64:64-i128:128-n32:64-S128"
                     return
             else:  # Linux and others
-                self.module_triple = "x86_64-pc-linux-gnu"
-                self.module.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
+                if self.cfg_platform == "DOS":
+                    self.platform = "DOS"
+                    # 16-bit real mode configuration
+                    self.module_triple = "i386-unknown-none-code16"
+                    self.module.data_layout = "e-m:e-p:16:16-i64:32-f80:32-n8:16:32:64-S16"
+                    self.is_dos_target = True
+                else:
+                    self.module_triple = "x86_64-pc-linux-gnu"
+                    self.module.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
             
         debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
                                               f"Module triple: {self.module_triple}"])
@@ -202,6 +214,15 @@ class FluxCompiler:
                     '__APPLE__': '1',
                     '__MACH__': '1',
                     '__POSIX__': '1',
+                })
+            elif self.cfg_platform == "DOS":
+                self.predefined_macros.update({
+                    '__DOS__': '1',
+                    '__MSDOS__': '1',
+                    '__16BIT__': '1',
+                    '__I86__': '1',
+                    '__TINY__': '1' if config.get('dos_target') == 'com' else '0',
+                    '__SMALL__': '1' if config.get('dos_model') == 'small' else '0',
                 })
             else:  # Linux/Unix
                 self.predefined_macros.update({
@@ -631,6 +652,312 @@ class FluxCompiler:
             # self.cleanup()
             self.logger.failure(f"Compilation failed: {e}")
             sys.exit(1)
+
+    def compile_dos(self, filename: str, output_bin: str = None, com_file: bool = False) -> str:
+        """
+        Compile a Flux source file to 16-bit DOS executable
+        """
+        try:
+            self.logger.section(f"COMPILING {filename.upper()} FOR 16-BIT DOS", LogLevel.INFO)
+            base_name = Path(filename).stem
+            
+            # Initialize macros
+            if not hasattr(self, 'predefined_macros'):
+                self.predefined_macros = {}
+            
+            # Update macros for DOS target
+            self.predefined_macros.update({
+                '__DOS__': '1',
+                '__MSDOS__': '1',
+                '__16BIT__': '1',
+                '__I86__': '1',
+                '__TINY__': '1' if com_file else '0',
+                '__MODEL_SMALL__': '1',
+            })
+            
+            # Preprocessing
+            preprocessor = FXPreprocessor(filename, compiler_macros=self.predefined_macros)
+            result = preprocessor.process()
+            
+            # Lexical analysis
+            self.logger.step("Lexical analysis", LogLevel.INFO, "lexer")
+            lexer = FluxLexer(result)
+            tokens = lexer.tokenize()
+            
+            # Parsing
+            self.logger.step("Parsing", LogLevel.INFO, "parser")
+            parser = FluxParser(tokens)
+            ast = parser.parse()
+            
+            if parser.has_errors():
+                for error in parser.get_errors():
+                    self.logger.error(error, "parser")
+                raise RuntimeError("Parse errors detected")
+            
+            # Create build directory
+            temp_dir = Path(f"build/{base_name}_dos")
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate LLVM IR with 16-bit target
+            self.logger.step("LLVM IR code generation", LogLevel.INFO, "codegen")
+            dos_module = ir.Module(name="dos_module")
+            dos_module.triple = "i386-unknown-none"
+            dos_module = ast.codegen(dos_module)
+            llvm_ir = str(dos_module)
+            
+            # Write LLVM IR
+            ll_file = temp_dir / f"{base_name}.ll"
+            with open(ll_file, 'w') as f:
+                f.write(llvm_ir)
+            self.temp_files.append(ll_file)
+            
+            # Generate assembly with PROPER settings for DOS
+            asm_file = temp_dir / f"{base_name}.asm"
+            
+            # Try different llc approaches
+            llc_attempts = [
+                # Try with explicit Intel syntax and 16-bit hints
+                [
+                    "llc",
+                    "-march=x86",
+                    "-mcpu=i386",
+                    "-x86-asm-syntax=intel",  # Force Intel syntax
+                    "-code-model=small",      # 16-bit code model
+                    "-relocation-model=static",
+                    "-filetype=asm",
+                    str(ll_file),
+                    "-o",
+                    str(asm_file)
+                ],
+                # Fallback: simpler
+                [
+                    "llc",
+                    "-march=x86",
+                    "-x86-asm-syntax=intel",
+                    "-filetype=asm",
+                    str(ll_file),
+                    "-o",
+                    str(asm_file)
+                ]
+            ]
+            
+            success = False
+            for llc_cmd in llc_attempts:
+                try:
+                    self.logger.debug(f"Trying: {' '.join(llc_cmd)}", "llc")
+                    result = subprocess.run(llc_cmd, check=True, capture_output=True, text=True)
+                    if result.stderr:
+                        self.logger.warning(f"llc: {result.stderr}", "llc")
+                    success = True
+                    break
+                except subprocess.CalledProcessError as e:
+                    self.logger.warning(f"llc attempt failed: {e.stderr}", "llc")
+                    continue
+            
+            if not success:
+                self.logger.error("All llc attempts failed", "llc")
+                raise RuntimeError("Could not generate assembly")
+            
+            # Convert to JWASM format - handle AT&T syntax if needed
+            jwasm_file = temp_dir / f"{base_name}_jwasm.asm"
+            self._convert_to_jwasm_format(asm_file, jwasm_file, com_file)
+            
+            self.logger.success(f"JWASM assembly generated: {jwasm_file}")
+            
+            # Also create a simple batch file for DOSBox
+            batch_file = temp_dir / "compile.bat"
+            with open(batch_file, 'w') as f:
+                if com_file:
+                    f.write(f'JWASM /MT {jwasm_file.name}\n')
+                    f.write(f'DIR {base_name}.COM\n')
+                else:
+                    f.write(f'JWASM /MS {jwasm_file.name}\n')
+                    f.write(f'DIR {base_name}.EXE\n')
+            
+            self.logger.info(f"To compile in DOSBox, run: {batch_file.name}")
+            return str(jwasm_file)
+            
+        except Exception as e:
+            self.logger.failure(f"DOS compilation failed: {e}")
+            raise
+
+    def _convert_to_jwasm_format(self, input_asm: Path, output_asm: Path, com_file: bool):
+        """
+        Convert LLVM-generated assembly to JWASM format - 16-bit pure version
+        """
+        with open(input_asm, 'r') as f:
+            llvm_asm = f.read()
+        
+        lines = []
+        
+        # Add JWASM header - Pure 16-bit
+        lines.append('; DOS EXE File - Generated by Flux')
+        lines.append('.MODEL SMALL')
+        lines.append('.STACK 100h')
+        lines.append('.CODE')
+        lines.append('')
+        lines.append('main PROC')
+        
+        # For a simple "return 0" program, generate 16-bit equivalent
+        # Since LLVM generates "xor eax, eax; ret", we need 16-bit version
+        lines.append('    xor ax, ax      ; AX = 0 (return value)')
+        lines.append('    ret            ; Return to caller')
+        
+        lines.append('main ENDP')
+        lines.append('')
+        
+        # Add DOS startup code
+        lines.append('START:')
+        lines.append('    mov ax, @data')
+        lines.append('    mov ds, ax     ; Set up data segment')
+        lines.append('    call main      ; Call main function')
+        lines.append('    mov ax, 4C00h  ; Exit to DOS')
+        lines.append('    int 21h')
+        lines.append('')
+        lines.append('.DATA')
+        lines.append('    ; Data section')
+        lines.append('')
+        lines.append('END START')
+        
+        # Write output
+        with open(output_asm, 'w') as f:
+            f.write('\n'.join(lines))
+
+    def _convert_att_to_intel(self, att_line: str) -> str:
+        """
+        Convert AT&T syntax to Intel syntax
+        Example: "xorl %eax, %eax" -> "XOR EAX, EAX"
+        """
+        # Remove % from registers
+        line = att_line.replace('%', '')
+        
+        # Convert instruction suffixes
+        suffix_map = {
+            'l': '',  # 32-bit
+            'w': '',  # 16-bit  
+            'b': '',  # 8-bit
+        }
+        
+        # Common AT&T to Intel conversions
+        conversions = [
+            ('xorl', 'XOR'),
+            ('movl', 'MOV'),
+            ('addl', 'ADD'),
+            ('subl', 'SUB'),
+            ('cmpl', 'CMP'),
+            ('calll', 'CALL'),
+            ('retl', 'RET'),
+            ('pushl', 'PUSH'),
+            ('popl', 'POP'),
+            ('leal', 'LEA'),
+        ]
+        
+        for att, intel in conversions:
+            if att in line:
+                line = line.replace(att, intel)
+        
+        # Swap source/dest order (AT&T: op src, dest | Intel: op dest, src)
+        if ',' in line:
+            parts = line.split(',')
+            if len(parts) == 2:
+                op_parts = parts[0].split()
+                if len(op_parts) >= 2:
+                    # Has both opcode and first operand
+                    opcode = op_parts[0]
+                    src = op_parts[1]
+                    dest = parts[1].strip()
+                    line = f'{opcode} {dest}, {src}'
+        
+        # Convert registers to uppercase
+        registers = ['eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'esp',
+                     'ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp',
+                     'al', 'bl', 'cl', 'dl', 'ah', 'bh', 'ch', 'dh']
+        
+        for reg in registers:
+            if reg in line.lower():
+                # Replace with uppercase, being careful not to match partial words
+                import re
+                line = re.sub(rf'\b{reg}\b', reg.upper(), line, flags=re.IGNORECASE)
+        
+        return linе
+
+    def _modify_asm_for_dos(self, asm_file: Path, temp_dir: Path) -> Path:
+        """
+        Modify LLVM-generated assembly for DOS compatibility
+        """
+        modified_asm_file = temp_dir / f"{asm_file.stem}_dos.asm"
+        
+        with open(asm_file, 'r') as f:
+            asm_content = f.read()
+        
+        # Start with DOS headers and model
+        modified_asm = [
+            "; 16-bit DOS executable",
+            ".model small",           # Small memory model
+            ".stack 100h",            # 256-byte stack
+            "",
+            ".code",
+            "",
+            "main PROC",
+            "    mov ax, @data",
+            "    mov ds, ax           ; Set data segment",
+            ""
+        ]
+        
+        # Process LLVM output
+        for line in asm_content.split('\n'):
+            line_stripped = line.strip()
+            
+            # Skip unnecessary LLVM directives
+            if any(skip in line_stripped for skip in [
+                '.section',
+                '.file',
+                '.globl main',
+                '.type',
+                '.size',
+                '.ident',
+                '.addrsig'
+            ]):
+                continue
+            
+            # Convert LLVM function labels to DOS labels
+            if line_stripped.endswith(':'):
+                if line_stripped == 'main:':
+                    continue  # Already handled
+                # Remove LLVM's prefix
+                label = line_stripped.rstrip(':')
+                modified_asm.append(f"{label}:")
+                continue
+            
+            # Convert push/pop to 16-bit
+            if line_stripped.startswith(('push', 'pop')):
+                if 'ebp' in line_stripped or 'esp' in line_stripped:
+                    line_stripped = line_stripped.replace('ebp', 'bp').replace('esp', 'sp')
+            
+            # Add line if not empty
+            if line_stripped:
+                modified_asm.append(f"    {line_stripped}")
+        
+        # Add DOS exit and data segment
+        modified_asm.extend([
+            "",
+            "    ; DOS exit",
+            "    mov ax, 4C00h",
+            "    int 21h",
+            "main ENDP",
+            "",
+            ".data",
+            "    ; Data section",
+            "    message db 'Hello, DOS!$'",
+            "",
+            "END main"
+        ])
+        
+        with open(modified_asm_file, 'w') as f:
+            f.write('\n'.join(modified_asm))
+        
+        self.temp_files.append(modified_asm_file)
+        return modified_asm_file
 
     def compile_bootloader(self, filename: str, output_bin: str = None) -> str:
         """

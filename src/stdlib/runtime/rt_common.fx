@@ -2,8 +2,6 @@
 // Functions that exist in frt.fx have been excluded from this translation.
 // All assembly uses AT&T syntax for LLVM integration with proper clobber lists.
 
-import "frt.fx";
-
 // ============ STRING FUNCTIONS ============
 
 def strncpy(char* dest, char* src, size_t n) -> char*
@@ -365,66 +363,6 @@ namespace __crt_stdio
     };
 };
 
-// ============ QUICK SORT ============
-
-def qsort(void* base, size_t num, size_t width, int (*compare)(void*, void*)) -> void
-{
-    // Simple bubble sort implementation (not optimal but functional)
-    if (num <= 1) {return void;};
-    
-    byte* array = (byte*)base;
-    
-    for (size_t i = 0; i < num - 1; i++)
-    {
-        for (size_t j = 0; j < num - i - 1; j++)
-        {
-            byte* elem1 = &array[j * width];
-            byte* elem2 = &array[(j + 1) * width];
-            
-            if (*compare(elem1, elem2) > 0)
-            {
-                // Swap elements
-                for (size_t k = 0; k < width; k++)
-                {
-                    byte temp = elem1[k];
-                    elem1[k] = elem2[k];
-                    elem2[k] = temp;
-                };
-            };
-        };
-    };
-    
-    return void;
-};
-
-def bsearch(void* key, void* base, size_t num, size_t width, int (*compare)(void*, void*)) -> void*
-{
-    byte* array = (byte*)base;
-    size_t left = 0;
-    size_t right = num;
-    
-    while (left < right)
-    {
-        size_t mid = (left + right) / 2;
-        byte* elem = &array[mid * width];
-        int cmp = *compare(key, elem);
-        
-        if (cmp == 0)
-        {
-            return elem;
-        }
-        elif (cmp < 0)
-        {
-            right = mid;
-        }
-        else
-        {
-            left = mid + 1;
-        };
-    };
-    
-    return void;
-};
 
 // ============ RANDOM NUMBER GENERATION ============
 
@@ -503,8 +441,7 @@ namespace __crt_time
     {
         (void)tz;  // timezone parameter is obsolete
         
-        if(def(WINDOWS))
-        {
+//#ifdef __WINDOWS__
             // Windows implementation using GetSystemTimeAsFileTime
             unsigned data{64} ft;
             volatile asm
@@ -518,11 +455,9 @@ namespace __crt_time
                 : "rcx", "rax", "r10", "r11", "memory";
             
             // Convert Windows FILETIME to Unix time
-            tv.tv_sec = (ft - 116444736000000000ULL) / 10000000ULL;
-            tv.tv_usec = ((ft - 116444736000000000ULL) % 10000000ULL) / 10;
-        }
-        else
-        {
+            tv.tv_sec = (ft - 116444736000000000) / 10000000;
+            tv.tv_usec = ((ft - 116444736000000000) % 10000000) / 10;
+//#else
             // Linux/macOS implementation
             volatile asm
             {
@@ -534,7 +469,7 @@ namespace __crt_time
             }   : "=r"(result)
                 : "r"(tv), "r"(tz)
                 : "rax", "rdi", "rsi", "rdx", "r10", "r8", "r9", "memory";
-        };
+//#endif;
         
         return result;
     };
@@ -543,8 +478,7 @@ namespace __crt_time
     {
         unsigned data{64} result = 0;
         
-        if(def(WINDOWS))
-        {
+//#ifdef __WINDOWS__
             volatile asm
             {
                 "subq    $40, %%rsp"
@@ -556,14 +490,12 @@ namespace __crt_time
                 : "rax", "rcx", "rdx", "r8", "r9", "r10", "r11", "memory";
 
             result *= 1000;  // Convert to microseconds
-        }
-        else
-        {
+//#else
             // Use gettimeofday on Unix-like systems
             timeval tv;
             gettimeofday(@tv, void);
-            result = tv.tv_sec * 1000000ULL + tv.tv_usec;
-        };
+            result = tv.tv_sec * 1000000 + tv.tv_usec;
+//#endif;
         
         return result;
     };
@@ -593,14 +525,14 @@ def system(char* command) -> int
 
 // ============ TERMINAL CONTROL ============
 
-def atexit(void (*func)()) -> int
+def atexit(void *func) -> int
 {
     // Simplified: would need to maintain a list of exit functions
     (void)func;
     return 0;
 };
 
-def on_exit(void (*func)(int, void*), void* arg) -> int
+def on_exit(void* func, void* arg) -> int
 {
     (void)func;
     (void)arg;
@@ -609,7 +541,7 @@ def on_exit(void (*func)(int, void*), void* arg) -> int
 
 // ============ SIGNAL HANDLING (MINIMAL) ============
 
-def signal(int sig, void (*handler)(int)) -> void (*)(int)
+def signal(int sig, void* handler) -> void*
 {
     // Simplified implementation
     (void)sig;
@@ -620,13 +552,10 @@ def signal(int sig, void (*handler)(int)) -> void (*)(int)
 def raise(int sig) -> int
 {
     // Send signal to current process
-    if(def(WINDOWS))
-    {
+//#ifdef __WINDOWS__
         // Windows doesn"t have POSIX signals
         return -1;
-    }
-    else
-    {
+//#else
         int result;
         volatile asm
         {
@@ -640,7 +569,7 @@ def raise(int sig) -> int
             : "rax", "rdi", "rsi", "rdx", "r10", "r8", "r9", "memory";
 
         return result;
-    };
+//#endif;
 };
 
 // ============ DYNAMIC MEMORY ============
@@ -769,10 +698,7 @@ def _aligned_free(void* ptr) -> void
 
 // ============ THREAD-LOCAL STORAGE ============
 
-if(def(WINDOWS))
-{
-    def __declspec(thread) int _tls_index = 0;
-    
+//#ifdef __WINDOWS__
     def _tls_get_value(unsigned data{32} index) -> void*
     {
         void* result;
@@ -787,7 +713,7 @@ if(def(WINDOWS))
 
         return result;
     };
-};
+//#endif;
 
 // ============ COMPILER INTRINSICS ============
 

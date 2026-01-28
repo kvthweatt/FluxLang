@@ -43,6 +43,8 @@ def main():
         print("Basic Options:")
         print("  -o <output>         Output binary name")
         print("  -v <level>          Legacy verbosity level (0-5)")
+        print("  -dos                Compile for DOS (16-bit)")
+        print("  -com                Create COM file instead of EXE (requires -dos)")
         print("  --library           Compile as static library instead of executable")
         print("")
         print("Advanced Logging Options:")
@@ -63,10 +65,14 @@ def main():
         print("Examples:")
         print("  python3 fc.py hello.fx")
         print("  python3 fc.py hello.fx -o hello --log-level 4")
+        print("  python3 fc.py hello.fx -dos -com        # Create DOS COM file")
+        print("  python3 fc.py hello.fx -dos -o hello.exe # Create DOS EXE file")
         print("  python3 fc.py hello.fx --log-filter lexer,parser --log-timestamp")
         sys.exit(1)
     
     args = sys.argv[1:]  # Skip script name
+    dos_mode = False
+    com_mode = False
     input_file = None
     output_bin = None
     verbosity = None
@@ -78,7 +84,13 @@ def main():
         arg = args[i]
         
         # Check for flags
-        if arg == "-v" and i + 1 < len(args):
+        if arg == "-dos":
+            dos_mode = True
+            i += 1
+        elif arg == "-com":
+            com_mode = True
+            i += 1
+        elif arg == "-v" and i + 1 < len(args):
             verbosity = int(args[i + 1])
             i += 2
         elif arg == "-o" and i + 1 < len(args):
@@ -103,9 +115,6 @@ def main():
             components = [c.strip() for c in args[i + 1].split(',')]
             logger_config['component_filter'] = components
             i += 2
-        elif arg.startswith("-"):
-            print(f"Warning: Unknown argument '{arg}'")
-            i += 1
         else:
             # Positional argument - should be input file
             if input_file is None:
@@ -117,6 +126,11 @@ def main():
                 print(f"Warning: Unexpected argument '{arg}'")
             i += 1
     
+    # Validate arguments
+    if com_mode and not dos_mode:
+        print("Error: -com flag requires -dos flag", file=sys.stderr)
+        sys.exit(1)
+    
     # Create compiler instance with advanced logging
     try:
         compiler = FluxCompiler(verbosity=verbosity, **logger_config)
@@ -127,6 +141,8 @@ def main():
             print(f"  Input file: {input_file}")
             print(f"  Output: {output_bin or 'auto-detected'}")
             print(f"  Mode: {'Library' if compile_as_library else 'Executable'}")
+            if dos_mode:
+                print(f"  Target: {'DOS COM' if com_mode else 'DOS EXE'}")
             print(f"  Log level: {logger_config.get('level', 'default')}")
             if logger_config.get('log_file'):
                 print(f"  Log file: {logger_config['log_file']}")
@@ -135,19 +151,25 @@ def main():
         
         binary_path = ""
         
-        # Compile the file
-        if config['target'] == "bootloader":
+        # Compile the file based on target
+        if dos_mode:
+            # Use DOS compilation method
+            binary_path = compiler.compile_dos(input_file, output_bin, com_file=com_mode)
+        elif config.get('target') == "bootloader":
             binary_path = compiler.compile_bootloader(input_file, output_bin)
-            return
-        if compile_as_library:
+        elif compile_as_library:
             binary_path = compiler.compile_library(input_file, output_bin)
         else:
             binary_path = compiler.compile_file(input_file, output_bin)
         
         # Final success message
         if logger_config.get('level', 0) < 3:
-            mode = "library" if compile_as_library else "executable"
-            print(f"✓ Compilation successful: {binary_path} ({mode})")
+            if dos_mode:
+                mode = "COM" if com_mode else "EXE"
+                print(f"✓ DOS {mode} compilation successful: {binary_path}")
+            else:
+                mode = "library" if compile_as_library else "executable"
+                print(f"✓ Compilation successful: {binary_path} ({mode})")
             
     except Exception as e:
         print(f"✗ Compilation failed: {e}", file=sys.stderr)
