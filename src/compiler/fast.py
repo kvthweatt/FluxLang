@@ -118,12 +118,32 @@ class Literal(ASTNode):
             return 32 if 0 <= value <= (1 << 32) - 1 else 64
         raise ValueError("Not an integer literal")
 
+    def _attach_type_metadata(self, llvm_value: ir.Value, type_spec: Optional['TypeSpec'] = None):
+        '''Attach Flux type information to LLVM value for proper signedness tracking'''
+        if type_spec is None:
+            # Create a minimal TypeSpec from DataType
+            from dataclasses import dataclass as dc
+            @dc
+            class MinimalTypeSpec:
+                is_signed: bool = True
+                
+            type_spec = MinimalTypeSpec()
+            if self.type == DataType.UINT:
+                type_spec.is_signed = False
+            elif self.type == DataType.SINT:
+                type_spec.is_signed = True
+        
+        llvm_value._flux_type_spec = type_spec
+        return llvm_value
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        #print("AST LITERAL:", self)
         if self.type in (DataType.SINT, DataType.UINT):
             val = int(self.value, 0) if isinstance(self.value, str) else int(self.value)
             width = self._infer_int_width(val)
-            return ir.Constant(ir.IntType(width), val)
+            llvm_val = ir.Constant(ir.IntType(width), val)
+            
+            # Attach type metadata for signedness tracking
+            return self._attach_type_metadata(llvm_val)
         elif self.type == DataType.FLOAT:
             return ir.Constant(ir.FloatType(), float(self.value))
         elif self.type == DataType.BOOL:
@@ -2221,7 +2241,13 @@ class BinaryOp(Expression):
                     Operator.MOD: builder.frem,
                 }[self.operator](lhs, rhs)
 
+            # CRITICAL: Check if EITHER operand is unsigned
             unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
+            
+            # Normalize operand widths BEFORE operation
+            if isinstance(lhs.type, ir.IntType) and isinstance(rhs.type, ir.IntType):
+                if lhs.type.width != rhs.type.width:
+                    lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=unsigned)
 
             return {
                 Operator.ADD: builder.add,
@@ -2489,14 +2515,21 @@ class CastExpression(Expression):
         # Handle standard numeric casts
         if isinstance(source_val.type, ir.IntType) and isinstance(target_llvm_type, ir.IntType):
             if source_val.type.width > target_llvm_type.width:
-                # Truncate to smaller integer
-                return builder.trunc(source_val, target_llvm_type)
+                result = builder.trunc(source_val, target_llvm_type)
             elif source_val.type.width < target_llvm_type.width:
-                # Extend to larger integer (sign extend)
-                return builder.sext(source_val, target_llvm_type)
+                is_unsigned = getattr(self.target_type, 'is_signed', True) == False
+                if is_unsigned:
+                    result = builder.zext(source_val, target_llvm_type)
+                else:
+                    result = builder.sext(source_val, target_llvm_type)
             else:
-                # Same width, no cast needed
-                return source_val
+                result = source_val
+            
+            # Attach target type metadata to result
+            if hasattr(self, 'target_type'):
+                result._flux_type_spec = self.target_type
+            
+            return result
         
         # Handle int to float
         elif isinstance(source_val.type, ir.IntType) and isinstance(target_llvm_type, (ir.FloatType, ir.DoubleType)):
