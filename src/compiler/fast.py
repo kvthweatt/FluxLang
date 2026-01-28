@@ -2518,10 +2518,15 @@ class CastExpression(Expression):
                 result = builder.trunc(source_val, target_llvm_type)
             elif source_val.type.width < target_llvm_type.width:
                 is_unsigned = getattr(self.target_type, 'is_signed', True) == False
-                if is_unsigned:
-                    result = builder.zext(source_val, target_llvm_type)
+                if isinstance(source_val, ir.Constant):
+                    # For constants, create new constant at target width directly
+                    result = ir.Constant(target_llvm_type, source_val.constant)
                 else:
-                    result = builder.sext(source_val, target_llvm_type)
+                    # For runtime values, use extension instructions
+                    if is_unsigned:
+                        result = builder.zext(source_val, target_llvm_type)
+                    else:
+                        result = builder.sext(source_val, target_llvm_type)
             else:
                 result = source_val
             
