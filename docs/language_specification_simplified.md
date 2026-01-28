@@ -51,7 +51,7 @@ def rsub(int x, int y) -> int
 
 Ternary logic:
 ```
-#import "standard.fx\0";
+#import "standard.fx";
 
 def main() -> int
 {
@@ -70,7 +70,7 @@ def main() -> int
 
 Null coalesce operator:
 ```
-#import "standard.fx\0";
+#import "standard.fx";
 
 def main() -> int
 {
@@ -109,8 +109,8 @@ int z = foo() <- bar(); // == // int z = foo(bar());
 Any file you import will take the place of the import statement.
 
 ```
-#import "standard.fx\0";
-#import "mylib.fx", "foobar.fx\0";  // Multi-line imports are processed from left to right in the order they appear.
+#import "standard.fx";
+#import "mylib.fx", "foobar.fx";  // Multi-line imports are processed from left to right in the order they appear.
 ```
 
 Example:  
@@ -123,7 +123,7 @@ int myVar = 10;
 **`main.fx`**
 
 ```
-#import "somefile.fx\0";  // int myVar = 10;
+#import "somefile.fx";  // int myVar = 10;
 
 def main() -> int
 {
@@ -137,7 +137,7 @@ def main() -> int
 
 ### Very simple preprocessor
 ```
-#import "standard.fx\0";
+#import "standard.fx";
 
 #ifdef __WINDOWS__
 def some_win_generic() -> LPCSTR*;
@@ -343,7 +343,7 @@ The brackets are replaced with the results of the statements in order respective
 **i-string Example:**
 
 ```
-#import "standard.fx\0";
+#import "standard.fx";
 
 using standard::io;
 
@@ -366,7 +366,7 @@ This allows you to write clean interpolated strings without strange formatting.
 **f-string Example:**
 
 ```
-#import "standard.fx\0"; // standard::io::print()
+#import "standard.fx"; // standard::io::print()
 
 unsigned data{8}[] as string;
 
@@ -424,7 +424,7 @@ int[]   i_array;                    // Definition
 int[]* pi_array = @i_array;         // Pointer
 
 // Pointer Arithmetic:
-#import "standard.fx\0";
+#import "standard.fx";
 
 using standard::io, standard::types;
 
@@ -509,7 +509,7 @@ For example, you can just keep type-chaining:
 Data decays to an integer type under the hood. All data is binary, and is therefore an integer.
 
 ```
-#import "standard.fx\0";
+#import "standard.fx";
 
 unsigned data{8} as byte;   // optionally `unsigned data{8}[] as noopstr;`
 byte[] as noopstring;
@@ -665,7 +665,7 @@ if (x == !void) {...code...};   // If it's not nothing, do something
 ## **Arrays:**
 
 ```
-#import "standard.fx\0";
+#import "standard.fx";
 using standard::io, standard::types;
 
 int[] ia_myArray = [3, 92, 14, 30, 6, 5, 11, 400];
@@ -1763,10 +1763,10 @@ def test_allocation() -> void
     stack int[1000] stack_array;
     
     // Heap allocation (manual)
-    heap int* heap_var = new int;
+    heap int heap_var = 22;
     *heap_var = 42;
     
-    heap int[]* heap_array = new int[1000];
+    heap int[] heap_array = void;
     
     // Use the variables
     print(stack_var);
