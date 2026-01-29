@@ -1,10 +1,22 @@
-#ifndef FLUX_STANDARD
-#import "standard.fx";
-#endif;
-
 #ifndef FLUX_STANDARD_TYPES
 #import "redtypes.fx";
 #endif;
+
+def strlen(byte* ps) -> int
+{
+    int c = 0;
+    while (true)
+    {
+        byte* ch = ps++;
+
+        if (*ch == 0)
+        {
+            break;
+        };
+        c++;
+    };
+    return c;
+};
 
 def i32str(i32 value, byte* buffer) -> i32
 {

@@ -381,6 +381,43 @@ namespace standard
                 return;
             };
 
+            def print(i8 x) -> void;
+            def print(i16 x) -> void;
+            def print(int x) -> void;
+            def print(i64 x) -> void;
+            def print(u16 x) -> void;
+            def print(uint x) -> void;
+            def print(u64 x) -> void;
+
+            def print(int x) -> void
+            {
+                byte[21] buf;
+                i32str(x,buf);
+                print(buf);
+                return;
+            };
+            def print(uint x) -> void
+            {
+                byte[21] buf;
+                u32str(x,buf);
+                print(buf);
+                return;
+            };
+            def print(i64 x) -> void
+            {
+                byte[21] buf;
+                i64str(x,buf);
+                print(buf);
+                return;
+            };
+            def print(u64 x) -> void
+            {
+                byte[21] buf;
+                u64str(x,buf);
+                print(buf);
+                return;
+            };
+
             def print() -> void
             {
                 // No params = newline printed

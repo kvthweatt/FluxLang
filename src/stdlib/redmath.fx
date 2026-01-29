@@ -83,13 +83,12 @@ namespace standard
             if (a < b) {return a;};
             return b;
         };
-        ///
+
         def min(float a, float b) -> float
         {
             if (a < b) {return a;};
             return b;
         };
-        ///
 
         // Maximum overloads
         def max(i8 a, i8 b) -> i8
@@ -115,13 +114,12 @@ namespace standard
             if (a > b) {return a;};
             return b;
         };
-        ///
+
         def max(float a, float b) -> float
         {
             if (a > b) {return a;};
             return b;
         };
-        ///
 
         // Clamp overloads
         def clamp(i8 value, i8 low, i8 high) -> i8

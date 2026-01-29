@@ -19,7 +19,7 @@
 #endif;
 
 // Import raw functions & builtins
-#import "strlen.fx";
+#import "strfuncs.fx";
 // ---------------------------
 
 #ifndef FLUX_STANDARD_SYSTEM
