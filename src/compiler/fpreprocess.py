@@ -141,13 +141,25 @@ class FXPreprocessor:
         
         # Check for import
         if stripped.startswith("#import"):
-            # Get the file path between quotes
-            if '"' in line:
-                import_start = line.find('"') + 1
-                import_end = line.find('"', import_start)
-                if import_end > import_start:
-                    import_file = line[import_start:import_end].strip()
-                    self._process_file(import_file)
+            # Handle multi-file imports like: #import "standard.fx", "strfuncs.fx";
+            # Extract all quoted filenames
+            import_files = []
+            
+            # Find all quoted strings in the line
+            start_idx = line.find('"')
+            while start_idx != -1:
+                end_idx = line.find('"', start_idx + 1)
+                if end_idx != -1:
+                    import_file = line[start_idx + 1:end_idx].strip()
+                    import_files.append(import_file)
+                    start_idx = line.find('"', end_idx + 1)
+                else:
+                    break
+            
+            # Process each import file in order
+            for import_file in import_files:
+                self._process_file(import_file)
+            
             return i + 1
         
         # Check for #endif - skip it

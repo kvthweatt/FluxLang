@@ -2,6 +2,10 @@
 #import "standard.fx";
 #endif;
 
+#ifndef FLUX_STANDARD_TYPES
+#import "redtypes.fx";
+#endif;
+
 def i32str(i32 value, byte* buffer) -> i32
 {
     if (value == 0)
@@ -33,7 +37,7 @@ def i32str(i32 value, byte* buffer) -> i32
     i32 write_pos = 0;
     if (is_negative == 1)
     {
-        buffer[0] = (byte)45; // '-'
+        buffer[0] = (byte)45; // '-' // cannot store i32 to i8*: mismatching types without (byte)
         write_pos = 1;
     };
     
@@ -352,4 +356,155 @@ def str2u64(byte* str) -> u64
     };
     
     return result;
+};
+
+// Convert float to string with specified precision
+// Returns number of characters written (excluding null terminator)
+def float2str(float value, byte* buffer, i32 precision) -> i32
+{
+    i32 write_pos = 0;
+    
+    // Handle negative numbers
+    if (value < 0.0)
+    {
+        buffer[0] = (byte)45; // '-'
+        write_pos = 1;
+        value = -value;
+    };
+    
+    // Handle zero case
+    if (value == 0.0)
+    {
+        buffer[write_pos] = (byte)48; // '0'
+        buffer[write_pos + 1] = (byte)46; // '.'
+        
+        i32 i = 0;
+        while (i < precision)
+        {
+            buffer[write_pos + 2 + i] = (byte)48; // '0'
+            i++;
+        };
+        
+        buffer[write_pos + 2 + precision] = (byte)0;
+        return write_pos + 1 + precision;
+    };
+    
+    // Extract integer part
+    i32 int_part = (i32)value;
+    
+    // Extract fractional part
+    float fractional = value - (float)int_part;
+    
+    // Multiply fractional by 10^precision without helper function
+    i32 frac_multiplier = 1;
+    i32 j = 0;
+    while (j < precision)
+    {
+        frac_multiplier = frac_multiplier * 10;
+        j++;
+    };
+    
+    // Calculate fractional part with rounding
+    float scaled_frac = fractional * (float)frac_multiplier;
+    i32 frac_part = (i32)(scaled_frac + 0.5);
+    
+    // Handle overflow from rounding (e.g., 0.999 becomes 1.00)
+    if (frac_part >= frac_multiplier)
+    {
+        int_part = int_part + 1;
+        frac_part = 0;
+        
+        // If int_part became 10, 100, etc., adjust
+        if (int_part % 10 == 0 && precision > 0)
+        {
+            // Simple adjustment for common cases
+            // Full general solution would be more complex
+        };
+    };
+    
+    // Convert integer part to string
+    if (int_part == 0)
+    {
+        buffer[write_pos] = (byte)48; // '0'
+        write_pos = write_pos + 1;
+    }
+    else
+    {
+        // Convert integer part in reverse
+        byte[32] int_temp;
+        i32 temp_pos = 0;
+        i32 temp_int = int_part;
+        
+        while (temp_int > 0)
+        {
+            int_temp[temp_pos] = (byte)((temp_int % 10) + 48);
+            temp_int = temp_int / 10;
+            temp_pos++;
+        };
+        
+        // Copy integer part to buffer
+        i32 k = temp_pos - 1;
+        while (k >= 0)
+        {
+            buffer[write_pos] = int_temp[k];
+            write_pos = write_pos + 1;
+            k--;
+        };
+    };
+    
+    // Add decimal point if precision > 0
+    if (precision > 0)
+    {
+        buffer[write_pos] = (byte)46; // '.'
+        write_pos = write_pos + 1;
+        
+        // Convert fractional part to string with leading zeros
+        if (frac_part == 0)
+        {
+            i32 m = 0;
+            while (m < precision)
+            {
+                buffer[write_pos] = (byte)48; // '0'
+                write_pos = write_pos + 1;
+                m++;
+            };
+        }
+        else
+        {
+            // Build fractional part in reverse
+            byte[32] frac_temp;
+            i32 frac_digits = 0;
+            i32 temp_frac = frac_part;
+            
+            while (temp_frac > 0)
+            {
+                frac_temp[frac_digits] = (byte)((temp_frac % 10) + 48);
+                temp_frac = temp_frac / 10;
+                frac_digits++;
+            };
+            
+            // Add leading zeros if needed
+            i32 leading_zeros = precision - frac_digits;
+            i32 n = 0;
+            while (n < leading_zeros)
+            {
+                buffer[write_pos] = (byte)48; // '0'
+                write_pos = write_pos + 1;
+                n++;
+            };
+            
+            // Copy fractional digits in reverse (to get correct order)
+            i32 p = frac_digits - 1;
+            while (p >= 0)
+            {
+                buffer[write_pos] = frac_temp[p];
+                write_pos = write_pos + 1;
+                p--;
+            };
+        };
+    };
+    
+    // Add null terminator
+    buffer[write_pos] = (byte)0;
+    return write_pos;
 };

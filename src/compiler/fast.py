@@ -2422,7 +2422,15 @@ class UnaryOp(Expression):
                     return ir.Constant(operand_val.type, -operand_val.constant)
                 elif isinstance(operand_val.type, ir.FloatType):
                     return ir.Constant(operand_val.type, -operand_val.constant)
-            return builder.neg(operand_val)
+            
+            # Use appropriate negation based on type
+            if isinstance(operand_val.type, ir.FloatType):
+                # For floats, use fsub with 0.0
+                zero = ir.Constant(operand_val.type, 0.0)
+                return builder.fsub(zero, operand_val)
+            else:
+                # For integers, use regular neg (which uses sub)
+                return builder.neg(operand_val)
         elif self.operator == Operator.INCREMENT:
             # Handle both prefix and postfix increment
             if isinstance(operand_val.type, ir.PointerType):
@@ -4558,7 +4566,8 @@ class Assignment(Statement):
                     except ValueError:
                         raise ValueError(f"Member '{member_name}' not found in struct")
                 else:
-                    raise ValueError(f"Struct type missing member names: {struct_type}")
+                    # This is a byte-array based struct - use vtable for field assignment
+                    return self._handle_vtable_struct_assignment(builder, module, obj, member_name, val)
             
             raise ValueError(f"Cannot assign to member '{member_name}' of non-struct type: {obj.type}")
     
@@ -4653,6 +4662,120 @@ class Assignment(Statement):
         casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{member_name}")
         builder.store(val, casted_ptr)
         return val
+    
+    def _handle_vtable_struct_assignment(self, builder: ir.IRBuilder, module: ir.Module, struct_ptr: ir.Value, member_name: str, val: ir.Value) -> ir.Value:
+        """Handle struct member assignment for byte-array based structs using vtable"""
+        # Determine struct name from the pointer type
+        struct_name = None
+        struct_type = struct_ptr.type.pointee
+        
+        # Try to match with registered struct types
+        if hasattr(module, '_struct_types'):
+            for name, registered_type in module._struct_types.items():
+                if registered_type == struct_type:
+                    struct_name = name
+                    break
+        
+        if struct_name is None:
+            # Try to infer from scope_type_info
+            if isinstance(self.target.object, Identifier):
+                var_name = self.target.object.name
+                if hasattr(builder, 'scope_type_info') and var_name in builder.scope_type_info:
+                    type_spec = builder.scope_type_info[var_name]
+                    if type_spec.custom_typename:
+                        struct_name = type_spec.custom_typename
+        
+        if struct_name is None:
+            raise ValueError(f"Cannot determine struct type for member assignment")
+        
+        # Get vtable
+        if not hasattr(module, '_struct_vtables') or struct_name not in module._struct_vtables:
+            raise ValueError(f"Vtable not found for struct '{struct_name}'")
+        
+        vtable = module._struct_vtables[struct_name]
+        
+        # Find field in vtable
+        field_info = next(
+            (f for f in vtable.fields if f[0] == member_name),
+            None
+        )
+        if not field_info:
+            raise ValueError(f"Field '{member_name}' not found in struct '{struct_name}'")
+        
+        _, bit_offset, bit_width, alignment = field_info
+        
+        # Load the current struct value
+        current_struct = builder.load(struct_ptr, name="current_struct")
+        
+        # Convert float to integer if needed
+        if isinstance(val.type, ir.FloatType):
+            int_type = ir.IntType(bit_width)
+            val = builder.bitcast(val, int_type)
+        
+        # Generate inline assignment code based on struct storage type
+        if isinstance(current_struct.type, ir.IntType):
+            # Integer type - simple bit operations
+            instance_type = current_struct.type
+            
+            # Create mask to clear the field
+            mask = ((1 << bit_width) - 1) << bit_offset
+            inverse_mask = (~mask) & ((1 << instance_type.width) - 1)
+            
+            # Clear the field
+            cleared = builder.and_(current_struct, ir.Constant(instance_type, inverse_mask))
+            
+            # Shift value to position
+            if val.type.width < instance_type.width:
+                val_extended = builder.zext(val, instance_type)
+            elif val.type.width > instance_type.width:
+                val_extended = builder.trunc(val, instance_type)
+            else:
+                val_extended = val
+            
+            if bit_offset > 0:
+                val_shifted = builder.shl(val_extended, ir.Constant(instance_type, bit_offset))
+            else:
+                val_shifted = val_extended
+            
+            # Combine
+            new_struct = builder.or_(cleared, val_shifted)
+            
+            # Store back
+            builder.store(new_struct, struct_ptr)
+            return val
+        else:
+            # Array type - byte manipulation
+            byte_offset = bit_offset // 8
+            bit_in_byte = bit_offset % 8
+            
+            if bit_in_byte == 0 and bit_width % 8 == 0:
+                # Byte-aligned field - simple case
+                field_bytes = bit_width // 8
+                
+                # Ensure val is the right type
+                if val.type.width != bit_width:
+                    if val.type.width < bit_width:
+                        val = builder.zext(val, ir.IntType(bit_width))
+                    else:
+                        val = builder.trunc(val, ir.IntType(bit_width))
+                
+                # Insert bytes into the struct
+                new_struct = current_struct
+                for i in range(field_bytes):
+                    # Extract byte from value
+                    shift_amount = i * 8
+                    byte_val = builder.lshr(val, ir.Constant(val.type, shift_amount))
+                    byte_val = builder.and_(byte_val, ir.Constant(val.type, 0xFF))
+                    byte_val = builder.trunc(byte_val, ir.IntType(8))
+                    
+                    # Insert into array
+                    new_struct = builder.insert_value(new_struct, byte_val, byte_offset + i)
+                
+                # Store back
+                builder.store(new_struct, struct_ptr)
+                return val
+            else:
+                raise NotImplementedError("Unaligned field assignment in large structs not yet supported")
 
 @dataclass
 class CompoundAssignment(Statement):
@@ -6746,6 +6869,12 @@ class StructLiteral(Expression):
                 # Byte-aligned field - simple case
                 field_bytes = bit_width // 8
                 
+                # Convert float to integer representation if needed
+                if isinstance(field_value.type, ir.FloatType):
+                    # Convert float to its integer bit representation
+                    int_type = ir.IntType(bit_width)
+                    field_value = builder.bitcast(field_value, int_type)
+                
                 # Convert field value to bytes and store
                 for i in range(field_bytes):
                     # Extract byte from field value
@@ -6777,12 +6906,14 @@ class StructVTable:
         total_bytes: Total size in bytes (rounded up)
         alignment: Required alignment in bits
         fields: List of (name, offset, width, alignment) tuples
+        field_types: Dict mapping field name to LLVM type (for proper type conversion)
     """
     struct_name: str
     total_bits: int
     total_bytes: int
     alignment: int
     fields: List[Tuple[str, int, int, int]]  # (name, bit_offset, bit_width, alignment)
+    field_types: Dict[str, ir.Type] = field(default_factory=dict)  # field_name -> LLVM type
     
     def to_llvm_constant(self, module: ir.Module) -> ir.Constant:
         """
@@ -7153,6 +7284,13 @@ class StructFieldAccess(Expression):
                         ir.Constant(field_type, i * 8)
                     )
                     result = builder.or_(result, byte_shifted)
+                
+                # Convert to proper type if needed (e.g., float)
+                if self.field_name in vtable.field_types:
+                    target_type = vtable.field_types[self.field_name]
+                    if isinstance(target_type, ir.FloatType) and isinstance(result.type, ir.IntType):
+                        # Convert integer bit representation back to float
+                        result = builder.bitcast(result, target_type)
                 
                 return result
             else:
