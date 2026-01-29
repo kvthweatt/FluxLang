@@ -2,7 +2,6 @@
 
 def main() -> int
 {
-    print("Hello World!\n\0");
-
-    return 0;
+	*(unsigned data{1}*)0 = 0;
+	return 0;
 };

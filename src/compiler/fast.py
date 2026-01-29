@@ -4617,13 +4617,13 @@ class Assignment(Statement):
                 raise ValueError("Cannot index non-array type")
                 
         elif isinstance(self.target, PointerDeref):
-            # Pointer dereference assignment (*ptr = val)
             ptr = self.target.pointer.codegen(builder, module)
             if isinstance(ptr.type, ir.PointerType):
+                # Bitcast pointer if value type doesn't match pointee type
+                if val.type != ptr.type.pointee:
+                    ptr = builder.bitcast(ptr, ir.PointerType(val.type))
                 builder.store(val, ptr)
                 return val
-            else:
-                raise ValueError("Cannot dereference non-pointer type")
                 
         else:
             raise ValueError(f"Cannot assign to {type(self.target).__name__}")

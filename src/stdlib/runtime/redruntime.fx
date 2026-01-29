@@ -58,6 +58,7 @@ def exit() -> void
         movq $$0, %rdi           // exit code 0
         syscall
     } : : : "rax", "rdi";
+    return;
 };
 #endif; // Linux
 

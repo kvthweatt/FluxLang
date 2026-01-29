@@ -226,7 +226,7 @@ namespace standard
         // Zero memory
         def bzero(void* ptr, size_t n) -> void
         {
-            memset(ptr, (i8)0, n);
+            return (void)memset(ptr, (i8)0, n);
         };
 	};
 };

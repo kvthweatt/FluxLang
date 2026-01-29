@@ -14,8 +14,9 @@ object myObj
 	def __exit() -> void
 	{
         print("Killing myObj instance...\n\0");
-        (void)(@)*(void*)@(*this); // Failed runtime free
-		return;
+        // dereference this, get address, cast to void pointer, dereference, cast to void.
+        // can get way more cursed.
+		return; // compiles.
 	};
 
 	def get() -> int
@@ -29,13 +30,14 @@ object myObj
 
 def main() -> int
 {
+	*(byte*)0 = (byte*)0;
+
 	myObj newObj();
-
-	int y = newObj.get();
-
 	newObj.__exit();
 
-	if (y == 5) // Should fail but does not.
+	int y = newObj.get(); // Should fail...
+
+	if (y == 5) // ...but doesn't.
 	{
 		print("Success!\n\0");
         newObj.__exit();
