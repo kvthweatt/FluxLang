@@ -131,6 +131,7 @@ def isolate_the_bug() -> int
     u64 result3 = (u64)((u64)0xFFFFFFFFu / (u64)256u);
     print("Double-cast 0xFFFFFFFF / 256 = \0");
     u64str(result3, buf); print(buf); print("\n\0");
+    print();
     
     return 0;
 };

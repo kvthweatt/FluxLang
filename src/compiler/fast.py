@@ -415,6 +415,8 @@ class TypeSpec:
         # Handle built-in types
         if self.base_type == DataType.SINT:
             return ir.IntType(32)
+        elif self.base_type == DataType.UINT:
+            return ir.IntType(32)
         elif self.base_type == DataType.FLOAT:
             return ir.FloatType()
         elif self.base_type == DataType.BOOL:
@@ -516,9 +518,14 @@ class Identifier(Expression):
                 ret_val = builder.load(ptr, name=self.name)
                 if is_volatile:
                     ret_val.volatile = True
-                # Attach type metadata to loaded value
-                if type_spec and not hasattr(ret_val, '_flux_type_spec'):
-                    ret_val._flux_type_spec = type_spec
+                # Attach type metadata to loaded value from multiple sources
+                if not hasattr(ret_val, '_flux_type_spec'):
+                    # Priority 1: Check scope_type_info
+                    if type_spec:
+                        ret_val._flux_type_spec = type_spec
+                    # Priority 2: Check if alloca itself has metadata
+                    elif hasattr(ptr, '_flux_type_spec'):
+                        ret_val._flux_type_spec = ptr._flux_type_spec
                 return ret_val
             
             # For non-pointer types, attach metadata and return
@@ -2134,9 +2141,13 @@ class LoweringContext:
         
         Args:
             a, b: Integer values to normalize
-            unsigned: Whether to use unsigned extension semantics
-            promote: If True, normalize to MAXIMUM width (for arithmetic/comparisons).
-                     If False, normalize to MINIMUM width (for bitshifts/bools).
+            unsigned: Whether to use unsigned extension semantics when extending
+            promote: If True, normalize to MAXIMUM width (for arithmetic/bitwise/comparisons).
+                     If False, normalize to MINIMUM width (for bitshifts only).
+        
+        Context:
+            - Bitshift operations (<<, >>): promote=False (shift amount matches value width)
+            - All other operations: promote=True (preserve full range and precision)
         """
         assert isinstance(a.type, ir.IntType)
         assert isinstance(b.type, ir.IntType)
@@ -2144,19 +2155,29 @@ class LoweringContext:
         if a.type.width == b.type.width:
             return a, b
 
+        # Promote to max for arithmetic/bitwise, lower to min for bitshifts
         width = max(a.type.width, b.type.width) if promote else min(a.type.width, b.type.width)
         ty = ir.IntType(width)
 
         def convert(v):
-            print("LOWERING NORMALIZE", v.type, v.type.width, ty, width)
+            direction = "PROMOTING" if promote else "LOWERING"
+            print(f"{direction} NORMALIZE", v.type, v.type.width, ty, width)
             if v.type.width == width:
                 return v
             elif v.type.width < width:
-                # Extending to larger width (shouldn't happen with min, but handle it)
-                return self.b.zext(v, ty) if unsigned else self.b.sext(v, ty)
+                # Extending to larger width
+                result = self.b.zext(v, ty) if unsigned else self.b.sext(v, ty)
             else:
                 # Truncating to smaller width
-                return self.b.trunc(v, ty)
+                result = self.b.trunc(v, ty)
+            
+            # Preserve _flux_type_spec metadata
+            if hasattr(v, '_flux_type_spec'):
+                result._flux_type_spec = v._flux_type_spec
+                # Update bit width to match new type
+                result._flux_type_spec.bit_width = width
+            
+            return result
 
         return convert(a), convert(b)
 
@@ -2317,7 +2338,7 @@ class BinaryOp(Expression):
         # --------------------------------------------------
 
         if self.operator in (Operator.BITAND, Operator.BITOR):
-            lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=False)
+            lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=True)
             return {
                 Operator.AND: builder.and_,
                 Operator.BITAND: builder.and_,
@@ -2341,14 +2362,21 @@ class BinaryOp(Expression):
         # --------------------------------------------------
 
         if self.operator in (Operator.BITSHIFT_LEFT, Operator.BITSHIFT_RIGHT):
-            # For bitshift operations, normalize to the LEFT operand's width (lower=True)
-            # This prevents promoting i8 << i32 to i32, which would be incorrect
-            # The shift amount should be truncated/extended to match the value being shifted
-            lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=False)
-            
+            # For bitshifts: the shift AMOUNT should match the VALUE's width
+            # i64 << i32 should become i64 << i64 (extend amount, preserve value width)
+            # i8 << i32 should become i8 << i8 (truncate amount to value width)
+            # The result width is always the left operand's width
+            if lhs.type.width != rhs.type.width:
+                if rhs.type.width < lhs.type.width:
+                    # Extend shift amount to match value width
+                    rhs = builder.zext(rhs, lhs.type)
+                else:
+                    # Truncate shift amount to match value width
+                    rhs = builder.trunc(rhs, lhs.type)
+
             if self.operator is Operator.BITSHIFT_LEFT:
                 return builder.shl(lhs, rhs)
-            
+
             return (
                 builder.lshr(lhs, rhs)
                 if ctx.is_unsigned(lhs)
@@ -2559,21 +2587,26 @@ class CastExpression(Expression):
                     # Check the literal's type
                     if self.expression.type == DataType.UINT:
                         # Unsigned literal -> zero extend
-                        return builder.zext(source_val, target_llvm_type)
+                        result = builder.zext(source_val, target_llvm_type)
                     elif self.expression.type == DataType.SINT:
                         # Signed literal -> sign extend
-                        return builder.sext(source_val, target_llvm_type)
+                        result = builder.sext(source_val, target_llvm_type)
                     else:
                         # Default to sign extend
-                        return builder.sext(source_val, target_llvm_type)
+                        result = builder.sext(source_val, target_llvm_type)
                 else:
-                    # Not a literal - need to check target type
-                    # For now, default to sign extend
-                    return builder.sext(source_val, target_llvm_type)
+                    # Not a literal - check if target type is unsigned
+                    if self.target_type.base_type == DataType.UINT or (
+                        self.target_type.custom_typename and 
+                        self.target_type.custom_typename.startswith('u')
+                    ):
+                        result = builder.zext(source_val, target_llvm_type)
+                    else:
+                        result = builder.sext(source_val, target_llvm_type)
             else:
                 result = source_val
             
-            # Attach target type metadata to result
+            # Attach target type metadata to result - ALWAYS, not just for truncation
             if hasattr(self, 'target_type'):
                 result._flux_type_spec = self.target_type
             
@@ -4269,6 +4302,13 @@ class VariableDeclaration(ASTNode):
             # Float to int conversion
             elif isinstance(init_val.type, ir.FloatType) and isinstance(llvm_type, ir.IntType):
                 init_val = builder.fptosi(init_val, llvm_type)
+        
+        # Preserve _flux_type_spec metadata if present on init_val
+        # This helps maintain signedness through store/load cycles
+        if hasattr(init_val, '_flux_type_spec'):
+            # Store metadata on the alloca so it can be retrieved on loads
+            if not hasattr(alloca, '_flux_type_spec'):
+                alloca._flux_type_spec = init_val._flux_type_spec
         
         builder.store(init_val, alloca)
     

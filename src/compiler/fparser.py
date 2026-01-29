@@ -209,7 +209,7 @@ class FluxParser:
             return self.variable_declaration_statement()
         elif self.expect(TokenType.SIGNED):
             return self.variable_declaration_statement()
-        elif self.expect(TokenType.SINT, TokenType.DATA, TokenType.CHAR, 
+        elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.DATA, TokenType.CHAR, 
                          TokenType.FLOAT_KW, TokenType.BOOL_KW, TokenType.VOID):
             return self.variable_declaration_statement()
         elif self.expect(TokenType.SEMICOLON):

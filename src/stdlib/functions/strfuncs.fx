@@ -145,7 +145,8 @@ def u64str(u64 value, byte* buffer) -> u64
     u64 pos = (u64)0;
     byte[32] temp;
     
-    while (value > (u64)0)
+    // Use != 0 instead of > 0 to avoid signed comparison issues
+    while (value != (u64)0)
     {
         temp[pos] = (byte)((value % (u64)10) + (u64)48); // Convert digit to ASCII
         value = value / (u64)10;
@@ -156,7 +157,7 @@ def u64str(u64 value, byte* buffer) -> u64
     u64 write_pos = (u64)0;
     u64 remaining = pos;  // Track how many digits remain
 
-    while (remaining > (u64)0)
+    while (remaining != (u64)0)
     {
         remaining--;  // Decrement BEFORE using as index
         buffer[write_pos] = temp[remaining];
@@ -167,20 +168,188 @@ def u64str(u64 value, byte* buffer) -> u64
     return write_pos;
 };
 
-///
-#ifndef FLUX_STANDARD_RUNTIME
-def main() -> int
+def str2i32(byte* str) -> int
 {
-    byte[20] xbuf;
-    int len = i32str(500, xbuf);
-
-    if (len == 3)
+    int result = 0;
+    int sign = 1;
+    int i = 0;
+    
+    // Skip leading whitespace
+    while (str[i] == 32 | str[i] == 9 | str[i] == 10 | str[i] == 13)
     {
-        print(xbuf);
-        print("\n\0");
-        print("Success!\n\0");
+        i++;
     };
-    return 0;
+    
+    // Check for sign
+    if (str[i] == 45)  // '-'
+    {
+        sign = -1;
+        i++;
+    }
+    elif (str[i] == 43)  // '+'
+    {
+        i++;
+    };
+    
+    // Convert digits
+    while (str[i] != 0)
+    {
+        byte c = str[i];
+        
+        // Check if character is a digit (0-9 are ASCII 48-57)
+        if (c >= 48 & c <= 57)
+        {
+            int digit = (int)(c - 48);
+            result = result * 10 + digit;
+        }
+        else
+        {
+            // Non-digit character, stop parsing
+            break;
+        };
+        
+        i++;
+    };
+    
+    return result * sign;
 };
-#endif;
-///
+
+// Convert string to unsigned 32-bit integer
+// Returns 0 if string is invalid or negative
+def str2u32(byte* str) -> uint
+{
+    uint result = (uint)0;
+    int i = 0;
+    
+    // Skip leading whitespace
+    while (str[i] == (byte)32 | str[i] == (byte)9 | str[i] == (byte)10 | str[i] == (byte)13)
+    {
+        i++;
+    };
+    
+    // Skip '+' if present, return 0 if '-' present
+    if (str[i] == (byte)45)  // '-'
+    {
+        return (uint)0;  // Negative not allowed for unsigned
+    }
+    elif (str[i] == (byte)43)  // '+'
+    {
+        i++;
+    };
+    
+    // Convert digits
+    while (str[i] != (byte)0)
+    {
+        byte c = str[i];
+        
+        // Check if character is a digit
+        if (c >= (byte)48 & c <= (byte)57)
+        {
+            uint digit = (uint)(c - (byte)48);
+            result = result * (uint)10 + digit;
+        }
+        else
+        {
+            // Non-digit character, stop parsing
+            break;
+        };
+        
+        i++;
+    };
+    
+    return result;
+};
+
+// Convert string to signed 64-bit integer
+// Returns 0 if string is invalid
+def str2i64(byte* str) -> i64
+{
+    i64 result = (i64)0;
+    i64 sign = (i64)1;
+    int i = 0;
+    
+    // Skip leading whitespace
+    while (str[i] == (byte)32 | str[i] == (byte)9 | str[i] == (byte)10 | str[i] == (byte)13)
+    {
+        i++;
+    };
+    
+    // Check for sign
+    if (str[i] == (byte)45)  // '-'
+    {
+        sign = (i64)-1;
+        i++;
+    }
+    elif (str[i] == (byte)43)  // '+'
+    {
+        i++;
+    };
+    
+    // Convert digits
+    while (str[i] != (byte)0)
+    {
+        byte c = str[i];
+        
+        // Check if character is a digit
+        if (c >= (byte)48 & c <= (byte)57)
+        {
+            i64 digit = (i64)(c - (byte)48);
+            result = result * (i64)10 + digit;
+        }
+        else
+        {
+            // Non-digit character, stop parsing
+            break;
+        };
+        
+        i++;
+    };
+    
+    return result * sign;
+};
+
+// Convert string to unsigned 64-bit integer
+// Returns 0 if string is invalid or negative
+def str2u64(byte* str) -> u64
+{
+    u64 result = (u64)0;
+    int i = 0;
+    
+    // Skip leading whitespace
+    while (str[i] == (byte)32 | str[i] == (byte)9 | str[i] == (byte)10 | str[i] == (byte)13)
+    {
+        i++;
+    };
+    
+    // Skip '+' if present, return 0 if '-' present
+    if (str[i] == (byte)45)  // '-'
+    {
+        return (u64)0;  // Negative not allowed for unsigned
+    }
+    elif (str[i] == (byte)43)  // '+'
+    {
+        i++;
+    };
+    
+    // Convert digits
+    while (str[i] != (byte)0)
+    {
+        byte c = str[i];
+        
+        // Check if character is a digit
+        if (c >= (byte)48 & c <= (byte)57)
+        {
+            u64 digit = (u64)(c - (byte)48);
+            result = result * (u64)10 + digit;
+        }
+        else
+        {
+            // Non-digit character, stop parsing
+            break;
+        };
+        
+        i++;
+    };
+    
+    return result;
+};

@@ -60,15 +60,6 @@ def test_individual_operations() -> int
     print("low = 1627584000: \0"); u64str(low, buf); print(buf); print("\n\0");
     print("high << 32 = \0"); u64str(shift_result, buf); print(buf); print("\n\0");
     print("(high << 32) | low = \0"); u64str(or_result, buf); print(buf); print("\n\0");
-    
-    // What SHOULD be 5000000000:
-    // high = 1 (0x00000001)
-    // high << 32 = 0x0000000100000000 = 4294967296
-    // low = 1627584000 (0x610A4B00)
-    // Combined: 0x00000001610A4B00 = 5000000000
-    
-    // What you got: 5922551296 = 0x160A4B000
-    // Notice: 0x160A4B000 = 0x1 << 32 would be 0x100000000, not 0x160A4B000
 
     print();print();
     
