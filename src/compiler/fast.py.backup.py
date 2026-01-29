@@ -2160,8 +2160,8 @@ class LoweringContext:
         ty = ir.IntType(width)
 
         def convert(v):
-            #direction = "PROMOTING" if promote else "LOWERING"
-            #print(f"{direction} NORMALIZE", v.type, v.type.width, ty, width)
+            direction = "PROMOTING" if promote else "LOWERING"
+            print(f"{direction} NORMALIZE", v.type, v.type.width, ty, width)
             if v.type.width == width:
                 return v
             elif v.type.width < width:
@@ -4977,7 +4977,7 @@ class CompoundAssignment(Statement):
         casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{member_name}")
         builder.store(val, casted_ptr)
         return val
-    
+
 @dataclass
 class Block(Statement):
     statements: List[Statement] = field(default_factory=list)
@@ -4993,7 +4993,8 @@ class Block(Statement):
                     if stmt_result is not None:  # Only update result if not None
                         result = stmt_result
                 except Exception as e:
-                    raise ValueError(f"DEBUG Block: Error in statement {i} ({type(stmt).__name__}): {e}")
+                    print(f"DEBUG Block: Error in statement {i} ({type(stmt).__name__}): {e}")
+                    raise
         return result
 
 @dataclass
@@ -6970,23 +6971,18 @@ class StructDef(ASTNode):
     def calculate_vtable(self, module: ir.Module) -> StructVTable:
             """Calculate struct layout and generate TLD."""
             fields = []
-            field_types = {}
             current_offset = 0
             max_alignment = 1
             
             for member in self.members:
                 member_type = member.type_spec
                 
-                # Get the LLVM type for this field
-                llvm_field_type = member_type.get_llvm_type(module)
-                field_types[member.name] = llvm_field_type
-                
                 if member_type.bit_width is not None:
                     bit_width = member_type.bit_width
                     alignment = member_type.alignment if member_type.alignment is not None else bit_width
                 elif member_type.custom_typename:
                     # Use TypeSpec.get_llvm_type() which handles all type lookups properly
-                    llvm_type = llvm_field_type
+                    llvm_type = member_type.get_llvm_type(module)
                     
                     # Calculate bit width and alignment from the LLVM type
                     if isinstance(llvm_type, ir.IntType):
@@ -7036,16 +7032,13 @@ class StructDef(ASTNode):
             
             total_bytes = (total_bits + 7) // 8
             
-            vtable = StructVTable(
+            return StructVTable(
                 struct_name=self.name,
                 total_bits=total_bits,
                 total_bytes=total_bytes,
                 alignment=max_alignment,
-                fields=fields,
-                field_types=field_types
+                fields=fields
             )
-            #print(f"DEBUG calculate_vtable: Created vtable for '{self.name}' with field_types={field_types}")
-            return vtable
     
     def _get_builtin_bit_width(self, base_type: DataType) -> int:
         """Get bit width for built-in types"""
@@ -7293,21 +7286,18 @@ class StructFieldAccess(Expression):
                     result = builder.or_(result, byte_shifted)
                 
                 # Convert to proper type if needed (e.g., float)
-                #print(f"DEBUG StructFieldAccess: field_name={self.field_name}, vtable.field_types={vtable.field_types}")
                 if self.field_name in vtable.field_types:
                     target_type = vtable.field_types[self.field_name]
-                    #print(f"DEBUG StructFieldAccess: target_type={target_type}, result.type={result.type}")
                     if isinstance(target_type, ir.FloatType) and isinstance(result.type, ir.IntType):
                         # Convert integer bit representation back to float
-                        #print(f"DEBUG StructFieldAccess: Converting {result.type} to {target_type}")
                         result = builder.bitcast(result, target_type)
-                else:
-                    raise ValueError(f"StructFieldAccess: field_name '{self.field_name}' not in vtable.field_types")
                 
                 return result
             else:
                 # Unaligned - complex bit manipulation
-                raise NotImplementedError("Unaligned field access in large structs not yet supported")
+                raise NotImplementedError(
+                    "Unaligned field access in large structs not yet supported"
+                )
     
     def _infer_struct_name(self, instance: ir.Value, module: ir.Module) -> str:
         """Infer struct name from instance type."""
