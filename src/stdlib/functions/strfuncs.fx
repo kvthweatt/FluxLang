@@ -18,6 +18,18 @@ def strlen(byte* ps) -> int
     return c;
 };
 
+def strcpy(noopstr dest, noopstr src) -> noopstr
+{
+    size_t i = 0;
+    while (src[i] != 0)
+    {
+        dest[i] = src[i];
+        i++;
+    };
+    dest[i] = (byte)0;
+    return dest;
+};
+
 def i32str(i32 value, byte* buffer) -> i32
 {
     if (value == 0)
@@ -427,7 +439,7 @@ def float2str(float value, byte* buffer, i32 precision) -> i32
         frac_part = 0;
         
         // If int_part became 10, 100, etc., adjust
-        if (int_part % 10 == 0 && precision > 0)
+        if (int_part % 10 == 0 & precision > 0)
         {
             // Simple adjustment for common cases
             // Full general solution would be more complex

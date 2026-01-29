@@ -794,8 +794,10 @@ class FluxParser:
                     if self.expect(TokenType.COLON):
                         self.advance()
                         endianness = int(self.consume(TokenType.SINT_LITERAL).value)
-                else:
+                elif self.expect(TokenType.SCOPE):
+                    self.advance()
                     alignment = bit_width
+                    endianness = int(self.consume(TokenType.SINT_LITERAL).value)
                 
                 self.consume(TokenType.RIGHT_BRACE)
         
@@ -908,6 +910,10 @@ class FluxParser:
                 if self.expect(TokenType.SINT_LITERAL):
                     self.advance()
                 if self.expect(TokenType.COLON):
+                    self.advance()
+                    if self.expect(TokenType.SINT_LITERAL):
+                        self.advance()
+                elif self.expect(TokenType.SCOPE):
                     self.advance()
                     if self.expect(TokenType.SINT_LITERAL):
                         self.advance()

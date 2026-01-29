@@ -30,7 +30,11 @@ object string
 
 def main() -> int
 {
-    byte[21] buf;
+    byte[24] buf1;
+    byte[24] buf2;
+
+    byte* bfp1 = @buf1;
+    byte* bfp2 = @buf2;
 
     noopstr x = "TESTING OOP STRINGS!!!\n\0";
     byte* px = @x;
@@ -38,6 +42,10 @@ def main() -> int
     string str(px);
     print(str.val());
     print(str.len());
+    print();
+
+    noopstr x = strcpy(bfp2, x);
+    print(buf2);
     print();
 
     print("Hello World!\n\0");
