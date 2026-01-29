@@ -1,63 +1,100 @@
-#import "redstandard.fx";
-
-#import "strfuncs.fx";
+// debug_file_test.fx
+#import "standard.fx";
 
 def main() -> i32
 {
-    byte[20] xbuf; // Up to 64 bit integers
-    int len = i32str(500,xbuf);
-    if (len == 3)
-    {
-        print(xbuf);
-        print();
-        print("i32str() success!\n\0");
-    };
-
-    u64 len = u64str((u64)5000000000,xbuf);
-    print(xbuf);        //705032704
+    print("Debug: Starting file test...\n\0");
+    
+    // Test different paths
+    byte[] path1 = "test.txt\0";
+    byte[] path2 = "\\test.txt\0";
+    byte[] path3 = "C:\\test.txt\0";
+    
+    print("Debug: Testing path1: \0");
+    print(@path1);
     print();
-    print("i64str() success!\n\0");
-
-    print("Starting...\n\0");
-    byte[] path = "test.txt\0";
     
-    // Open file for reading
-    i64 file_handle = open_read(@path);
+    // First check if we can even call the function
+    i64 handle = open_read(@path1);
     
-    // Check if file opened successfully
-    if (file_handle == -1 or file_handle == 0xFFFFFFFFFFFFFFFF or file_handle == 0)
+    print("Debug: open_read returned: \0");
+    byte[20] buf;
+    i64str(handle, buf);
+    print(buf);
+    print();
+    
+    // Try creating a file first
+    print("Debug: Trying to create a file first...\0");
+    
+    i64 create_handle = open_write(@path1);
+    
+    print("Debug: open_write returned: \0");
+    i64str(create_handle, buf);
+    print(buf);
+    print();
+    
+    if (create_handle != -1)
     {
-        byte[] error_msg = "Error opening file\n\0";
-        print(@error_msg);
-        return 1;
+        print("Debug: Successfully created file!\n");
+        
+        // Write something
+        byte[] test_data = "Test data\n\0";
+        i32 written = win_write(create_handle, test_data, strlen(test_data));
+        
+        print("Debug: win_write returned: \0");
+        i32str(written, buf);
+        print(buf);
+        print();
+        
+        // Close it
+        i32 closed = win_close(create_handle);
+        print("Debug: win_close returned: \0");
+        i32str(closed, buf);
+        print(buf);
+        print();
+        
+        // Now try to read it
+        print("Debug: Now trying to read the file we just created...\n\0");
+        handle = open_read(@path1);
+        
+        print("Debug: open_read (after create) returned: \0");
+        i64str(handle, buf);
+        print(buf);
+        print();
+        
+        if (handle != -1)
+        {
+            byte[100] read_buf;
+            i32 read_bytes = win_read(handle, read_buf, 100);
+            
+            print("Debug: win_read returned: \0");
+            i32str(read_bytes, buf);
+            print(buf);
+            print("\n");
+            
+            if (read_bytes > 0)
+            {
+                print("Debug: Read content: \0");
+                read_buf[read_bytes] = (byte)0;
+                print(read_buf);
+            };
+            
+            win_close(handle);
+        };
+    }
+    else
+    {
+        print("Debug: Could not create file. Testing with absolute path...\n\0");
+        
+        // Try C:\test.txt
+        create_handle = open_write(@path3);
+        
+        print("Debug: open_write (C:\\test.txt) returned: \0");
+        i64str(create_handle, buf);
+        print(buf);
+        print();
     };
     
-    print("File opened!\n\0");
-    
-    // Create a buffer to read into
-    byte[1024] buffer; // zero out with = void
-    byte* bufptr = buffer;
-    
-    // Read from file
-    i32 bytes_read = win_read(file_handle, bufptr, 1024);
-    
-    if (bytes_read == -1)
-    {
-        print("Read returned -1\n\0");
-    };
-    
-    if (bytes_read == 0)
-    {
-        print("Read returned 0 (EOF or empty)\n\0");
-    };
-    
-    print("File contents:\n\0");
-    print(@buffer, bytes_read);  // Print exactly what we read
-    print("\n\0");
-    
-    // Close the file
-    win_close(file_handle);
-    
-    print("Finished!\n\0");
+    print("Debug: Test complete.\n\0");
     return 0;
 };

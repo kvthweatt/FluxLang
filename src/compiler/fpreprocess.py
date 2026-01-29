@@ -117,10 +117,32 @@ class FXPreprocessor:
         
         # Check for #def
         if stripped.startswith("#def"):
-            parts = line.split()
+            # Find the semicolon or comment start
+            semicolon_pos = line.find(';')
+            comment_pos = line.find('//')
+            
+            # Determine where the macro definition ends
+            if comment_pos != -1 and (semicolon_pos == -1 or comment_pos < semicolon_pos):
+                # Comment comes before semicolon or no semicolon
+                end_pos = comment_pos
+            elif semicolon_pos != -1:
+                end_pos = semicolon_pos
+            else:
+                end_pos = len(line)
+            
+            # Extract the part up to semicolon or comment
+            macro_line = line[:end_pos].strip()
+            
+            parts = macro_line.split()
             if len(parts) >= 3:
                 macro_name = parts[1]
-                macro_value = ' '.join(parts[2:]).rstrip(';').strip()
+                # Join the rest as the value (skip #def and macro_name)
+                macro_value = ' '.join(parts[2:]).strip()
+                
+                # Remove any trailing semicolon if it's still there
+                if macro_value.endswith(';'):
+                    macro_value = macro_value.rstrip(';').strip()
+                    
                 self.macros[macro_name] = macro_value
                 print(f"[PREPROCESSOR] Defined macro: {macro_name} = {macro_value}")
             return i + 1
@@ -266,7 +288,12 @@ class FXPreprocessor:
                 if current_token:
                     # Check if token is a macro
                     if current_token in self.macros:
-                        result_parts.append(self.macros[current_token])
+                        # Get macro value and strip trailing semicolon if present
+                        macro_value = self.macros[current_token]
+                        # Remove trailing semicolon if it's at the end
+                        if macro_value.endswith(';'):
+                            macro_value = macro_value.rstrip(';').strip()
+                        result_parts.append(macro_value)
                     else:
                         result_parts.append(current_token)
                     current_token = ""
@@ -277,7 +304,11 @@ class FXPreprocessor:
         # Handle last token
         if current_token:
             if current_token in self.macros:
-                result_parts.append(self.macros[current_token])
+                macro_value = self.macros[current_token]
+                # Remove trailing semicolon if it's at the end
+                if macro_value.endswith(';'):
+                    macro_value = macro_value.rstrip(';').strip()
+                result_parts.append(macro_value)
             else:
                 result_parts.append(current_token)
         

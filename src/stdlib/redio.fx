@@ -456,7 +456,7 @@ namespace standard
         {
 #ifdef __WINDOWS__
             // File access modes (dwDesiredAccess)
-            #def GENERIC_READ 2147483648;
+            #def GENERIC_READ 0x80000000;
             #def GENERIC_WRITE 0x40000000;
             #def GENERIC_READ_WRITE 0xC0000000;
             
@@ -474,6 +474,7 @@ namespace standard
             
             // File attributes (dwFlagsAndAttributes)
             #def FILE_ATTRIBUTE_NORMAL 0x80;
+            #def FILE_ATTRIBUTE_ARCHIVE 0x20;
             
             // Invalid handle value
             #def INVALID_HANDLE_VALUE -1;
@@ -494,29 +495,41 @@ namespace standard
 
                 volatile asm
                 {
-                    // Save the input parameters to specific registers for the Windows x64 calling convention
-                    // Windows x64: RCX, RDX, R8, R9, then stack
+                    // Save path to RCX (first parameter)
+                    movq $0, %rcx           // lpFileName (path)
                     
-                    movq $0, %rcx           // lpFileName (path) - already 64-bit
-                    movl $1, %edx           // dwDesiredAccess (access) - 32-bit into lower EDX
-                    movl $2, %r8d           // dwShareMode (share) - 32-bit into lower R8D
+                    // Save access to RDX (second parameter)
+                    movl $1, %edx           // dwDesiredAccess (access) - 32-bit
+                    
+                    // Save share to R8 (third parameter)
+                    movl $2, %r8d           // dwShareMode (share) - 32-bit
+                    
+                    // Set R9 to NULL for lpSecurityAttributes (fourth parameter)
                     xorq %r9, %r9           // lpSecurityAttributes = NULL
                     
-                    subq $$56, %rsp         // Shadow space (32) + 3 params (24)
+                    // Allocate stack space: 32 bytes shadow + 24 bytes for 3 parameters
+                    subq $$56, %rsp
                     
-                    movl $3, %eax           // Get disposition into EAX
-                    movl %eax, 32(%rsp)     // dwCreationDisposition on stack
+                    // Save disposition to stack (fifth parameter)
+                    movl $3, %eax           // Get disposition
+                    movl %eax, 32(%rsp)     // dwCreationDisposition
                     
-                    movl $4, %eax           // Get attributes into EAX
-                    movl %eax, 40(%rsp)     // dwFlagsAndAttributes on stack
+                    // Save attributes to stack (sixth parameter)
+                    movl $4, %eax           // Get attributes
+                    movl %eax, 40(%rsp)     // dwFlagsAndAttributes
                     
+                    // Set hTemplateFile to NULL (seventh parameter)
                     xorq %rax, %rax
                     movq %rax, 48(%rsp)     // hTemplateFile = NULL
                     
+                    // Call CreateFileA
                     call CreateFileA
                     
+                    // Store result
+                    movq %rax, $5           // Store in 'handle' variable
+                    
+                    // Clean up stack
                     addq $$56, %rsp
-                    movq %rax, $5           // Store handle result
                 } : : "r"(path), "r"(access), "r"(share), "r"(disposition), "r"(attributes), "m"(handle)
                   : "rax","rcx","rdx","r8","r9","r10","r11","memory";
                 
@@ -529,50 +542,42 @@ namespace standard
             {
                 u32 bytes_read = 0;
                 u32* bytes_read_ptr = @bytes_read;
-                i64 readfile_result = 0;
-                i64* readfile_result_ptr = @readfile_result;
-                i64 error_code = 0;
-                i64* error_code_ptr = @error_code;
+                i32 success = 0;
                 
                 volatile asm
                 {
-                    movq $0, %r12           // Save handle to callee-saved register
-                    movq %r12, %rcx         // hFile
-                    movq $1, %rdx           // lpBuffer
-                    movl $2, %r8d           // nNumberOfBytesToRead
-                    movq $3, %r9            // lpNumberOfBytesRead pointer
+                    // Save handle to RCX (first parameter)
+                    movq $0, %rcx           // hFile (handle)
                     
+                    // Save buffer to RDX (second parameter)
+                    movq $1, %rdx           // lpBuffer (buffer)
+                    
+                    // Save bytes_to_read to R8 (third parameter)
+                    movl $2, %r8d           // nNumberOfBytesToRead
+                    
+                    // Save bytes_read_ptr to R9 (fourth parameter)
+                    movq $3, %r9            // lpNumberOfBytesRead
+                    
+                    // Allocate stack space: 32 bytes shadow + 8 bytes for 5th parameter
                     subq $$40, %rsp
+                    
+                    // Set lpOverlapped to NULL (fifth parameter)
                     xorq %rax, %rax
                     movq %rax, 32(%rsp)     // lpOverlapped = NULL
                     
+                    // Call ReadFile
                     call ReadFile
                     
+                    // Store success flag
+                    movl %eax, $4           // Store in 'success' variable
+                    
+                    // Clean up stack
                     addq $$40, %rsp
-                    
-                    movq $4, %r10           // readfile_result_ptr
-                    movq %rax, (%r10)       // Store result
-                    
-                    // If ReadFile failed, get the error code
-                    cmpq $$0, %rax
-                    jne skip_error
-                    
-                    subq $$32, %rsp
-                    call GetLastError
-                    addq $$32, %rsp
-                    
-                    movq $5, %r10           // error_code_ptr  
-                    movq %rax, (%r10)       // Store error
-                    
-                skip_error:
-                } : : "r"(handle), "r"(buffer), "r"(bytes_to_read), "r"(bytes_read_ptr), "r"(readfile_result_ptr), "r"(error_code_ptr)
-                  : "rax","rcx","rdx","r8","r9","r10","r11","r12","memory";
+                } : : "r"(handle), "r"(buffer), "r"(bytes_to_read), "r"(bytes_read_ptr), "m"(success)
+                  : "rax","rcx","rdx","r8","r9","r10","r11","memory";
                 
-                if (readfile_result == 0)
+                if (success == 0)
                 {
-                    print("ReadFile syscall failed.\n\0");
-                    // error_code now contains the Windows error code
-                    // Common errors: 6 = invalid handle, 87 = invalid parameter
                     return -1;
                 };
                 
@@ -586,42 +591,45 @@ namespace standard
                 u32 bytes_written = 0;
                 u32* bytes_written_ptr = @bytes_written;
                 i32 success = 0;
-                i32* success_ptr = @success;
                 
                 volatile asm
                 {
-                    // BOOL WriteFile(
-                    //   HANDLE hFile,                    // RCX - handle
-                    //   LPCVOID lpBuffer,                // RDX - buffer
-                    //   DWORD nNumberOfBytesToWrite,     // R8  - bytes to write
-                    //   LPDWORD lpNumberOfBytesWritten,  // R9  - bytes written ptr
-                    //   LPOVERLAPPED lpOverlapped        // stack+32 - NULL
-                    // )
-                    
+                    // Save handle to RCX (first parameter)
                     movq $0, %rcx           // hFile (handle)
-                    movq $1, %rdx           // lpBuffer (buffer)
-                    movl $2, %r8d           // nNumberOfBytesToWrite
-                    movq $3, %r9            // lpNumberOfBytesWritten (bytes_written ptr)
                     
-                    subq $$40, %rsp         // Shadow space + 1 param
+                    // Save buffer to RDX (second parameter)
+                    movq $1, %rdx           // lpBuffer (buffer)
+                    
+                    // Save bytes_to_write to R8 (third parameter)
+                    movl $2, %r8d           // nNumberOfBytesToWrite
+                    
+                    // Save bytes_written_ptr to R9 (fourth parameter)
+                    movq $3, %r9            // lpNumberOfBytesWritten
+                    
+                    // Allocate stack space: 32 bytes shadow + 8 bytes for 5th parameter
+                    subq $$40, %rsp
+                    
+                    // Set lpOverlapped to NULL (fifth parameter)
                     xorq %rax, %rax
                     movq %rax, 32(%rsp)     // lpOverlapped = NULL
                     
+                    // Call WriteFile
                     call WriteFile
                     
+                    // Store success flag
+                    movl %eax, $4           // Store in 'success' variable
+                    
+                    // Clean up stack
                     addq $$40, %rsp
-                    movq $4, %rcx           // success_ptr
-                    movl %eax, (%rcx)       // Store success/failure
-                } : : "r"(handle), "r"(buffer), "r"(bytes_to_write), "r"(bytes_written_ptr), "r"(success_ptr)
+                } : : "r"(handle), "r"(buffer), "r"(bytes_to_write), "r"(bytes_written_ptr), "m"(success)
                   : "rax","rcx","rdx","r8","r9","r10","r11","memory";
                 
-                // Return bytes written if successful, -1 if failed
                 if (success == 0)
                 {
                     return -1;
                 };
                 
-                return bytes_written;
+                return (i32)bytes_written;
             };
             
             // CloseHandle - Closes a file handle
@@ -629,18 +637,24 @@ namespace standard
             def win_close(i64 handle) -> i32
             {
                 i32 result = 0;
-                i32* result_ptr = @result;
                 
                 volatile asm
                 {
-                    // BOOL CloseHandle(HANDLE hObject)
+                    // Save handle to RCX (first parameter)
                     movq $0, %rcx           // hObject (handle)
-                    subq $$32, %rsp         // Shadow space
+                    
+                    // Allocate shadow space
+                    subq $$32, %rsp
+                    
+                    // Call CloseHandle
                     call CloseHandle
+                    
+                    // Store result
+                    movl %eax, $1           // Store in 'result' variable
+                    
+                    // Clean up stack
                     addq $$32, %rsp
-                    movq $1, %rcx           // result_ptr
-                    movl %eax, (%rcx)       // Store result
-                } : : "r"(handle), "r"(result_ptr)
+                } : : "r"(handle), "m"(result)
                   : "rax","rcx","rdx","r8","r9","r10","r11","memory";
                 
                 return result;
@@ -651,78 +665,75 @@ namespace standard
             // Open file for reading
             def open_read(byte* path) -> i64
             {
-                print("In open_read()...\n\0");
-                return win_open(path, (u32)GENERIC_READ, (u32)FILE_SHARE_READ, (u32)OPEN_EXISTING, (u32)FILE_ATTRIBUTE_NORMAL);
+                return win_open(path, (i32)GENERIC_READ, (i32)FILE_SHARE_READ, (i32)OPEN_EXISTING, (i32)FILE_ATTRIBUTE_NORMAL);
             };
             //
-            // Open file for writing (creates if doesn't exist)
+            // Open file for writing (creates if doesn't exist, truncates if exists)
             def open_write(byte* path) -> i64
             {
-                return (i64)win_open(path, (u32)GENERIC_WRITE, 0, (u32)CREATE_ALWAYS, (u32)FILE_ATTRIBUTE_NORMAL);
+                return win_open(path, (i32)GENERIC_WRITE, (i32)0, (i32)CREATE_ALWAYS, (i32)FILE_ATTRIBUTE_NORMAL);
+            };
+            //
+            // Open file for appending (creates if doesn't exist)
+            def open_append(byte* path) -> i64
+            {
+                return win_open(path, (i32)GENERIC_WRITE, (i32)FILE_SHARE_READ, (i32)OPEN_ALWAYS, (i32)FILE_ATTRIBUTE_NORMAL);
             };
             //
             // Open file for reading and writing
             def open_read_write(byte* path) -> i64
             {
-                return (i64)win_open(path, (u32)GENERIC_READ_WRITE, (u32)FILE_SHARE_READ, (u32)OPEN_ALWAYS, (u32)FILE_ATTRIBUTE_NORMAL);
+                return win_open(path, (i32)GENERIC_READ_WRITE, (i32)FILE_SHARE_READ, (i32)OPEN_ALWAYS, (i32)FILE_ATTRIBUTE_NORMAL);
             };
             //
 #endif; // Windows
 
 #ifdef __LINUX__
             // File I/O functions for Linux
-
-            // File open flags (o_flags)
+            // Linux syscall numbers
+            /// Refactor syscall numbers to standard::system::linux ///
+            #def SYS_OPEN 2;
+            #def SYS_READ 0;
+            #def SYS_WRITE 1;
+            #def SYS_CLOSE 3;
+            #def SYS_EXIT 60;
+            
+            // File open flags
             #def O_RDONLY 0x0000;
             #def O_WRONLY 0x0001;
-            #def O_RDWR 0x0002;
-            #def O_CREAT 0x0040;
-            #def O_TRUNC 0x0200;
+            #def O_RDWR   0x0002;
+            #def O_CREAT  0x0040;
+            #def O_TRUNC  0x0200;
             #def O_APPEND 0x0400;
             
-            // File permission modes (mode)
-            #def S_IRUSR 0x0400;
-            #def S_IWUSR 0x0200;
-            #def S_IXUSR 0x0100;
-            #def S_IRGRP 0x0040;
-            #def S_IWGRP 0x0020;
-            #def S_IXGRP 0x0010;
-            #def S_IROTH 0x0004;
-            #def S_IWOTH 0x0002;
-            #def S_IXOTH 0x0001;
+            // File permission modes
+            #def S_IRUSR 0x0400;  // user read
+            #def S_IWUSR 0x0200;  // user write
+            #def S_IXUSR 0x0100;  // user execute
+            #def DEFAULT_PERM (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
             
-            // Common permission combinations
-            #def S_IRWXU (S_IRUSR || S_IWUSR || S_IXUSR);
-            #def S_IRWXG (S_IRGRP || S_IWGRP || S_IXGRP);
-            #def S_IRWXO (S_IROTH || S_IWOTH || S_IXOTH);
-            #def DEFAULT_PERM (S_IRUSR || S_IWUSR || S_IRGRP || S_IROTH);
+            #def S_IRGRP 0x0040;  // group read
+            #def S_IWGRP 0x0020;  // group write
+            #def S_IXGRP 0x0010;  // group execute
             
-            // File descriptor constants
+            #def S_IROTH 0x0004;  // others read
+            #def S_IWOTH 0x0002;  // others write
+            #def S_IXOTH 0x0001;  // others execute
+            
             #def INVALID_FD -1;
             
-            // FORWARD DECLARATIONS
-            def nix_open(byte* path, i32 flags, i32 mode) -> i64;
-            def nix_read(i64 fd, byte* buffer, u64 bytes_to_read) -> i64;
-            def nix_write(i64 fd, byte* buffer, u64 bytes_to_write) -> i64;
-            def nix_close(i64 fd) -> i32;
-            
-            // IMPLEMENTATIONS
-            
-            // open - Opens or creates a file
-            // Returns: File descriptor (i64), or -1 on failure
-            // Linux syscall: open(const char *pathname, int flags, mode_t mode)
-            // syscall number: 2 (open)
-            def nix_open(byte* path, i32 flags, i32 mode) -> i64
+            // Open a file
+            def open(byte* path, i32 flags, i32 mode) -> i64
             {
                 i64 result = INVALID_FD;
                 
                 volatile asm
                 {
-                    // Linux x64 calling convention for syscalls:
-                    // syscall number: rax
-                    // arg1: rdi, arg2: rsi, arg3: rdx, arg4: r10, arg5: r8, arg6: r9
+                    // Linux syscall: open(const char *pathname, int flags, mode_t mode)
+                    // syscall number: 2 (open)
+                    // Parameters: rdi = pathname, rsi = flags, rdx = mode
                     
-                    movq $$2, %rax           // syscall number: open = 2
+                    movq $$2, %rax           // syscall: open
                     movq $0, %rdi           // pathname (path)
                     movl $1, %esi           // flags (lower 32-bit)
                     movl $2, %edx           // mode (lower 32-bit)
@@ -730,116 +741,114 @@ namespace standard
                     
                     movq %rax, $3           // Store result
                 } : : "r"(path), "r"(flags), "r"(mode), "m"(result)
-                  : "rax","rdi","rsi","rdx","r10","r8","r9","r11","rcx","memory";
+                  : "rax","rdi","rsi","rdx","rcx","r11","memory";
                 
                 return result;
             };
             
-            // read - Reads data from a file
-            // Returns: Number of bytes actually read, or -1 on error
-            // Linux syscall: read(int fd, void *buf, size_t count)
-            // syscall number: 0 (read)
-            def nix_read(i64 fd, byte* buffer, u64 bytes_to_read) -> i64
+            // Read from a file
+            def read(i64 fd, byte* buffer, u64 count) -> i64
             {
                 i64 result = 0;
                 
                 volatile asm
                 {
-                    movq $$0, %rax           // syscall number: read = 0
+                    // Linux syscall: read(int fd, void *buf, size_t count)
+                    // syscall number: 0 (read)
+                    // Parameters: rdi = fd, rsi = buf, rdx = count
+                    
+                    movq $$0, %rax           // syscall: read
                     movq $0, %rdi           // fd
                     movq $1, %rsi           // buf (buffer)
-                    movq $2, %rdx           // count (bytes_to_read)
+                    movq $2, %rdx           // count
                     syscall                 // invoke syscall
                     
                     movq %rax, $3           // Store result
-                } : : "r"(fd), "r"(buffer), "r"(bytes_to_read), "m"(result)
-                  : "rax","rdi","rsi","rdx","r10","r8","r9","r11","rcx","memory";
+                } : : "r"(fd), "r"(buffer), "r"(count), "m"(result)
+                  : "rax","rdi","rsi","rdx","rcx","r11","memory";
                 
                 return result;
             };
             
-            // write - Writes data to a file
-            // Returns: Number of bytes actually written, or -1 on error
-            // Linux syscall: write(int fd, const void *buf, size_t count)
-            // syscall number: 1 (write)
-            def nix_write(i64 fd, byte* buffer, u64 bytes_to_write) -> i64
+            // Write to a file
+            def write(i64 fd, byte* buffer, u64 count) -> i64
             {
                 i64 result = 0;
                 
                 volatile asm
                 {
-                    movq $$1, %rax           // syscall number: write = 1
+                    // Linux syscall: write(int fd, const void *buf, size_t count)
+                    // syscall number: 1 (write)
+                    // Parameters: rdi = fd, rsi = buf, rdx = count
+                    
+                    movq $$1, %rax           // syscall: write
                     movq $0, %rdi           // fd
                     movq $1, %rsi           // buf (buffer)
-                    movq $2, %rdx           // count (bytes_to_write)
+                    movq $2, %rdx           // count
                     syscall                 // invoke syscall
                     
                     movq %rax, $3           // Store result
-                } : : "r"(fd), "r"(buffer), "r"(bytes_to_write), "m"(result)
-                  : "rax","rdi","rsi","rdx","r10","r8","r9","r11","rcx","memory";
+                } : : "r"(fd), "r"(buffer), "r"(count), "m"(result)
+                  : "rax","rdi","rsi","rdx","rcx","r11","memory";
                 
                 return result;
             };
             
-            // close - Closes a file descriptor
-            // Returns: 0 on success, -1 on failure
-            // Linux syscall: close(int fd)
-            // syscall number: 3 (close)
-            def nix_close(i64 fd) -> i32
+            // Close a file
+            def close(i64 fd) -> i32
             {
                 i64 result = 0;
                 
                 volatile asm
                 {
-                    movq $$3, %rax           // syscall number: close = 3
+                    // Linux syscall: close(int fd)
+                    // syscall number: 3 (close)
+                    // Parameters: rdi = fd
+                    
+                    movq $$3, %rax           // syscall: close
                     movq $0, %rdi           // fd
                     syscall                 // invoke syscall
                     
                     movq %rax, $1           // Store result
                 } : : "r"(fd), "m"(result)
-                  : "rax","rdi","rsi","rdx","r10","r8","r9","r11","rcx","memory";
+                  : "rax","rdi","rsi","rdx","rcx","r11","memory";
                 
                 return (i32)result;
             };
             
-            // HELPER FUNCTIONS - Simplified wrappers to match Windows API
-            
-            // Open file for reading
+            // Helper functions
             def open_read(byte* path) -> i64
             {
-                return nix_open(path, O_RDONLY, 0);
+                return open(path, O_RDONLY, 0);
             };
             
-            // Open file for writing (creates if doesn't exist, truncates if exists)
             def open_write(byte* path) -> i64
             {
-                return nix_open(path, O_WRONLY || O_CREAT || O_TRUNC, DEFAULT_PERM);
+                return open(path, O_WRONLY | O_CREAT | O_TRUNC, DEFAULT_PERM);
             };
             
-            // Open file for reading and writing
+            def open_append(byte* path) -> i64
+            {
+                return open(path, O_WRONLY | O_CREAT | O_APPEND, DEFAULT_PERM);
+            };
+            
             def open_read_write(byte* path) -> i64
             {
-                return nix_open(path, O_RDWR || O_CREAT, DEFAULT_PERM);
+                return open(path, O_RDWR | O_CREAT, DEFAULT_PERM);
             };
             
-            // Read from file (wrapper with 32-bit count)
-            def read(i64 fd, byte* buffer, u32 bytes_to_read) -> i32
+            // Read with 32-bit count (wrapper)
+            def read32(i64 fd, byte* buffer, u32 count) -> i32
             {
-                i64 result = nix_read(fd, buffer, (u64)bytes_to_read);
+                i64 result = read(fd, buffer, (u64)count);
                 return (i32)result;
             };
             
-            // Write to file (wrapper with 32-bit count)
-            def write(i64 fd, byte* buffer, u32 bytes_to_write) -> i32
+            // Write with 32-bit count (wrapper)
+            def write32(i64 fd, byte* buffer, u32 count) -> i32
             {
-                i64 result = nix_write(fd, buffer, (u64)bytes_to_write);
+                i64 result = write(fd, buffer, (u64)count);
                 return (i32)result;
-            };
-            
-            // Close file
-            def close(i64 fd) -> i32
-            {
-                return nix_close(fd);
             };
 #endif;
         };
