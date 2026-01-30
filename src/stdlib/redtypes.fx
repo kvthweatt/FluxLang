@@ -141,12 +141,12 @@ namespace standard
         // ============ ALIGNMENT UTILITIES ============
         def align_up(u64 value, u64 alignment) -> u64
         {
-            return (value + alignment - 1) & ~(alignment - 1);
+            return (value + alignment - 1) & (alignment - 1);
         };
         
         def align_down(u64 value, u64 alignment) -> u64
         {
-            return value & ~(alignment - 1);
+            return value & (alignment - 1);
         };
         
         def is_aligned(u64 value, u64 alignment) -> bool

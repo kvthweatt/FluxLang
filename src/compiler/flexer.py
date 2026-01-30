@@ -158,6 +158,7 @@ class TokenType(Enum):
     SCOPE = auto()          # ::
     QUESTION = auto()       # ?     ?: = Parse as ternary
     COLON = auto()          # :
+    TIE = auto()            # ~ Ownership/move semantics
 
     # Directionals
     RETURN_ARROW = auto()   # ->
@@ -846,6 +847,13 @@ class FluxLexer:
                 tokens.append(Token(TokenType.SCOPE, '::', start_pos[0], start_pos[1]))
                 self.advance(count=2)
                 continue
+
+            # Refactor to quad_char_tokens -> special bit twiddlers here
+                
+            # Refactor to triple_char_tokens
+
+            # Refactor to double_char_tokens
+            double_char_tokens = {}
             
             # Single-character operators and delimiters
             single_char_tokens = {
@@ -873,6 +881,7 @@ class FluxLexer:
                 ';': TokenType.SEMICOLON,
                 ',': TokenType.COMMA,
                 '.': TokenType.DOT,
+                '~': TokenType.TIE
             }
             
             if char in single_char_tokens:

@@ -1857,6 +1857,11 @@ class FluxParser:
             self.advance()
             operand = self.unary_expression()
             return UnaryOp(Operator.DECREMENT, operand)
+        elif self.expect(TokenType.TIE):
+            # Ownershipt
+            self.advance()
+            operand = self.unary_expression()
+            return TieExpression(operand)
         else:
             return self.postfix_expression()
     

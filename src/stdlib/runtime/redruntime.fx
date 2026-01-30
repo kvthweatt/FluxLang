@@ -42,23 +42,73 @@ def FRTStartup() -> int; // GO AWAY, SHOO
   //DO NOT REDEFINE THIS FUNCTION SIGNATURE
 ///                                   ///
 
+def exit(int code) -> void;
+def exit(int code) -> void
+{
+#ifdef __WINDOWS__
+    volatile asm
+    {
+        movl $0, %ecx
+        movq $$0x002C, %rax
+        movq $$-1, %r10
+        syscall
+    } : : "r"(code) : "rax", "rcx", "r10", "r11", "memory";
+#endif;
+#ifdef __LINUX__
+    volatile asm
+    {
+        movl $0, %edi
+        movq $$231, %rax
+        syscall
+    } : : "r"(code) : "rax", "rdi", "r11", "memory";
+#endif;
+#ifdef __MACOS__
+    volatile asm
+    {
+        movq $$0x2000001, %rax
+        movl $0, %edi
+        syscall
+    } : : "r"(code) : "rax", "rdi", "memory";
+#endif;
+    return;
+};
+
+def abort() -> void;
+def abort() -> void
+{
+#ifdef __WINDOWS__
+    volatile asm
+    {
+        movq $$1, %rcx
+        movq $$0x002C, %rax
+        movq $$-1, %r10
+        syscall
+    } : : : "rax", "rcx", "r10", "r11", "memory";
+#endif;
+#ifdef __LINUX__
+    volatile asm
+    {
+        movq $$1, %rdi
+        movq $$231, %rax
+        syscall
+    } : : : "rax", "rdi", "r11", "memory";
+#endif;
+#ifdef __MACOS__
+    volatile asm
+    {
+        movq $$0x2000001, %rax
+        movq $$1, %rdi
+        syscall
+    } : : : "rax", "rdi", "memory";
+#endif;
+};
+
 #ifdef __LINUX__
 def _start() -> int;
-def exit() -> void;
 
 def _start() -> int
 {
     return FRTStartup();
-};
-def exit() -> void
-{
-    volatile asm
-    {
-        movq $$60, %rax          // sys_exit
-        movq $$0, %rdi           // exit code 0
-        syscall
-    } : : : "rax", "rdi";
-    return;
 };
 #endif; // Linux
 

@@ -1,8 +1,12 @@
-#import "standard.fx";
+#import "standard.fx"
 
 def main() -> int
 {
-    print("Testing *(unsigned data{1}*)0 = 0;\0");
-	*(unsigned data{1}*)0 = 0;
+	int x = 5;
+	int y = ~x;
+	print(x);
+	print();
+    print("Testing *(@)*(void*)void;\n\0");
+	//*(@)*(void*)void;
 	return 0;
 };
