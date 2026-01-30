@@ -554,7 +554,10 @@ class FluxParser:
 
     def union_def(self) -> UnionDefStatement:
         """
-        union_def -> 'union' IDENTIFIER (';' | '{' union_member* '}' ';')
+        union_def -> 'union' IDENTIFIER (';' | '{' union_member* '}' (IDENTIFIER)? ';')
+        
+        Tagged union syntax: union name {} tagname;
+        where tagname is an identifier that is an enum type
         """
         self.consume(TokenType.UNION)
         name = self.consume(TokenType.IDENTIFIER).value
@@ -571,8 +574,14 @@ class FluxParser:
             members.append(self.union_member())
         
         self.consume(TokenType.RIGHT_BRACE)
+        
+        # Check for optional tag name (tagged union)
+        tag_name = None
+        if self.expect(TokenType.IDENTIFIER):
+            tag_name = self.consume(TokenType.IDENTIFIER).value
+        
         self.consume(TokenType.SEMICOLON)
-        return UnionDefStatement(UnionDef(name, members))
+        return UnionDefStatement(UnionDef(name, members, tag_name))
 
     def union_member(self) -> UnionMember:
         """

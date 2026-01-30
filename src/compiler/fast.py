@@ -3068,6 +3068,97 @@ class MemberAccess(Expression):
         
         raise ValueError(f"Member access on unsupported type: {obj_val.type}")
     
+@dataclass
+class MemberAccess(Expression):
+    object: Expression
+    member: str
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Handle enum member access FIRST (before trying to codegen the identifier)
+        if isinstance(self.object, Identifier):
+            type_name = self.object.name
+            if hasattr(module, '_enum_types') and type_name in module._enum_types:
+                enum_values = module._enum_types[type_name]
+                if self.member not in enum_values:
+                    raise NameError(f"Enum value '{self.member}' not found in enum '{type_name}'")
+                return ir.Constant(ir.IntType(32), enum_values[self.member])
+        
+        # Check if this is a struct type
+        if hasattr(module, '_struct_types'):
+            obj = self.object.codegen(builder, module)
+            for struct_name, struct_type in module._struct_types.items():
+                if obj.type == struct_type or (isinstance(obj.type, ir.PointerType) and obj.type.pointee == struct_type):
+                    # This is struct field access
+                    field_access = StructFieldAccess(self.object, self.member)
+                    return field_access.codegen(builder, module)
+        # Handle static struct/union member access (A.x where A is a struct/union type)
+        if isinstance(self.object, Identifier):
+            type_name = self.object.name
+            if hasattr(module, '_struct_types') and type_name in module._struct_types:
+                # Look for the global variable representing this member
+                global_name = f"{type_name}.{self.member}"
+                for global_var in module.global_values:
+                    if global_var.name == global_name:
+                        return builder.load(global_var)
+                
+                raise NameError(f"Static member '{self.member}' not found in struct '{type_name}'")
+            # Check for union types
+            elif hasattr(module, '_union_types') and type_name in module._union_types:
+                # Look for the global variable representing this member
+                global_name = f"{type_name}.{self.member}"
+                for global_var in module.global_values:
+                    if global_var.name == global_name:
+                        return builder.load(global_var)
+                
+                raise NameError(f"Static member '{self.member}' not found in union '{type_name}'")
+        
+        # Handle regular member access (obj.x where obj is an instance)
+        obj_val = self.object.codegen(builder, module)
+        
+        # Special case: if this is accessing 'this' in a method, handle the double pointer issue
+        if (isinstance(self.object, Identifier) and self.object.name == "this" and 
+            isinstance(obj_val.type, ir.PointerType) and 
+            isinstance(obj_val.type.pointee, ir.PointerType) and
+            isinstance(obj_val.type.pointee.pointee, ir.LiteralStructType)):
+            # Load the actual 'this' pointer from the alloca
+            obj_val = builder.load(obj_val, name="this_ptr")
+        
+        if isinstance(obj_val.type, ir.PointerType):
+            # Handle pointer to struct (both literal and identified struct types)
+            is_struct_pointer = (isinstance(obj_val.type.pointee, ir.LiteralStructType) or
+                                hasattr(obj_val.type.pointee, '_name') or  # Identified struct type
+                                hasattr(obj_val.type.pointee, 'elements'))  # Other struct-like types
+            
+            if is_struct_pointer:
+                struct_type = obj_val.type.pointee
+                
+                # Check if this is actually a union (unions are implemented as structs)
+                if hasattr(module, '_union_types'):
+                    for union_name, union_type in module._union_types.items():
+                        if union_type == struct_type:
+                            # This is a union - handle union member access
+                            return self._handle_union_member_access(builder, module, obj_val, union_name)
+                
+                # Regular struct member access
+                if not hasattr(struct_type, 'names'):
+                    raise ValueError("Struct type missing member names")
+                
+                member_index = 0
+                try:
+                    member_index = struct_type.names.index(self.member)
+                except ValueError:
+                    raise ValueError(f"Member '{self.member}' not found in struct")
+                
+                # FIXED: Pass indices as a single list argument
+                member_ptr = builder.gep(
+                    obj_val,
+                    [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), member_index)],
+                    inbounds=True
+                )
+                return builder.load(member_ptr)
+        
+        raise ValueError(f"Member access on unsupported type: {obj_val.type}")
+    
     def _handle_union_member_access(self, builder: ir.IRBuilder, module: ir.Module, union_ptr: ir.Value, union_name: str) -> ir.Value:
         """Handle union member access by casting the union to the appropriate member type"""
         # Get union member information
@@ -3077,6 +3168,21 @@ class MemberAccess(Expression):
         union_info = module._union_member_info[union_name]
         member_names = union_info['member_names']
         member_types = union_info['member_types']
+        is_tagged = union_info['is_tagged']
+        
+        # Handle special ._ tag access for tagged unions
+        if self.member == '_':
+            if not is_tagged:
+                raise ValueError(f"Cannot access tag '._' on non-tagged union '{union_name}'")
+            
+            # For tagged unions, the tag is at index 0
+            tag_ptr = builder.gep(
+                union_ptr,
+                [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)],
+                inbounds=True,
+                name="union_tag_ptr"
+            )
+            return builder.load(tag_ptr, name="union_tag_value")
         
         # Find the requested member
         if self.member not in member_names:
@@ -3085,10 +3191,24 @@ class MemberAccess(Expression):
         member_index = member_names.index(self.member)
         member_type = member_types[member_index]
         
-        # Cast the union pointer to the appropriate member type pointer and load the value
-        member_ptr_type = ir.PointerType(member_type)
-        casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{self.member}")
-        return builder.load(casted_ptr, name=f"union_{self.member}_value")
+        # For tagged unions, we need to cast the data field (index 1), not the whole union
+        if is_tagged:
+            # Get pointer to the data field (index 1)
+            data_ptr = builder.gep(
+                union_ptr,
+                [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 1)],
+                inbounds=True,
+                name="union_data_ptr"
+            )
+            # Cast the data pointer to the appropriate member type pointer
+            member_ptr_type = ir.PointerType(member_type)
+            casted_ptr = builder.bitcast(data_ptr, member_ptr_type, name=f"union_as_{self.member}")
+            return builder.load(casted_ptr, name=f"union_{self.member}_value")
+        else:
+            # For regular unions, cast the union pointer directly
+            member_ptr_type = ir.PointerType(member_type)
+            casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{self.member}")
+            return builder.load(casted_ptr, name=f"union_{self.member}_value")
 
 @dataclass
 class MethodCall(Expression):
@@ -4231,6 +4351,22 @@ class Assignment(Statement):
         union_info = module._union_member_info[union_name]
         member_names = union_info['member_names']
         member_types = union_info['member_types']
+        is_tagged = union_info['is_tagged']
+        
+        # Handle special ._ tag assignment for tagged unions
+        if member_name == '_':
+            if not is_tagged:
+                raise ValueError(f"Cannot assign to tag '._' on non-tagged union '{union_name}'")
+            
+            # For tagged unions, the tag is at index 0
+            tag_ptr = builder.gep(
+                union_ptr,
+                [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)],
+                inbounds=True,
+                name="union_tag_ptr"
+            )
+            builder.store(val, tag_ptr)
+            return val
         
         # Find the requested member
         if member_name not in member_names:
@@ -4251,11 +4387,26 @@ class Assignment(Statement):
             builder.initialized_unions = set()
         builder.initialized_unions.add(union_var_id)
         
-        # Cast the union pointer to the appropriate member type pointer and store the value
-        member_ptr_type = ir.PointerType(member_type)
-        casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{member_name}")
-        builder.store(val, casted_ptr)
-        return val
+        # For tagged unions, we need to cast the data field (index 1), not the whole union
+        if is_tagged:
+            # Get pointer to the data field (index 1)
+            data_ptr = builder.gep(
+                union_ptr,
+                [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 1)],
+                inbounds=True,
+                name="union_data_ptr"
+            )
+            # Cast the data pointer to the appropriate member type pointer
+            member_ptr_type = ir.PointerType(member_type)
+            casted_ptr = builder.bitcast(data_ptr, member_ptr_type, name=f"union_as_{member_name}")
+            builder.store(val, casted_ptr)
+            return val
+        else:
+            # For regular unions, cast the union pointer directly
+            member_ptr_type = ir.PointerType(member_type)
+            casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{member_name}")
+            builder.store(val, casted_ptr)
+            return val
     
     def _handle_vtable_struct_assignment(self, builder: ir.IRBuilder, module: ir.Module, struct_ptr: ir.Value, member_name: str, val: ir.Value) -> ir.Value:
         """Handle struct member assignment for byte-array based structs using vtable"""
@@ -4546,6 +4697,22 @@ class CompoundAssignment(Statement):
         union_info = module._union_member_info[union_name]
         member_names = union_info['member_names']
         member_types = union_info['member_types']
+        is_tagged = union_info['is_tagged']
+        
+        # Handle special ._ tag assignment for tagged unions
+        if member_name == '_':
+            if not is_tagged:
+                raise ValueError(f"Cannot assign to tag '._' on non-tagged union '{union_name}'")
+            
+            # For tagged unions, the tag is at index 0
+            tag_ptr = builder.gep(
+                union_ptr,
+                [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)],
+                inbounds=True,
+                name="union_tag_ptr"
+            )
+            builder.store(val, tag_ptr)
+            return val
         
         # Find the requested member
         if member_name not in member_names:
@@ -4566,11 +4733,26 @@ class CompoundAssignment(Statement):
             builder.initialized_unions = set()
         builder.initialized_unions.add(union_var_id)
         
-        # Cast the union pointer to the appropriate member type pointer and store the value
-        member_ptr_type = ir.PointerType(member_type)
-        casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{member_name}")
-        builder.store(val, casted_ptr)
-        return val
+        # For tagged unions, we need to cast the data field (index 1), not the whole union
+        if is_tagged:
+            # Get pointer to the data field (index 1)
+            data_ptr = builder.gep(
+                union_ptr,
+                [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 1)],
+                inbounds=True,
+                name="union_data_ptr"
+            )
+            # Cast the data pointer to the appropriate member type pointer
+            member_ptr_type = ir.PointerType(member_type)
+            casted_ptr = builder.bitcast(data_ptr, member_ptr_type, name=f"union_as_{member_name}")
+            builder.store(val, casted_ptr)
+            return val
+        else:
+            # For regular unions, cast the union pointer directly
+            member_ptr_type = ir.PointerType(member_type)
+            casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{member_name}")
+            builder.store(val, casted_ptr)
+            return val
     
 @dataclass
 class Block(Statement):
@@ -6131,6 +6313,7 @@ class UnionMember(ASTNode):
 class UnionDef(ASTNode):
     name: str
     members: List[UnionMember] = field(default_factory=list)
+    tag_name: Optional[str] = None  # Name of the enum type used as tag
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
         # First convert all member types to LLVM types
@@ -6161,9 +6344,22 @@ class UnionDef(ASTNode):
                 max_size = size
                 max_type = member_type
         
-        # Create a struct type with proper padding
-        union_type = ir.LiteralStructType([max_type])
-        union_type.names = [self.name]
+        # For tagged unions, create a struct with tag field + union data
+        if self.tag_name:
+            # Verify the tag is an enum type
+            if not hasattr(module, '_enum_types') or self.tag_name not in module._enum_types:
+                raise ValueError(f"Tag '{self.tag_name}' is not a defined enum type")
+            
+            # Tagged union structure: { i32 tag, [max_size x i8] data }
+            tag_type = ir.IntType(32)  # Enum is i32
+            data_type = ir.ArrayType(ir.IntType(8), max_size)
+            
+            union_type = ir.LiteralStructType([tag_type, data_type])
+            union_type.names = [f"{self.name}_tagged"]
+        else:
+            # Regular union: just the data
+            union_type = ir.LiteralStructType([max_type])
+            union_type.names = [self.name]
         
         # Store the type in the module's context
         if not hasattr(module, '_union_types'):
@@ -6176,7 +6372,9 @@ class UnionDef(ASTNode):
         module._union_member_info[self.name] = {
             'member_types': member_types,
             'member_names': member_names,
-            'max_size': max_size
+            'max_size': max_size,
+            'tag_name': self.tag_name,
+            'is_tagged': bool(self.tag_name)
         }
         
         return union_type

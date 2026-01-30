@@ -339,6 +339,9 @@ class TypeSpec:
             if hasattr(module, '_struct_types') and self.custom_typename in module._struct_types:
                 return module._struct_types[self.custom_typename]
             
+            if hasattr(module, '_union_types') and self.custom_typename in module._union_types:
+                return module._union_types[self.custom_typename]
+            
             if hasattr(module, '_using_namespaces'):
                 for namespace in module._using_namespaces:
                     mangled_name = namespace.replace('::', '__') + '__' + self.custom_typename
@@ -351,6 +354,9 @@ class TypeSpec:
                     
                     if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
                         return module._struct_types[mangled_name]
+                    
+                    if hasattr(module, '_union_types') and mangled_name in module._union_types:
+                        return module._union_types[mangled_name]
             
             if hasattr(module, '_namespaces'):
                 for registered_namespace in module._namespaces:
@@ -364,6 +370,9 @@ class TypeSpec:
                     
                     if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
                         return module._struct_types[mangled_name]
+                    
+                    if hasattr(module, '_union_types') and mangled_name in module._union_types:
+                        return module._union_types[mangled_name]
             
             if hasattr(module, '_using_namespaces'):
                 for namespace in module._using_namespaces:
@@ -380,6 +389,9 @@ class TypeSpec:
                         
                         if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
                             return module._struct_types[mangled_name]
+                        
+                        if hasattr(module, '_union_types') and mangled_name in module._union_types:
+                            return module._union_types[mangled_name]
             
             raise NameError(f"Unknown type: {self.custom_typename}")
         

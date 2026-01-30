@@ -302,29 +302,6 @@ class FluxLexer:
         while self.current_char() and self.current_char() in ' \t\r\n':
             self.advance()
     
-    def skip_comment(self) -> None:
-        if self.current_char() == '/' and self.peek_char() == '/':
-            # Skip until end of line
-            while self.current_char() and self.current_char() != '\n':
-                self.advance()
-
-    def skip_multiline_comment(self) -> None:
-        if (self.current_char() == '/' and 
-            self.peek_char() == '/' and 
-            self.peek_char(2) == '/'):
-            # Skip opening ///
-            self.advance(count=3)
-            
-            # Skip until we find closing ///
-            while self.current_char():
-                if (self.current_char() == '/' and 
-                    self.peek_char() == '/' and 
-                    self.peek_char(2) == '/'):
-                    # Skip closing ///
-                    self.advance(count=3)
-                    return
-                self.advance()
-
     def read_asm_block(self) -> Token:
         """Read an inline assembly block"""
         start_pos = (self.line, self.column)
@@ -609,18 +586,6 @@ class FluxLexer:
             if self.current_char() and self.current_char() in ' \t\r\n':
                 self.skip_whitespace()
                 continue
-
-            # Skip multi-line comments (triple slash)
-            if (self.current_char() == '/' and 
-                self.peek_char() == '/' and 
-                self.peek_char(2) == '/'):
-                self.skip_multiline_comment()
-                continue
-
-            # Skip comments
-            if self.current_char() == '/' and self.peek_char() == '/':
-                self.skip_comment()
-                continue
             
             start_pos = (self.line, self.column)
             char = self.current_char()
@@ -813,8 +778,13 @@ if __name__ == "__main__":
         except IOError as e:
             print(f"Error reading file '{args.file}': {e}", file=sys.stderr)
             sys.exit(1)
+
+        print("\n[PREPROCESSOR] Standard library / user-defined macros:\n")
+        from fpreprocess import FXPreprocessor
+        preprocessor = FXPreprocessor(args.file)
+        result = preprocessor.process()
         
-        lexer = FluxLexer(source_code)
+        lexer = FluxLexer(result)
         
         try:
             tokens = lexer.tokenize()
