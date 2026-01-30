@@ -4343,70 +4343,8 @@ class Assignment(Statement):
             raise ValueError(f"Cannot assign to {type(self.target).__name__}")
     
     def _handle_union_member_assignment(self, builder: ir.IRBuilder, module: ir.Module, union_ptr: ir.Value, union_name: str, member_name: str, val: ir.Value) -> ir.Value:
-        """Handle union member assignment by casting the union to the appropriate member type"""
-        # Get union member information
-        if not hasattr(module, '_union_member_info') or union_name not in module._union_member_info:
-            raise ValueError(f"Union member info not found for '{union_name}'")
-        
-        union_info = module._union_member_info[union_name]
-        member_names = union_info['member_names']
-        member_types = union_info['member_types']
-        is_tagged = union_info['is_tagged']
-        
-        # Handle special ._ tag assignment for tagged unions
-        if member_name == '_':
-            if not is_tagged:
-                raise ValueError(f"Cannot assign to tag '._' on non-tagged union '{union_name}'")
-            
-            # For tagged unions, the tag is at index 0
-            tag_ptr = builder.gep(
-                union_ptr,
-                [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)],
-                inbounds=True,
-                name="union_tag_ptr"
-            )
-            builder.store(val, tag_ptr)
-            return val
-        
-        # Find the requested member
-        if member_name not in member_names:
-            raise ValueError(f"Member '{member_name}' not found in union '{union_name}'")
-        
-        member_index = member_names.index(member_name)
-        member_type = member_types[member_index]
-        
-        # Create unique identifier for this union variable instance
-        union_var_id = f"{union_ptr.name}_{id(union_ptr)}"
-        
-        # Check if union has already been initialized (immutability check)
-        if hasattr(builder, 'initialized_unions') and union_var_id in builder.initialized_unions:
-            raise RuntimeError(f"Union variable is immutable after initialization. Cannot reassign member '{member_name}' of union '{union_name}'")
-        
-        # Mark this union as initialized
-        if not hasattr(builder, 'initialized_unions'):
-            builder.initialized_unions = set()
-        builder.initialized_unions.add(union_var_id)
-        
-        # For tagged unions, we need to cast the data field (index 1), not the whole union
-        if is_tagged:
-            # Get pointer to the data field (index 1)
-            data_ptr = builder.gep(
-                union_ptr,
-                [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 1)],
-                inbounds=True,
-                name="union_data_ptr"
-            )
-            # Cast the data pointer to the appropriate member type pointer
-            member_ptr_type = ir.PointerType(member_type)
-            casted_ptr = builder.bitcast(data_ptr, member_ptr_type, name=f"union_as_{member_name}")
-            builder.store(val, casted_ptr)
-            return val
-        else:
-            # For regular unions, cast the union pointer directly
-            member_ptr_type = ir.PointerType(member_type)
-            casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{member_name}")
-            builder.store(val, casted_ptr)
-            return val
+        """Handle union member assignment - delegates to utility function"""
+        return handle_union_member_assignment(builder, module, union_ptr, union_name, member_name, val)
     
     def _handle_vtable_struct_assignment(self, builder: ir.IRBuilder, module: ir.Module, struct_ptr: ir.Value, member_name: str, val: ir.Value) -> ir.Value:
         """Handle struct member assignment for byte-array based structs using vtable"""
@@ -4689,70 +4627,8 @@ class CompoundAssignment(Statement):
             return ptr
     
     def _handle_union_member_assignment(self, builder: ir.IRBuilder, module: ir.Module, union_ptr: ir.Value, union_name: str, member_name: str, val: ir.Value) -> ir.Value:
-        """Handle union member assignment by casting the union to the appropriate member type"""
-        # Get union member information
-        if not hasattr(module, '_union_member_info') or union_name not in module._union_member_info:
-            raise ValueError(f"Union member info not found for '{union_name}'")
-        
-        union_info = module._union_member_info[union_name]
-        member_names = union_info['member_names']
-        member_types = union_info['member_types']
-        is_tagged = union_info['is_tagged']
-        
-        # Handle special ._ tag assignment for tagged unions
-        if member_name == '_':
-            if not is_tagged:
-                raise ValueError(f"Cannot assign to tag '._' on non-tagged union '{union_name}'")
-            
-            # For tagged unions, the tag is at index 0
-            tag_ptr = builder.gep(
-                union_ptr,
-                [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)],
-                inbounds=True,
-                name="union_tag_ptr"
-            )
-            builder.store(val, tag_ptr)
-            return val
-        
-        # Find the requested member
-        if member_name not in member_names:
-            raise ValueError(f"Member '{member_name}' not found in union '{union_name}'")
-        
-        member_index = member_names.index(member_name)
-        member_type = member_types[member_index]
-        
-        # Create unique identifier for this union variable instance
-        union_var_id = f"{union_ptr.name}_{id(union_ptr)}"
-        
-        # Check if union has already been initialized (immutability check)
-        if hasattr(builder, 'initialized_unions') and union_var_id in builder.initialized_unions:
-            raise RuntimeError(f"Union variable is immutable after initialization. Cannot reassign member '{member_name}' of union '{union_name}'")
-        
-        # Mark this union as initialized
-        if not hasattr(builder, 'initialized_unions'):
-            builder.initialized_unions = set()
-        builder.initialized_unions.add(union_var_id)
-        
-        # For tagged unions, we need to cast the data field (index 1), not the whole union
-        if is_tagged:
-            # Get pointer to the data field (index 1)
-            data_ptr = builder.gep(
-                union_ptr,
-                [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 1)],
-                inbounds=True,
-                name="union_data_ptr"
-            )
-            # Cast the data pointer to the appropriate member type pointer
-            member_ptr_type = ir.PointerType(member_type)
-            casted_ptr = builder.bitcast(data_ptr, member_ptr_type, name=f"union_as_{member_name}")
-            builder.store(val, casted_ptr)
-            return val
-        else:
-            # For regular unions, cast the union pointer directly
-            member_ptr_type = ir.PointerType(member_type)
-            casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{member_name}")
-            builder.store(val, casted_ptr)
-            return val
+        """Handle union member assignment - delegates to utility function"""
+        return handle_union_member_assignment(builder, module, union_ptr, union_name, member_name, val)
     
 @dataclass
 class Block(Statement):

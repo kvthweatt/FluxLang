@@ -983,3 +983,93 @@ def array_heap_allocation(builder: ir.IRBuilder, module: ir.Module, str_val):
     # Return the array pointer
     zero = ir.Constant(ir.IntType(32), 0)
     return builder.gep(array_ptr, [zero, zero], name="heap_array_ptr")
+
+# ============================================================================
+# Union Member Assignment
+# ============================================================================
+
+def handle_union_member_assignment(builder, module, union_ptr, union_name, member_name, val):
+    """
+    Handle union member assignment by casting the union to the appropriate member type.
+    
+    This function handles both regular unions and tagged unions, with special support
+    for the ._ syntax to access/modify the tag field in tagged unions.
+    
+    Args:
+        builder: LLVM IR builder
+        module: LLVM module containing union type information
+        union_ptr: Pointer to the union instance
+        union_name: Name of the union type
+        member_name: Name of the member to assign (or '_' for tag)
+        val: Value to assign
+        
+    Returns:
+        The assigned value
+        
+    Raises:
+        ValueError: If union info not found, member not found, or invalid tag access
+        RuntimeError: If trying to reassign an already initialized union member
+    """
+    # Get union member information
+    if not hasattr(module, '_union_member_info') or union_name not in module._union_member_info:
+        raise ValueError(f"Union member info not found for '{union_name}'")
+    
+    union_info = module._union_member_info[union_name]
+    member_names = union_info['member_names']
+    member_types = union_info['member_types']
+    is_tagged = union_info['is_tagged']
+    
+    # Handle special ._ tag assignment for tagged unions
+    if member_name == '_':
+        if not is_tagged:
+            raise ValueError(f"Cannot assign to tag '._' on non-tagged union '{union_name}'")
+        
+        # For tagged unions, the tag is at index 0
+        tag_ptr = builder.gep(
+            union_ptr,
+            [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)],
+            inbounds=True,
+            name="union_tag_ptr"
+        )
+        builder.store(val, tag_ptr)
+        return val
+    
+    # Find the requested member
+    if member_name not in member_names:
+        raise ValueError(f"Member '{member_name}' not found in union '{union_name}'")
+    
+    member_index = member_names.index(member_name)
+    member_type = member_types[member_index]
+    
+    # Create unique identifier for this union variable instance
+    union_var_id = f"{union_ptr.name}_{id(union_ptr)}"
+    
+    # Check if union has already been initialized (immutability check)
+    if hasattr(builder, 'initialized_unions') and union_var_id in builder.initialized_unions:
+        raise RuntimeError(f"Union variable is immutable after initialization. Cannot reassign member '{member_name}' of union '{union_name}'")
+    
+    # Mark this union as initialized
+    if not hasattr(builder, 'initialized_unions'):
+        builder.initialized_unions = set()
+    builder.initialized_unions.add(union_var_id)
+    
+    # For tagged unions, we need to cast the data field (index 1), not the whole union
+    if is_tagged:
+        # Get pointer to the data field (index 1)
+        data_ptr = builder.gep(
+            union_ptr,
+            [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 1)],
+            inbounds=True,
+            name="union_data_ptr"
+        )
+        # Cast the data pointer to the appropriate member type pointer
+        member_ptr_type = ir.PointerType(member_type)
+        casted_ptr = builder.bitcast(data_ptr, member_ptr_type, name=f"union_as_{member_name}")
+        builder.store(val, casted_ptr)
+        return val
+    else:
+        # For regular unions, cast the union pointer directly
+        member_ptr_type = ir.PointerType(member_type)
+        casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{member_name}")
+        builder.store(val, casted_ptr)
+        return val

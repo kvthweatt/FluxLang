@@ -676,7 +676,7 @@ class FluxParser:
     
     def struct_member(self) -> Union[StructMember, List[StructMember]]:
         """
-        struct_member -> type_spec IDENTIFIER (',' IDENTIFIER)* ';'
+        struct_member -> type_spec IDENTIFIER (',' IDENTIFIER)* ('=' expression (',' expression)*)? ';'
         """
         type_spec = self.type_spec()
         name = self.consume(TokenType.IDENTIFIER).value
@@ -684,14 +684,23 @@ class FluxParser:
 
         # Handle comma-separated variable names
         while self.expect(TokenType.COMMA):
-            self.advance()
-            members.append(self.consume(TokenType.IDENTIFIER).value)
+            next_tok = self.peek()
+            if next_tok and next_tok.type == TokenType.IDENTIFIER:
+                self.advance()
+                members.append(self.consume(TokenType.IDENTIFIER).value)
+            else:
+                break
         
-        # Handle optional initial value (only applies to last variable)
-        initial_value = None
+        # Handle optional initial values (comma-separated)
+        initial_values = []
         if self.expect(TokenType.ASSIGN):
             self.advance()
-            initial_value = self.expression()
+            initial_values.append(self.expression())
+            
+            # Handle comma-separated initializers
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                initial_values.append(self.expression())
         
         self.consume(TokenType.SEMICOLON)
         
@@ -699,12 +708,14 @@ class FluxParser:
         if len(members) > 1:
             result = []
             for i, member_name in enumerate(members):
-                # Only the last member can have an initial value
-                member_initial_value = initial_value if i == len(members) - 1 else None
+                # Assign initializer if available
+                member_initial_value = initial_values[i] if i < len(initial_values) else None
                 result.append(StructMember(member_name, type_spec, member_initial_value))
             return result
         else:
-            return StructMember(members[0], type_spec, initial_value)
+            member_initial_value = initial_values[0] if initial_values else None
+            return StructMember(members[0], type_spec, member_initial_value)
+
     
     def object_def(self) -> ObjectDef:
         """
@@ -760,9 +771,14 @@ class FluxParser:
                     else:
                         # Field declaration
                         var = self.variable_declaration()
+                        if isinstance(var, list):
+                            for v in var:
+                                member = StructMember(v.name, v.type_spec, v.initial_value, is_private)
+                                members.append(member)
+                        else:
+                            member = StructMember(var.name, var.type_spec, var.initial_value, is_private)
+                            members.append(member)
                         self.consume(TokenType.SEMICOLON)
-                        member = StructMember(var.name, var.type_spec, var.initial_value, is_private)
-                        members.append(member)
                 
                 self.consume(TokenType.RIGHT_BRACE)
                 self.consume(TokenType.SEMICOLON)
@@ -782,9 +798,14 @@ class FluxParser:
                 else:
                     # Field declaration
                     var = self.variable_declaration()
+                    if isinstance(var, list):
+                        for v in var:
+                            member = StructMember(v.name, v.type_spec, v.initial_value, False)
+                            members.append(member)
+                    else:
+                        member = StructMember(var.name, var.type_spec, var.initial_value, False)
+                        members.append(member)
                     self.consume(TokenType.SEMICOLON)
-                    member = StructMember(var.name, var.type_spec, var.initial_value, False)
-                    members.append(member)
         
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
@@ -818,7 +839,10 @@ class FluxParser:
                            TokenType.STACK, TokenType.REGISTER,
                            TokenType.CONST, TokenType.VOLATILE):
                 var_decl = self.variable_declaration()
-                variables.append(var_decl)
+                if isinstance(var_decl, list):
+                    variables.extend(var_decl)
+                else:
+                    variables.append(var_decl)
                 self.consume(TokenType.SEMICOLON)
             elif self.expect(TokenType.DEF):
                 func = self.function_def()
@@ -850,7 +874,10 @@ class FluxParser:
                 pass
             elif self.is_variable_declaration():
                 var_decl = self.variable_declaration()
-                variables.append(var_decl)
+                if isinstance(var_decl, list):
+                    variables.extend(var_decl)
+                else:
+                    variables.append(var_decl)
                 self.consume(TokenType.SEMICOLON)
             else:
                 self.error("Expected function, struct, object, namespace, or variable declaration")
@@ -1093,15 +1120,16 @@ class FluxParser:
                              TokenType.LEFT_PAREN, TokenType.LEFT_BRACE,
                              TokenType.COMMA, TokenType.LEFT_BRACKET)
 
-    def variable_declaration_statement(self) -> Statement:
+    def variable_declaration_statement(self) -> Union[Statement, List[Statement]]:
         """
         variable_declaration_statement -> variable_declaration ';'
+        Returns either a single statement or a list of statements for multiple declarations
         """
         decl = self.variable_declaration()
         self.consume(TokenType.SEMICOLON)
         return decl
     
-    def variable_declaration(self) -> Union[VariableDeclaration, TypeDeclaration]:
+    def variable_declaration(self) -> Union[VariableDeclaration, TypeDeclaration, List[VariableDeclaration]]:
         type_spec = self.type_spec()
         
         if self.expect(TokenType.AS):
@@ -1150,21 +1178,55 @@ class FluxParser:
                 self.symbol_table.define(var_name, SymbolKind.VARIABLE)
                 names.append(var_name)
             
-            initial_value = None
+            # Parse initializers if present
+            initializers = []
             if self.expect(TokenType.ASSIGN):
                 self.advance()
-                initial_value = self.expression()
+                # Parse first initializer
+                init_expr = self.expression()
+                initializers.append(init_expr)
+                
+                # Parse additional initializers if multiple variables
+                while self.expect(TokenType.COMMA) and len(initializers) < len(names):
+                    self.advance()
+                    init_expr = self.expression()
+                    initializers.append(init_expr)
+            
+            # If we have multiple variables, create multiple declarations
+            if len(names) > 1:
+                # Check if we have the right number of initializers
+                if initializers and len(initializers) != len(names):
+                    self.error(f"Number of initializers ({len(initializers)}) does not match number of variables ({len(names)})")
+                
+                # Create a declaration for each variable
+                declarations = []
+                for i, var_name in enumerate(names):
+                    init_val = initializers[i] if i < len(initializers) else None
+                    
+                    if isinstance(init_val, StructLiteral) and init_val.struct_type is None:
+                        if type_spec.custom_typename:
+                            init_val.struct_type = type_spec.custom_typename
+                    
+                    var_decl = VariableDeclaration(var_name, type_spec, init_val)
+                    if type_spec.storage_class == StorageClass.GLOBAL:
+                        var_decl.is_global = True
+                    declarations.append(var_decl)
+                
+                return declarations
+            else:
+                # Single variable declaration
+                initial_value = initializers[0] if initializers else None
                 
                 if isinstance(initial_value, StructLiteral) and initial_value.struct_type is None:
                     if type_spec.custom_typename:
                         initial_value.struct_type = type_spec.custom_typename
-            
-            var_decl = VariableDeclaration(names[0], type_spec, initial_value)
-            
-            if type_spec.storage_class == StorageClass.GLOBAL:
-                var_decl.is_global = True
-            
-            return var_decl
+                
+                var_decl = VariableDeclaration(names[0], type_spec, initial_value)
+                
+                if type_spec.storage_class == StorageClass.GLOBAL:
+                    var_decl.is_global = True
+                
+                return var_decl
     
     def block_statement(self) -> Block:
         """
@@ -1180,7 +1242,11 @@ class FluxParser:
         while not self.expect(TokenType.RIGHT_BRACE):
             stmt = self.statement()
             if stmt:
-                statements.append(stmt)
+                # Handle multiple declarations returned as a list
+                if isinstance(stmt, list):
+                    statements.extend(stmt)
+                else:
+                    statements.append(stmt)
         
         self.consume(TokenType.RIGHT_BRACE)
         self.symbol_table.exit_scope()
@@ -1431,7 +1497,12 @@ class FluxParser:
             init = None
             if not self.expect(TokenType.SEMICOLON):
                 if self.is_variable_declaration():
-                    init = self.variable_declaration()  # Don't wrap in ExpressionStatement
+                    var_decl = self.variable_declaration()
+                    # If multiple declarations, wrap in a Block
+                    if isinstance(var_decl, list):
+                        init = Block(var_decl)
+                    else:
+                        init = var_decl
                 else:
                     init = ExpressionStatement(self.expression())
             self.consume(TokenType.SEMICOLON)
