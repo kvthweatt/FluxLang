@@ -568,8 +568,8 @@ class FluxCompiler:
                     'legacy_stdio_definitions.lib',
                     'libvcruntime.lib',
                     "kernel32.lib",
-                    "ucrt.lib",
-                    "libcmt.lib",
+                    #"ucrt.lib",
+                    #"libcmt.lib",
                     "msvcrt.lib",   # Optional, link with C runtime
                     # "user32.lib",  # Uncomment only if GUI functions are used
                     # "gdi32.lib",   # Uncomment only if drawing functions are used
