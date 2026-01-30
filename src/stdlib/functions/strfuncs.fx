@@ -2,6 +2,9 @@
 #import "redtypes.fx";
 #endif;
 
+#ifndef FLUX_STANDARD_STRINGS
+#def FLUX_STANDARD_STRINGS 1;
+
 def strlen(byte* ps) -> int
 {
     int c = 0;
@@ -532,3 +535,9 @@ def float2str(float value, byte* buffer, i32 precision) -> i32
     buffer[write_pos] = (byte)0;
     return write_pos;
 };
+
+#ifdef FLUX_STANDARD_STRINGS
+#import "string_object_raw.fx";
+#endif;
+
+#endif;

@@ -1,3 +1,9 @@
+#ifndef FLUX_STANDARD_STRINGS
+#def FLUX_STANDARD_STRINGS 1;
+#endif
+
+#ifdef FLUX_STANDARD_STRINGS
+
 object string
 {
     noopstr value;
@@ -23,3 +29,5 @@ object string
         return strlen(this.value);
     };
 };
+
+#endif;

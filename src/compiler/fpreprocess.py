@@ -20,7 +20,15 @@ class FXPreprocessor:
         # Step 2: Build combined source
         combined_source = '\n'.join(self.output_lines)
         
-        # Step 3: Keep replacing macros until no more replacements occur
+        # Step 3: Remove all empty lines
+        lines = combined_source.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            if line.strip():  # Only keep non-empty lines
+                cleaned_lines.append(line)
+        combined_source = '\n'.join(cleaned_lines)
+        
+        # Step 4: Keep replacing macros until no more replacements occur
         replaced = True
         iteration = 0
         while replaced:
@@ -40,7 +48,7 @@ class FXPreprocessor:
         ending = "es." if iteration > 1 else "."
         print(f"[PREPROCESSOR] Completed after {iteration} macro pass{ending}")
         
-        # Step 4: Write to build/tmp.fx
+        # Step 5: Write to build/tmp.fx
         build_dir = Path("build")
         build_dir.mkdir(exist_ok=True)
         output_file = build_dir / "tmp.fx"
@@ -52,6 +60,38 @@ class FXPreprocessor:
         print(f"[PREPROCESSOR] Processed {len(self.processed_files)} file(s)")
         
         return combined_source
+    
+    def _strip_comments(self, content: str) -> str:
+        """Strip all comments from content: // and /// ... ///"""
+        result = []
+        i = 0
+        n = len(content)
+        
+        while i < n:
+            # Check for /// comment
+            if i + 2 < n and content[i] == '/' and content[i+1] == '/' and content[i+2] == '/':
+                # Skip the opening ///
+                i += 3
+                # Skip everything until we find closing ///
+                while i < n:
+                    if i + 2 < n and content[i] == '/' and content[i+1] == '/' and content[i+2] == '/':
+                        i += 3  # Skip closing ///
+                        break
+                    i += 1
+                continue
+            
+            # Check for // comment
+            if i + 1 < n and content[i] == '/' and content[i+1] == '/':
+                # Skip to end of line
+                while i < n and content[i] != '\n':
+                    i += 1
+                continue
+            
+            # Regular character
+            result.append(content[i])
+            i += 1
+        
+        return ''.join(result)
     
     def _resolve_path(self, filepath: str) -> Optional[Path]:
         """Resolve import path"""
@@ -70,6 +110,7 @@ class FXPreprocessor:
             cwd / "src" / "stdlib" / filepath,
             cwd / "src" / "stdlib" / "runtime" / filepath,
             cwd / "src" / "stdlib" / "functions" / filepath,
+            cwd / "src" / "stdlib" / "builtins" / filepath
         ]
         
         for location in locations:
@@ -94,9 +135,12 @@ class FXPreprocessor:
         self.processed_files.add(abs_path)
         print(f"[PREPROCESSOR] Processing: {filepath}")
         
-        # Read the file
+        # Read the file and strip comments immediately
         with open(resolved_path, 'r', encoding='utf-8') as f:
             content = f.read()
+        
+        # Strip all comments before processing
+        content = self._strip_comments(content)
         
         # Process line by line
         lines = content.splitlines()
@@ -106,32 +150,23 @@ class FXPreprocessor:
     
     def _process_line(self, lines: List[str], i: int) -> int:
         """Process a single line, return next line index"""
-        line = lines[i].rstrip()
+        line = lines[i]
         
-        # Skip empty lines
-        if not line:
-            self.output_lines.append("")
+        # Skip empty lines (we'll handle removal at the end)
+        if not line.strip():
             return i + 1
         
         stripped = line.strip()
         
         # Check for #def
         if stripped.startswith("#def"):
-            # Find the semicolon or comment start
+            # Find the semicolon
             semicolon_pos = line.find(';')
-            comment_pos = line.find('//')
+            if semicolon_pos == -1:
+                semicolon_pos = len(line)
             
-            # Determine where the macro definition ends
-            if comment_pos != -1 and (semicolon_pos == -1 or comment_pos < semicolon_pos):
-                # Comment comes before semicolon or no semicolon
-                end_pos = comment_pos
-            elif semicolon_pos != -1:
-                end_pos = semicolon_pos
-            else:
-                end_pos = len(line)
-            
-            # Extract the part up to semicolon or comment
-            macro_line = line[:end_pos].strip()
+            # Extract the part up to semicolon
+            macro_line = line[:semicolon_pos].strip()
             
             parts = macro_line.split()
             if len(parts) >= 3:
@@ -163,11 +198,10 @@ class FXPreprocessor:
         
         # Check for import
         if stripped.startswith("#import"):
-            # Handle multi-file imports like: #import "standard.fx", "strfuncs.fx";
             # Extract all quoted filenames
             import_files = []
             
-            # Find all quoted strings in the line
+            # Find all quoted strings in the line (comments already stripped)
             start_idx = line.find('"')
             while start_idx != -1:
                 end_idx = line.find('"', start_idx + 1)
@@ -185,7 +219,7 @@ class FXPreprocessor:
             return i + 1
         
         # Check for #endif - skip it
-        if stripped.startswith("#endif"):
+        if stripped.startswith("#endif;"):
             return i + 1
         
         # Check for #else - skip it (handled in conditional processing)
@@ -216,7 +250,7 @@ class FXPreprocessor:
         lines_to_include = []
         
         while i < len(lines):
-            line = lines[i].rstrip()
+            line = lines[i]
             stripped = line.strip()
             
             # Handle nested conditionals
@@ -265,29 +299,17 @@ class FXPreprocessor:
         # Split line into tokens, preserving whitespace structure
         result_parts = []
         in_quotes = False
-        in_comment = False
         current_token = ""
         
         for char in line:
-            if char == '"' and not in_comment:
+            if char == '"':
                 in_quotes = not in_quotes
-                current_token += char
-            elif char == '/' and not in_quotes and not in_comment:
-                # Check for comment start
-                if current_token.endswith('/'):
-                    in_comment = True
-                    current_token = current_token[:-1]
-                    result_parts.append(current_token)
-                    current_token = "//"
-                else:
-                    current_token += char
-            elif in_comment:
                 current_token += char
             elif char.isspace() or char in '.,;:()[]{}+-*/%=!<>|&^~':
                 # End of token
                 if current_token:
                     # Check if token is a macro
-                    if current_token in self.macros:
+                    if not in_quotes and current_token in self.macros:
                         # Get macro value and strip trailing semicolon if present
                         macro_value = self.macros[current_token]
                         # Remove trailing semicolon if it's at the end
@@ -303,7 +325,7 @@ class FXPreprocessor:
         
         # Handle last token
         if current_token:
-            if current_token in self.macros:
+            if not in_quotes and current_token in self.macros:
                 macro_value = self.macros[current_token]
                 # Remove trailing semicolon if it's at the end
                 if macro_value.endswith(';'):

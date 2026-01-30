@@ -1,8 +1,11 @@
 // File I/O Library using C FFI
 // Simple wrapper around C's stdio.h functions
 
-#ifndef FLUX_FILE_IO
-#def FLUX_FILE_IO 1;
+#ifndef FLUX_STANDARD_FFI_FIO
+#def FLUX_STANDARD_FFI_FIO 1;
+#endif;
+
+#ifdef FLUX_STANDARD_FFI_FIO
 
 extern
 {
@@ -155,5 +158,7 @@ namespace standard
 };
 
 using standard::io::file;
+
+#import "file_object_raw.fx";
 
 #endif;

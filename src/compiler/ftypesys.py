@@ -292,8 +292,8 @@ class TypeSpec:
     alignment: Optional[int] = None
     endianness: Optional[int] = 0
     is_array: bool = False
-    array_size: Optional[int] = None
-    array_dimensions: Optional[List[Optional[int]]] = None
+    array_size: Optional[Union[int, Any]] = None  # Can be int literal or Expression (evaluated at runtime if needed)
+    array_dimensions: Optional[List[Optional[Union[int, Any]]]] = None  # Same for multi-dimensional arrays
     is_pointer: bool = False
     pointer_depth: int = 0
     custom_typename: Optional[str] = None
@@ -409,13 +409,25 @@ class TypeSpec:
             current_type = base_type
             for dim in reversed(self.array_dimensions):
                 if dim is not None:
-                    current_type = ir.ArrayType(current_type, dim)
+                    # Only handle compile-time constant dimensions
+                    if isinstance(dim, int):
+                        current_type = ir.ArrayType(current_type, dim)
+                    else:
+                        # Runtime size - return pointer to element type
+                        # The actual allocation will be handled in _codegen_local
+                        return ir.PointerType(base_type)
                 else:
                     current_type = ir.PointerType(current_type)
             return current_type
         elif self.is_array:
             if self.array_size is not None:
-                return ir.ArrayType(base_type, self.array_size)
+                # Check if it's a compile-time constant
+                if isinstance(self.array_size, int):
+                    return ir.ArrayType(base_type, self.array_size)
+                else:
+                    # Runtime size - return pointer to element type
+                    # The actual allocation will be handled in _codegen_local
+                    return ir.PointerType(base_type)
             else:
                 if isinstance(base_type, ir.PointerType):
                     return base_type

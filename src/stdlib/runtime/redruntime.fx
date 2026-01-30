@@ -24,7 +24,14 @@
 
 // Import raw functions & builtins
 #import "strfuncs.fx";
+//
 // ---------------------------
+//
+// Import runtime helpers
+//#import "ffifio.fx";
+//
+// ---------------------------
+//
 
 #ifndef FLUX_STANDARD_SYSTEM
 #import "redsys.fx";

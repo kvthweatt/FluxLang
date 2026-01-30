@@ -7151,7 +7151,7 @@ class ObjectDef(ASTNode):
     is_prototype: bool = False
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
-        print(f"[codegen] Processing object: {self.name}")
+        ##print(f"[codegen] Processing object: {self.name}")
 
         if not hasattr(module, '_struct_vtables'):
             module._struct_vtables = {}
@@ -7167,7 +7167,7 @@ class ObjectDef(ASTNode):
             member_types.append(member_type)
             member_names.append(member.name)
         
-        print(f"[codegen] Object {self.name} has {len(member_types)} members")
+        ##print(f"[codegen] Object {self.name} has {len(member_types)} members")
         # Create the struct type for data members
         struct_type = ir.global_context.get_identified_type(self.name)
         struct_type.set_body(*member_types)
@@ -7205,17 +7205,17 @@ class ObjectDef(ASTNode):
         )
         module._struct_vtables[self.name] = vtable
 
-        print(f"[codegen] Created struct type for {self.name}: {struct_type}")
+        #print(f"[codegen] Created struct type for {self.name}: {struct_type}")
         # Create methods as functions with 'this' parameter
         for method in self.methods:
-            print(f"[codegen] Processing method: {method.name}")
+            #print(f"[codegen] Processing method: {method.name}")
             # Convert return type
             if method.return_type.base_type == DataType.THIS:
                 ret_type = ir.PointerType(struct_type)
             else:
                 ret_type = self._convert_type(method.return_type, module)
             
-            print(f"[codegen] Method {method.name} return type: {ret_type}")
+            #print(f"[codegen] Method {method.name} return type: {ret_type}")
             # Create parameter types - first parameter is always 'this' pointer
             param_types = [ir.PointerType(struct_type)]
             
@@ -7225,7 +7225,7 @@ class ObjectDef(ASTNode):
             # Create function type
             func_type = ir.FunctionType(ret_type, param_types)
             
-            print(f"[codegen] Method {method.name} function type: {func_type}")
+            #print(f"[codegen] Method {method.name} function type: {func_type}")
             # Create function with mangled name
             func_name = f"{self.name}.{method.name}"
             func = ir.Function(module, func_type, func_name)

@@ -6,7 +6,7 @@
 // Declare Windows CRT functions
 extern
 {
-    def !!printf(char* format) -> int;
+    //def !!printf(char* format) -> int;
 };
 
 #endif; // FLUX_STANDARD_EXCEPTIONS
