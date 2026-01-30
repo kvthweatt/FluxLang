@@ -689,179 +689,48 @@ class FluxLexer:
                 
                 continue
             
-            # Multi-character operators (order matters - longest first)
-            if char == '{' and self.peek_char() == '}' and self.peek_char(2) == '*':
-                tokens.append(Token(TokenType.FUNCTION_POINTER, '{}*', start_pos[0], start_pos[1]))
-                self.advance(count=3)
-                continue
-
-            # BITSHIFT ASSIGN
-            if char == '<' and self.peek_char() == '<' and self.peek_char(2) == '=':
-                tokens.append(Token(TokenType.BITSHIFT_LEFT_ASSIGN, '<<=', start_pos[0], start_pos[1]))
-                self.advance(count=3)
-                continue
-            if char == '>' and self.peek_char() == '>' and self.peek_char(2) == '=':
-                tokens.append(Token(TokenType.BITSHIFT_RIGHT_ASSIGN, '>>=', start_pos[0], start_pos[1]))
-                self.advance(count=3)
-                continue
+            # Triple-character tokens dictionary
+            triple_char_tokens = {
+                '<<=': TokenType.BITSHIFT_LEFT_ASSIGN,
+                '>>=': TokenType.BITSHIFT_RIGHT_ASSIGN,
+                '^^=': TokenType.XOR_ASSIGN,
+                '{}*': TokenType.FUNCTION_POINTER,
+                '(@)': TokenType.ADDRESS_CAST
+            }
             
-            if char == '^' and self.peek_char() == '^' and self.peek_char(2) == '=':
-                tokens.append(Token(TokenType.XOR_ASSIGN, '^^=', start_pos[0], start_pos[1]))
-                self.advance(count=3)
-                continue
-
-            # ADDRESS CAST
-            if char == "(" and self.peek_char() == "@" and self.peek_char(2) == ")":
-                tokens.append(Token(TokenType.ADDRESS_CAST, '(@)', start_pos[0], start_pos[1]))
-                self.advance(count=3)
-                continue
+            # Double-character tokens dictionary  
+            double_char_tokens = {
+                '==': TokenType.EQUAL,
+                '!=': TokenType.NOT_EQUAL,
+                '!!': TokenType.NO_MANGLE,
+                '??': TokenType.NULL_COALESCE,
+                '<=': TokenType.LESS_EQUAL,
+                '>=': TokenType.GREATER_EQUAL,
+                '<<': TokenType.BITSHIFT_LEFT,
+                '>>': TokenType.BITSHIFT_RIGHT,
+                '++': TokenType.INCREMENT,
+                '--': TokenType.DECREMENT,
+                '+=': TokenType.PLUS_ASSIGN,
+                '-=': TokenType.MINUS_ASSIGN,
+                '*=': TokenType.MULTIPLY_ASSIGN,
+                '/=': TokenType.DIVIDE_ASSIGN,
+                '%=': TokenType.MODULO_ASSIGN,
+                '^=': TokenType.POWER_ASSIGN,
+                '&=': TokenType.AND_ASSIGN,
+                '|=': TokenType.OR_ASSIGN,
+                '^^': TokenType.XOR_OP,
+                '&&': TokenType.AND,
+                '||': TokenType.OR,
+                '->': TokenType.RETURN_ARROW,
+                '<-': TokenType.CHAIN_ARROW,
+                '<~': TokenType.RECURSE_ARROW,
+                '..': TokenType.RANGE,
+                '::': TokenType.SCOPE,
+                '`&': TokenType.BITAND_OP,
+                '`|': TokenType.BITOR_OP
+            }
             
-            # Bitwise operators AND with backtick prefix (TODO - VERY EXTENSIVE)
-            # Must add corresponding keywords.
-            if char == '`':
-                if self.peek_char() == "&":
-                    tokens.append(Token(TokenType.BITAND_OP, '`&', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
-                elif self.peek_char() == "|":
-                    tokens.append(Token(TokenType.BITOR_OP, '`|', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
-            
-            # Two-character operators
-            if char == '=' and self.peek_char() == '=':
-                tokens.append(Token(TokenType.EQUAL, '==', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
-            
-            if char == '!':
-                if self.peek_char() == '=':
-                    tokens.append(Token(TokenType.NOT_EQUAL, '!=', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
-                elif self.peek_char() == '!':
-                    tokens.append(Token(TokenType.NO_MANGLE, '!!', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
-
-            if char == '?' and self.peek_char() == '?':
-                tokens.append(Token(TokenType.NULL_COALESCE, '??', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
-            
-            if char == '<':
-                if self.peek_char() == '=':
-                    tokens.append(Token(TokenType.LESS_EQUAL, '<=', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
-                elif self.peek_char() == "-":
-                    tokens.append(Token(TokenType.CHAIN_ARROW, '<-', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
-            
-            if char == '>':
-                if self.peek_char() == '=':
-                    tokens.append(Token(TokenType.GREATER_EQUAL, '>=', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
-            
-            if char == '<' and self.peek_char() == '<':
-                tokens.append(Token(TokenType.BITSHIFT_LEFT, '<<', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
-            
-            if char == '>' and self.peek_char() == '>':
-                tokens.append(Token(TokenType.BITSHIFT_RIGHT, '>>', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
-            
-            if char == '+' and self.peek_char() == '+':
-                tokens.append(Token(TokenType.INCREMENT, '++', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
-            
-            if char == '-' and self.peek_char() == '-':
-                tokens.append(Token(TokenType.DECREMENT, '--', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
-            
-            if char == '+' and self.peek_char() == '=':
-                tokens.append(Token(TokenType.PLUS_ASSIGN, '+=', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
-            
-            if char == '-':
-                if self.peek_char() == '=':
-                    tokens.append(Token(TokenType.MINUS_ASSIGN, '-=', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
-                if self.peek_char() == '>':
-                    tokens.append(Token(TokenType.RETURN_ARROW, '->', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
-            
-            if char == '*' and self.peek_char() == '=':
-                tokens.append(Token(TokenType.MULTIPLY_ASSIGN, '*=', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
-            
-            if char == '/' and self.peek_char() == '=':
-                tokens.append(Token(TokenType.DIVIDE_ASSIGN, '/=', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
-            
-            if char == '%' and self.peek_char() == '=':
-                tokens.append(Token(TokenType.MODULO_ASSIGN, '%=', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
-            
-            if char == '^' and self.peek_char() == '=':
-                tokens.append(Token(TokenType.POWER_ASSIGN, '^=', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
-
-            if char == '^' and self.peek_char() == '^':
-                if self.peek_char() == '=':
-                    tokens.append(Token(TokenType.XOR))
-            
-            if char == '&':
-                if self.peek_char() == '&':
-                    tokens.append(Token(TokenType.AND, '&&', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
-                elif self.peek_char() == '=':
-                    tokens.append(Token(TokenType.AND_ASSIGN, '&=', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
-            
-            if char == '|':
-                if self.peek_char() == "|":
-                    tokens.append(Token(TokenType.OR, '||', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
-                elif self.peek_char() == '=':
-                    tokens.append(Token(TokenType.OR_ASSIGN, '|=', start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
-            
-            if char == '.' and self.peek_char() == '.':
-                tokens.append(Token(TokenType.RANGE, '..', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
-            
-            if char == ':' and self.peek_char() == ':':
-                tokens.append(Token(TokenType.SCOPE, '::', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
-
-            # Refactor to quad_char_tokens -> special bit twiddlers here
-                
-            # Refactor to triple_char_tokens
-
-            # Refactor to double_char_tokens
-            double_char_tokens = {}
-            
-            # Single-character operators and delimiters
+            # Single-character tokens dictionary
             single_char_tokens = {
                 '+': TokenType.PLUS,
                 '-': TokenType.MINUS,
@@ -890,6 +759,22 @@ class FluxLexer:
                 '~': TokenType.TIE
             }
             
+            # Cascading check - longest first
+            # Check for 3-char tokens
+            triple_char = char + (self.peek_char() or '') + (self.peek_char(2) or '')
+            if triple_char in triple_char_tokens:
+                tokens.append(Token(triple_char_tokens[triple_char], triple_char, start_pos[0], start_pos[1]))
+                self.advance(count=3)
+                continue
+            
+            # Check for 2-char tokens  
+            double_char = char + (self.peek_char() or '')
+            if double_char in double_char_tokens:
+                tokens.append(Token(double_char_tokens[double_char], double_char, start_pos[0], start_pos[1]))
+                self.advance(count=2)
+                continue
+            
+            # Check for 1-char tokens
             if char in single_char_tokens:
                 tokens.append(Token(single_char_tokens[char], char, start_pos[0], start_pos[1]))
                 self.advance()
