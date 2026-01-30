@@ -18,6 +18,10 @@
 #import "redtypes.fx";
 #endif;
 
+#ifndef FLUX_STANDARD_MEMORY
+#import "redmemory.fx";
+#endif;
+
 // Import raw functions & builtins
 #import "strfuncs.fx";
 // ---------------------------

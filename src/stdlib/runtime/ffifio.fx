@@ -148,7 +148,7 @@ namespace standard
                 };
                 
                 fclose(file);
-                return (bool)1;
+                return 1;
             };
         };
     };

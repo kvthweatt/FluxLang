@@ -1,45 +1,10 @@
-///
-Compile time f-string example.
-
-Currently requires {vars} to be declared globally,
-in this example {a}
-
-Still working to get f-strings working for runtime.
-///
-
-#import "redstandard.fx";
-
-// Compile time constant for f-string
-int a = 69;
-int b = 420;
-int c = 1337;
-int d = a + b;
-int e = 5 ^ 2;
-//int[] squares = [x^2 for (x in 1..10)];
-
-def pow(int l, int r) -> int
-{
-	int x = l;
-	for (int y = 0; y < r - 1; y++)
-	{
-		x *= l;
-	};
-	return x;
-};
-
-int z = 5 ^ 5;
+#import "standard.fx";
 
 def main() -> int
 {
-	int j = 0;
-	int k = 1;
-	j = k;
-	if (j == 1)
-	{
-		print("j\n\0");
-	};
-	byte[] x = f"Testing f-string.\n{a} {b} {c} {d} {e} {z}\0";
-	int len = strlen(@x);
-	print(@x,len);
+	int x = 5;
+	noopstr s = f"Testing fstring with {x}!\n\0";
+
+	print(s);
 	return 0;
 };

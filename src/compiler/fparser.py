@@ -18,9 +18,46 @@ Usage:
 """
 
 import sys
+from contextlib import contextmanager
 from typing import List, Optional, Union, Any
 from flexer import FluxLexer, TokenType, Token
 from fast import *
+
+class SymbolKind(Enum):
+    TYPE = "type"
+    VARIABLE = "variable"
+    FUNCTION = "function"
+    NAMESPACE = "namespace"
+
+class SymbolTable:
+    def __init__(self):
+        self.scopes: List[Dict[str, SymbolKind]] = [{}]
+        self._initialize_builtins()
+    
+    def _initialize_builtins(self):
+        builtins = ['int', 'uint', 'float', 'char', 'bool', 'void', 'data']
+        for typename in builtins:
+            self.scopes[0][typename] = SymbolKind.TYPE
+    
+    def enter_scope(self):
+        self.scopes.append({})
+    
+    def exit_scope(self):
+        if len(self.scopes) > 1:
+            self.scopes.pop()
+    
+    def define(self, name: str, kind: SymbolKind):
+        self.scopes[-1][name] = kind
+    
+    def lookup(self, name: str) -> Optional[SymbolKind]:
+        for scope in reversed(self.scopes):
+            if name in scope:
+                return scope[name]
+        return None
+    
+    def is_type(self, name: str) -> bool:
+        kind = self.lookup(name)
+        return kind == SymbolKind.TYPE
 
 class ParseError(Exception):
     """Exception raised when parsing fails"""
@@ -36,6 +73,28 @@ class FluxParser:
         self.current_token = self.tokens[0] if tokens else None
         self.parse_errors = []  # Track parse errors
         self._processing_imports = set()
+        self.symbol_table = SymbolTable()
+
+    @contextmanager
+    def _lookahead(self):
+        """
+        Context manager for lookahead operations.
+        Automatically saves and restores parser position.
+        
+        Usage:
+            with self._lookahead():
+                # Perform lookahead checks
+                if self.expect(...):
+                    return True
+            # Position automatically restored here
+        """
+        saved_pos = self.position
+        saved_token = self.current_token
+        try:
+            yield
+        finally:
+            self.position = saved_pos
+            self.current_token = saved_token
     
     def error(self, message: str) -> None:
         """Raise a parse error with current token context"""
@@ -283,10 +342,6 @@ class FluxParser:
         return ExternBlock(declarations)
     
     def function_def(self) -> Union[FunctionDef]:
-        """
-        function_def -> ('const')? ('volatile')? 'def' IDENTIFIER '(' parameter_list? ')' '->' type_spec ';'
-        function_def -> ('const')? ('volatile')? 'def' IDENTIFIER '(' parameter_list? ')' '->' type_spec block ';'
-        """
         is_const = False
         is_volatile = False
         no_mangle = False
@@ -301,31 +356,35 @@ class FluxParser:
         
         self.consume(TokenType.DEF)
         if self.expect(TokenType.NO_MANGLE):
-            print("Not mangling")
             no_mangle = True
             self.consume(TokenType.NO_MANGLE)
         name = self.consume(TokenType.IDENTIFIER).value
         
-        # This is a function definition
+        self.symbol_table.enter_scope()
+        
         self.consume(TokenType.LEFT_PAREN)
         parameters = self.parameter_list() if not self.expect(TokenType.RIGHT_PAREN) else []
+        for param in parameters:
+            self.symbol_table.define(param.name, SymbolKind.VARIABLE)
         self.consume(TokenType.RIGHT_PAREN)
         
         self.consume(TokenType.RETURN_ARROW)
         return_type = self.type_spec()
         
-        # Check if this is a prototype (ends with semicolon) or definition (has block)
         is_prototype = False
         body = None
         if self.expect(TokenType.SEMICOLON):
             is_prototype = True
             self.advance()
-            body = Block([])  # Empty block for prototype
+            body = Block([])
         else:
             body = self.block()
             self.consume(TokenType.SEMICOLON)
         
-        return FunctionDef(name, parameters, return_type, body, is_const, is_volatile, is_prototype, no_mangle)
+        self.symbol_table.exit_scope()
+        
+        return FunctionDef(name, parameters, return_type, body, is_const, 
+                          is_volatile, is_prototype, no_mangle)
 
     def _is_function_pointer_declaration(self) -> bool:
         """
@@ -334,8 +393,7 @@ class FluxParser:
         Pattern: return_type{}* identifier(param_types)
         Example: void{}* fp()
         """
-        saved_pos = self.position
-        try:
+        with self._lookahead():
             # Skip storage class and qualifiers
             if self.expect(TokenType.GLOBAL, TokenType.LOCAL, TokenType.HEAP, 
                           TokenType.STACK, TokenType.REGISTER):
@@ -379,11 +437,6 @@ class FluxParser:
             
             # This is a function pointer!
             return True
-        finally:
-            # Always restore position
-            self.position = saved_pos
-            self.current_token = self.tokens[self.position] if self.position < len(self.tokens) else None
-
 
     def function_pointer_type(self) -> FunctionPointerType:
         """
@@ -691,9 +744,6 @@ class FluxParser:
         return ObjectDef(name, methods, members, nested_objects, nested_structs)
     
     def namespace_def(self) -> NamespaceDef:
-        """
-        namespace_def -> 'namespace' IDENTIFIER  '{' namespace_body* '}'
-        """
         self.consume(TokenType.NAMESPACE)
         namespace_parts = [self.consume(TokenType.IDENTIFIER).value]
         while self.expect(TokenType.SCOPE):
@@ -701,9 +751,7 @@ class FluxParser:
             namespace_parts.append(self.consume(TokenType.IDENTIFIER).value)
         name = '__'.join(namespace_parts)
         
-        # INHERITANCE - TODO after v1 Flux
         base_namespaces = []
-        
         functions = []
         structs = []
         objects = []
@@ -712,12 +760,13 @@ class FluxParser:
         
         if self.expect(TokenType.SEMICOLON):
             self.advance()
-            return NamespaceDef(name, functions, structs, objects, variables, nested_namespaces, base_namespaces)
+            return NamespaceDef(name, functions, structs, objects, variables, 
+                               nested_namespaces, base_namespaces)
         
+        self.symbol_table.enter_scope()
         self.consume(TokenType.LEFT_BRACE)
         
         while not self.expect(TokenType.RIGHT_BRACE):
-            # Check for storage class keywords FIRST
             if self.expect(TokenType.GLOBAL, TokenType.LOCAL, TokenType.HEAP, 
                            TokenType.STACK, TokenType.REGISTER,
                            TokenType.CONST, TokenType.VOLATILE):
@@ -725,18 +774,20 @@ class FluxParser:
                 variables.append(var_decl)
                 self.consume(TokenType.SEMICOLON)
             elif self.expect(TokenType.DEF):
-                functions.append(self.function_def())
+                func = self.function_def()
+                functions.append(func)
+                self.symbol_table.define(func.name, SymbolKind.FUNCTION)
             elif self.expect(TokenType.STRUCT):
-                structs.append(self.struct_def())
+                struct = self.struct_def()
+                structs.append(struct)
             elif self.expect(TokenType.OBJECT):
-                objects.append(self.object_def())
+                obj = self.object_def()
+                objects.append(obj)
             elif self.expect(TokenType.NAMESPACE):
                 nested_ns = self.namespace_def()
-                # MERGE NESTED NAMESPACES WITH SAME NAME
                 merged = False
                 for existing_ns in nested_namespaces:
                     if existing_ns.name == nested_ns.name:
-                        # Merge content into existing namespace
                         existing_ns.functions.extend(nested_ns.functions)
                         existing_ns.structs.extend(nested_ns.structs)
                         existing_ns.objects.extend(nested_ns.objects)
@@ -755,11 +806,14 @@ class FluxParser:
                 variables.append(var_decl)
                 self.consume(TokenType.SEMICOLON)
             else:
-                self.error("Expected function, struct, object, namespace, if or def, or variable declaration")
+                self.error("Expected function, struct, object, namespace, or variable declaration")
         
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
-        return NamespaceDef(name, functions, structs, objects, variables, nested_namespaces, base_namespaces)
+        self.symbol_table.exit_scope()
+        
+        return NamespaceDef(name, functions, structs, objects, variables, 
+                           nested_namespaces, base_namespaces)
     
     def type_spec(self) -> TypeSpec:
         """
@@ -929,10 +983,7 @@ class FluxParser:
             self.error("Expected type specifier")
     
     def is_variable_declaration(self) -> bool:
-        """Check if current position starts a variable declaration"""
-        saved_pos = self.position
-        try:
-            # Skip type specifiers
+        with self._lookahead():
             if self.expect(TokenType.CONST):
                 self.advance()
             if self.expect(TokenType.VOLATILE):
@@ -940,15 +991,13 @@ class FluxParser:
             if self.expect(TokenType.SIGNED, TokenType.UNSIGNED):
                 self.advance()
             
-            # Must have a base type
-            if not self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.CHAR, 
+            if not self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.CHAR, 
                              TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
                              TokenType.IDENTIFIER):
                 return False
             
             self.advance()
             
-            # Skip data type specification
             if self.expect(TokenType.LEFT_BRACE):
                 self.advance()
                 if self.expect(TokenType.SINT_LITERAL):
@@ -964,10 +1013,8 @@ class FluxParser:
                 if self.expect(TokenType.RIGHT_BRACE):
                     self.advance()
             
-            # Skip array specification - support multiple dimensions
             while self.expect(TokenType.LEFT_BRACKET):
                 self.advance()
-                # Skip expression inside brackets (integer, identifier, or any expression)
                 if not self.expect(TokenType.RIGHT_BRACKET):
                     bracket_depth = 1
                     while bracket_depth > 0 and not self.expect(TokenType.EOF):
@@ -981,32 +1028,24 @@ class FluxParser:
                 if self.expect(TokenType.RIGHT_BRACKET):
                     self.advance()
             
-            # Skip pointer
             if self.expect(TokenType.MULTIPLY):
                 self.advance()
             
-            # Check for 'as' followed by void - this is a void cast, not a type declaration
             if self.expect(TokenType.AS):
                 self.advance()
                 if self.expect(TokenType.VOID):
-                    return False  # This is "x as void" - a void cast expression, not a type declaration
-                return self.expect(TokenType.IDENTIFIER)  # Type declaration like "int as myint"
+                    return False
+                return self.expect(TokenType.IDENTIFIER)
             
-            # Must have identifier for regular variable declaration
-            # After identifier, we can have: =, ;, (, {, or [
             if not self.expect(TokenType.IDENTIFIER):
                 return False
             
-            self.advance()  # consume the variable name
+            self.advance()
             
-            # Valid next tokens after variable name
             return self.expect(TokenType.ASSIGN, TokenType.SEMICOLON, 
                              TokenType.LEFT_PAREN, TokenType.LEFT_BRACE,
                              TokenType.COMMA, TokenType.LEFT_BRACKET)
-        finally:
-            self.position = saved_pos
-            self.current_token = self.tokens[self.position] if self.position < len(self.tokens) else None
-    
+
     def variable_declaration_statement(self) -> Statement:
         """
         variable_declaration_statement -> variable_declaration ';'
@@ -1016,28 +1055,18 @@ class FluxParser:
         return decl
     
     def variable_declaration(self) -> Union[VariableDeclaration, TypeDeclaration]:
-        """
-        variable_declaration -> type_spec IDENTIFIER ('=' expression)?
-                             | type_spec 'as' IDENTIFIER ('=' expression)?
-                             | type_spec IDENTIFIER '{' struct_init '}'  # Struct literal init
-                             | type_spec FUNCTION_POINTER IDENTIFIER PARAMS = @FUNCTION
-        
-        Note: Array dimensions must be part of type_spec, not after IDENTIFIER
-        """
         type_spec = self.type_spec()
-
-        # Check if this is a type declaration (using 'as')
+        
         if self.expect(TokenType.AS):
             self.advance()
             type_name = self.consume(TokenType.IDENTIFIER).value
+            self.symbol_table.define(type_name, SymbolKind.TYPE)
             
-            # Optional initial value
             initial_value = None
             if self.expect(TokenType.ASSIGN):
                 self.advance()
                 initial_value = self.expression()
                 
-                # If the initial value is a struct literal, infer the type from the variable's type_spec
                 if isinstance(initial_value, StructLiteral) and initial_value.struct_type is None:
                     if type_spec.custom_typename:
                         initial_value.struct_type = type_spec.custom_typename
@@ -1045,23 +1074,17 @@ class FluxParser:
                         self.error("Struct literal initialization requires a custom type")
             
             return TypeDeclaration(type_name, type_spec, initial_value)
-        elif self.expect(TokenType.ASSIGN):
-            self.advance()
-            return self.assignment_expression()
         else:
-            # Regular variable declaration
             name = self.consume(TokenType.IDENTIFIER).value
+            self.symbol_table.define(name, SymbolKind.VARIABLE)
             
-            # Check for object instantiation: identifier(args)
             if self.expect(TokenType.LEFT_PAREN):
-                # Object instantiation syntax: Type identifier(args)
-                self.advance()  # consume '('
+                self.advance()
                 args = []
                 if not self.expect(TokenType.RIGHT_PAREN):
                     args = self.argument_list()
                 self.consume(TokenType.RIGHT_PAREN)
                 
-                # Create a function call to the constructor as the initial value
                 if type_spec.custom_typename:
                     constructor_name = f"{type_spec.custom_typename}.__init"
                 else:
@@ -1069,31 +1092,28 @@ class FluxParser:
                 
                 constructor_call = FunctionCall(constructor_name, args)
                 var_decl = VariableDeclaration(name, type_spec, constructor_call)
-                # Mark as global if storage_class is GLOBAL
                 if type_spec.storage_class == StorageClass.GLOBAL:
                     var_decl.is_global = True
                 return var_decl
             
-            # Handle comma-separated variables
             names = [name]
             while self.expect(TokenType.COMMA):
                 self.advance()
-                names.append(self.consume(TokenType.IDENTIFIER).value)
+                var_name = self.consume(TokenType.IDENTIFIER).value
+                self.symbol_table.define(var_name, SymbolKind.VARIABLE)
+                names.append(var_name)
             
-            # Optional initial value (only for last variable)
             initial_value = None
             if self.expect(TokenType.ASSIGN):
                 self.advance()
                 initial_value = self.expression()
-
+                
                 if isinstance(initial_value, StructLiteral) and initial_value.struct_type is None:
                     if type_spec.custom_typename:
                         initial_value.struct_type = type_spec.custom_typename
             
-            # Create variable declaration
             var_decl = VariableDeclaration(names[0], type_spec, initial_value)
             
-            # Mark as global if storage_class is GLOBAL
             if type_spec.storage_class == StorageClass.GLOBAL:
                 var_decl.is_global = True
             
@@ -1106,18 +1126,18 @@ class FluxParser:
         return self.block()
     
     def block(self) -> Block:
-        """
-        block -> '{' statement* '}'
-        """
         self.consume(TokenType.LEFT_BRACE)
-        statements = []
+        self.symbol_table.enter_scope()
         
+        statements = []
         while not self.expect(TokenType.RIGHT_BRACE):
             stmt = self.statement()
             if stmt:
                 statements.append(stmt)
         
         self.consume(TokenType.RIGHT_BRACE)
+        self.symbol_table.exit_scope()
+        
         return Block(statements)
 
     def asm_statement(self, is_volatile: bool = False) -> ExpressionStatement:
@@ -1328,25 +1348,21 @@ class FluxParser:
         self.consume(TokenType.LEFT_PAREN)
         
         # Check if it's a for-in loop by looking ahead
-        saved_pos = self.position
         is_for_in = False
         
-        # Look for pattern: identifier (',' identifier)* 'in' expression
-        if self.expect(TokenType.IDENTIFIER):
-            self.advance()
-            while self.expect(TokenType.COMMA):
+        with self._lookahead():
+            # Look for pattern: identifier (',' identifier)* 'in' expression
+            if self.expect(TokenType.IDENTIFIER):
                 self.advance()
-                if self.expect(TokenType.IDENTIFIER):
+                while self.expect(TokenType.COMMA):
                     self.advance()
-                else:
-                    break
-            if self.expect(TokenType.IN):
-                is_for_in = True
-        
-        # Restore position
-        self.position = saved_pos
-        self.current_token = self.tokens[self.position]
-        
+                    if self.expect(TokenType.IDENTIFIER):
+                        self.advance()
+                    else:
+                        break
+                if self.expect(TokenType.IN):
+                    is_for_in = True
+
         if is_for_in:
             # for-in loop
             variables = []

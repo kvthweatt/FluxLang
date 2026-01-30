@@ -16,16 +16,8 @@ from llvmlite import ir
 from pathlib import Path
 import os
 
+from ftypesys import *
 from futilities import *
-
-## TO DO
-#
-# -> Add `lext` keyword to set external linkage.
-#    \_> Cause gv.linkage = 'external'
-#
-# -> Add `extern` keyword for FFI.
-#
-## /TODO
 
 # Base classes first
 @dataclass
@@ -34,34 +26,11 @@ class ASTNode:
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Any:
         raise NotImplementedError(f"codegen not implemented for {self.__class__.__name__}")
 
-class StorageClass(Enum):
-    """Storage class specifiers for variables"""
-    AUTO = "auto"         # Default: automatic storage (stack for locals, global for module-level)
-    STACK = "stack"       # Force stack allocation
-    HEAP = "heap"         # Force heap allocation
-    GLOBAL = "global"     # Global/static storage
-    LOCAL = "local"       # Local scope (restricted to current stack)
-    REGISTER = "register" # Hint: keep in register if possible
-
 # Literal values (no dependencies)
 @dataclass
 class Literal(ASTNode):
     value: Any
     type: DataType
-
-    def _infer_int_width(self, value: int) -> int:
-        if self.type == DataType.SINT:
-            if -(1 << 31) <= value <= (1 << 31) - 1:
-                return 32
-            else:
-                return 64
-        elif self.type == DataType.UINT:
-            if 0 <= value <= (1 << 32) - 1:
-                return 32
-            else:
-                return 64
-        else:
-            raise ValueError("Not an integer literal")
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         if self.type in (DataType.SINT, DataType.UINT):
@@ -254,151 +223,6 @@ class Literal(ASTNode):
             
             # Return the initialized struct (load it to get the value)
             return builder.load(struct_ptr, name="struct_value")
-
-# Type definitions
-@dataclass
-class TypeSpec:
-    base_type: Union[DataType, str]
-    is_signed: bool = True
-    is_const: bool = False
-    is_volatile: bool = False
-    bit_width: Optional[int] = None
-    alignment: Optional[int] = None
-    endianness: Optional[int] = 0 # Little-endian by default. Secondary guarantee.
-    is_array: bool = False
-    array_size: Optional[int] = None
-    array_dimensions: Optional[List[Optional[int]]] = None
-    is_pointer: bool = False
-    pointer_depth: int = 0
-    custom_typename: Optional[str] = None
-    storage_class: Optional[StorageClass] = None  # NEW: storage class
-
-    def get_llvm_type(self, module: ir.Module) -> ir.Type:
-        """Get LLVM type for this TypeSpec, resolving custom type names"""
-        
-        if self.custom_typename:
-            # First try direct lookup (unqualified or fully-qualified)
-            if hasattr(module, '_type_aliases') and self.custom_typename in module._type_aliases:
-                base_type = module._type_aliases[self.custom_typename]
-                if isinstance(base_type, ir.ArrayType) and not self.is_array:
-                    return ir.PointerType(base_type.element)
-                return base_type
-            
-            if hasattr(module, '_struct_types') and self.custom_typename in module._struct_types:
-                return module._struct_types[self.custom_typename]
-            
-            # Use _using_namespaces to resolve
-            if hasattr(module, '_using_namespaces'):
-                for namespace in module._using_namespaces:
-                    mangled_name = namespace.replace('::', '__') + '__' + self.custom_typename
-                    
-                    if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
-                        base_type = module._type_aliases[mangled_name]
-                        if isinstance(base_type, ir.ArrayType) and not self.is_array:
-                            return ir.PointerType(base_type.element)
-                        return base_type
-                    
-                    if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
-                        return module._struct_types[mangled_name]
-            
-            # Search ALL registered namespaces (allows cross-namespace type resolution)
-            if hasattr(module, '_namespaces'):
-                for registered_namespace in module._namespaces:
-                    mangled_name = registered_namespace.replace('::', '__') + '__' + self.custom_typename
-                    
-                    if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
-                        base_type = module._type_aliases[mangled_name]
-                        if isinstance(base_type, ir.ArrayType) and not self.is_array:
-                            return ir.PointerType(base_type.element)
-                        return base_type
-                    
-                    if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
-                        return module._struct_types[mangled_name]
-            
-            # **NEW: Also try common parent namespaces**
-            # For nested namespaces like standard::io::console, try parent paths
-            if hasattr(module, '_using_namespaces'):
-                for namespace in module._using_namespaces:
-                    namespace_parts = namespace.split('::')
-                    # Try each parent level (e.g., for "standard::io::console", try "standard::io", "standard")
-                    for i in range(len(namespace_parts), 0, -1):
-                        parent_namespace = '::'.join(namespace_parts[:i])
-                        mangled_name = parent_namespace.replace('::', '__') + '__' + self.custom_typename
-                        
-                        if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
-                            base_type = module._type_aliases[mangled_name]
-                            if isinstance(base_type, ir.ArrayType) and not self.is_array:
-                                return ir.PointerType(base_type.element)
-                            return base_type
-                        
-                        if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
-                            return module._struct_types[mangled_name]
-            
-            # Not found - raise error
-            raise NameError(f"Unknown type: {self.custom_typename}")
-        
-        # Handle built-in types
-        if self.base_type == DataType.SINT:
-            return ir.IntType(32)
-        elif self.base_type == DataType.UINT:
-            return ir.IntType(32)
-        elif self.base_type == DataType.FLOAT:
-            return ir.FloatType()
-        elif self.base_type == DataType.BOOL:
-            return ir.IntType(1)
-        elif self.base_type == DataType.CHAR:
-            return ir.IntType(8)
-        elif self.base_type == DataType.VOID:
-            return ir.VoidType()
-        elif self.base_type == DataType.DATA:
-            # Only require bit_width for explicit data{N} types without custom names
-            if self.bit_width is None:
-                raise ValueError(f"DATA type missing bit_width for {self}")
-            return ir.IntType(self.bit_width)
-        else:
-            raise ValueError(f"Unsupported type: {self.base_type}")
-    
-    def get_llvm_type_with_array(self, module: ir.Module) -> ir.Type:
-        """Get LLVM type including array/pointer specifications"""
-        
-        # Get base type (this handles custom type names)
-        base_type = self.get_llvm_type(module)
-
-        if self.is_pointer:
-            # Special case: void* is i8* in LLVM
-            if self.base_type == DataType.VOID:
-                return ir.PointerType(ir.IntType(8))
-            return ir.PointerType(base_type)
-        
-        # Handle array types - support multi-dimensional arrays
-        if self.is_array and self.array_dimensions:
-            # Build array type from the inside out
-            # e.g., byte[4][4] becomes ArrayType(ArrayType(byte, 4), 4)
-            current_type = base_type
-            for dim in reversed(self.array_dimensions):
-                if dim is not None:
-                    current_type = ir.ArrayType(current_type, dim)
-                else:
-                    # Unsized array dimension - use pointer
-                    current_type = ir.PointerType(current_type)
-            return current_type
-        elif self.is_array:
-            # Single-dimensional array (backward compatibility)
-            if self.array_size is not None:
-                # Fixed-size array
-                return ir.ArrayType(base_type, self.array_size)
-            else:
-                # Unsized array - return pointer to element type
-                if isinstance(base_type, ir.PointerType):
-                    return base_type
-                else:
-                    return ir.PointerType(base_type)
-        
-        # Handle pointer types
-        if self.is_pointer:
-            return ir.PointerType(base_type)
-        
-        return base_type
 
 # Expressions (built up from simple to complex)
 @dataclass
@@ -1279,9 +1103,8 @@ class ArrayLiteral(Expression):
         )
         
         if use_heap:
-            # TODO: Implement heap allocation for string literals
-            # For now, fall back to stack
-            use_stack = True
+            # Heap allocation: allocate memory and copy array data
+            return heap_array_allocation(builder, module, str_val)
         
         if use_global:
             # Create global variable for the string with unique name
@@ -1868,10 +1691,7 @@ class StringLiteral(Expression):
         )
         
         if use_heap:
-            # TODO: Implement heap allocation for string literals
-            # Should call our custom malloc()
-            # For now, fall back to stack
-            use_stack = True
+            return string_heap_allocation(builder, module, str_val)
         
         if use_global:
             # Create global variable for the string with unique name
@@ -2720,10 +2540,105 @@ class FStringLiteral(Expression):
             return ArrayLiteral.from_string(full_string).codegen(builder, module)
             
         except (ValueError, NotImplementedError):
-            # If we can't evaluate at compile time, fall back to runtime
-            # TODO: Implement runtime f-string evaluation
-            raise NotImplementedError("Runtime f-string evaluation not yet implemented. Use simple literals or compile-time constants.")
-    
+            return self._generate_runtime_fstring(builder, module)
+
+    def _generate_runtime_fstring(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """
+        Generate runtime code for f-string evaluation.
+        
+        This method generates code that:
+        1. Evaluates each part (literals and expressions) at runtime
+        2. Converts values to strings
+        3. Concatenates them into the final string
+        """
+        # Estimate buffer size conservatively
+        max_size = 256
+        for part in self.parts:
+            if isinstance(part, Literal) and part.type == DataType.CHAR:
+                max_size += len(part.value)
+            else:
+                max_size += 32  # Conservative estimate for numeric conversions
+        
+        # Allocate buffer on stack
+        buffer_type = ir.ArrayType(ir.IntType(8), max_size)
+        buffer = builder.alloca(buffer_type, name="fstring_buffer")
+        
+        # Initialize position counter
+        pos_ptr = builder.alloca(ir.IntType(32), name="fstring_pos")
+        builder.store(ir.Constant(ir.IntType(32), 0), pos_ptr)
+        
+        # Declare sprintf for number-to-string conversion
+        sprintf_fn = module.globals.get('sprintf')
+        if sprintf_fn is None:
+            sprintf_type = ir.FunctionType(
+                ir.IntType(32),
+                [ir.PointerType(ir.IntType(8)), ir.PointerType(ir.IntType(8))],
+                var_arg=True
+            )
+            sprintf_fn = ir.Function(module, sprintf_type, 'sprintf')
+            sprintf_fn.linkage = 'external'
+        
+        # Process each part
+        for part in self.parts:
+            pos = builder.load(pos_ptr, name="current_pos")
+            dest_ptr = builder.gep(buffer, [ir.Constant(ir.IntType(32), 0), pos], name="dest")
+            
+            if isinstance(part, Literal) and part.type == DataType.CHAR:
+                # String literal: copy character by character
+                src_val = part.codegen(builder, module)
+                if isinstance(src_val.type, ir.PointerType):
+                    str_len = len(part.value)
+                    for i in range(str_len):
+                        char_ptr = builder.gep(src_val, [ir.Constant(ir.IntType(32), i)])
+                        char_val = builder.load(char_ptr)
+                        dest_char_ptr = builder.gep(dest_ptr, [ir.Constant(ir.IntType(32), i)])
+                        builder.store(char_val, dest_char_ptr)
+                    
+                    new_pos = builder.add(pos, ir.Constant(ir.IntType(32), str_len))
+                    builder.store(new_pos, pos_ptr)
+            else:
+                # Expression: evaluate and convert to string using sprintf
+                val = part.codegen(builder, module)
+                
+                # Determine format string based on type
+                if isinstance(val.type, ir.IntType):
+                    fmt_str = "%llu" if is_unsigned(val) else "%lld"
+                elif isinstance(val.type, ir.FloatType):
+                    fmt_str = "%f"
+                else:
+                    fmt_str = "%p"
+                
+                # Create format string global
+                fmt_bytes = (fmt_str + "\\0").encode('ascii')
+                fmt_array_ty = ir.ArrayType(ir.IntType(8), len(fmt_bytes))
+                fmt_val = ir.Constant(fmt_array_ty, bytearray(fmt_bytes))
+                
+                fmt_gv = ir.GlobalVariable(module, fmt_val.type, 
+                                          name=f".fstring_fmt_{id(part)}")
+                fmt_gv.linkage = 'internal'
+                fmt_gv.global_constant = True
+                fmt_gv.initializer = fmt_val
+                
+                zero = ir.Constant(ir.IntType(32), 0)
+                fmt_ptr = builder.gep(fmt_gv, [zero, zero])
+                
+                # Extend value to 64-bit for variadic args if needed
+                if isinstance(val.type, ir.IntType) and val.type.width < 64:
+                    val = builder.zext(val, ir.IntType(64)) if is_unsigned(val) else builder.sext(val, ir.IntType(64))
+                
+                chars_written = builder.call(sprintf_fn, [dest_ptr, fmt_ptr, val])
+                new_pos = builder.add(pos, chars_written)
+                builder.store(new_pos, pos_ptr)
+        
+        # Null-terminate the string
+        final_pos = builder.load(pos_ptr)
+        null_ptr = builder.gep(buffer, [ir.Constant(ir.IntType(32), 0), final_pos])
+        builder.store(ir.Constant(ir.IntType(8), 0), null_ptr)
+        
+        # Return pointer to the buffer
+        zero = ir.Constant(ir.IntType(32), 0)
+        return builder.gep(buffer, [zero, zero], name="fstring_result")
+
     def _evaluate_compile_time_expression(self, expr: Expression, builder: ir.IRBuilder, module: ir.Module) -> Any:
         """Try to evaluate an expression at compile time"""
         
@@ -5598,33 +5513,52 @@ class AssertStatement(Statement):
         builder.position_at_start(fail_block)
         
         if self.message:
-            # Create message string constant
-            msg_str = self.message + '\n'
-            msg_bytes = msg_str.encode('ascii')
-            msg_type = ir.ArrayType(ir.IntType(8), len(msg_bytes))
-            msg_const = ir.Constant(msg_type, bytearray(msg_bytes))
+            # Handle message - it can be a string literal or an Expression
+            if isinstance(self.message, str):
+                # Parser gave us a string directly - create a global constant
+                msg_bytes = self.message.encode('ascii')
+                msg_type = ir.ArrayType(ir.IntType(8), len(msg_bytes))
+                msg_const = ir.Constant(msg_type, bytearray(msg_bytes))
+                
+                msg_gv = ir.GlobalVariable(module, msg_type, name=f"assert_msg_{id(self)}")
+                msg_gv.initializer = msg_const
+                msg_gv.linkage = 'internal'
+                msg_gv.global_constant = True
+                
+                zero = ir.Constant(ir.IntType(32), 0)
+                msg_ptr = builder.gep(msg_gv, [zero, zero], inbounds=True)
+            else:
+                # Message is an Expression - evaluate it
+                msg_val = self.message.codegen(builder, module)
+                
+                # Handle array pointers - get pointer to first element
+                if isinstance(msg_val.type, ir.PointerType) and isinstance(msg_val.type.pointee, ir.ArrayType):
+                    zero = ir.Constant(ir.IntType(32), 0)
+                    msg_ptr = builder.gep(msg_val, [zero, zero], inbounds=True, name="assert_msg_ptr")
+                else:
+                    msg_ptr = msg_val
             
-            msg_gv = ir.GlobalVariable(
-                module,
-                msg_type,
-                name='ASSERT_MSG'
-            )
-            msg_gv.initializer = msg_const
-            msg_gv.linkage = 'internal'
-            msg_gv.global_constant = True
+            # Look for Flux print function
+            print_fn = module.globals.get('print')
             
-            # Get pointer to message
-            zero = ir.Constant(ir.IntType(32), 0)
-            msg_ptr = builder.gep(msg_gv, [zero, zero], inbounds=True)
-            
-            # Declare puts if not already present
-            # URGENT -> CALL PRINT
-            # TODO: DEFINE GENERIC PRINT IN STANDARD LIBRARY
-            puts = module.globals.get('puts')
-            builder.call(puts, [msg_ptr])
+            if print_fn is not None:
+                builder.call(print_fn, [msg_ptr])
+            else:
+                # Fallback to puts
+                puts_fn = module.globals.get('puts')
+                if puts_fn is None:
+                    puts_type = ir.FunctionType(ir.IntType(32), [ir.PointerType(ir.IntType(8))])
+                    puts_fn = ir.Function(module, puts_type, 'puts')
+                    puts_fn.linkage = 'external'
+                builder.call(puts_fn, [msg_ptr])
 
-        # Abort
+        # Call abort
         abort = module.globals.get('abort')
+        if abort is None:
+            abort_type = ir.FunctionType(ir.VoidType(), [])
+            abort = ir.Function(module, abort_type, 'abort')
+            abort.linkage = 'external'
+        
         builder.call(abort, [])
         builder.unreachable()
 

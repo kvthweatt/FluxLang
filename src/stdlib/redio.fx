@@ -37,10 +37,10 @@ namespace standard
 #ifdef __MACOS__
             def mac_print(byte* msg, int x) -> void;
 #endif;
+
             // GENERIC
             def print(noopstr s, int len) -> void;
             def print(noopstr s) -> void;
-
 
 // INPUT DEFINITIONS BEGIN
 #ifdef __WINDOWS__

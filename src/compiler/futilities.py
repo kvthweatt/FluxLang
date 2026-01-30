@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Flux Utilities Module
+Flux AST Utilities Module
 
 Helper and utility functions extracted from the Flux AST.
 These functions provide common operations for type conversion,
@@ -16,21 +16,11 @@ from typing import Any, Optional, List, Dict, Tuple
 from enum import Enum
 from llvmlite import ir
 
+from ftypesys import DataType
 
 # ============================================================================
 # Type System Utilities
 # ============================================================================
-
-class DataType(Enum):
-    """Data type enumeration (imported for type hints)"""
-    SINT = "int"
-    UINT = "uint"
-    FLOAT = "float"
-    CHAR = "char"
-    BOOL = "bool"
-    DATA = "data"
-    VOID = "void"
-    THIS = "this"
 
 
 class Operator(Enum):
@@ -85,8 +75,8 @@ class Operator(Enum):
 
 
 class LoweringContext:
-    def __init__(self, builder: ir.IRBuilder):
-        self.b = builder
+    def __init__(instance, builder: ir.IRBuilder):
+        instance.b = builder
 
     # --------------------------------------------------
     # Signedness
@@ -105,7 +95,7 @@ class LoweringContext:
     # Integer normalization
     # --------------------------------------------------
 
-    def normalize_ints(self, a: ir.Value, b: ir.Value, *, unsigned: bool, promote: bool):
+    def normalize_ints(instance, a: ir.Value, b: ir.Value, *, unsigned: bool, promote: bool):
         """
         Normalize two integer values to the same width.
         
@@ -136,10 +126,10 @@ class LoweringContext:
                 return v
             elif v.type.width < width:
                 # Extending to larger width
-                result = self.b.zext(v, ty) if unsigned else self.b.sext(v, ty)
+                result = instance.b.zext(v, ty) if unsigned else instance.b.sext(v, ty)
             else:
                 # Truncating to smaller width
-                result = self.b.trunc(v, ty)
+                result = instance.b.trunc(v, ty)
             
             # Preserve _flux_type_spec metadata
             if hasattr(v, '_flux_type_spec'):
@@ -155,29 +145,29 @@ class LoweringContext:
     # Pointer helpers
     # --------------------------------------------------
 
-    def ptr_to_i64(self, v: ir.Value) -> ir.Value:
+    def ptr_to_i64(instance, v: ir.Value) -> ir.Value:
         if isinstance(v.type, ir.PointerType):
-            return self.b.ptrtoint(v, ir.IntType(64))
+            return instance.b.ptrtoint(v, ir.IntType(64))
         return v
 
     # --------------------------------------------------
     # Comparisons
     # --------------------------------------------------
 
-    def emit_int_cmp(self, op: str, a: ir.Value, b: ir.Value):
-        unsigned = self.comparison_is_unsigned(a, b)
-        a, b = self.normalize_ints(a, b, unsigned=unsigned, promote=True)
+    def emit_int_cmp(instance, op: str, a: ir.Value, b: ir.Value):
+        unsigned = instance.comparison_is_unsigned(a, b)
+        a, b = instance.normalize_ints(a, b, unsigned=unsigned, promote=True)
         return (
-            self.b.icmp_unsigned(op, a, b)
+            instance.b.icmp_unsigned(op, a, b)
             if unsigned
-            else self.b.icmp_signed(op, a, b)
+            else instance.b.icmp_signed(op, a, b)
         )
 
-    def emit_ptr_cmp(self, op: str, a: ir.Value, b: ir.Value):
+    def emit_ptr_cmp(instance, op: str, a: ir.Value, b: ir.Value):
         # Explicit raw-address semantics
-        a = self.ptr_to_i64(a)
-        b = self.ptr_to_i64(b)
-        return self.b.icmp_unsigned(op, a, b)
+        a = instance.ptr_to_i64(a)
+        b = instance.ptr_to_i64(b)
+        return instance.b.icmp_unsigned(op, a, b)
 
 
 def infer_int_width(value: int, data_type: DataType) -> int:
@@ -937,3 +927,59 @@ def is_macro_defined(module: ir.Module, macro_name: str) -> bool:
     
     # Handle other types (shouldn't happen but be defensive)
     return bool(value)
+
+
+# String Heap Allocation
+
+def string_heap_allocation(builder: ir.IRBuilder, module: ir.Module, str_val):
+    # Heap allocation: allocate memory and copy string data
+    # Declare malloc if not already present
+    malloc_fn = module.globals.get('malloc')
+    if malloc_fn is None:
+        malloc_type = ir.FunctionType(ir.PointerType(ir.IntType(8)), [ir.IntType(64)])
+        malloc_fn = ir.Function(module, malloc_type, 'malloc')
+        malloc_fn.linkage = 'external'
+    
+    # Allocate memory for the string
+    size = ir.Constant(ir.IntType(64), len(str_val.type))
+    heap_ptr = builder.call(malloc_fn, [size], name="heap_str")
+    
+    # Cast to array pointer type
+    array_ptr = builder.bitcast(heap_ptr, ir.PointerType(str_val.type))
+    
+    # Store the string constant in the allocated memory
+    builder.store(str_val, array_ptr)
+    
+    # Return pointer to first element
+    zero = ir.Constant(ir.IntType(32), 0)
+    return builder.gep(array_ptr, [zero, zero], name="heap_str_ptr")
+
+# Array Heap Allocation
+def array_heap_allocation(builder: ir.IRBuilder, module: ir.Module, str_val):
+    # Heap allocation: allocate memory and copy array data
+    malloc_fn = module.globals.get('malloc')
+    if malloc_fn is None:
+        malloc_type = ir.FunctionType(ir.PointerType(ir.IntType(8)), [ir.IntType(64)])
+        malloc_fn = ir.Function(module, malloc_type, 'malloc')
+        malloc_fn.linkage = 'external'
+    
+    # Calculate total bytes needed for the array
+    element_size = str_val.type.element.width // 8  # bits to bytes
+    array_count = str_val.type.count
+    total_bytes = element_size * array_count
+    
+    size = ir.Constant(ir.IntType(64), total_bytes)
+    heap_ptr = builder.call(malloc_fn, [size], name="heap_array")
+    
+    # Cast to appropriate array pointer type
+    array_ptr = builder.bitcast(heap_ptr, ir.PointerType(str_val.type))
+    
+    # Store the array constant in the allocated memory
+    builder.store(str_val, array_ptr)
+    
+    # Mark as array pointer for downstream logic
+    array_ptr.type._is_array_pointer = True
+    
+    # Return the array pointer
+    zero = ir.Constant(ir.IntType(32), 0)
+    return builder.gep(array_ptr, [zero, zero], name="heap_array_ptr")
