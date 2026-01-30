@@ -9,7 +9,7 @@
 - bool ✅
 - break ✅
 - case ✅
-- catch
+- catch ✅
 - char ✅
 - compt ❌ Deferred for bootsrap
 - const ✅
@@ -22,7 +22,7 @@
 - elif ✅
 - else ✅
 - lext ❌ Deferred for bootsrap
-- extern ❌ Deferred for bootsrap
+- extern ✅
 - false ✅
 - float ✅
 - for ✅
@@ -109,8 +109,11 @@
 - SCOPE = "::" ✅
 - TERMARY = "?:" ✅
 - NULL COALESCE = "??" ✅
+- ADDRESS_CAST = "(@)" ✅
+- NO_MANGLE = "!!" ✅
 
 ## Directionals
 - RETURN_ARROW = "->" ✅
 - CHAIN_ARROW = "<-" ✅
 - RECURSE_ARROW = "<~"  ⚠️ Not implemented, can be done in reduced spec
+- TIE = "~" ✅ (Ownership)
