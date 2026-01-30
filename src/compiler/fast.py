@@ -16,6 +16,8 @@ from llvmlite import ir
 from pathlib import Path
 import os
 
+from futilities import *
+
 ## TO DO
 #
 # -> Add `lext` keyword to set external linkage.
@@ -32,17 +34,6 @@ class ASTNode:
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Any:
         raise NotImplementedError(f"codegen not implemented for {self.__class__.__name__}")
 
-# Enums and simple types
-class DataType(Enum):
-    SINT = "int"
-    UINT = "uint"
-    FLOAT = "float"
-    CHAR = "char"
-    BOOL = "bool"
-    DATA = "data"
-    VOID = "void"
-    THIS = "this"
-
 class StorageClass(Enum):
     """Storage class specifiers for variables"""
     AUTO = "auto"         # Default: automatic storage (stack for locals, global for module-level)
@@ -51,59 +42,6 @@ class StorageClass(Enum):
     GLOBAL = "global"     # Global/static storage
     LOCAL = "local"       # Local scope (restricted to current stack)
     REGISTER = "register" # Hint: keep in register if possible
-
-class Operator(Enum):
-    ADD = "+"
-    SUB = "-"
-    MUL = "*"
-    DIV = "/"
-    MOD = "%"
-    NOT = "!"
-    POWER = "^"
-    XOR = "^^"
-    OR = "|"
-    AND = "&"
-    BITOR = "`|"
-    BITAND = "`&"
-    NOR = "!|"
-    NAND = "!&"
-    INCREMENT = "++"
-    DECREMENT = "--"
-    
-    # Comparison
-    EQUAL = "=="
-    NOT_EQUAL = "!="
-    LESS_THAN = "<"
-    LESS_EQUAL = "<="
-    GREATER_THAN = ">"
-    GREATER_EQUAL = ">="
-    
-    # Shift
-    BITSHIFT_LEFT = "<<"
-    BITSHIFT_RIGHT = ">>"
-    
-    # Assignment
-    ASSIGN = "="
-    PLUS_ASSIGN = "+="
-    MINUS_ASSIGN = "-="
-    MULTIPLY_ASSIGN = "*="
-    DIVIDE_ASSIGN = "/="
-    MODULO_ASSIGN = "%="
-    POWER_ASSIGN = "^="
-    XOR_ASSIGN = "^^="
-    BITSHIFT_LEFT_ASSIGN = "<<="
-    BITSHIFT_RIGHT_ASSIGN = ">>="
-    
-    # Other operators
-    ADDRESS_OF = "@"
-    RANGE = ".."
-    SCOPE = "::"
-    QUESTION = "?"
-    COLON = ":"
-
-    # Directionals
-    RETURN_ARROW = "->"
-    CHAIN_ARROW = "<-"
 
 # Literal values (no dependencies)
 @dataclass
@@ -125,23 +63,10 @@ class Literal(ASTNode):
         else:
             raise ValueError("Not an integer literal")
 
-    def _attach_type_metadata(self, llvm_value: ir.Value, type_spec: Optional['TypeSpec'] = None):
-        '''Attach Flux type information to LLVM value for proper signedness tracking'''
-        bit_width = llvm_value.type.width if hasattr(llvm_value.type, 'width') else None
-        if type_spec is None:
-            type_spec = TypeSpec(
-                base_type=self.type,
-                is_signed=(self.type == DataType.SINT),
-                bit_width=bit_width
-            )
-        
-        llvm_value._flux_type_spec = type_spec
-        return llvm_value
-
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         if self.type in (DataType.SINT, DataType.UINT):
             val = int(self.value, 0) if isinstance(self.value, str) else int(self.value)
-            width = self._infer_int_width(val)
+            width = infer_int_width(val, self.type)
             
             # For unsigned types with values >= 2^63, ensure proper handling
             if self.type == DataType.UINT and width == 64 and val >= (1 << 63):
@@ -153,7 +78,7 @@ class Literal(ASTNode):
                 llvm_val = ir.Constant(ir.IntType(width), val)
             
             # Attach type metadata for signedness tracking
-            return self._attach_type_metadata(llvm_val)
+            return attach_type_metadata(llvm_val, base_type=self.type)
         elif self.type == DataType.FLOAT:
             return ir.Constant(ir.FloatType(), float(self.value))
         elif self.type == DataType.BOOL:
@@ -1319,64 +1244,6 @@ class ArrayLiteral(Expression):
             
             return ptr
     
-    def _find_common_type(self, types: List[ir.Type]) -> ir.Type:
-        """Find a common type that all elements can be cast to."""
-        if not types:
-            return ir.IntType(32)  # Default to i32
-        
-        # Check if all are integer types
-        if all(isinstance(t, ir.IntType) for t in types):
-            # Use the widest integer type
-            max_width = max(t.width for t in types)
-            return ir.IntType(max_width)
-        
-        # Check if any are float types
-        if any(isinstance(t, ir.FloatType) for t in types):
-            # Promote all to float
-            return ir.FloatType()
-        
-        # Check for pointer types
-        if all(isinstance(t, ir.PointerType) for t in types):
-            # All pointers - use void* as common type
-            return ir.PointerType(ir.IntType(8))
-        
-        # Default to first type
-        return types[0]
-    
-    def _cast_to_type(self, builder: ir.IRBuilder, value: ir.Value, target_type: ir.Type) -> ir.Value:
-        """Cast value to target type."""
-        if value.type == target_type:
-            return value
-        
-        # Integer type conversions
-        if isinstance(value.type, ir.IntType) and isinstance(target_type, ir.IntType):
-            if value.type.width < target_type.width:
-                return builder.sext(value, target_type)
-            elif value.type.width > target_type.width:
-                return builder.trunc(value, target_type)
-            else:
-                return value
-        
-        # Integer to float
-        if isinstance(value.type, ir.IntType) and isinstance(target_type, ir.FloatType):
-            return builder.sitofp(value, target_type)
-        
-        # Float to integer
-        if isinstance(value.type, ir.FloatType) and isinstance(target_type, ir.IntType):
-            return builder.fptosi(value, target_type)
-        
-        # Pointer casts
-        if isinstance(value.type, ir.PointerType) and isinstance(target_type, ir.PointerType):
-            return builder.bitcast(value, target_type)
-        
-        # Array to pointer decay (for function arguments)
-        if (isinstance(value.type, ir.PointerType) and isinstance(value.type.pointee, ir.ArrayType) and
-            isinstance(target_type, ir.PointerType) and value.type.pointee.element == target_type.pointee):
-            zero = ir.Constant(ir.IntType(32), 0)
-            return builder.gep(value, [zero, zero], name="array_decay")
-        
-        raise ValueError(f"Cannot cast {value.type} to {target_type}")
-    
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate code for array literal."""
         if self.is_string:
@@ -1515,11 +1382,11 @@ class ArrayLiteral(Expression):
             element_type = next(iter(element_types))
         else:
             # Try to find a common type
-            element_type = self._find_common_type(list(element_types))
+            element_type = find_common_type(list(element_types))
             # Cast all elements to common type
             for i in range(len(element_values)):
                 if element_values[i].type != element_type:
-                    element_values[i] = self._cast_to_type(builder, element_values[i], element_type)
+                    element_values[i] = cast_to_type(builder, element_values[i], element_type)
         
         # Create array type and constant
         array_type = ir.ArrayType(element_type, len(element_values))
@@ -2066,156 +1933,6 @@ class QualifiedName(Expression):
             return f"{qual_str}.{self.member}"
         return qual_str
 
-# Helper utilities for array operations
-def is_array_or_array_pointer(val: ir.Value) -> bool:
-    """Check if value is an array type or a pointer to an array type"""
-    return (isinstance(val.type, ir.ArrayType) or 
-            (isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType)))
-
-def is_array_pointer(val: ir.Value) -> bool:
-    """Check if value is a pointer to an array type"""
-    return (isinstance(val.type, ir.PointerType) and 
-            isinstance(val.type.pointee, ir.ArrayType))
-
-def get_array_info(val: ir.Value) -> tuple:
-    """Get (element_type, length) for array or array pointer"""
-    if isinstance(val.type, ir.ArrayType):
-        # Direct array type (loaded from a pointer)
-        return (val.type.element, val.type.count)
-    elif isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType):
-        # Pointer to array type
-        array_type = val.type.pointee
-        return (array_type.element, array_type.count)
-    else:
-        raise ValueError(f"Value is not an array or array pointer: {val.type}")
-
-def emit_memcpy(builder: ir.IRBuilder, module: ir.Module, dst_ptr: ir.Value, src_ptr: ir.Value, bytes: int) -> None:
-    """Emit llvm.memcpy intrinsic call"""
-    # Declare llvm.memcpy.p0i8.p0i8.i64 if not already declared
-    memcpy_name = "llvm.memcpy.p0i8.p0i8.i64"
-    if memcpy_name not in module.globals:
-        memcpy_type = ir.FunctionType(
-            ir.VoidType(),
-            [ir.PointerType(ir.IntType(8)),  # dst
-             ir.PointerType(ir.IntType(8)),  # src
-             ir.IntType(64),                 # len
-             ir.IntType(1)]                  # volatile
-        )
-        memcpy_func = ir.Function(module, memcpy_type, name=memcpy_name)
-        memcpy_func.attributes.add('nounwind')
-    else:
-        memcpy_func = module.globals[memcpy_name]
-    
-    # Cast pointers to i8* if needed
-    i8_ptr = ir.PointerType(ir.IntType(8))
-    if dst_ptr.type != i8_ptr:
-        dst_ptr = builder.bitcast(dst_ptr, i8_ptr)
-    if src_ptr.type != i8_ptr:
-        src_ptr = builder.bitcast(src_ptr, i8_ptr)
-    
-    # Call memcpy
-    builder.call(memcpy_func, [
-        dst_ptr,
-        src_ptr,
-        ir.Constant(ir.IntType(64), bytes),
-        ir.Constant(ir.IntType(1), 0)  # not volatile
-    ])
-
-class LoweringContext:
-    def __init__(self, builder: ir.IRBuilder):
-        self.b = builder
-
-    # --------------------------------------------------
-    # Signedness
-    # --------------------------------------------------
-
-    @staticmethod
-    def is_unsigned(val: ir.Value) -> bool:
-        spec = getattr(val, "_flux_type_spec", None)
-        return spec is not None and not spec.is_signed
-
-    @staticmethod
-    def comparison_is_unsigned(a: ir.Value, b: ir.Value) -> bool:
-        return LoweringContext.is_unsigned(a) or LoweringContext.is_unsigned(b)
-
-    # --------------------------------------------------
-    # Integer normalization
-    # --------------------------------------------------
-
-    def normalize_ints(self, a: ir.Value, b: ir.Value, *, unsigned: bool, promote: bool):
-        """
-        Normalize two integer values to the same width.
-        
-        Args:
-            a, b: Integer values to normalize
-            unsigned: Whether to use unsigned extension semantics when extending
-            promote: If True, normalize to MAXIMUM width (for arithmetic/bitwise/comparisons).
-                     If False, normalize to MINIMUM width (for bitshifts only).
-        
-        Context:
-            - Bitshift operations (<<, >>): promote=False (shift amount matches value width)
-            - All other operations: promote=True (preserve full range and precision)
-        """
-        assert isinstance(a.type, ir.IntType)
-        assert isinstance(b.type, ir.IntType)
-
-        if a.type.width == b.type.width:
-            return a, b
-
-        # Promote to max for arithmetic/bitwise, lower to min for bitshifts
-        width = max(a.type.width, b.type.width) if promote else min(a.type.width, b.type.width)
-        ty = ir.IntType(width)
-
-        def convert(v):
-            #direction = "PROMOTING" if promote else "LOWERING"
-            #print(f"{direction} NORMALIZE", v.type, v.type.width, ty, width)
-            if v.type.width == width:
-                return v
-            elif v.type.width < width:
-                # Extending to larger width
-                result = self.b.zext(v, ty) if unsigned else self.b.sext(v, ty)
-            else:
-                # Truncating to smaller width
-                result = self.b.trunc(v, ty)
-            
-            # Preserve _flux_type_spec metadata
-            if hasattr(v, '_flux_type_spec'):
-                result._flux_type_spec = v._flux_type_spec
-                # Update bit width to match new type
-                result._flux_type_spec.bit_width = width
-            
-            return result
-
-        return convert(a), convert(b)
-
-    # --------------------------------------------------
-    # Pointer helpers
-    # --------------------------------------------------
-
-    def ptr_to_i64(self, v: ir.Value) -> ir.Value:
-        if isinstance(v.type, ir.PointerType):
-            return self.b.ptrtoint(v, ir.IntType(64))
-        return v
-
-    # --------------------------------------------------
-    # Comparisons
-    # --------------------------------------------------
-
-    def emit_int_cmp(self, op: str, a: ir.Value, b: ir.Value):
-        unsigned = self.comparison_is_unsigned(a, b)
-        a, b = self.normalize_ints(a, b, unsigned=unsigned, promote=True)
-        return (
-            self.b.icmp_unsigned(op, a, b)
-            if unsigned
-            else self.b.icmp_signed(op, a, b)
-        )
-
-    def emit_ptr_cmp(self, op: str, a: ir.Value, b: ir.Value):
-        # Explicit raw-address semantics
-        a = self.ptr_to_i64(a)
-        b = self.ptr_to_i64(b)
-        return self.b.icmp_unsigned(op, a, b)
-
 
 @dataclass
 class BinaryOp(Expression):
@@ -2223,21 +1940,12 @@ class BinaryOp(Expression):
     operator: Operator
     right: Expression
 
-    def _is_unsigned(self, val: ir.Value) -> bool:
-        """
-        Check if a value should be treated as unsigned based on its type metadata.
-        Returns True if unsigned, False if signed or unknown (default to signed).
-        """
-        if hasattr(val, '_flux_type_spec'):
-            return not val._flux_type_spec.is_signed
-        return False
-
     def _get_comparison_signedness(self, left_val: ir.Value, right_val: ir.Value) -> bool:
         """
         Determine if comparison should be unsigned.
         If either operand is unsigned, use unsigned comparison.
         """
-        return self._is_unsigned(left_val) or self._is_unsigned(right_val)
+        return is_unsigned(left_val) or is_unsigned(right_val)
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         ctx = LoweringContext(builder)
@@ -2749,40 +2457,6 @@ class CastExpression(Expression):
         asm_type = ir.FunctionType(ir.VoidType(), [i8_ptr])
         inline_asm = ir.InlineAsm(asm_type, asm_code, constraints, side_effect=True)
         builder.call(inline_asm, [void_ptr])
-
-# ALERT
-# DO NOT REMOVE IS_MACRO_DEFINED DO NOT REMOVE
-# ALERT
-def is_macro_defined(module: ir.Module, macro_name: str) -> bool:
-    """
-    Check if a preprocessor macro is defined in the module.
-    
-    Args:
-        module: LLVM IR module containing preprocessor macros
-        macro_name: Name of the macro to check
-        
-    Returns:
-        True if macro is defined and evaluates to truthy value, False otherwise
-    """
-    if not hasattr(module, '_preprocessor_macros'):
-        return False
-    
-    if macro_name not in module._preprocessor_macros:
-        return False
-    
-    # Get macro value
-    value = module._preprocessor_macros[macro_name]
-    
-    # Handle string values - check if it's "1" or other truthy string
-    if isinstance(value, str):
-        # Empty string or "0" are falsy
-        if value == "" or value == "0":
-            return False
-        # Everything else is truthy
-        return True
-    
-    # Handle other types (shouldn't happen but be defensive)
-    return bool(value)
 
 @dataclass
 class RangeExpression(Expression):
@@ -4074,9 +3748,9 @@ class VariableDeclaration(ASTNode):
             if init_const is not None:
                 gvar.initializer = init_const
             else:
-                gvar.initializer = self._get_default_initializer(llvm_type)
+                gvar.initializer = get_default_initializer(llvm_type)
         else:
-            gvar.initializer = self._get_default_initializer(llvm_type)
+            gvar.initializer = get_default_initializer(llvm_type)
         
         gvar.linkage = 'internal'
         return gvar
@@ -4168,17 +3842,6 @@ class VariableDeclaration(ASTNode):
                         return other_global.initializer
         
         return None
-    
-    def _get_default_initializer(self, llvm_type: ir.Type) -> ir.Constant:
-        """Get default initializer for a type."""
-        if isinstance(llvm_type, ir.IntType):
-            return ir.Constant(llvm_type, 0)
-        elif isinstance(llvm_type, ir.FloatType):
-            return ir.Constant(llvm_type, 0.0)
-        elif isinstance(llvm_type, ir.ArrayType):
-            return ir.Constant(llvm_type, ir.Undefined)
-        else:
-            return ir.Constant(llvm_type, None)
     
     def _codegen_local(self, builder: ir.IRBuilder, module: ir.Module, 
                       llvm_type: ir.Type, resolved_type_spec: TypeSpec) -> ir.Value:
@@ -7054,7 +6717,7 @@ class StructDef(ASTNode):
                         bit_width = 32
                         alignment = 32
                 else:
-                    bit_width = self._get_builtin_bit_width(member_type.base_type)
+                    bit_width = get_builtin_bit_width(member_type.base_type)
                     alignment = bit_width
                 
                 if alignment > 1:
@@ -7087,17 +6750,6 @@ class StructDef(ASTNode):
             )
             #print(f"DEBUG calculate_vtable: Created vtable for '{self.name}' with field_types={field_types}")
             return vtable
-    
-    def _get_builtin_bit_width(self, base_type: DataType) -> int:
-        """Get bit width for built-in types"""
-        widths = {
-            DataType.BOOL: 1,
-            DataType.CHAR: 8,
-            DataType.SINT: 32,
-            DataType.FLOAT: 32,
-            DataType.VOID: 0
-        }
-        return widths.get(base_type, 32)
     
     def _get_custom_type_info(self, typename: str, module: ir.Module) -> Dict:
         """Look up custom type information from module's type registry."""
@@ -7266,7 +6918,7 @@ class StructFieldAccess(Expression):
 
         # Fallback: try to infer from type
         if struct_name is None:
-            struct_name = self._infer_struct_name(instance, module)
+            struct_name = infer_struct_name(instance, module)
         
         # Get vtable
         vtable = module._struct_vtables.get(struct_name)
@@ -7398,7 +7050,7 @@ class StructFieldAssign(Statement):
         instance = builder.load(instance_ptr)
         
         # Get struct type
-        struct_name = self._infer_struct_name(instance, module)
+        struct_name = infer_struct_name(instance, module)
         vtable = module._struct_vtables[struct_name]
         
         # Find field
@@ -7456,17 +7108,6 @@ class StructFieldAssign(Statement):
             raise NotImplementedError(
                 "Field assignment in large structs not yet supported"
             )
-    
-    def _infer_struct_name(self, instance: ir.Value, module: ir.Module) -> str:
-        """Infer struct name from instance type"""
-        if not hasattr(module, '_struct_types'):
-            raise ValueError("No struct types defined")
-        
-        for struct_name, struct_type in module._struct_types.items():
-            if instance.type == struct_type:
-                return struct_name
-        
-        raise ValueError("Cannot determine struct type from instance")
 
 @dataclass
 class StructRecast(Expression):

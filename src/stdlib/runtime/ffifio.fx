@@ -3,7 +3,6 @@
 
 #ifndef FLUX_FILE_IO
 #def FLUX_FILE_IO 1;
-#endif;
 
 extern
 {
@@ -140,7 +139,7 @@ namespace standard
             
             // Check if file exists
             // Returns 1 if exists, 0 if not
-            def file_exists(byte* filename) -> int
+            def file_exists(byte* filename) -> bool
             {
                 void* file = fopen(filename, "rb\0");
                 if (file == 0)
@@ -149,10 +148,12 @@ namespace standard
                 };
                 
                 fclose(file);
-                return 1;
+                return (bool)1;
             };
         };
     };
 };
 
 using standard::io::file;
+
+#endif;
