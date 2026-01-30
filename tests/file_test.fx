@@ -1,100 +1,73 @@
-// debug_file_test.fx
-#import "standard.fx";
+// Example: Using the File I/O Library
+#import "standard.fx", "ffifio.fx";
 
-def main() -> i32
+def main() -> int
 {
-    print("Debug: Starting file test...\n\0");
-    
-    // Test different paths
-    byte[] path1 = "test.txt\0";
-    byte[] path2 = "\\test.txt\0";
-    byte[] path3 = "C:\\test.txt\0";
-    
-    print("Debug: Testing path1: \0");
-    print(@path1);
-    print();
-    
-    // First check if we can even call the function
-    i64 handle = open_read(@path1);
-    
-    print("Debug: open_read returned: \0");
-    byte[20] buf;
-    i64str(handle, buf);
-    print(buf);
-    print();
-    
-    // Try creating a file first
-    print("Debug: Trying to create a file first...\0");
-    
-    i64 create_handle = open_write(@path1);
-    
-    print("Debug: open_write returned: \0");
-    i64str(create_handle, buf);
-    print(buf);
-    print();
-    
-    if (create_handle != -1)
+    noopstr filename = "test.txt\0";
+    // ===== EXAMPLE 1: Write to a file =====
+    byte[100] message = "Hello from Flux!\nThis is a test file.\n\0";
+    int result = write_file(filename, message, 41);  // 41 chars
+
+    if (result == (bool)-1)
     {
-        print("Debug: Successfully created file!\n");
-        
-        // Write something
-        byte[] test_data = "Test data\n\0";
-        i32 written = win_write(create_handle, test_data, strlen(test_data));
-        
-        print("Debug: win_write returned: \0");
-        i32str(written, buf);
-        print(buf);
-        print();
-        
-        // Close it
-        i32 closed = win_close(create_handle);
-        print("Debug: win_close returned: \0");
-        i32str(closed, buf);
-        print(buf);
-        print();
-        
-        // Now try to read it
-        print("Debug: Now trying to read the file we just created...\n\0");
-        handle = open_read(@path1);
-        
-        print("Debug: open_read (after create) returned: \0");
-        i64str(handle, buf);
-        print(buf);
-        print();
-        
-        if (handle != -1)
-        {
-            byte[100] read_buf;
-            i32 read_bytes = win_read(handle, read_buf, 100);
-            
-            print("Debug: win_read returned: \0");
-            i32str(read_bytes, buf);
-            print(buf);
-            print("\n");
-            
-            if (read_bytes > 0)
-            {
-                print("Debug: Read content: \0");
-                read_buf[read_bytes] = (byte)0;
-                print(read_buf);
-            };
-            
-            win_close(handle);
-        };
-    }
-    else
-    {
-        print("Debug: Could not create file. Testing with absolute path...\n\0");
-        
-        // Try C:\test.txt
-        create_handle = open_write(@path3);
-        
-        print("Debug: open_write (C:\\test.txt) returned: \0");
-        i64str(create_handle, buf);
-        print(buf);
-        print();
+        // Error writing file
+        return 1;
     };
     
-    print("Debug: Test complete.\n\0");
+    
+    // ===== EXAMPLE 2: Read from a file =====
+    byte[1024] buffer;
+    int bytes_read = read_file(filename, buffer, 1024);
+    
+    if (bytes_read == -1)
+    {
+        // Error reading file
+        return 1;
+    };
+    
+    // buffer now contains the file contents
+    // You can print it or process it
+    
+    
+    // ===== EXAMPLE 3: Append to a file =====
+    byte[50] more_data = "Appending more text!\n\0";
+    append_file(filename, more_data, 21);
+    
+    
+    // ===== EXAMPLE 4: Check file size =====
+    int size = get_file_size(filename);
+    // size now contains the file size in bytes
+    
+    
+    // ===== EXAMPLE 5: Check if file exists =====
+    if ((bool)file_exists(filename))
+    {
+        // File exists!
+        print("File exists!\0");
+    };
+
+    
+    // ===== EXAMPLE 6: Manual file operations =====
+    // For more control, use the raw C functions:
+    ///
+    void* file = fopen("data.bin", "wb");
+    if (file != (@)0)
+    {
+        byte[10] data = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+        fwrite(@data, 1, 10, file);
+        fclose(file);
+    };
+    
+    // Read it back
+    void* file2 = fopen("data.bin", "rb");
+    if (file2 != (@)0)
+    {
+        byte[10] read_data;
+        fread(@read_data, 1, 10, file2);
+        fclose(file2);
+        
+        // read_data now contains {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+    };
+    ///
     return 0;
 };
