@@ -1,0 +1,1954 @@
+commit 936f3a230a89fdac549d4abdbacf15a146be21b5
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 29 22:26:09 2026 -0600
+
+    Update to what works
+
+commit f91e0089dd84c1ed021df16b63390470b92f2a39
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 29 22:21:22 2026 -0600
+
+    Minor change. Also extern working.
+
+commit 9c2bfa408f058047f43b996ec5da4aa97dbba6f2
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 29 22:19:36 2026 -0600
+
+    `try`/`catch` working.
+
+commit 8ac8ca7d6a5aebdca529bef4c0f123e4e2ef4083
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 29 19:18:51 2026 -0600
+
+    Fixed runtime, `exit()` has a parameter now taking an int and was missing that.
+
+commit 3995edb90f0df761d5d67d5e76330c0a000072fb
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 29 19:12:55 2026 -0600
+
+    Refactored Lexer operator lexing.
+
+commit 627a2bdef3be57477f83492f884181ba44d0e690
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 29 18:59:02 2026 -0600
+
+    Added `!!` -- The no-mangle token. Instruct the compiler not to mangle this function name, `def !!foo() -> void {};`
+
+commit 57b2daf188b4f4739e8212ff8395fbe3df9be0ce
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 29 18:47:34 2026 -0600
+
+    Some exception stuff. Added try/catch handling. Needs work. Need to have more arch forms of the exception code.
+
+commit de8f20bc4783e1c25fc439ea51afa0fb78892ca3
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 29 18:18:45 2026 -0600
+
+    Cleanup
+
+commit 082052e5ac345faa0ada8ce56567792eebe09b77
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 29 18:17:19 2026 -0600
+
+    Added `~` -- The 'tie' operator, for comptime ownership semantics.
+
+commit db5871e0f7c0393389f20ab94d6c172ba7ef2a15
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 29 01:30:07 2026 -0600
+
+    Fixed preprocessor.
+
+commit 426fae10b26b86e136836f5eb52554271e4ae509
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 29 00:05:09 2026 -0600
+
+    `*(unsigned data{1}*)0 = 0;`
+
+commit 93a56a12c046895495b23c46ec2be4f724b9fed8
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 28 23:06:10 2026 -0600
+
+    Expanded standard library.
+
+commit 010a34b92361fbc6f29f28662b61e04a41207720
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 28 21:39:21 2026 -0600
+
+    OOP strings. Ability to print numbers. Can do `print(5)` now.
+
+commit d4dfa8169c0dd899bc4aba66b8270f7f9eec16a5
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 28 20:02:45 2026 -0600
+
+    Fix for structs for now.
+
+commit 62637f8cea710dbffc87dea92b4280601dd6a199
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 28 19:40:39 2026 -0600
+
+    Bunch of fixes, added multi-line import support.
+
+commit e9e883c410bc0858d2f7540abe98385d67b8331f
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 28 18:17:41 2026 -0600
+
+    String to integer!
+
+commit b051646ba75b65866d43e9a49e315f03ba2d6f6b
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 28 17:24:48 2026 -0600
+
+    Here we go.
+
+commit 5ff1cc08acf4d47abdaf69d71434279c85202a17
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 28 15:03:00 2026 -0600
+
+    Almost there...
+
+commit 594fb987083bbf6ac3ba1615c629180b4f439ad1
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 28 14:54:16 2026 -0600
+
+    More fixed, almost there.
+
+commit 30a89f155eaa36709a85bb13790d2cd01fdffbd0
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 28 14:23:31 2026 -0600
+
+    Almost have 64-bit fixed.
+
+commit bbc1ad7e544fd250d62b9f2fcd06678f75a18f97
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 28 13:43:52 2026 -0600
+
+    Update to support unsigned integer literals with `u` suffix.
+
+commit ac5811dde8959253019bd1d2527dd7c52afc96a0
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 28 11:33:10 2026 -0600
+
+    Added 64-bit tests.
+
+commit 866345fc8766e31a6ae9b2b067dee93551f6f096
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 28 08:06:43 2026 -0600
+
+    Fix to language specification.
+
+commit e66968495796c586441caf072628046d5961dbb1
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 28 00:09:05 2026 -0600
+
+    Testing `redmath.fx`
+
+commit fc92039117abd17e30a6c6d67499485f870cc067
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 23:38:49 2026 -0600
+
+    DOS is hot.
+
+commit 7646cec287431b8c75522a7130c38012840ff7d5
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 16:06:13 2026 -0600
+
+    Fixed strings, they are not null-terminated by default, programmers must terminate them or use standard::types::string
+
+commit 2e304295caa884b3cc83216e9f51be0869d289c3
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 16:02:00 2026 -0600
+
+    Missing details about more operators and general things one would do.
+
+commit bcd37a89b729f869cfbbc81ebe9fb88d798c617a
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 15:58:14 2026 -0600
+
+    Fixed, removed `import` from keyword list, it is now a preprocessor directive. Added preprocessor info.
+
+commit 4a32375565b3648ff8ac646204fe4c53ad9aa362
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 15:55:28 2026 -0600
+
+    Update to reduced spec to demonstrate more of the language.
+
+commit 4a39c6937f15c401c253b9b7aa945fc6cf6a668c
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 15:27:17 2026 -0600
+
+    Updated what works
+
+commit e58ed9bd36c05dd6d14532d9197b3fdca599e732
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 15:19:38 2026 -0600
+
+    Added chain `<-`, null coalesce `??` and ternary `?:` operators.
+
+commit 996d17da6463cd8fddde43f264f58be8f5634da4
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 14:42:44 2026 -0600
+
+    `object` and `struct` working.
+
+commit 9c38cc1d1a49e2852cfe590dbd2fabcda76fb7c1
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 12:25:26 2026 -0600
+
+    Cursed Flux? Cursed Flux.
+
+commit c5d9e759a847cc312987f886bbb05f0732fd49bd
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 11:19:29 2026 -0600
+
+    Added address casting with `(@)` syntax, including a specialized token in the Lexer.
+
+commit 489b80b111abba1d6d7c04d7b487156a8db4b105
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 03:50:33 2026 -0600
+
+    Fix 4....
+
+commit ea9b3aa231c73800c441a2a088788eb340a0785d
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 03:49:39 2026 -0600
+
+    Fix 3
+
+commit b5be9e51ee64ee0532f831c646d83f221787ea82
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 03:44:35 2026 -0600
+
+    Fix 2?
+
+commit f7cf33e0751682c279bb806f677d04846e6155fc
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 03:41:42 2026 -0600
+
+    Fix for MacOS/Darwin compilation
+
+commit a17c6e3fff6524ff85b4aafb299bafda1888ba73
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 01:32:47 2026 -0600
+
+    Moved.
+
+commit 57df112fb7a5ad648db23a40da3d2d141fa4f7a6
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 01:32:12 2026 -0600
+
+    Address of integer literal.
+
+commit 9b90b00ba1e4efd7a3c146c3bc9aa96faf96943b
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 27 01:22:26 2026 -0600
+
+    void is false.
+
+commit 2f826dc89ec1b8421d61888e6d1418a39a04dd9b
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 20:02:22 2026 -0600
+
+    Updated numeric support (octal, duotrigesimal) for Sublime.
+
+commit 4c169fd571b0ce87d1ebbffcab48ed9ba26dbdef
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 19:55:14 2026 -0600
+
+    Corrected documentation, Flux uses little-endian by default, not big-endian.
+
+commit 6450d9225d8d54bbf962f28b833b7328bae8457c
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 18:38:01 2026 -0600
+
+    Added support for Base32 (Duotrigesimal) numbers. `0123456789ABCDEFGHIJKLMNOPQRSTUV`
+
+commit 88d24e8c6f5b14d93cb1a4499836b664676cf20e
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 18:09:13 2026 -0600
+
+    Added octal support to the Lexer
+
+commit c56b3c0c9d5e6a28c4e7addf9b7fc82f6f7c569b
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 17:55:12 2026 -0600
+
+    Fixed packing order for array to integer packing. Also fixed unpacking.
+
+commit e54b7ee1f49cd62e7f232149b26c09237cc667ee
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 17:28:31 2026 -0600
+
+    Added missing `_pack_array_pointer_to_integer()`
+
+commit e1f91fcbcaf3f2e51d1652726317fa96c4179901
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 17:27:16 2026 -0600
+
+    Added support for packing arrays to integers.
+
+commit fe19d3696dcd335be16bf3c0fadcbad647c32fda
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 17:07:24 2026 -0600
+
+    Cleaned up preprocessor output.
+
+commit 9ce60e09e299f2f099f12ad5bc09c869d9c1dd0f
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 16:58:05 2026 -0600
+
+    Refactored VariableDeclaration array handling into ArrayLiteral
+
+commit 2bb1c985012f28c836457a969936dc120299dc37
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 16:27:00 2026 -0600
+
+    Added support for array to array copy.
+
+commit cbcd4b6d30ade5004d94963ed542b5788ab9fb79
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 16:23:26 2026 -0600
+
+    Added support for packing strings to integers. Will need to support other types.
+
+commit d8e1550391c684c2d6413ffc0e8f6eaf4331ac04
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 15:11:29 2026 -0600
+
+    Fix to VariableDeclaration in AST to use ArrayLiteral for arrays and not Literal
+
+commit c7dd06347865519204492dea75f7036eaa35ee0a
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 14:09:13 2026 -0600
+
+    Testing alternate `mac_print()`
+
+commit 8233a1863abe748263b79b118e392061d4afc67e
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 14:00:54 2026 -0600
+
+    Updated MacOS compilation to support clang & llc
+
+commit 976e231b7f8a58f5786237f57b1eb82bcc3278eb
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 13:11:42 2026 -0600
+
+    Fixed naming of macro in standard library for ARCH64
+
+commit 209bad838b23bb3006a601be505a75fd96961c62
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 26 12:42:51 2026 -0600
+
+    Added a little ARM support.
+
+commit 8f38128db7265204b7d5974aad5394fdc2ff5ba2
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Jan 25 13:23:01 2026 -0600
+
+    Removed estimates and incorrect tables from struct specification.
+
+commit 4bba8a5a811af1fe0f31a172f4f652c9cc476b10
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Jan 25 03:46:08 2026 -0600
+
+    Cleanup
+
+commit e8b4a3f6903bd9574ac457c8693ca1e4b45a7c44
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Jan 25 03:44:45 2026 -0600
+
+    Added support for void pointers.
+
+commit cea3d0c2c3004062101edf60a2394a36fb29b448
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Jan 25 01:50:13 2026 -0600
+
+    Fixed FunctionDef to not mangle `_start` and `exit` for Linux builds.
+
+commit 28f1f5dfbc259002d1628687416d0ce418b3c65e
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Jan 25 01:47:16 2026 -0600
+
+    Fixed FunctionCall
+
+commit ead3126b5e78c13cd260b6358afe8d5bb0307771
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sat Jan 24 21:54:49 2026 -0600
+
+    Forgot pointers need to be dereferenced, fixed `bool_ptr.fx`.
+
+commit 104db70abd247321c472a57029237baff618251c
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sat Jan 24 21:38:27 2026 -0600
+
+    Added bitwise OR/AND (`\`|`) / (`\`&`)
+
+commit f6b7b8369db146b608a673c9fe6d1363080d8b60
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sat Jan 24 12:28:37 2026 -0600
+
+    Finally fixed namespaces.
+
+commit ba047c9267342abf83a8c0ab040167526782af12
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sat Jan 24 05:17:25 2026 -0600
+
+    Function signature overload working.
+
+commit 586e318255b34e456cab2abb4b5b43b4ecb23f07
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 23 20:21:07 2026 -0600
+
+    Preprocessor updated, fixed bugginess on Linux
+
+commit 5347d9a9773448b58f62fa367afa06480e2087d4
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 23 06:19:00 2026 -0600
+
+    Update change log.
+
+commit 56a78c0d54f56a013b191bf019723f806d906012
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 23 06:17:47 2026 -0600
+
+    Fixed StringLiteral, now `test` translates to `[4 x i8]*` just like an array, as intended.
+
+commit 74ce409757f83553b5e503dedbb606c2466a5868
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 23 03:22:04 2026 -0600
+
+    f-strings working at compile time.
+
+commit 88f4f480c0130516bee5a0781d7a97b0f7269321
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 23 03:01:15 2026 -0600
+
+    Major fixes to full specification doc. Fixed missing semicolons, missing return statements, `import` removed from keyword list and added to preprocessor directives along with other directives. Fixed stack/heap void cast memory freeing example.
+
+commit 911262560abcc4980bff76059049f9864bfd4e90
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 23 02:39:22 2026 -0600
+
+    Update to AST to change FStringLiteral to use ArrayLiteral, also update to Lexer to support `\0` in f-strings.
+
+commit 6368083c57d1606c935cd53b62019198b54257f0
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 23 01:43:37 2026 -0600
+
+    Update to `docs\what_works.md`
+
+commit 817cfda1a1b1d46be09edadd53dabf2bcf560362
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 23 01:42:29 2026 -0600
+
+    Update to change log.
+
+commit 1cc2d3fe325ef90d5e37f02682503c1a7f3aba53
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 23 01:12:20 2026 -0600
+
+    Arrays fixed, can now perform `arr[0] = val;`, finally allowing fundamental things to be done in code.
+
+commit 98eca098efee177e5eb7106fa6060e58dc28ab27
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 23 00:23:17 2026 -0600
+
+    Restructured the standard library + runtime.
+
+commit b26ebaba902bea760039f4da2e7be55e8bda0a6d
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 22 18:14:40 2026 -0600
+
+    Fixed the lexer not properly handling `\0` in strings. Now `strlen()` works perfectly.
+
+commit 21b9fa63aad50d5fd036ab8f507deb2ae721622e
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 22 16:27:59 2026 -0600
+
+    Getting closer to file input/output on Windows.
+
+commit dbb3828cede7664fe1a3e2bb0c4ae57d70d4555f
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 22 15:25:07 2026 -0600
+
+    Fixed runtime, now `tests\os_detect.fx` works on both Linux and Windows!
+
+commit b390ae40331746df421be75c1e0e76cf7c330da6
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 22 14:35:38 2026 -0600
+
+    Updated the runtime and `redio.fx` to properly add/remove OS-specific functions via macros, allows programs to compile on Linux, `print()` works, however on Linux programs will segfault at the end of execution, likely due to the ASM in `exit()` being incorrect.
+
+commit 4ac56ab9ab348fbebbf23ddf1829bc54207c6df2
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 22 13:12:46 2026 -0600
+
+    Fixed redruntime.fx, `main()` not properly forward declared to be in scope of __LINUX__
+
+commit 95a7402f7bd360e8af31e2010714e4933945cd4d
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 22 12:40:45 2026 -0600
+
+    More macro stuff. Added compiler builtin macros for OS detection.
+
+commit 959a40c184e0ac1f2deed854b2314fff2b40e6ee
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 22 11:01:23 2026 -0600
+
+    Moved scripts into scripts
+
+commit 5cf3623aa131822b2bdba7972a7ef7dd9a835df9
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 22 10:36:00 2026 -0600
+
+    Added support for multi-line comments, updated Sublime editor support.
+
+commit b11c6eef5cf34cd981a4e917244c416383cb6ddf
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 21 23:39:05 2026 -0600
+
+    Removed artifacts
+
+commit 85b1d9e5d590793d0b8da42255f1fa076ce14e15
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 21 23:38:25 2026 -0600
+
+    Added more macro stuff to the preprocessor. Can now do ifdef, ifndef, else, endif, and def, prefixed with a #
+
+commit b9b50b895b32fb7465c80d1d492a9ae67ddd5b6b
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 21 21:39:43 2026 -0600
+
+    StringLiteral was missing somehow?
+
+commit 635d6d764e09ca984d5184c67ce0bdd867087491
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 21 17:45:51 2026 -0600
+
+    Added StringLiteral class to AST. Added Flux runtime startup.
+
+commit 4f145ad4b3a4c63a5e92b9d4550b7047ce3c9219
+Author: Karac Thweatt <81203640+kvthweatt@users.noreply.github.com>
+Date:   Wed Jan 14 14:40:29 2026 -0600
+
+    Create readme.md
+
+commit a32a1fed6e737c87deb86c9df941ac469595053f
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 14 14:16:14 2026 -0600
+
+    Update for Sublime, improved syntax highlighting, added color scheme.
+
+commit 3f96c330f5e249a8ac29907f9d909bc13e61b499
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 12 19:25:49 2026 -0600
+
+    Fix
+
+commit b5bce1b91ada654b43e91e94aa8b84e0a6056d0c
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 12 19:24:55 2026 -0600
+
+    Update to fix Linux compilation.
+
+commit 6f5ebbf9c8d9b8b3dc5d6690564cea4811f8330c
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 8 14:47:14 2026 -0600
+
+    Forgot to reset config to normal state before pushing.
+
+commit e3d49b060127a5d1c68873c72e6e3e3a05a5dfba
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 8 05:39:02 2026 -0600
+
+    Updated configuration to support build targets `executable`, `library`, `driver`, `bootloader`
+
+commit aecb7ae8f40095f533a8b05684411e6d7dd46929
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 8 00:31:03 2026 -0600
+
+    .gitignore not working???
+
+commit e00e08723b43fbb8f67d8fd10944b9f0b0990a9f
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 8 00:30:16 2026 -0600
+
+    Removed pycache and pyc files
+
+commit afedc1dcbe331bf1475197df2f7f332b71fc566d
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 8 00:29:28 2026 -0600
+
+    Removed pycache and pyc files
+
+commit fd979d86a1dcc3f109bd78e58cb571cd6e85236d
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 8 00:21:14 2026 -0600
+
+    Added new helper script to identify locations in the AST where allocating does not respect type alignment. Both in local and global allocation.
+
+commit 9229bb4bbaa16bba164b2b231bdf872d7c490f84
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 7 23:58:22 2026 -0600
+
+    Clean up
+
+commit f2fb111f5e455335ec0477038fc2e6299c172940
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 7 22:47:21 2026 -0600
+
+    Added configuration, updated `src\compiler\fc.py` to use the configuration.
+
+commit 82ffc7ad3a3a25bf3191bec3f7273c2cba4201ac
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 7 21:57:03 2026 -0600
+
+    Fix
+
+commit bb709a716838afc25df5a47572d5eb21be649b47
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 7 21:53:05 2026 -0600
+
+    Began implementation of a standardized Flux configuration file.
+
+commit 9aab39fce4c1988f2add6d15f486b93b63540e54
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 7 20:36:36 2026 -0600
+
+    Automated testing.
+
+commit fa3e152791d23f78227d52c30d36bf5548c25e39
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 7 20:10:02 2026 -0600
+
+    Strings for function calls working, currently handled as globals, this must change. Need to do something like `str_alloca.align = type.alignment` to make sure it works.
+
+commit c9a13db635ac60c0257b770e752cbe6c59dd8847
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Jan 7 17:15:07 2026 -0600
+
+    Added preprocessor. Very simple, will never be changed again. Fixes issue behind ImportStatement in the AST and parsing imports.
+
+commit ce401c3d3fd96e851d459700bf3c3dcc343aa68b
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 6 14:20:41 2026 -0600
+
+    Fixed.
+
+commit 93ae4e1e0c7d0854600d832bd43bff5e375e5c11
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 6 14:13:33 2026 -0600
+
+    Fixed, input working as expected now.
+
+commit 194a616b895b4a6b15381d4d40c35804a6c690aa
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 6 14:05:26 2026 -0600
+
+    Minor fixes.
+
+commit beb778384f526796b4464d90532426b56f092fad
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 6 14:01:22 2026 -0600
+
+    Improved ASM for win_input
+
+commit 17d7eb5ec44d22fb2f9a41c11211a9f4d7c7b2ca
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Jan 6 13:46:04 2026 -0600
+
+    HOUSTON WE HAVE INPUT
+
+commit 2303be3a042b44b51d7d6c7dc54bc4826eb991bf
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 22:56:28 2026 -0600
+
+    Fixed.
+
+commit 52997d4ad7c9f9c039e39f452fc848b15224d04d
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 22:52:43 2026 -0600
+
+    Added `local` specification.
+
+commit 73dab2708e0c217ac2fc8566661a6429201c8548
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 22:46:50 2026 -0600
+
+    Added a document which shows current progress.
+
+commit 7e471588b9e4347ae07fb7c23d2cc3b345a3c29f
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 22:44:27 2026 -0600
+
+    Revised wording for `struct` specification. Fixed terminology.
+
+commit 58c020b951b84ed9af095658b8b9d0693938bed5
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 22:41:33 2026 -0600
+
+    Added `cstruct` and `class` specification.
+
+commit 0d9d784e0d8d64e8ac8c7c6d2b0cf9b4e61a61b5
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 21:00:45 2026 -0600
+
+    Arrays working.
+
+commit ccabc41d50be1b481b16aed8c06c78b63a87f038
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 20:32:03 2026 -0600
+
+    Almost able to do file I/O.
+
+commit 2138d0294a64ae6c771fdc43370f030e7a600c1c
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 19:31:58 2026 -0600
+
+    `frt.fx` has parse error issues commented out.
+
+commit 6fc0cee3d461d990551caf2338b104313d981dcf
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 17:19:31 2026 -0600
+
+    Added Change Log
+
+commit 8208d8cfc0fab0f0246edd16aae271c82d266c50
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 16:37:57 2026 -0600
+
+    All loops working.
+
+commit e2558b3d5fcc4ec2f87a834af00d745b2af04ae5
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 16:32:38 2026 -0600
+
+    Plain `do` loops added. Now supports `do` `do-while` `while` and `for` loops.
+
+commit 9313b0c767b37dc2b59264e4d3d8706d1b88592b
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 16:16:04 2026 -0600
+
+    `switch` fixed.
+
+commit b2d917915f99b2896f00a2ce22a8947428ac8e4f
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 16:05:33 2026 -0600
+
+    Lexer fixed.
+
+commit 1fa5c1ff8ce6c4ea4e8dce24a212fcbbe38e5855
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 15:42:49 2026 -0600
+
+    Full operator set support. Can now perform bit-shift operations.
+
+commit 2280d5949b1c0a7ca9507453d8b95a2ea2650a52
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 14:54:33 2026 -0600
+
+    Updated AST to have hardcoded runtime path, must change to use paths available from entrypoint.
+
+commit 84a144329c56cfd3faf46889080841fcee7f9303
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 13:39:00 2026 -0600
+
+    Cleaned up
+
+commit 74af6a8b496810c37d5c8e65690aab86147315fc
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 13:35:51 2026 -0600
+
+    Fixed compilation on Linux, added similarly aggressive flags to optimize compilation.
+
+commit a14ce6c45c6d6d8c2fbac90437360c03f5cbdbef
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 11:09:46 2026 -0600
+
+    Added `register`.
+
+commit 28eeefc00fd7b1735a89c3d8d5a2b5e6e197d05d
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 10:58:10 2026 -0600
+
+    const volatile global unsigned int
+
+commit 674954b61bcb0b4d07bf46863d7ad7c37fa5dceb
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 10:37:28 2026 -0600
+
+    Update .gitignore
+
+commit ec28c6da2ff3d920e5423fa92584c2859a948b55
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Jan 5 01:04:37 2026 -0600
+
+    Fixed variables? Can pass strings to functions now.
+
+commit 0d59cac0d76745cb1f49e5c08832185ba1386bcc
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Jan 4 15:02:32 2026 -0600
+
+    Finally fixed the error causing clang to scream duplicate definition when writing inline ASM.
+
+commit 97e426907901c8ff073d357e7c63ef73d9afd4f2
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Jan 4 14:10:22 2026 -0600
+
+    unbroke the thing i broke
+
+commit a09ba9c7da6ef4fd244ef6753636434d518f5da7
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Jan 4 13:46:50 2026 -0600
+
+    Quick fix to import/using - reverted to Piotr's implementation.
+
+commit 1269190a62759b42562350fa5d790832d187339a
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 2 22:39:23 2026 -0600
+
+    Addition to the standard library.
+
+commit f8eb0484fe17446b8525d347ba10b71766d2d165
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 2 21:48:03 2026 -0600
+
+    Fixed reverted change, now we have tiny binaries.
+
+commit 2af734414c06243cde97eb69fe7695ebddd16cc9
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 2 20:45:37 2026 -0600
+
+    Fixed accidentally breaking the compiler.
+
+commit 21492cec797491d9b778a93a74774596488bf720
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 2 20:27:13 2026 -0600
+
+    Updated flux runtime library
+
+commit 7cb99ae32e71eb5e9e98edf0cf5b7b6290c13659
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 2 20:15:25 2026 -0600
+
+    AES example, updated sublime syntax to reflect full specification
+
+commit 3a212c7c020cebb7817d9d1896839771b0def19d
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 2 18:50:48 2026 -0600
+
+    Update readme
+
+commit 2b64a9c71a85cfaf1edacf4d5d5410d0d3b445bc
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 2 18:49:18 2026 -0600
+
+    Update readme
+
+commit c0384e6934ee0cfa37a83eb51b3132e01d456401
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 2 18:40:54 2026 -0600
+
+    Defined a struct specification.
+
+commit 258431d73b04fb99113ab8b928ddc57aaa1b2709
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 2 16:54:45 2026 -0600
+
+    Added a document to learn Flux for experienced programmers.
+
+commit 059a6d6891de62c74651de6d01e829457cbe73eb
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 2 16:26:38 2026 -0600
+
+    Fixes + addition of the Flux runtime, a minimal implementation, ported from C with some things removed like strcpy()
+
+commit 6a3f401eedf71bb049c91b554e8688c00ea4808d
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 2 15:58:42 2026 -0600
+
+    Update
+
+commit 5c66cd0c31d4303a2a3aa677d7e0d2b59f5e482c
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Dec 31 00:40:28 2025 -0600
+
+    Structs are now perma-packed. They should never be un-packed. If you want padding, add padding with your data types.
+
+commit 700bfde3dff87924a97e44bd49a6e25c36b63ec7
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Dec 30 19:12:11 2025 -0600
+
+    1.5KB helloworld, even less. No CRT allowed
+
+commit fe9bc629f29f46bb830354ceb84dce98c50c260f
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Dec 30 18:45:39 2025 -0600
+
+    3KB finally. Finally got CRT out of here.
+
+commit a2b8ee60cbdddcd05e5f9da347f93e75da9af9dc
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Dec 30 18:14:57 2025 -0600
+
+    Remove bochs debugger file
+
+commit 69b07a7c694507d65c3b894428a2dcf04d0521f8
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Dec 30 17:05:01 2025 -0600
+
+    More changes, fixed some things with structs.
+
+commit 664e6aad4dd63c1765107ee769ec0f6695224b5d
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Dec 30 15:32:25 2025 -0600
+
+    Updated intro doc
+
+commit de1be834dce2ca106e20a2292b444e64cbbc1ae9
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Dec 30 14:59:08 2025 -0600
+
+    Fixed local readme
+
+commit f37d1d6ca324b4080c693d9d9e5d134e7ee10f78
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Dec 30 14:57:04 2025 -0600
+
+    Altered gitignore to ignore exe files
+
+commit 0b2faab322b70e1f8a27a2a06ae5fac77abb88d8
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Dec 30 14:54:00 2025 -0600
+
+    Forgot to commit the updated and working import/using code.
+
+commit 8ad01ca0d508f11d0fff74c49d7219eb5423ab92
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Aug 28 17:52:26 2025 -0500
+
+    Change
+
+commit 310922b58ddee278faf4ff9447eb210aec2c1413
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Aug 27 12:07:26 2025 -0500
+
+    Array comprehension added.
+
+commit b893438643cc6a07ca562bb3f73ada699f44a04d
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Aug 26 17:40:14 2025 -0500
+
+    Removed null-termination of strings as this is forbidden for our compiler to do so for the programmer. Also changed encoding from utf-8 to ASCII for strings.
+
+commit 782d0afed493bdf9019a76b0f6a94ee58502c76c
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Aug 26 17:38:27 2025 -0500
+
+    Fixed issues with sizeof, import/using, the type system, and string literals.
+
+commit a5b09437d72552a8087a276953fa0722a7975578
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Aug 26 16:37:22 2025 -0500
+
+    Fixed import as well as using namespaces.
+
+commit b8f2f81474adeb77bd7bd46cc897e42de2cf2701
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 25 21:25:38 2025 -0500
+
+    Restored to pre void cast state, fixed some things that were somehow broken along the way?
+
+commit adee7873a57fb061646fae79fdf5d93cb9764b6a
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 25 12:49:16 2025 -0500
+
+    Bunch of array and pointer stuff now working.
+
+commit 0eb3d588a5de37f8acb0d909eb65941e8ad622d9
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Aug 22 23:01:06 2025 -0500
+
+    Did a lot, tried fixing import and using - almost working as intended. struct functionality improved, however some reinterpret casts fail which should succeed such as 4x i8 -> i32. struct_test.fx demonstrates the power of pure-data structs.
+
+commit 07b594ffbe8be8b32fdba02dd580ab96fc3ca716
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Aug 20 12:28:15 2025 -0500
+
+    Zero-cost, zero-copy, byte array to struct casting now a reality.
+
+commit 59204a92a28299fbcdbcaa7233855cc37aa0f325
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Aug 19 23:53:50 2025 -0500
+
+    Unions now immutable after assignment.
+
+commit 517fd2bd3f85d635b83050e77f0452efd54a1e4b
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Aug 19 23:48:57 2025 -0500
+
+    Unions working.
+
+commit 6d5d9c92d1e6e34ae0507daf12c36d75d24bbafd
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Aug 19 22:55:00 2025 -0500
+
+    Object instantiation working.
+
+commit 5d1d85957f4f81bbc9617deb4044fe8bca7bc32c
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Aug 19 22:45:26 2025 -0500
+
+    Objects compile, now working on instantiation.
+
+commit 4114c5c9ede568710841f6a1fee698d983aa581f
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Aug 19 20:18:49 2025 -0500
+
+    Freedom of reinterpretation achieved. Zero overhead, zero marshalling.
+
+commit 16f3af025eb620fa1b231530cd7c70ce3a047c1b
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 18 21:53:33 2025 -0500
+
+    Update
+
+commit 9331e0591c77dc77adf6635d85672e4f5cda0828
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 18 21:24:54 2025 -0500
+
+    Update
+
+commit ea08adf0ef9da7c6d6c639282df261460198843e
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 18 21:24:21 2025 -0500
+
+    Update
+
+commit 6784682c489d154af5a48e605369f339001db342
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 18 21:23:45 2025 -0500
+
+    Update
+
+commit af46c4085c9da266eeedc780da1d8d632d9cca3f
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 18 21:20:52 2025 -0500
+
+    Update
+
+commit a3abbd1a566efa1fcf5bd6f0211dccfa4d44a8c0
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 18 17:00:11 2025 -0500
+
+    Hello, World!
+
+commit f62f3bfcf57c6b790c0cac20c7b91bb992d06753
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 18 15:29:54 2025 -0500
+
+    Cleaned up.
+
+commit bf7cae7e55c0c978fee4df6557976973ab626eb1
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 18 11:22:24 2025 -0500
+
+    Fixed type creation for `data`, as well as type chaining. The parser now resolves base type information.
+
+commit 26b3edfdb1809a09174f2a953185b78688708a6b
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 18 10:59:01 2025 -0500
+
+    Successfully corrected ASM implementation so LLVM accepts it, inputs/outputs/clobbers all working. Next task is get syscalls working, we achieved syscalls but are having trouble with standard output.
+
+commit de42b51e8b6e148a77833d832d2b4da533fd091a
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 18 07:56:11 2025 -0500
+
+    Fixed import, and using, now properly registers namespaces and rejects invalid references.
+
+commit 57d9c0c019ce2081374cbc44fe0b83912a2ab800
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Aug 8 19:30:33 2025 -0500
+
+    Language specification had a duplicate line, removed.
+
+commit e4b171df135d6444ba9d13ba7faedb47fefb89d2
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Aug 8 16:59:50 2025 -0500
+
+    Create tests directory scaffold and pytest configuration
+    
+    - Add tests/__init__.py for test package initialization
+    - Add tests/conftest.py with PYTHONPATH setup for src/compiler imports
+    - Create tests/data/ directory for sample program storage
+    - Add pytest.ini with -ra, doctest=False, and --strict-markers options
+
+commit fe79e91f98865075fa45cf1680d41e5329d11327
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Aug 8 16:54:41 2025 -0500
+
+    Integrated uv to manage project dependencies and virtual environments.
+
+commit 00119d386b6243733b6f8453aec19b3f03aa8bbf
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Aug 8 12:18:20 2025 -0500
+
+    Added support to compile under Windows using clang
+
+commit 0a743681e36c9a05862f9779527e075c92ceb1f1
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Aug 7 21:04:41 2025 -0500
+
+    Incorrect ownership example in readme.fx, print(*content); corrected to print(~content);
+
+commit 17da7dfb8ab0d337e1e8c17ae0a388e7e7145d83
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Aug 7 21:02:18 2025 -0500
+
+    Lexer was incorrectly displaying RETURN_ARROW as '-=' instead of '->' when showing a tokenized source file.
+
+commit 7d5be88f9566f1d8bb6ef061321467634a66ebb3
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Aug 7 16:15:15 2025 -0500
+
+    Example 3 ownership was incorrect.
+
+commit 19c0b68243751ad55b5fc995024aa1f5d735d141
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Aug 7 14:03:50 2025 -0500
+
+    Adoped the register keyword from C, can be combined with volatile to guarantee the value is stored in the CPU and not RAM
+
+commit 15301404516cd9d50f035a2a210ad6094ffc2556
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Aug 7 10:59:34 2025 -0500
+
+    Fixed result output for restructuring in intro doc and readme
+
+commit be9d082326fe2bc6593a8f006c8af44d6535b4ea
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Aug 7 10:58:01 2025 -0500
+
+    Gave more examples in readme.md
+
+commit fe85351a0877ad65f10a5dc51e187610b9662154
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Aug 7 10:53:57 2025 -0500
+
+    Fixed intro doc figure 5.3.1 code to be more aligned with what standard::fio along with readme.md
+
+commit db121b182ed3f37931d1c15ee911f48da6b62140
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Aug 7 10:46:46 2025 -0500
+
+    Update, removed serialization since structs are considered to be in serialized form as they are, updated reduced and full specifications to reflect this.
+
+commit c4f98c0f62723f90992f85108c7b44f362edf38e
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 4 09:59:30 2025 -0500
+
+    Update
+
+commit 4f51f552252dba360ad5d889796538565fd83271
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 4 09:57:28 2025 -0500
+
+    Update
+
+commit b4392709b1d892a5ac8f0043992ddf0524159b4f
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 4 07:55:19 2025 -0500
+
+    Update
+
+commit 5e7dca432601e58351bb6b7a1f452d97248471d1
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 4 07:10:02 2025 -0500
+
+    Extended intro doc, explained inheritance and exclusion syntax
+
+commit b94ccd6f38db273cac40c18e9244d074d42fb6b7
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 4 06:33:32 2025 -0500
+
+    Missing semicolon in figure 5.3.1 of intro doc and main readme.md struct->data examples
+
+commit d6889301b70220dd63437bcd0a0c6601ec563c6f
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Aug 4 06:29:49 2025 -0500
+
+    Missing semicolon in figure 5.3.1 of intro doc and main readme.md struct->data examples
+
+commit 4df16edbeadb429923b0edf84a6664a0daef909d
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Aug 3 15:50:45 2025 -0500
+
+    Updated readme.md to give a better view of Flux.
+
+commit 16db87d961fa49aeaaf8e766146cebca9a8c79e2
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Aug 3 15:49:50 2025 -0500
+
+    Updated readme.md to give a better view of Flux.
+
+commit 12ee76d3399ed83f2fa9720b19961d4ad47113e7
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sat Aug 2 17:10:37 2025 -0500
+
+    Updated Flux intro doc, detailed inheritance for objects and structs.
+
+commit a62adbfed6849fdd58ec4a6596e047e85752433a
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sat Aug 2 00:29:45 2025 -0500
+
+    Added VSCode editor support
+
+commit cf0de135570f17cc12cf7c470412a7bc0153bce4
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Aug 1 17:30:46 2025 -0500
+
+    wtf was I doing
+
+commit 1b8f678cc449679ec3b806871d511814be46cec3
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Aug 1 17:29:19 2025 -0500
+
+    Added ownership escape hatch
+
+commit 063b13a3b6d6ef8e10255f9e77dd7928040e8058
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Aug 1 17:27:57 2025 -0500
+
+    Missing `local` keyword from full specification.
+
+commit a6303b92ce3d93d49271904b9d7f9c0b0c3c5a99
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Aug 1 17:26:21 2025 -0500
+
+    Changed `new` syntax, added an example of full specification hell.
+
+commit 416159dc3ecff1eb98c9ae298ef851bfe2ba4a93
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Aug 1 17:16:57 2025 -0500
+
+    Updated full language specification. Added ownership with ~. Flux needed a little more Rust inspiration.
+
+commit 93718fb4aa89076135d372888381b07e509bf9f1
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Aug 1 15:30:05 2025 -0500
+
+    Fixed Flux intro doc, temp conversion code example was missing type specifiers for c/f vars
+
+commit 5fc8789cdab852857778964ea0326c31b37583be
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Aug 1 08:37:56 2025 -0500
+
+    Fixed Flux intro doc, figure 5.2 had no type specified for sizebytes and sizeitems
+
+commit a7393db61d44145e77d7b19ffbd90ba4aa9134af
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Aug 1 08:35:12 2025 -0500
+
+    Fixed Flux intro doc, figures 4.2 and 4.3 had no type specifier for `len`
+
+commit 8313a713540273509d7c3bdf36890b5481da1d61
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 31 21:11:25 2025 -0500
+
+    Update
+
+commit 43468574ff4f8d2932043b7546e972188ace24e5
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 31 20:52:22 2025 -0500
+
+    Added vector.fx
+
+commit 875dd9a34b8ae8955336d4c96c51c58e69a373fb
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 31 20:13:22 2025 -0500
+
+    Redesigned SHA256 implementation.
+
+commit 49b85692eed849f5e99c4441de2054c619f5f8f3
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 31 19:46:03 2025 -0500
+
+    Updated standard library, added new syntax as(const) for permanent type declaration. Fixed missing semicolon in lang_spec_full.md. Namespaces can be declared const to prevent their change.
+
+commit 29cb0f5abb20f33365ea7e4bfb7329b9b7a670b6
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 31 17:40:34 2025 -0500
+
+    Changed Flux intro doc, removed void casting example, saving for later. This is a more advanced concept which requires more buildup of knowledge.
+
+commit d236004da26e7fac2a6e990b8c844eb82d913da8
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 31 17:25:16 2025 -0500
+
+    Updated Flux intro doc
+
+commit 2d522b1953aca59fbf4780aad09305580590dd0b
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 31 15:39:17 2025 -0500
+
+    Fixed Flux intro doc, figure 5.3.1 was missing File.close()
+
+commit 03b0bdcbeebb1c44f80352700d06e255f866d0fe
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 31 15:24:23 2025 -0500
+
+    Fixed Flux intro doc, figure 5.3.1 had file declared and assigned without a type specifier.
+
+commit f7b4f514dfbe265135cd7cec2fab84a061215ea4
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 31 15:18:59 2025 -0500
+
+    Fixed Flux intro doc, figure 5.3.1 bit widths for headers were incorrect.
+
+commit 68ab1356cf4eab330567dfb154de57e996f65e5d
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Jul 29 21:06:31 2025 -0500
+
+    Updated figure 6.3.1 and 6.3.2 to have the correct for loop examples.
+
+commit 8ae8f7bd5c887e44561dbc6aa7ff53f6a086a9f9
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Jul 29 20:56:53 2025 -0500
+
+    Flux intro doc figure 4.1 & 4.2 used input from io but input isn't used in the example program.
+
+commit da436deb7296eb2b5c6860f359c64d38c9b648c3
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Jul 29 19:16:29 2025 -0500
+
+    Updated wording in full language specification to be more concise about object methods
+
+commit 9b4f5169658a787b5d0930780de086befd475be8
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Jul 29 18:22:24 2025 -0500
+
+    Cleaned up examples and removed binary blobs
+
+commit f4d2abe7a4e12a15ba48a47a54315ec09044844b
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 22:19:39 2025 -0500
+
+    Updated Flux intro doc, figure 5.4 i32 restructuring value was incorrectly calculated. Now fixed.
+
+commit fb601d44fd164fe68580deef585eb4ccfba7e7d4
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 21:58:20 2025 -0500
+
+    Updated readme, didn't expect to receive help so soon, may implement some full spec features.
+
+commit 9615c0cac03a6209416d17aeead38cad82cfaeff
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 20:22:54 2025 -0500
+
+    Added codegen() for AssertStatement, we now have a way to print stuff.
+
+commit 2abe92549398c1f861c07710a04c150e74c1ef79
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 20:02:46 2025 -0500
+
+    Added Break and Continue codegen() methods
+
+commit 4bf98be26321425f0b42a600f53b1e57603eeecd
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 20:02:25 2025 -0500
+
+    Added AlignOf and TypeOf codegen() methods
+
+commit 7957c82445e759c153317b3612c5e5d4c21c7cbe
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 19:50:52 2025 -0500
+
+    Added AddressOf and PointerDeref codegen() methods. Needs work.
+
+commit 65e0f3f01769a4c7364932d0b434db353456c3d5
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 18:17:52 2025 -0500
+
+    Intro doc figure 5.3.1 incorrect, fixed. Missing buffer for array access.
+
+commit ee6cbdf0989f89f13d3cf7348c3f1b69f81e6a34
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 18:12:07 2025 -0500
+
+    Updated Flux intro doc, began chapter 6, do/while added.
+
+commit 1f03c4b45674b49b412bbea354c8c847f105494e
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 15:27:21 2025 -0500
+
+    Updated intro doc, added switch example
+
+commit 69491f255ce637b8b02444cacf1a88e6c6621c1c
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 13:30:37 2025 -0500
+
+    Updated intro doc, grammar change.
+
+commit 104e2085232b4fbd99f3c1b05366daf60822ee09
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 13:23:22 2025 -0500
+
+    Fixed f5.4 32-bit int table values
+
+commit bb19699ab5cf58fcee565b83b774b6788e8a11c3
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 13:19:24 2025 -0500
+
+    Restructuring example included fio.fx which was unnecessary.
+
+commit 50b6bd9376aa91cb39300db5c6ea5b4d820cde68
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 13:16:26 2025 -0500
+
+    Fixed distance() function, took struct as param, now takes Point which is type struct
+
+commit f631f692ecd7169597326a62eca7111ac0859d6a
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 13:13:30 2025 -0500
+
+    Missing chapter numbers for Flux intro
+
+commit b94fb555e316c1172d1437683265429db9bde0d1
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 13:12:03 2025 -0500
+
+    Updated Flux intro, explained restructuring.
+
+commit 374405a1f2cbb308b0eb690823fa8882fbdfeb13
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 12:23:02 2025 -0500
+
+    Updated Flux Intro, explained data structuring.
+
+commit 021e3ba8c5004c515ab10a404e346e3f2f8a3654
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 12:14:19 2025 -0500
+
+    Forgot to add file.close();
+
+commit 6d5d646dcb762675fcbf3cc1be81d5291f8affea
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 28 11:44:01 2025 -0500
+
+    Updated Flux Intro, added struct & data
+
+commit 77171f0488d181df677ef8e6a9dd92927a90c428
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sun Jul 27 23:52:23 2025 -0500
+
+    Replaced possessive language with inclusive language, 'my' with 'our'
+
+commit 679307cae22a6654b18eb7e492ac705bf99f1e21
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sun Jul 27 23:49:56 2025 -0500
+
+    Update
+
+commit f68a7d68c00f5f464f38e2c9be6e856729a5de97
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sun Jul 27 18:35:32 2025 -0500
+
+    Updated intro doc
+
+commit f14faae4851a4b2b7790b62eb13421261c5d70ee
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sun Jul 27 17:44:42 2025 -0500
+
+    Updated intro doc
+
+commit 1a42ae68c6bffb413aa1c6bbb4081f3ba6527792
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sun Jul 27 17:38:05 2025 -0500
+
+    Updated intro doc
+
+commit d8d54ac7a034cb26dc4f16ced03369ae54719032
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sun Jul 27 12:12:36 2025 -0500
+
+    Update
+
+commit 95361decd28dc927a9d279338fb3efe08e3fab30
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sun Jul 27 11:04:25 2025 -0500
+
+    Fixed readme.md
+
+commit b9336f3aabd1a3d360502af06ee0b3d2b63b98f9
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sun Jul 27 11:02:46 2025 -0500
+
+    Added learning guide.
+
+commit f579f63a16ffa87ce2732aabac831f7d3c6259b6
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 26 15:27:22 2025 -0500
+
+    Update
+
+commit a69a2da94d24af53cd661f6ff34b2452f64a313f
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 26 15:14:22 2025 -0500
+
+    Update
+
+commit 369af209e77f0f2222c6455bb49d9701da2c883a
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 26 14:45:36 2025 -0500
+
+    Update
+
+commit 161baa8fde37615cc39aaba8fe0586428a1292ce
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 26 12:47:04 2025 -0500
+
+    Update
+
+commit e091aefcbf01a150c75a62445b33f3b7352d1d96
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 26 12:35:42 2025 -0500
+
+    Created utility to track codegen implementation progress.
+
+commit 4a9e4f7b0378e0b6d21b3b89286e50d9f3b9f932
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 26 12:24:00 2025 -0500
+
+    Added copyright + attribution
+
+commit efb9e43a114164a2b3b462d401c2b1eed7a707b2
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 26 12:20:39 2025 -0500
+
+    Update
+
+commit 8dc1088a8ae2f197a6f5f5edd6c2ceb9b0946ace
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 26 12:11:31 2025 -0500
+
+    Added logo.
+
+commit 4e153624cebbb13657861faa107fea8c8f02c7bf
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri Jul 25 19:41:14 2025 -0500
+
+    i8 != i32 for print.fx when passing integer literal
+
+commit 3db755ad9fa7b7c466f25235055e3d21db7ecba7
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri Jul 25 19:13:52 2025 -0500
+
+    Do-While loops implemented.
+
+commit b3c2f8b885d39a090c08ae2e7b147e1906c4220d
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri Jul 25 19:04:14 2025 -0500
+
+    Switch implemented.
+
+commit 71f5a55eef2e4277bd56d252ed7aac18c249d1d9
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri Jul 25 17:11:05 2025 -0500
+
+    Added traits to full language specification
+
+commit 569c880e723295ff9b900b710da0f512546f658e
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri Jul 25 16:54:21 2025 -0500
+
+    Fix readme.md
+
+commit b76da4d73115d11560ff87ffa706d0a5e9056990
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri Jul 25 16:52:23 2025 -0500
+
+    Update, commented out extended int types, updated full specification. Fixed unique_ptr<T> example - used void casting instead of assignment for L parameter.
+
+commit fcbff15529b57bfb2149fb55279d9d8edde983de
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 24 19:54:23 2025 -0500
+
+    Invalid  example for unique_ptr<T>, fixed
+
+commit cd959db437c322a9580813cc1cdbb813fbb5b353
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 24 18:56:47 2025 -0500
+
+    Fix
+
+commit 094958012f02c5f4681644b267be13181bb4b0f8
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 24 18:52:42 2025 -0500
+
+    Update
+
+commit a72e9cd92c0d22e47a17e852c560387ff862d22a
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 24 18:48:36 2025 -0500
+
+    Update
+
+commit 028004a189824844727f02ab3cdc4e1d90a1731e
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 24 18:42:52 2025 -0500
+
+    Update
+
+commit 4276df3b4f2746a06cf4d7d39118d011710c542e
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 24 18:23:26 2025 -0500
+
+    Update
+
+commit 3bc83be58a195b73898aed1b859ab9c4ff9859ef
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Thu Jul 24 11:25:40 2025 -0500
+
+    Namespace, object, and struct prototyping works, same with nesting
+
+commit 1e60a794a8ed5ecf65f44b2641fcf8539d8dd837
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Wed Jul 23 13:55:04 2025 -0500
+
+    Update to fc.py for command line options
+
+commit 2a8aa64a16943bbb82cce932d358057482451695
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Jul 22 22:24:52 2025 -0500
+
+    Flux Standard Library (FSL)
+
+commit 2236e612052777ce9c3df185e802cee7a119a44f
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Jul 22 10:16:59 2025 -0500
+
+    Update
+
+commit 48466d9cfefb02cfcd4cfefec6030d731b1cdce1
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 21 20:11:58 2025 -0500
+
+    SHA256 example.
+
+commit 2e7a4a60dfc7ec7cc9e056bee636eb2f9ffe4850
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 21 20:03:04 2025 -0500
+
+    SHA256 example.
+
+commit 3689659462f714e62869031f5029f01eceeb41ce
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 21 19:50:17 2025 -0500
+
+    Updated fc.py to call the compilation toolchain.
+
+commit 1f9fa1d99ee10be745566234a993a9389a6b2195
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 21 19:42:23 2025 -0500
+
+    Update
+
+commit f3526741f270d275983d5e5670bd2161da836a7a
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 21 19:39:18 2025 -0500
+
+    Update
+
+commit 7e8965e2cb49927960a83c564cd1f842341bea73
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 21 19:38:25 2025 -0500
+
+    Update
+
+commit 8b3f7ebfbe99af4ba4e76591f3cfe62830631eae
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Jul 21 19:29:23 2025 -0500
+
+    It's alive.
+
+commit c67632ac112090a660ca6acaff9c2a05b0d55adb
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 19 13:09:39 2025 -0500
+
+    Update
+
+commit a7a830a05880eac3421784860793dbe9655ddb8f
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 19 13:09:16 2025 -0500
+
+    Update
+
+commit b8c233f39bdac5251d950153c6856644e44ca447
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 19 13:07:52 2025 -0500
+
+    Update
+
+commit d2cfb554ffe1403300abfd37320405b985bb99c4
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 19 13:07:19 2025 -0500
+
+    Update
+
+commit f906c3347f2dfa1dd5583213a5e5c62b5ae1a3a6
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 19 13:05:14 2025 -0500
+
+    Update
+
+commit 4ca55a99bab92008ef32a5b995068003353f11bc
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 19 12:39:58 2025 -0500
+
+    Update, major changes to specification
+
+commit 8c812700d61b9b61927bc4413bc724f50c6f5478
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sun Jul 13 00:03:58 2025 -0500
+
+    Update
+
+commit 48a5ec51addbad9e30794688a7137d3622ebdca9
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 5 14:09:03 2025 -0500
+
+    Update
+
+commit 2ab64a2b6ec929fa40627f594950f36b4c10b840
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 5 12:47:49 2025 -0500
+
+    Update
+
+commit cd23fba33d2468aabe1427fc1c82f9f93619aa60
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 5 12:46:07 2025 -0500
+
+    Update
+
+commit 5d0b6c298f0713d560b1db92bd05fa8e47da4d0b
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Jul 5 12:44:28 2025 -0500
+
+    Update
+
+commit 6e4a9f01aace1c3831e8459a3d3a40564e78219d
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Jul 1 19:47:33 2025 -0500
+
+    Update
+
+commit 913acf7074ee377f0427523e9e96ee9dc5cd750f
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Jun 10 14:12:34 2025 -0500
+
+    Update
+
+commit 4368e100d4d89ec607b778ee26baaaec8f3c27c0
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Jun 10 14:11:37 2025 -0500
+
+    Update
+
+commit cbaef84de0b768688f5227c5ccfa5f7be087c3d0
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Jun 10 14:09:54 2025 -0500
+
+    Update
+
+commit eb2383b208b4bfb827df421c020ba721bd37f9ba
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Jun 10 14:07:35 2025 -0500
+
+    Standard library was using  as an identifier.
+
+commit 85a35965b2247f5c951b3dfd31efcc020217be6a
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Jun 10 13:19:20 2025 -0500
+
+    Update 6/10
+
+commit d906aa2f56a4b68ff78e046f433957c0c386eb66
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Jun 10 09:42:22 2025 -0500
+
+    Update
+
+commit d37233a4e60828eea325f854218d749f2a1cdaee
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Wed Jun 4 22:50:56 2025 -0500
+
+    Added primitive math.fx for the standard library
+
+commit b3c2b736fcc324f6e192accb6cc2e673acc75219
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Wed Jun 4 22:19:17 2025 -0500
+
+    Update
+
+commit a04961ac0816a77ad44181f0a97fa41c61a06fba
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Wed Jun 4 21:56:19 2025 -0500
+
+    Switched to Python, lexer and parser ready for LLVM.
+
+commit a32464dd336918b4d83dcada4d3632a602c87d13
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue May 27 20:51:02 2025 -0500
+
+    Parsing and type checking, we can finally move to interpretation.
+
+commit 85e6ef49c217291ede6843c29db5071f6922078e
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue May 27 16:00:06 2025 -0500
+
+    C++ is too much. Switched to Python, will implement a Flux VM to interpret code.
+
+commit 06101d9c3294c6e75824f5b30b67cb7beeb29b75
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri May 23 17:23:22 2025 -0500
+
+    Updated the language entirely. New keywords, and more. Major overhaul.
+
+commit f56bde1603ecd18a369c73502a0208e04118a70c
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri Apr 4 14:53:20 2025 -0500
+
+    Added example programs, and they don't parse properly. Go figure.
+
+commit 57692fa2b517acd48f0445796683f5cc7266abc7
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri Apr 4 14:09:12 2025 -0500
+
+    Fixed, we finally parse through test.fx, now to refactor, then make a more complicated test.fx
+
+commit 89bbc11e8b73f59ed95efc274836aeee76d8293b
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri Apr 4 13:47:59 2025 -0500
+
+    Fixed dealing with assignment statements in for bodies, now somehow object instantiation is failing again. Refactor definitely needed.
+
+commit 85831bd0603cf2ab778a8727db8c165e799456b1
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri Apr 4 13:39:47 2025 -0500
+
+    Almost thru test.fx, one major parsing issue remaining. Parser needs refactoring because its current state is poor.
+
+commit 5831eed194bb23d5b014dad6aaca38098766056e
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Mar 29 15:44:12 2025 -0500
+
+    One parser error remaining for test.fx
+
+commit 15c8ef3474d296dcd26ac0997ec6c9a8d57ef775
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Mar 29 14:20:33 2025 -0500
+
+    Parsed to line 180 of test.fx successfully
+
+commit 936418e79164aea16b085c6889cc4e955c13b2a4
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Mar 29 03:48:08 2025 -0500
+
+    Finally parsing past line 100 of test.fx
+
+commit 3274c220e83e91f1bd43a5422d4d6d73307ce680
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri Mar 28 00:47:17 2025 -0500
+
+    Reworked again.
+
+commit 7b0e46f7c1e8d0526566b708671f3afecc554d2d
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri Feb 28 20:58:10 2025 -0600
+
+    if statements working with qualified types. Need to fix comments?
+
+commit b831b7f5e164ca55fd5ebce73eb72958a4c4fc82
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 27 17:39:29 2025 -0600
+
+    Problem defining variables in main?
+
+commit a1c6eeab9f4c07e5f9b500ee62c91161a33d3f9f
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 27 12:48:46 2025 -0600
+
+    Namespaces, classes, objects, scope working.
+
+commit 8eaa452008aeb1cab6f75f94ffd5c4f13de33f9f
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Wed Feb 26 17:44:14 2025 -0600
+
+    More tests.
+
+commit c0395bc69a62ad13045577c756ba1cbc3f10d701
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Wed Feb 26 12:00:55 2025 -0600
+
+    Modified i-string parsing to be more intuitive.
+
+commit 4642edd97630f391610b4d64b4065f0e408ee8bb
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Wed Feb 26 10:50:52 2025 -0600
+
+    Working i-strings
+
+commit c5e1823eec252f81c19887fafa92fbf65cafc545
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Wed Feb 26 10:31:07 2025 -0600
+
+    Hello from foo()
+
+commit 62eb324aa974cae8bcb7dc1fd2f3e877fb253fae
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Feb 25 23:56:45 2025 -0600
+
+    Hello World!
+
+commit c06f21f56148ac33f014e6e345b3ca96e77832bb
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Feb 25 11:19:49 2025 -0600
+
+    Almost parsing.
+
+commit 8bdbbd0dc483439d008eca03803035cf683eb48c
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Tue Feb 25 09:47:08 2025 -0600
+
+    Redesign
+
+commit f80f93ff6595ce4a991eb50adaa830ad1359b50f
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Feb 24 22:46:28 2025 -0600
+
+    Parser now rejecting foreign types but with memory allocation issue.
+
+commit 7768653dc02a1b96907c5820dab63c7d496890ae
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Mon Feb 24 21:51:41 2025 -0600
+
+    Added: interpreter, runtime, utils
+
+commit 878d4c1cf80cfbde92c6ebff39365579e1416660
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Sat Feb 22 00:18:21 2025 -0600
+
+    Fixed global function declaration.
+
+commit 963fa94789d0852fde52deca6ba88d8b8220147f
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Fri Feb 21 23:26:17 2025 -0600
+
+    Redesign
+
+commit 7c994ea68835a77e70d4e71d09968a05b4377b62
+Author: Karac Thweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 20 17:13:02 2025 -0600
+
+    Initial Commit

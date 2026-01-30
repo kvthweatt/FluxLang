@@ -2,15 +2,17 @@
 
 def main() -> int
 {
+    int x = 1000;
     try
     {
-        print("Attemptnig segfault...\n\0");
-        throw(4);
+        print("Throwing...\0");
+        throw(x);
     }
-    catch (i64 err)
+    catch (int s)
     {
-        print(err);
-        print();
+        print("\nCaught \0");
+        print(s);
+        print("!\n\0");
     };
     
     return 0;
