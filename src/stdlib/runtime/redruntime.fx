@@ -30,20 +30,20 @@
 #endif;
 
 // >Mains
-def main() -> int;
+def !!main() -> int;
 def main(int argc, byte** argv) -> int;
 // /Mains
 
   ///                                   ///
   //DO NOT REDEFINE THIS FUNCTION SIGNATURE
 ///                                   ///
-def FRTStartup() -> int; // GO AWAY, SHOO
+def !!FRTStartup() -> int; // GO AWAY, SHOO
   ///                                   ///
   //DO NOT REDEFINE THIS FUNCTION SIGNATURE
 ///                                   ///
 
-def exit(int code) -> void;
-def exit(int code) -> void
+def !!exit(int code) -> void;
+def !!exit(int code) -> void
 {
 #ifdef __WINDOWS__
     volatile asm
@@ -73,8 +73,8 @@ def exit(int code) -> void
     return;
 };
 
-def abort() -> void;
-def abort() -> void
+def !!abort() -> void;
+def !!abort() -> void
 {
 #ifdef __WINDOWS__
     volatile asm
@@ -104,16 +104,16 @@ def abort() -> void
 };
 
 #ifdef __LINUX__
-def _start() -> int;
+def !!_start() -> int;
 
-def _start() -> int
+def !!_start() -> int
 {
     return FRTStartup();
 };
 #endif; // Linux
 
 #ifdef FLUX_RUNTIME
-def FRTStartup() -> int
+def !!FRTStartup() -> int
 {
     int return_code;
     switch (CURRENT_OS)

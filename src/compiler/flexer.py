@@ -165,6 +165,7 @@ class TokenType(Enum):
     CHAIN_ARROW = auto()    # <-
     RECURSE_ARROW = auto()  # <~
     NULL_COALESCE = auto()  # ??
+    NO_MANGLE = auto()      # !! tell the compiler not to mangle this name at all for any reason.
 
     # SPECIAL
     FUNCTION_POINTER = auto() # {}*
@@ -733,10 +734,15 @@ class FluxLexer:
                 self.advance(count=2)
                 continue
             
-            if char == '!' and self.peek_char() == '=':
-                tokens.append(Token(TokenType.NOT_EQUAL, '!=', start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
+            if char == '!':
+                if self.peek_char() == '=':
+                    tokens.append(Token(TokenType.NOT_EQUAL, '!=', start_pos[0], start_pos[1]))
+                    self.advance(count=2)
+                    continue
+                elif self.peek_char() == '!':
+                    tokens.append(Token(TokenType.NO_MANGLE, '!!', start_pos[0], start_pos[1]))
+                    self.advance(count=2)
+                    continue
 
             if char == '?' and self.peek_char() == '?':
                 tokens.append(Token(TokenType.NULL_COALESCE, '??', start_pos[0], start_pos[1]))

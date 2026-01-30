@@ -6209,6 +6209,7 @@ class FunctionDef(ASTNode):
     is_const: bool = False
     is_volatile: bool = False
     is_prototype: bool = False
+    no_mangle: bool = False
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Function:
         # Convert return type
@@ -6238,7 +6239,7 @@ class FunctionDef(ASTNode):
         func_type = ir.FunctionType(ret_type, param_types)
         
         # Always generate mangled name for consistency
-        if self.name == "FRTStartup" or self.name == "main" or self.name == "_start" or self.name == "exit" or self.name == "setjmp" or self.name == "__intrinsic_setjmp" or self.name == "longjmp":
+        if self.no_mangle or self.name == "main":
             mangled_name = self.name
         else:
             mangled_name = self._mangle_name(module)

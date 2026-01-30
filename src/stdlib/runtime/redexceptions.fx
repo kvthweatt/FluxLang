@@ -4,7 +4,7 @@
 #def FLUX_STANDARD_EXCEPTIONS 1
 
 
-def setjmp(char* env) -> int
+def !!setjmp(char* env) -> int
 {
     i64* buf = (i64*)env;
     
@@ -33,12 +33,12 @@ def setjmp(char* env) -> int
     return 0;
 };
 
-def __intrinsic_setjmp(char* env) -> int
+def !!__intrinsic_setjmp(char* env) -> int
 {
     return setjmp(env);
 };
 
-def longjmp(char* env, int val) -> void
+def !!longjmp(char* env, int val) -> void
 {
     i64* buf = (i64*)env;
     

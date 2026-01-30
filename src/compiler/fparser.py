@@ -250,6 +250,7 @@ class FluxParser:
         """
         is_const = False
         is_volatile = False
+        no_mangle = False
         
         if self.expect(TokenType.CONST):
             is_const = True
@@ -260,6 +261,10 @@ class FluxParser:
             self.advance()
         
         self.consume(TokenType.DEF)
+        if self.expect(TokenType.NO_MANGLE):
+            print("Not mangling")
+            no_mangle = True
+            self.consume(TokenType.NO_MANGLE)
         name = self.consume(TokenType.IDENTIFIER).value
         
         # This is a function definition
@@ -281,7 +286,7 @@ class FluxParser:
             body = self.block()
             self.consume(TokenType.SEMICOLON)
         
-        return FunctionDef(name, parameters, return_type, body, is_const, is_volatile, is_prototype)
+        return FunctionDef(name, parameters, return_type, body, is_const, is_volatile, is_prototype, no_mangle)
 
     def _is_function_pointer_declaration(self) -> bool:
         """
