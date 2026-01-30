@@ -138,7 +138,7 @@ def !!FRTStartup() -> int
             } : : "m"(argc), "m"(argv) : "rdi","rsi","memory";
             
             // Try main with args first
-            return_code = main(argc, argv);
+            return_code = main();
         }
         #endif;
         #ifdef __MACOS__
@@ -150,7 +150,7 @@ def !!FRTStartup() -> int
         default
         {
             #ifdef __LINUX__
-            exit();
+            exit(0);
             #endif;
             return return_code;
         };
@@ -160,7 +160,7 @@ def !!FRTStartup() -> int
         // Handle error
     };
     #ifdef __LINUX__
-    exit();  // Should pass return_code
+    exit(0);  // Should pass return_code
     #endif;
     return return_code;
 };
