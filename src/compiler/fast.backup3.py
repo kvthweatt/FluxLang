@@ -493,7 +493,14 @@ class Identifier(Expression):
             type_spec = None
             if hasattr(builder, 'scope_type_info') and self.name in builder.scope_type_info:
                 type_spec = builder.scope_type_info[self.name]
-            
+
+            if (hasattr(builder, 'object_validity_flags') and 
+                self.name in builder.object_validity_flags):
+                
+                error_msg = f"COMPILE ERROR: Use after tie: variable '{self.name}' was moved"
+                print(error_msg)
+                raise RuntimeError(error_msg)
+
             # Handle special case for 'this' pointer
             if self.name == "this":
                 if type_spec and not hasattr(ptr, '_flux_type_spec'):
@@ -4182,7 +4189,7 @@ class VariableDeclaration(ASTNode):
         if not hasattr(builder, 'scope_type_info'):
             builder.scope_type_info = {}
         builder.scope_type_info[self.name] = resolved_type_spec
-        
+
         # Initialize variable if needed
         if self.initial_value:
             self._initialize_local(builder, module, alloca, llvm_type)
@@ -5813,12 +5820,8 @@ class TryBlock(Statement):
         # This catches all exceptions (catch-all with cleanup)
         landing_pad = builder.landingpad(
             ir.LiteralStructType([ir.PointerType(ir.IntType(8)), ir.IntType(32)]),
-            personality_func
+            cleanup=True
         )
-        
-        # Add catch-all clause (catches any exception)
-        landing_pad.add_clause(ir.Constant(ir.PointerType(ir.IntType(8)), None))
-        landing_pad.cleanup = True
         
         # Extract exception pointer and selector from landing pad
         exc_ptr = builder.extract_value(landing_pad, 0, name='exc_ptr')
@@ -6559,6 +6562,57 @@ class UnionDef(ASTNode):
         
         return union_type
 
+@dataclass
+class TieExpression(Expression):
+    """
+    Tie operator: ~variable
+    
+    Transfers ownership and marks source as tied-from.
+    Only creates tracking when explicitly used.
+    """
+    operand: Expression
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Generate tie (move) operation."""
+        # Must be an identifier (lvalue)
+        if not isinstance(self.operand, Identifier):
+            raise ValueError("Tie operator ~ can only be applied to variables")
+        
+        var_name = self.operand.name
+        
+        # Get the variable pointer
+        if builder.scope and var_name in builder.scope:
+            var_ptr = builder.scope[var_name]
+        elif var_name in module.globals:
+            var_ptr = module.globals[var_name]
+        else:
+            raise NameError(f"Unknown variable: {var_name}")
+        
+        # Load the value (this is the tie/move)
+        tied_value = builder.load(var_ptr, name=f"{var_name}_tied")
+        
+        # Create validity flag NOW (lazy initialization)
+        if not hasattr(builder, 'object_validity_flags'):
+            builder.object_validity_flags = {}
+        
+        if var_name not in builder.object_validity_flags:
+            # Create validity flag on first tie
+            validity_flag = builder.alloca(ir.IntType(1), name=f"{var_name}_valid")
+            # Initialize to 1 (was valid before this tie)
+            builder.store(ir.Constant(ir.IntType(1), 1), validity_flag)
+            builder.object_validity_flags[var_name] = validity_flag
+        
+        # Mark as tied-from (invalid)
+        validity_flag = builder.object_validity_flags[var_name]
+        builder.store(ir.Constant(ir.IntType(1), 0), validity_flag)
+        
+        # Zero out source to prevent accidental reuse
+        if isinstance(var_ptr.type.pointee, ir.PointerType):
+            builder.store(ir.Constant(var_ptr.type.pointee, None), var_ptr)
+        elif isinstance(var_ptr.type.pointee, ir.IntType):
+            builder.store(ir.Constant(var_ptr.type.pointee, 0), var_ptr)
+        
+        return tied_value
 
 """
 Flux Struct Implementation according to struct_specification.md

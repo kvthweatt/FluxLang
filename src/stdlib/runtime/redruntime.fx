@@ -165,3 +165,7 @@ def FRTStartup() -> int
     return return_code;
 };
 #endif;
+
+#ifndef FLUX_STANDARD_EXCEPTIONS
+#import "redexceptions.fx";
+#endif;

@@ -4,9 +4,9 @@ def main() -> int
 {
 	int x = 5;
 	int y = ~x;
-	print(x);
+	print(y);
 	print();
     print("Testing *(@)*(void*)void;\n\0");
-	//*(@)*(void*)void;
+	*(@)*(void*)void;
 	return 0;
 };

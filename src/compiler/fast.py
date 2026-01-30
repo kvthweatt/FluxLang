@@ -5757,147 +5757,133 @@ class TryBlock(Statement):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """
-        Flux try/catch using LLVM's native exception handling.
-        Generates proper LLVM IR that can catch runtime errors including UAF.
-        
-        Uses LLVM's invoke/landingpad mechanism for structured exception handling.
+        Flux try/catch using setjmp/longjmp.
+        Works with explicit throw statements.
         """
+        
+        # Get or create necessary runtime support
+        setjmp_func = self._get_or_declare_setjmp(module)
+        
+        # Create exception value storage global if it doesn't exist
+        if '__flux_exception_value' not in module.globals:
+            exc_global = ir.GlobalVariable(module, ir.IntType(64), name='__flux_exception_value')
+            exc_global.initializer = ir.Constant(ir.IntType(64), 0)
+            exc_global.linkage = 'internal'
+        
+        # Create jmp_buf storage (array of 5 x i64 is typical for setjmp)
+        jmp_buf_type = ir.ArrayType(ir.IntType(64), 5)
+        jmp_buf_alloca = builder.alloca(jmp_buf_type, name='jmp_buf')
+        
+        # Save old jmp_buf pointer (for nested try blocks)
+        old_jmp_buf = None
+        if hasattr(builder, 'flux_jmpbuf'):
+            old_jmp_buf = builder.flux_jmpbuf
+        builder.flux_jmpbuf = jmp_buf_alloca
         
         # Create basic blocks
         func = builder.block.function
-        try_block = func.append_basic_block('try')
-        landing_pad_block = func.append_basic_block('lpad')
+        setjmp_call_block = func.append_basic_block('try.setjmp')
+        try_block = func.append_basic_block('try.body')
         catch_blocks_ir = []
         end_block = func.append_basic_block('try.end')
         
         # Create catch blocks
         for i, (exc_type, exc_name, catch_body) in enumerate(self.catch_blocks):
-            catch_block = func.append_basic_block(f'catch_{i}')
+            catch_block = func.append_basic_block(f'catch.{i}')
             catch_blocks_ir.append(catch_block)
         
-        # Branch to try block
-        builder.branch(try_block)
+        # Branch to setjmp call
+        builder.branch(setjmp_call_block)
         
-        # Generate TRY block with invoke instead of direct calls
+        # Call setjmp - returns 0 on first call, non-zero when longjmp'ed to
+        builder.position_at_start(setjmp_call_block)
+        
+        # Cast jmp_buf to i8* for setjmp call
+        jmp_buf_i8 = builder.bitcast(jmp_buf_alloca, ir.PointerType(ir.IntType(8)))
+        setjmp_result = builder.call(setjmp_func, [jmp_buf_i8], name='setjmp.result')
+        
+        # Check if this is the initial call (0) or a longjmp (non-zero)
+        zero = ir.Constant(ir.IntType(32), 0)
+        is_exception = builder.icmp_signed('!=', setjmp_result, zero, name='is_exception')
+        
+        # Branch: if no exception, go to try block; if exception, go to first catch block
+        if catch_blocks_ir:
+            builder.cbranch(is_exception, catch_blocks_ir[0], try_block)
+        else:
+            # No catch blocks - just go to try block (exception will propagate)
+            builder.cbranch(is_exception, end_block, try_block)
+        
+        # Generate TRY block
         builder.position_at_start(try_block)
-        
-        # Generate try body code with exception-aware calls
-        # Store landing pad info for exception-throwing operations
-        old_landing_pad = getattr(builder, 'flux_landing_pad', None)
-        builder.flux_landing_pad = landing_pad_block
-        
-        # Generate the try body - this will use invoke for potentially throwing operations
         self.try_body.codegen(builder, module)
-        
-        # Restore previous landing pad
-        builder.flux_landing_pad = old_landing_pad
         
         # If try block completes normally, branch to end
         if not builder.block.is_terminated:
             builder.branch(end_block)
         
-        # Generate LANDING PAD block
-        builder.position_at_start(landing_pad_block)
-        
-        # Create personality function for exception handling
-        personality_func = self._get_or_create_personality_func(module)
-        # Set personality function on the containing function
-        # Note: In llvmlite, personality function is set differently
-        try:
-            if hasattr(func, 'personality'):
-                func.personality = personality_func
-            elif hasattr(func.attributes, 'personality'):
-                func.attributes.personality = personality_func
-            else:
-                # Skip personality function setting for now
-                pass
-        except Exception as e:
-            # If setting personality function fails, continue without it
-            print(f"Warning: Could not set personality function: {e}")
-            pass
-        
-        # Create landing pad instruction
-        # This catches all exceptions (catch-all with cleanup)
-        landing_pad = builder.landingpad(
-            ir.LiteralStructType([ir.PointerType(ir.IntType(8)), ir.IntType(32)]),
-            personality_func
-        )
-        
-        # Add catch-all clause (catches any exception)
-        landing_pad.add_clause(ir.Constant(ir.PointerType(ir.IntType(8)), None))
-        landing_pad.cleanup = True
-        
-        # Extract exception pointer and selector from landing pad
-        exc_ptr = builder.extract_value(landing_pad, 0, name='exc_ptr')
-        exc_selector = builder.extract_value(landing_pad, 1, name='exc_sel')
-        
-        # For catch-all blocks, we don't need to check the selector
-        # Just jump to the first catch block (assuming catch() means catch-all)
-        if catch_blocks_ir:
-            builder.branch(catch_blocks_ir[0])
-        else:
-            # No catch blocks - resume exception
-            builder.resume(landing_pad)
-        
         # Generate CATCH blocks
         for i, (exc_type, exc_name, catch_body) in enumerate(self.catch_blocks):
             builder.position_at_start(catch_blocks_ir[i])
             
-            # Create scope for catch block if there's an exception variable
+            # Load the exception value from global storage
             if exc_name:
-                # Allocate space for exception value
+                exc_global = module.globals['__flux_exception_value']
+                exc_val_i64 = builder.load(exc_global, name='exc_val')
+                
+                # Allocate local variable for exception
                 if exc_type:
                     exc_type_llvm = exc_type.get_llvm_type(module)
                 else:
-                    exc_type_llvm = ir.IntType(32)  # Default exception type
+                    exc_type_llvm = ir.IntType(32)
                 
                 exc_var = builder.alloca(exc_type_llvm, name=exc_name)
-                # For now, store a constant exception value
-                # In a full implementation, this would extract info from exc_ptr
-                exc_value = ir.Constant(exc_type_llvm, 1001)  # UAF exception code
-                builder.store(exc_value, exc_var)
-                builder.scope[exc_name] = exc_var
+                
+                # Truncate or extend the exception value to match the type
+                if isinstance(exc_type_llvm, ir.IntType):
+                    if exc_type_llvm.width < 64:
+                        exc_val = builder.trunc(exc_val_i64, exc_type_llvm, name='exc_trunc')
+                    elif exc_type_llvm.width > 64:
+                        exc_val = builder.zext(exc_val_i64, exc_type_llvm, name='exc_ext')
+                    else:
+                        exc_val = exc_val_i64
+                else:
+                    # For non-integer types, just bitcast
+                    exc_val = builder.bitcast(exc_val_i64, exc_type_llvm)
+                
+                builder.store(exc_val, exc_var)
+                
+                # Add to scope if scope exists
+                if hasattr(builder, 'scope') and builder.scope is not None:
+                    builder.scope[exc_name] = exc_var
             
             # Generate catch body
             catch_body.codegen(builder, module)
             
             # Remove exception variable from scope
-            if exc_name and exc_name in builder.scope:
+            if exc_name and hasattr(builder, 'scope') and builder.scope is not None and exc_name in builder.scope:
                 del builder.scope[exc_name]
             
             # Branch to end if not already terminated
             if not builder.block.is_terminated:
                 builder.branch(end_block)
         
+        # Restore old jmp_buf
+        builder.flux_jmpbuf = old_jmp_buf
+        
         # Position at end block
         builder.position_at_start(end_block)
         return None
     
-    def _get_or_create_personality_func(self, module: ir.Module) -> ir.Function:
-        """Get or create the exception personality function"""
-        func_name = '__flux_personality_v0'
+    def _get_or_declare_setjmp(self, module: ir.Module) -> ir.Function:
+        """Get or declare the setjmp function"""
+        func_name = 'setjmp'
         if func_name in module.globals:
             return module.globals[func_name]
         
-        # Create personality function signature
-        # This is platform-specific, but typically looks like:
-        # i32 @personality(i32, i32, i64, i8*, i8*)
-        func_type = ir.FunctionType(
-            ir.IntType(32),
-            [ir.IntType(32), ir.IntType(32), ir.IntType(64), 
-             ir.PointerType(ir.IntType(8)), ir.PointerType(ir.IntType(8))]
-        )
-        func = ir.Function(module, func_type, func_name)
+        # int setjmp(jmp_buf env) - where jmp_buf is i8*
+        func_type = ir.FunctionType(ir.IntType(32), [ir.PointerType(ir.IntType(8))])
+        func = ir.Function(module, func_type, name=func_name)
         func.linkage = 'external'
-        
-        # Generate basic personality function body
-        entry_block = func.append_basic_block('entry')
-        pers_builder = ir.IRBuilder(entry_block)
-        
-        # For now, always return 1 (EXCEPTION_EXECUTE_HANDLER)
-        # This means "handle the exception"
-        pers_builder.ret(ir.Constant(ir.IntType(32), 1))
-        
         return func
 
 @dataclass
@@ -5905,27 +5891,68 @@ class ThrowStatement(Statement):
     expression: Expression
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        # Bare-metal longjmp implementation
+        """
+        Throw an exception using longjmp.
+        Works with TryBlock's setjmp-based exception handling.
+        """
+        # Evaluate the exception value
         exc_val = self.expression.codegen(builder, module)
         
-        # Store exception in known location
-        exc_slot = builder.gep(
-            module.globals.get('__flux_exception_slot'),
-            [ir.Constant(ir.IntType(64), 0)],
-            name='exc.ptr'
-        )
-        builder.store(exc_val, exc_slot)
+        # Get or create the exception value storage global
+        if '__flux_exception_value' not in module.globals:
+            exc_global = ir.GlobalVariable(module, ir.IntType(64), name='__flux_exception_value')
+            exc_global.initializer = ir.Constant(ir.IntType(64), 0)
+            exc_global.linkage = 'internal'
         
-        # longjmp to handler
-        builder.call(
-            module.declare_intrinsic('llvm.eh.sjlj.longjmp'),
-            [builder.bitcast(
-                builder.load(builder.globals.get('__flux_jmpbuf')),
-                ir.PointerType(ir.IntType(8))
-            )],
-        )
+        exc_global = module.globals['__flux_exception_value']
+        
+        # Convert exception value to i64 for storage
+        if isinstance(exc_val.type, ir.IntType):
+            if exc_val.type.width < 64:
+                exc_val_i64 = builder.zext(exc_val, ir.IntType(64), name='exc_zext')
+            elif exc_val.type.width > 64:
+                exc_val_i64 = builder.trunc(exc_val, ir.IntType(64), name='exc_trunc')
+            else:
+                exc_val_i64 = exc_val
+        else:
+            # For non-integer types, bitcast to i64
+            exc_val_i64 = builder.bitcast(exc_val, ir.IntType(64))
+        
+        # Store the exception value
+        builder.store(exc_val_i64, exc_global)
+        
+        # Get the jmp_buf from the nearest try block
+        if not hasattr(builder, 'flux_jmpbuf') or builder.flux_jmpbuf is None:
+            raise RuntimeError("throw statement used outside of try block")
+        
+        jmp_buf = builder.flux_jmpbuf
+        
+        # Get or declare longjmp function
+        longjmp_func = self._get_or_declare_longjmp(module)
+        
+        # Cast jmp_buf to i8* for longjmp call
+        jmp_buf_i8 = builder.bitcast(jmp_buf, ir.PointerType(ir.IntType(8)))
+        
+        # Call longjmp(jmp_buf, 1) - the 1 indicates an exception occurred
+        one = ir.Constant(ir.IntType(32), 1)
+        builder.call(longjmp_func, [jmp_buf_i8, one])
+        
+        # Mark this as unreachable since longjmp doesn't return
         builder.unreachable()
         return None
+    
+    def _get_or_declare_longjmp(self, module: ir.Module) -> ir.Function:
+        """Get or declare the longjmp function"""
+        func_name = 'longjmp'
+        if func_name in module.globals:
+            return module.globals[func_name]
+        
+        # void longjmp(jmp_buf env, int val) - where jmp_buf is i8*
+        func_type = ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.IntType(8)), ir.IntType(32)])
+        func = ir.Function(module, func_type, name=func_name)
+        func.linkage = 'external'
+        func.attributes.add('noreturn')
+        return func
 
 @dataclass
 class AssertStatement(Statement):
@@ -6211,7 +6238,7 @@ class FunctionDef(ASTNode):
         func_type = ir.FunctionType(ret_type, param_types)
         
         # Always generate mangled name for consistency
-        if self.name == "FRTStartup" or self.name == "main" or self.name == "_start" or self.name == "exit":
+        if self.name == "FRTStartup" or self.name == "main" or self.name == "_start" or self.name == "exit" or self.name == "setjmp" or self.name == "__intrinsic_setjmp" or self.name == "longjmp":
             mangled_name = self.name
         else:
             mangled_name = self._mangle_name(module)
