@@ -5753,37 +5753,27 @@ class SwitchStatement(Statement):
 @dataclass
 class TryBlock(Statement):
     try_body: Block
-    catch_blocks: List[Tuple[Optional[TypeSpec], str, Block]]  # (type, name, block)
+    catch_blocks: List[Tuple[Optional[TypeSpec], str, Block]]
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        """
-        Flux try/catch using setjmp/longjmp.
-        Works with explicit throw statements.
-        """
+        """Flag-based try/catch using stack-allocated exception state"""
         
-        # Get or create necessary runtime support
-        setjmp_func = self._get_or_declare_setjmp(module)
+        # Allocate exception flag and value on the STACK (not global)
+        exc_flag = builder.alloca(ir.IntType(1), name='exception_flag')
+        exc_value = builder.alloca(ir.IntType(64), name='exception_value')
         
-        # Create exception value storage global if it doesn't exist
-        if '__flux_exception_value' not in module.globals:
-            exc_global = ir.GlobalVariable(module, ir.IntType(64), name='__flux_exception_value')
-            exc_global.initializer = ir.Constant(ir.IntType(64), 0)
-            exc_global.linkage = 'internal'
+        # Save old exception state (for nested try blocks)
+        old_exc_flag = getattr(builder, 'flux_exception_flag', None)
+        old_exc_value = getattr(builder, 'flux_exception_value', None)
         
-        # Create jmp_buf storage (array of 5 x i64 is typical for setjmp)
-        jmp_buf_type = ir.ArrayType(ir.IntType(64), 5)
-        jmp_buf_alloca = builder.alloca(jmp_buf_type, name='jmp_buf')
-        
-        # Save old jmp_buf pointer (for nested try blocks)
-        old_jmp_buf = None
-        if hasattr(builder, 'flux_jmpbuf'):
-            old_jmp_buf = builder.flux_jmpbuf
-        builder.flux_jmpbuf = jmp_buf_alloca
+        # Set current exception state pointers
+        builder.flux_exception_flag = exc_flag
+        builder.flux_exception_value = exc_value
         
         # Create basic blocks
         func = builder.block.function
-        setjmp_call_block = func.append_basic_block('try.setjmp')
         try_block = func.append_basic_block('try.body')
+        catch_check_block = func.append_basic_block('catch.check')
         catch_blocks_ir = []
         end_block = func.append_basic_block('try.end')
         
@@ -5792,43 +5782,45 @@ class TryBlock(Statement):
             catch_block = func.append_basic_block(f'catch.{i}')
             catch_blocks_ir.append(catch_block)
         
-        # Branch to setjmp call
-        builder.branch(setjmp_call_block)
+        # Set exception handler for this try block
+        builder.flux_exception_handler = catch_check_block
         
-        # Call setjmp - returns 0 on first call, non-zero when longjmp'ed to
-        builder.position_at_start(setjmp_call_block)
+        # Clear exception flag before entering try block
+        builder.store(ir.Constant(ir.IntType(1), 0), exc_flag)
         
-        # Cast jmp_buf to i8* for setjmp call
-        jmp_buf_i8 = builder.bitcast(jmp_buf_alloca, ir.PointerType(ir.IntType(8)))
-        setjmp_result = builder.call(setjmp_func, [jmp_buf_i8], name='setjmp.result')
-        
-        # Check if this is the initial call (0) or a longjmp (non-zero)
-        zero = ir.Constant(ir.IntType(32), 0)
-        is_exception = builder.icmp_signed('!=', setjmp_result, zero, name='is_exception')
-        
-        # Branch: if no exception, go to try block; if exception, go to first catch block
-        if catch_blocks_ir:
-            builder.cbranch(is_exception, catch_blocks_ir[0], try_block)
-        else:
-            # No catch blocks - just go to try block (exception will propagate)
-            builder.cbranch(is_exception, end_block, try_block)
+        # Branch to try block
+        builder.branch(try_block)
         
         # Generate TRY block
         builder.position_at_start(try_block)
         self.try_body.codegen(builder, module)
         
-        # If try block completes normally, branch to end
+        # After try block, check if exception occurred
         if not builder.block.is_terminated:
-            builder.branch(end_block)
+            builder.branch(catch_check_block)
+        
+        # Check exception flag
+        builder.position_at_start(catch_check_block)
+        exc_flag_val = builder.load(exc_flag, name='exc_flag')
+        zero = ir.Constant(ir.IntType(1), 0)
+        has_exception = builder.icmp_signed('!=', exc_flag_val, zero, name='has_exception')
+        
+        # Branch: if exception, go to first catch; otherwise go to end
+        if catch_blocks_ir:
+            builder.cbranch(has_exception, catch_blocks_ir[0], end_block)
+        else:
+            builder.cbranch(has_exception, end_block, end_block)
         
         # Generate CATCH blocks
         for i, (exc_type, exc_name, catch_body) in enumerate(self.catch_blocks):
             builder.position_at_start(catch_blocks_ir[i])
             
-            # Load the exception value from global storage
+            # Clear exception flag since we're handling it
+            builder.store(ir.Constant(ir.IntType(1), 0), exc_flag)
+            
+            # Load the exception value
             if exc_name:
-                exc_global = module.globals['__flux_exception_value']
-                exc_val_i64 = builder.load(exc_global, name='exc_val')
+                exc_val_i64 = builder.load(exc_value, name='exc_val')
                 
                 # Allocate local variable for exception
                 if exc_type:
@@ -5847,12 +5839,11 @@ class TryBlock(Statement):
                     else:
                         exc_val = exc_val_i64
                 else:
-                    # For non-integer types, just bitcast
                     exc_val = builder.bitcast(exc_val_i64, exc_type_llvm)
                 
                 builder.store(exc_val, exc_var)
                 
-                # Add to scope if scope exists
+                # Add to scope
                 if hasattr(builder, 'scope') and builder.scope is not None:
                     builder.scope[exc_name] = exc_var
             
@@ -5867,44 +5858,31 @@ class TryBlock(Statement):
             if not builder.block.is_terminated:
                 builder.branch(end_block)
         
-        # Restore old jmp_buf
-        builder.flux_jmpbuf = old_jmp_buf
+        # Restore old exception state
+        builder.flux_exception_flag = old_exc_flag
+        builder.flux_exception_value = old_exc_value
+        builder.flux_exception_handler = None
         
         # Position at end block
         builder.position_at_start(end_block)
         return None
-    
-    def _get_or_declare_setjmp(self, module: ir.Module) -> ir.Function:
-        """Get or declare the setjmp function"""
-        func_name = 'setjmp'
-        if func_name in module.globals:
-            return module.globals[func_name]
-        
-        # int setjmp(jmp_buf env) - where jmp_buf is i8*
-        func_type = ir.FunctionType(ir.IntType(32), [ir.PointerType(ir.IntType(8))])
-        func = ir.Function(module, func_type, name=func_name)
-        func.linkage = 'external'
-        return func
 
 @dataclass
 class ThrowStatement(Statement):
     expression: Expression
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        """
-        Throw an exception using longjmp.
-        Works with TryBlock's setjmp-based exception handling.
-        """
+        """Throw an exception using stack-allocated exception state"""
+        
+        # Get the exception state from builder (set by TryBlock)
+        if not hasattr(builder, 'flux_exception_flag') or builder.flux_exception_flag is None:
+            raise RuntimeError("throw statement used outside of try block")
+        
+        exc_flag = builder.flux_exception_flag
+        exc_value = builder.flux_exception_value
+        
         # Evaluate the exception value
         exc_val = self.expression.codegen(builder, module)
-        
-        # Get or create the exception value storage global
-        if '__flux_exception_value' not in module.globals:
-            exc_global = ir.GlobalVariable(module, ir.IntType(64), name='__flux_exception_value')
-            exc_global.initializer = ir.Constant(ir.IntType(64), 0)
-            exc_global.linkage = 'internal'
-        
-        exc_global = module.globals['__flux_exception_value']
         
         # Convert exception value to i64 for storage
         if isinstance(exc_val.type, ir.IntType):
@@ -5915,44 +5893,21 @@ class ThrowStatement(Statement):
             else:
                 exc_val_i64 = exc_val
         else:
-            # For non-integer types, bitcast to i64
             exc_val_i64 = builder.bitcast(exc_val, ir.IntType(64))
         
         # Store the exception value
-        builder.store(exc_val_i64, exc_global)
+        builder.store(exc_val_i64, exc_value)
         
-        # Get the jmp_buf from the nearest try block
-        if not hasattr(builder, 'flux_jmpbuf') or builder.flux_jmpbuf is None:
-            raise RuntimeError("throw statement used outside of try block")
+        # Set exception flag
+        builder.store(ir.Constant(ir.IntType(1), 1), exc_flag)
         
-        jmp_buf = builder.flux_jmpbuf
+        # Branch to exception handler
+        if hasattr(builder, 'flux_exception_handler') and builder.flux_exception_handler is not None:
+            builder.branch(builder.flux_exception_handler)
+        else:
+            builder.unreachable()
         
-        # Get or declare longjmp function
-        longjmp_func = self._get_or_declare_longjmp(module)
-        
-        # Cast jmp_buf to i8* for longjmp call
-        jmp_buf_i8 = builder.bitcast(jmp_buf, ir.PointerType(ir.IntType(8)))
-        
-        # Call longjmp(jmp_buf, 1) - the 1 indicates an exception occurred
-        one = ir.Constant(ir.IntType(32), 1)
-        builder.call(longjmp_func, [jmp_buf_i8, one])
-        
-        # Mark this as unreachable since longjmp doesn't return
-        builder.unreachable()
         return None
-    
-    def _get_or_declare_longjmp(self, module: ir.Module) -> ir.Function:
-        """Get or declare the longjmp function"""
-        func_name = 'longjmp'
-        if func_name in module.globals:
-            return module.globals[func_name]
-        
-        # void longjmp(jmp_buf env, int val) - where jmp_buf is i8*
-        func_type = ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.IntType(8)), ir.IntType(32)])
-        func = ir.Function(module, func_type, name=func_name)
-        func.linkage = 'external'
-        func.attributes.add('noreturn')
-        return func
 
 @dataclass
 class AssertStatement(Statement):
@@ -7926,6 +7881,53 @@ class UsingStatement(Statement):
         if not hasattr(module, '_using_namespaces'):
             module._using_namespaces = []
         module._using_namespaces.append(self.namespace_path)
+
+# Extern declaration
+@dataclass
+class ExternBlock(Statement):
+    """
+    Extern block for FFI declarations.
+    
+    Syntax:
+        extern {
+            def function_name(params) -> return_type;
+        };
+    
+    Or single declaration:
+        extern def function_name(params) -> return_type;
+    """
+    declarations: List['FunctionDef']  # List of function prototypes
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
+        """Generate external function declarations"""
+        for func_def in self.declarations:
+            # Ensure these are prototypes
+            if not func_def.is_prototype:
+                raise ValueError(f"Extern functions must be prototypes (no body): {func_def.name}")
+            
+            # Generate the function declaration with external linkage
+            ret_type = func_def._convert_type(func_def.return_type, module)
+            param_types = [func_def._convert_type(param.type_spec, module) for param in func_def.parameters]
+            func_type = ir.FunctionType(ret_type, param_types)
+            
+            # Use the actual function name (no mangling for extern functions)
+            func_name = func_def.name
+            
+            # Create or get the function
+            if func_name in module.globals:
+                func = module.globals[func_name]
+                if not isinstance(func, ir.Function):
+                    raise ValueError(f"Name '{func_name}' already used for non-function")
+            else:
+                func = ir.Function(module, func_type, func_name)
+            
+            # Set external linkage
+            func.linkage = 'external'
+            
+            # Name the parameters
+            for i, param in enumerate(func.args):
+                if i < len(func_def.parameters):
+                    param.name = func_def.parameters[i].name
 
 # Custom type definition
 @dataclass

@@ -169,8 +169,6 @@ class FluxParser:
         # No storage class or qualifiers - check for other statement types
         if self.expect(TokenType.USING):
             return self.using_statement()
-        elif self.expect(TokenType.EXTERN):
-            return self.extern_statement()
         elif self.expect(TokenType.DEF):
             return self.function_def()
         elif self.expect(TokenType.UNION):
@@ -244,43 +242,6 @@ class FluxParser:
         # TODO: Add support for comma-separated namespaces
         self.consume(TokenType.SEMICOLON)
         return UsingStatement(namespace_path)
-    
-    def extern_statement(self) -> ExternBlock:
-        """
-        extern_statement -> 'extern' '{' extern_function_def* '}' ';'
-                         | 'extern' 'def' IDENTIFIER '(' parameter_list? ')' '->' type_spec ';'
-        """
-        self.consume(TokenType.EXTERN)
-        
-        declarations = []
-        
-        # Check if this is a block or single declaration
-        if self.expect(TokenType.LEFT_BRACE):
-            # Block form: extern Ellipsis;
-            self.advance()
-            
-            while not self.expect(TokenType.RIGHT_BRACE):
-                # Each declaration must be a function prototype
-                if self.expect(TokenType.DEF):
-                    func_def = self.function_def()
-                    if not func_def.is_prototype:
-                        self.error("Extern functions must be prototypes (declarations only, no body)")
-                    declarations.append(func_def)
-                else:
-                    self.error("Expected function declaration inside extern block")
-            
-            self.consume(TokenType.RIGHT_BRACE)
-            self.consume(TokenType.SEMICOLON)
-        elif self.expect(TokenType.DEF):
-            # Single declaration form: extern def ...;
-            func_def = self.function_def()
-            if not func_def.is_prototype:
-                self.error("Extern functions must be prototypes (declarations only, no body)")
-            declarations.append(func_def)
-        else:
-            self.error("Expected '{' or 'def' after 'extern'")
-        
-        return ExternBlock(declarations)
     
     def function_def(self) -> Union[FunctionDef]:
         """

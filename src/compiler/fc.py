@@ -543,7 +543,7 @@ class FluxCompiler:
                     f"C:\\Program Files\\LLVM\\bin\\{config['linker']}.exe",
                     "/entry:" + config.get('entrypoint', 'main'),                 # TODO -> f"/entry:{entrypoint}"
                                                    # Custom entrypoint support, default main if unspecified
-                    "/nodefaultlib" if int(config['no_default_libraries']) == 1 else "",
+                    #"/nodefaultlib" if int(config['no_default_libraries']) == 1 else "",
                     "/subsystem:" + config['subsystem'],
                     "/opt:ref" if int(config['remove_unused_funcs']) == 1 else "",                    # Remove unused functions/data
                     "/opt:icf" if int(config['comdat_folding']) == 1 else "",                    # Identical COMDAT folding
@@ -565,10 +565,12 @@ class FluxCompiler:
                     str(obj_file),
                     # Only link essential libraries
                     #config['lib_files'],
+                    'legacy_stdio_definitions.lib',
+                    'libvcruntime.lib',
                     "kernel32.lib",
-                    #"ntdll.lib",
+                    "ucrt.lib",
+                    "libcmt.lib",
                     "msvcrt.lib",   # Optional, link with C runtime
-                    #"ntdll.lib",
                     # "user32.lib",  # Uncomment only if GUI functions are used
                     # "gdi32.lib",   # Uncomment only if drawing functions are used
                     f"/out:{output_bin}"
