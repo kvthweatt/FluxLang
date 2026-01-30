@@ -64,7 +64,7 @@ class ParseError(Exception):
     def __init__(self, message: str, token: Optional[Token] = None):
         self.message = message
         self.token = token
-        super().__init__(f"{message}" + (f" at {token.line}:{token.column}" if token else ""))
+        super().__init__(f"{message}")
 
 class FluxParser:
     def __init__(self, tokens: List[Token]):
@@ -232,6 +232,8 @@ class FluxParser:
             return self.extern_statement()
         elif self.expect(TokenType.DEF):
             return self.function_def()
+        elif self.expect(TokenType.ENUM):
+            return self.enum_def()
         elif self.expect(TokenType.UNION):
             return self.union_def()
         elif self.expect(TokenType.STRUCT):
@@ -513,6 +515,42 @@ class FluxParser:
         type_spec = self.type_spec()
         name = self.consume(TokenType.IDENTIFIER).value
         return Parameter(name, type_spec)
+
+    def enum_def(self) -> EnumDefStatement:
+        """
+        enum_def -> 'enum' IDENTIFIER '{' enum_item (',' enum_item)* '}' ';'
+        enum_item -> IDENTIFIER ('=' INTEGER)?
+        """
+        self.consume(TokenType.ENUM)
+        name = self.consume(TokenType.IDENTIFIER, f"Expected: enumurated list name after enum keyword at Line {self.current_token.line:,.0f}:{self.current_token.column} in build\\tmp.fx").value
+        self.symbol_table.define(name, SymbolKind.TYPE)
+        self.consume(TokenType.LEFT_BRACE)
+        
+        values = {}
+        current_value = 0
+        
+        while not self.expect(TokenType.RIGHT_BRACE):
+            item_name = self.consume(TokenType.IDENTIFIER).value
+            
+            # Check if explicit value is provided
+            if self.expect(TokenType.ASSIGN):
+                self.advance()
+                # Parse the integer value
+                value_token = self.consume(TokenType.INTEGER)
+                current_value = int(value_token.value, 0)
+            
+            values[item_name] = current_value
+            current_value += 1
+            
+            # Handle comma separator
+            if self.expect(TokenType.COMMA):
+                self.advance()
+            elif not self.expect(TokenType.RIGHT_BRACE):
+                self.error("Expected ',' or '}' in enum definition")
+        
+        self.consume(TokenType.RIGHT_BRACE)
+        self.consume(TokenType.SEMICOLON)
+        return EnumDefStatement(EnumDef(name, values))
 
     def union_def(self) -> UnionDefStatement:
         """
@@ -2080,7 +2118,6 @@ class FluxParser:
                 self.advance()
             return Literal(value, DataType.SINT)
         elif self.expect(TokenType.UINT_LITERAL):
-            print("PARSER GOT UINT LITERAL")
             #print(self.current_token.value)
             if self.current_token.value.startswith('0d'):
                 number_str = self.current_token.value[2:]
@@ -2095,7 +2132,7 @@ class FluxParser:
             else:
                 value = int(self.current_token.value, 0)
                 self.advance()
-            print(value)
+            #print(value)
             return Literal(value, DataType.UINT)
         elif self.expect(TokenType.FLOAT):
             value = float(self.current_token.value)

@@ -2983,6 +2983,15 @@ class MemberAccess(Expression):
     member: str
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Handle enum member access FIRST (before trying to codegen the identifier)
+        if isinstance(self.object, Identifier):
+            type_name = self.object.name
+            if hasattr(module, '_enum_types') and type_name in module._enum_types:
+                enum_values = module._enum_types[type_name]
+                if self.member not in enum_values:
+                    raise NameError(f"Enum value '{self.member}' not found in enum '{type_name}'")
+                return ir.Constant(ir.IntType(32), enum_values[self.member])
+        
         # Check if this is a struct type
         if hasattr(module, '_struct_types'):
             obj = self.object.codegen(builder, module)
@@ -6085,6 +6094,32 @@ class DestructuringAssignment(Statement):
     source: Expression
     source_type: Optional[Identifier]  # For the "from" clause
     is_explicit: bool  # True if using "as" syntax
+
+@dataclass
+class EnumDef(ASTNode):
+    name: str
+    values: dict
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
+        if not hasattr(module, '_enum_types'):
+            module._enum_types = {}
+        module._enum_types[self.name] = self.values
+        
+        for name, value in self.values.items():
+            const_name = f"{self.name}.{name}"
+            const_value = ir.Constant(ir.IntType(32), value)
+            global_const = ir.GlobalVariable(module, ir.IntType(32), name=const_name)
+            global_const.initializer = const_value
+            global_const.global_constant = True
+
+@dataclass
+class EnumDefStatement(Statement):
+    enum_def: EnumDef
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Value]:
+        # Delegate codegen to the contained EnumDef
+        self.enum_def.codegen(builder, module)
+        return None
 
 @dataclass
 class UnionMember(ASTNode):

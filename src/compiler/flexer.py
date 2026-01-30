@@ -60,6 +60,7 @@ class TokenType(Enum):
     DO = auto()
     ELIF = auto()
     ELSE = auto()
+    ENUM = auto()
     EXTERN = auto()
     FALSE = auto()
     FLOAT_KW = auto()
@@ -225,6 +226,7 @@ class FluxLexer:
             'do': TokenType.DO,
             'elif': TokenType.ELIF,
             'else': TokenType.ELSE,
+            'enum': TokenType.ENUM,
             'extern': TokenType.EXTERN,
             'false': TokenType.FALSE,
             'float': TokenType.FLOAT_KW,

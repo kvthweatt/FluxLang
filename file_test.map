@@ -92,14 +92,14 @@ END GROUP
 .plt.sec
  *(SORT_BY_ALIGNMENT(.plt.sec))
 
-.text           0x00000000004000f0     0x1874
+.text           0x00000000004000f0     0x1b04
  *(SORT_BY_ALIGNMENT(.text.unlikely) SORT_BY_ALIGNMENT(.text.*_unlikely) SORT_BY_ALIGNMENT(.text.unlikely.*))
  *(SORT_BY_ALIGNMENT(.text.exit) SORT_BY_ALIGNMENT(.text.exit.*))
  *(SORT_BY_ALIGNMENT(.text.startup) SORT_BY_ALIGNMENT(.text.startup.*))
  *(SORT_BY_ALIGNMENT(.text.hot) SORT_BY_ALIGNMENT(.text.hot.*))
  *(SORT_BY_NAME(SORT_BY_ALIGNMENT(.text.sorted.*)))
  *(SORT_BY_ALIGNMENT(.text) SORT_BY_ALIGNMENT(.stub) SORT_BY_ALIGNMENT(.text.*) SORT_BY_ALIGNMENT(.gnu.linkonce.t.*))
- .text          0x00000000004000f0     0x1874 build/file_test/file_test.o
+ .text          0x00000000004000f0     0x1b04 build/file_test/file_test.o
                 0x00000000004000f0                __static_init
                 0x0000000000400100                standard__types__bswap16__1__u16__ret_u16
                 0x0000000000400110                standard__types__bswap32__1__u32__ret_u32
@@ -112,11 +112,11 @@ END GROUP
                 0x0000000000400200                standard__types__align_up__2__u64__u64__ret_u64
                 0x0000000000400220                standard__types__align_down__2__u64__u64__ret_u64
                 0x0000000000400240                standard__types__is_aligned__2__u64__u64__ret_bool
-                0x0000000000400260                standard__types__memcpy__3__void_ptr1__void_ptr1__size_t__ret_void
-                0x00000000004002c0                standard__types__memmove__3__void_ptr1__void_ptr1__size_t__ret_void
-                0x0000000000400370                standard__types__memset__3__void_ptr1__byte__size_t__ret_void
-                0x00000000004003d0                standard__types__memcmp__3__void_ptr1__void_ptr1__size_t__ret_i32
-                0x0000000000400450                standard__types__bzero__2__void_ptr1__size_t__ret_void
+                0x0000000000400260                standard__memory__memcpy__3__void_ptr1__void_ptr1__size_t__ret_void
+                0x00000000004002c0                standard__memory__memmove__3__void_ptr1__void_ptr1__size_t__ret_void
+                0x0000000000400370                standard__memory__memset__3__void_ptr1__byte__size_t__ret_void
+                0x00000000004003d0                standard__memory__memcmp__3__void_ptr1__void_ptr1__size_t__ret_i32
+                0x0000000000400450                standard__memory__bzero__2__void_ptr1__size_t__ret_void
                 0x0000000000400480                strlen__1__byte_ptr1__ret_int
                 0x00000000004004d0                strcpy__2__noopstr__noopstr__ret_noopstr
                 0x0000000000400550                i32str__2__i32__byte_ptr1__ret_i32
@@ -128,35 +128,51 @@ END GROUP
                 0x0000000000400be0                str2i64__1__byte_ptr1__ret_i64
                 0x0000000000400cd0                str2u64__1__byte_ptr1__ret_u64
                 0x0000000000400db0                float2str__3__float__byte_ptr1__i32__ret_i32
-                0x0000000000401170                standard__io__console__input__2__byte_arr__int__ret_int
-                0x0000000000401190                standard__io__console__nix_print__2__byte_ptr1__int__ret_void
-                0x00000000004011c0                standard__io__console__print__2__noopstr__int__ret_void
-                0x00000000004011f0                standard__io__console__print__1__noopstr__ret_void
-                0x0000000000401230                standard__io__console__print__1__int__ret_void
-                0x0000000000401260                standard__io__console__print__1__i64__ret_void
-                0x0000000000401290                standard__io__console__print__1__uint__ret_void
-                0x00000000004012c0                standard__io__console__print__1__u64__ret_void
-                0x00000000004012f0                standard__io__console__print__0__ret_void
-                0x0000000000401310                standard__io__file__open__3__byte_ptr1__i32__i32__ret_i64
-                0x0000000000401360                standard__io__file__read__3__i64__byte_ptr1__u64__ret_i64
-                0x00000000004013b0                standard__io__file__write__3__i64__byte_ptr1__u64__ret_i64
-                0x0000000000401400                standard__io__file__close__1__i64__ret_i32
-                0x0000000000401440                standard__io__file__open_read__1__byte_ptr1__ret_i64
-                0x0000000000401450                standard__io__file__open_write__1__byte_ptr1__ret_i64
-                0x0000000000401470                standard__io__file__open_append__1__byte_ptr1__ret_i64
-                0x0000000000401490                standard__io__file__open_read_write__1__byte_ptr1__ret_i64
-                0x00000000004014b0                standard__io__file__read32__3__i64__byte_ptr1__u32__ret_i32
-                0x00000000004014e0                standard__io__file__write32__3__i64__byte_ptr1__u32__ret_i32
-                0x0000000000401510                main
-                0x0000000000401670                FRTStartup
-                0x00000000004016c0                exit
-                0x00000000004016e0                abort
-                0x0000000000401700                _start
-                0x0000000000401710                standard__io__file__read_file__3__byte_ptr1__byte_arr__int__ret_int
-                0x00000000004017d0                standard__io__file__write_file__3__byte_ptr1__byte_arr__int__ret_int
-                0x0000000000401840                standard__io__file__append_file__3__byte_ptr1__byte_arr__int__ret_int
-                0x00000000004018b0                standard__io__file__get_file_size__1__byte_ptr1__ret_int
-                0x0000000000401920                standard__io__file__file_exists__1__byte_ptr1__ret_int
+                0x0000000000401170                string.__init
+                0x0000000000401180                string.__exit
+                0x0000000000401190                string.val
+                0x00000000004011a0                string.len
+                0x00000000004011b0                standard__io__console__input__2__byte_arr__int__ret_int
+                0x00000000004011d0                standard__io__console__nix_print__2__byte_ptr1__int__ret_void
+                0x0000000000401200                standard__io__console__print__2__noopstr__int__ret_void
+                0x0000000000401230                standard__io__console__print__1__noopstr__ret_void
+                0x0000000000401270                standard__io__console__print__1__int__ret_void
+                0x00000000004012a0                standard__io__console__print__1__i64__ret_void
+                0x00000000004012d0                standard__io__console__print__1__uint__ret_void
+                0x0000000000401300                standard__io__console__print__1__u64__ret_void
+                0x0000000000401330                standard__io__console__print__0__ret_void
+                0x0000000000401350                standard__io__file__open__3__byte_ptr1__i32__i32__ret_i64
+                0x00000000004013a0                standard__io__file__read__3__i64__byte_ptr1__u64__ret_i64
+                0x00000000004013f0                standard__io__file__write__3__i64__byte_ptr1__u64__ret_i64
+                0x0000000000401440                standard__io__file__close__1__i64__ret_i32
+                0x0000000000401480                standard__io__file__open_read__1__byte_ptr1__ret_i64
+                0x0000000000401490                standard__io__file__open_write__1__byte_ptr1__ret_i64
+                0x00000000004014b0                standard__io__file__open_append__1__byte_ptr1__ret_i64
+                0x00000000004014d0                standard__io__file__open_read_write__1__byte_ptr1__ret_i64
+                0x00000000004014f0                standard__io__file__read32__3__i64__byte_ptr1__u32__ret_i32
+                0x0000000000401520                standard__io__file__write32__3__i64__byte_ptr1__u32__ret_i32
+                0x0000000000401550                main
+                0x0000000000401600                FRTStartup
+                0x0000000000401650                exit
+                0x0000000000401670                abort
+                0x0000000000401690                _start
+                0x00000000004016a0                standard__io__file__read_file__3__byte_ptr1__byte_arr__int__ret_int
+                0x0000000000401760                standard__io__file__write_file__3__byte_ptr1__byte_arr__int__ret_int
+                0x00000000004017d0                standard__io__file__append_file__3__byte_ptr1__byte_arr__int__ret_int
+                0x0000000000401840                standard__io__file__get_file_size__1__byte_ptr1__ret_int
+                0x00000000004018b0                standard__io__file__file_exists__1__byte_ptr1__ret_bool
+                0x0000000000401900                file.__init
+                0x0000000000401940                file.__exit
+                0x0000000000401960                file.close
+                0x00000000004019b0                file.open
+                0x0000000000401a00                file.read
+                0x0000000000401a70                file.write
+                0x0000000000401ae0                file.seek
+                0x0000000000401b30                file.tell
+                0x0000000000401b50                file.eof
+                0x0000000000401b70                file.size
+                0x0000000000401be0                file.opened
+                0x0000000000401bf0                file.get_handle
  *(SORT_BY_ALIGNMENT(.gnu.warning))
 
 .fini
@@ -165,10 +181,10 @@ END GROUP
                 [!provide]                        PROVIDE (_etext = .)
                 [!provide]                        PROVIDE (etext = .)
 
-.rodata         0x0000000000500000       0x64
+.rodata         0x0000000000500000       0x44
  *(SORT_BY_ALIGNMENT(.rodata) SORT_BY_ALIGNMENT(.rodata.*) SORT_BY_ALIGNMENT(.gnu.linkonce.r.*))
- .rodata.cst32  0x0000000000500000       0x60 build/file_test/file_test.o
- .rodata.cst4   0x0000000000500060        0x4 build/file_test/file_test.o
+ .rodata.cst32  0x0000000000500000       0x40 build/file_test/file_test.o
+ .rodata.cst4   0x0000000000500040        0x4 build/file_test/file_test.o
 
 .rodata1
  *(SORT_BY_ALIGNMENT(.rodata1))
@@ -177,9 +193,9 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.eh_frame_hdr))
  *(SORT_BY_ALIGNMENT(.eh_frame_entry) SORT_BY_ALIGNMENT(.eh_frame_entry.*))
 
-.eh_frame       0x0000000000500068      0x640
+.eh_frame       0x0000000000500048      0x808
  *(SORT_BY_ALIGNMENT(.eh_frame))
- .eh_frame      0x0000000000500068      0x640 build/file_test/file_test.o
+ .eh_frame      0x0000000000500048      0x808 build/file_test/file_test.o
  *(SORT_BY_ALIGNMENT(.eh_frame.*))
 
 .sframe
@@ -194,7 +210,7 @@ END GROUP
 
 .exception_ranges
  *(SORT_BY_ALIGNMENT(.exception_ranges*))
-                0x00000000005016a8                . = DATA_SEGMENT_ALIGN (CONSTANT (MAXPAGESIZE), CONSTANT (COMMONPAGESIZE))
+                0x0000000000501850                . = DATA_SEGMENT_ALIGN (CONSTANT (MAXPAGESIZE), CONSTANT (COMMONPAGESIZE))
 
 .eh_frame
  *(SORT_BY_ALIGNMENT(.eh_frame))
@@ -213,7 +229,7 @@ END GROUP
 .exception_ranges
  *(SORT_BY_ALIGNMENT(.exception_ranges*))
 
-.tdata          0x00000000005016a8        0x0
+.tdata          0x0000000000501850        0x0
                 [!provide]                        PROVIDE (__tdata_start = .)
  *(SORT_BY_ALIGNMENT(.tdata) SORT_BY_ALIGNMENT(.tdata.*) SORT_BY_ALIGNMENT(.gnu.linkonce.td.*))
 
@@ -221,18 +237,18 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.tbss) SORT_BY_ALIGNMENT(.tbss.*) SORT_BY_ALIGNMENT(.gnu.linkonce.tb.*))
  *(SORT_BY_ALIGNMENT(.tcommon))
 
-.preinit_array  0x00000000005016a8        0x0
+.preinit_array  0x0000000000501850        0x0
                 [!provide]                        PROVIDE (__preinit_array_start = .)
  *(SORT_BY_ALIGNMENT(.preinit_array))
                 [!provide]                        PROVIDE (__preinit_array_end = .)
 
-.init_array     0x00000000005016a8        0x0
+.init_array     0x0000000000501850        0x0
                 [!provide]                        PROVIDE (__init_array_start = .)
  *(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*))
  *(SORT_BY_ALIGNMENT(.init_array) SORT_BY_ALIGNMENT(EXCLUDE_FILE(*crtend?.o *crtend.o *crtbegin?.o *crtbegin.o) .ctors))
                 [!provide]                        PROVIDE (__init_array_end = .)
 
-.fini_array     0x00000000005016a8        0x0
+.fini_array     0x0000000000501850        0x0
                 [!provide]                        PROVIDE (__fini_array_start = .)
  *(SORT_BY_INIT_PRIORITY(.fini_array.*) SORT_BY_INIT_PRIORITY(.dtors.*))
  *(SORT_BY_ALIGNMENT(.fini_array) SORT_BY_ALIGNMENT(EXCLUDE_FILE(*crtend?.o *crtend.o *crtbegin?.o *crtbegin.o) .dtors))
@@ -262,27 +278,27 @@ END GROUP
 .dynamic
  *(SORT_BY_ALIGNMENT(.dynamic))
 
-.got            0x00000000005016a8        0x0
+.got            0x0000000000501850        0x0
  *(SORT_BY_ALIGNMENT(.got))
- .got           0x00000000005016a8        0x0 build/file_test/file_test.o
+ .got           0x0000000000501850        0x0 build/file_test/file_test.o
  *(SORT_BY_ALIGNMENT(.igot))
-                0x00000000005016a8                . = DATA_SEGMENT_RELRO_END (., (SIZEOF (.got.plt) >= 0x18)?0x18:0x0)
+                0x0000000000501850                . = DATA_SEGMENT_RELRO_END (., (SIZEOF (.got.plt) >= 0x18)?0x18:0x0)
 
-.got.plt        0x00000000005016a8        0x0
+.got.plt        0x0000000000501850        0x0
  *(SORT_BY_ALIGNMENT(.got.plt))
- .got.plt       0x00000000005016a8        0x0 build/file_test/file_test.o
+ .got.plt       0x0000000000501850        0x0 build/file_test/file_test.o
  *(SORT_BY_ALIGNMENT(.igot.plt))
- .igot.plt      0x00000000005016a8        0x0 build/file_test/file_test.o
+ .igot.plt      0x0000000000501850        0x0 build/file_test/file_test.o
 
 .data           0x0000000000600000        0x0
  *(SORT_BY_ALIGNMENT(.data) SORT_BY_ALIGNMENT(.data.*) SORT_BY_ALIGNMENT(.gnu.linkonce.d.*))
 
 .data1
  *(SORT_BY_ALIGNMENT(.data1))
-                0x00000000005016a8                _edata = .
+                0x0000000000501850                _edata = .
                 [!provide]                        PROVIDE (edata = .)
                 0x0000000000600000                . = ALIGN (ALIGNOF (NEXT_SECTION))
-                0x00000000005016a8                __bss_start = .
+                0x0000000000501850                __bss_start = .
 
 .bss            0x0000000000700000        0x0
  *(SORT_BY_ALIGNMENT(.dynbss))
@@ -304,7 +320,7 @@ END GROUP
  *(SORT_BY_ALIGNMENT(.ldata) SORT_BY_ALIGNMENT(.ldata.*) SORT_BY_ALIGNMENT(.gnu.linkonce.l.*))
                 0x0000000000700000                . = ALIGN ((. != 0x0)?0x8:0x1)
                 0x0000000000700000                . = ALIGN (0x8)
-                0x00000000005016a8                _end = .
+                0x0000000000501850                _end = .
                 [!provide]                        PROVIDE (end = .)
                 0x0000000000700000                . = DATA_SEGMENT_END (.)
 
@@ -432,6 +448,20 @@ _start                                            build/file_test/file_test.o
 abort                                             build/file_test/file_test.o
 exit                                              build/file_test/file_test.o
 fclose                                            build/file_test/file_test.o
+feof                                              build/file_test/file_test.o
+ferror                                            build/file_test/file_test.o
+file.__exit                                       build/file_test/file_test.o
+file.__init                                       build/file_test/file_test.o
+file.close                                        build/file_test/file_test.o
+file.eof                                          build/file_test/file_test.o
+file.get_handle                                   build/file_test/file_test.o
+file.open                                         build/file_test/file_test.o
+file.opened                                       build/file_test/file_test.o
+file.read                                         build/file_test/file_test.o
+file.seek                                         build/file_test/file_test.o
+file.size                                         build/file_test/file_test.o
+file.tell                                         build/file_test/file_test.o
+file.write                                        build/file_test/file_test.o
 float2str__3__float__byte_ptr1__i32__ret_i32      build/file_test/file_test.o
 fopen                                             build/file_test/file_test.o
 fread                                             build/file_test/file_test.o
@@ -454,7 +484,7 @@ standard__io__console__print__1__uint__ret_void   build/file_test/file_test.o
 standard__io__console__print__2__noopstr__int__ret_void build/file_test/file_test.o
 standard__io__file__append_file__3__byte_ptr1__byte_arr__int__ret_int build/file_test/file_test.o
 standard__io__file__close__1__i64__ret_i32        build/file_test/file_test.o
-standard__io__file__file_exists__1__byte_ptr1__ret_int build/file_test/file_test.o
+standard__io__file__file_exists__1__byte_ptr1__ret_bool build/file_test/file_test.o
 standard__io__file__get_file_size__1__byte_ptr1__ret_int build/file_test/file_test.o
 standard__io__file__open__3__byte_ptr1__i32__i32__ret_i64 build/file_test/file_test.o
 standard__io__file__open_append__1__byte_ptr1__ret_i64 build/file_test/file_test.o
@@ -467,20 +497,20 @@ standard__io__file__read_file__3__byte_ptr1__byte_arr__int__ret_int build/file_t
 standard__io__file__write32__3__i64__byte_ptr1__u32__ret_i32 build/file_test/file_test.o
 standard__io__file__write__3__i64__byte_ptr1__u64__ret_i64 build/file_test/file_test.o
 standard__io__file__write_file__3__byte_ptr1__byte_arr__int__ret_int build/file_test/file_test.o
+standard__memory__bzero__2__void_ptr1__size_t__ret_void build/file_test/file_test.o
+standard__memory__memcmp__3__void_ptr1__void_ptr1__size_t__ret_i32 build/file_test/file_test.o
+standard__memory__memcpy__3__void_ptr1__void_ptr1__size_t__ret_void build/file_test/file_test.o
+standard__memory__memmove__3__void_ptr1__void_ptr1__size_t__ret_void build/file_test/file_test.o
+standard__memory__memset__3__void_ptr1__byte__size_t__ret_void build/file_test/file_test.o
 standard__types__align_down__2__u64__u64__ret_u64 build/file_test/file_test.o
 standard__types__align_up__2__u64__u64__ret_u64   build/file_test/file_test.o
 standard__types__bit_test__2__u32__u32__ret_bool  build/file_test/file_test.o
 standard__types__bswap16__1__u16__ret_u16         build/file_test/file_test.o
 standard__types__bswap32__1__u32__ret_u32         build/file_test/file_test.o
 standard__types__bswap64__1__u64__ret_u64         build/file_test/file_test.o
-standard__types__bzero__2__void_ptr1__size_t__ret_void build/file_test/file_test.o
 standard__types__hton16__1__le16__ret_be16        build/file_test/file_test.o
 standard__types__hton32__1__le32__ret_be32        build/file_test/file_test.o
 standard__types__is_aligned__2__u64__u64__ret_bool build/file_test/file_test.o
-standard__types__memcmp__3__void_ptr1__void_ptr1__size_t__ret_i32 build/file_test/file_test.o
-standard__types__memcpy__3__void_ptr1__void_ptr1__size_t__ret_void build/file_test/file_test.o
-standard__types__memmove__3__void_ptr1__void_ptr1__size_t__ret_void build/file_test/file_test.o
-standard__types__memset__3__void_ptr1__byte__size_t__ret_void build/file_test/file_test.o
 standard__types__ntoh16__1__be16__ret_le16        build/file_test/file_test.o
 standard__types__ntoh32__1__be32__ret_le32        build/file_test/file_test.o
 str2i32__1__byte_ptr1__ret_int                    build/file_test/file_test.o
@@ -488,6 +518,10 @@ str2i64__1__byte_ptr1__ret_i64                    build/file_test/file_test.o
 str2u32__1__byte_ptr1__ret_uint                   build/file_test/file_test.o
 str2u64__1__byte_ptr1__ret_u64                    build/file_test/file_test.o
 strcpy__2__noopstr__noopstr__ret_noopstr          build/file_test/file_test.o
+string.__exit                                     build/file_test/file_test.o
+string.__init                                     build/file_test/file_test.o
+string.len                                        build/file_test/file_test.o
+string.val                                        build/file_test/file_test.o
 strlen__1__byte_ptr1__ret_int                     build/file_test/file_test.o
 u32str__2__u32__byte_ptr1__ret_u32                build/file_test/file_test.o
 u64str__2__u64__byte_ptr1__ret_u64                build/file_test/file_test.o

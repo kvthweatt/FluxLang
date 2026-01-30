@@ -305,10 +305,8 @@ class FluxCompiler:
                 
                 # Check if parse errors occurred
                 if parser.has_errors():
-                    self.logger.error(f"Compilation aborted due to {len(parser.get_errors())} parse error(s)", "parser")
-                    for error in parser.get_errors():
-                        self.logger.error(error, "parser")
-                    raise RuntimeError("Parse errors detected - compilation aborted")
+                    e = "error" + "s" if len(parser.get_errors()) > 1 else ""
+                    raise RuntimeError(f"{len(parser.get_errors())} parse {'error' + ('s' if len(parser.get_errors()) > 1 else '')} detected, compilation aborted")
                 
                 # Log AST if requested (legacy compatibility + new system)
                 if self.verbosity == 1 or self.logger.level >= LogLevel.DEBUG:

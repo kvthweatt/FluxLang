@@ -35,7 +35,7 @@ class StorageClass(Enum):
 
 
 @dataclass
-class Type:
+class BaseType:
     """Base type representation"""
     
     def to_llvm(self, module: ir.Module) -> ir.Type:
@@ -46,7 +46,7 @@ class Type:
 
 
 @dataclass
-class PrimitiveType(Type):
+class PrimitiveType(BaseType):
     kind: DataType
     width: Optional[int] = None
     signed: bool = True
@@ -78,8 +78,8 @@ class PrimitiveType(Type):
 
 
 @dataclass
-class PointerType(Type):
-    pointee: Type
+class PointerType(BaseType):
+    pointee: BaseType
     
     def to_llvm(self, module: ir.Module) -> ir.Type:
         pointee_llvm = self.pointee.to_llvm(module)
@@ -92,8 +92,8 @@ class PointerType(Type):
 
 
 @dataclass
-class ArrayType(Type):
-    element: Type
+class ArrayType(BaseType):
+    element: BaseType
     dimensions: List[Optional[int]]
     
     def to_llvm(self, module: ir.Module) -> ir.Type:
@@ -114,7 +114,7 @@ class ArrayType(Type):
 
 
 @dataclass
-class NamedType(Type):
+class NamedType(BaseType):
     name: str
     
     def to_llvm(self, module: ir.Module) -> ir.Type:
@@ -128,7 +128,7 @@ class NamedType(Type):
 
 
 @dataclass
-class StructType(Type):
+class StructType(BaseType):
     name: str
     
     def to_llvm(self, module: ir.Module) -> ir.Type:
@@ -141,9 +141,14 @@ class StructType(Type):
 
 
 @dataclass
-class FunctionType(Type):
-    return_type: Type
-    parameters: List[Type]
+class EnumType():
+    name: str
+
+
+@dataclass
+class FunctionType(BaseType):
+    return_type: BaseType
+    parameters: List[BaseType]
     
     def to_llvm(self, module: ir.Module) -> ir.FunctionType:
         ret_type = self.return_type.to_llvm(module)
@@ -156,8 +161,8 @@ class FunctionType(Type):
 
 
 @dataclass
-class QualifiedType(Type):
-    base: Type
+class QualifiedType(BaseType):
+    base: BaseType
     is_const: bool = False
     is_volatile: bool = False
     storage_class: Optional[StorageClass] = None
@@ -240,7 +245,7 @@ class TypeChecker:
     """Type compatibility and casting validation"""
     
     @staticmethod
-    def is_compatible(source: Type, target: Type) -> bool:
+    def is_compatible(source: BaseType, target: BaseType) -> bool:
         if isinstance(source, PrimitiveType) and isinstance(target, PrimitiveType):
             if source.kind == target.kind:
                 return True
@@ -256,7 +261,7 @@ class TypeChecker:
         return False
     
     @staticmethod
-    def can_cast(source: Type, target: Type) -> bool:
+    def can_cast(source: BaseType, target: BaseType) -> bool:
         if isinstance(source, PrimitiveType) and isinstance(target, PrimitiveType):
             return True
         
@@ -266,7 +271,7 @@ class TypeChecker:
         return False
     
     @staticmethod
-    def common_type(a: Type, b: Type) -> Type:
+    def common_type(a: BaseType, b: BaseType) -> BaseType:
         if isinstance(a, PrimitiveType) and isinstance(b, PrimitiveType):
             if a.kind == DataType.FLOAT or b.kind == DataType.FLOAT:
                 return PrimitiveType(DataType.FLOAT)
@@ -299,7 +304,7 @@ class TypeSpec:
     custom_typename: Optional[str] = None
     storage_class: Optional[StorageClass] = None
     
-    def to_new_type(self) -> Type:
+    def to_new_type(self) -> BaseType:
         """Convert TypeSpec to new Type system"""
         base = None
         
