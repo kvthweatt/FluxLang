@@ -1316,16 +1316,19 @@ class ArrayLiteral(Expression):
                     packed_value |= (ord(string_val[j]) << (j * 8))
                 const_elements.append(ir.Constant(llvm_type.element, packed_value))
             
+
             # NEW: Pack nested ArrayLiteral into integer
             elif isinstance(elem, ArrayLiteral) and isinstance(llvm_type.element, ir.IntType):
                 # Pack the array elements into a single integer constant
                 packed_value = 0
-                bit_offset = llvm_type.element.width  # Start from high bits
-                                
-                for inner_elem in elem.elements:
+                bit_offset = 0  # Start from low bits
+                
+                print(f"DEBUG: Packing nested ArrayLiteral with {len(elem.elements)} elements into {llvm_type.element}")
+                
+                for inner_elem in reversed(elem.elements):
                     # For global constants, we need constant values
                     if isinstance(inner_elem, Literal):
-                        if inner_elem.type == DataType.SINT:
+                        if inner_elem.type == DataType.INT:
                             elem_val = inner_elem.value
                             elem_width = 32  # This is wrong - need to infer from context
                         else:
@@ -1347,6 +1350,8 @@ class ArrayLiteral(Expression):
                                     elem_width = actual_type.width
                                 else:
                                     raise ValueError(f"Global {var_name} is not an integer type: {actual_type}")
+                                
+                                print(f"DEBUG: Packing {var_name} = {elem_val} ({elem_width} bits) at offset {bit_offset}")
                             else:
                                 raise ValueError(f"Global {var_name} has no initializer")
                         else:
@@ -1354,22 +1359,22 @@ class ArrayLiteral(Expression):
                     else:
                         raise ValueError(f"Cannot evaluate {type(inner_elem)} at compile time for global array")
                     
-                    bit_offset -= elem_width
+                    # Pack in reverse order: last element at low bits
                     packed_value |= (elem_val << bit_offset)
-                                
+                    bit_offset += elem_width
+                
+                print(f"DEBUG: Final packed value: {packed_value} ({bin(packed_value)}) = {llvm_type.element.width} bits")
+                
                 # Verify we used all the bits
-                # TODO:
-                # This should not be a compilation error.
-                # Instead, fill the rest of the bits with 0.
-                if bit_offset != 0:
+                if bit_offset != llvm_type.element.width:
                     raise ValueError(
-                        f"Bit offset mismatch after packing: expected 0, got {bit_offset}"
+                        f"Bit offset mismatch after packing: expected {llvm_type.element.width}, got {bit_offset}"
                     )
                 
                 const_elements.append(ir.Constant(llvm_type.element, packed_value))
-            
+
             elif isinstance(elem, Literal):
-                if elem.type == DataType.SINT:
+                if elem.type == DataType.SINT or elem.type == DataType.UINT:
                     const_elements.append(ir.Constant(llvm_type.element, elem.value))
                 elif elem.type == DataType.FLOAT:
                     const_elements.append(ir.Constant(llvm_type.element, elem.value))
@@ -4009,7 +4014,13 @@ class VariableDeclaration(ASTNode):
             if isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
                 if llvm_type.pointee != init_val.type.pointee:
                     init_val = builder.bitcast(init_val, llvm_type)
-            
+
+                elif isinstance(init_val.type.pointee, ir.ArrayType):
+                    # Pack array bits into integer
+                    init_val = ArrayLiteral._pack_array_pointer_to_integer(
+                        builder, module, init_val, llvm_type
+                    )
+
             # Integer type conversion
             elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.IntType):
                 if init_val.type.width > llvm_type.width:

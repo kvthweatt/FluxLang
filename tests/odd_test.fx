@@ -12,7 +12,7 @@ def main() -> int
 {
     noopstr x = f"{test2}\n\0";
     print(x);
-    if (test1[0] == 0b000010000010000010000)
+    if (test1[0] == 0b10000010000010000)
     {
         print("Binary check success!\n\0");
     };

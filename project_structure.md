@@ -14,6 +14,10 @@ root dir
 |   `--> fpreprocess.py // Preprocessor
 |   `--> flexer.py      // Lexer
 |   `--> fparser.py     // Parser
+	`--> futilities.py  // Utility functions
+	`--> ftypesys.py    // Type System
+	`--> flogger.py     // Logging
+	`--> fconfig.py     // Config helper
 |   `--> fast.py        // AST
 |   `--> fc.py          // Compiler front-end
 |
