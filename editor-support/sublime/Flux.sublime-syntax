@@ -59,16 +59,12 @@ contexts:
         5: entity.name.type.flux
 
     # Primitive types (MUST come before keywords)
-    - match: '\b(int|float|void|bool|char)\b'
+    - match: '\b(int|uint|float|void|bool|char)\b'
       scope: storage.type.primitive.flux
 
     # Storage types
-    - match: '\b(struct|object|union|trait|contract)\b'
+    - match: '\b(enum|struct|object|union|trait|contract)\b'
       scope: storage.type.flux
-    
-    # 'data' keyword when not part of type definition
-    - match: '\bdata\b(?!\s*\{)'
-      scope: storage.type.data.flux
 
     # Keywords (but NOT types)
     - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|contract|compt|const|continue|def|default|do|elif|else|extern|false|for|from|global|heap|if|in|is|local|namespace|not|operator|or|private|public|register|return|signed|sizeof|stack|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|volatile|while|xor)\b'
@@ -109,19 +105,19 @@ contexts:
       scope: keyword.operator.dereference.flux
 
     # Numbers - Duotrigesimal
-    - match: '\b0d[0-9A-V]+\b'
+    - match: '\b0d[0-9A-V]+u?\b'
       scope: constant.numeric.duotrigesimal.flux
 
     # Numbers - Hex
-    - match: '\b0x[0-9A-F]+\b'
+    - match: '\b0x[0-9A-F]+u?\b'
       scope: constant.numeric.hex.flux
 
     # Numbers - Octal
-    - match: '\b0o[0-7]+\b'
+    - match: '\b0o[0-7]+u?\b'
       scope: constant.numeric.octal.flux
 
     # Numbers - Binary
-    - match: '\b0b[01]+\b'
+    - match: '\b0b[01]+u?\b'
       scope: constant.numeric.binary.flux
 
     # Numbers - Float
@@ -129,7 +125,7 @@ contexts:
       scope: constant.numeric.float.flux
 
     # Numbers - Integer
-    - match: '\b\d+\b'
+    - match: '\b\d+u?\b'
       scope: constant.numeric.integer.flux
 
     # Operators - Custom operator definition
@@ -196,7 +192,7 @@ contexts:
     - match: '"'
       scope: punctuation.definition.string.end.flux
       pop: true
-    - match: '\\[\\"nrt]'
+    - match: '\\[\\"nrt0]'
       scope: constant.character.escape.flux
 
   i_string_body:
@@ -207,7 +203,7 @@ contexts:
     - match: '\{'
       scope: punctuation.section.interpolation.begin.flux
       push: interpolation_scope
-    - match: '\\[\\"nrt]'
+    - match: '\\[\\"nrt0]'
       scope: constant.character.escape.flux
 
   f_string_body:

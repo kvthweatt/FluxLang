@@ -106,8 +106,18 @@
             "foreground": "var(red)"
         },
         {
+            "name": "Number Duotrigesimal",
+            "scope": "constant.numeric.duotrigesimal",
+            "foreground": "var(red)"
+        },
+        {
             "name": "Number Hex",
             "scope": "constant.numeric.hex",
+            "foreground": "var(red)"
+        },
+        {
+            "name": "Number Octal",
+            "scope": "constant.numeric.octal",
             "foreground": "var(red)"
         },
         {
