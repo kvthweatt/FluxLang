@@ -1537,12 +1537,13 @@ class ArrayLiteral(Expression):
                 f"into {target_type.width}-bit integer"
             )
         
-        # Pack at runtime
+        # Pack at runtime (big-endian: first element at high bits, last at low bits)
         result = ir.Constant(target_type, 0)
         bit_offset = 0
         
         zero = ir.Constant(ir.IntType(32), 0)
-        for i in range(array_type.count):
+        # Iterate in reverse: last element goes to low bits
+        for i in range(array_type.count - 1, -1, -1):
             index = ir.Constant(ir.IntType(32), i)
             elem_ptr = builder.gep(array_ptr, [zero, index], inbounds=True)
             elem_val = builder.load(elem_ptr)
@@ -2588,7 +2589,28 @@ class FStringLiteral(Expression):
             pos = builder.load(pos_ptr, name="current_pos")
             dest_ptr = builder.gep(buffer, [ir.Constant(ir.IntType(32), 0), pos], name="dest")
             
-            if isinstance(part, Literal) and part.type == DataType.CHAR:
+            if isinstance(part, str):
+                # Plain string part: clean and copy character by character
+                clean_part = part
+                if clean_part.startswith('f"'):
+                    clean_part = clean_part[2:]
+                if clean_part.endswith('"'):
+                    clean_part = clean_part[:-1]
+                
+                # Create a string literal from the cleaned part
+                str_literal = ArrayLiteral.from_string(clean_part)
+                src_val = str_literal.codegen(builder, module)
+                str_len = len(clean_part)
+                
+                for i in range(str_len):
+                    char_ptr = builder.gep(src_val, [ir.Constant(ir.IntType(32), i)])
+                    char_val = builder.load(char_ptr)
+                    dest_char_ptr = builder.gep(dest_ptr, [ir.Constant(ir.IntType(32), i)])
+                    builder.store(char_val, dest_char_ptr)
+                
+                new_pos = builder.add(pos, ir.Constant(ir.IntType(32), str_len))
+                builder.store(new_pos, pos_ptr)
+            elif isinstance(part, Literal) and part.type == DataType.CHAR:
                 # String literal: copy character by character
                 src_val = part.codegen(builder, module)
                 if isinstance(src_val.type, ir.PointerType):
@@ -3825,9 +3847,14 @@ class VariableDeclaration(ASTNode):
             )
         
         elif isinstance(self.initial_value, ArrayLiteral):
-            return ArrayLiteral.create_global_array_initializer(
-                self.initial_value, llvm_type, module
-            )
+            # Check if target is an integer (bitfield packing) or an array
+            if isinstance(llvm_type, ir.IntType):
+                # Pack array into integer for bitfield initialization
+                return self._pack_array_literal_to_int_constant(self.initial_value, llvm_type, module)
+            else:
+                return ArrayLiteral.create_global_array_initializer(
+                    self.initial_value, llvm_type, module
+                )
         
         # NEW: Handle array indexing at compile time
         elif isinstance(self.initial_value, ArrayAccess):
@@ -3862,6 +3889,56 @@ class VariableDeclaration(ASTNode):
                 return array_const.constant[index_value]
         
         return None
+    
+    def _pack_array_literal_to_int_constant(self, array_literal: 'ArrayLiteral', 
+                                           target_type: ir.IntType, module: ir.Module) -> Optional[ir.Constant]:
+        """Pack an array literal into an integer constant for global bitfield initialization."""
+        packed_value = 0
+        bit_offset = 0
+        
+        # Pack in reverse order: first element at high bits, last element at low bits (big-endian)
+        for elem in reversed(array_literal.elements):
+            # Get the constant value and bit width
+            if isinstance(elem, Literal):
+                elem_val = elem.value
+                # Default to 32-bit for literals unless we can infer better
+                elem_width = 32
+            elif isinstance(elem, Identifier):
+                # Look up the global variable
+                var_name = elem.name
+                if var_name not in module.globals:
+                    return None  # Can't resolve at compile time
+                
+                global_var = module.globals[var_name]
+                if not hasattr(global_var, 'initializer') or global_var.initializer is None:
+                    return None
+                
+                elem_val = global_var.initializer.constant
+                
+                # Get actual bit width from the global variable's type
+                if isinstance(global_var.type, ir.PointerType):
+                    actual_type = global_var.type.pointee
+                else:
+                    actual_type = global_var.type
+                
+                if isinstance(actual_type, ir.IntType):
+                    elem_width = actual_type.width
+                else:
+                    return None  # Not an integer type
+            else:
+                return None  # Can't evaluate at compile time
+            
+            # Pack the value
+            packed_value |= (elem_val << bit_offset)
+            bit_offset += elem_width
+        
+        # Verify total bits match target
+        if bit_offset != target_type.width:
+            raise ValueError(
+                f"Bitfield packing size mismatch: packed {bit_offset} bits into {target_type.width}-bit integer"
+            )
+        
+        return ir.Constant(target_type, packed_value)
     
     def _literal_to_constant(self, lit: Literal, llvm_type: ir.Type) -> ir.Constant:
         """Convert literal to LLVM constant."""
@@ -4010,8 +4087,17 @@ class VariableDeclaration(ASTNode):
                 builder.store(array_ptr, alloca)
                 return
             
+            # Pointer to array to integer packing (for bitfield initialization)
+            if (isinstance(init_val.type, ir.PointerType) and 
+                isinstance(init_val.type.pointee, ir.ArrayType) and 
+                isinstance(llvm_type, ir.IntType)):
+                # Pack array bits into integer
+                init_val = ArrayLiteral._pack_array_pointer_to_integer(
+                    builder, module, init_val, llvm_type
+                )
+            
             # Pointer to integer conversion (addresses are just numbers in Flux)
-            if isinstance(init_val.type, ir.PointerType) and isinstance(llvm_type, ir.IntType):
+            elif isinstance(init_val.type, ir.PointerType) and isinstance(llvm_type, ir.IntType):
                 init_val = builder.ptrtoint(init_val, llvm_type, name="ptr_to_int")
             
             # Integer to pointer conversion
