@@ -76,6 +76,7 @@ class TokenType(Enum):
     LOCAL = auto()
     NAMESPACE = auto()
     NOT = auto()
+    NO_INIT = auto()
     OBJECT = auto()
     OR = auto()
     PRIVATE = auto()
@@ -241,6 +242,7 @@ class FluxLexer:
             'local': TokenType.LOCAL,
             'namespace': TokenType.NAMESPACE,
             'not': TokenType.NOT,
+            'noinit': TokenType.NO_INIT,
             'object': TokenType.OBJECT,
             'or': TokenType.OR,
             'private': TokenType.PRIVATE,

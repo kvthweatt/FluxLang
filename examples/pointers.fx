@@ -2,6 +2,8 @@
 
 def main() -> int
 {
+    int a = noinit; // No initialized value
+
     uint x, y = 10, 0;
 
     uint* px, py = @x, @y;
@@ -23,7 +25,7 @@ def main() -> int
     // Dereference py to get the value at the address
     // Cast to make sure it's the proper type to print
 
-    if (x == 10 & y == 0 & *py == x & px == py)
+    if (x == 10 & y == 0 & *py == x & px == py & px == (@)kx)
     {
         print("Success, y unchanged, py points to x.\n\0");
         print((uint)*py);

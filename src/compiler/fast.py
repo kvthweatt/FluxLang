@@ -3724,6 +3724,30 @@ class SizeOf(Expression):
             return ir.Constant(ir.IntType(32), val_type.width)  # Already in bits
         raise ValueError(f"Cannot determine size of type: {val_type}")
 
+@dataclass
+class NoInit(Expression):
+    """
+    Represents the noinit keyword for uninitialized variable declarations.
+    This is a special marker expression that indicates a variable should not
+    be automatically initialized to zero.
+    
+    Example:
+        int x = noinit;  // x is declared but not initialized
+    
+    Note: This expression type should never generate code directly - it is
+    handled specially in VariableDeclaration.codegen()
+    """
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
+        """
+        NoInit should never be code-generated directly.
+        It's a compile-time marker that's handled in VariableDeclaration.
+        """
+        raise RuntimeError(
+            "noinit is a compile-time marker and should not generate code directly. "
+            "It should only be used as an initializer in variable declarations."
+        )
+
 # Variable declarations
 @dataclass
 class VariableDeclaration(ASTNode):
@@ -3813,14 +3837,21 @@ class VariableDeclaration(ASTNode):
         # Create new global
         gvar = ir.GlobalVariable(module, llvm_type, self.name)
         
-        # Set initializer
-        if self.initial_value:
+        # Handle noinit for global variables
+        if isinstance(self.initial_value, NoInit):
+            # Global variables in LLVM IR require an initializer
+            # Use Undefined to represent uninitialized state
+            # This is the LLVM equivalent of "no initialization"
+            gvar.initializer = ir.Undefined(llvm_type)
+        # Set initializer if value provided
+        elif self.initial_value:
             init_const = self._create_global_initializer(module, llvm_type)
             if init_const is not None:
                 gvar.initializer = init_const
             else:
                 gvar.initializer = get_default_initializer(llvm_type)
         else:
+            # Default behavior: zero-initialize
             gvar.initializer = get_default_initializer(llvm_type)
         
         gvar.linkage = 'internal'
@@ -3979,9 +4010,18 @@ class VariableDeclaration(ASTNode):
             builder.scope_type_info = {}
         builder.scope_type_info[self.name] = resolved_type_spec
 
-        # Initialize variable if needed
-        if self.initial_value:
+        # Handle noinit keyword - skip initialization entirely
+        if isinstance(self.initial_value, NoInit):
+            # Mark variable as explicitly uninitialized for tracking
+            if not hasattr(builder, 'uninitialized_vars'):
+                builder.uninitialized_vars = set()
+            builder.uninitialized_vars.add(self.name)
+            # Do NOT initialize the alloca - it will contain undefined value
+        # Initialize variable if value is provided (and it's not noinit)
+        elif self.initial_value:
             self._initialize_local(builder, module, alloca, llvm_type)
+        # If no initial_value at all, Flux currently zero-initializes
+        # This maintains backward compatibility with existing behavior
         
         # Register in scope
         builder.scope[self.name] = alloca

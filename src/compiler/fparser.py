@@ -2245,6 +2245,9 @@ class FluxParser:
         elif self.expect(TokenType.THIS):
             self.advance()
             return Identifier("this")
+        elif self.expect(TokenType.NO_INIT):
+            self.advance()
+            return NoInit()
         #elif self.expect(TokenType.SUPER): # DEFERRED
             #self.advance()
             #return Identifier("super")

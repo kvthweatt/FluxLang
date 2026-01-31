@@ -59,7 +59,7 @@ contexts:
         5: entity.name.type.flux
 
     # Primitive types (MUST come before keywords)
-    - match: '\b(int|uint|float|void|bool|char)\b'
+    - match: '\b(int|uint|float|void|bool|char|data)\b'
       scope: storage.type.primitive.flux
 
     # Storage types
@@ -71,7 +71,7 @@ contexts:
       scope: keyword.control.flux
 
     # Type modifiers
-    - match: '\b(const|volatile|signed|unsigned|heap|stack|register)\b'
+    - match: '\b(noinit|const|volatile|signed|unsigned|heap|stack|register)\b'
       scope: storage.modifier.flux
 
     # Special methods (dunder methods)
