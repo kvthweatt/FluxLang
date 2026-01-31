@@ -4010,8 +4010,16 @@ class VariableDeclaration(ASTNode):
                 builder.store(array_ptr, alloca)
                 return
             
+            # Pointer to integer conversion (addresses are just numbers in Flux)
+            if isinstance(init_val.type, ir.PointerType) and isinstance(llvm_type, ir.IntType):
+                init_val = builder.ptrtoint(init_val, llvm_type, name="ptr_to_int")
+            
+            # Integer to pointer conversion
+            elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.PointerType):
+                init_val = builder.inttoptr(init_val, llvm_type, name="int_to_ptr")
+            
             # Pointer type conversion
-            if isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
+            elif isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
                 if llvm_type.pointee != init_val.type.pointee:
                     init_val = builder.bitcast(init_val, llvm_type)
 
@@ -4225,6 +4233,12 @@ class Assignment(Statement):
                     array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
                     builder.store(array_ptr, ptr)
                     return array_ptr
+                # Handle void* to typed pointer assignment (e.g., py = (@)pxk where pxk is int)
+                elif (isinstance(val.type, ir.PointerType) and 
+                      isinstance(val.type.pointee, ir.IntType) and val.type.pointee.width == 8 and
+                      isinstance(ptr.type.pointee, ir.PointerType)):
+                    # This is assigning void* (i8*) to a typed pointer
+                    val = builder.bitcast(val, ptr.type.pointee, name="void_ptr_to_typed")
                 # Handle other type mismatches as needed
                 elif isinstance(val.type, ir.IntType) and isinstance(ptr.type.pointee, ir.IntType):
                     if val.type.width != ptr.type.pointee.width:
