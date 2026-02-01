@@ -1397,7 +1397,7 @@ class FluxParser:
     
     def if_statement(self) -> IfStatement:
         """
-        if_statement -> 'if' '(' expression ')' block ('elif' '(' expression ')' block)* ('else' block)? ';'
+        if_statement -> 'if' '(' expression ')' block (('elif' | 'else' 'if') '(' expression ')' block)* ('else' block)? ';'
         """
         self.consume(TokenType.IF)
         self.consume(TokenType.LEFT_PAREN)
@@ -1406,8 +1406,14 @@ class FluxParser:
         then_block = self.block()
         
         elif_blocks = []
-        while self.expect(TokenType.ELIF):
-            self.advance()
+        while self.expect(TokenType.ELIF) or (self.expect(TokenType.ELSE) and self.peek() and self.peek().type == TokenType.IF):
+            if self.expect(TokenType.ELIF):
+                self.advance()
+            else:
+                # Handle 'else if'
+                self.advance()  # consume 'else'
+                self.advance()  # consume 'if'
+            
             self.consume(TokenType.LEFT_PAREN)
             elif_condition = self.expression()
             self.consume(TokenType.RIGHT_PAREN)

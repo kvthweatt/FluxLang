@@ -4882,10 +4882,37 @@ class IfStatement(Statement):
         if not builder.block.is_terminated:
             builder.branch(merge_block)
         
-        # Emit else block
+        # Emit else block (which may contain elif chain)
         builder.position_at_start(else_block)
+        
+        # Process elif blocks as a chain
+        current_block = else_block
+        for i, (elif_cond, elif_body) in enumerate(self.elif_blocks):
+            # Generate the elif condition
+            elif_cond_val = elif_cond.codegen(builder, module)
+            
+            # Create blocks for this elif
+            elif_then = func.append_basic_block(f'elif_then_{i}')
+            elif_else = func.append_basic_block(f'elif_else_{i}')
+            
+            # Branch based on elif condition
+            builder.cbranch(elif_cond_val, elif_then, elif_else)
+            
+            # Emit elif body
+            builder.position_at_start(elif_then)
+            elif_body.codegen(builder, module)
+            if not builder.block.is_terminated:
+                builder.branch(merge_block)
+            
+            # Continue in the elif_else block for next elif or final else
+            builder.position_at_start(elif_else)
+            current_block = elif_else
+        
+        # After all elifs, emit the final else block if present
         if self.else_block:
             self.else_block.codegen(builder, module)
+        
+        # Branch to merge if not already terminated
         if not builder.block.is_terminated:
             builder.branch(merge_block)
         

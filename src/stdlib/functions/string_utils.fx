@@ -202,7 +202,8 @@ namespace string_utils
         {
             len = len - 1;
         };
-        str[len] = 0;
+        str[len] = (byte)0;
+        return;
     };
     
     
@@ -294,7 +295,7 @@ namespace string_utils
         byte* dest = malloc(len + 1);
         if (dest == 0)
         {
-            return 0;
+            return (byte*)0;
         };
         
         for (int i = 0; i <= len; i = i + 1)
@@ -304,21 +305,21 @@ namespace string_utils
         
         return dest;
     };
-    
+
     // Copy n characters (allocates new buffer with null terminator)
     def copy_n(byte* src, int n) -> byte*
     {
         byte* dest = malloc(n + 1);
         if (dest == 0)
         {
-            return 0;
+            return (byte*)0;
         };
         
         for (int i = 0; i < n & src[i] != 0; i = i + 1)
         {
             dest[i] = src[i];
         };
-        dest[n] = 0;
+        dest[n] = (byte)0;
         
         return dest;
     };
@@ -329,14 +330,14 @@ namespace string_utils
         byte* result = malloc(length + 1);
         if (result == 0)
         {
-            return 0;
+            return (byte*)0;
         };
         
         for (int i = 0; i < length & str[start + i] != 0; i = i + 1)
         {
-            result[i] = str[start + i];
+            result[i] = (byte)str[start + i];
         };
-        result[length] = 0;
+        result[length] = (byte)0;
         
         return result;
     };
@@ -353,7 +354,7 @@ namespace string_utils
         byte* result = malloc(len1 + len2 + 1);
         if (result == 0)
         {
-            return 0;
+            return (byte*)0;
         };
         
         for (int i = 0; i < len1; i = i + 1)
@@ -364,7 +365,7 @@ namespace string_utils
         {
             result[len1 + i] = s2[i];
         };
-        result[len1 + len2] = 0;
+        result[len1 + len2] = (byte)0;
         
         return result;
     };
@@ -384,7 +385,7 @@ namespace string_utils
             negative = true;
             pos = pos + 1;
         }
-        else if (str[pos] == '+')
+        elif (str[pos] == '+')
         {
             pos = pos + 1;
         };
@@ -474,7 +475,7 @@ namespace string_utils
         
         if (current_line != line_num)
         {
-            return 0; // Line not found
+            return (byte*)0; // Line not found
         };
         
         // Find end of line
@@ -501,7 +502,7 @@ namespace string_utils
             {
                 in_word = false;
             }
-            else if (!in_word)
+            elif (!in_word)
             {
                 in_word = true;
                 count = count + 1;
@@ -510,7 +511,7 @@ namespace string_utils
         
         return count;
     };
-    
+
     
     // ===== REPLACEMENT =====
     
@@ -537,7 +538,7 @@ namespace string_utils
         byte* result = malloc(new_len + 1);
         if (result == 0)
         {
-            return 0;
+            return (byte*)0;
         };
         
         // Copy before match
