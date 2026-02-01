@@ -53,6 +53,8 @@
         return c;
     };
 
+    def foo(int x) -> int {return 0;};
+
 def main() -> int
 {
     if (is_whitespace('\n'))
@@ -63,5 +65,6 @@ def main() -> int
     {
         print("Digit found!\n\0");
     };
+
 	return 0;
 };

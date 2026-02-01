@@ -553,7 +553,7 @@ class FluxCompiler:
                     "/opt:ref" if int(config['remove_unused_funcs']) == 1 else "",                    # Remove unused functions/data
                     "/opt:icf" if int(config['comdat_folding']) == 1 else "",                    # Identical COMDAT folding
                     "/section:.text,ERW",
-                    "/merge:.rdata=.text" if int(config['merge_read_only_w_text']) == 1 else "",         # Merge read-only data with code
+                    #"/merge:.rdata=.text" if int(config['merge_read_only_w_text']) == 1 else "",         # Merge read-only data with code
                     "/merge:.data=.text" if int(config['marge_data_and_code']) == 1 else "",          # Merge data with code
                     "/align:" + config['memory_alignment'] if int(config['memory_alignment']) != 0 else "",                    # 32-bit memory alignment (minimal padding)
                     "/filealign:" + config['bin_disk_alignment'] if int(config['bin_disk_alignment']) != 0 else "",                # 32-bit file alignment (tiny executable)
