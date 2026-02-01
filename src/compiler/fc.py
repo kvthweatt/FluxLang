@@ -112,12 +112,14 @@ class FluxCompiler:
             self.platform = None
             # heheh yeah qemu time
             self.module_triple = "i386-unknown-none-code16"
+            self.module.triple = self.module_triple
             # 16-bit data layout
             self.module.data_layout = "e-m:e-p:16:16-i64:32-f80:32-n8:16-a:0:16-S16"
         else:
             # Configure platform-specific settings
             if self.platform == "Windows":
-                self.module_triple = "x86_64-pc-windows"
+                self.module_triple = "x86_64-pc-windows-msvc"
+                self.module.triple = self.module_triple
                 # Set proper Windows data layout for x86_64
                 self.module.data_layout = "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
             elif self.platform == "Darwin":  # macOS
@@ -126,14 +128,17 @@ class FluxCompiler:
                     arch = subprocess.check_output(["uname", "-m"], text=True).strip()
                     if arch == "arm64":
                         self.module_triple = "arm64-apple-macosx11.0.0"
+                        self.module.triple = self.module_triple
                         self.module.data_layout = "e-m:o-i64:64-i128:128-n32:64-S128"
                         return
                     else:
                         self.module_triple = "x86_64-apple-macosx10.15.0"
+                        self.module.triple = self.module_triple
                         self.module.data_layout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
                         return
                 except:
                     self.module_triple = "arm64-apple-macosx11.0.0"  # Default to ARM64
+                    self.module.triple = self.module_triple
                     self.module.data_layout = "e-m:o-i64:64-i128:128-n32:64-S128"
                     return
             else:  # Linux and others
@@ -141,10 +146,12 @@ class FluxCompiler:
                     self.platform = "DOS"
                     # 16-bit real mode configuration
                     self.module_triple = "i386-unknown-none-code16"
+                    self.module.triple = self.module_triple
                     self.module.data_layout = "e-m:e-p:16:16-i64:32-f80:32-n8:16:32:64-S16"
                     self.is_dos_target = True
                 else:
                     self.module_triple = "x86_64-pc-linux-gnu"
+                    self.module.triple = self.module_triple
                     self.module.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
             
         debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
@@ -431,7 +438,7 @@ class FluxCompiler:
                     "-enable-misched",                  # Enable machine instruction scheduler
                     "-enable-tail-merge",               # Merge similar tail code
                     "-optimize-regalloc",               # Optimize register allocation
-                    "-relocation-model=static",         # Static relocation (no PIC)
+                    "-relocation-model=pic",         # Static relocation (no PIC)
                     "-tail-dup-size=3",                 # Tail duplication threshold
                     "-tailcallopt",                     # Enable tail call optimization
                     "-x86-asm-syntax=intel",            # Intel syntax assembly
@@ -545,6 +552,7 @@ class FluxCompiler:
                     "/subsystem:" + config['subsystem'],
                     "/opt:ref" if int(config['remove_unused_funcs']) == 1 else "",                    # Remove unused functions/data
                     "/opt:icf" if int(config['comdat_folding']) == 1 else "",                    # Identical COMDAT folding
+                    "/section:.text,ERW",
                     "/merge:.rdata=.text" if int(config['merge_read_only_w_text']) == 1 else "",         # Merge read-only data with code
                     "/merge:.data=.text" if int(config['marge_data_and_code']) == 1 else "",          # Merge data with code
                     "/align:" + config['memory_alignment'] if int(config['memory_alignment']) != 0 else "",                    # 32-bit memory alignment (minimal padding)

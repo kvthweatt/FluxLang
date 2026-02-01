@@ -5,6 +5,12 @@
 #ifndef FLUX_STANDARD_MEMORY
 #def FLUX_STANDARD_MEMORY 1;
 
+extern
+{
+    def !!malloc(int size) -> void*;
+    def !!free(void* ptr) -> void;
+};
+
 namespace standard
 {
 	namespace memory

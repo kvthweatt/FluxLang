@@ -614,7 +614,11 @@ class FluxLexer:
                     tokens.append(Token(TokenType.STRING_LITERAL, content, start_pos[0], start_pos[1]))
                 else:
                     content = self.read_string("'")
-                    tokens.append(Token(TokenType.STRING_LITERAL, content, start_pos[0], start_pos[1]))
+                    # Single quotes with exactly one character are CHAR literals, not strings
+                    if len(content) == 1:
+                        tokens.append(Token(TokenType.CHAR, content, start_pos[0], start_pos[1]))
+                    else:
+                        tokens.append(Token(TokenType.STRING_LITERAL, content, start_pos[0], start_pos[1]))
                 continue
 
             if char == 'a' and self.peek_char() == 's' and self.peek_char(2) == 'm' and self.peek_char(3) == '"':

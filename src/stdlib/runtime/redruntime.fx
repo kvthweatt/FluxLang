@@ -28,7 +28,7 @@
 // ---------------------------
 //
 // Import runtime helpers
-//#import "ffifio.fx";
+#import "ffifio.fx";
 //
 // ---------------------------
 //

@@ -357,6 +357,11 @@ class FluxParser:
             self.advance()
         
         self.consume(TokenType.DEF)
+        # Check if this is a function pointer declaration (def{}*)
+        if self.expect(TokenType.FUNCTION_POINTER):
+            self.advance()  # consume the {}* token
+            return self.function_pointer_declaration()
+        
         if self.expect(TokenType.NO_MANGLE):
             no_mangle = True
             self.consume(TokenType.NO_MANGLE)
@@ -444,14 +449,13 @@ class FluxParser:
         """
         Parse function pointer type specification.
         
-        Syntax: return_type{}* (param_types)
-        Example: void{}* x(int, int)
-        """
-        # Parse return type
-        return_type = self.peek(-2)
+        Syntax: def{}* identifier()->return_type
+        Example: def{}* fp()->int
         
+        The identifier has already been consumed by function_pointer_declaration.
+        This method parses: ()->return_type
+        """
         # Parse parameter types in parentheses
-        self.consume(TokenType.IDENTIFIER)
         self.consume(TokenType.LEFT_PAREN)
         
         parameter_types = []
@@ -465,23 +469,27 @@ class FluxParser:
                 parameter_types.append(self.type_spec())
         
         self.consume(TokenType.RIGHT_PAREN)
+        
+        # Parse return type after ->
+        self.consume(TokenType.RETURN_ARROW)
+        return_type = self.type_spec()
+        
         print("GOT FUNCTION POINTER")
         
         return FunctionPointerType(return_type, parameter_types)
-
 
     def function_pointer_declaration(self) -> FunctionPointerDeclaration:
         """
         Parse function pointer declaration.
         
-        Syntax: return_type{}* name(param_types) = @function_name;
-        Example: void{}* fp() = @foo;
+        Syntax: def{}* name()->return_type = @function_name;
+        Example: def{}* fp()->void = @foo;
         """
-        # Parse the function pointer type (return type + {}* + param types)
-        fp_type = self.function_pointer_type()
-        
-        # Get the name
+        # Get the identifier name FIRST
         name = self.consume(TokenType.IDENTIFIER).value
+        
+        # Parse the function pointer type (param types + return type)
+        fp_type = self.function_pointer_type()
         
         # Optional initializer
         initializer = None
@@ -2004,7 +2012,7 @@ class FluxParser:
             operand = self.unary_expression()
             return UnaryOp(operator, operand)
         elif self.expect(TokenType.MULTIPLY):
-            # Pointer dereference - this handles *x, **x, ***x, etc.
+            # Pointer dereference operator
             self.advance()
             operand = self.cast_expression()
             return PointerDeref(operand)

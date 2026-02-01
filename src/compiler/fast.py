@@ -2781,6 +2781,42 @@ class FunctionCall(Expression):
         5. Raise error if still not found
         """
         
+        # Step 0: Check if this is a function pointer variable (local or global)
+        # Function pointer variables should be called using FunctionPointerCall
+        is_func_ptr_var = False
+        
+        # Check local scope
+        if builder.scope and self.name in builder.scope:
+            var_ptr = builder.scope[self.name]
+            # Check if it's a pointer to a function type
+            # Note: Local variables are allocated with alloca, so we get a pointer to the pointer
+            if isinstance(var_ptr.type, ir.PointerType):
+                pointee = var_ptr.type.pointee
+                # Check for both direct function pointer and double-pointer (from alloca)
+                if isinstance(pointee, ir.FunctionType):
+                    # Direct pointer to function (shouldn't happen for locals, but check anyway)
+                    is_func_ptr_var = True
+                elif isinstance(pointee, ir.PointerType) and isinstance(pointee.pointee, ir.FunctionType):
+                    # Pointer to pointer to function (local variable from alloca)
+                    is_func_ptr_var = True
+        
+        # Check global scope
+        elif self.name in module.globals:
+            gvar = module.globals[self.name]
+            if not isinstance(gvar, ir.Function):
+                # It's a global variable, check if it's a function pointer
+                if isinstance(gvar.type, ir.PointerType):
+                    if isinstance(gvar.type.pointee, ir.FunctionType):
+                        is_func_ptr_var = True
+        
+        # If it's a function pointer variable, delegate to FunctionPointerCall
+        if is_func_ptr_var:
+            func_ptr_call = FunctionPointerCall(
+                pointer=Identifier(self.name),
+                arguments=self.arguments
+            )
+            return func_ptr_call.codegen(builder, module)
+        
         # Step 1: Try direct lookup
         func = module.globals.get(self.name, None)
         mangled_name = None
@@ -3407,6 +3443,8 @@ class AddressOf(Expression):
             if var_name in module.globals:
                 func_or_var = module.globals[var_name]
                 if isinstance(func_or_var, ir.Function):
+                    # Return the function directly - LLVM will handle it as a function pointer
+                    # The function object itself can be used as a constant pointer value
                     return func_or_var
             
             # Try function overload resolution
@@ -3416,6 +3454,7 @@ class AddressOf(Expression):
                 # we need to pick the right overload
                 # If there's only one overload, use it
                 if len(overloads) == 1:
+                    # Return the function - it will be used as a constant function pointer
                     return overloads[0]['function']
                 else:
                     # Multiple overloads - need to disambiguate
@@ -4160,7 +4199,12 @@ class VariableDeclaration(ASTNode):
                 if init_val.type.width > llvm_type.width:
                     init_val = builder.trunc(init_val, llvm_type)
                 elif init_val.type.width < llvm_type.width:
-                    init_val = builder.sext(init_val, llvm_type)
+                    # Use zext for unsigned, sext for signed
+                    from futilities import is_unsigned
+                    if is_unsigned(init_val):
+                        init_val = builder.zext(init_val, llvm_type)
+                    else:
+                        init_val = builder.sext(init_val, llvm_type)
             
             # Int to float conversion
             elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.FloatType):
@@ -4369,7 +4413,12 @@ class Assignment(Statement):
                 elif isinstance(val.type, ir.IntType) and isinstance(ptr.type.pointee, ir.IntType):
                     if val.type.width != ptr.type.pointee.width:
                         if val.type.width < ptr.type.pointee.width:
-                            val = builder.sext(val, ptr.type.pointee)
+                            # Use zext for unsigned, sext for signed
+                            from futilities import is_unsigned
+                            if is_unsigned(val):
+                                val = builder.zext(val, ptr.type.pointee)
+                            else:
+                                val = builder.sext(val, ptr.type.pointee)
                         else:
                             val = builder.trunc(val, ptr.type.pointee)
             
@@ -5408,26 +5457,16 @@ class ReturnStatement(Statement):
             return value
 
         # === ALLOWED IMPLICIT CASE ===
-        # Integer literal conversion (both widening and narrowing)
-        # This includes plain literals and unary operations on literals (like -1)
-        is_literal_int = (
-            isinstance(self.value, Literal) and 
-            self.value.type in (DataType.SINT, DataType.UINT)
-        )
-        is_unary_literal_int = (
-            isinstance(self.value, UnaryOp) and
-            isinstance(self.value.operand, Literal) and
-            self.value.operand.type in (DataType.SINT, DataType.UINT)
-        )
-        
-        if (
-            (is_literal_int or is_unary_literal_int)
-            and isinstance(src, ir.IntType)
-            and isinstance(expected, ir.IntType)
-        ):
+        # Integer type conversion (widening and narrowing)
+        # This includes literals, binary operations, and all integer expressions
+        if isinstance(src, ir.IntType) and isinstance(expected, ir.IntType):
             if src.width < expected.width:
-                # Widening: use sign-extension
-                return builder.sext(value, expected)
+                # Widening: use zero-extension for unsigned, sign-extension for signed
+                from futilities import is_unsigned
+                if is_unsigned(value):
+                    return builder.zext(value, expected)
+                else:
+                    return builder.sext(value, expected)
             elif src.width > expected.width:
                 # Narrowing: truncate
                 return builder.trunc(value, expected)
@@ -6225,6 +6264,11 @@ class FunctionPointerDeclaration(Statement):
         """Generate function pointer variable"""
         ptr_type = self.fp_type.get_llvm_pointer_type(module)
         
+        # Store type information for later lookup
+        if not hasattr(builder, 'scope_type_info'):
+            builder.scope_type_info = {}
+        builder.scope_type_info[self.name] = self.fp_type
+        
         # Allocate storage
         if builder.scope is None:
             # Global function pointer
@@ -6246,6 +6290,13 @@ class FunctionPointerDeclaration(Statement):
             
             if self.initializer:
                 init_val = self.initializer.codegen(builder, module)
+                # If init_val is a function, we need to ensure it's properly converted
+                # to a function pointer with correct type
+                if isinstance(init_val, ir.Function):
+                    # For Windows PE compatibility, explicitly convert via ptrtoint/inttoptr
+                    # This ensures the linker properly resolves the function address
+                    func_as_int = builder.ptrtoint(init_val, ir.IntType(64))
+                    init_val = builder.inttoptr(func_as_int, ptr_type)
                 builder.store(init_val, alloca)
             
             return alloca
@@ -6270,7 +6321,9 @@ class FunctionPointerCall(Expression):
         # Generate arguments
         args = [arg.codegen(builder, module) for arg in self.arguments]
         
-        # Perform indirect call
+        # Simple indirect call - just call through the pointer
+        # The key issue: llvmlite's builder.call() should work, but we need
+        # to ensure the function pointer is properly typed
         return builder.call(func_ptr, args, name="indirect_call")
 
 @dataclass
