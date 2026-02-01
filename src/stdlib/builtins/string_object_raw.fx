@@ -4,6 +4,10 @@
 
 #ifdef FLUX_STANDARD_STRINGS
 
+
+
+
+
 object string
 {
     noopstr value;
@@ -27,6 +31,20 @@ object string
     def len() -> int
     {
         return strlen(this.value);
+    };
+
+    def set(noopstr s) -> bool
+    {
+        try
+        {
+            this.value = s;
+            return true;
+        }
+        catch()
+        {
+            return false;
+        };
+        return false;
     };
 };
 

@@ -209,7 +209,7 @@ class FluxLexer:
             'and': TokenType.AND,
             'as': TokenType.AS,
             'asm': TokenType.ASM,
-            'at': TokenType.AT,
+            #'at': TokenType.AT,
             'asm': TokenType.ASM,
             'assert': TokenType.ASSERT,
             'auto': TokenType.AUTO,

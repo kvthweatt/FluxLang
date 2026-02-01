@@ -64,7 +64,7 @@ class ParseError(Exception):
     def __init__(self, message: str, token: Optional[Token] = None):
         self.message = message
         self.token = token
-        super().__init__(f"{message}")
+        super().__init__(f"{message} Line {token.line}:{token.column}")
 
 class FluxParser:
     def __init__(self, tokens: List[Token]):
@@ -370,23 +370,34 @@ class FluxParser:
         self.symbol_table.enter_scope()
         
         self.consume(TokenType.LEFT_PAREN)
-        parameters = self.parameter_list() if not self.expect(TokenType.RIGHT_PAREN) else []
-        for param in parameters:
-            self.symbol_table.define(param.name, SymbolKind.VARIABLE)
+        parameters = []
+        if not self.expect(TokenType.RIGHT_PAREN):
+            parameters = self.parameter_list()
         self.consume(TokenType.RIGHT_PAREN)
         
         self.consume(TokenType.RETURN_ARROW)
         return_type = self.type_spec()
         
+        # Check if this is a prototype by looking for semicolon vs body
         is_prototype = False
         body = None
+        
         if self.expect(TokenType.SEMICOLON):
             is_prototype = True
             self.advance()
             body = Block([])
         else:
+            # If any parameter lacks a name, this is an error for a definition
+            for param in parameters:
+                if param.name is None:
+                    self.error(f"Function definition requires parameter names, but parameter of type {param.type_spec} has no name")
             body = self.block()
             self.consume(TokenType.SEMICOLON)
+        
+        # Only add named parameters to symbol table
+        for param in parameters:
+            if param.name:
+                self.symbol_table.define(param.name, SymbolKind.VARIABLE)
         
         self.symbol_table.exit_scope()
         
@@ -518,10 +529,16 @@ class FluxParser:
     
     def parameter(self) -> Parameter:
         """
-        parameter -> type_spec IDENTIFIER
+        parameter -> type_spec IDENTIFIER?
+        Returns Parameter where name may be None.
         """
         type_spec = self.type_spec()
-        name = self.consume(TokenType.IDENTIFIER).value
+        
+        # Identifier is optional
+        name = None
+        if self.expect(TokenType.IDENTIFIER):
+            name = self.consume(TokenType.IDENTIFIER).value
+        
         return Parameter(name, type_spec)
 
     def enum_def(self) -> EnumDefStatement:

@@ -19,5 +19,7 @@ def main() -> int
 
     print(hex_to_int('F'));
 
+    int lo = find_char_last("abcdabcd",'d');
+
 	return 0;
 };

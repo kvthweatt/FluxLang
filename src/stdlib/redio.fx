@@ -41,6 +41,7 @@ namespace standard
             // GENERIC
             def print(noopstr s, int len) -> void;
             def print(noopstr s) -> void;
+            def print(byte s) -> void; // print single character
 
 // INPUT DEFINITIONS BEGIN
 #ifdef __WINDOWS__
@@ -381,6 +382,8 @@ namespace standard
                 return;
             };
 
+            def printchar(noopstr x) -> void;
+            def print(byte x) -> void;
             def print(i8 x) -> void;
             def print(i16 x) -> void;
             def print(int x) -> void;
@@ -415,6 +418,13 @@ namespace standard
                 byte[21] buf;
                 u64str(x,buf);
                 print(buf);
+                return;
+            };
+
+            def print(byte s) -> void
+            {
+                byte[2] x = [s, 0];
+                print(x);
                 return;
             };
 

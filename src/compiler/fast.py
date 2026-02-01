@@ -4949,9 +4949,9 @@ class IfStatement(Statement):
                 # Runtime condition in global scope - not supported
                 raise RuntimeError("Cannot use runtime conditions in global scope if statements")
         except Exception as e:
-            print(f"Warning: Could not evaluate global if condition: {e}")
+            raise RuntimeError(f"Warning: Could not evaluate global if condition: {e}")
             # Default to executing the then block for safety
-            self.then_block.codegen(builder, module)
+            #self.then_block.codegen(builder, module)
         
         return None
 
