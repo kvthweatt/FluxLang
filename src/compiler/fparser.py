@@ -343,7 +343,7 @@ class FluxParser:
         
         return ExternBlock(declarations)
     
-    def function_def(self) -> Union[FunctionDef]:
+    def function_def(self) -> Union[FunctionDef, List[FunctionDef]]:
         is_const = False
         is_volatile = False
         no_mangle = False
@@ -378,7 +378,44 @@ class FluxParser:
         self.consume(TokenType.RETURN_ARROW)
         return_type = self.type_spec()
         
-        # Check if this is a prototype by looking for semicolon vs body
+        # Check if this is a multi-function prototype declaration
+        # Pattern: def foo() -> int, foo() -> bool, foo(int) -> void;
+        if self.expect(TokenType.COMMA):
+            # This is a multi-function prototype declaration
+            prototypes = []
+            
+            # Add the first prototype
+            prototypes.append(FunctionDef(name, parameters, return_type, Block([]), 
+                                        is_const, is_volatile, True, no_mangle))
+            
+            # Parse additional prototypes
+            while self.expect(TokenType.COMMA):
+                self.advance()  # consume comma
+                
+                # Each additional prototype must have the same name
+                proto_name = self.consume(TokenType.IDENTIFIER).value
+                if proto_name != name:
+                    self.error(f"Multi-function prototype must use same name '{name}', got '{proto_name}'")
+                
+                self.consume(TokenType.LEFT_PAREN)
+                proto_parameters = []
+                if not self.expect(TokenType.RIGHT_PAREN):
+                    proto_parameters = self.parameter_list()
+                self.consume(TokenType.RIGHT_PAREN)
+                
+                self.consume(TokenType.RETURN_ARROW)
+                proto_return_type = self.type_spec()
+                
+                prototypes.append(FunctionDef(proto_name, proto_parameters, proto_return_type, 
+                                            Block([]), is_const, is_volatile, True, no_mangle))
+            
+            self.consume(TokenType.SEMICOLON)
+            self.symbol_table.exit_scope()
+            
+            # Return the list of prototypes
+            return prototypes
+        
+        # Check if this is a single prototype by looking for semicolon vs body
         is_prototype = False
         body = None
         
