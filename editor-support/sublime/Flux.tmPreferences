@@ -3,71 +3,22 @@
 <plist version="1.0">
 <dict>
     <key>name</key>
-    <string>Flux</string>
+    <string>Flux Indentation</string>
     <key>scope</key>
     <string>source.flux</string>
     <key>settings</key>
     <dict>
-        <!-- Increase indent after these patterns -->
+        <!-- Increase indent after { -->
         <key>increaseIndentPattern</key>
-        <string>^\s*.*(\{|\[|do|if|elif|else|switch|case|default|try|catch|namespace|def.*-&gt;.*|struct|object|trait|contract|while|for|compt|extern|public|private|asm)\s*$</string>
+        <string>^.*\{[^}"']*$</string>
         
-        <!-- Decrease indent on these patterns -->
+        <!-- Decrease indent when line starts with } or }; -->
         <key>decreaseIndentPattern</key>
-        <string>^\s*(\}|\]|elif|else|case|default|catch|public|private)\b</string>
+        <string>^\s*(\}|\};)\s*$</string>
         
-        <!-- Auto-closing pairs -->
-        <key>shellVariables</key>
-        <array>
-            <dict>
-                <key>name</key>
-                <string>TM_COMMENT_START</string>
-                <key>value</key>
-                <string>// </string>
-            </dict>
-        </array>
-        
-        <!-- Bracket pairs with semicolon -->
-        <key>smartTypingPairs</key>
-        <array>
-            <array>
-                <string>(</string>
-                <string>)</string>
-            </array>
-            <array>
-                <string>[</string>
-                <string>]</string>
-            </array>
-            <array>
-                <string>{</string>
-                <string>};</string>
-            </array>
-            <array>
-                <string>"</string>
-                <string>"</string>
-            </array>
-            <array>
-                <string>'</string>
-                <string>'</string>
-            </array>
-        </array>
-        
-        <!-- Auto-pair for semicolons -->
-        <key>highlightPairs</key>
-        <array>
-            <array>
-                <string>(</string>
-                <string>)</string>
-            </array>
-            <array>
-                <string>[</string>
-                <string>]</string>
-            </array>
-            <array>
-                <string>{</string>
-                <string>}</string>
-            </array>
-        </array>
+        <!-- Smart typing: when you type { and press enter, } stays at same level -->
+        <key>smartIndent</key>
+        <false/>
     </dict>
 </dict>
 </plist>

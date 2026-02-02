@@ -1,4 +1,21 @@
 {
-    "tab_size": 4,
-    "translate_tabs_to_spaces": true
+  "auto_indent": true,
+  "smart_indent": false,  // TURN OFF smart indent for Flux
+  "indent_subsequent_lines": false,
+  "trim_automatic_white_space": true,
+  "tab_size": 4,
+  "translate_tabs_to_spaces": true,
+  
+  "indentation_rules": {
+    // Increase indent after {
+    "increase_indent_pattern": "^.*\\{[^}\"']*$",
+    
+    // Decrease indent when line starts with } or };
+    "decrease_indent_pattern": "^\\s*(\\}|\\};)\\s*$"
+  },
+  
+  // Disable auto-pairing of braces (we'll handle it differently)
+  "auto_close_brackets": false,
+  "auto_complete": true,
+  "match_brackets": true
 }

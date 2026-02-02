@@ -1,0 +1,20 @@
+{
+  "auto_complete_triggers": [
+    {
+      "characters": "{",
+      "selector": "source.flux"
+    }
+  ],
+  "auto_match_enabled": true,
+  
+  // This ensures when you type { and press enter, the } stays aligned
+  "match_brackets_angle": false,
+  "match_brackets_braces": true,
+  "match_brackets_content": true,
+  "match_brackets_square": false,
+  "match_brackets": true,
+  
+  // Custom bracket matching for Flux
+  "bracket_indent": true,
+  "bracket_indent_next_line_pattern": ""
+}

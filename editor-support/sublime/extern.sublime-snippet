@@ -1,0 +1,6 @@
+<snippet>
+  <content><![CDATA[extern !!${1:function}(${2:params}) -> ${3:return_value};]]></content>
+  <tabTrigger>extern</tabTrigger>
+  <scope>source.flux</scope>
+  <description>Declare an externally defined function.</description>
+</snippet>

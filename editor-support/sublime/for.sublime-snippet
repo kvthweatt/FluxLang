@@ -1,0 +1,9 @@
+<snippet>
+  <content><![CDATA[for (${1:initial};${2:condition};${3:side_effect})
+{
+    ${4};
+};]]></content>
+  <tabTrigger>for</tabTrigger>
+  <scope>source.flux</scope>
+  <description>Loop while condition is true.</description>
+</snippet>

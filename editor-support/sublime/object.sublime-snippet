@@ -1,0 +1,17 @@
+<snippet>
+  <content><![CDATA[object ${1:name}
+{
+    def __init(${2}) -> this
+    {
+        ${3};
+        return this;
+    };
+
+    def __exit() -> void { return; };
+
+    ${4};
+};]]></content>
+  <tabTrigger>object</tabTrigger>
+  <scope>source.flux</scope>
+  <description>Define an object.</description>
+</snippet>

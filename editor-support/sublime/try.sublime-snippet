@@ -1,0 +1,13 @@
+<snippet>
+  <content><![CDATA[try
+{
+    ${1};
+}
+catch (${2:type} ${3:value})
+{
+    ${4};
+};]]></content>
+  <tabTrigger>try</tabTrigger>
+  <scope>source.flux</scope>
+  <description>Catch an exception if one occurs.</description>
+</snippet>

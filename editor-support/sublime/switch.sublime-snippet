@@ -1,0 +1,13 @@
+<snippet>
+  <content><![CDATA[switch (${1:value})
+{
+    case (${2:first_case})
+    {
+        ${3};
+    }
+    default {${4};};
+};]]></content>
+  <tabTrigger>switch</tabTrigger>
+  <scope>source.flux</scope>
+  <description>Switch on value, creates jump table.</description>
+</snippet>

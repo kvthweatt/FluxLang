@@ -1,0 +1,10 @@
+<snippet>
+  <content><![CDATA[def ${1:name}(${2:params}) -> ${3:return_type}
+{
+    ${4};
+    return (${3:return_type})${5:value};
+};]]></content>
+  <tabTrigger>def</tabTrigger>
+  <scope>source.flux</scope>
+  <description>Define a function. Press tab for fast prototyping.</description>
+</snippet>
