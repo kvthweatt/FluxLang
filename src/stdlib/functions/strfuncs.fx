@@ -6,6 +6,7 @@
 #def FLUX_STANDARD_STRINGS 1;
 
 extern def !!strcmp(byte* x, byte* y) -> int;
+extern def !!printf(byte* x, byte* y) -> void;
 
 def strlen(byte* ps) -> int
 {

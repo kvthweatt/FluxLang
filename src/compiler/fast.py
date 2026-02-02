@@ -1984,8 +1984,13 @@ class UnaryOp(Expression):
                 new_val = builder.add(operand_val, one)
             
             if isinstance(self.operand, Identifier):
-                # Retrieve the variable's pointer from the current scope and store the updated value
-                ptr = builder.scope[self.operand.name]
+                # Retrieve the variable's pointer from the current scope or globals and store the updated value
+                if builder.scope is not None and self.operand.name in builder.scope:
+                    ptr = builder.scope[self.operand.name]
+                elif self.operand.name in module.globals:
+                    ptr = module.globals[self.operand.name]
+                else:
+                    raise NameError(f"Variable '{self.operand.name}' not found in any scope")
                 st = builder.store(new_val, ptr)
                 if hasattr(builder,'volatile_vars') and self.operand.name in builder.volatile_vars:
                     st.volatile = True
@@ -2002,8 +2007,13 @@ class UnaryOp(Expression):
                 new_val = builder.sub(operand_val, one)
             
             if isinstance(self.operand, Identifier):
-                # Retrieve the variable's pointer from the current scope and store the updated value
-                ptr = builder.scope[self.operand.name]
+                # Retrieve the variable's pointer from the current scope or globals and store the updated value
+                if builder.scope is not None and self.operand.name in builder.scope:
+                    ptr = builder.scope[self.operand.name]
+                elif self.operand.name in module.globals:
+                    ptr = module.globals[self.operand.name]
+                else:
+                    raise NameError(f"Variable '{self.operand.name}' not found in any scope")
                 st = builder.store(new_val, ptr)
                 if hasattr(builder,'volatile_vars') and self.operand.name in builder.volatile_vars:
                     st.volatile = True
@@ -3366,12 +3376,18 @@ class ArrayAccess(Expression):
         if isinstance(array_val, ir.GlobalVariable):
             zero = ir.Constant(ir.IntType(32), 0)
             gep = builder.gep(array_val, [zero, index_val], inbounds=True, name="array_gep")
+            # Check if the result is itself an array (multidimensional) - if so, don't load
+            if isinstance(gep.type, ir.PointerType) and isinstance(gep.type.pointee, ir.ArrayType):
+                return gep  # Return pointer to sub-array for further indexing
             return builder.load(gep, name="array_load")
         
         # Handle local arrays
         elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
             zero = ir.Constant(ir.IntType(32), 0)
             gep = builder.gep(array_val, [zero, index_val], inbounds=True, name="array_gep")
+            # Check if the result is itself an array (multidimensional) - if so, don't load
+            if isinstance(gep.type, ir.PointerType) and isinstance(gep.type.pointee, ir.ArrayType):
+                return gep  # Return pointer to sub-array for further indexing
             return builder.load(gep, name="array_load")
         
         # Handle pointer types (like char*)
@@ -5459,6 +5475,7 @@ class ForInLoop(Statement):
         return None
 
 @dataclass
+@dataclass
 class ReturnStatement(Statement):
     value: Optional[Expression] = None
 
@@ -5482,6 +5499,7 @@ class ReturnStatement(Statement):
         else:
             raise RuntimeError("Cannot determine function return type")
 
+        # Rework to use lowering context.
         ret_val = self._coerce_return_value(builder, ret_val, expected)
 
         builder.ret(ret_val)
@@ -5526,6 +5544,44 @@ class ReturnStatement(Statement):
                     f"Return struct type mismatch: {src} != {expected}"
                 )
             return value
+
+        # === Array type conversion when bit widths match ===
+        # This handles cases like [8 x i32] -> [32 x i8] where 8*32 = 32*8 = 256 bits
+        # Flux allows "anything so long as the widths match"
+        if isinstance(src, ir.ArrayType) and isinstance(expected, ir.ArrayType):
+            # Check if element types are both integers
+            src_elem = src.element
+            exp_elem = expected.element
+            
+            if isinstance(src_elem, ir.IntType) and isinstance(exp_elem, ir.IntType):
+                # Calculate total bit widths
+                src_total_bits = src.count * src_elem.width
+                exp_total_bits = expected.count * exp_elem.width
+                
+                # If bit widths match, we can convert by storing and loading through memory
+                if src_total_bits == exp_total_bits:
+                    # Allocate temporary storage for source type
+                    temp = builder.alloca(src, name="array_convert_temp")
+                    
+                    # Store the source value
+                    builder.store(value, temp)
+                    
+                    # Bitcast the pointer to the expected type
+                    temp_as_expected = builder.bitcast(temp, ir.PointerType(expected))
+                    
+                    # Load as the expected type
+                    return builder.load(temp_as_expected, name="array_converted")
+                else:
+                    raise TypeError(
+                        f"Invalid return type: array bit width mismatch: "
+                        f"cannot return {src} ({src_total_bits} bits) "
+                        f"from function returning {expected} ({exp_total_bits} bits)"
+                    )
+            else:
+                raise TypeError(
+                    f"Invalid return type: can only convert between integer arrays, "
+                    f"got {src} -> {expected}"
+                )
 
         # Everything else is illegal
         raise TypeError(

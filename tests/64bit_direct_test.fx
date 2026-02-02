@@ -1,7 +1,5 @@
 #import "standard.fx";
 
-#import "strfuncs.fx";
-
 def test_direct() -> int
 {
     // Direct operations without function calls
@@ -23,8 +21,8 @@ def test_direct() -> int
     };
     
     // Try manual 64-bit by combining two 32-bit parts
-    u64 high = (u64)1;          // High 32 bits
-    u64 low  = (u64)1627584000; // Low 32 bits
+    u64 high = (u64)1;                  // High 32 bits
+    u64 low  = (u64)1627584000;         // Low 32 bits
     u64 combined = (high << 32) | low;  // Should be 5922551296
     
     print("Manual combine: \0");
@@ -42,9 +40,10 @@ def test_direct() -> int
     
     return 0;
 };
-///
+
+#ifndef __FLUX_TEST__
 def main() -> int
 {
     return test_direct();
 };
-///
+#endif;

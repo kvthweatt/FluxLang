@@ -1,7 +1,5 @@
 #import "standard.fx";
 
-#import "strfuncs.fx";
-
 def test_64bit_arithmetic() -> int
 {
     byte[32] buffer;
@@ -57,10 +55,11 @@ def test_64bit_arithmetic() -> int
     
     return 0;
 };
-///
+
+#ifndef __FLUX_TEST__
 def main() -> int
 {
     print("Testing 64-bit arithmetic operations:\n\0");
     return test_64bit_arithmetic();
 };
-///
+#endif;

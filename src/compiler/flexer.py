@@ -821,11 +821,7 @@ if __name__ == "__main__":
             for i, token in enumerate(display_tokens):
                 print(f"{i+1:4}: {token.type.name:20} | {repr(token.value):25} | Line {token.line:3}, Col {token.column:3}")
         else:
-            print(f"=== Tokens for {args.file} ===")
-            for token in display_tokens:
-                if token.value.strip():  # Only show tokens with non-empty values
-                    print(f"{token.type.name:20} | {repr(token.value):20} | L{token.line}:C{token.column}")
-                else:
-                    print(f"{token.type.name:20} | {'<empty>':20} | L{token.line}:C{token.column}")
-    
+            print(f"=== Token Summary for {args.file} ===")
+            print(f"Total tokens: {len(tokens) - 1}")  # Exclude EOF
+
     main()

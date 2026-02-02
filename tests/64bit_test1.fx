@@ -1,6 +1,6 @@
 #import "standard.fx";
-#import "strfuncs.fx";
 
+#ifndef __FLUX_TEST__
 def main() -> int
 {
 	byte[20] buf;
@@ -36,3 +36,4 @@ def main() -> int
 
 	return 0;
 };
+#endif;

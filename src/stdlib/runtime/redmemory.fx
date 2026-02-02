@@ -7,91 +7,31 @@
 
 extern
 {
-    def !!malloc(int size) -> void*;
+    // Memory allocation
+    def !!malloc(size_t size) -> void*;
+    def !!memcpy(void* dst, void* src, size_t n) -> void*;
     def !!free(void* ptr) -> void;
+    def !!calloc(size_t num, size_t size) -> void*;
+    def !!realloc(void* ptr, size_t size) -> void*;
+
+    def !!memcpy(void* dest, void* src, size_t n) -> void*;
+    def !!memmove(void* dest, void* src, size_t n) -> void*;
+    def !!memset(void* ptr, int value, size_t n) -> void*;
+    def !!memcmp(void* ptr1, void* ptr2, size_t n) -> int;
+    
+    def !!strlen(const char* str) -> size_t;
+    def !!strcpy(char* dest, const char* src) -> char*;
+    def !!strncpy(char* dest, const char* src, size_t n) -> char*;
+    def !!strcat(char* dest, const char* src) -> char*;
+    def !!strncat(char* dest, const char* src, size_t n) -> char*;
+    def !!strcmp(const char* s1, const char* s2) -> int;
+    def !!strncmp(const char* s1, const char* s2, size_t n) -> int;
+    def !!strchr(const char* str, int ch) -> char*;
+    def !!strstr(const char* haystack, const char* needle) -> char*;
+    
+    def !!abort() -> void;
+    def !!exit(int status) -> void;
+    def !!atexit(void* null) -> int;
 };
-
-namespace standard
-{
-	namespace memory
-	{
-		// ============ MEMORY UTILITIES ============
-
-		// Memory copy (simple byte-by-byte implementation)
-		def memcpy(void* dest, void* src, size_t n) -> void*
-		{
-		    byte* d = (byte*)dest;
-		    byte* s = (byte*)src;
-		    
-		    for (size_t i = 0; i < n; i++)
-		    {
-		        d[i] = s[i];
-		    };
-		    
-		    return dest;
-		};
-
-		// Memory move (handles overlapping regions)
-		def memmove(void* dest, void* src, size_t n) -> void*
-		{
-		    byte* d = (byte*)dest;
-		    byte* s = (byte*)src;
-		    
-		    if (d < s)
-		    {
-		        for (size_t i = 0; i < n; i++)
-		        {
-		            d[i] = s[i];
-		        };
-		    }
-		    else
-		    {
-		        for (size_t i = n; i > 0; i--)
-		        {
-		            d[i-1] = s[i-1];
-		        };
-		    };
-		    
-		    return dest;
-		};
-
-		// Memory set
-		def memset(void* ptr, byte value, size_t n) -> void*
-		{
-		    byte* p = (byte*)ptr;
-		    
-		    for (size_t i = 0; i < n; i++)
-		    {
-		        p[i] = value;
-		    };
-		    
-		    return ptr;
-		};
-
-		def memcmp(void* ptr1, void* ptr2, size_t n) -> i32
-		{
-		    byte* p1 = (byte*)ptr1;
-		    byte* p2 = (byte*)ptr2;
-		    
-		    for (size_t i = 0; i < n; i++)
-		    {
-		        if (p1[i] != p2[i])
-		        {
-		            return (i32)p1[i] - (i32)p2[i];
-		        };
-		    };
-		    
-		    return 0;
-		};
-
-		// Zero memory
-		def bzero(void* ptr, size_t n) -> void
-		{
-		    return (void)memset(ptr, (i8)0, n);
-		};
-	};
-};
-
-using standard::memory;
 
 #endif;

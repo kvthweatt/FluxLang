@@ -572,7 +572,7 @@ class FluxCompiler:
                     # Only link essential libraries
                     #config['lib_files'],
                     'legacy_stdio_definitions.lib',
-                    'libvcruntime.lib',
+                    #'libvcruntime.lib',
                     "kernel32.lib",
                     "ucrt.lib",
                     "shell32.lib",
@@ -591,7 +591,42 @@ class FluxCompiler:
                         self.logger.warning(f"Linker stderr: {result.stderr}", "linker")
                 except subprocess.CalledProcessError as e:
                     self.logger.error(f"Linking failed: {e.stderr}", "linker")
-                    raise
+                    if config['linker'] == "lld-link":
+                        self.logger.step(f"Falling back to clang...", LogLevel.INFO, "linker")
+                        try:
+                            result = subprocess.run(
+    f"clang {str(obj_file)} -o {output_bin} "
+    "-fuse-ld=lld-link "
+    "-Os "
+    "-flto "
+    "-fvisibility=hidden "
+    "-fmerge-all-constants "
+    "-fno-unwind-tables "
+    "-fno-asynchronous-unwind-tables "
+    "-nodefaultlibs "  # Don't use default libs, but we'll specify our own
+    "-Wl,/OPT:REF "
+    "-Wl,/OPT:ICF "
+    "-Wl,/DEBUG:NONE "
+    "-Wl,/INCREMENTAL:NO "
+    "-Wl,/LTCG "
+    "-Wl,/MERGE:.rdata=.text "
+    #"-Wl,/ALIGN:16 "
+    "-Wl,/ENTRY:FRTStartup "  # Use CRT startup for compatibility
+    "-Wl,/SUBSYSTEM:CONSOLE "
+    # Link only necessary libraries:
+    "-lkernel32 "  # Windows kernel functions (CreateFile, ReadFile, etc.)
+    "-lucrt "  # Modern C runtime (strlen, fopen, etc.)
+    "-llegacy_stdio_definitions "  # For stdio functions in UCRT
+    # Alternatively for older MSVCRT:
+    # "-lmsvcrt "  # Old C runtime (smaller but may have issues)
+)
+                            print(result)
+                            if result.stderr:
+                                print(result.stderr)
+                                raise RuntimeError("Copmilation failed.")
+
+                        except Exception as e:
+                            print()
             else:  # Linux and others
                 link_cmd = [
                     "ld",

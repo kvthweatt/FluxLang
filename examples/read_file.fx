@@ -4,7 +4,9 @@
 def main() -> int
 {
     int bsize = 8192;
-    byte[8192] fbuf; // 8KB, stack allocated. For bigger arrays use malloc()
+    byte[8192] fbuf;
+    // 8KB, stack allocated. For bigger arrays use malloc()
+    // See malloc.fx in this same examples folder.
     noopstr f = "src\\stdlib\\builtins\\string_object_raw.fx\0";
 
     int bytes_read = read_file(f, fbuf, bsize);

@@ -13,6 +13,8 @@ def main() -> int
     memset(buffer, c, (size_t)size - 1);
     buffer[size-1] = '\0';
     printf("%s",buffer);
+    free(buffer); // Can use (void)buffer; as well.
+    
     print("Done.\n\0");
 
 	return 0;

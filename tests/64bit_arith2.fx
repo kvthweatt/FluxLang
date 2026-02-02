@@ -1,7 +1,5 @@
 #import "standard.fx";
 
-#import "strfuncs.fx";
-
 def check_literal_types() -> int
 {
     byte[32] buffer;
@@ -60,9 +58,10 @@ def check_literal_types() -> int
     
     return 0;
 };
-///
+
+#ifndef __FLUX_TEST__
 def main() -> int
 {
     return check_literal_types();
 };
-///
+#endif;

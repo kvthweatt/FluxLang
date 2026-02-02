@@ -1,7 +1,5 @@
 #import "standard.fx";
 
-#import "strfuncs.fx";
-
 def test_individual_operations() -> int
 {
     byte[32] buf;
@@ -65,9 +63,10 @@ def test_individual_operations() -> int
     
     return 0;
 };
-///
+
+#ifndef __FLUX_TEST__
 def main() -> int
 {
     return test_individual_operations();
 };
-///
+#endif;

@@ -1,7 +1,5 @@
 #import "standard.fx";
 
-#import "strfuncs.fx";
-
 def signed_vs_unsigned() -> int
 {
     byte[32] buf;
@@ -35,9 +33,10 @@ def signed_vs_unsigned() -> int
     
     return 0;
 };
-///
+
+#ifndef __FLUX_TEST__
 def main() -> int
 {
     return signed_vs_unsigned();
 };
-///
+#endif;
