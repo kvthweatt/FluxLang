@@ -1,20 +1,9 @@
-#import "redstandard.fx";
-#import "strlen.fx";
-
-float a = 3.14;
-float b = a + a; // Float math is failing
-
-int c = 1;
-int d = 2;
-d += 1;
+#import "standard.fx";
 
 def main() -> int
 {
-    noopstr x = f"{a}\n\0";
-	noopstr y = f"{b}\n\0";
-    int len1 = strlen(@x);
-    int len2 = strlen(@y);
-	print(@x,len1);
-    print(@y,len2);
-	return 0;	
+    float a,b = 3.14,5;
+    print((a+b)/(float)3,5);
+    print();
+    return 0;
 };

@@ -391,6 +391,15 @@ namespace standard
             def print(u16 x) -> void;
             def print(uint x) -> void;
             def print(u64 x) -> void;
+            def print(float x) -> void;
+            def print(float x, int y) -> void;
+
+            def print(byte s) -> void
+            {
+                byte[2] x = [s, 0];
+                print(x);
+                return;
+            };
 
             def print(int x) -> void
             {
@@ -420,11 +429,18 @@ namespace standard
                 print(buf);
                 return;
             };
-
-            def print(byte s) -> void
+            def print(float x) -> void
             {
-                byte[2] x = [s, 0];
-                print(x);
+                byte[256] buffer;
+                float2str(x, @buffer, 5);
+                print(buffer);
+                return;
+            };
+            def print(float x, int y) -> void
+            {
+                byte[256] buffer;
+                float2str(x, @buffer, y);
+                print(buffer);
                 return;
             };
 

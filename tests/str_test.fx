@@ -1,8 +1,5 @@
 #import "standard.fx";
 
-#import "strfuncs.fx";
-
-
 def main() -> int
 {
     // Test with explicit large 64-bit constants

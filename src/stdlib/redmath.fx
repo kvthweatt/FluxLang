@@ -572,10 +572,9 @@ namespace standard
         ///
 
         // Additional math utilities with overloads
-
         def lerp(i8 a, i8 b, float t) -> i8
         {
-            return ((float)a + (float)(b - a) * t);
+            return (i8)((float)a + (float)(b - a) * t);
         };
         
         def lerp(i16 a, i16 b, float t) -> i16

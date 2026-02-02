@@ -13,7 +13,7 @@ def main() -> int
 	(void)buf; // Reset buffer
 	byte[20] buf;
 
-	print("u64 test1 = (u64)0xFFFFFFFFu; // == // \0");
+	print("u64 test1 = (u64)0xFFFFFFFFu; / == / \0");
 	u64str(test1,buf);
 	print(buf);
     print();
@@ -21,7 +21,7 @@ def main() -> int
 	(void)buf; // Reset buffer
 	byte[20] buf;
 
-	print("u64 test2 = test1 / (u64)256u; // == // \0");
+	print("u64 test2 = test1 / (u64)256u; / == / \0");
 	u64str(test2,buf);
 	print(buf);
     print();
@@ -29,7 +29,7 @@ def main() -> int
 	(void)buf; // Reset buffer
 	byte[20] buf;
 
-	print("u64 test3 = (u64)0xFFFFFFFFu / (u64)256u; // == // \0");
+	print("u64 test3 = (u64)0xFFFFFFFFu / (u64)256u; / == / \0");
 	u64str(test3,buf);
 	print(buf);
     print();

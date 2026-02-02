@@ -3376,23 +3376,39 @@ class ArrayAccess(Expression):
         if isinstance(array_val, ir.GlobalVariable):
             zero = ir.Constant(ir.IntType(32), 0)
             gep = builder.gep(array_val, [zero, index_val], inbounds=True, name="array_gep")
-            # Check if the result is itself an array (multidimensional) - if so, don't load
-            if isinstance(gep.type, ir.PointerType) and isinstance(gep.type.pointee, ir.ArrayType):
-                return gep  # Return pointer to sub-array for further indexing
+            # Check if the result is itself an array (multidimensional) or struct - if so, don't load
+            if isinstance(gep.type, ir.PointerType):
+                if isinstance(gep.type.pointee, ir.ArrayType):
+                    return gep  # Return pointer to sub-array for further indexing
+                elif (isinstance(gep.type.pointee, ir.LiteralStructType) or
+                      hasattr(gep.type.pointee, '_name') or  # Identified struct type
+                      hasattr(gep.type.pointee, 'elements')):  # Other struct-like types
+                    return gep  # Return pointer to struct for member access
             return builder.load(gep, name="array_load")
         
         # Handle local arrays
         elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
             zero = ir.Constant(ir.IntType(32), 0)
             gep = builder.gep(array_val, [zero, index_val], inbounds=True, name="array_gep")
-            # Check if the result is itself an array (multidimensional) - if so, don't load
-            if isinstance(gep.type, ir.PointerType) and isinstance(gep.type.pointee, ir.ArrayType):
-                return gep  # Return pointer to sub-array for further indexing
+            # Check if the result is itself an array (multidimensional) or struct - if so, don't load
+            if isinstance(gep.type, ir.PointerType):
+                if isinstance(gep.type.pointee, ir.ArrayType):
+                    return gep  # Return pointer to sub-array for further indexing
+                elif (isinstance(gep.type.pointee, ir.LiteralStructType) or
+                      hasattr(gep.type.pointee, '_name') or  # Identified struct type
+                      hasattr(gep.type.pointee, 'elements')):  # Other struct-like types
+                    return gep  # Return pointer to struct for member access
             return builder.load(gep, name="array_load")
         
         # Handle pointer types (like char*)
         elif isinstance(array_val.type, ir.PointerType):
             gep = builder.gep(array_val, [index_val], inbounds=True, name="ptr_gep")
+            # Check if the result points to a struct - if so, don't load
+            if isinstance(gep.type, ir.PointerType):
+                if (isinstance(gep.type.pointee, ir.LiteralStructType) or
+                    hasattr(gep.type.pointee, '_name') or  # Identified struct type
+                    hasattr(gep.type.pointee, 'elements')):  # Other struct-like types
+                    return gep  # Return pointer to struct for member access
             return builder.load(gep, name="ptr_load")
         
         else:
@@ -7158,11 +7174,10 @@ class StructDef(ASTNode):
         vtable_global.linkage = 'internal'
         vtable_global.global_constant = True
         
-        # Create type alias for instances
-        if self.vtable.total_bits <= 64:
-            instance_type = ir.IntType(self.vtable.total_bits)
-        else:
-            instance_type = ir.ArrayType(ir.IntType(8), self.vtable.total_bytes)
+        # Create proper LLVM struct type with named fields
+        field_types = [self.vtable.field_types[name] for name, _, _, _ in self.vtable.fields]
+        instance_type = ir.LiteralStructType(field_types)
+        instance_type.names = [name for name, _, _, _ in self.vtable.fields]
         
         # Store type information in module
         if not hasattr(module, '_struct_types'):

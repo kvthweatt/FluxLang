@@ -159,6 +159,6 @@ namespace standard
 
 using standard::io::file;
 
-#import "file_object_raw.fx";
+//#import "file_object_raw.fx";
 
 #endif;

@@ -1,6 +1,5 @@
 #def __FLUX_TEST__ 1;
 #import "standard.fx";
-#import "strfuncs.fx";
 #import "tests\\64bit_arith.fx";
 #import "tests\\64bit_arith2.fx";
 #import "tests\\64bit_su_test.fx";

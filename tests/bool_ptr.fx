@@ -3,8 +3,8 @@
 
 def foo(bool* src, bool* dst) -> void
 {
-	*dst = *src;
-	return void;
+	dst = src;
+	return;
 };
 
 

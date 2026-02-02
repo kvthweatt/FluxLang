@@ -19,37 +19,12 @@
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "redmemory.fx";             // FFI-based Memory Operations (CRT)
+#import "redmemory.fx";
 #endif;
-
-// Import raw functions & builtins
-#import "red_string_utilities.fx";
-//
-// ---------------------------
-//
-// Import runtime helpers
-#import "ffifio.fx";                 // FFI-based File Input/Output (CRT)
-//
-// ---------------------------
-//
 
 #ifndef FLUX_STANDARD_SYSTEM
 #import "redsys.fx";
 #endif;
-#ifndef FLUX_STANDARD_IO
-#import "redio.fx";
-#endif;
-
-extern
-{
-    def !!GetCommandLineW() -> wchar*;
-    def !!CommandLineToArgvW(wchar* x, int* y) -> wchar**; 
-    def !!LocalFree(void* x) -> void*;
-    // Note, should be able to declare all comma separated
-    // names should not have to be identical, they're just prototypes.
-    // Also, issue with type-only specified prototypes, failing
-};
-
 
 // >Mains
 def !!main() -> int;
@@ -144,8 +119,4 @@ def !!FRTStartup() -> int
     #endif;
     return return_code;
 };
-#endif;
-
-#ifndef FLUX_STANDARD_EXCEPTIONS
-#import "redexceptions.fx";
 #endif;

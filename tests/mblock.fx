@@ -12,6 +12,6 @@ def main() -> int
 
     struct* pm = @newblock; // struct pointers not working
 
-    newblock = 0; // wtf
+    //newblock = 0; // wtf
     return 0;
 };
