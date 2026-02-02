@@ -143,6 +143,8 @@ def !!FRTStartup() -> int
         #ifdef __WINDOWS__
         case (1)
         {
+            return_code = main();
+            ///
             //global i64 WIN_STANDARD_HANDLE = win_get_std_handle();
             
             // Get command line and parse arguments
@@ -157,6 +159,7 @@ def !!FRTStartup() -> int
             
             // Free the argument vector
             LocalFree(argvW);
+            ///
         }
         #endif;
         #ifdef __LINUX__
