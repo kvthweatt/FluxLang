@@ -1741,7 +1741,7 @@ auto {a, b} = p{first, second};  // a=10, b=20
 ```
 alignof, and, as, asm, assert, auto, break, bool, case, catch, const, continue, data, def, default,
 do, elif, else, enum, false, float, for, global, heap, if, in, is, int, local, namespace, new, not, object, or,
-private, public, register, return, signed, sizeof, stack, struct, super, switch, this, throw, true, try, typeof, uint,
+private, public, register, return, signed, sizeof, stack, struct, switch, this, throw, true, try, typeof, uint,
 union, unsigned, void, volatile, while, xor
 ```
 
