@@ -324,9 +324,16 @@ class FluxParser:
                 # Each declaration must be a function prototype
                 if self.expect(TokenType.DEF):
                     func_def = self.function_def()
-                    if not func_def.is_prototype:
-                        self.error("Extern functions must be prototypes (declarations only, no body)")
-                    declarations.append(func_def)
+                    # Handle both single FunctionDef and list of FunctionDef (multi-function prototypes)
+                    if isinstance(func_def, list):
+                        for fd in func_def:
+                            if not fd.is_prototype:
+                                self.error("Extern functions must be prototypes (declarations only, no body)")
+                            declarations.append(fd)
+                    else:
+                        if not func_def.is_prototype:
+                            self.error("Extern functions must be prototypes (declarations only, no body)")
+                        declarations.append(func_def)
                 else:
                     self.error("Expected function declaration inside extern block")
             
@@ -335,9 +342,16 @@ class FluxParser:
         elif self.expect(TokenType.DEF):
             # Single declaration form: extern def ...;
             func_def = self.function_def()
-            if not func_def.is_prototype:
-                self.error("Extern functions must be prototypes (declarations only, no body)")
-            declarations.append(func_def)
+            # Handle both single FunctionDef and list of FunctionDef (multi-function prototypes)
+            if isinstance(func_def, list):
+                for fd in func_def:
+                    if not fd.is_prototype:
+                        self.error("Extern functions must be prototypes (declarations only, no body)")
+                    declarations.append(fd)
+            else:
+                if not func_def.is_prototype:
+                    self.error("Extern functions must be prototypes (declarations only, no body)")
+                declarations.append(func_def)
         else:
             self.error("Expected '{' or 'def' after 'extern'")
         
@@ -392,10 +406,10 @@ class FluxParser:
             while self.expect(TokenType.COMMA):
                 self.advance()  # consume comma
                 
-                # Each additional prototype must have the same name
+                # Each additional prototype has its own name
                 proto_name = self.consume(TokenType.IDENTIFIER).value
-                if proto_name != name:
-                    self.error(f"Multi-function prototype must use same name '{name}', got '{proto_name}'")
+                #if proto_name != name:
+                    #self.error(f"Multi-function prototype must use same name '{name}', got '{proto_name}'")
                 
                 self.consume(TokenType.LEFT_PAREN)
                 proto_parameters = []
@@ -406,6 +420,7 @@ class FluxParser:
                 self.consume(TokenType.RETURN_ARROW)
                 proto_return_type = self.type_spec()
                 
+                # no_mangle applies to ALL functions in this comma-separated list
                 prototypes.append(FunctionDef(proto_name, proto_parameters, proto_return_type, 
                                             Block([]), is_const, is_volatile, True, no_mangle))
             

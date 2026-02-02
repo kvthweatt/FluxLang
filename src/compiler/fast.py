@@ -7825,8 +7825,11 @@ class ExternBlock(Statement):
             param_types = [func_def._convert_type(param.type_spec, module) for param in func_def.parameters]
             func_type = ir.FunctionType(ret_type, param_types)
             
-            # Use the actual function name (no mangling for extern functions)
-            func_name = func_def.name
+            # Use mangled name unless no_mangle is set
+            if func_def.no_mangle:
+                func_name = func_def.name
+            else:
+                func_name = func_def._mangle_name(module)
             
             # Create or get the function
             if func_name in module.globals:
