@@ -2201,10 +2201,13 @@ class CastExpression(Expression):
         elif isinstance(source_val.type, ir.IntType) and isinstance(target_llvm_type, ir.PointerType):
             return builder.inttoptr(source_val, target_llvm_type, name="int_to_ptr")
 
-        # Handle pointer to integer cast (reinterpret cast like (i64*)ptr)
+        # Handle pointer to integer cast
         elif isinstance(source_val.type, ir.PointerType) and isinstance(target_llvm_type, ir.IntType):
+            # Special case: array pointer to integer -> pack array elements
+            if isinstance(source_val.type.pointee, ir.ArrayType):
+                return ArrayLiteral._pack_array_pointer_to_integer(builder, module, source_val, target_llvm_type)
+            # Regular pointer to integer (reinterpret cast like (i64*)ptr)
             return builder.ptrtoint(source_val, target_llvm_type, name="ptr_to_int")
-
         else:
             raise ValueError(f"Unsupported cast from {source_val.type} to {target_llvm_type}")
     
@@ -4154,6 +4157,19 @@ class VariableDeclaration(ASTNode):
         
         # Handle type mismatch
         if init_val.type != llvm_type:
+            # Special case: array concatenation result to array variable
+            # e.g., int[2] b = [a[0]] + [1];
+            # init_val.type is [2 x i32]* (pointer), llvm_type is [2 x i32] (value)
+            if (isinstance(self.initial_value, BinaryOp) and 
+                self.initial_value.operator in (Operator.ADD, Operator.SUB) and
+                isinstance(init_val.type, ir.PointerType) and 
+                isinstance(init_val.type.pointee, ir.ArrayType) and
+                isinstance(llvm_type, ir.ArrayType)):
+                # Load the array value from the concat result pointer and store it
+                array_value = builder.load(init_val, name="concat_array_value")
+                builder.store(array_value, alloca)
+                return
+
             # Special case: array concatenation result
             if (isinstance(self.initial_value, BinaryOp) and 
                 self.initial_value.operator in (Operator.ADD, Operator.SUB) and
