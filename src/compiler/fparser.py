@@ -1164,7 +1164,8 @@ class FluxParser:
                 if self.expect(TokenType.RIGHT_BRACKET):
                     self.advance()
             
-            if self.expect(TokenType.MULTIPLY):
+            # Consume all pointer levels (**, ***, etc.)
+            while self.expect(TokenType.MULTIPLY):
                 self.advance()
             
             if self.expect(TokenType.AS):

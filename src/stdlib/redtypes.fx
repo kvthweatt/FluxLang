@@ -52,6 +52,10 @@ namespace standard
         u32 as size_t;
         #endif;
 
+        #ifdef __WINDOWS__
+        i16 as wchar;
+        #endif;
+
         // ============ FLOATING POINT ============
         u64 as double;  // Using u64 as placeholder for double
 

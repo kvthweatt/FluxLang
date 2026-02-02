@@ -40,18 +40,29 @@
 #import "redio.fx";
 #endif;
 
+extern
+{
+    def !!GetCommandLineW() -> wchar*;
+    def !!CommandLineToArgvW(wchar* x, int* y) -> wchar**; 
+    def !!LocalFree(void* x) -> void*;
+    // Note, should be able to declare all comma separated
+    // names should not have to be identical, they're just prototypes.
+    // Also, issue with type-only specified prototypes, failing
+};
+
+
 // >Mains
 def !!main() -> int;
-def main(int argc, byte** argv) -> int;
+def !!main(int* argc, byte** argv) -> int;
 // /Mains
 
-  ///                                   ///
-  //DO NOT REDEFINE THIS FUNCTION SIGNATURE
-///                                   ///
+  ///                                       ///
+ ///DO NOT REDEFINE THIS FUNCTION SIGNATURE///
+///                                       ///
 def !!FRTStartup() -> int; // GO AWAY, SHOO
-  ///                                   ///
-  //DO NOT REDEFINE THIS FUNCTION SIGNATURE
-///                                   ///
+  ///                                       ///
+ ///DO NOT REDEFINE THIS FUNCTION SIGNATURE///
+///                                       ///
 
 def !!exit(int code) -> void;
 def !!exit(int code) -> void
@@ -133,7 +144,19 @@ def !!FRTStartup() -> int
         case (1)
         {
             //global i64 WIN_STANDARD_HANDLE = win_get_std_handle();
-            return_code = main();
+            
+            // Get command line and parse arguments
+            wchar* cmdLine = GetCommandLineW();
+            int argc = 0;
+            wchar** argvW = CommandLineToArgvW(cmdLine, @argc);
+            
+            // Convert wchar** to byte** (simplified - you may need proper conversion)
+            byte** argv = (byte**)argvW;
+            
+            return_code = main(argc, argv);
+            
+            // Free the argument vector
+            LocalFree(argvW);
         }
         #endif;
         #ifdef __LINUX__

@@ -4,6 +4,8 @@ Flux is a systems programming language resembling C++ and Python.
 This is the _reduced_ language specification.  
 The purpose of this reduced specification is to make Flux easier to write an AST and parser for, and less work to integrate with LLVM.  
 The goal is to create a version 1 of Flux which can be used to rewrite itself.  
+- This goal has been achieved as of 1/30/2026
+
 Python makes dealing with arrays simplistic, but doesn't have pointers natively. Flux solves this problem.  
 If you like Flux, please consider contributing to the project or joining the [Flux Discord server](https://discord.gg/RAHjbYuNUc) where you can ask questions, provide feedback, and talk with other Flux enjoyers!
 
@@ -11,8 +13,19 @@ If you like Flux, please consider contributing to the project or joining the [Fl
 
 ## **Functions:**
 
-Signature:
+Prototype:
+```
+// Single declaration
+def name(parameters) -> void;
 
+// Multi-declaration
+def name(int) -> bool,
+    name(float) -> void,
+    name(char*) -> int;   // Can prototype multiple functions at once, comma separated signatures.
+```
+Prototype signatures do not need a variable name, only types like `def foo(int,int,void*)->bool;`
+
+Signature:
 ```
 def name (parameters) -> return_type
 {
@@ -21,16 +34,15 @@ def name (parameters) -> return_type
 ```
 
 Example:
-
 ```
 def myAdd(int x, int y) -> int
 {
     return x + y;
 };
 ```
+Definitions require a variable name.
 
 Overloading example:
-
 ```
 def myAdd(float x, float y) -> float
 {
@@ -39,11 +51,10 @@ def myAdd(float x, float y) -> float
 ```
 
 Recursion example:
-
 ```
 def rsub(int x, int y) -> int
 {
-    if (x == 0 || y == 0) { return 0; };
+    if (x == 0 | y == 0) { return 0; };
 
     rsub(--x,--y);
 };
@@ -149,6 +160,22 @@ def some_nix_generic() -> void*;
 ```
 
 ---
+
+## **External Functions (FFI):**
+Single-line:
+```
+extern def foo() -> void;
+extern def !!foo() -> void;  // !! tells the compiler do not mangle this function name
+```
+Block-based:
+```
+extern
+{
+    def foo() -> void;
+    def bar() -> void;
+    def !!zed() -> void;
+};
+```
 
 ## **Namespaces:**
 
@@ -395,7 +422,7 @@ print(a);
 
 // Pointers to variables:
 int idata = 0;
-int *p_idata = @idata;
+int* p_idata = @idata;
 
 *p_idata += 3;
 print(idata);  // 3
@@ -406,8 +433,8 @@ def add(int x, int y) -> int { return x + y; };
 def sub(int x, int y) -> int { return x - y; };
 
 // Function pointer declarations
-int *p_add(int,int) = @add;
-int *p_sub(int,int) = @sub;
+int* p_add(int,int) = @add;
+int* p_sub(int,int) = @sub;
 
 // Must dereference to call
 print(*p_add(0,3)); // 3
@@ -441,7 +468,7 @@ def main() -> int
     ptr += 2; // Increment ptr by 2 positions
     print(f"Value at ptr: {*ptr}\0");            // Output: 40
 
-    int *ptr2 = @arr[4]; // ptr2 points to the last element of arr
+    int* ptr2 = @arr[4]; // ptr2 points to the last element of arr
     print(f"Elements between ptr and ptr2: {ptr2 - ptr}\0"); // Output: 1
 
     return 0;
@@ -470,9 +497,13 @@ if (condition1)
 {
     doThis();
 }
-elif (condition2)
+elif (condition2)      // You can also use `else if`
 {
     doThat();
+}
+else if (condition 3)  // Equivalent to `elif`
+{
+    doAnythingElse();
 }
 else
 {
@@ -572,10 +603,10 @@ def bar() -> float
 };
 ```
 
-If you try to return data with the `return` statement and the function definition declares the return type as void, nothing is returned.
+If you try to return data with the `return` statement and the function definition declares the return type as `void`, nothing is returned.  
+The compiler will ignore the return value and treat it as if only `return;` were present.
 
 **Void casting in relation to the stack and heap:**
-
 ```
 def example() -> void {
     int stackVar = 42;          // Stack allocated
@@ -596,7 +627,6 @@ All of this is runtime behavior, but can also happen in comptime.
 ---
 
 ## **Array and pointer operations based on data types:**
-
 ```
 unsigned data{16::0}[] as larray3 little_array[3] = {0x1234, 0x5678, 0x9ABC};
 // Memory: [34 12] [78 56] [BC 9A]
@@ -623,7 +653,6 @@ word local_port = (unsigned data{16::0})((network_port >> 8) | (network_port << 
 ## **types.fx module:**
 
 Imported by `standard.fx`
-
 ```
 // The standard types found in Flux that are not included keywords
 // This is an excerpt and not a complete list of all types defined in the standard library of types
@@ -636,7 +665,6 @@ unsigned data{64} as ui64;
 ---
 
 ## **The `sizeof`, `typeof`, and `alignof` keywords:**
-
 ```
 unsigned data{8:8}[] as string;
 signed data{13:16} as strange;
@@ -653,7 +681,6 @@ typeof(strange);  // signed data{13:16}
 ---
 
 ## **`void` as a literal and a keyword:**
-
 ```
 if (x == void) {...code...};    // If it's nothing, do something
 void x;
@@ -663,7 +690,6 @@ if (x == !void) {...code...};   // If it's not nothing, do something
 ---
 
 ## **Arrays:**
-
 ```
 #import "standard.fx";
 using standard::io, standard::types;
@@ -679,7 +705,6 @@ def len(int[] array) -> int
 ```
 
 **Array comprehension:**
-
 ```
 // Python-style comprehension
 int[10] squares = [x ^ 2 for (int x in 1..10)];
@@ -702,7 +727,6 @@ int[20] events = [x for (int x= 1; x <= 20; x++) if (x % 2 == 0)];
 ## **Loops:**
 
 Flux supports 2 styles of for loops, it uses Python style and C++ style
-
 ```
 for (x in y)                     // Python style
 {
@@ -759,7 +783,6 @@ Since structures are data-only, they are already serialized.
 ---
 
 ## **Error handling with try/throw/catch:**
-
 ```
 unsigned data{8}[] as string;  // Basic string implementation with no functionality (non-OOP string)
 
@@ -835,9 +858,7 @@ def main() -> int
 ---
 
 ## **Switching:**
-
 `switch` is static, value-based, and non-flexible. Switch statements are for speed.
-
 ```
 switch (e)
 {
@@ -859,10 +880,8 @@ switch (e)
 ---
 
 ## **Assertion:**
-
 `assert` automatically performs `throw` if the condition is false if it's inside a try/catch block,
 otherwise it automatically writes to standard error output.
-
 ```
 def main() -> int
 {
@@ -883,7 +902,6 @@ def main() -> int
 ---
 
 ## **Runtime type-checking:**
-
 ```
 Animal* pet = @Dog();
 if (typeof(pet) == Dog) { /* Legal */ };
@@ -894,7 +912,6 @@ if (pet is Dog) { /* Legal, syntactic sugar for `typeof(pet) == Dog` */ };
 ---
 
 ## **Constant Expressions:**
-
 ```
 const def myconstexpr(int x, int y) -> int {return x * y;};  // Basic syntax
 ```
@@ -902,7 +919,6 @@ const def myconstexpr(int x, int y) -> int {return x * y;};  // Basic syntax
 ---
 
 ## **Heap allocation:**
-
 ```
 heap int x = 5;      // Allocate
 (void)ptr;           // Deallocate
@@ -915,8 +931,7 @@ heap int x = 5;      // Allocate
 ## **Advanced Pointer Manipulation**
 
 ### Taking Address of Literals
-
-```flux
+```
 // You can take the address of a literal value
 int* p = @42;
 print(*p);  // 42
@@ -934,8 +949,7 @@ int* offset = base + 5;
 ```
 
 ### Pointer-Integer Conversions
-
-```flux
+```
 unsigned data{64} as u64ptr;
 unsigned data{32} as uint32;
 
@@ -961,8 +975,7 @@ int* aligned_px = (int*)addr;
 ```
 
 ### Manual Struct Offsetting
-
-```flux
+```
 struct Vector3
 {
     float x;
@@ -992,8 +1005,7 @@ print(v.y);  // 5.0
 ```
 
 ### Pointer Array Traversal
-
-```flux
+```
 def traverse_as_bytes(int* ptr, int count) -> void
 {
     byte* bp = (byte*)ptr;
@@ -1012,41 +1024,8 @@ traverse_as_bytes(@data[0], 4);
 
 ## **Memory Layout and Alignment Tricks**
 
-### Union Type Punning
-
-```flux
-union FloatInt
-{
-    float f;
-    u32 i;
-};
-
-def float_to_bits(float value) -> unsigned data{32}
-{
-    FloatInt converter = {f = value};
-    return converter.i;
-};
-
-def bits_to_float(unsigned data{32} bits) -> float
-{
-    FloatInt converter = {i = bits};
-    return converter.f;
-};
-
-// Usage: Inspect IEEE-754 representation
-float pi = 3.14159;
-u32 pi_bits = float_to_bits(pi);
-print(f"Pi as bits: 0x{pi_bits:08X}\0");  // 0x40490FD0
-
-// Manipulate sign bit
-uint32 negative_pi_bits = pi_bits ^ 0x80000000;
-float negative_pi = bits_to_float(negative_pi_bits);
-print(negative_pi);  // -3.14159
-```
-
 ### Struct Packing with Custom Alignment
-
-```flux
+```
 // Tightly packed struct (no padding)
 struct PackedRGB
 {
@@ -1072,10 +1051,9 @@ alignof(AlignedData); // 4 bytes (strictest member alignment)
 ```
 
 ### Endianness Handling
-
-```flux
+```
 unsigned data{16::0} as little16;  // Little-endian 16-bit
-unsigned data{16::1} as big16;     // Big-endian 16-bit
+unsigned data{16} as big16;        // Big-endian default 16-bit
 
 def swap_endian_16(unsigned data{16} value) -> unsigned data{16}
 {
@@ -1102,8 +1080,7 @@ print(host_value);         // 0x3412 (byte-swapped for little-endian)
 ```
 
 ### Bit-Field Manipulation
-
-```flux
+```
 // 13-bit signed value, 16-bit aligned
 signed data{13:16} as strange13;
 
@@ -1132,8 +1109,7 @@ uint32 byte1 = extract_bits(packed, 8, 8);     // 0x56
 ## **Advanced Data Type Features**
 
 ### Unusual Bit Widths
-
-```flux
+```
 // 3-bit unsigned value (0-7)
 unsigned data{3} as tiny = 5;
 
@@ -1153,37 +1129,8 @@ unsigned data{17} as u17 b = (u17)a;  // Zero-extend
 signed data{13} as s13 c = (s13)a;    // Reinterpret bits
 ```
 
-### Type Aliasing Chains
-
-```flux
-// Build complex type from primitives
-u16 as word;
-word as network_word;
-network_word as port_number;
-
-port_number http_port = 80;
-port_number https_port = 443;
-
-// Function takes the aliased type
-def validate_port(port_number port) -> bool
-{
-    return port > 0 && port < 65536;
-};
-
-// Multi-level pointer aliasing
-word* as word_ptr;
-word_ptr* as word_ptr_ptr;
-
-word value = 0x1234;
-word_ptr p1 = @value;
-word_ptr_ptr p2 = @p1;
-
-print(**p2);  // 0x1234
-```
-
 ### Mixing Signed/Unsigned in Expressions
-
-```flux
+```
 signed data{32} as i32;
 unsigned data{32} as u32;
 
@@ -1211,8 +1158,7 @@ if ((u32)a < b)  // false: 4294967286 > 20
 ## **Control Flow Edge Cases**
 
 ### Nested Switches with Fallthrough
-
-```flux
+```
 def classify_value(int x, int y) -> void
 {
     switch (x)
@@ -1248,8 +1194,7 @@ def classify_value(int x, int y) -> void
 ```
 
 ### Complex Try/Catch with Multiple Types
-
-```flux
+```
 object ErrorA
 {
     int code;
@@ -1308,8 +1253,7 @@ def main() -> int
 ```
 
 ### Nested Loops with Break/Continue
-
-```flux
+```
 def find_in_matrix(int[][] matrix, int target) -> bool
 {
     for (int i = 0; i < 10; i++)
@@ -1344,184 +1288,7 @@ def wait_for_ready(int* status_reg) -> void
         };
         timeout--;
     }
-    while (timeout > 0 && !(*status_reg & 0x80));  // Not error bit
-};
-```
-
----
-
-## **Object and Struct Composition Patterns**
-
-### Composition vs Inheritance
-
-```flux
-// Composition approach
-struct Engine
-{
-    int horsepower;
-    float displacement;
-};
-
-struct Transmission
-{
-    int gears;
-    bool automatic;
-};
-
-object Car
-{
-    Engine engine;
-    Transmission trans;
-    string make;
-    string model;
-    
-    def __init(string mk, string mdl) -> this
-    {
-        this.make = mk;
-        this.model = mdl;
-        this.engine = {horsepower = 200, displacement = 2.0};
-        this.trans = {gears = 6, automatic = true};
-        return this;
-    };
-    
-    def get_specs() -> string
-    {
-        return f"{this.make} {this.model}: {this.engine.horsepower}hp, {this.trans.gears} gears\0\0";
-    };
-};
-
-// Inheritance approach (via composition in reduced spec)
-object Vehicle
-{
-    string make;
-    string model;
-    
-    def __init(string mk, string mdl) -> this
-    {
-        this.make = mk;
-        this.model = mdl;
-        return this;
-    };
-};
-
-object Motorcycle
-{
-    Vehicle base;  // Simulated inheritance
-    bool has_sidecar;
-    
-    def __init(string mk, string mdl, bool sidecar) -> this
-    {
-        this.base = Vehicle(mk, mdl);
-        this.has_sidecar = sidecar;
-        return this;
-    };
-    
-    def get_info() -> string
-    {
-        return f"{this.base.make} {this.base.model}\0\0";
-    };
-};
-```
-
-### Nested Objects and Private Access
-
-```flux
-object Database
-{
-    object Connection
-    {
-        private
-        {
-            string host;
-            int port;
-        };
-        
-        public
-        {
-            bool connected;
-            
-            def __init(string h, int p) -> this
-            {
-                this.host = h;
-                this.port = p;
-                this.connected = false;
-                return this;
-            };
-            
-            def connect() -> bool
-            {
-                // Can access private members within same object
-                print(f"Connecting to {this.host}:{this.port}\0\0");
-                this.connected = true;
-                return true;
-            };
-        };
-    };
-    
-    Connection conn;
-    
-    def __init(string host, int port) -> this
-    {
-        this.conn = Connection(host, port);
-        return this;
-    };
-    
-    def get_connection() -> Connection
-    {
-        // Cannot access conn.host or conn.port (private to Connection)
-        return this.conn;
-    };
-};
-
-Database db = Database("localhost\0", 5432);
-db.get_connection().connect();
-// db.get_connection().host;  // ERROR: private member
-```
-
-### Struct-in-Object Patterns
-
-```flux
-struct Point2D
-{
-    float x;
-    float y;
-};
-
-struct BoundingBox
-{
-    Point2D min;
-    Point2D max;
-};
-
-object Shape
-{
-    BoundingBox bounds;
-    string name;
-    
-    def __init(string n) -> this
-    {
-        this.name = n;
-        this.bounds = {
-            min = {x = 0.0, y = 0.0},
-            max = {x = 1.0, y = 1.0}
-        };
-        return this;
-    };
-    
-    def area() -> float
-    {
-        float width = this.bounds.max.x - this.bounds.min.x;
-        float height = this.bounds.max.y - this.bounds.min.y;
-        return width * height;
-    };
-    
-    def contains(Point2D pt) -> bool
-    {
-        return pt.x >= this.bounds.min.x &&
-               pt.x <= this.bounds.max.x &&
-               pt.y >= this.bounds.min.y &&
-               pt.y <= this.bounds.max.y;
-    };
+    while (timeout > 0 & !(*status_reg & 0x80));  // Not error bit
 };
 ```
 
@@ -1533,7 +1300,7 @@ object Shape
 
 ```flux
 // Function pointer type for callbacks
-void{}* callback(int) = eventHandler(int)->void;
+def{}* callback(int)->void = eventHandler;
 
 object EventSystem
 {
@@ -1583,9 +1350,8 @@ events.trigger(404);  // Calls both handlers
 ```
 
 ### Function Pointer Arrays (Jump Tables)
-
-```flux
-int *operations[4](int, int) as OpTable;
+```
+int* operations[4](int, int) as OpTable;
 
 def op_add(int a, int b) -> int { return a + b; };
 def op_sub(int a, int b) -> int { return a - b; };
@@ -1596,7 +1362,7 @@ OpTable ops = [@op_add, @op_sub, @op_mul, @op_div];
 
 def calculate(int opcode, int a, int b) -> int
 {
-    if (opcode >= 0 && opcode < 4)
+    if (opcode >= 0 & opcode < 4)
     {
         return *ops[opcode](a, b);  // Jump table dispatch
     };
@@ -1611,8 +1377,7 @@ print(calculate(3, 10, 5));  // 2  (div)
 ```
 
 ### Vtable-like Structures
-
-```flux
+```
 struct ShapeVTable
 {
     float *area(void*) as area_fn;
@@ -1658,8 +1423,7 @@ print(f"Area: {area}\0");  // approx 78.54
 ## **Array Comprehension Advanced Examples**
 
 ### Multi-dimensional Comprehension
-
-```flux
+```
 // Generate 2D grid
 int[10][10] grid = [
     [x * y for (int y = 0; y < 10; y++)]
@@ -1676,8 +1440,7 @@ int[10][10] chess_pattern = [
 ```
 
 ### Comprehension with Complex Expressions
-
-```flux
+```
 // Fibonacci sequence
 int[20] fib = [
     x == 0 ? 0 : (x == 1 ? 1 : fib[x-1] + fib[x-2])
@@ -1704,8 +1467,7 @@ int[5] evens_squared = [
 ## **Memory Management Patterns**
 
 ### Manual Memory Pools
-
-```flux
+```
 struct MemoryBlock
 {
     unsigned data{8}[1024] as byte_array bytes;
@@ -1745,7 +1507,7 @@ object MemoryPool
         u64ptr ptr_addr = (u64ptr)ptr;
         
         int index = (int)((ptr_addr - block_base) / sizeof(MemoryBlock));
-        if (index >= 0 && index < 100)
+        if (index >= 0 & index < 100)
         {
             this.blocks[index].in_use = false;
         };
@@ -1754,8 +1516,7 @@ object MemoryPool
 ```
 
 ### Stack vs Heap Allocation
-
-```flux
+```
 def test_allocation() -> void
 {
     // Stack allocation (automatic)
@@ -1785,8 +1546,7 @@ def test_allocation() -> void
 ## **Practical Real-World Examples**
 
 ### Simple Packet Parser
-
-```flux
+```
 unsigned data{8}[] as bytes;
 unsigned data{16::1} as be16;  // Big-endian 16-bit
 unsigned data{32::1} as be32;  // Big-endian 32-bit
@@ -1833,8 +1593,7 @@ print(f"Dest: {format_ip(hdr.dst_addr)}\0");
 ```
 
 ### Fixed-Point Math
-
-```flux
+```
 // 16.16 fixed-point format
 signed data{32} as fixed16_16;
 
@@ -1868,8 +1627,7 @@ print(from_fixed(result));  // approx 6.28318
 ```
 
 ### Circular Buffer
-
-```flux
+```
 object CircularBuffer
 {
     unsigned data{8}[256] as byte buffer;
@@ -1923,8 +1681,7 @@ object CircularBuffer
 ## **Type System Edge Cases**
 
 ### Void Semantics
-
-```flux
+```
 // Void as a value
 void x = void;
 
@@ -1955,8 +1712,7 @@ def get_nullable() -> int*
 ```
 
 ### Auto Type Inference
-
-```flux
+```
 // Auto infers from right-hand side
 auto x = 42;           // int
 auto y = 3.14;         // float
@@ -1982,16 +1738,14 @@ auto {a, b} = p{first, second};  // a=10, b=20
 ---
 
 # Keyword list:
-
 ```
 alignof, and, as, asm, assert, auto, break, bool, case, catch, const, continue, data, def, default,
-do, elif, else, false, float, for, global, heap, if, in, is, int, local, namespace, new, not, object, or,
+do, elif, else, enum, false, float, for, global, heap, if, in, is, int, local, namespace, new, not, object, or,
 private, public, register, return, signed, sizeof, stack, struct, super, switch, this, throw, true, try, typeof, uint,
 union, unsigned, void, volatile, while, xor
 ```
 
 # Operator list:
-
 ```
 ADD = "+"
 SUB = "-"
@@ -2035,6 +1789,7 @@ RANGE = ".."
 SCOPE = "::"
 TERNARY = "?:"
 NULL_COALESCE = "??"
+NO_MANGLE = "!!"
 ```
 
 ---
@@ -2045,4 +1800,4 @@ bool, int `5`, float `3.14`, char `"B"` == `66` - `65` == `'A'`, data
 
 ## All types:
 
-bool, int, uint, float, char, data, void, const, object, struct, union
+bool, int, uint, float, char, data, void, object, struct, union, enum
