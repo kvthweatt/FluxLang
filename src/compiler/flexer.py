@@ -25,7 +25,7 @@ class TokenType(Enum):
     # Literals
     SINT_LITERAL = auto()
     UINT_LITERAL = auto() # Unsigned integer literal support `123u`
-    FLOAT = auto()
+    FLOAT = auto() # Support for 1f == float type == 1.0
     CHAR = auto()
     STRING_LITERAL = auto()
     BOOL = auto()
@@ -87,7 +87,6 @@ class TokenType(Enum):
     SIZEOF = auto()
     STACK = auto()
     STRUCT = auto()
-    #SUPER = auto() #DEFERRED FOR BOOTSTRAP
     SWITCH = auto()
     THIS = auto()
     THROW = auto()
@@ -97,21 +96,10 @@ class TokenType(Enum):
     UNION = auto()
     UNSIGNED = auto()
     USING = auto()
-    #VIRTUAL = auto() #DEFERRED FOR BOOTSTRAP
     VOID = auto()
     VOLATILE = auto()
     WHILE = auto()
     XOR = auto()
-    
-    # Fixed-width integer types
-#    UINT8 = auto()
-#    UINT16 = auto()
-#    UINT32 = auto()
-#    UINT64 = auto()
-#    INT8 = auto()
-#    INT16 = auto()
-#    INT32 = auto()
-#    INT64 = auto()
     
     # Operators
     PLUS = auto()           # +
@@ -209,7 +197,6 @@ class FluxLexer:
             'and': TokenType.AND,
             'as': TokenType.AS,
             'asm': TokenType.ASM,
-            #'at': TokenType.AT,
             'asm': TokenType.ASM,
             'assert': TokenType.ASSERT,
             'auto': TokenType.AUTO,
@@ -253,7 +240,6 @@ class FluxLexer:
             'sizeof': TokenType.SIZEOF,
             'stack': TokenType.STACK,
             'struct': TokenType.STRUCT,
-            #'super': TokenType.SUPER, #DEFERRED FOR BOOTSTRAP
             'switch': TokenType.SWITCH,
             'this': TokenType.THIS,
             'throw': TokenType.THROW,
@@ -264,21 +250,10 @@ class FluxLexer:
             'union': TokenType.UNION,
             'unsigned': TokenType.UNSIGNED,
             'using': TokenType.USING,
-            #'virtual': TokenType.VIRTUAL, #DEFERRED FOR BOOTSTRAP
             'void': TokenType.VOID,
             'volatile': TokenType.VOLATILE,
             'while': TokenType.WHILE,
             'xor': TokenType.XOR,
-            #'contract': TokenType.CONTRACT,
-            # Fixed-width integer types
-            #'uint8': TokenType.UINT8,
-            #'uint16': TokenType.UINT16,
-            #'uint32': TokenType.UINT32,
-            #'uint64': TokenType.UINT64,
-            #'int8': TokenType.INT8,
-            #'int16': TokenType.INT16,
-            #'int32': TokenType.INT32,
-            #'int64': TokenType.INT64
         }
     
     def current_char(self) -> Optional[str]:
@@ -514,17 +489,25 @@ class FluxLexer:
             while self.current_char() and self.current_char().isdigit():
                 result += self.current_char()
                 self.advance()
-
         
-        token_type = TokenType.FLOAT if is_float else TokenType.SINT_LITERAL
+        # Determine token type based on suffixes
+        token_type = TokenType.SINT_LITERAL
         
-        # Check for unsigned suffix (lowercase 'u' only) - but NOT for floats
-        if not is_float and self.current_char() and self.current_char() == 'u':
-            token_type = TokenType.UINT_LITERAL
-            result += self.current_char()
+        # Check for float suffix (lowercase 'f' only)
+        if self.current_char() and self.current_char() == 'f':
+            token_type = TokenType.FLOAT
+            is_float = True
             self.advance()
+        # Check for unsigned suffix (lowercase 'u' only) - but NOT if we already found 'f'
+        elif not is_float and self.current_char() and self.current_char() == 'u':
+            token_type = TokenType.UINT_LITERAL
+            #result += self.current_char()  # Keep the 'u' in the token value
+            self.advance()
+        # If we have a decimal point but no 'f' suffix, it's still a float
+        elif is_float:
+            token_type = TokenType.FLOAT
         
-        return Token(token_type, result.replace("u",""), start_pos[0], start_pos[1])
+        return Token(token_type, result, start_pos[0], start_pos[1])
     
     def read_identifier(self) -> Token:
         start_pos = (self.line, self.column)

@@ -126,7 +126,7 @@ class LoweringContext:
                 return v
             elif v.type.width < width:
                 # Extending to larger width
-                result = instance.b.zext(v, ty) if unsigned else instance.b.sext(v, ty)
+                result = instance.b.zext(v, ty) if unsigned else instance.b.zext(v, ty)
             else:
                 # Truncating to smaller width
                 result = instance.b.trunc(v, ty)

@@ -237,7 +237,11 @@ class FluxParser:
         elif self.expect(TokenType.UNION):
             return self.union_def()
         elif self.expect(TokenType.STRUCT):
-            return self.struct_def()
+            if self.peek() and self.peek().type == TokenType.MULTIPLY:
+                # This is a struct pointer variable declaration like: struct* pm
+                return self.variable_declaration_statement()
+            else:
+                return self.struct_def()
         elif self.expect(TokenType.OBJECT):
             return self.object_def()
         elif self.expect(TokenType.NAMESPACE):
@@ -979,18 +983,19 @@ class FluxParser:
         storage_class = None
 
         # Parse storage class FIRST (before qualifiers)
-        if self.expect(TokenType.GLOBAL):
-            storage_class = StorageClass.GLOBAL
-            self.advance()
-        elif self.expect(TokenType.LOCAL):
-            storage_class = StorageClass.LOCAL
-            self.advance()
-        elif self.expect(TokenType.HEAP):
-            storage_class = StorageClass.HEAP
-            self.advance()
-        elif self.expect(TokenType.STACK):
-            storage_class = StorageClass.STACK
-            self.advance()
+        if self.expect(TokenType.GLOBAL, TokenType.LOCAL, TokenType.HEAP, TokenType.STACK):
+            if self.expect(TokenType.GLOBAL):
+                storage_class = StorageClass.GLOBAL
+                self.advance()
+            elif self.expect(TokenType.LOCAL):
+                storage_class = StorageClass.LOCAL
+                self.advance()
+            elif self.expect(TokenType.HEAP):
+                storage_class = StorageClass.HEAP
+                self.advance()
+            elif self.expect(TokenType.STACK):
+                storage_class = StorageClass.STACK
+                self.advance()
         elif self.expect(TokenType.REGISTER):
             storage_class = StorageClass.REGISTER
             self.advance()
@@ -1096,7 +1101,7 @@ class FluxParser:
     
     def base_type(self) -> Union[DataType, List]:
         """
-        base_type -> 'int' | 'uint' | 'float' | 'char' | 'bool' | 'data' | 'void' | IDENTIFIER
+        base_type -> 'int' | 'uint' | 'float' | 'char' | 'bool' | 'data' | 'void' | 'struct' | IDENTIFIER
         Returns DataType for built-in types, or [DataType.DATA, typename] for custom types
         """
         if self.expect(TokenType.SINT):
@@ -1123,6 +1128,11 @@ class FluxParser:
         elif self.expect(TokenType.THIS):
             self.advance()
             return DataType.THIS
+        elif self.expect(TokenType.STRUCT):
+            # Handle 'struct' keyword as a generic struct type
+            # This allows syntax like: struct* ptr or struct MyStruct
+            self.advance()
+            return DataType.STRUCT
         elif self.expect(TokenType.OBJECT):
             self.error("Objects cannot be used as types in struct members.")
         elif self.expect(TokenType.IDENTIFIER):
@@ -1144,7 +1154,7 @@ class FluxParser:
             
             if not self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.CHAR, 
                              TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
-                             TokenType.IDENTIFIER):
+                             TokenType.STRUCT, TokenType.IDENTIFIER):
                 return False
             
             self.advance()

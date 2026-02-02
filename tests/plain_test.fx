@@ -157,48 +157,7 @@ enum TokenType
     NEWLINE
 };
 
-object Token
-{
-    //TokenType type;
-    int token;
-    string lexeme("");
-    i32 line;
-    i32 column;
-    
-    def __init() -> this
-    {
-        this.token = TokenType.EOF;
-        this.lexeme.set();
-        this.line = 0;
-        this.column = 0;
-        return this;
-    };
-    
-    def __exit() -> void
-    {
-        // Cleanup if needed
-        (void)this;
-        return;
-    };
-    
-    def token_name() -> noopstr
-    {
-        // Simple type to name mapping with explicit null termination
-        switch (this.token)
-        {
-            case (TokenType.SINT_LITERAL) {return "SINT_LITERAL\0";}
-            case (TokenType.UINT_LITERAL) {return "UINT_LITERAL\0";}
-            case (TokenType.FLOAT) {return "FLOAT\0";}
-            case (TokenType.CHAR) {return "CHAR\0";}
-            case (TokenType.STRING_LITERAL) {return "STRING_LITERAL\0";}
-            case (TokenType.IDENTIFIER) {return "IDENTIFIER\0";}
-            case (TokenType.ASM_BLOCK) {return "ASM_BLOCK\0";}
-            case (TokenType.EOF) {return "EOF\0";}
-            default {return "UNKNOWN\0";};
-        };
-        return (noopstr)0;
-    };
-};
+struct Token;
 
 def main() -> int
 {
@@ -213,16 +172,15 @@ def main() -> int
 	//  	mismatching types
 	//      (they don't look mismatched to me)
 	//print((u32)*v); // segfault if you deinitialize.
-	exit(0);
 	print("Flux Lexer starting ...\n\0");
 	noopstr filename = "build\\tmp.fx\0";
 	int size = get_file_size(filename);
-	byte* file = malloc(size + 1);
+	byte* file = malloc((u64)size + 1);
 	int bytes_read = read_file(filename, file, size);
 	print("Read file \0"); print(filename); print(", size: \0"); print(size); print(" bytes.\n\n
 [start of file]\n\0");
 
-	Token tokens();
+	Token[100000] tokens;
 	//(); // Should be able to call function here.
 
 	//byte[size] file = file;

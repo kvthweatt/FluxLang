@@ -3717,6 +3717,11 @@ class SizeOf(Expression):
         
         # Handle Identifier case - look up the declared type instead of loading the value
         if isinstance(self.target, Identifier):
+            # First check if this is a struct type name
+            if hasattr(module, '_struct_vtables') and self.target.name in module._struct_vtables:
+                vtable = module._struct_vtables[self.target.name]
+                return ir.Constant(ir.IntType(32), vtable.total_bits)
+            
             # Look up the variable declaration in the current scope
             if builder.scope is not None and self.target.name in builder.scope:
                 ptr = builder.scope[self.target.name]
@@ -6861,28 +6866,65 @@ class StructLiteral(Expression):
         # Create zeroed instance
         if isinstance(struct_type, ir.IntType):
             instance = ir.Constant(struct_type, 0)
+        elif isinstance(struct_type, ir.LiteralStructType):
+            # For proper struct types, initialize each field to zero
+            zero_values = []
+            for field_type in struct_type.elements:
+                if isinstance(field_type, ir.IntType):
+                    zero_values.append(ir.Constant(field_type, 0))
+                elif isinstance(field_type, ir.FloatType):
+                    zero_values.append(ir.Constant(field_type, 0.0))
+                elif isinstance(field_type, ir.DoubleType):
+                    zero_values.append(ir.Constant(field_type, 0.0))
+                else:
+                    # Default to an integer constant for other types
+                    zero_values.append(ir.Constant(ir.IntType(32), 0))
+            instance = ir.Constant(struct_type, zero_values)
         else:
             instance = ir.Constant(struct_type, [ir.Constant(ir.IntType(8), 0)] * vtable.total_bytes)
         
         # Pack field values
-        for field_name, field_value_expr in self.field_values.items():
-            field_info = next(
-                (f for f in vtable.fields if f[0] == field_name),
-                None
-            )
-            if not field_info:
-                raise ValueError(f"Field '{field_name}' not found in struct '{self.struct_type}'")
+        if isinstance(struct_type, ir.LiteralStructType):
+            # For proper struct types, build the constant directly with all field values
+            field_constants = []
+            for i, (field_name, _, _, _) in enumerate(vtable.fields):
+                if field_name in self.field_values:
+                    # Generate the field value
+                    field_value_expr = self.field_values[field_name]
+                    field_value = field_value_expr.codegen(builder, module)
+                    # For constants, we can use them directly
+                    if isinstance(field_value, ir.Constant):
+                        field_constants.append(field_value)
+                    else:
+                        # Non-constant value - we need to use insertvalue instructions
+                        # But for struct literals, all values should be constants
+                        raise ValueError(f"Struct literal field '{field_name}' must be a constant expression")
+                else:
+                    # Use the zero value we created
+                    field_constants.append(instance.constant_value[i])
             
-            _, bit_offset, bit_width, alignment = field_info
-            
-            # Generate value
-            field_value = field_value_expr.codegen(builder, module)
-            
-            # Pack into instance
-            instance = self._pack_field_value(
-                builder, instance, field_value, 
-                bit_offset, bit_width, vtable.total_bits
-            )
+            # Create the final struct constant
+            instance = ir.Constant(struct_type, field_constants)
+        else:
+            # For packed integer or byte array structs, use the old packing method
+            for field_name, field_value_expr in self.field_values.items():
+                field_info = next(
+                    (f for f in vtable.fields if f[0] == field_name),
+                    None
+                )
+                if not field_info:
+                    raise ValueError(f"Field '{field_name}' not found in struct '{self.struct_type}'")
+                
+                _, bit_offset, bit_width, alignment = field_info
+                
+                # Generate value
+                field_value = field_value_expr.codegen(builder, module)
+                
+                # Pack into instance
+                instance = self._pack_field_value(
+                    builder, instance, field_value, 
+                    bit_offset, bit_width, vtable.total_bits
+                )
         
         return instance
     
@@ -7324,6 +7366,21 @@ class StructFieldAccess(Expression):
             else:
                 result = masked
             
+            return result
+        elif isinstance(instance.type, ir.LiteralStructType):
+            # Proper struct type - use extractvalue with field index
+            # Find field index
+            field_index = None
+            for i, field_info in enumerate(vtable.fields):
+                if field_info[0] == self.field_name:
+                    field_index = i
+                    break
+            
+            if field_index is None:
+                raise ValueError(f"Field '{self.field_name}' not found in struct '{struct_name}'")
+            
+            # Extract the field value directly using the field index
+            result = builder.extract_value(instance, field_index, name=self.field_name)
             return result
         else:
             # Array type - byte extraction

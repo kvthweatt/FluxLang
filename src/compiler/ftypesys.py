@@ -21,6 +21,7 @@ class DataType(Enum):
     CHAR = "char"
     BOOL = "bool"
     DATA = "data"
+    STRUCT = "struct"
     VOID = "void"
     THIS = "this"
 
@@ -405,6 +406,8 @@ class TypeSpec:
             return ir.IntType(1)
         elif self.base_type == DataType.CHAR:
             return ir.IntType(8)
+        elif self.base_type == DataType.STRUCT:
+            return ir.IntType(8)
         elif self.base_type == DataType.VOID:
             return ir.VoidType()
         elif self.base_type == DataType.DATA:
@@ -418,7 +421,7 @@ class TypeSpec:
         base_type = self.get_llvm_type(module)
         
         if self.is_pointer:
-            if self.base_type == DataType.VOID:
+            if self.base_type == DataType.VOID or self.base_type == DataType.STRUCT:
                 return ir.PointerType(ir.IntType(8))
             return ir.PointerType(base_type)
         
