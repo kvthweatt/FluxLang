@@ -181,7 +181,6 @@ uv.lock
 *.bc
 # For IDA disassembly leftover from analyzing binaries
 *.i64
-build/
 
 # Project-specific
-/prompts/
+/prompts
