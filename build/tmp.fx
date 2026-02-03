@@ -1125,101 +1125,45 @@ namespace standard
     {
         namespace console
         {
-            def win_input(byte[] buffer, int max_len) -> int;
+            def nix_input(byte[] buffer, int max_len) -> int;
             def input(byte[] buffer, int max_len) -> int;
-            def win_print(byte* msg, int x) -> void;
+            def nix_print(byte* msg, int x) -> void;
             def print(noopstr s, int len) -> void;
             def print(noopstr s) -> void;
             def print(byte s) -> void; 
-            def reset_from_input() -> void;
-            def win_input(byte[] buf, int max_len) -> int
-            {
-                i32 bytes_read = 0;
-                i32* bytes_read_ptr = @bytes_read;
-                i32 original_mode = 0;
-                i32* mode_ptr = @original_mode;
-                volatile asm
-                {
-                    movq $$-10, %rcx
-                    subq $$32, %rsp
-                    call GetStdHandle
-                    addq $$32, %rsp
-                    movq %rax, %r12
-                    movq %rax, %rcx
-                    movq $3, %rdx
-                    subq $$32, %rsp
-                    call GetConsoleMode
-                    addq $$32, %rsp
-                    movq %r12, %rcx
-                    movq $$0x001F, %rdx
-                    subq $$32, %rsp
-                    call SetConsoleMode
-                    addq $$32, %rsp
-                    movq %r12, %rcx
-                    movq $0, %rdx           
-                    movl $1, %r8d           
-                    movq $2, %r9            
-                    subq $$40, %rsp
-                    movq $$0, 32(%rsp)
-                    call ReadFile
-                    addq $$40, %rsp
-                    movq %r12, %rcx
-                    movl ($3), %edx
-                    subq $$32, %rsp
-                    call SetConsoleMode
-                    addq $$32, %rsp
-                    movl ($2), %eax
-                } : : "r"(buf), "r"(max_len), "r"(bytes_read_ptr), "r"(mode_ptr)
-                  : "rax","rcx","rdx","r8","r9","r10","r11","r12","memory";
-                reset_from_input();
-                return bytes_read - 2;
-            };
             def input(byte[] buffer, int max_len) -> int
             {
-                switch (1)
+                switch (2)
                 {
-                    case (1)
+                    case (2)
                     {
-                        return win_input(buffer, max_len);
+                        return nix_input(buffer, max_len);
                     }
                     default
                     { return 0; };
                 };
                 return 0;
             };
-            def win_print(byte* msg, int x) -> void
+            def nix_print(byte* msg, int x) -> void
             {
+                i64 count = x;
                 volatile asm
                 {
-                    movq $$-11, %rcx
-                    subq $$32, %rsp
-                    call GetStdHandle
-                    addq $$32, %rsp
-                    movq %rax, %rcx         
-                    movq $0, %rdx           
-                    movl $1, %r8d           
-                    xorq %r9, %r9           
-                    subq $$40, %rsp         
-                    movq %r9, 32(%rsp)      
-                    call WriteFile
-                    addq $$40, %rsp
-                } : : "r"(msg), "r"(x) : "rax","rcx","rdx","r8","r9","r10","r11","memory";
-                return;
-            };
-            def reset_from_input() -> void
-            {
-                char bs = 8;
-                win_print(@bs,1);
-                win_print(@bs,1);
+                    movq $$1, %rax
+                    movq $$1, %rdi
+                    movq $0, %rsi
+                    movq $1, %rdx
+                    syscall
+                } : : "r"(msg), "r"(count) : "rax","rdi","rsi","rdx","rcx","r11","memory";
                 return;
             };
     		def print(noopstr s, int len) -> void
     		{
-                switch (1)
+                switch (2)
                 {
-                    case (1) 
+                    case (2) 
                     {
-                        win_print(@s, len);
+                        nix_print(@s, len);
                     }
                     default { return; }; 
                 };
@@ -1229,11 +1173,11 @@ namespace standard
             def print(noopstr s) -> void
             {
                 int len = strlen(@s);
-                switch (1)
+                switch (2)
                 {
-                    case (1) 
+                    case (2) 
                     {
-                        win_print(@s, len);
+                        nix_print(@s, len);
                     }
                     default { return; }; 
                 };
@@ -1301,11 +1245,11 @@ namespace standard
             };
             def print() -> void
             {
-                switch (1)
+                switch (2)
                 {
-                    case (1) 
+                    case (2) 
                     {
-                        win_print("\n", 1);
+                        nix_print("\n", 1);
                     }
                     default { return; }; 
                 };
@@ -1314,112 +1258,89 @@ namespace standard
         };      
         namespace file
         {
-            def win_open(byte* path, u32 access, u32 share, u32 disposition, u32 attributes) -> i64;
-            def win_read(i64 handle, byte* buffer, u32 bytes_to_read) -> i32;
-            def win_write(i64 handle, byte* buffer, u32 bytes_to_write) -> i32;
-            def win_close(i64 handle) -> i32;
-            def win_open(byte* path, u32 access, u32 share, u32 disposition, u32 attributes) -> i64
+            def open(byte* path, i32 flags, i32 mode) -> i64
             {
-                i64 handle = -1;
+                i64 result = -1;
                 volatile asm
                 {
-                    movq $0, %rcx           
-                    movl $1, %edx           
-                    movl $2, %r8d           
-                    xorq %r9, %r9           
-                    subq $$56, %rsp
-                    movl $3, %eax           
-                    movl %eax, 32(%rsp)     
-                    movl $4, %eax           
-                    movl %eax, 40(%rsp)     
-                    xorq %rax, %rax
-                    movq %rax, 48(%rsp)     
-                    call CreateFileA
-                    movq %rax, $5           
-                    addq $$56, %rsp
-                } : : "r"(path), "r"(access), "r"(share), "r"(disposition), "r"(attributes), "m"(handle)
-                  : "rax","rcx","rdx","r8","r9","r10","r11","memory";
-                return handle;
-            };
-            def win_read(i64 handle, byte* buffer, u32 bytes_to_read) -> i32
-            {
-                u32 bytes_read = 0;
-                u32* bytes_read_ptr = @bytes_read;
-                i32 success = 0;
-                volatile asm
-                {
-                    movq $0, %rcx           
-                    movq $1, %rdx           
-                    movl $2, %r8d           
-                    movq $3, %r9            
-                    subq $$40, %rsp
-                    xorq %rax, %rax
-                    movq %rax, 32(%rsp)     
-                    call ReadFile
-                    movl %eax, $4           
-                    addq $$40, %rsp
-                } : : "r"(handle), "r"(buffer), "r"(bytes_to_read), "r"(bytes_read_ptr), "m"(success)
-                  : "rax","rcx","rdx","r8","r9","r10","r11","memory";
-                if (success == 0)
-                {
-                    return -1;
-                };
-                return (i32)bytes_read;
-            };
-            def win_write(i64 handle, byte* buffer, u32 bytes_to_write) -> i32
-            {
-                u32 bytes_written = 0;
-                u32* bytes_written_ptr = @bytes_written;
-                i32 success = 0;
-                volatile asm
-                {
-                    movq $0, %rcx           
-                    movq $1, %rdx           
-                    movl $2, %r8d           
-                    movq $3, %r9            
-                    subq $$40, %rsp
-                    xorq %rax, %rax
-                    movq %rax, 32(%rsp)     
-                    call WriteFile
-                    movl %eax, $4           
-                    addq $$40, %rsp
-                } : : "r"(handle), "r"(buffer), "r"(bytes_to_write), "r"(bytes_written_ptr), "m"(success)
-                  : "rax","rcx","rdx","r8","r9","r10","r11","memory";
-                if (success == 0)
-                {
-                    return -1;
-                };
-                return (i32)bytes_written;
-            };
-            def win_close(i64 handle) -> i32
-            {
-                i32 result = 0;
-                volatile asm
-                {
-                    movq $0, %rcx           
-                    subq $$32, %rsp
-                    call CloseHandle
-                    movl %eax, $1           
-                    addq $$32, %rsp
-                } : : "r"(handle), "m"(result)
-                  : "rax","rcx","rdx","r8","r9","r10","r11","memory";
+                    movq $$2, %rax           
+                    movq $0, %rdi           
+                    movl $1, %esi           
+                    movl $2, %edx           
+                    syscall                 
+                    movq %rax, $3           
+                } : : "r"(path), "r"(flags), "r"(mode), "m"(result)
+                  : "rax","rdi","rsi","rdx","rcx","r11","memory";
                 return result;
+            };
+            def read(i64 fd, byte* buffer, u64 count) -> i64
+            {
+                i64 result = 0;
+                volatile asm
+                {
+                    movq $$0, %rax           
+                    movq $0, %rdi           
+                    movq $1, %rsi           
+                    movq $2, %rdx           
+                    syscall                 
+                    movq %rax, $3           
+                } : : "r"(fd), "r"(buffer), "r"(count), "m"(result)
+                  : "rax","rdi","rsi","rdx","rcx","r11","memory";
+                return result;
+            };
+            def write(i64 fd, byte* buffer, u64 count) -> i64
+            {
+                i64 result = 0;
+                volatile asm
+                {
+                    movq $$1, %rax           
+                    movq $0, %rdi           
+                    movq $1, %rsi           
+                    movq $2, %rdx           
+                    syscall                 
+                    movq %rax, $3           
+                } : : "r"(fd), "r"(buffer), "r"(count), "m"(result)
+                  : "rax","rdi","rsi","rdx","rcx","r11","memory";
+                return result;
+            };
+            def close(i64 fd) -> i32
+            {
+                i64 result = 0;
+                volatile asm
+                {
+                    movq $$3, %rax           
+                    movq $0, %rdi           
+                    syscall                 
+                    movq %rax, $1           
+                } : : "r"(fd), "m"(result)
+                  : "rax","rdi","rsi","rdx","rcx","r11","memory";
+                return (i32)result;
             };
             def open_read(byte* path) -> i64
             {
-                return win_open(path, (i32)0x80000000, (i32)0x00000001, (i32)3, (i32)0x80);
+                return open(path, 0x0000, 0);
             };
             def open_write(byte* path) -> i64
             {
-                return win_open(path, (i32)0x40000000, (i32)0, (i32)2, (i32)0x80);
+                return open(path, 0x0001 | 0x0040 | 0x0200, (0x0400 | 0x0200 | 0x0040 | 0x0004));
             };
             def open_append(byte* path) -> i64
             {
-                return win_open(path, (i32)0x40000000, (i32)0x00000001, (i32)4, (i32)0x80);
+                return open(path, 0x0001 | 0x0040 | 0x0400, (0x0400 | 0x0200 | 0x0040 | 0x0004));
             };
             def open_read_write(byte* path) -> i64
             {
-                return win_open(path, (i32)0xC0000000, (i32)0x00000001, (i32)4, (i32)0x80);
+                return open(path, 0x0002 | 0x0040, (0x0400 | 0x0200 | 0x0040 | 0x0004));
+            };
+            def read32(i64 fd, byte* buffer, u32 count) -> i32
+            {
+                i64 result = read(fd, buffer, (u64)count);
+                return (i32)result;
+            };
+            def write32(i64 fd, byte* buffer, u32 count) -> i32
+            {
+                i64 result = write(fd, buffer, (u64)count);
+                return (i32)result;
             };
         };
     };
@@ -1438,23 +1359,37 @@ extern
 def !!main() -> int;
 def !!main(int* argc, byte** argv) -> int;
 def !!FRTStartup() -> int; 
+def !!_start() -> int;
+def !!_start() -> int
+{
+    return FRTStartup();
+};
 def !!FRTStartup() -> int
 {
     int return_code;
-    switch (1)
+    switch (2)
     {
-        case (1)
+        case (2)
         {
+            i64 argc = 0;
+            noopstr* argv = (noopstr*)0;
+            volatile asm
+            {
+                movq %rdi, $0  
+                movq %rsi, $1  
+            } : : "m"(argc), "m"(argv) : "rdi","rsi","memory";
             return_code = main();
         }
         default
         {
+            exit(0);
             return return_code;
         };
     };
     if (return_code != 0)
     {
     };
+    exit(0);  
     return return_code;
 };
 extern

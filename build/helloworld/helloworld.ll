@@ -1,6 +1,6 @@
 ; ModuleID = "flux_module"
-target triple = "x86_64-pc-windows-msvc"
-target datalayout = "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
+target triple = "x86_64-pc-linux-gnu"
+target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
 
 %"string" = type {i8*}
 define void @"__static_init"()
@@ -3959,60 +3959,7 @@ ifcont:
 @"OS_WINDOWS" = internal global i32 1
 @"OS_LINUX" = internal global i32 2
 @"OS_MACOS" = internal global i32 3
-define i32 @"standard__io__console__win_input__2__byte_arr__int__ret_int"(i8* %"buf", i32 %"max_len")
-{
-entry:
-  %"buf.addr" = alloca i8*
-  store i8* %"buf", i8** %"buf.addr"
-  %"max_len.addr" = alloca i32
-  store i32 %"max_len", i32* %"max_len.addr"
-  %"bytes_read" = alloca i32
-  store i32 0, i32* %"bytes_read"
-  %"bytes_read_ptr" = alloca i32*
-  store i32* %"bytes_read", i32** %"bytes_read_ptr"
-  %"original_mode" = alloca i32
-  store i32 0, i32* %"original_mode"
-  %"mode_ptr" = alloca i32*
-  store i32* %"original_mode", i32** %"mode_ptr"
-  %"buf_load" = load i8*, i8** %"buf.addr"
-  %"max_len_load" = load i32, i32* %"max_len.addr"
-  %"bytes_read_ptr_load" = load i32*, i32** %"bytes_read_ptr"
-  %"mode_ptr_load" = load i32*, i32** %"mode_ptr"
-  call void asm sideeffect "movq $$-10, %rcx
-                    subq $$32, %rsp
-                    call GetStdHandle
-                    addq $$32, %rsp
-                    movq %rax, %r12
-                    movq %rax, %rcx
-                    movq $3, %rdx
-                    subq $$32, %rsp
-                    call GetConsoleMode
-                    addq $$32, %rsp
-                    movq %r12, %rcx
-                    movq $$0x001F, %rdx
-                    subq $$32, %rsp
-                    call SetConsoleMode
-                    addq $$32, %rsp
-                    movq %r12, %rcx
-                    movq $0, %rdx           
-                    movl $1, %r8d           
-                    movq $2, %r9            
-                    subq $$40, %rsp
-                    movq $$0, 32(%rsp)
-                    call ReadFile
-                    addq $$40, %rsp
-                    movq %r12, %rcx
-                    movl ($3), %edx
-                    subq $$32, %rsp
-                    call SetConsoleMode
-                    addq $$32, %rsp
-                    movl ($2), %eax", "r,r,r,r,~{rax},~{rcx},~{rdx},~{r8},~{r9},~{r10},~{r11},~{r12},~{memory}"
-(i8* %"buf_load", i32 %"max_len_load", i32* %"bytes_read_ptr_load", i32* %"mode_ptr_load")
-  call void @"standard__io__console__reset_from_input__0__ret_void"()
-  %"bytes_read.1" = load i32, i32* %"bytes_read"
-  %".12" = sub i32 %"bytes_read.1", 2
-  ret i32 %".12"
-}
+declare i32 @"standard__io__console__nix_input__2__byte_arr__int__ret_int"(i8* %".1", i32 %".2")
 
 define i32 @"standard__io__console__input__2__byte_arr__int__ret_int"(i8* %"buffer", i32 %"max_len")
 {
@@ -4021,40 +3968,37 @@ entry:
   store i8* %"buffer", i8** %"buffer.addr"
   %"max_len.addr" = alloca i32
   store i32 %"max_len", i32* %"max_len.addr"
-  switch i32 1, label %"switch_default" [i32 1, label %"switch_case_0"]
+  switch i32 2, label %"switch_default" [i32 2, label %"switch_case_0"]
 switch_merge:
   ret i32 0
 switch_case_0:
   %"buffer.1" = load i8*, i8** %"buffer.addr"
   %"max_len.1" = load i32, i32* %"max_len.addr"
-  %".7" = call i32 @"standard__io__console__win_input__2__byte_arr__int__ret_int"(i8* %"buffer.1", i32 %"max_len.1")
+  %".7" = call i32 @"standard__io__console__nix_input__2__byte_arr__int__ret_int"(i8* %"buffer.1", i32 %"max_len.1")
   ret i32 %".7"
 switch_default:
   ret i32 0
 }
 
-define void @"standard__io__console__win_print__2__byte_ptr1__int__ret_void"(i8* %"msg", i32 %"x")
+define void @"standard__io__console__nix_print__2__byte_ptr1__int__ret_void"(i8* %"msg", i32 %"x")
 {
 entry:
   %"msg.addr" = alloca i8*
   store i8* %"msg", i8** %"msg.addr"
   %"x.addr" = alloca i32
   store i32 %"x", i32* %"x.addr"
+  %"count" = alloca i64
+  %"x.1" = load i32, i32* %"x.addr"
+  %".6" = sext i32 %"x.1" to i64
+  store i64 %".6", i64* %"count"
   %"msg_load" = load i8*, i8** %"msg.addr"
-  %"x_load" = load i32, i32* %"x.addr"
-  call void asm sideeffect "movq $$-11, %rcx
-                    subq $$32, %rsp
-                    call GetStdHandle
-                    addq $$32, %rsp
-                    movq %rax, %rcx         
-                    movq $0, %rdx           
-                    movl $1, %r8d           
-                    xorq %r9, %r9           
-                    subq $$40, %rsp         
-                    movq %r9, 32(%rsp)      
-                    call WriteFile
-                    addq $$40, %rsp", "r,r,~{rax},~{rcx},~{rdx},~{r8},~{r9},~{r10},~{r11},~{memory}"
-(i8* %"msg_load", i32 %"x_load")
+  %"count_load" = load i64, i64* %"count"
+  call void asm sideeffect "movq $$1, %rax
+                    movq $$1, %rdi
+                    movq $0, %rsi
+                    movq $1, %rdx
+                    syscall", "r,r,~{rax},~{rdi},~{rsi},~{rdx},~{rcx},~{r11},~{memory}"
+(i8* %"msg_load", i64 %"count_load")
   ret void
 }
 
@@ -4065,20 +4009,19 @@ entry:
   store i8* %"s", i8** %"s.addr"
   %"len.addr" = alloca i32
   store i32 %"len", i32* %"len.addr"
-  switch i32 1, label %"switch_default" [i32 1, label %"switch_case_0"]
+  switch i32 2, label %"switch_default" [i32 2, label %"switch_case_0"]
 switch_merge:
   %"s_void_ptr" = bitcast i8** %"s.addr" to i8*
   call void asm sideeffect "
-                movq %rcx, %r10
-                movl $$0x1E, %eax
+                movq $$11, %rax
                 syscall
-            ", "r,~{rax},~{r10},~{r11},~{memory}"
+            ", "r,~{rax},~{r11},~{memory}"
 (i8* %"s_void_ptr")
   ret void
 switch_case_0:
   %"s_ptr" = load i8*, i8** %"s.addr"
   %"len.1" = load i32, i32* %"len.addr"
-  call void @"standard__io__console__win_print__2__byte_ptr1__int__ret_void"(i8* %"s_ptr", i32 %"len.1")
+  call void @"standard__io__console__nix_print__2__byte_ptr1__int__ret_void"(i8* %"s_ptr", i32 %"len.1")
   br label %"switch_merge"
 switch_default:
   ret void
@@ -4094,20 +4037,19 @@ entry:
   %".4" = call i64 @"strlen"(i8* %"s_ptr")
   %".5" = trunc i64 %".4" to i32
   store i32 %".5", i32* %"len"
-  switch i32 1, label %"switch_default" [i32 1, label %"switch_case_0"]
+  switch i32 2, label %"switch_default" [i32 2, label %"switch_case_0"]
 switch_merge:
   %"s_void_ptr" = bitcast i8** %"s.addr" to i8*
   call void asm sideeffect "
-                movq %rcx, %r10
-                movl $$0x1E, %eax
+                movq $$11, %rax
                 syscall
-            ", "r,~{rax},~{r10},~{r11},~{memory}"
+            ", "r,~{rax},~{r11},~{memory}"
 (i8* %"s_void_ptr")
   ret void
 switch_case_0:
   %"s_ptr.1" = load i8*, i8** %"s.addr"
   %"len.1" = load i32, i32* %"len"
-  call void @"standard__io__console__win_print__2__byte_ptr1__int__ret_void"(i8* %"s_ptr.1", i32 %"len.1")
+  call void @"standard__io__console__nix_print__2__byte_ptr1__int__ret_void"(i8* %"s_ptr.1", i32 %"len.1")
   br label %"switch_merge"
 switch_default:
   ret void
@@ -4127,17 +4069,6 @@ entry:
   store i8 %".5", i8* %"elem_1"
   %"arg0_to_void_ptr" = bitcast [2 x i8]* %"x" to i8*
   call void @"standard__io__console__print__1__noopstr__ret_void"(i8* %"arg0_to_void_ptr")
-  ret void
-}
-
-define void @"standard__io__console__reset_from_input__0__ret_void"()
-{
-entry:
-  %"bs" = alloca i8
-  %".2" = trunc i32 8 to i8
-  store i8 %".2", i8* %"bs"
-  call void @"standard__io__console__win_print__2__byte_ptr1__int__ret_void"(i8* %"bs", i32 1)
-  call void @"standard__io__console__win_print__2__byte_ptr1__int__ret_void"(i8* %"bs", i32 1)
   ret void
 }
 
@@ -4239,7 +4170,7 @@ entry:
 define void @"standard__io__console__print__0__ret_void"()
 {
 entry:
-  switch i32 1, label %"switch_default" [i32 1, label %"switch_case_0"]
+  switch i32 2, label %"switch_default" [i32 2, label %"switch_case_0"]
 switch_merge:
   ret void
 switch_case_0:
@@ -4247,155 +4178,108 @@ switch_case_0:
   %"str_char_0" = getelementptr [1 x i8], [1 x i8]* %"str_stack", i32 0, i32 0
   store i8 10, i8* %"str_char_0"
   %"arg0_to_void_ptr" = bitcast [1 x i8]* %"str_stack" to i8*
-  call void @"standard__io__console__win_print__2__byte_ptr1__int__ret_void"(i8* %"arg0_to_void_ptr", i32 1)
+  call void @"standard__io__console__nix_print__2__byte_ptr1__int__ret_void"(i8* %"arg0_to_void_ptr", i32 1)
   br label %"switch_merge"
 switch_default:
   ret void
 }
 
-define i64 @"standard__io__file__win_open__5__byte_ptr1__u32__u32__u32__u32__ret_i64"(i8* %"path", i32 %"access", i32 %"share", i32 %"disposition", i32 %"attributes")
+define i64 @"standard__io__file__open__3__byte_ptr1__i32__i32__ret_i64"(i8* %"path", i32 %"flags", i32 %"mode")
 {
 entry:
   %"path.addr" = alloca i8*
   store i8* %"path", i8** %"path.addr"
-  %"access.addr" = alloca i32
-  store i32 %"access", i32* %"access.addr"
-  %"share.addr" = alloca i32
-  store i32 %"share", i32* %"share.addr"
-  %"disposition.addr" = alloca i32
-  store i32 %"disposition", i32* %"disposition.addr"
-  %"attributes.addr" = alloca i32
-  store i32 %"attributes", i32* %"attributes.addr"
-  %"handle" = alloca i64
-  %".12" = sub i32 0, 1
-  %".13" = sext i32 %".12" to i64
-  store i64 %".13", i64* %"handle"
+  %"flags.addr" = alloca i32
+  store i32 %"flags", i32* %"flags.addr"
+  %"mode.addr" = alloca i32
+  store i32 %"mode", i32* %"mode.addr"
+  %"result" = alloca i64
+  %".8" = sub i32 0, 1
+  %".9" = sext i32 %".8" to i64
+  store i64 %".9", i64* %"result"
   %"path_load" = load i8*, i8** %"path.addr"
-  %"access_load" = load i32, i32* %"access.addr"
-  %"share_load" = load i32, i32* %"share.addr"
-  %"disposition_load" = load i32, i32* %"disposition.addr"
-  %"attributes_load" = load i32, i32* %"attributes.addr"
-  call void asm sideeffect "movq $0, %rcx           
-                    movl $1, %edx           
-                    movl $2, %r8d           
-                    xorq %r9, %r9           
-                    subq $$56, %rsp
-                    movl $3, %eax           
-                    movl %eax, 32(%rsp)     
-                    movl $4, %eax           
-                    movl %eax, 40(%rsp)     
-                    xorq %rax, %rax
-                    movq %rax, 48(%rsp)     
-                    call CreateFileA
-                    movq %rax, $5           
-                    addq $$56, %rsp", "r,r,r,r,r,m,~{rax},~{rcx},~{rdx},~{r8},~{r9},~{r10},~{r11},~{memory}"
-(i8* %"path_load", i32 %"access_load", i32 %"share_load", i32 %"disposition_load", i32 %"attributes_load", i64* %"handle")
-  %"handle.1" = load i64, i64* %"handle"
-  ret i64 %"handle.1"
+  %"flags_load" = load i32, i32* %"flags.addr"
+  %"mode_load" = load i32, i32* %"mode.addr"
+  call void asm sideeffect "movq $$2, %rax           
+                    movq $0, %rdi           
+                    movl $1, %esi           
+                    movl $2, %edx           
+                    syscall                 
+                    movq %rax, $3", "r,r,r,m,~{rax},~{rdi},~{rsi},~{rdx},~{rcx},~{r11},~{memory}"
+(i8* %"path_load", i32 %"flags_load", i32 %"mode_load", i64* %"result")
+  %"result.1" = load i64, i64* %"result"
+  ret i64 %"result.1"
 }
 
-define i32 @"standard__io__file__win_read__3__i64__byte_ptr1__u32__ret_i32"(i64 %"handle", i8* %"buffer", i32 %"bytes_to_read")
+define i64 @"standard__io__file__read__3__i64__byte_ptr1__u64__ret_i64"(i64 %"fd", i8* %"buffer", i64 %"count")
 {
 entry:
-  %"handle.addr" = alloca i64
-  store i64 %"handle", i64* %"handle.addr"
+  %"fd.addr" = alloca i64
+  store i64 %"fd", i64* %"fd.addr"
   %"buffer.addr" = alloca i8*
   store i8* %"buffer", i8** %"buffer.addr"
-  %"bytes_to_read.addr" = alloca i32
-  store i32 %"bytes_to_read", i32* %"bytes_to_read.addr"
-  %"bytes_read" = alloca i32
-  store i32 0, i32* %"bytes_read"
-  %"bytes_read_ptr" = alloca i32*
-  store i32* %"bytes_read", i32** %"bytes_read_ptr"
-  %"success" = alloca i32
-  store i32 0, i32* %"success"
-  %"handle_load" = load i64, i64* %"handle.addr"
+  %"count.addr" = alloca i64
+  store i64 %"count", i64* %"count.addr"
+  %"result" = alloca i64
+  %".8" = sext i32 0 to i64
+  store i64 %".8", i64* %"result"
+  %"fd_load" = load i64, i64* %"fd.addr"
   %"buffer_load" = load i8*, i8** %"buffer.addr"
-  %"bytes_to_read_load" = load i32, i32* %"bytes_to_read.addr"
-  %"bytes_read_ptr_load" = load i32*, i32** %"bytes_read_ptr"
-  call void asm sideeffect "movq $0, %rcx           
-                    movq $1, %rdx           
-                    movl $2, %r8d           
-                    movq $3, %r9            
-                    subq $$40, %rsp
-                    xorq %rax, %rax
-                    movq %rax, 32(%rsp)     
-                    call ReadFile
-                    movl %eax, $4           
-                    addq $$40, %rsp", "r,r,r,r,m,~{rax},~{rcx},~{rdx},~{r8},~{r9},~{r10},~{r11},~{memory}"
-(i64 %"handle_load", i8* %"buffer_load", i32 %"bytes_to_read_load", i32* %"bytes_read_ptr_load", i32* %"success")
-  %"success.1" = load i32, i32* %"success"
-  %".12" = icmp eq i32 %"success.1", 0
-  br i1 %".12", label %"then", label %"else"
-then:
-  %".14" = sub i32 0, 1
-  ret i32 %".14"
-else:
-  br label %"ifcont"
-ifcont:
-  %"bytes_read.1" = load i32, i32* %"bytes_read"
-  ret i32 %"bytes_read.1"
+  %"count_load" = load i64, i64* %"count.addr"
+  call void asm sideeffect "movq $$0, %rax           
+                    movq $0, %rdi           
+                    movq $1, %rsi           
+                    movq $2, %rdx           
+                    syscall                 
+                    movq %rax, $3", "r,r,r,m,~{rax},~{rdi},~{rsi},~{rdx},~{rcx},~{r11},~{memory}"
+(i64 %"fd_load", i8* %"buffer_load", i64 %"count_load", i64* %"result")
+  %"result.1" = load i64, i64* %"result"
+  ret i64 %"result.1"
 }
 
-define i32 @"standard__io__file__win_write__3__i64__byte_ptr1__u32__ret_i32"(i64 %"handle", i8* %"buffer", i32 %"bytes_to_write")
+define i64 @"standard__io__file__write__3__i64__byte_ptr1__u64__ret_i64"(i64 %"fd", i8* %"buffer", i64 %"count")
 {
 entry:
-  %"handle.addr" = alloca i64
-  store i64 %"handle", i64* %"handle.addr"
+  %"fd.addr" = alloca i64
+  store i64 %"fd", i64* %"fd.addr"
   %"buffer.addr" = alloca i8*
   store i8* %"buffer", i8** %"buffer.addr"
-  %"bytes_to_write.addr" = alloca i32
-  store i32 %"bytes_to_write", i32* %"bytes_to_write.addr"
-  %"bytes_written" = alloca i32
-  store i32 0, i32* %"bytes_written"
-  %"bytes_written_ptr" = alloca i32*
-  store i32* %"bytes_written", i32** %"bytes_written_ptr"
-  %"success" = alloca i32
-  store i32 0, i32* %"success"
-  %"handle_load" = load i64, i64* %"handle.addr"
+  %"count.addr" = alloca i64
+  store i64 %"count", i64* %"count.addr"
+  %"result" = alloca i64
+  %".8" = sext i32 0 to i64
+  store i64 %".8", i64* %"result"
+  %"fd_load" = load i64, i64* %"fd.addr"
   %"buffer_load" = load i8*, i8** %"buffer.addr"
-  %"bytes_to_write_load" = load i32, i32* %"bytes_to_write.addr"
-  %"bytes_written_ptr_load" = load i32*, i32** %"bytes_written_ptr"
-  call void asm sideeffect "movq $0, %rcx           
-                    movq $1, %rdx           
-                    movl $2, %r8d           
-                    movq $3, %r9            
-                    subq $$40, %rsp
-                    xorq %rax, %rax
-                    movq %rax, 32(%rsp)     
-                    call WriteFile
-                    movl %eax, $4           
-                    addq $$40, %rsp", "r,r,r,r,m,~{rax},~{rcx},~{rdx},~{r8},~{r9},~{r10},~{r11},~{memory}"
-(i64 %"handle_load", i8* %"buffer_load", i32 %"bytes_to_write_load", i32* %"bytes_written_ptr_load", i32* %"success")
-  %"success.1" = load i32, i32* %"success"
-  %".12" = icmp eq i32 %"success.1", 0
-  br i1 %".12", label %"then", label %"else"
-then:
-  %".14" = sub i32 0, 1
-  ret i32 %".14"
-else:
-  br label %"ifcont"
-ifcont:
-  %"bytes_written.1" = load i32, i32* %"bytes_written"
-  ret i32 %"bytes_written.1"
+  %"count_load" = load i64, i64* %"count.addr"
+  call void asm sideeffect "movq $$1, %rax           
+                    movq $0, %rdi           
+                    movq $1, %rsi           
+                    movq $2, %rdx           
+                    syscall                 
+                    movq %rax, $3", "r,r,r,m,~{rax},~{rdi},~{rsi},~{rdx},~{rcx},~{r11},~{memory}"
+(i64 %"fd_load", i8* %"buffer_load", i64 %"count_load", i64* %"result")
+  %"result.1" = load i64, i64* %"result"
+  ret i64 %"result.1"
 }
 
-define i32 @"standard__io__file__win_close__1__i64__ret_i32"(i64 %"handle")
+define i32 @"standard__io__file__close__1__i64__ret_i32"(i64 %"fd")
 {
 entry:
-  %"handle.addr" = alloca i64
-  store i64 %"handle", i64* %"handle.addr"
-  %"result" = alloca i32
-  store i32 0, i32* %"result"
-  %"handle_load" = load i64, i64* %"handle.addr"
-  call void asm sideeffect "movq $0, %rcx           
-                    subq $$32, %rsp
-                    call CloseHandle
-                    movl %eax, $1           
-                    addq $$32, %rsp", "r,m,~{rax},~{rcx},~{rdx},~{r8},~{r9},~{r10},~{r11},~{memory}"
-(i64 %"handle_load", i32* %"result")
-  %"result.1" = load i32, i32* %"result"
-  ret i32 %"result.1"
+  %"fd.addr" = alloca i64
+  store i64 %"fd", i64* %"fd.addr"
+  %"result" = alloca i64
+  %".4" = sext i32 0 to i64
+  store i64 %".4", i64* %"result"
+  %"fd_load" = load i64, i64* %"fd.addr"
+  call void asm sideeffect "movq $$3, %rax           
+                    movq $0, %rdi           
+                    syscall                 
+                    movq %rax, $1", "r,m,~{rax},~{rdi},~{rsi},~{rdx},~{rcx},~{r11},~{memory}"
+(i64 %"fd_load", i64* %"result")
+  %"result.1" = load i64, i64* %"result"
+  %".7" = trunc i64 %"result.1" to i32
+  ret i32 %".7"
 }
 
 define i64 @"standard__io__file__open_read__1__byte_ptr1__ret_i64"(i8* %"path")
@@ -4404,9 +4288,8 @@ entry:
   %"path.addr" = alloca i8*
   store i8* %"path", i8** %"path.addr"
   %"path.1" = load i8*, i8** %"path.addr"
-  %".4" = trunc i64 2147483648 to i32
-  %".5" = call i64 @"standard__io__file__win_open__5__byte_ptr1__u32__u32__u32__u32__ret_i64"(i8* %"path.1", i32 %".4", i32 1, i32 3, i32 128)
-  ret i64 %".5"
+  %".4" = call i64 @"standard__io__file__open__3__byte_ptr1__i32__i32__ret_i64"(i8* %"path.1", i32 0, i32 0)
+  ret i64 %".4"
 }
 
 define i64 @"standard__io__file__open_write__1__byte_ptr1__ret_i64"(i8* %"path")
@@ -4415,8 +4298,13 @@ entry:
   %"path.addr" = alloca i8*
   store i8* %"path", i8** %"path.addr"
   %"path.1" = load i8*, i8** %"path.addr"
-  %".4" = call i64 @"standard__io__file__win_open__5__byte_ptr1__u32__u32__u32__u32__ret_i64"(i8* %"path.1", i32 1073741824, i32 0, i32 2, i32 128)
-  ret i64 %".4"
+  %".4" = or i32 1, 64
+  %".5" = or i32 %".4", 512
+  %".6" = or i32 1024, 512
+  %".7" = or i32 %".6", 64
+  %".8" = or i32 %".7", 4
+  %".9" = call i64 @"standard__io__file__open__3__byte_ptr1__i32__i32__ret_i64"(i8* %"path.1", i32 %".5", i32 %".8")
+  ret i64 %".9"
 }
 
 define i64 @"standard__io__file__open_append__1__byte_ptr1__ret_i64"(i8* %"path")
@@ -4425,8 +4313,13 @@ entry:
   %"path.addr" = alloca i8*
   store i8* %"path", i8** %"path.addr"
   %"path.1" = load i8*, i8** %"path.addr"
-  %".4" = call i64 @"standard__io__file__win_open__5__byte_ptr1__u32__u32__u32__u32__ret_i64"(i8* %"path.1", i32 1073741824, i32 1, i32 4, i32 128)
-  ret i64 %".4"
+  %".4" = or i32 1, 64
+  %".5" = or i32 %".4", 1024
+  %".6" = or i32 1024, 512
+  %".7" = or i32 %".6", 64
+  %".8" = or i32 %".7", 4
+  %".9" = call i64 @"standard__io__file__open__3__byte_ptr1__i32__i32__ret_i64"(i8* %"path.1", i32 %".5", i32 %".8")
+  ret i64 %".9"
 }
 
 define i64 @"standard__io__file__open_read_write__1__byte_ptr1__ret_i64"(i8* %"path")
@@ -4435,9 +4328,54 @@ entry:
   %"path.addr" = alloca i8*
   store i8* %"path", i8** %"path.addr"
   %"path.1" = load i8*, i8** %"path.addr"
-  %".4" = trunc i64 3221225472 to i32
-  %".5" = call i64 @"standard__io__file__win_open__5__byte_ptr1__u32__u32__u32__u32__ret_i64"(i8* %"path.1", i32 %".4", i32 1, i32 4, i32 128)
-  ret i64 %".5"
+  %".4" = or i32 2, 64
+  %".5" = or i32 1024, 512
+  %".6" = or i32 %".5", 64
+  %".7" = or i32 %".6", 4
+  %".8" = call i64 @"standard__io__file__open__3__byte_ptr1__i32__i32__ret_i64"(i8* %"path.1", i32 %".4", i32 %".7")
+  ret i64 %".8"
+}
+
+define i32 @"standard__io__file__read32__3__i64__byte_ptr1__u32__ret_i32"(i64 %"fd", i8* %"buffer", i32 %"count")
+{
+entry:
+  %"fd.addr" = alloca i64
+  store i64 %"fd", i64* %"fd.addr"
+  %"buffer.addr" = alloca i8*
+  store i8* %"buffer", i8** %"buffer.addr"
+  %"count.addr" = alloca i32
+  store i32 %"count", i32* %"count.addr"
+  %"result" = alloca i64
+  %"fd.1" = load i64, i64* %"fd.addr"
+  %"buffer.1" = load i8*, i8** %"buffer.addr"
+  %"count.1" = load i32, i32* %"count.addr"
+  %".8" = zext i32 %"count.1" to i64
+  %".9" = call i64 @"standard__io__file__read__3__i64__byte_ptr1__u64__ret_i64"(i64 %"fd.1", i8* %"buffer.1", i64 %".8")
+  store i64 %".9", i64* %"result"
+  %"result.1" = load i64, i64* %"result"
+  %".11" = trunc i64 %"result.1" to i32
+  ret i32 %".11"
+}
+
+define i32 @"standard__io__file__write32__3__i64__byte_ptr1__u32__ret_i32"(i64 %"fd", i8* %"buffer", i32 %"count")
+{
+entry:
+  %"fd.addr" = alloca i64
+  store i64 %"fd", i64* %"fd.addr"
+  %"buffer.addr" = alloca i8*
+  store i8* %"buffer", i8** %"buffer.addr"
+  %"count.addr" = alloca i32
+  store i32 %"count", i32* %"count.addr"
+  %"result" = alloca i64
+  %"fd.1" = load i64, i64* %"fd.addr"
+  %"buffer.1" = load i8*, i8** %"buffer.addr"
+  %"count.1" = load i32, i32* %"count.addr"
+  %".8" = zext i32 %"count.1" to i64
+  %".9" = call i64 @"standard__io__file__write__3__i64__byte_ptr1__u64__ret_i64"(i64 %"fd.1", i8* %"buffer.1", i64 %".8")
+  store i64 %".9", i64* %"result"
+  %"result.1" = load i64, i64* %"result"
+  %".11" = trunc i64 %"result.1" to i32
+  ret i32 %".11"
 }
 
 declare external i16* @"GetCommandLineW"()
@@ -4516,16 +4454,26 @@ define i32 @"FRTStartup"()
 {
 entry:
   %"return_code" = alloca i32
-  switch i32 1, label %"switch_default" [i32 1, label %"switch_case_0"]
+  switch i32 2, label %"switch_default" [i32 2, label %"switch_case_0"]
 switch_merge:
   %"return_code.2" = load i32, i32* %"return_code"
-  %".7" = icmp ne i32 %"return_code.2", 0
-  br i1 %".7", label %"then", label %"else"
+  %".12" = icmp ne i32 %"return_code.2", 0
+  br i1 %".12", label %"then", label %"else"
 switch_case_0:
-  %".3" = call i32 @"main"()
-  store i32 %".3", i32* %"return_code"
+  %"argc" = alloca i64
+  %".3" = sext i32 0 to i64
+  store i64 %".3", i64* %"argc"
+  %"argv" = alloca i8**
+  %"int_to_ptr" = inttoptr i32 0 to i8**
+  store i8** %"int_to_ptr", i8*** %"argv"
+  call void asm sideeffect "movq %rdi, $0  
+                movq %rsi, $1", "m,m,~{rdi},~{rsi},~{memory}"
+(i64* %"argc", i8*** %"argv")
+  %".7" = call i32 @"main"()
+  store i32 %".7", i32* %"return_code"
   br label %"switch_merge"
 switch_default:
+  call void @"exit"(i32 0)
   %"return_code.1" = load i32, i32* %"return_code"
   ret i32 %"return_code.1"
 then:
@@ -4533,6 +4481,14 @@ then:
 else:
   br label %"ifcont"
 ifcont:
+  call void @"exit"(i32 0)
   %"return_code.3" = load i32, i32* %"return_code"
   ret i32 %"return_code.3"
+}
+
+define i32 @"_start"()
+{
+entry:
+  %".2" = call i32 @"FRTStartup"()
+  ret i32 %".2"
 }
