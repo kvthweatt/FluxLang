@@ -77,7 +77,7 @@ namespace standard
 
         def bswap32(u32 value) -> u32
         {
-            return ((value & 0xFF) << 24) |
+            return ((value & 0xFF) << 24)  |
                    ((value & 0xFF00) << 8) |
                    ((value >> 8) & 0xFF00) |
                    ((value >> 24) & 0xFF);
@@ -85,13 +85,13 @@ namespace standard
         
         def bswap64(u64 value) -> u64
         {
-            return ((value & 0xFF) << 56) |
-                   ((value & 0xFF00) << 40) |
-                   ((value & 0xFF0000) << 24) |
+            return ((value & 0xFF) << 56)      |
+                   ((value & 0xFF00) << 40)    |
+                   ((value & 0xFF0000) << 24)  |
                    ((value & 0xFF000000) << 8) |
                    ((value >> 8) & 0xFF000000) |
-                   ((value >> 24) & 0xFF0000) |
-                   ((value >> 40) & 0xFF00) |
+                   ((value >> 24) & 0xFF0000)  |
+                   ((value >> 40) & 0xFF00)    |
                    ((value >> 56) & 0xFF);
         };
 

@@ -153,6 +153,7 @@ class TokenType(Enum):
     # Directionals
     RETURN_ARROW = auto()   # ->
     CHAIN_ARROW = auto()    # <-
+    LAMBDA_ARROW = auto()   # <:-    { a / b } <:- (type a: expr, type b: expr)
     RECURSE_ARROW = auto()  # <~
     NULL_COALESCE = auto()  # ??
     NO_MANGLE = auto()      # !! tell the compiler not to mangle this name at all for any reason.
@@ -651,7 +652,8 @@ class FluxLexer:
                 '>>=': TokenType.BITSHIFT_RIGHT_ASSIGN,
                 '^^=': TokenType.XOR_ASSIGN,
                 '{}*': TokenType.FUNCTION_POINTER,
-                '(@)': TokenType.ADDRESS_CAST
+                '(@)': TokenType.ADDRESS_CAST,
+                '<:-': TokenType.LAMBDA_ARROW,
             }
             
             # Double-character tokens dictionary  

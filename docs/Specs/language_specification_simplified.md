@@ -433,12 +433,12 @@ def add(int x, int y) -> int { return x + y; };
 def sub(int x, int y) -> int { return x - y; };
 
 // Function pointer declarations
-int* p_add(int,int) = @add;
-int* p_sub(int,int) = @sub;
+def{}* p_add(int,int)->int = @add;
+def{}* p_sub(int,int)->int = @sub;
 
 // Must dereference to call
-print(*p_add(0,3)); // 3
-print(*p_sub(5,2)); // 3
+print(p_add(0,3)); // 3
+print(p_sub(5,2)); // 3
 
 // Pointers to objects, structs, arrays:
 object    myObj {};                 // Definition
@@ -447,8 +447,11 @@ object* p_myObj = @myObj;           // Pointer
 struct    myStruct {};              // Definition
 struct* p_myStruct = @myStruct;     // Pointer
 
-int[]   i_array;                    // Definition
-int[]* pi_array = @i_array;         // Pointer
+int[]* pi_array = @i_array;         // Array of pointer
+
+const* int x;  // Constant pointer
+
+const* int* x; // Constant pointer to int pointer
 
 // Pointer Arithmetic:
 #import "standard.fx";
