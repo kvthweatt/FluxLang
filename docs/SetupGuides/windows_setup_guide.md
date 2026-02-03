@@ -2,7 +2,7 @@
 
 This guide helps you understand and configure your Windows development environment for Flux. Rather than providing automated scripts, we believe in helping you understand each component and make informed choices about your setup.
 
-## Understanding the Toolchain
+## Toolchain
 
 Flux compilation on Windows involves several components working together:
 
@@ -22,7 +22,7 @@ Flux compilation on Windows involves several components working together:
 Choose one of these methods:
 
 **Option 1: Official LLVM (Recommended)**
-```powershell
+```
 winget install LLVM.LLVM
 ```
 
@@ -32,7 +32,7 @@ winget install LLVM.LLVM
 - Add `C:\Program Files\LLVM\bin` to your PATH
 
 **Option 3: Package Manager**
-```powershell
+```
 # If you use Chocolatey
 choco install llvm
 
@@ -68,7 +68,7 @@ python -c "import llvmlite; print('llvmlite OK')"
 
 ### 2. Check LLVM/Clang
 ```powershell
-clang --version                     # Should show LLVM version
+clang --version                         # Should show LLVM version
 clang --print-targets | findstr x86_64  # Should show x86_64 targets
 ```
 
@@ -76,14 +76,14 @@ clang --print-targets | findstr x86_64  # Should show x86_64 targets
 Open **Developer Command Prompt for VS** or **Developer PowerShell for VS**:
 ```powershell
 cl                                  # Should show MSVC compiler
-link                               # Should show Microsoft linker
+link                                # Should show Microsoft linker
 ```
 
 ### 4. Test Flux Compilation
-From a **Visual Studio Developer Command Prompt**:
+From a command prompt:
 ```powershell
 cd C:\path\to\Flux
-python flux_compiler.py tests\test.fx --log-level 3
+python fc.py tests\test.fx --log-level 3
 ```
 
 ## Common Issues and Solutions
@@ -123,7 +123,7 @@ python flux_compiler.py tests\test.fx --log-level 3
 ## Development Workflow
 
 ### Recommended Terminal Setup
-1. Use **Visual Studio Developer Command Prompt** or **Developer PowerShell**
+1. Use **Command Prompt** or **PowerShell**
 2. These terminals automatically configure environment variables for MSVC tools
 3. Available through: Start Menu → Visual Studio → Developer Command Prompt
 
@@ -134,7 +134,7 @@ When properly configured, you should see these environment variables:
 - `PATH` - Includes LLVM, Python, and MSVC tools
 
 ### Compilation Process Understanding
-When you run `python flux_compiler.py program.fx`, Flux:
+When you run `python fc.py program.fx`, Flux:
 1. **Lexes** your Flux source code into tokens
 2. **Parses** tokens into an Abstract Syntax Tree (AST)
 3. **Generates** LLVM Intermediate Representation (IR)
@@ -149,7 +149,9 @@ If you have LLVM installed in a non-standard location, Flux will automatically s
 - `clang.exe` (if in PATH)
 - `clang` (Unix-style name)
 
-### Build Directory
+You can also set a custom configuration in `config\flux_config.cfg`
+
+### Building
 Flux creates temporary files in `build/` directory:
 - `program.ll` - LLVM IR code
 - `program.obj` - Object file
@@ -157,8 +159,8 @@ Flux creates temporary files in `build/` directory:
 
 ### Debugging Compilation Issues
 Enable detailed logging to understand what's happening:
-```powershell
-python flux_compiler.py program.fx --log-level 4 --log-timestamp
+```
+python fc.py program.fx --log-level 4 --log-timestamp
 ```
 
 This shows exactly which tools are being called and their output.
@@ -181,4 +183,4 @@ This manual setup process helps you:
 
 As Flux matures, we'll eventually provide a self-hosted installer written in Flux itself - demonstrating the language's capabilities while maintaining transparency about what's being installed.
 
-Happy Flux development! 🚀
+Happy Flux development!

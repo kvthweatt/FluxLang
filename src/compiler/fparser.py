@@ -1322,8 +1322,38 @@ class FluxParser:
         """
         return self.block()
     
-    def block(self) -> Block:
+    def block(self) -> Union[Block, Expression]:
+        """
+        Handles both statement blocks and expression blocks.
+        Statement block: { stmt; stmt; ... }
+        Expression block: { expr }
+        """
         self.consume(TokenType.LEFT_BRACE)
+        
+        # Check if this is an expression block (single expression, no semicolons)
+        # by looking ahead
+        saved_pos = self.position
+        
+        # Try to parse as expression block first
+        try:
+            # Don't enter scope yet - we don't know if it's a statement block
+            expr = self.expression()
+            
+            if self.expect(TokenType.RIGHT_BRACE):
+                # Single expression followed by } - this is an expression block
+                self.consume(TokenType.RIGHT_BRACE)
+                return expr
+            else:
+                # Not just an expression, must be a statement block
+                # Restore and parse as statement block
+                self.position = saved_pos
+                self.current_token = self.tokens[self.position]
+        except:
+            # Failed to parse as expression, restore and try as statement block
+            self.position = saved_pos
+            self.current_token = self.tokens[self.position]
+        
+        # Parse as statement block
         self.symbol_table.enter_scope()
         
         statements = []
@@ -1884,18 +1914,59 @@ class FluxParser:
         """
         chain_expression -> relational_expression ('<-' chain_expression)?
         Right associative chain arrow
+        
+        Also handles acceptor blocks:
+        {expr_with_placeholders} <- N:func_call <- N:func_call ...
         """
         expr = self.relational_expression()
         
         if self.expect(TokenType.CHAIN_ARROW):
-            self.advance()
+            # Peek ahead to determine what kind of chain this is
+            next_pos = self.position + 1  # Look past the '<-'
+            if next_pos < len(self.tokens):
+                next_token = self.tokens[next_pos]
+                peek_after = self.tokens[next_pos + 1] if next_pos + 1 < len(self.tokens) else None
+                
+                # Check if we have labeled input pattern: N:func_call
+                if next_token.type in (TokenType.SINT_LITERAL, TokenType.UINT_LITERAL) and \
+                   peek_after and peek_after.type == TokenType.COLON:
+                    # This is an acceptor block with labeled inputs
+                    # The left side (expr) is the acceptor expression
+                    labeled_inputs = []
+                    
+                    # Parse all labeled inputs
+                    while self.expect(TokenType.CHAIN_ARROW):
+                        self.advance()  # consume '<-'
+                        
+                        if not self.expect(TokenType.SINT_LITERAL, TokenType.UINT_LITERAL):
+                            self.error("Expected label number after '<-' in acceptor block")
+                        
+                        label = int(self.current_token.value, 0)
+                        self.advance()
+                        self.consume(TokenType.COLON)
+                        input_expr = self.relational_expression()
+                        
+                        if not isinstance(input_expr, (FunctionCall, AcceptorBlock)):
+                            self.error("Labeled input must be a function call or acceptor block")
+                        
+                        labeled_inputs.append((label, input_expr))
+                    
+                    # Create AcceptorBlock with the expression and labeled inputs
+                    return AcceptorBlock(expr, labeled_inputs)
+            
+            # Old-style chain arrow (function call chaining)
+            self.advance()  # consume '<-'
             right = self.chain_expression()
             
-            if isinstance(expr, FunctionCall):
-                expr.arguments.insert(0, right)
-                return expr
+            if isinstance(expr, (FunctionCall, AcceptorBlock)):
+                if isinstance(expr, FunctionCall):
+                    expr.arguments.insert(0, right)
+                    return expr
+                else:  # AcceptorBlock
+                    # For AcceptorBlock on left, we can't use old-style chaining
+                    self.error("AcceptorBlock on left side requires labeled input syntax (N:func)")
             else:
-                self.error("Chain arrow requires function call on left side")
+                self.error("Chain arrow requires function call or acceptor block on left side")
         
         return expr
 
@@ -2151,11 +2222,21 @@ class FluxParser:
         
         while True:
             if self.expect(TokenType.LEFT_BRACKET):
-                # Array access
+                # Array access or array slice [start:end]
                 self.advance()
-                index = self.expression()
-                self.consume(TokenType.RIGHT_BRACKET)
-                expr = ArrayAccess(expr, index)
+                start_index = self.expression()
+                
+                # Check if this is a slice operation [start:end]
+                if self.expect(TokenType.COLON):
+                    self.advance()
+                    end_index = self.expression()
+                    self.consume(TokenType.RIGHT_BRACKET)
+                    # Create an ArraySlice node
+                    expr = ArraySlice(expr, start_index, end_index)
+                else:
+                    # Regular array access
+                    self.consume(TokenType.RIGHT_BRACKET)
+                    expr = ArrayAccess(expr, start_index)
             elif self.expect(TokenType.LEFT_PAREN):
                 # Function call
                 self.advance()
@@ -2352,9 +2433,19 @@ class FluxParser:
             return expr
         elif self.expect(TokenType.LEFT_BRACKET):
             return self.array_literal()
+        elif self.expect(TokenType.COLON):
+            # Placeholder syntax :(N)
+            self.advance()  # consume ':'
+            self.consume(TokenType.LEFT_PAREN)
+            if not self.expect(TokenType.SINT_LITERAL, TokenType.UINT_LITERAL):
+                self.error("Expected integer in placeholder :(N)")
+            index = int(self.current_token.value, 0)
+            self.advance()
+            self.consume(TokenType.RIGHT_PAREN)
+            return AcceptorPlaceholder(index)
         elif self.expect(TokenType.LEFT_BRACE):
-            # Parse struct literal - returns StructLiteral node
-            return self.struct_literal()
+            # Parse block - could be statement block or expression block
+            return self.block()
         elif self.expect(TokenType.SIZEOF):
             return self.sizeof_expression()
         elif self.expect(TokenType.ALIGNOF):
@@ -2498,6 +2589,16 @@ class FluxParser:
             
             self.consume(TokenType.RIGHT_BRACKET)
             return ArrayLiteral(elements)  # Array literal
+    
+    def expression_block(self) -> Expression:
+        """
+        expression_block -> '{' expression '}'
+        Used for acceptor blocks that contain a single expression with placeholders.
+        """
+        self.consume(TokenType.LEFT_BRACE)
+        expr = self.expression()
+        self.consume(TokenType.RIGHT_BRACE)
+        return expr
     
     def struct_literal(self) -> StructLiteral:
         """

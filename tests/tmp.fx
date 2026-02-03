@@ -14,8 +14,6 @@ def main() -> int
 
     py = (@)pxk;  // cast back to address
 
-    unsigned data{3} as i3;
-
     print(*py);
     print();
     print(y);

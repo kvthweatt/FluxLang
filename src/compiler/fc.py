@@ -16,7 +16,7 @@ from flexer import FluxLexer
 from fparser import FluxParser, ParseError
 from fast import *
 from fpreprocess import *
-from flux_logger import FluxLogger, FluxLoggerConfig, LogLevel
+from flogger import FluxLogger, FluxLoggerConfig, LogLevel
 from fconfig import *
 
 def get_debug_level(level: str):
@@ -535,13 +535,14 @@ class FluxCompiler:
             # Step 8: Link executable
             output_bin = output_bin or f"./{base_name}"
             # Add .exe extension for Windows executables
+            output_dir = output_bin.replace(".exe","")
             if self.platform == "Windows" and not output_bin.endswith('.exe'):
                 output_bin += ".exe"
             
             self.logger.step(f"Linking executable: {output_bin}", LogLevel.INFO, "linker")
             
             if self.platform == "Darwin":  # macOS
-                link_cmd = ["clang", str(obj_file), "-o", output_bin]
+                link_cmd = ["clang", str(obj_file), "-o", f"build/{output_dir}/{output_bin}"]
             elif self.platform == "Windows":
                 # Use LLD
                 link_cmd = [
@@ -580,7 +581,7 @@ class FluxCompiler:
                     "msvcrt.lib",   # Optional, link with C runtime
                     # "user32.lib",  # Uncomment only if GUI functions are used
                     # "gdi32.lib",   # Uncomment only if drawing functions are used
-                    f"/out:{output_bin}"
+                    f"/out:build\\{output_dir}\\{output_bin}"
                 ]
                 self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
                 
@@ -595,7 +596,7 @@ class FluxCompiler:
                         self.logger.step(f"Falling back to clang...", LogLevel.INFO, "linker")
                         try:
                             result = subprocess.run(
-    f"clang {str(obj_file)} -o {output_bin} "
+    f"clang {str(obj_file)} -o build\\{output_dir}\\{output_bin} "
     "-fuse-ld=lld-link "
     "-Os "
     "-flto "
@@ -673,7 +674,7 @@ class FluxCompiler:
                     #"-lgcc_eh",                                # GCC exception handling
                     "--start-group",
                     "--end-group",
-                    "-o", output_bin
+                    "-o", f"build/{output_dir}/{output_bin}"
                 ]
                 #link_cmd = ["clang", "-static", str(obj_file), "-o", output_bin]
                 self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")

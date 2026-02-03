@@ -42,12 +42,12 @@
 
 extern
 {
-    def !!GetCommandLineW() -> wchar*;
-    def !!CommandLineToArgvW(wchar* x, int* y) -> wchar**; 
-    def !!LocalFree(void* x) -> void*;
-    // Note, should be able to declare all comma separated
-    // names should not have to be identical, they're just prototypes.
-    // Also, issue with type-only specified prototypes, failing
+    def !!
+        GetCommandLineW() -> wchar*,
+        CommandLineToArgvW(wchar* x, int* y) -> wchar**, 
+        LocalFree(void* x) -> void*,
+        exit(int code) -> void,
+        abort() -> void;
 };
 
 
@@ -63,10 +63,6 @@ def !!FRTStartup() -> int; // GO AWAY, SHOO
   ///                                       ///
  ///DO NOT REDEFINE THIS FUNCTION SIGNATURE///
 ///                                       ///
-
-extern def !!exit(int code) -> void;
-
-extern def !!abort() -> void;
 
 #ifdef __LINUX__
 def !!_start() -> int;

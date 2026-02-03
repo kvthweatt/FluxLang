@@ -4901,6 +4901,155 @@ class Block(Statement):
                     raise ValueError(f"DEBUG Block: Error in statement {i} ({type(stmt).__name__}): {e}")
         return result
 
+
+@dataclass
+class IRStore(Expression):
+    """
+    Wrapper that holds a pre-computed IR value.
+    Used to substitute placeholders in acceptor blocks with their evaluated results.
+    """
+    ir_value: ir.Value
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        return self.ir_value
+
+
+@dataclass
+class AcceptorPlaceholder(Expression):
+    """
+    Represents :(N) placeholder in acceptor blocks.
+    
+    Example:
+        {:(1) + :(2)}  // Two placeholders with indices 1 and 2
+    
+    These should be substituted with IRStore nodes before codegen is called.
+    """
+    index: int
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        raise RuntimeError(
+            f"AcceptorPlaceholder :({self.index}) should be substituted before codegen. "
+            f"This indicates a bug in the acceptor block implementation."
+        )
+
+
+@dataclass
+class AcceptorBlock(Expression):
+    """
+    Represents acceptor block syntax for collecting multiple function results.
+    
+    Syntax:
+        {expression_with_placeholders} <- N:function_call <- N:function_call ...
+    
+    Example:
+        {2 * :(1) * :(2)} <- 1:sqrt(36) <- 2:foo(256)
+    
+    Execution:
+        1. Evaluates labeled inputs in numeric order (1, 2, 3...)
+        2. Substitutes placeholders with evaluated values
+        3. Evaluates the final expression
+    
+    Fields:
+        expression: The block expression containing AcceptorPlaceholder nodes
+        labeled_inputs: List of (label_number, function_call) tuples
+    """
+    expression: Expression
+    labeled_inputs: List[Tuple[int, Expression]]
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Sort inputs by label to ensure execution order (1, 2, 3...)
+        sorted_inputs = sorted(self.labeled_inputs, key=lambda x: x[0])
+        
+        # Evaluate each labeled input in order
+        placeholder_values = {}
+        for label, expr in sorted_inputs:
+            value = expr.codegen(builder, module)
+            placeholder_values[label] = value
+        
+        # Substitute placeholders with IRStore nodes containing evaluated values
+        substituted_expr = self._substitute_placeholders(self.expression, placeholder_values)
+        
+        # Evaluate the final expression
+        return substituted_expr.codegen(builder, module)
+    
+    def _substitute_placeholders(self, expr: Expression, values: Dict[int, ir.Value]) -> Expression:
+        """
+        Recursively walk the expression tree and replace AcceptorPlaceholder nodes
+        with IRStore nodes containing the pre-computed values.
+        """
+        if isinstance(expr, AcceptorPlaceholder):
+            if expr.index not in values:
+                raise RuntimeError(
+                    f"Placeholder :({expr.index}) referenced but no corresponding "
+                    f"labeled input provided"
+                )
+            return IRStore(values[expr.index])
+        
+        # Handle BinaryOp
+        if isinstance(expr, BinaryOp):
+            return BinaryOp(
+                left=self._substitute_placeholders(expr.left, values),
+                operator=expr.operator,
+                right=self._substitute_placeholders(expr.right, values)
+            )
+        
+        # Handle UnaryOp
+        if isinstance(expr, UnaryOp):
+            return UnaryOp(
+                operator=expr.operator,
+                operand=self._substitute_placeholders(expr.operand, values)
+            )
+        
+        # Handle FunctionCall
+        if isinstance(expr, FunctionCall):
+            return FunctionCall(
+                name=expr.name,
+                arguments=[self._substitute_placeholders(arg, values) for arg in expr.arguments],
+                type_arguments=expr.type_arguments if hasattr(expr, 'type_arguments') else None
+            )
+        
+        # Handle ArrayAccess
+        if isinstance(expr, ArrayAccess):
+            return ArrayAccess(
+                array=self._substitute_placeholders(expr.array, values),
+                index=self._substitute_placeholders(expr.index, values)
+            )
+        
+        # Handle MemberAccess
+        if isinstance(expr, MemberAccess):
+            return MemberAccess(
+                object=self._substitute_placeholders(expr.object, values),
+                member=expr.member
+            )
+        
+        # Handle Cast
+        if isinstance(expr, Cast):
+            return Cast(
+                expression=self._substitute_placeholders(expr.expression, values),
+                target_type=expr.target_type
+            )
+        
+        # Handle TernaryOp
+        if isinstance(expr, TernaryOp):
+            return TernaryOp(
+                condition=self._substitute_placeholders(expr.condition, values),
+                true_expr=self._substitute_placeholders(expr.true_expr, values),
+                false_expr=self._substitute_placeholders(expr.false_expr, values)
+            )
+        
+        # Handle nested AcceptorBlock
+        if isinstance(expr, AcceptorBlock):
+            return AcceptorBlock(
+                expression=self._substitute_placeholders(expr.expression, values),
+                labeled_inputs=[(label, self._substitute_placeholders(inp, values)) 
+                               for label, inp in expr.labeled_inputs]
+            )
+        
+        # For literals, identifiers, and other leaf nodes, return as-is
+        # (they don't contain placeholders)
+        return expr
+
+
 @dataclass
 class XorStatement(Statement):
     expressions: List[Expression] = field(default_factory=list)

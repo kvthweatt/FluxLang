@@ -7,24 +7,14 @@
 
 ## What is Flux?
 
-Flux is a compiled systems language that combines C-like performance with Python-inspired syntax. It's designed for programmers who need direct memory control and bit-level precision without fighting complex abstractions.
+Flux is a compiled systems language that combines C-like performance with Python-inspired syntax. It's for everyone, designed to have all the bells and whistles you could want in one place. Gone now are the days of writing your performance critical code in one language and calling it from another.
 
-**Key characteristics:**
+**Characteristics:**
 - Manual memory management
-- Explicit control over data layout
-- Zero-cost binary data manipulation
-- Compile-time execution capabilities
-- Clean, readable syntax
+- Compiler that does not fight you
+- First class data control features
+- Consistent grammar and syntax constructs throughout
 
-```
-// Single-line comments
-
-///
-Multi
-line
-comments
-///
-```
 
 ## Core Features
 
@@ -40,15 +30,14 @@ def some_nix_generic() -> void*;
 #endif;
 #endif;
 ```
-
 Macro definitions must have a value, 0 included. Example:
 ```
 // Defined:
-#def MY_MACRO 1;
-#def NOT_DEFINED 0;
+#def MY_MACRO 1;     // Considered defined.
+#def NOT_DEFINED 0;  // Considered undefined.
 
-#ifdef NOT_DEFINED // False
-#ifndef MY_MACRO   // False
+#ifdef NOT_DEFINED   // False
+#ifndef MY_MACRO     // False
 ```
 
 ### Bit-Precise Data Types
@@ -60,23 +49,6 @@ unsigned data{1} as bit;           // 1-bit type
 unsigned data{13:16} as custom;    // 13 bits, 16-bit aligned
 unsigned data{32} as u32;          // Standard 32-bit unsigned
 ```
-
-### Zero-Copy Struct Casting
-
-Map structs directly onto raw bytes without parsing:
-
-```flux
-struct Header {
-    unsigned data{16} magic;
-    unsigned data{32} filesize;
-    unsigned data{32} offset;
-};
-
-byte[] buffer = file.readall();
-Header header = (Header)buffer;
-print(header.filesize);  // Direct access, no parsing
-```
-Struct specification can be read [here](https://github.com/kvthweatt/FluxLang/blob/main/docs/struct_specification.md).
 
 ### Bit-Level Field Access
 
@@ -93,7 +65,7 @@ struct Flags {
 
 byte status = 0b10110001;
 Flags f = (Flags)status;
-if (f.enabled && !f.error) { /* ... */ }
+if (f.enabled && !f.error) { /* ... */ };
 ```
 
 ### Compile-Time Execution
@@ -105,55 +77,12 @@ compt {
     def MY_CONSTANT 42;
     
     if (!def(DEBUG_MODE)) {
-        global def DEBUG_MODE true;
+        global def DEBUG_MODE true;  // MUST use {} blocks, even for single line side-effects.
     };
 };
 ```
 
-## Practical Examples
-
-**Network Protocol Parsing:**
-```flux
-struct TCPHeader {
-    unsigned data{16} src_port, dst_port;
-    unsigned data{32} seq_num;
-    unsigned data{4} data_offset;
-    unsigned data{6} flags;
-    unsigned data{16} window;
-};
-
-byte[] packet = recv();
-TCPHeader tcp = (TCPHeader)packet;
-```
-
-**Hardware Register Access:**
-```flux
-struct GPIOControl {
-    unsigned data{2} mode;
-    unsigned data{1} pull_up;
-    unsigned data{3} drive_strength;
-    unsigned data{2} reserved;
-};
-
-volatile byte* gpio = @0x40000000;
-GPIOControl ctrl = (GPIOControl)(*gpio);
-ctrl.mode = 0b01;  // Set to output
-*gpio = (byte)ctrl;
-```
-
-**Memory-Efficient Game Data:**
-```flux
-struct Entity {
-    unsigned data{1} active;
-    unsigned data{1} visible;
-    unsigned data{2} team;
-    unsigned data{4} type;
-};
-// 8 properties in 1 byte per entity
-```
-
 ## Language Basics
-
 **Functions:**
 ```flux
 def add(int x, int y) -> int {
@@ -161,8 +90,41 @@ def add(int x, int y) -> int {
 };
 ```
 
+**Function Prototypes:**
+```
+// Single def, multiple signatures.
+def foo() -> void,
+    foo() -> int,     // Can declare multiple signatures on one line.
+    foo() -> float;   // Identical names are recommended.
+
+def abc() -> void,
+    jki() -> void,    // Even with different names!
+    xyz() -> void;    // Different names are not recommended.
+```
+
+**Universal External FFI:**  
+Flux has an operator called the "no mangle" operator, `!!`, which instructs the compiler to not mangle the function name to its right. This only applies to function names.
+```
+extern def stcmp(byte*,byte*)->int;  // Single-line
+
+extern                               // Multi-line
+{
+    def foo() -> void;
+    def zad() -> void;
+};
+
+// !! cascades when performing multi-signature def
+extern
+{
+    def !!
+        foo() -> void,
+        bar() -> void,
+        baz() -> void;     // All safe from name mangling
+};
+```
+
 **Objects (OOP):**
-```flux
+```
 object Vector3 {
     float x, y, z;
     
@@ -171,6 +133,8 @@ object Vector3 {
         return this;
     };
     
+    def __exit() -> void {};   // Explicit returns for void functions unnecessary.
+    
     def length() -> float {
         return sqrt(this.x^2 + this.y^2 + this.z^2);
     };
@@ -178,7 +142,7 @@ object Vector3 {
 ```
 
 **Structs (Data-only):**
-```flux
+```
 struct Point {
     float x, y, z;
 };
@@ -190,12 +154,33 @@ int* ptr;                // Allocate
 *ptr = 42;
 (void)ptr;               // Deallocate explicitly
 ```
+Skip declaring a variable:
+```
+int* px = @55;           // Allocate 55 and get its address. 
+```
+Round trip (pointer, to int, and back):
+```
+int  x   = 5;
+int* px  = @x;
+int  pxk = px;      // Address as integer
+int* py  = (@)pxk;  // Address as pointer
+```
+This can segfault or crash if your default pointer width is 64 bits.  
+The safe way to do this round trip with 64 bit pointers is this:  
+```
+int  x   = 5;
+int* px  = @x;
+u64  pxk = px;      // Address as integer, pxk is big enough to hold a 64 bit pointer
+int* py  = (@)pxk;  // Address as pointer, pointer will be 64 bits and can accept pxk
+```
+
+Flux treats all data the same. It's all just numbers.
 
 **Ownership (Optional):**
 ```flux
-def ~make() -> ~int {
-    int ~x = 42;
-    return ~x;  // Explicit transfer
+def make() -> int {
+    int ~x = 42; // Mark with "tie" operator ~
+    return ~x;   // Explicit transfer
 };
 ```
 
@@ -285,19 +270,19 @@ def main() -> int {
 
 ## 📚 **Learn More**
 
-- **[Language Specification](docs/lang_spec_full.md)** - Complete language reference
+- **[Language Specification](docs/Specs/lang_spec_full.md)** - Complete language reference
 - **[Getting Started Guide](docs/learn_flux_intro.md)** - Tutorial for new users  
 - **[Examples](examples/)** - Real-world Flux programs
-- **[Setup Guide](docs/windows_setup_guide.md)** - Platform-specific installation
+- **[Windows Setup Guide](docs/SetupGuides/windows_setup_guide.md)**
+- **[Linux Setup Guide](docs/SetupGuides/linux_setup_guide.md)**
 
 ## 🤝 **Contributing**
 
 Flux is actively developed and approaching self-hosting. We're building the future of systems programming.
 
-**Current Status:** ~95% of reduced specification complete, working compiler, real programs running.
+**Current Status:** 100% of reduced specification complete, working compiler, real programs running.  
+Bug fixing and refactoring are currently the names of the games. There are still some small issues here and there.
 
 ## ⚖️ **License**
 
 Copyright (C) 2024 Karac Von Thweatt. All rights reserved.
-
-*Flux: Casual disregard for the impossible, one revolution at a time.*

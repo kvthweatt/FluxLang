@@ -7,8 +7,18 @@
 
 #ifdef FLUX_STRING_UTILS
 
-extern def !!strcmp(byte* x, byte* y) -> int;
-extern def !!printf(byte* x, byte* y) -> void;
+extern
+{
+    def !!
+        strcmp(byte* x, byte* y) -> int,
+        printf(byte* x, byte* y) -> void,
+        strncpy(byte* dest, byte* src, size_t n) -> byte*,
+        strcat(byte* dest, byte* src) -> byte*,
+        strncat(byte* dest, byte* src, size_t n) -> byte*,
+        strncmp(byte* s1, byte* s2, size_t n) -> int,
+        strchr(byte* str, int ch) -> byte*,
+        strstr(byte* haystack, byte* needle) -> byte*;
+};
 
 def strlen(byte* ps) -> int
 {
