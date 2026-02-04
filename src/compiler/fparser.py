@@ -399,6 +399,7 @@ class FluxParser:
         # Check if this is a multi-function prototype declaration
         # Pattern: def foo() -> int, foo() -> bool, foo(int) -> void;
         if self.expect(TokenType.COMMA):
+            print("GOT MULTI-FUNCTION PROTOTYPE DECLARATION")
             # This is a multi-function prototype declaration
             prototypes = []
             
@@ -837,8 +838,13 @@ class FluxParser:
                 while not self.expect(TokenType.RIGHT_BRACE):
                     if self.expect(TokenType.DEF):
                         method = self.function_def()
-                        method.is_private = is_private
-                        methods.append(method)
+                        if isinstance(method, list):
+                            for m in method:
+                                m.is_private = is_private
+                                methods.append(m)
+                        else:
+                            method.is_private = is_private
+                            methods.append(method)
                     elif self.expect(TokenType.OBJECT):
                         nested_obj = self.object_def()
                         nested_obj.is_private = is_private
@@ -867,7 +873,10 @@ class FluxParser:
                 # Regular member (defaults to public)
                 if self.expect(TokenType.DEF):
                     method = self.function_def()
-                    methods.append(method)
+                    if isinstance(method, list):
+                        methods.extend(method)
+                    else:
+                        methods.append(method)
                 elif self.expect(TokenType.OBJECT):
                     nested_obj = self.object_def()
                     nested_objects.append(nested_obj)
@@ -927,8 +936,13 @@ class FluxParser:
                 self.consume(TokenType.SEMICOLON)
             elif self.expect(TokenType.DEF):
                 func = self.function_def()
-                functions.append(func)
-                self.symbol_table.define(func.name, SymbolKind.FUNCTION)
+                if isinstance(func, list):
+                    for f in func:
+                        functions.append(f)
+                        self.symbol_table.define(f.name, SymbolKind.FUNCTION)
+                else:
+                    functions.append(func)
+                    self.symbol_table.define(func.name, SymbolKind.FUNCTION)
             elif self.expect(TokenType.STRUCT):
                 struct = self.struct_def()
                 structs.append(struct)

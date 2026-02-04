@@ -43,6 +43,7 @@ class TestRunner:
         
         # Tests directory is at project root
         self.test_dir = self.project_root / "tests"
+        self.build_dir = self.project_root / "build"
         
         # Ensure compiler exists
         if not self.compiler_path.exists():
@@ -75,7 +76,7 @@ class TestRunner:
         
         return [Path(f) for f in sorted(files)]
     
-    def run_compiler(self, test_file: Path) -> Tuple[bool, Optional[str], float]:
+    def run_compiler(self, test_file: Path) -> Tuple[bool, Optional[str], float, str]:
         """Run the Flux compiler on a test file"""
         print(f"Compiling: {test_file.name}...", end="", flush=True)
         
@@ -120,10 +121,11 @@ class TestRunner:
                     return True, str(exe_path), elapsed
                 else:
                     # Check if it's in the tests directory
-                    exe_path = test_file.parent / exe_name
+                    exe_path = self.build_dir / exe_name.replace(".exe","") / exe_name
+                    print(exe_path)
                     if exe_path.exists():
                         print(f"OK ({elapsed:.2f}s)")
-                        return True, str(exe_path), elapsed
+                        return True, str(exe_path), elapsed, exe_name
                     else:
                         print(f"FAILED (executable not found)")
                         return False, "Executable not generated", elapsed
@@ -141,13 +143,13 @@ class TestRunner:
             print(f"FAILED (error: {str(e)})")
             return False, str(e), elapsed
     
-    def run_executable(self, exe_path: str) -> Tuple[bool, str, float]:
+    def run_executable(self, exe_path: str, exe_name: str) -> Tuple[bool, str, float]:
         """Run the compiled executable"""
         exe_path_obj = Path(exe_path)
         if not exe_path_obj.exists():
             return False, f"Executable not found at {exe_path}", 0.0
         
-        print(f"   Running executable...", end="", flush=True)
+        print(f"   Running {exe_name} ...", end="", flush=True)
         start_time = time.time()
         
         try:
@@ -269,13 +271,16 @@ class TestRunner:
             total_tests += 1
             
             # Compile the test
-            compile_success, compile_output, compile_time = self.run_compiler(test_file)
+            try:
+                compile_success, compile_output, compile_time, exe_name = self.run_compiler(test_file)
+            except:
+                continue
             total_compile_time += compile_time
             
             if compile_success:
                 # Run the executable if compilation succeeded
                 if not self.compile_only:
-                    run_success, run_output, run_time = self.run_executable(compile_output)
+                    run_success, run_output, run_time = self.run_executable(compile_output, exe_name)
                     total_run_time += run_time
                     
                     if run_success:

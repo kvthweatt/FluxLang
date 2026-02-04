@@ -382,17 +382,17 @@ namespace standard
                 return;
             };
 
-            def printchar(noopstr x) -> void;
-            def print(byte x) -> void;
-            def print(i8 x) -> void;
-            def print(i16 x) -> void;
-            def print(int x) -> void;
-            def print(i64 x) -> void;
-            def print(u16 x) -> void;
-            def print(uint x) -> void;
-            def print(u64 x) -> void;
-            def print(float x) -> void;
-            def print(float x, int y) -> void;
+            def printchar(noopstr x) -> void,
+                print(byte x) -> void,
+                print(i8 x) -> void,
+                print(i16 x) -> void,
+                print(int x) -> void,
+                print(i64 x) -> void,
+                print(u16 x) -> void,
+                print(uint x) -> void,
+                print(u64 x) -> void,
+                print(float x) -> void,
+                print(float x, int y) -> void;
 
             def print(byte s) -> void
             {
