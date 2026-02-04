@@ -3,20 +3,14 @@
 #import "string_object_raw.fx";
 
 
-namespace test
-{
-	def foo(int,int)->int,
-        foo()->void;
-
-    def foo(int x, int y) -> int {return x * y;};
-    def foo()->void {};
-};
-
-
 def main() -> int
 {
-    string s("\0");
-    foo();
-    test::foo(1,2);
+    string s("Test 1!\0");
+
+    s.set("Testing strings!\0");
+    print(s.val());
+    print();
+
+    s.__exit();
 	return 0;
 };

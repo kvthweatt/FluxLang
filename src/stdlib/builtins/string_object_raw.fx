@@ -20,6 +20,7 @@ namespace standard
 
             def __exit() -> void
             {
+                free(this.value);
                 return;
             };
 
@@ -33,7 +34,7 @@ namespace standard
                 return strlen(this.value);
             };
 
-            def set(noopstr s) -> bool
+            def set(byte* s) -> bool
             {
                 try
                 {

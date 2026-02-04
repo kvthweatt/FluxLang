@@ -3253,10 +3253,24 @@ class MethodCall(Expression):
         
         # Generate arguments with 'this' pointer as first argument
         args = [obj_ptr]  # 'this' pointer is the object pointer
-        for arg_expr in self.arguments:
-            args.append(arg_expr.codegen(builder, module))
-        
-        # Call the method
+
+        for i, arg_expr in enumerate(self.arguments):
+            arg_val = arg_expr.codegen(builder, module)
+
+            # Expected type: method params include 'this' as arg0, so user args start at arg1
+            expected_type = func.args[i + 1].type
+
+            # Array-to-pointer decay: [N x i8]* -> i8* (and same for other element types)
+            if (isinstance(arg_val.type, ir.PointerType) and
+                isinstance(arg_val.type.pointee, ir.ArrayType) and
+                isinstance(expected_type, ir.PointerType) and
+                arg_val.type.pointee.element == expected_type.pointee):
+
+                zero = ir.Constant(ir.IntType(32), 0)
+                arg_val = builder.gep(arg_val, [zero, zero], name=f"marg{i}_decay")
+
+            args.append(arg_val)
+
         return builder.call(func, args)
 
 @dataclass
