@@ -3140,97 +3140,19 @@ class MemberAccess(Expression):
                     [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), member_index)],
                     inbounds=True
                 )
-                return builder.load(member_ptr)
-        
-        raise ValueError(f"Member access on unsupported type: {obj_val.type}")
-    
-@dataclass
-class MemberAccess(Expression):
-    object: Expression
-    member: str
-
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        # Handle enum member access FIRST (before trying to codegen the identifier)
-        if isinstance(self.object, Identifier):
-            type_name = self.object.name
-            if hasattr(module, '_enum_types') and type_name in module._enum_types:
-                enum_values = module._enum_types[type_name]
-                if self.member not in enum_values:
-                    raise NameError(f"Enum value '{self.member}' not found in enum '{type_name}'")
-                return ir.Constant(ir.IntType(32), enum_values[self.member])
-        
-        # Check if this is a struct type
-        if hasattr(module, '_struct_types'):
-            obj = self.object.codegen(builder, module)
-            for struct_name, struct_type in module._struct_types.items():
-                if obj.type == struct_type or (isinstance(obj.type, ir.PointerType) and obj.type.pointee == struct_type):
-                    # This is struct field access
-                    field_access = StructFieldAccess(self.object, self.member)
-                    return field_access.codegen(builder, module)
-        # Handle static struct/union member access (A.x where A is a struct/union type)
-        if isinstance(self.object, Identifier):
-            type_name = self.object.name
-            if hasattr(module, '_struct_types') and type_name in module._struct_types:
-                # Look for the global variable representing this member
-                global_name = f"{type_name}.{self.member}"
-                for global_var in module.global_values:
-                    if global_var.name == global_name:
-                        return builder.load(global_var)
                 
-                raise NameError(f"Static member '{self.member}' not found in struct '{type_name}'")
-            # Check for union types
-            elif hasattr(module, '_union_types') and type_name in module._union_types:
-                # Look for the global variable representing this member
-                global_name = f"{type_name}.{self.member}"
-                for global_var in module.global_values:
-                    if global_var.name == global_name:
-                        return builder.load(global_var)
+                # If the member is an array, return the pointer for indexing
+                # If it's a struct, return the pointer for member access
+                # Otherwise, load the value
+                if isinstance(member_ptr.type, ir.PointerType):
+                    pointee = member_ptr.type.pointee
+                    if isinstance(pointee, ir.ArrayType):
+                        return member_ptr  # Return pointer to array for indexing
+                    elif (isinstance(pointee, ir.LiteralStructType) or
+                          hasattr(pointee, '_name') or
+                          hasattr(pointee, 'elements')):
+                        return member_ptr  # Return pointer to struct for member access
                 
-                raise NameError(f"Static member '{self.member}' not found in union '{type_name}'")
-        
-        # Handle regular member access (obj.x where obj is an instance)
-        obj_val = self.object.codegen(builder, module)
-        
-        # Special case: if this is accessing 'this' in a method, handle the double pointer issue
-        if (isinstance(self.object, Identifier) and self.object.name == "this" and 
-            isinstance(obj_val.type, ir.PointerType) and 
-            isinstance(obj_val.type.pointee, ir.PointerType) and
-            isinstance(obj_val.type.pointee.pointee, ir.LiteralStructType)):
-            # Load the actual 'this' pointer from the alloca
-            obj_val = builder.load(obj_val, name="this_ptr")
-        
-        if isinstance(obj_val.type, ir.PointerType):
-            # Handle pointer to struct (both literal and identified struct types)
-            is_struct_pointer = (isinstance(obj_val.type.pointee, ir.LiteralStructType) or
-                                hasattr(obj_val.type.pointee, '_name') or  # Identified struct type
-                                hasattr(obj_val.type.pointee, 'elements'))  # Other struct-like types
-            
-            if is_struct_pointer:
-                struct_type = obj_val.type.pointee
-                
-                # Check if this is actually a union (unions are implemented as structs)
-                if hasattr(module, '_union_types'):
-                    for union_name, union_type in module._union_types.items():
-                        if union_type == struct_type:
-                            # This is a union - handle union member access
-                            return self._handle_union_member_access(builder, module, obj_val, union_name)
-                
-                # Regular struct member access
-                if not hasattr(struct_type, 'names'):
-                    raise ValueError("Struct type missing member names")
-                
-                member_index = 0
-                try:
-                    member_index = struct_type.names.index(self.member)
-                except ValueError:
-                    raise ValueError(f"Member '{self.member}' not found in struct")
-                
-                # FIXED: Pass indices as a single list argument
-                member_ptr = builder.gep(
-                    obj_val,
-                    [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), member_index)],
-                    inbounds=True
-                )
                 return builder.load(member_ptr)
         
         raise ValueError(f"Member access on unsupported type: {obj_val.type}")
@@ -7234,8 +7156,8 @@ class StructDef(ASTNode):
             for member in self.members:
                 member_type = member.type_spec
                 
-                # Get the LLVM type for this field
-                llvm_field_type = member_type.get_llvm_type(module)
+                # Get the LLVM type for this field - use get_llvm_type_with_array to handle arrays
+                llvm_field_type = member_type.get_llvm_type_with_array(module)
                 field_types[member.name] = llvm_field_type
                 
                 if member_type.bit_width is not None:
@@ -7420,12 +7342,6 @@ class StructFieldAccess(Expression):
         # Get struct instance value
         instance_val = self.struct_instance.codegen(builder, module)
 
-        # If instance is a pointer, load it first
-        if isinstance(instance_val.type, ir.PointerType):
-            instance = builder.load(instance_val, name="struct_load")
-        else:
-            instance = instance_val
-        
         # Determine struct type - check if instance is from a variable
         struct_name = None
         is_pointer = False
@@ -7456,10 +7372,23 @@ class StructFieldAccess(Expression):
             if field_index is None:
                 raise ValueError(f"Field '{self.field_name}' not found in struct '{struct_name}'")
             
-            # Use GEP to get pointer to field, then load
+            # Use GEP to get pointer to field
             zero = ir.Constant(ir.IntType(32), 0)
             field_idx = ir.Constant(ir.IntType(32), field_index)
             field_ptr = builder.gep(instance_val, [zero, field_idx], name=f"{self.field_name}_ptr")
+            
+            # If the field is an array, return the pointer for indexing
+            # If it's a struct, return the pointer for member access
+            # Otherwise, load the value
+            if isinstance(field_ptr.type, ir.PointerType):
+                pointee = field_ptr.type.pointee
+                if isinstance(pointee, ir.ArrayType):
+                    return field_ptr  # Return pointer to array for indexing
+                elif (isinstance(pointee, ir.LiteralStructType) or
+                      hasattr(pointee, '_name') or
+                      hasattr(pointee, 'elements')):
+                    return field_ptr  # Return pointer to struct for member access
+            
             return builder.load(field_ptr, name=self.field_name)
         
         # Otherwise, handle as before (load if pointer to value)

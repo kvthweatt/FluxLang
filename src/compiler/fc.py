@@ -577,6 +577,7 @@ class FluxCompiler:
                     "kernel32.lib",
                     "ucrt.lib",
                     "shell32.lib",
+                    "Ws2_32.lib",
                     #"libcmt.lib",
                     "msvcrt.lib",   # Optional, link with C runtime
                     # "user32.lib",  # Uncomment only if GUI functions are used

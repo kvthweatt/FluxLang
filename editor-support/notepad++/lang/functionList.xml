@@ -1,0 +1,27 @@
+<association id= "flux.function" userDefinedLangName="Flux" ext=".fx" />
+<parsers>
+    <parser id="flux_function" displayName="Flux">
+        <function
+            mainExpr="^\s*def\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\([^\)]*\)\s*-&gt;\s*[a-zA-Z_][a-zA-Z0-9_]*"
+            displayMode="$functionName">
+            <functionName>
+                <nameExpr expr="def\s+\K[a-zA-Z_][a-zA-Z0-9_]*" />
+            </functionName>
+        </function>
+        <classRange
+            mainExpr="^\s*(object|struct|union|namespace|enum)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\{"
+            openSymbole = "\{"
+            closeSymbole = "\}">
+            <className>
+                <nameExpr expr="(object|struct|union|namespace|enum)\s+\K[a-zA-Z_][a-zA-Z0-9_]*" />
+            </className>
+            <function
+                mainExpr="^\s*def\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\([^\)]*\)\s*-&gt;\s*[a-zA-Z_][a-zA-Z0-9_]*"
+                displayMode="$functionName">
+                <functionName>
+                    <nameExpr expr="def\s+\K[a-zA-Z_][a-zA-Z0-9_]*" />
+                </functionName>
+            </function>
+        </classRange>
+    </parser>
+</parsers>

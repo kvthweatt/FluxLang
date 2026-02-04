@@ -104,15 +104,6 @@ def !!FRTStartup() -> int
         #ifdef __LINUX__
         case (2)
         {
-            i64 argc = 0;
-            noopstr* argv = (noopstr*)0;
-            
-            volatile asm
-            {
-                movq %rdi, $0  // argc
-                movq %rsi, $1  // argv
-            } : : "m"(argc), "m"(argv) : "rdi","rsi","memory";
-            
             // Try main with args first
             return_code = main();
         }
@@ -136,9 +127,9 @@ def !!FRTStartup() -> int
         // Handle error
     };
     #ifdef __LINUX__
-    exit(0);  // Should pass return_code
+    exit(return_code);  // Should pass return_code
     #endif;
-    return return_code;
+    return return_code; // Unreached
 };
 #endif;
 

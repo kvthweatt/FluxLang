@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="Windows-1252" ?>
+<NotepadPlus>
+    <AutoComplete>
+        <KeyWord name="def" />
+        <KeyWord name="extern" />
+        <KeyWord name="object" />
+        <KeyWord name="struct" />
+        <KeyWord name="union" />
+        <KeyWord name="namespace" />
+        <KeyWord name="enum" />
+        <KeyWord name="if" />
+        <KeyWord name="elif" />
+        <KeyWord name="else" />
+        <KeyWord name="for" />
+        <KeyWord name="while" />
+        <KeyWord name="do" />
+        <KeyWord name="switch" />
+        <KeyWord name="case" />
+        <KeyWord name="default" />
+        <KeyWord name="try" />
+        <KeyWord name="catch" />
+        <KeyWord name="throw" />
+        <KeyWord name="return" />
+        <KeyWord name="break" />
+        <KeyWord name="continue" />
+        <KeyWord name="import" />
+        <KeyWord name="using" />
+        <KeyWord name="const" />
+        <KeyWord name="volatile" />
+        <KeyWord name="heap" />
+        <KeyWord name="stack" />
+        <KeyWord name="register" />
+        <KeyWord name="signed" />
+        <KeyWord name="unsigned" />
+        <KeyWord name="noinit" />
+        <KeyWord name="sizeof" />
+        <KeyWord name="typeof" />
+        <KeyWord name="alignof" />
+        <KeyWord name="true" />
+        <KeyWord name="false" />
+        <KeyWord name="void" />
+        <KeyWord name="int" />
+        <KeyWord name="uint" />
+        <KeyWord name="float" />
+        <KeyWord name="bool" />
+        <KeyWord name="char" />
+        <KeyWord name="data" />
+        <KeyWord name="this" />
+        <KeyWord name="super" />
+        <KeyWord name="auto" />
+        <KeyWord name="asm" />
+        <KeyWord name="assert" />
+        <KeyWord name="compt" />
+        <KeyWord name="trait" />
+        <KeyWord name="contract" />
+        <KeyWord name="and" />
+        <KeyWord name="or" />
+        <KeyWord name="not" />
+        <KeyWord name="xor" />
+        <KeyWord name="in" />
+        <KeyWord name="is" />
+        <KeyWord name="global" />
+        <KeyWord name="local" />
+        <KeyWord name="private" />
+        <KeyWord name="public" />
+        <KeyWord name="from" />
+        
+        <!-- Common patterns -->
+        <KeyWord name="def name(params) -> return_type" />
+        <KeyWord name="if (condition)" />
+        <KeyWord name="for (initial; condition; side_effect)" />
+        <KeyWord name="while (condition)" />
+        <KeyWord name="switch (value)" />
+        <KeyWord name="try { } catch (type value)" />
+        <KeyWord name="object name { }" />
+        <KeyWord name="struct name { }" />
+        <KeyWord name="namespace name { }" />
+        <KeyWord name="extern def !!name() -> void;" />
+        <KeyWord name="unsigned data{8}[] as string;" />
+        <KeyWord name="i&quot;{}&quot;:{ }" />
+        <KeyWord name="f&quot;{}&quot;" />
+    </AutoComplete>
+</NotepadPlus>
