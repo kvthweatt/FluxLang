@@ -270,7 +270,7 @@ def init_sockaddr_str(sockaddr_in* addr, byte* ip_str, u16 port) -> void
         // Returns socket fd on success, -1 on error
         def tcp_server_create(u16 port, int backlog) -> int
         {
-            print("In tcp_server_create(\0"); print((i32)port); print(", \0"); print(backlog); print(")\n\0");
+            print("In tcp_server_create(\0"); print((u32)port); print(", \0"); print(backlog); print(")\n\0");
             int sockfd = tcp_socket();
             if (sockfd < 0)
             {

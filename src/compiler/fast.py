@@ -4077,12 +4077,24 @@ class VariableDeclaration(ASTNode):
     
     def _call_constructor(self, builder: ir.IRBuilder, module: ir.Module, alloca: ir.Value) -> None:
         """Call constructor for object initialization."""
-        constructor_func = module.globals.get(self.initial_value.name)
+        ctor_name = self.initial_value.name
+        constructor_func = module.globals.get(ctor_name)
+
+        # If not found, try resolving through `using` namespaces (same idea as FunctionCall.codegen)
+        if constructor_func is None and hasattr(module, "_using_namespaces"):
+            for namespace in module._using_namespaces:
+                mangled_prefix = namespace.replace("::", "__") + "__"
+                mangled_name = mangled_prefix + ctor_name  # e.g. standard__strings__ + string.__init
+                constructor_func = module.globals.get(mangled_name)
+                if constructor_func is not None:
+                    ctor_name = mangled_name
+                    break
+
         if constructor_func is None:
             raise NameError(f"Constructor not found: {self.initial_value.name}")
-        
+
         args = [alloca]
-        
+
         for i, arg_expr in enumerate(self.initial_value.arguments):
             param_index = i + 1
             if (isinstance(arg_expr, StringLiteral) and
@@ -4090,15 +4102,15 @@ class VariableDeclaration(ASTNode):
                 isinstance(constructor_func.args[param_index].type, ir.PointerType) and
                 isinstance(constructor_func.args[param_index].type.pointee, ir.IntType) and
                 constructor_func.args[param_index].type.pointee.width == 8):
-                
+
                 arg_val = ArrayLiteral.create_local_string_for_arg(
                     builder, module, arg_expr.value, f"ctor_arg{i}"
                 )
             else:
                 arg_val = arg_expr.codegen(builder, module)
-            
+
             args.append(arg_val)
-        
+
         builder.call(constructor_func, args)
     
     def _store_with_type_conversion(self, builder: ir.IRBuilder, alloca: ir.Value, 

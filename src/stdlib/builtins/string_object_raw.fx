@@ -4,48 +4,52 @@
 
 #ifdef FLUX_STANDARD_STRINGS
 
-
-
-
-
-object string
+namespace standard
 {
-    noopstr value;
-
-    def __init(byte* x) -> this
+    namespace strings
     {
-        this.value = x;
-        return this;
-    };
-
-    def __exit() -> void
-    {
-        return;
-    };
-
-    def val() -> byte*
-    {
-        return this.value;
-    };
-
-    def len() -> int
-    {
-        return strlen(this.value);
-    };
-
-    def set(noopstr s) -> bool
-    {
-        try
+        object string
         {
-            this.value = s;
-            return true;
-        }
-        catch()
-        {
-            return false;
+            noopstr value;
+
+            def __init(byte* x) -> this
+            {
+                this.value = x;
+                return this;
+            };
+
+            def __exit() -> void
+            {
+                return;
+            };
+
+            def val() -> byte*
+            {
+                return this.value;
+            };
+
+            def len() -> int
+            {
+                return strlen(this.value);
+            };
+
+            def set(noopstr s) -> bool
+            {
+                try
+                {
+                    this.value = s;
+                    return true;
+                }
+                catch()
+                {
+                    return false;
+                };
+                return false;
+            };
         };
-        return false;
     };
 };
+
+using standard::strings;
 
 #endif;

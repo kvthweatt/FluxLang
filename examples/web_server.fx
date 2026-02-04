@@ -129,25 +129,50 @@ def handle_client(int client_sock) -> void
         
         if (is_root)
         {
-            content = "<html><body><h1>Flux HTTP Server</h1><p>Welcome to the Flux web server!</p><p>Try: <a href='/about'>/about</a> or <a href='/time'>/time</a></p></body></html>\0";
+            content = "
+<html>
+    <body>
+        <h1>Flux HTTP Server</h1><p>Welcome to the Flux web server!</p><p>Try: <a href='/about'>/about</a> or <a href='/time'>/time</a></p></body></html>\0";
             content_len = 0;
             while (content[content_len] != 0) { content_len = content_len + 1; };
         }
         elif (path_buffer[0] == '/' & path_buffer[1] == 'a' & path_buffer[2] == 'b' & path_buffer[3] == 'o' & path_buffer[4] == 'u' & path_buffer[5] == 't')
         {
-            content = "<html><body><h1>About</h1><p>This is a simple HTTP server written in Flux.</p><p>Flux is a systems programming language.</p></body></html>\0";
+            content = "
+<html>
+    <body>
+        <h1>About</h1>
+        <p>This is a simple HTTP server written in Flux.</p>
+        <p>Flux is a systems programming language.</p>
+        <p><a href='/'>Go to the root of the site.</a></p>
+    </body>
+</html>\0";
             content_len = 0;
             while (content[content_len] != 0) { content_len = content_len + 1; };
         }
         elif (path_buffer[0] == '/' & path_buffer[1] == 't' & path_buffer[2] == 'i' & path_buffer[3] == 'm' & path_buffer[4] == 'e')
         {
-            content = "<html><body><h1>About</h1><p>This is a simple HTTP server written in Flux.</p><p>Flux is a systems programming language.</p></body></html>\0";
+            content = "
+<html>
+    <body>
+        <h1>Time</h1>
+        <p>This is a simple HTTP server written in Flux.</p>
+        <p>Time to look at the clock.</p>
+        <p><a href='/'>Go to the root of the site.</a></p>
+    </body>
+</html>\0";
             content_len = 0;
             while (content[content_len] != 0) { content_len = content_len + 1; };
         }
         else
         {
-            content = "<html><body><h1>404 Not Found</h1><p>The requested page was not found.</p></body></html>\0";
+            content = "
+<html>
+    <body>
+        <h1>404 Not Found</h1>
+        <p>The requested page was not found.</p>
+    </body>
+</html>\0";
             content_len = 0;
             while (content[content_len] != 0) { content_len = content_len + 1; };
         };
