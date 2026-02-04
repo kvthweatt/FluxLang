@@ -20,7 +20,7 @@ namespace standard
 
             def __exit() -> void
             {
-                free(this.value);
+                //free(this.value);
                 return;
             };
 

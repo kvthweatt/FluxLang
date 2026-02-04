@@ -7795,82 +7795,83 @@ class ObjectDef(ASTNode):
 
         #print(f"[codegen] Created struct type for {self.name}: {struct_type}")
         # Create methods as functions with 'this' parameter
+        # --- PASS 1: predeclare all methods (including prototypes) ---
+        method_funcs = {}  # method_name -> ir.Function
+
         for method in self.methods:
-            #print(f"[codegen] Processing method: {method.name}")
-            # Convert return type
+            # Return type
             if method.return_type.base_type == DataType.THIS:
                 ret_type = ir.PointerType(struct_type)
             else:
                 ret_type = self._convert_type(method.return_type, module)
-            
-            #print(f"[codegen] Method {method.name} return type: {ret_type}")
-            # Create parameter types - first parameter is always 'this' pointer
+
+            # Param types: always 'this' first
             param_types = [ir.PointerType(struct_type)]
-            
-            # Add other parameters
-            param_types.extend([self._convert_type(param.type_spec, module) for param in method.parameters])
-            
-            # Create function type
+            param_types.extend([self._convert_type(p.type_spec, module) for p in method.parameters])
+
             func_type = ir.FunctionType(ret_type, param_types)
-            
-            #print(f"[codegen] Method {method.name} function type: {func_type}")
-            # Create function with mangled name
             func_name = f"{self.name}.{method.name}"
-            func = ir.Function(module, func_type, func_name)
-            
-            # Set parameter names
-            func.args[0].name = "this"  # First arg is 'this' pointer
-            for i, param in enumerate(func.args[1:], 1):
-                param.name = method.parameters[i-1].name
-            
-            # If it's a prototype, we're done
+
+            # Reuse existing function if prototype+definition both appear
+            existing = module.globals.get(func_name)
+            if existing is None:
+                func = ir.Function(module, func_type, func_name)
+            else:
+                # Optional: sanity-check signature matches
+                if not isinstance(existing, ir.Function):
+                    raise RuntimeError(f"{func_name} already exists and is not a function")
+                if existing.function_type != func_type:
+                    raise RuntimeError(f"Conflicting signatures for {func_name}")
+                func = existing
+
+            # Name args (safe to repeat)
+            func.args[0].name = "this"
+            for i, arg in enumerate(func.args[1:], 1):
+                arg.name = method.parameters[i - 1].name
+
+            method_funcs[method.name] = func
+
+        # --- PASS 2: emit method bodies (skip prototypes) ---
+        for method in self.methods:
             if isinstance(method, FunctionDef) and method.is_prototype:
                 continue
-            
-            # Create entry block
+
+            func = method_funcs.get(method.name)
+            if func is None:
+                raise RuntimeError(f"Internal error: missing function for method {method.name}")
+
+            # If body already emitted (e.g. duplicate defs), skip
+            if len(func.blocks) != 0:
+                continue
+
             entry_block = func.append_basic_block('entry')
             method_builder = ir.IRBuilder(entry_block)
-            
-            # Create scope for method
-            method_builder.scope = {}
-            
-            # Store parameters in scope
-            for i, param in enumerate(func.args):
-                if i == 0:  # 'this' pointer - store the parameter directly, not an alloca
-                    # The 'this' pointer is already a pointer to the struct, we don't need to
-                    # allocate storage for it since we just need to access its members
-                    method_builder.scope["this"] = param
-                else:
-                    # For other parameters, create alloca as usual
-                    alloca = method_builder.alloca(param.type, name=f"{param.name}.addr")
-                    method_builder.store(param, alloca)
-                    method_builder.scope[method.parameters[i-1].name] = alloca
 
-            # When generating method body, register 'this' parameter
+            method_builder.scope = {}
             if not hasattr(method_builder, 'scope_type_info'):
                 method_builder.scope_type_info = {}
 
-            # Create TypeSpec for 'this' pointing to the object type
-            this_type_spec = TypeSpec(
-                base_type=DataType.DATA,
-                custom_typename=self.name,
-                is_pointer=True
-            )
+            # Register 'this'
+            method_builder.scope["this"] = func.args[0]
+            this_type_spec = TypeSpec(base_type=DataType.DATA, custom_typename=self.name, is_pointer=True)
             method_builder.scope_type_info['this'] = this_type_spec
 
-            # Generate method body
-            if isinstance(method, FunctionDef):
-                # Generate normal body for all methods, including __init
-                method.body.codegen(method_builder, module)
-                # For __init__, add return 'this' pointer after body if not already terminated
-                if method.name == '__init' and not method_builder.block.is_terminated:
-                    method_builder.ret(func.args[0])
-            else:
-                method.body.codegen(method_builder, module)
-            
-            # Add implicit return if needed
+            # Store other params
+            for i, param in enumerate(func.args[1:], 1):
+                alloca = method_builder.alloca(param.type, name=f"{param.name}.addr")
+                method_builder.store(param, alloca)
+                method_builder.scope[method.parameters[i - 1].name] = alloca
+
+            # Emit body
+            method.body.codegen(method_builder, module)
+
+            # __init implicit return
+            if isinstance(method, FunctionDef) and method.name == '__init' and not method_builder.block.is_terminated:
+                method_builder.ret(func.args[0])
+
+            # Implicit return for void
             if not method_builder.block.is_terminated:
-                if isinstance(ret_type, ir.VoidType):
+                if isinstance(func.function_type.return_type, ir.VoidType):
                     method_builder.ret_void()
                 else:
                     raise RuntimeError(f"Method {method.name} must end with return statement")
