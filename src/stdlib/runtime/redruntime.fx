@@ -24,6 +24,8 @@
 
 // Import raw functions & builtins
 #import "red_string_utilities.fx";
+#import "string_object_raw.fx";
+#import "file_object_raw.fx";
 //
 // ---------------------------
 //

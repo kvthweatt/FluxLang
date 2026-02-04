@@ -9,174 +9,170 @@
 #import "ffifio.fx";
 #endif;
 
-
 #ifdef FLUX_STANDARD_FFI_FIO
 
-object file
+enum file_error_states
 {
-    void* handle;
-    bool is_open;
-    bool has_error;
+    GOOD,
+    NOT_OPEN_OR_ZERO
+};
 
-    // Initialize with filename and mode
-    def __init(byte* filename, byte* mode) -> this
+namespace standard
+{
+    namespace files
     {
-        this.handle = fopen(filename, mode);
-        this.is_open = (this.handle != 0);
-        this.has_error = (bool)0;
-        return this;
-    };
 
-    // Cleanup on destruction
-    def __exit() -> void
-    {
-        if (this.is_open)
+        object file
         {
-            fclose(this.handle);
-            this.is_open = (bool)0;
+            void* handle;
+            int size, error_state;
+
+            def is_open()->bool,
+                close()->bool,
+                size()->int,
+                read_all()->string,
+                write(byte*)->int,
+                write_bytes(byte*,int)->int,
+                seek(int,int)->bool,
+                tell()->int,
+                rewind()->void;
+
+            def __init(byte* path, byte* mode) -> this
+            {
+                this.handle = fopen(path, mode);
+                this.size = this.size();
+                if (this.is_open()) { this.error_state = 0; };
+                return this;
+            };
+
+            def is_open() -> bool
+            {
+                return this.handle != 0;
+            };
+
+            def close() -> bool
+            {
+                if (this.handle == (void*)0)
+                {
+                    return false;
+                };
+
+                fclose(this.handle);
+                this.handle = (void*)0;
+                return true;
+            };
+
+            def __exit() -> void
+            {
+                this.close();
+                return;
+            };
+
+            // Returns file size without changing current position
+            def size() -> int
+            {
+                if (this.handle == 0)
+                {
+                    this.error_state = file_error_states.NOT_OPEN_OR_ZERO;
+                    return -1;
+                };
+
+                int cur = ftell(this.handle);
+                fseek(this.handle, 0, SEEK_END);
+                int s = ftell(this.handle);
+                fseek(this.handle, cur, SEEK_SET);
+                return s;
+            };
+
+            // Read entire file into a heap-backed string that this string owns.
+            // Caller should call result.__exit() (or rely on normal object cleanup rules if you add them later).
+            def read_all() -> string
+            {
+                // If you want it to always start from beginning:
+                // rewind(this.handle);
+
+                int s = this.size();
+                if (s <= 0)
+                {
+                    string empty("\0");
+                    return empty;
+                };
+
+                byte* buf = malloc((u64)s + 1);
+                if (buf == 0)
+                {
+                    string empty2("\0");
+                    return empty2;
+                };
+
+                int bytes_read = fread(buf, 1, s, this.handle);
+                if (bytes_read < 0)
+                {
+                    free(buf);
+                    string empty3("\0");
+                    return empty3;
+                };
+
+                buf[bytes_read] = (byte)0;
+
+                // IMPORTANT: string.__exit() frees this.value, so buf MUST be heap memory.
+                string out(buf);
+                return out;
+            };
+
+            // Write a null-terminated byte* (writes strlen bytes)
+            def write(byte* xdata) -> int
+            {
+                if (this.handle == 0)
+                {
+                    return -1;
+                };
+
+                int n = (int)strlen(xdata);
+                return fwrite(xdata, 1, n, this.handle);
+            };
+
+            // Write a raw buffer with explicit length
+            def write_bytes(byte* xdata, int n) -> int
+            {
+                if (this.handle == 0)
+                {
+                    return -1;
+                };
+
+                return fwrite(xdata, 1, n, this.handle);
+            };
+
+            def seek(int offset, int whence) -> bool
+            {
+                if (this.handle == 0)
+                {
+                    return false;
+                };
+                return fseek(this.handle, offset, whence) == 0;
+            };
+
+            def tell() -> int
+            {
+                if (this.handle == 0)
+                {
+                    return -1;
+                };
+                return ftell(this.handle);
+            };
+
+            def rewind() -> void
+            {
+                if (this.handle != 0)
+                {
+                    rewind(this.handle);
+                };
+                return;
+            };
         };
-        return;
-    };
-
-    // Close file
-    def close() -> bool
-    {
-        if ((bool)!this.is_open)
-        {
-            return (bool)0;
-        };
-
-        int result = fclose(this.handle);
-        this.is_open = (bool)0;
-        this.handle = (void*)0;
-        
-        return (result == 0);
-    };
-
-    // Open file with specified mode
-    def open(byte* filename, byte* mode) -> bool
-    {
-        if (this.is_open)
-        {
-            this.close();
-        };
-
-        this.handle = fopen(filename, mode);
-        this.is_open = (this.handle != 0);
-        this.has_error = (bool)0;
-        
-        return this.is_open;
-    };
-
-    // Read data from file
-    def read(byte[] buffer, int size, int count) -> int
-    {
-        if (!this.is_open)
-        {
-            this.has_error = (bool)1;
-            return -1;
-        };
-
-        int bytes_read = fread(buffer, size, count, this.handle);
-        
-        if (ferror(this.handle) != 0)
-        {
-            this.has_error = (bool)1;
-        };
-
-        return bytes_read;
-    };
-
-    // Write data to file
-    def write(byte[] dx, int size, int count) -> int
-    {
-        if (!this.is_open)
-        {
-            this.has_error = (bool)1;
-            return -1;
-        };
-
-        int bytes_written = fwrite(dx, size, count, this.handle);
-        
-        if (ferror(this.handle) != 0)
-        {
-            this.has_error = (bool)1;
-        };
-
-        return bytes_written;
-    };
-
-    // Seek to position in file
-    def seek(int offset, int whence) -> bool
-    {
-        if (!this.is_open)
-        {
-            this.has_error = (bool)1;
-            return (bool)0;
-        };
-
-        int result = fseek(this.handle, offset, whence);
-        
-        if (result != 0)
-        {
-            this.has_error = (bool)1;
-            return (bool)0;
-        };
-
-        return (bool)1;
-    };
-
-    // Get current position in file
-    def tell() -> int
-    {
-        if (!this.is_open)
-        {
-            this.has_error = (bool)1;
-            return -1;
-        };
-
-        return ftell(this.handle);
-    };
-
-    // Check if at end of file
-    def eof() -> bool
-    {
-        if (!this.is_open)
-        {
-            return (bool)1;
-        };
-
-        return (feof(this.handle) != 0);
-    };
-
-    // Get file size
-    def size() -> int
-    {
-        if (!this.is_open)
-        {
-            this.has_error = (bool)1;
-            return -1;
-        };
-
-        int current_pos = ftell(this.handle);
-        fseek(this.handle, 0, 2);
-        int file_size = ftell(this.handle);
-        fseek(this.handle, current_pos, 0);
-
-        return file_size;
-    };
-
-    // Check if file is currently open
-    def opened() -> bool
-    {
-        return this.is_open;
-    };
-
-    // Get raw file handle
-    def get_handle() -> void*
-    {
-        return this.handle;
     };
 };
+
+using standard::files;
 
 #endif;

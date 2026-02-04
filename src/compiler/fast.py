@@ -7896,6 +7896,7 @@ class NamespaceDef(ASTNode):
     functions: List[FunctionDef] = field(default_factory=list)
     structs: List[StructDef] = field(default_factory=list)
     objects: List[ObjectDef] = field(default_factory=list)
+    enums: List[EnumDef] = field(default_factory=list)
     variables: List[VariableDeclaration] = field(default_factory=list)
     nested_namespaces: List['NamespaceDef'] = field(default_factory=list)
     base_namespaces: List[str] = field(default_factory=list)  # inheritance
@@ -7987,6 +7988,15 @@ class NamespaceDef(ASTNode):
                 obj.codegen(work_builder, module)
             finally:
                 obj.name = original_name
+
+        # Process enums
+        for enum in self.enums:
+            original_name = enum.name
+            enum.name = f"{self.name}__{enum.name}"
+            try:
+                enum.codegen(work_builder, module)
+            finally:
+                enum.name = original_name
 
         if "__static_init" in module.globals:
             init_func = module.globals["__static_init"]
