@@ -193,7 +193,7 @@ namespace standard
         {
             *addr.sin_family = (u16)AF_INET;
             *addr.sin_port = htons(port);
-            *addr.sin_addr = htonl(ip_addr);
+            *addr.sin_addr = ip_addr;
             
             // Zero out padding
             int i = 0;
@@ -205,20 +205,31 @@ namespace standard
         };
         
         // Initialize sockaddr_in with string IP (dotted decimal)
-        def init_sockaddr_str(sockaddr_in* addr, byte* ip_str, u16 port) -> void
-        {
-            *addr.sin_family = (u16)AF_INET;
-            *addr.sin_port = htons(port);
-            *addr.sin_addr = inet_addr(ip_str);
-            
-            // Zero out padding
-            int i = 0;
-            while (i < 8)
-            {
-                *addr.sin_zero[i] = 0;
-                i = i + 1;
-            };
-        };
+def init_sockaddr_str(sockaddr_in* addr, byte* ip_str, u16 port) -> void
+{
+    *addr.sin_family = (u16)AF_INET;
+    *addr.sin_port = htons(port);
+    *addr.sin_addr = htonl(inet_addr(ip_str));
+    
+    print("After init_sockaddr_str:\n\0");
+    print("  sin_family = \0");
+    print((int)addr.sin_family);
+    print("\n\0");
+    print("  sin_port = \0");
+    print((int)addr.sin_port);
+    print("\n\0");
+    print("  sin_addr = \0");
+    print((int)addr.sin_addr);
+    print("\n\0");
+    
+    // Zero out padding
+    int i = 0;
+    while (i < 8)
+    {
+        *addr.sin_zero[i] = (byte)0;
+        i = i + 1;
+    };
+};
 
         // Set socket to non-blocking mode (Windows version using ioctlsocket)
         def set_nonblocking(int sockfd) -> int
@@ -259,21 +270,35 @@ namespace standard
         // Returns socket fd on success, -1 on error
         def tcp_server_create(u16 port, int backlog) -> int
         {
+            print("In tcp_server_create(\0"); print((i32)port); print(", \0"); print(backlog); print(")\n\0");
             int sockfd = tcp_socket();
             if (sockfd < 0)
             {
+                print("Failed at sockfd < 0\n\0");
                 return -1;
             };
             
             // Enable address reuse
             set_reuseaddr(sockfd, true);
-            
+
             // Bind to address
             sockaddr_in addr;
+
+            u16 port_network = htons((u16)8080);
+            print("Port in network order (u16): \0");
+            print((int)port_network);
+            print("\n\0");
+
+            addr.sin_family = (u16)2;
+            addr.sin_port = port_network;
+            addr.sin_addr = (u32)0;  // Try without htonl
+
             init_sockaddr(@addr, INADDR_ANY, port);
-            
-            if (bind(sockfd, @addr, 16) < 0)
+            int bind_result = bind(sockfd, @addr, 16);
+            if (bind_result < 0)
             {
+                print("Failed to bind socket. Result: \0"); print(bind_result); print("\n\0");
+                print("get_last_error() = \0"); print(get_last_error()); print("\n\0");
                 closesocket(sockfd);
                 return -1;
             };
@@ -305,16 +330,30 @@ namespace standard
             {
                 return -1;
             };
-            
+
             sockaddr_in addr;
             init_sockaddr_str(@addr, ip_addr, port);
-            
-            if (connect(sockfd, @addr, 16) < 0)
+
+            print("About to call connect. sockfd = \0");
+            print(sockfd);
+            print("\n\0");
+
+            int connect_result = connect(sockfd, @addr, 16);
+
+            print("connect returned: \0");
+            print(connect_result);
+            print("\n\0");
+
+            if (connect_result < 0)
             {
+                int err = net::get_last_error();  // Call it RIGHT HERE
+                print("connect failed. WSA Error: \0");
+                print(err);
+                print("\n\0");
                 closesocket(sockfd);
                 return -1;
             };
-            
+
             return sockfd;
         };
         
