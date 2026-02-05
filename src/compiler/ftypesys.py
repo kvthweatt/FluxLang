@@ -238,62 +238,314 @@ class QualifiedType(BaseType):
 
 
 class TypeResolver:
-    """Resolves named types and handles namespace lookups"""
+    """
+    Centralized resolver for ALL identifier, type, and function lookups.
+    Handles ALL module name path scope and mangling.
+    """
+
+    def resolve(typename: str, module: ir.Module) -> Optional[ir.Type]:
+        """
+        Resolve a type name using current namespace from module.
+        """
+        current_ns = TypeResolver.get_current_namespace(module)
+        return TypeResolver.resolve_type(module, typename, current_ns)
+    
+    # ============================================================================
+    # Name Mangling - ALL mangling must use this
+    # ============================================================================
     
     @staticmethod
-    def resolve(typename: str, module: ir.Module) -> Optional[ir.Type]:
-        if hasattr(module, '_type_aliases') and typename in module._type_aliases:
-            base_type = module._type_aliases[typename]
-            if isinstance(base_type, ir.ArrayType):
-                return ir.PointerType(base_type.element)
-            return base_type
+    def mangle_name(namespace: str, name: str) -> str:
+        """
+        Convert namespace::name to namespace__name.
+        THIS is the ONLY place where :: -> __ conversion should happen.
         
-        if hasattr(module, '_struct_types') and typename in module._struct_types:
-            return module._struct_types[typename]
+        Args:
+            namespace: Namespace path (e.g., 'std::types')
+            name: Unmangled name
+            
+        Returns:
+            Mangled name (e.g., 'std__types__name')
+        """
+        if not namespace:
+            return name
+        return namespace.replace('::', '__') + '__' + name
+    
+    # ============================================================================
+    # Storage Access - Direct lookup in module storage
+    # ============================================================================
+    
+    @staticmethod
+    def lookup_in_storage(module: ir.Module, name: str, 
+                          storage_name: str) -> Optional[Any]:
+        """
+        Direct lookup in a specific module storage.
         
+        Args:
+            module: LLVM module
+            name: Name to look up
+            storage_name: '_type_aliases', '_struct_types', '_union_types', 
+                         '_enum_types', 'globals', '_struct_vtables'
+            
+        Returns:
+            Found item or None
+        """
+        if not hasattr(module, storage_name):
+            return None
+        
+        storage = getattr(module, storage_name)
+        if storage is None or name not in storage:
+            return None
+        
+        result = storage[name]
+        
+        # Special case: type aliases that are array types return pointer to element
+        if storage_name == '_type_aliases' and isinstance(result, ir.ArrayType):
+            return ir.PointerType(result.element)
+        
+        return result
+    
+    @staticmethod
+    def lookup_type(module: ir.Module, name: str) -> Optional[ir.Type]:
+        """
+        Look up a type in type-related storage (_type_aliases, _struct_types, etc).
+        Direct lookup only - no namespace resolution.
+        
+        Args:
+            module: LLVM module
+            name: Type name (can be mangled)
+            
+        Returns:
+            LLVM type or None
+        """
+        # Check all type storage in order
+        for storage_name in ['_type_aliases', '_struct_types', '_union_types', '_enum_types']:
+            result = TypeResolver.lookup_in_storage(module, name, storage_name)
+            if result is not None:
+                return result
+        return None
+    
+    @staticmethod
+    def lookup_global(module: ir.Module, name: str) -> Optional[Any]:
+        """
+        Look up in module.globals (variables and functions).
+        Direct lookup only - no namespace resolution.
+        
+        Args:
+            module: LLVM module  
+            name: Global name (can be mangled)
+            
+        Returns:
+            Global variable/function or None
+        """
+        return TypeResolver.lookup_in_storage(module, name, 'globals')
+    
+    # ============================================================================
+    # Namespace Resolution - The main algorithm
+    # ============================================================================
+    
+    @staticmethod
+    def resolve_with_namespace(
+        module: ir.Module,
+        name: str,
+        current_namespace: str = "",
+        lookup_func=None
+    ) -> Optional[Any]:
+        """
+        Resolve a name through the namespace hierarchy.
+        
+        CORE RESOLUTION ALGORITHM
+        Search order:
+        1. Exact match (name as-is)
+        2. Current namespace + name
+        3. Parent namespaces + name (walking up)
+        4. Using namespaces + name
+        5. All registered namespaces + name
+        
+        Args:
+            module: LLVM module
+            name: Name to resolve (unmangled)
+            current_namespace: Current namespace context (e.g., 'std::types')
+            lookup_func: Function to do actual lookup (default: lookup_type)
+                        Should be lookup_type or lookup_global
+            
+        Returns:
+            Resolved item or None
+        """
+        if lookup_func is None:
+            lookup_func = TypeResolver.lookup_type
+        
+        # 1. Try exact match first
+        result = lookup_func(module, name)
+        if result is not None:
+            return result
+        
+        # 2. Try current namespace
+        if current_namespace:
+            mangled = TypeResolver.mangle_name(current_namespace, name)
+            result = lookup_func(module, mangled)
+            if result is not None:
+                return result
+        
+        # 3. Try parent namespaces (walk up the tree)
+        if current_namespace:
+            parts = current_namespace.split('::')
+            while parts:
+                parts.pop()
+                parent_ns = '::'.join(parts)
+                if parent_ns:
+                    mangled = TypeResolver.mangle_name(parent_ns, name)
+                else:
+                    mangled = name
+                
+                result = lookup_func(module, mangled)
+                if result is not None:
+                    return result
+        
+        # 4. Try using namespaces
         if hasattr(module, '_using_namespaces'):
             for namespace in module._using_namespaces:
-                mangled_name = namespace.replace('::', '__') + '__' + typename
-                
-                if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
-                    base_type = module._type_aliases[mangled_name]
-                    if isinstance(base_type, ir.ArrayType):
-                        return ir.PointerType(base_type.element)
-                    return base_type
-                
-                if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
-                    return module._struct_types[mangled_name]
+                mangled = TypeResolver.mangle_name(namespace, name)
+                result = lookup_func(module, mangled)
+                if result is not None:
+                    return result
         
+        # 5. Try all registered namespaces
         if hasattr(module, '_namespaces'):
-            for registered_namespace in module._namespaces:
-                mangled_name = registered_namespace.replace('::', '__') + '__' + typename
-                
-                if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
-                    base_type = module._type_aliases[mangled_name]
-                    if isinstance(base_type, ir.ArrayType):
-                        return ir.PointerType(base_type.element)
-                    return base_type
-                
-                if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
-                    return module._struct_types[mangled_name]
-        
-        if hasattr(module, '_using_namespaces'):
-            for namespace in module._using_namespaces:
-                namespace_parts = namespace.split('::')
-                for i in range(len(namespace_parts), 0, -1):
-                    parent_namespace = '::'.join(namespace_parts[:i])
-                    mangled_name = parent_namespace.replace('::', '__') + '__' + typename
-                    
-                    if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
-                        base_type = module._type_aliases[mangled_name]
-                        if isinstance(base_type, ir.ArrayType):
-                            return ir.PointerType(base_type.element)
-                        return base_type
-                    
-                    if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
-                        return module._struct_types[mangled_name]
+            for namespace in module._namespaces:
+                mangled = TypeResolver.mangle_name(namespace, name)
+                result = lookup_func(module, mangled)
+                if result is not None:
+                    return result
         
         return None
+    
+    # ============================================================================
+    # High-level resolution methods - Use these from other code
+    # ============================================================================
+    
+    @staticmethod
+    def resolve_type(module: ir.Module, typename: str, 
+                     current_namespace: str = "") -> Optional[ir.Type]:
+        """
+        Resolve a type name.
+        
+        Replaces:
+        - TypeResolver.resolve()
+        - NamespaceTypeHandler.resolve_custom_type()
+        
+        Args:
+            module: LLVM module
+            typename: Type name to resolve
+            current_namespace: Current namespace context
+            
+        Returns:
+            LLVM type or None
+        """
+        return TypeResolver.resolve_with_namespace(
+            module, typename, current_namespace, TypeResolver.lookup_type
+        )
+    
+    @staticmethod
+    def resolve_function(module: ir.Module, func_name: str,
+                        current_namespace: str = "") -> Optional[str]:
+        """
+        Resolve a function name and return its mangled name.
+        
+        Replaces:
+        - FunctionResolver.resolve_function_name()
+        
+        Args:
+            module: LLVM module
+            func_name: Function name to resolve
+            current_namespace: Current namespace context
+            
+        Returns:
+            Mangled function name or None
+        """
+        result = TypeResolver.resolve_with_namespace(
+            module, func_name, current_namespace, TypeResolver.lookup_global
+        )
+        
+        if result is not None and isinstance(result, ir.Function):
+            return result.name
+        
+        return None
+    
+    @staticmethod
+    def resolve_identifier(module: ir.Module, name: str,
+                          current_namespace: str = "") -> Optional[str]:
+        """
+        Resolve an identifier (variable or type alias) and return its mangled name.
+        
+        Replaces:
+        - IdentifierTypeHandler.resolve_namespace_mangled_name()
+        - VariableTypeHandler.identifier_to_constant() namespace lookup
+        
+        Args:
+            module: LLVM module
+            name: Identifier name
+            current_namespace: Current namespace context
+            
+        Returns:
+            Mangled name or None
+        """
+        # Try globals first
+        result = TypeResolver.resolve_with_namespace(
+            module, name, current_namespace, TypeResolver.lookup_global
+        )
+        
+        if result is not None:
+            # Find the actual key used in globals
+            if name in module.globals:
+                return name
+            
+            if current_namespace:
+                mangled = TypeResolver.mangle_name(current_namespace, name)
+                if mangled in module.globals:
+                    return mangled
+            
+            if hasattr(module, '_using_namespaces'):
+                for namespace in module._using_namespaces:
+                    mangled = TypeResolver.mangle_name(namespace, name)
+                    if mangled in module.globals:
+                        return mangled
+        
+        # Try type aliases
+        result = TypeResolver.resolve_with_namespace(
+            module, name, current_namespace, TypeResolver.lookup_type
+        )
+        
+        if result is not None:
+            if hasattr(module, '_type_aliases'):
+                if name in module._type_aliases:
+                    return name
+                
+                if current_namespace:
+                    mangled = TypeResolver.mangle_name(current_namespace, name)
+                    if mangled in module._type_aliases:
+                        return mangled
+                
+                if hasattr(module, '_using_namespaces'):
+                    for namespace in module._using_namespaces:
+                        mangled = TypeResolver.mangle_name(namespace, name)
+                        if mangled in module._type_aliases:
+                            return mangled
+        
+        return None
+    
+    @staticmethod
+    def get_current_namespace(module: ir.Module) -> str:
+        """
+        Get the current namespace from module.
+        
+        Args:
+            module: LLVM module
+            
+        Returns:
+            Current namespace or empty string
+        """
+        return getattr(module, '_current_namespace', '')
 
 
 class TypeChecker:
@@ -345,70 +597,11 @@ class TypeChecker:
 class FunctionResolver:
     """Resolves function names within namespace contexts"""
     
-    @staticmethod
-    def resolve_function_name(func_name: str, module: 'ir.Module', current_namespace: str = "") -> Optional[str]:
+    def resolve_function_name(func_name: str, module: ir.Module, current_namespace: str = "") -> Optional[str]:
         """
-        Resolve a function name to its fully qualified name.
-        Searches in order:
-        1. Exact match (for already-mangled or global names)
-        2. Current namespace
-        3. Parent namespaces of current namespace
-        4. Using namespaces
-        5. All registered namespaces
-        
-        Args:
-            func_name: The function name to resolve
-            module: LLVM module
-            current_namespace: Current namespace context (e.g., "standard::types")
-            
-        Returns:
-            Fully qualified function name if found, None otherwise
+        Resolve function name and return mangled name.
         """
-        # Try exact match first (handles already-mangled names or global functions)
-        if func_name in module.globals:
-            candidate = module.globals[func_name]
-            if isinstance(candidate, ir.Function):
-                return func_name
-        
-        # Try current namespace
-        if current_namespace:
-            mangled = f"{current_namespace.replace('::', '__')}__{func_name}"
-            if mangled in module.globals:
-                candidate = module.globals[mangled]
-                if isinstance(candidate, ir.Function):
-                    return mangled
-        
-        # Try parent namespaces of current namespace
-        if current_namespace:
-            parts = current_namespace.split('::')
-            while parts:
-                parts.pop()
-                parent_ns = '::'.join(parts)
-                mangled = f"{parent_ns.replace('::', '__')}__{func_name}" if parent_ns else func_name
-                if mangled in module.globals:
-                    candidate = module.globals[mangled]
-                    if isinstance(candidate, ir.Function):
-                        return mangled
-        
-        # Try using namespaces
-        if hasattr(module, '_using_namespaces'):
-            for namespace in module._using_namespaces:
-                mangled = f"{namespace.replace('::', '__')}__{func_name}"
-                if mangled in module.globals:
-                    candidate = module.globals[mangled]
-                    if isinstance(candidate, ir.Function):
-                        return mangled
-        
-        # Try all registered namespaces as a last resort
-        if hasattr(module, '_namespaces'):
-            for namespace in module._namespaces:
-                mangled = f"{namespace.replace('::', '__')}__{func_name}"
-                if mangled in module.globals:
-                    candidate = module.globals[mangled]
-                    if isinstance(candidate, ir.Function):
-                        return mangled
-        
-        return None
+        return TypeResolver.resolve_function(module, func_name, current_namespace)
 
 
 @dataclass
@@ -659,101 +852,12 @@ class NamespaceTypeHandler:
             func_def.name = original_name
             module._current_namespace = original_namespace
     
-    @staticmethod
-    def resolve_custom_type(module: 'ir.Module', typename: str, current_namespace: str = "") -> Optional['ir.Type']:
+    def resolve_custom_type(module: ir.Module, typename: str,
+                           current_namespace: str = "") -> Optional[ir.Type]:
         """
-        Resolve a custom type name to its LLVM type.
-        Searches namespaces in the following order:
-        1. Exact match (for fully qualified names)
-        2. Current namespace 
-        3. Parent namespaces of current namespace
-        4. Using namespaces
-        5. All registered namespaces
+        Resolve custom type name.
         """
-        # Try exact match first (handles already-mangled names)
-        if hasattr(module, '_type_aliases') and typename in module._type_aliases:
-            return module._type_aliases[typename]
-        
-        if hasattr(module, '_struct_types') and typename in module._struct_types:
-            return module._struct_types[typename]
-        
-        if hasattr(module, '_union_types') and typename in module._union_types:
-            return module._union_types[typename]
-        
-        if hasattr(module, '_enum_types') and typename in module._enum_types:
-            return module._enum_types[typename]
-        
-        # Try current namespace
-        if current_namespace:
-            mangled = f"{current_namespace.replace('::', '__')}__{typename}"
-            
-            if hasattr(module, '_type_aliases') and mangled in module._type_aliases:
-                return module._type_aliases[mangled]
-            
-            if hasattr(module, '_struct_types') and mangled in module._struct_types:
-                return module._struct_types[mangled]
-            
-            if hasattr(module, '_union_types') and mangled in module._union_types:
-                return module._union_types[mangled]
-            
-            if hasattr(module, '_enum_types') and mangled in module._enum_types:
-                return module._enum_types[mangled]
-        
-        # Try parent namespaces of current namespace
-        if current_namespace:
-            parts = current_namespace.split('::')
-            while parts:
-                parts.pop()
-                parent_ns = '::'.join(parts)
-                mangled = f"{parent_ns.replace('::', '__')}__{typename}" if parent_ns else typename
-                
-                if hasattr(module, '_type_aliases') and mangled in module._type_aliases:
-                    return module._type_aliases[mangled]
-                
-                if hasattr(module, '_struct_types') and mangled in module._struct_types:
-                    return module._struct_types[mangled]
-                
-                if hasattr(module, '_union_types') and mangled in module._union_types:
-                    return module._union_types[mangled]
-                
-                if hasattr(module, '_enum_types') and mangled in module._enum_types:
-                    return module._enum_types[mangled]
-        
-        # Try using namespaces
-        if hasattr(module, '_using_namespaces'):
-            for namespace in module._using_namespaces:
-                mangled = f"{namespace.replace('::', '__')}__{typename}"
-                
-                if hasattr(module, '_type_aliases') and mangled in module._type_aliases:
-                    return module._type_aliases[mangled]
-                
-                if hasattr(module, '_struct_types') and mangled in module._struct_types:
-                    return module._struct_types[mangled]
-                
-                if hasattr(module, '_union_types') and mangled in module._union_types:
-                    return module._union_types[mangled]
-                
-                if hasattr(module, '_enum_types') and mangled in module._enum_types:
-                    return module._enum_types[mangled]
-        
-        # Try all registered namespaces as a last resort
-        if hasattr(module, '_namespaces'):
-            for namespace in module._namespaces:
-                mangled = f"{namespace.replace('::', '__')}__{typename}"
-                
-                if hasattr(module, '_type_aliases') and mangled in module._type_aliases:
-                    return module._type_aliases[mangled]
-                
-                if hasattr(module, '_struct_types') and mangled in module._struct_types:
-                    return module._struct_types[mangled]
-                
-                if hasattr(module, '_union_types') and mangled in module._union_types:
-                    return module._union_types[mangled]
-                
-                if hasattr(module, '_enum_types') and mangled in module._enum_types:
-                    return module._enum_types[mangled]
-        
-        return None
+        return TypeResolver.resolve_type(module, typename, current_namespace)
 
 
 @dataclass
@@ -961,7 +1065,7 @@ class VariableTypeHandler:
             return VariableTypeHandler._literal_to_constant(initial_value, llvm_type)
         
         elif isinstance(initial_value, Identifier):
-            return VariableTypeHandler._identifier_to_constant(initial_value, module)
+            return VariableTypeHandler.identifier_to_constant(initial_value, module)
         
         elif isinstance(initial_value, BinaryOp):
             return VariableTypeHandler._eval_const_expr(initial_value, module)
@@ -1088,23 +1192,17 @@ class VariableTypeHandler:
             return ir.Constant(llvm_type, 1 if lit.value else 0)
         return None
     
-    @staticmethod
-    def _identifier_to_constant(ident, module: ir.Module) -> Optional[ir.Constant]:
-        """Get constant from identifier (reference to another global)."""
-        var_name = ident.name
-        if var_name in module.globals:
-            other_global = module.globals[var_name]
+    def identifier_to_constant_namespace_lookup(var_name: str, module: ir.Module) -> Optional[ir.Constant]:
+        """
+        Look up identifier in using namespaces for constant resolution.
+        """
+        current_ns = TypeResolver.get_current_namespace(module)
+        mangled_name = TypeResolver.resolve_identifier(module, var_name, current_ns)
+        
+        if mangled_name and mangled_name in module.globals:
+            other_global = module.globals[mangled_name]
             if hasattr(other_global, 'initializer') and other_global.initializer:
                 return other_global.initializer
-        
-        # Check namespace-qualified names
-        if hasattr(module, '_using_namespaces'):
-            for namespace in module._using_namespaces:
-                mangled_name = namespace.replace('::', '__') + '__' + var_name
-                if mangled_name in module.globals:
-                    other_global = module.globals[mangled_name]
-                    if hasattr(other_global, 'initializer') and other_global.initializer:
-                        return other_global.initializer
         
         return None
     
@@ -1123,7 +1221,7 @@ class VariableTypeHandler:
             return None
         
         elif isinstance(expr, Identifier):
-            return VariableTypeHandler._identifier_to_constant(expr, module)
+            return VariableTypeHandler.identifier_to_constant(expr, module)
         
         elif isinstance(expr, BinaryOp):
             left = VariableTypeHandler._eval_const_expr(expr.left, module)
@@ -1347,27 +1445,73 @@ class ArrayTypeHandler:
 
     @staticmethod
     def preserve_array_element_type_metadata(loaded_val: ir.Value, array_val: ir.Value, module: ir.Module) -> ir.Value:
-        """
-        Preserve type metadata when loading an element from an array.
-        
-        This extracts the element type spec from the array's metadata and attaches it
-        to the loaded value, maintaining type information through array access operations.
-        
-        Args:
-            loaded_val: The loaded element value
-            array_val: The source array
-            module: LLVM module for type resolution
-            
-        Returns:
-            The loaded value with appropriate type metadata attached
-        """
-        # Try to get the element type spec from the array value's metadata
         element_type_spec = get_array_element_type_spec(array_val)
         
         if element_type_spec:
             return attach_type_metadata(loaded_val, type_spec=element_type_spec)
         
         return attach_type_metadata_from_llvm_type(loaded_val, loaded_val.type, module)
+    
+    @staticmethod
+    def _zero() -> ir.Constant:
+        """Return i32 zero constant."""
+        return ir.Constant(ir.IntType(32), 0)
+    
+    @staticmethod
+    def _index(value: int) -> ir.Constant:
+        """Return i32 constant for given index."""
+        return ir.Constant(ir.IntType(32), value)
+    
+    @staticmethod
+    def _get_array_element_ptr(builder: ir.IRBuilder, array_val: ir.Value, index: ir.Value, name: str = "elem") -> ir.Value:
+        """
+        Get pointer to an element in an array, handling all array types.
+        Works with: GlobalVariable arrays, local arrays (pointer to array), and raw pointers.
+        """
+        zero = ArrayTypeHandler._zero()
+        
+        if isinstance(array_val, ir.GlobalVariable) or \
+           (isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType)):
+            # Global or local array: need [zero, index]
+            return builder.gep(array_val, [zero, index], inbounds=True, name=name)
+        elif isinstance(array_val.type, ir.PointerType):
+            # Raw pointer (like char*): just [index]
+            return builder.gep(array_val, [index], inbounds=True, name=name)
+        else:
+            raise ValueError(f"Cannot get element pointer for type: {array_val.type}")
+    
+    @staticmethod
+    def _get_array_start_ptr(builder: ir.IRBuilder, array_ptr: ir.Value, name: str = "start") -> ir.Value:
+        """Get pointer to first element of array."""
+        zero = ArrayTypeHandler._zero()
+        return builder.gep(array_ptr, [zero, zero], name=name)
+    
+    @staticmethod
+    def _load_if_pointer(builder: ir.IRBuilder, val: ir.Value) -> ir.Value:
+        """Load value if it's a pointer, otherwise return as-is."""
+        if isinstance(val.type, ir.PointerType):
+            return builder.load(val)
+        return val
+    
+    @staticmethod
+    def _cast_int_to_width(builder: ir.IRBuilder, val: ir.Value, target_type: ir.IntType) -> ir.Value:
+        """Extend or truncate integer to target width."""
+        if not isinstance(val.type, ir.IntType) or not isinstance(target_type, ir.IntType):
+            raise ValueError(f"Cannot cast non-integer types: {val.type} to {target_type}")
+        
+        if val.type.width < target_type.width:
+            return builder.zext(val, target_type)
+        elif val.type.width > target_type.width:
+            return builder.trunc(val, target_type)
+        return val
+    
+    @staticmethod
+    def _store_byte_at_index(builder: ir.IRBuilder, array_ptr: ir.Value, index: int, byte_value: int) -> None:
+        """Store a single byte at the given index in a byte array."""
+        zero = ArrayTypeHandler._zero()
+        idx = ArrayTypeHandler._index(index)
+        elem_ptr = builder.gep(array_ptr, [zero, idx])
+        builder.store(ir.Constant(ir.IntType(8), byte_value), elem_ptr)
     
     @staticmethod
     def _store_bytes_to_array(builder: ir.IRBuilder, array_ptr: ir.Value, bytes_data: bytes, start_index: int = 0) -> None:
@@ -1380,22 +1524,19 @@ class ArrayTypeHandler:
             builder.store(char_val, elem_ptr)
     
     @staticmethod
-    def _pack_value_into_integer(builder: ir.IRBuilder, result: ir.Value, elem_val: ir.Value, 
-                                 target_type: ir.IntType, bit_offset: int) -> Tuple[ir.Value, int]:
+    def _pack_value_into_integer(builder: ir.IRBuilder, result: ir.Value, elem_val: ir.Value, target_type: ir.IntType, bit_offset: int) -> Tuple[ir.Value, int]:
         """
         Pack a single integer value into a larger integer at the specified bit offset.
         Returns (new_result, new_bit_offset).
         """
         elem_width = elem_val.type.width
         
-        # Extend/truncate to target width if needed
-        if elem_val.type.width != target_type.width:
-            elem_val = builder.zext(elem_val, target_type)
+        # Extend to target width if needed
+        elem_val = ArrayTypeHandler._cast_int_to_width(builder, elem_val, target_type)
         
-        # Shift into position
+        # Shift into position if needed
         if bit_offset > 0:
-            shift_amount = ir.Constant(target_type, bit_offset)
-            elem_val = builder.shl(elem_val, shift_amount)
+            elem_val = builder.shl(elem_val, ir.Constant(target_type, bit_offset))
         
         # OR into result
         result = builder.or_(result, elem_val)
@@ -1407,13 +1548,7 @@ class ArrayTypeHandler:
         # Declare llvm.memcpy.p0i8.p0i8.i64 if not already declared
         memcpy_name = "llvm.memcpy.p0i8.p0i8.i64"
         if memcpy_name not in module.globals:
-            memcpy_type = ir.FunctionType(
-                ir.VoidType(),
-                [ir.PointerType(ir.IntType(8)),  # dst
-                 ir.PointerType(ir.IntType(8)),  # src
-                 ir.IntType(64),                 # len
-                 ir.IntType(1)]                  # volatile
-            )
+            memcpy_type = ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.IntType(8)), ir.PointerType(ir.IntType(8)), ir.IntType(64), ir.IntType(1)])
             memcpy_func = ir.Function(module, memcpy_type, name=memcpy_name)
             memcpy_func.attributes.add('nounwind')
         else:
@@ -1427,12 +1562,7 @@ class ArrayTypeHandler:
             src_ptr = builder.bitcast(src_ptr, i8_ptr)
         
         # Call memcpy
-        builder.call(memcpy_func, [
-            dst_ptr,
-            src_ptr,
-            ir.Constant(ir.IntType(64), bytes),
-            ir.Constant(ir.IntType(1), 0)  # not volatile
-        ])
+        builder.call(memcpy_func, [dst_ptr, src_ptr, ir.Constant(ir.IntType(64), bytes), ir.Constant(ir.IntType(1), 0)])
     
     @staticmethod
     def emit_memset(builder: ir.IRBuilder, module: ir.Module, dst_ptr: ir.Value, value: int, bytes: int) -> None:
@@ -1441,11 +1571,7 @@ class ArrayTypeHandler:
         if memset_name not in module.globals:
             memset_type = ir.FunctionType(
                 ir.VoidType(),
-                [ir.PointerType(ir.IntType(8)),  # dst
-                 ir.IntType(8),                  # val
-                 ir.IntType(64),                 # len
-                 ir.IntType(1)]                  # volatile
-            )
+                [ir.PointerType(ir.IntType(8)), ir.IntType(8), ir.IntType(64), ir.IntType(1)])
             memset_func = ir.Function(module, memset_type, name=memset_name)
             memset_func.attributes.add('nounwind')
         else:
@@ -1457,31 +1583,11 @@ class ArrayTypeHandler:
             dst_ptr = builder.bitcast(dst_ptr, i8_ptr)
         
         # Call memset
-        builder.call(memset_func, [
-            dst_ptr,
-            ir.Constant(ir.IntType(8), value),
-            ir.Constant(ir.IntType(64), bytes),
-            ir.Constant(ir.IntType(1), 0)  # not volatile
-        ])
+        builder.call(memset_func, [dst_ptr, ir.Constant(ir.IntType(8), value), ir.Constant(ir.IntType(64), bytes), ir.Constant(ir.IntType(1), 0)])
     
     @staticmethod
-    def concatenate(builder: ir.IRBuilder, module: ir.Module, 
-                   left_val: ir.Value, right_val: ir.Value, 
-                   operator) -> ir.Value:
-        """
-        Handle array concatenation (+ and -) operations.
-        
-        Args:
-            builder: IR builder
-            module: LLVM module
-            left_val: Left operand (array or array pointer)
-            right_val: Right operand (array or array pointer)
-            operator: ADD for concatenation, SUB for truncation
-            
-        Returns:
-            Pointer to new concatenated/truncated array
-        """
-        from fast import Operator
+    def concatenate(builder: ir.IRBuilder, module: ir.Module, left_val: ir.Value, right_val: ir.Value, operator) -> ir.Value:
+        """Handle array concatenation (+ and -) operations."""
         
         # Get array information
         left_elem_type, left_len = ArrayTypeHandler.get_array_info(left_val)
@@ -1491,34 +1597,18 @@ class ArrayTypeHandler:
         if left_elem_type != right_elem_type:
             raise ValueError(f"Cannot {operator.value} arrays with different element types: {left_elem_type} vs {right_elem_type}")
         
-        # Calculate result length
-        if operator == Operator.ADD:
-            result_len = left_len + right_len
-        else:  # SUB
-            result_len = max(left_len - right_len, 0)
-        
-        # Create result array type
+        result_len = left_len + right_len if operator == Operator.ADD else max(left_len - right_len, 0)
         result_array_type = ir.ArrayType(left_elem_type, result_len)
         
-        # Check if both operands are global constants for compile-time concatenation
-        if (isinstance(left_val, ir.GlobalVariable) and 
-            isinstance(right_val, ir.GlobalVariable) and 
-            getattr(left_val, 'global_constant', False) and 
-            getattr(right_val, 'global_constant', False)):
-            # Compile-time concatenation
-            return ArrayTypeHandler.create_global_array_concat(
-                module, left_val, right_val, result_array_type, operator
-            )
+        # Check for compile-time concatenation
+        if (isinstance(left_val, ir.GlobalVariable) and isinstance(right_val, ir.GlobalVariable) and 
+            getattr(left_val, 'global_constant', False) and getattr(right_val, 'global_constant', False)):
+            return ArrayTypeHandler.create_global_array_concat(module, left_val, right_val, result_array_type, operator)
         else:
-            # Runtime concatenation
-            return ArrayTypeHandler.create_runtime_array_concat(
-                builder, module, left_val, right_val, result_array_type, operator
-            )
+            return ArrayTypeHandler.create_runtime_array_concat(builder, module, left_val, right_val, result_array_type, operator)
     
     @staticmethod
-    def create_global_array_concat(module: ir.Module, left_val: ir.Value, 
-                                    right_val: ir.Value, result_array_type: ir.ArrayType, 
-                                    operator) -> ir.Value:
+    def create_global_array_concat(module: ir.Module, left_val: ir.Value, right_val: ir.Value, result_array_type: ir.ArrayType, operator) -> ir.Value:
         """Create compile-time global array concatenation."""
         from fast import Operator
         
@@ -1543,10 +1633,7 @@ class ArrayTypeHandler:
         return global_var
     
     @staticmethod
-    def create_runtime_array_concat(builder: ir.IRBuilder, module: ir.Module, 
-                                     left_val: ir.Value, right_val: ir.Value, 
-                                     result_array_type: ir.ArrayType, 
-                                     operator) -> ir.Value:
+    def create_runtime_array_concat(builder: ir.IRBuilder, module: ir.Module, left_val: ir.Value, right_val: ir.Value, result_array_type: ir.ArrayType, operator) -> ir.Value:
         """Create runtime array concatenation using memcpy."""
         from fast import Operator
         
@@ -1562,30 +1649,15 @@ class ArrayTypeHandler:
         
         # Copy left array to result
         if left_len > 0:
-            # Get pointer to first element of result array
-            zero = ir.Constant(ir.IntType(32), 0)
-            result_start = builder.gep(result_ptr, [zero, zero], name="result_start")
-            
-            # Get pointer to source array start
-            left_start = builder.gep(left_val, [zero, zero], name="left_start")
-            
-            # Copy left array
-            left_bytes = left_len * elem_size_bytes
-            ArrayTypeHandler.emit_memcpy(builder, module, result_start, left_start, left_bytes)
-        
-        # Copy right array to result (for ADD operation)
+            result_start = ArrayTypeHandler._get_array_start_ptr(builder, result_ptr, "result_start")
+            left_start = ArrayTypeHandler._get_array_start_ptr(builder, left_val, "left_start")
+            ArrayTypeHandler.emit_memcpy(builder, module, result_start, left_start, left_len * elem_size_bytes)
         if operator == Operator.ADD and right_len > 0:
-            zero = ir.Constant(ir.IntType(32), 0)
-            # Get pointer to position after left array in result
-            left_len_const = ir.Constant(ir.IntType(32), left_len)
+            zero = ArrayTypeHandler._zero()
+            left_len_const = ArrayTypeHandler._index(left_len)
             result_right_start = builder.gep(result_ptr, [zero, left_len_const], name="result_right_start")
-            
-            # Get pointer to source array start
-            right_start = builder.gep(right_val, [zero, zero], name="right_start")
-            
-            # Copy right array
-            right_bytes = right_len * elem_size_bytes
-            ArrayTypeHandler.emit_memcpy(builder, module, result_right_start, right_start, right_bytes)
+            right_start = ArrayTypeHandler._get_array_start_ptr(builder, right_val, "right_start")
+            ArrayTypeHandler.emit_memcpy(builder, module, result_right_start, right_start, right_len * elem_size_bytes)
         
         # Mark as array pointer
         result_ptr.type._is_array_pointer = True
@@ -1593,113 +1665,69 @@ class ArrayTypeHandler:
         return result_ptr
     
     @staticmethod
-    def resize_for_assignment(builder: ir.IRBuilder, module: ir.Module, 
-                             ptr: ir.Value, val: ir.Value, 
-                             var_name: str = None) -> ir.Value:
-        """
-        Dynamically resize arrays to accommodate new values during assignment.
-        
-        Args:
-            builder: IR builder
-            module: LLVM module
-            ptr: Pointer to existing array
-            val: New value to assign (array)
-            var_name: Optional variable name for scope updates
-            
-        Returns:
-            Pointer to resized array (may be same as ptr if no resize needed)
-        """
+    def resize_for_assignment(builder: ir.IRBuilder, module: ir.Module, ptr: ir.Value, val: ir.Value, var_name: str = None) -> ir.Value:
+        """Dynamically resize arrays to accommodate new values during assignment."""
         # Get array information
         val_elem_type, val_len = ArrayTypeHandler.get_array_info(val)
         ptr_elem_type, ptr_len = ArrayTypeHandler.get_array_info(ptr)
         
         # If the new array is larger, we need to reallocate
         if val_len > ptr_len:
-            # Create new array type with the larger size
+            # Need to reallocate
             new_array_type = ir.ArrayType(val_elem_type, val_len)
             
             # Allocate new storage for the resized array
             new_alloca = builder.alloca(new_array_type, name=f"{var_name}_resized" if var_name else "array_resized")
             
-            # Copy existing data from old array to new array (first ptr_len elements)
+            # Copy old data
             if ptr_len > 0:
                 elem_size_bytes = ptr_elem_type.width // 8
-                old_bytes = ptr_len * elem_size_bytes
-                
-                # Get pointer to start of old array
-                zero = ir.Constant(ir.IntType(32), 0)
-                old_start = builder.gep(ptr, [zero, zero], name="old_start")
-                
-                # Get pointer to start of new array
-                new_start = builder.gep(new_alloca, [zero, zero], name="new_start")
-                
-                # Copy old data
-                ArrayTypeHandler.emit_memcpy(builder, module, new_start, old_start, old_bytes)
+                old_start = ArrayTypeHandler._get_array_start_ptr(builder, ptr, "old_start")
+                new_start = ArrayTypeHandler._get_array_start_ptr(builder, new_alloca, "new_start")
+                ArrayTypeHandler.emit_memcpy(builder, module, new_start, old_start, ptr_len * elem_size_bytes)
             
-            # Copy new data to the new array (overwriting all elements)
+            # Copy new data (overwrites all elements)
             new_bytes = val_len * (val_elem_type.width // 8)
-            zero = ir.Constant(ir.IntType(32), 0)
-            new_start = builder.gep(new_alloca, [zero, zero], name="new_start")
-            val_start = builder.gep(val, [zero, zero], name="val_start")
+            new_start = ArrayTypeHandler._get_array_start_ptr(builder, new_alloca, "new_start")
+            val_start = ArrayTypeHandler._get_array_start_ptr(builder, val, "val_start")
             ArrayTypeHandler.emit_memcpy(builder, module, new_start, val_start, new_bytes)
             
-            # Update the original variable to point to the new array
+            # Update scope
             if var_name and builder.scope and var_name in builder.scope:
                 builder.scope[var_name] = new_alloca
             
             return new_alloca
         else:
-            # If new array is smaller or same size, just copy the data
-            copy_len = min(val_len, ptr_len)
-            copy_bytes = copy_len * (val_elem_type.width // 8)
-            
-            zero = ir.Constant(ir.IntType(32), 0)
-            ptr_start = builder.gep(ptr, [zero, zero], name="ptr_start")
-            val_start = builder.gep(val, [zero, zero], name="val_start")
+            # Just copy the data
+            copy_bytes = min(val_len, ptr_len) * (val_elem_type.width // 8)
+            ptr_start = ArrayTypeHandler._get_array_start_ptr(builder, ptr, "ptr_start")
+            val_start = ArrayTypeHandler._get_array_start_ptr(builder, val, "val_start")
             
             # Copy the data
             ArrayTypeHandler.emit_memcpy(builder, module, ptr_start, val_start, copy_bytes)
             
-            # If the new array is smaller, zero out the remaining elements
+            # Zero out remaining if smaller
             if val_len < ptr_len:
                 remaining_bytes = (ptr_len - val_len) * (ptr_elem_type.width // 8)
                 if remaining_bytes > 0:
-                    # Get pointer to remaining area
-                    val_len_const = ir.Constant(ir.IntType(32), val_len)
+                    zero = ArrayTypeHandler._zero()
+                    val_len_const = ArrayTypeHandler._index(val_len)
                     remaining_start = builder.gep(ptr, [zero, val_len_const], name="remaining_start")
-                    
-                    # Zero out remaining bytes
                     ArrayTypeHandler.emit_memset(builder, module, remaining_start, 0, remaining_bytes)
             
             return ptr
     
     @staticmethod
-    def slice_array(builder: ir.IRBuilder, module: ir.Module, 
-                   array_val: ir.Value, start_val: ir.Value, end_val: ir.Value,
-                   is_reverse: bool = False) -> ir.Value:
-        """
-        Extract array slice with optional reverse.
-        
-        Args:
-            builder: IR builder
-            module: LLVM module
-            array_val: Source array
-            start_val: Start index (i32)
-            end_val: End index (i32, inclusive)
-            is_reverse: True for reverse slicing (e.g., s[3..0])
-            
-        Returns:
-            Pointer to new array containing the slice
-        """
-        # Calculate slice length based on direction
+    def slice_array(builder: ir.IRBuilder, module: ir.Module, array_val: ir.Value, start_val: ir.Value, end_val: ir.Value,is_reverse: bool = False) -> ir.Value:
+        """Extract array slice with optional reverse."""
+        # Calculate slice length
         if is_reverse:
             # Reverse range: length = (start - end) + 1
             slice_len_exclusive = builder.sub(start_val, end_val, name="slice_len_exclusive")
-            slice_len = builder.add(slice_len_exclusive, ir.Constant(ir.IntType(32), 1), name="slice_len")
         else:
             # Forward range: length = (end - start) + 1
             slice_len_exclusive = builder.sub(end_val, start_val, name="slice_len_exclusive")
-            slice_len = builder.add(slice_len_exclusive, ir.Constant(ir.IntType(32), 1), name="slice_len")
+        slice_len = builder.add(slice_len_exclusive, ArrayTypeHandler._index(1), name="slice_len")
         
         # Determine the element type
         if isinstance(array_val, ir.GlobalVariable):
@@ -1720,25 +1748,9 @@ class ArrayTypeHandler:
         max_slice_size = 256  # Should be enough for most string operations
         slice_array_type = ir.ArrayType(element_type, max_slice_size)
         slice_ptr = builder.alloca(slice_array_type, name="slice_array")
+        slice_start_ptr = ArrayTypeHandler._get_array_start_ptr(builder, slice_ptr, "slice_start")
         
-        # Get pointer to the start of the source array/string
-        zero = ir.Constant(ir.IntType(32), 0)
-        if isinstance(array_val, ir.GlobalVariable):
-            # Global array access
-            source_start_ptr = builder.gep(array_val, [zero, start_val], inbounds=True, name="source_start")
-        elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
-            # Local array access
-            source_start_ptr = builder.gep(array_val, [zero, start_val], inbounds=True, name="source_start")
-        elif isinstance(array_val.type, ir.PointerType):
-            # Pointer arithmetic for strings (char*, etc.)
-            source_start_ptr = builder.gep(array_val, [start_val], inbounds=True, name="source_start")
-        else:
-            raise ValueError(f"Unsupported array type for slicing: {array_val.type}")
-        
-        # Get pointer to the start of the slice array
-        slice_start_ptr = builder.gep(slice_ptr, [zero, zero], inbounds=True, name="slice_start")
-        
-        # Copy the slice using a loop that handles both forward and reverse directions
+        # Create slice loop
         func = builder.block.function
         loop_cond = func.append_basic_block('slice_loop_cond')
         loop_body = func.append_basic_block('slice_loop_body')
@@ -1746,7 +1758,7 @@ class ArrayTypeHandler:
         
         # Create loop counter
         counter_ptr = builder.alloca(ir.IntType(32), name="slice_counter")
-        builder.store(ir.Constant(ir.IntType(32), 0), counter_ptr)
+        builder.store(ArrayTypeHandler._index(0), counter_ptr)
         builder.branch(loop_cond)
         
         # Loop condition: counter < slice_len
@@ -1765,16 +1777,8 @@ class ArrayTypeHandler:
             # For forward slices: source index goes forwards from start
             source_offset = builder.add(start_val, counter, name="forward_source_offset")
         
-        # Get source element at calculated offset
-        if isinstance(array_val, ir.GlobalVariable):
-            # Global array access
-            source_elem_ptr = builder.gep(array_val, [zero, source_offset], inbounds=True, name="source_elem")
-        elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
-            # Local array access
-            source_elem_ptr = builder.gep(array_val, [zero, source_offset], inbounds=True, name="source_elem")
-        elif isinstance(array_val.type, ir.PointerType):
-            # Pointer arithmetic for strings (char*, etc.)
-            source_elem_ptr = builder.gep(array_val, [source_offset], inbounds=True, name="source_elem")
+        # Get source element using helper (handles all array types)
+        source_elem_ptr = ArrayTypeHandler._get_array_element_ptr(builder, array_val, source_offset, "source_elem")
         
         source_elem = builder.load(source_elem_ptr, name="source_val")
         
@@ -1783,30 +1787,28 @@ class ArrayTypeHandler:
         builder.store(source_elem, dest_elem_ptr)
         
         # Increment counter
-        next_counter = builder.add(counter, ir.Constant(ir.IntType(32), 1), name="next_counter")
+        next_counter = builder.add(counter, ArrayTypeHandler._index(1), name="next_counter")
         builder.store(next_counter, counter_ptr)
         builder.branch(loop_cond)
         
-        # End of loop - add null terminator for strings
+        # Loop end - null terminate strings
+        # Only way for this to work is to null terminate so this is an exception to the no null terminate rule.
         builder.position_at_start(loop_end)
-        if element_type == ir.IntType(8):  # For string slices, add null terminator
+        if element_type == ir.IntType(8):
             final_counter = builder.load(counter_ptr, name="final_counter")
             null_ptr = builder.gep(slice_start_ptr, [final_counter], inbounds=True, name="null_pos")
-            null_char = ir.Constant(ir.IntType(8), 0)
-            builder.store(null_char, null_ptr)
+            builder.store(ir.Constant(ir.IntType(8), 0), null_ptr)
         
         return slice_ptr
     
     @staticmethod
     def create_global_string_initializer(string_value: str, llvm_type: ir.Type) -> Optional[ir.Constant]:
         """Create a compile-time constant initializer for a global string."""
-        if isinstance(llvm_type, ir.ArrayType) and \
-           isinstance(llvm_type.element, ir.IntType) and \
-           llvm_type.element.width == 8:
+        if isinstance(llvm_type, ir.ArrayType) and isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8:
             
             string_val = string_value
             char_values = []
-            for i, char in enumerate(string_val):
+            for i, char in enumerate(string_value):
                 if i >= llvm_type.count:
                     break
                 char_values.append(ir.Constant(ir.IntType(8), ord(char)))
@@ -1817,8 +1819,7 @@ class ArrayTypeHandler:
         return None
 
     @staticmethod
-    def create_global_array_initializer(array_literal, llvm_type: ir.Type, 
-                                        module: ir.Module) -> Optional[ir.Constant]:
+    def create_global_array_initializer(array_literal, llvm_type: ir.Type, module: ir.Module) -> Optional[ir.Constant]:
         """Create a compile-time constant initializer for a global array."""
         from fast import StringLiteral, Literal, DataType as FastDataType, Identifier
         
@@ -1859,7 +1860,7 @@ class ArrayTypeHandler:
                                 elem_val = global_var.initializer.constant
                                 # Get the actual type width from the global variable's type
                                 if isinstance(global_var.type, ir.PointerType):
-                                    actual_type = global_var.type.pointee
+                                    actual_type = global_var.type.pointee if isinstance(global_var.type, ir.PointerType) else global_var.type
                                 else:
                                     actual_type = global_var.type
                                 
@@ -1880,17 +1881,40 @@ class ArrayTypeHandler:
                 
                 # Verify we used all the bits
                 if bit_offset != llvm_type.element.width:
-                    raise ValueError(
-                        f"Array packing size mismatch: packed {bit_offset} bits into {llvm_type.element.width}-bit integer"
-                    )
+                    raise ValueError(f"Array packing size mismatch: packed {bit_offset} bits into {llvm_type.element.width}-bit integer")
                 
                 const_elements.append(ir.Constant(llvm_type.element, packed_value))
             
             # Direct constant elements
             elif isinstance(elem, Literal):
-                llvm_val = elem.to_llvm_constant(module)
+                llvm_val = elem.codegen(None, module)
+                
+                # Convert to target element type if needed
                 if llvm_val.type != llvm_type.element:
-                    raise ValueError(f"Array element type mismatch: expected {llvm_type.element}, got {llvm_val.type}")
+                    # Both must be integer types for conversion
+                    if isinstance(llvm_val.type, ir.IntType) and isinstance(llvm_type.element, ir.IntType):
+                        # Get the literal value
+                        if isinstance(llvm_val, ir.Constant):
+                            # Truncate or extend to target width
+                            target_width = llvm_type.element.width
+                            source_width = llvm_val.type.width
+                            
+                            if source_width > target_width:
+                                # Truncate - mask to target width
+                                mask = (1 << target_width) - 1
+                                truncated_val = llvm_val.constant & mask
+                                llvm_val = ir.Constant(llvm_type.element, truncated_val)
+                            elif source_width < target_width:
+                                # Extend - just use the value directly
+                                llvm_val = ir.Constant(llvm_type.element, llvm_val.constant)
+                            # If widths are equal but types differ, recreate constant
+                            else:
+                                llvm_val = ir.Constant(llvm_type.element, llvm_val.constant)
+                        else:
+                            raise ValueError(f"Cannot convert non-constant literal to array element type")
+                    else:
+                        raise ValueError(f"Array element type mismatch: expected {llvm_type.element}, got {llvm_val.type}")
+                
                 const_elements.append(llvm_val)
             
             else:
@@ -1903,13 +1927,11 @@ class ArrayTypeHandler:
         return ir.Constant(llvm_type, const_elements)
 
     @staticmethod
-    def initialize_local_array(builder: ir.IRBuilder, module: ir.Module, 
-                              alloca: ir.Value, llvm_type: ir.Type, 
-                              array_literal) -> None:
+    def initialize_local_array(builder: ir.IRBuilder, module: ir.Module, alloca: ir.Value, llvm_type: ir.Type, array_literal) -> None:
         """Initialize a local array variable with an array literal."""
         from fast import StringLiteral
         
-        zero = ir.Constant(ir.IntType(32), 0)
+        zero = ArrayTypeHandler._zero()
         
         for i, elem in enumerate(array_literal.elements):
             if i >= llvm_type.count:
@@ -1917,33 +1939,24 @@ class ArrayTypeHandler:
             
             # Pack StringLiteral into integer if the target is integer type
             if isinstance(elem, StringLiteral) and isinstance(llvm_type.element, ir.IntType):
-                string_val = elem.value
-                byte_count = min(len(string_val), llvm_type.element.width // 8)
                 packed_value = 0
-                for j in range(byte_count):
-                    packed_value |= (ord(string_val[j]) << (j * 8))
+                for j in range(min(len(elem.value), llvm_type.element.width // 8)):
+                    packed_value |= (ord(elem.value[j]) << (j * 8))
                 
-                index = ir.Constant(ir.IntType(32), i)
-                elem_ptr = builder.gep(alloca, [zero, index], name=f"elem_{i}")
-                packed_const = ir.Constant(llvm_type.element, packed_value)
-                builder.store(packed_const, elem_ptr)
+                elem_ptr = builder.gep(alloca, [zero, ArrayTypeHandler._index(i)], name=f"elem_{i}")
+                builder.store(ir.Constant(llvm_type.element, packed_value), elem_ptr)
             else:
                 elem_val = elem.codegen(builder, module)
-                
-                if isinstance(elem_val.type, ir.PointerType):
-                    elem_val = builder.load(elem_val)
+                elem_val = ArrayTypeHandler._load_if_pointer(builder, elem_val)
                 
                 if elem_val.type != llvm_type.element:
                     if isinstance(elem_val.type, ir.IntType) and isinstance(llvm_type.element, ir.IntType):
-                        if elem_val.type.width < llvm_type.element.width:
-                            elem_val = builder.sext(elem_val, llvm_type.element)
-                        elif elem_val.type.width > llvm_type.element.width:
-                            elem_val = builder.trunc(elem_val, llvm_type.element)
+                        elem_val = ArrayTypeHandler._cast_int_to_width(builder, elem_val, llvm_type.element)
                     else:
                         raise ValueError(f"Array element type mismatch: expected {llvm_type.element}, got {elem_val.type}")
                 
                 index = ir.Constant(ir.IntType(32), i)
-                elem_ptr = builder.gep(alloca, [zero, index], name=f"elem_{i}")
+                elem_ptr = builder.gep(alloca, [zero, ArrayTypeHandler._index(i)], name=f"elem_{i}")
                 builder.store(elem_val, elem_ptr)
 
     @staticmethod
@@ -1968,9 +1981,7 @@ class ArrayTypeHandler:
             
             # Convert to runtime packing if not constant
             if not isinstance(elem_val, ir.Constant):
-                return ArrayTypeHandler.pack_array_to_integer_runtime(
-                    builder, module, array_lit, target_type
-                )
+                return ArrayTypeHandler.pack_array_to_integer_runtime(builder, module, array_lit, target_type)
             
             # Pack constant value
             packed_value |= (elem_val.constant << bit_offset)
@@ -1978,17 +1989,12 @@ class ArrayTypeHandler:
         
         # Verify total width matches target
         if bit_offset != target_type.width:
-            raise ValueError(
-                f"Array packing size mismatch: packed {bit_offset} bits into {target_type.width}-bit integer"
-            )
+            raise ValueError(f"Array packing size mismatch: packed {bit_offset} bits into {target_type.width}-bit integer")
         
         return ir.Constant(target_type, packed_value)
 
     @staticmethod
-    def pack_array_to_integer_runtime(builder: ir.IRBuilder,
-                                       module: ir.Module,
-                                       array_lit, 
-                                       target_type: ir.IntType) -> ir.Value:
+    def pack_array_to_integer_runtime(builder: ir.IRBuilder, module: ir.Module, array_lit,  target_type: ir.IntType) -> ir.Value:
         """Pack array elements into integer at runtime."""
         result = ir.Constant(target_type, 0)
         bit_offset = 0
@@ -2005,15 +2011,12 @@ class ArrayTypeHandler:
                 raise ValueError(f"Cannot pack non-integer type {elem_val.type} into integer")
             
             # Use helper to pack value
-            result, bit_offset = ArrayTypeHandler._pack_value_into_integer(
-                builder, result, elem_val, target_type, bit_offset
-            )
+            result, bit_offset = ArrayTypeHandler._pack_value_into_integer(builder, result, elem_val, target_type, bit_offset)
         
         return result
 
     @staticmethod
-    def pack_array_pointer_to_integer(builder: ir.IRBuilder, module: ir.Module,
-                                       array_ptr: ir.Value, target_type: ir.IntType) -> ir.Value:
+    def pack_array_pointer_to_integer(builder: ir.IRBuilder, module: ir.Module, array_ptr: ir.Value, target_type: ir.IntType) -> ir.Value:
         """Pack an array (via pointer) into a single integer at runtime."""
         if not isinstance(array_ptr.type, ir.PointerType):
             raise ValueError("Expected pointer to array")
@@ -2030,40 +2033,29 @@ class ArrayTypeHandler:
         # Calculate expected total bits
         total_bits = array_type.count * elem_type.width
         if total_bits != target_type.width:
-            raise ValueError(
-                f"Array packing size mismatch: {array_type.count} x {elem_type.width} = {total_bits} bits "
-                f"into {target_type.width}-bit integer"
-            )
+            raise ValueError(f"Array packing size mismatch: {array_type.count} x {elem_type.width} = {total_bits} bits into {target_type.width}-bit integer")
         
         # Pack at runtime (big-endian: first element at high bits, last at low bits)
         result = ir.Constant(target_type, 0)
         bit_offset = 0
         
-        zero = ir.Constant(ir.IntType(32), 0)
+        zero = ArrayTypeHandler._zero()
         # Iterate in reverse: last element goes to low bits
         for i in range(array_type.count - 1, -1, -1):
-            index = ir.Constant(ir.IntType(32), i)
-            elem_ptr = builder.gep(array_ptr, [zero, index], inbounds=True)
+            elem_ptr = builder.gep(array_ptr, [zero, ArrayTypeHandler._index(i)], inbounds=True)
             elem_val = builder.load(elem_ptr)
             
-            # Use helper to pack value
-            result, bit_offset = ArrayTypeHandler._pack_value_into_integer(
-                builder, result, elem_val, target_type, bit_offset
-            )
+            result, bit_offset = ArrayTypeHandler._pack_value_into_integer(builder, result, elem_val, target_type, bit_offset)
         
         return result
 
     @staticmethod
-    def initialize_local_string(builder: ir.IRBuilder, module: ir.Module, 
-                               alloca: ir.Value, llvm_type: ir.Type, 
-                               string_literal) -> None:
+    def initialize_local_string(builder: ir.IRBuilder, module: ir.Module, alloca: ir.Value, llvm_type: ir.Type, string_literal) -> None:
         """Initialize a local variable with a string literal."""
         string_val = string_literal.value
         
         # Case 1: Pointer to i8 (char*)
-        if isinstance(llvm_type, ir.PointerType) and \
-           isinstance(llvm_type.pointee, ir.IntType) and \
-           llvm_type.pointee.width == 8:
+        if isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8:
             
             # Store string data on stack
             string_bytes = string_val.encode('ascii')
@@ -2073,29 +2065,23 @@ class ArrayTypeHandler:
             # Use helper to store bytes
             ArrayTypeHandler._store_bytes_to_array(builder, str_alloca, string_bytes)
             
-            zero = ir.Constant(ir.IntType(32), 0)
-            str_ptr = builder.gep(str_alloca, [zero, zero], name="str_ptr")
+            str_ptr = ArrayTypeHandler._get_array_start_ptr(builder, str_alloca, "str_ptr")
             builder.store(str_ptr, alloca)
         
         # Case 2: Array of i8 (char[N])
-        elif isinstance(llvm_type, ir.ArrayType) and \
-             isinstance(llvm_type.element, ir.IntType) and \
-             llvm_type.element.width == 8:
+        elif isinstance(llvm_type, ir.ArrayType) and isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8:
             
             # Store string characters
             string_bytes = string_val.encode('ascii')[:llvm_type.count]
             ArrayTypeHandler._store_bytes_to_array(builder, alloca, string_bytes)
             
             # Null-terminate remaining
-            zero = ir.Constant(ir.IntType(32), 0)
+            zero = ArrayTypeHandler._zero()
             for i in range(len(string_bytes), llvm_type.count):
-                index = ir.Constant(ir.IntType(32), i)
-                elem_ptr = builder.gep(alloca, [zero, index])
-                builder.store(ir.Constant(ir.IntType(8), 0), elem_ptr)
+                elem_ptr = builder.gep(alloca, [zero, ArrayTypeHandler._index(i)])
 
     @staticmethod
-    def create_local_string_for_arg(builder: ir.IRBuilder, module: ir.Module, 
-                                    string_value: str, name_hint: str) -> ir.Value:
+    def create_local_string_for_arg(builder: ir.IRBuilder, module: ir.Module, string_value: str, name_hint: str) -> ir.Value:
         """Create a local string on the stack for passing as an argument."""
         string_bytes = string_value.encode('ascii')
         str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
@@ -2104,14 +2090,10 @@ class ArrayTypeHandler:
         # Use helper to store bytes
         ArrayTypeHandler._store_bytes_to_array(builder, str_alloca, string_bytes)
         
-        zero = ir.Constant(ir.IntType(32), 0)
-        str_ptr = builder.gep(str_alloca, [zero, zero], name=f"{name_hint}_str_ptr")
-        return str_ptr
+        return ArrayTypeHandler._get_array_start_ptr(builder, str_alloca, f"{name_hint}_str_ptr")
 
     @staticmethod
-    def copy_array_to_local(builder: ir.IRBuilder, module: ir.Module, 
-                           alloca: ir.Value, llvm_type: ir.Type, 
-                           source_identifier) -> None:
+    def copy_array_to_local(builder: ir.IRBuilder, module: ir.Module, alloca: ir.Value, llvm_type: ir.Type, source_identifier) -> None:
         """Copy an array from one variable to another."""
         # Get the source array
         init_val = source_identifier.codegen(builder, module)
@@ -2125,14 +2107,12 @@ class ArrayTypeHandler:
         source_array_type = init_val.type.pointee
         copy_count = min(llvm_type.count, source_array_type.count)
         
-        zero = ir.Constant(ir.IntType(32), 0)
+        zero = ArrayTypeHandler._zero()
         for i in range(copy_count):
-            index = ir.Constant(ir.IntType(32), i)
-            # Load from source
-            src_ptr = builder.gep(init_val, [zero, index], inbounds=True, name=f"src_{i}")
+            idx = ArrayTypeHandler._index(i)
+            src_ptr = builder.gep(init_val, [zero, idx], inbounds=True, name=f"src_{i}")
             src_val = builder.load(src_ptr, name=f"val_{i}")
-            # Store to destination
-            dst_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"dst_{i}")
+            dst_ptr = builder.gep(alloca, [zero, idx], inbounds=True, name=f"dst_{i}")
             builder.store(src_val, dst_ptr)
 
 class LiteralTypeHandler:
@@ -2238,6 +2218,20 @@ class LiteralTypeHandler:
         Returns:
             Normalized integer value for LLVM IR constant
         """
+        # Parse the value if it's a string (hex literals come as strings)
+        val = int(literal_value, 0) if isinstance(literal_value, str) else int(literal_value)
+        
+        # For unsigned types with large values, convert to signed representation
+        # LLVM IR constants are always signed, but we need to preserve the bit pattern
+        if literal_type == DataType.UINT:
+            # If value is larger than max signed value for this width, convert to negative
+            max_signed = (1 << (width - 1)) - 1
+            if val > max_signed:
+                # Convert to two's complement signed representation
+                val = val - (1 << width)
+        
+        return val
+        
     @staticmethod
     def preserve_array_element_type_metadata(loaded_val: ir.Value, array_val: ir.Value, module: ir.Module) -> ir.Value:
         """
@@ -2268,7 +2262,29 @@ class LiteralTypeHandler:
         Cast an integer value to a target integer type using appropriate trunc/sext.
         
         This handles type conversions needed when storing values into arrays with
+        specific element types, or when converting between different integer widths.
+        
+        Args:
+            builder: IR builder
+            value: Source integer value
+            target_type: Target integer type
+            
+        Returns:
+            Value cast to target type (or original if no cast needed)
         """
+        # Only handle integer-to-integer casts
+        if not (isinstance(value.type, ir.IntType) and isinstance(target_type, ir.IntType)):
+            return value
+        
+        # If same width, no cast needed
+        if value.type.width == target_type.width:
+            return value
+        
+        # Truncate if source is wider
+        if value.type.width > target_type.width:
+            return builder.trunc(value, target_type)
+        
+        # Sign-extend if source is narrower
         return builder.sext(value, target_type)
     
     @staticmethod
@@ -2504,35 +2520,12 @@ class IdentifierTypeHandler:
             print(error_msg)
             raise RuntimeError(error_msg)
     
-    @staticmethod
     def resolve_namespace_mangled_name(name: str, module: ir.Module) -> Optional[str]:
         """
-        Resolve an identifier using namespace 'using' statements.
-        
-        Args:
-            name: The unqualified identifier name
-            module: LLVM module containing _using_namespaces
-            
-        Returns:
-            Mangled name if found in a using namespace, None otherwise
+        Resolve identifier using namespace 'using' statements.
         """
-        if not hasattr(module, '_using_namespaces'):
-            return None
-        
-        for namespace in module._using_namespaces:
-            # Convert namespace path to mangled name format
-            mangled_prefix = namespace.replace('::', '__') + '__'
-            mangled_name = mangled_prefix + name
-            
-            # Check in global variables with mangled name
-            if mangled_name in module.globals:
-                return mangled_name
-            
-            # Check in type aliases with mangled name
-            if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
-                return mangled_name
-        
-        return None
+        current_ns = TypeResolver.get_current_namespace(module)
+        return TypeResolver.resolve_identifier(module, name, current_ns)
     
     @staticmethod
     def is_type_alias(name: str, module: ir.Module) -> bool:
