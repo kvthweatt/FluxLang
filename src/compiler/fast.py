@@ -4463,7 +4463,6 @@ class ForInLoop(Statement):
         return None
 
 @dataclass
-@dataclass
 class ReturnStatement(Statement):
     value: Optional[Expression] = None
 
@@ -4488,93 +4487,10 @@ class ReturnStatement(Statement):
             raise RuntimeError("Cannot determine function return type")
 
         # Rework to use lowering context.
-        ret_val = self._coerce_return_value(builder, ret_val, expected)
+        ret_val = coerce_return_value(builder, ret_val, expected)
 
         builder.ret(ret_val)
         return None
-    
-    def _coerce_return_value(
-        self,
-        builder: ir.IRBuilder,
-        value: ir.Value,
-        expected: ir.Type
-    ) -> ir.Value:
-        src = value.type
-
-        # Exact match
-        if src == expected:
-            return value
-
-        # === ALLOWED IMPLICIT CASE ===
-        # Integer type conversion (widening and narrowing)
-        # This includes literals, binary operations, and all integer expressions
-        if isinstance(src, ir.IntType) and isinstance(expected, ir.IntType):
-            if src.width < expected.width:
-                # Widening: use zero-extension for unsigned, sign-extension for signed
-                from futilities import is_unsigned
-                if is_unsigned(value):
-                    return builder.zext(value, expected)
-                else:
-                    return builder.sext(value, expected)
-            elif src.width > expected.width:
-                # Narrowing: truncate
-                return builder.trunc(value, expected)
-            # Same width already handled by exact match above
-
-        # Pointer ABI cast
-        if isinstance(src, ir.PointerType) and isinstance(expected, ir.PointerType):
-            return builder.bitcast(value, expected)
-
-        # Struct exact match only
-        if isinstance(src, ir.LiteralStructType) and isinstance(expected, ir.LiteralStructType):
-            if src != expected:
-                raise TypeError(
-                    f"Return struct type mismatch: {src} != {expected}"
-                )
-            return value
-
-        # === Array type conversion when bit widths match ===
-        # This handles cases like [8 x i32] -> [32 x i8] where 8*32 = 32*8 = 256 bits
-        # Flux allows "anything so long as the widths match"
-        if isinstance(src, ir.ArrayType) and isinstance(expected, ir.ArrayType):
-            # Check if element types are both integers
-            src_elem = src.element
-            exp_elem = expected.element
-            
-            if isinstance(src_elem, ir.IntType) and isinstance(exp_elem, ir.IntType):
-                # Calculate total bit widths
-                src_total_bits = src.count * src_elem.width
-                exp_total_bits = expected.count * exp_elem.width
-                
-                # If bit widths match, we can convert by storing and loading through memory
-                if src_total_bits == exp_total_bits:
-                    # Allocate temporary storage for source type
-                    temp = builder.alloca(src, name="array_convert_temp")
-                    
-                    # Store the source value
-                    builder.store(value, temp)
-                    
-                    # Bitcast the pointer to the expected type
-                    temp_as_expected = builder.bitcast(temp, ir.PointerType(expected))
-                    
-                    # Load as the expected type
-                    return builder.load(temp_as_expected, name="array_converted")
-                else:
-                    raise TypeError(
-                        f"Invalid return type: array bit width mismatch: "
-                        f"cannot return {src} ({src_total_bits} bits) "
-                        f"from function returning {expected} ({exp_total_bits} bits)"
-                    )
-            else:
-                raise TypeError(
-                    f"Invalid return type: can only convert between integer arrays, "
-                    f"got {src} -> {expected}"
-                )
-
-        # Everything else is illegal
-        raise TypeError(
-            f"Invalid return type: cannot return {src} from function returning {expected}"
-        )
 
 @dataclass
 class BreakStatement(Statement):
