@@ -12,7 +12,7 @@ def main() -> int
     
     // Take the address of the pointer itself
     int** void_ptr = (int**)@demon;
-    u32 demon = (u32)["H","E","L","L"];
+    u32 demon = (u32)['H','E','L','L'];
     
     // Dereference through the chaos
     //int sacrificed = @void_ptr;    // Causes another i32* != i32*

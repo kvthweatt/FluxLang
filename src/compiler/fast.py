@@ -32,12 +32,14 @@ class Literal(ASTNode):
     type: DataType
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        print(f"[DEBUG Literal.codegen] value={self.value}, type={self.type}")
         if self.type in (DataType.SINT, DataType.UINT):
             llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
             normalized_val = LiteralTypeHandler.normalize_int_value(self.value, self.type, llvm_type.width)
             llvm_val = ir.Constant(llvm_type, normalized_val)
             
             # Attach type metadata for signedness tracking
+            print(f"[DEBUG Literal.codegen] Created llvm_val type={llvm_val.type}, width={llvm_val.type.width if hasattr(llvm_val.type, 'width') else 'N/A'}")
             return attach_type_metadata(llvm_val, base_type=self.type)
         elif self.type == DataType.FLOAT:
             llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
@@ -928,13 +930,19 @@ class BinaryOp(Expression):
                 if lhs.type.width != rhs.type.width:
                     lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=unsigned, promote=True)
 
-            return {
+            result = {
                 Operator.ADD: builder.add,
                 Operator.SUB: builder.sub,
                 Operator.MUL: builder.mul,
                 Operator.DIV: builder.udiv if unsigned else builder.sdiv,
                 Operator.MOD: builder.urem if unsigned else builder.srem,
             }[self.operator](lhs, rhs)
+            
+            # Preserve type metadata (signedness) to result
+            if unsigned:
+                return attach_type_metadata(result, base_type=DataType.UINT)
+            else:
+                return attach_type_metadata(result, base_type=DataType.SINT)
 
         # --------------------------------------------------
         # Comparisons
@@ -972,23 +980,29 @@ class BinaryOp(Expression):
 
         if self.operator in (Operator.BITAND, Operator.BITOR):
             lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=True)
-            return {
+            result = {
                 Operator.AND: builder.and_,
                 Operator.BITAND: builder.and_,
                 Operator.OR: builder.or_,
                 Operator.BITOR: builder.or_,
                 Operator.XOR: builder.xor,
             }[self.operator](lhs, rhs)
+            # Bitwise operations preserve signedness from operands
+            unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
+            return attach_type_metadata(result, base_type=DataType.UINT if unsigned else DataType.SINT)
 
         if self.operator in (Operator.AND, Operator.OR, Operator.XOR):
             lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=True)
-            return {
+            result = {
                 Operator.AND: builder.and_,
                 Operator.BITAND: builder.and_,
                 Operator.OR: builder.or_,
                 Operator.BITOR: builder.or_,
                 Operator.XOR: builder.xor,
             }[self.operator](lhs, rhs)
+            # Bitwise operations preserve signedness from operands
+            unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
+            return attach_type_metadata(result, base_type=DataType.UINT if unsigned else DataType.SINT)
 
         # --------------------------------------------------
         # Shifts
@@ -1008,13 +1022,19 @@ class BinaryOp(Expression):
                     rhs = builder.trunc(rhs, lhs.type)
 
             if self.operator is Operator.BITSHIFT_LEFT:
-                return builder.shl(lhs, rhs)
+                result = builder.shl(lhs, rhs)
+                # Shifts preserve signedness of left operand
+                unsigned = ctx.is_unsigned(lhs)
+                return attach_type_metadata(result, base_type=DataType.UINT if unsigned else DataType.SINT)
 
-            return (
+            result = (
                 builder.lshr(lhs, rhs)
                 if ctx.is_unsigned(lhs)
                 else builder.ashr(lhs, rhs)
             )
+            # Shifts preserve signedness of left operand
+            unsigned = ctx.is_unsigned(lhs)
+            return attach_type_metadata(result, base_type=DataType.UINT if unsigned else DataType.SINT)
 
         # --------------------------------------------------
         # Boolean composites
@@ -2227,13 +2247,65 @@ class MemberAccess(Expression):
                 if isinstance(member_ptr.type, ir.PointerType):
                     pointee = member_ptr.type.pointee
                     if isinstance(pointee, ir.ArrayType):
-                        return member_ptr  # Return pointer to array for indexing
+                        # Return pointer to array for indexing
+                        # Attach element type spec if available
+                        struct_name = None
+                        if hasattr(module, '_struct_types'):
+                            for name, stype in module._struct_types.items():
+                                if stype == struct_type:
+                                    struct_name = name
+                                    break
+                        
+                        if (struct_name and hasattr(module, '_struct_member_type_specs') and 
+                            struct_name in module._struct_member_type_specs):
+                            member_specs = module._struct_member_type_specs[struct_name]
+                            print(f"[DEBUG MemberAccess] Found struct {struct_name}, looking for member {self.member}")
+                            print(f"[DEBUG MemberAccess] Available members: {list(member_specs.keys())}")
+                            if self.member in member_specs:
+                                type_spec = member_specs[self.member]
+                                print(f"[DEBUG MemberAccess] Member type spec: {type_spec}")
+                                print(f"[DEBUG MemberAccess] Has array_element_type: {hasattr(type_spec, 'array_element_type')}")
+                                if hasattr(type_spec, 'array_element_type'):
+                                    print(f"[DEBUG MemberAccess] array_element_type: {type_spec.array_element_type}")
+                                # For array types, attach the element type spec
+                                if hasattr(type_spec, 'array_element_type') and type_spec.array_element_type:
+                                    print(f"[DEBUG MemberAccess] Attaching element type to array pointer")
+                                    member_ptr._flux_array_element_type_spec = type_spec.array_element_type
+                                    print(f"[DEBUG MemberAccess] Element type base_type: {type_spec.array_element_type.base_type}")
+                        
+                        return member_ptr
                     elif (isinstance(pointee, ir.LiteralStructType) or
                           hasattr(pointee, '_name') or
                           hasattr(pointee, 'elements')):
                         return member_ptr  # Return pointer to struct for member access
                 
-                return builder.load(member_ptr)
+                loaded = builder.load(member_ptr)
+                # Preserve type metadata from struct member type
+                from ftypesys import attach_type_metadata_from_llvm_type, attach_type_metadata
+                
+                # Try to find the struct name and get the member type spec
+                struct_name = None
+                if hasattr(module, '_struct_types'):
+                    for name, stype in module._struct_types.items():
+                        if stype == struct_type:
+                            struct_name = name
+                            break
+                
+                # If we found the struct and have member type specs, use them
+                if (struct_name and hasattr(module, '_struct_member_type_specs') and 
+                    struct_name in module._struct_member_type_specs):
+                    member_specs = module._struct_member_type_specs[struct_name]
+                    if self.member in member_specs:
+                        type_spec = member_specs[self.member]
+                        # For array types, get the element type spec
+                        if hasattr(type_spec, 'array_element_type') and type_spec.array_element_type:
+                            # Member is an array, but we don't load it here (returned pointer above)
+                            # This shouldn't happen
+                            pass
+                        return attach_type_metadata(loaded, type_spec=type_spec)
+                
+                # Fallback to original method
+                return attach_type_metadata_from_llvm_type(loaded, loaded.type, module)
         
         raise ValueError(f"Member access on unsupported type: {obj_val.type}")
     
@@ -2409,7 +2481,24 @@ class ArrayAccess(Expression):
                       hasattr(gep.type.pointee, '_name') or  # Identified struct type
                       hasattr(gep.type.pointee, 'elements')):  # Other struct-like types
                     return gep  # Return pointer to struct for member access
-            return builder.load(gep, name="array_load")
+            loaded = builder.load(gep, name="array_load")
+            # Preserve type metadata from array element type
+            from ftypesys import attach_type_metadata_from_llvm_type, get_array_element_type_spec
+            
+            # Try to get the element type spec from the array value's metadata
+            element_type_spec = get_array_element_type_spec(array_val)
+            print(f"[DEBUG ArrayAccess] array_val has metadata: {hasattr(array_val, '_flux_array_element_type_spec')}")
+            print(f"[DEBUG ArrayAccess] element_type_spec: {element_type_spec}")
+            if element_type_spec:
+                print(f"[DEBUG ArrayAccess] Attaching element type spec: base_type={element_type_spec.base_type}, is_signed={getattr(element_type_spec, 'is_signed', None)}")
+                from ftypesys import attach_type_metadata
+                result = attach_type_metadata(loaded, type_spec=element_type_spec)
+                print(f"[DEBUG ArrayAccess] Result has metadata: {hasattr(result, '_flux_type_spec')}")
+                if hasattr(result, '_flux_type_spec'):
+                    print(f"[DEBUG ArrayAccess] Result metadata: base_type={result._flux_type_spec.base_type}, is_signed={getattr(result._flux_type_spec, 'is_signed', None)}")
+                return result
+            
+            return attach_type_metadata_from_llvm_type(loaded, loaded.type, module)
         
         # Handle local arrays
         elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
@@ -2423,7 +2512,24 @@ class ArrayAccess(Expression):
                       hasattr(gep.type.pointee, '_name') or  # Identified struct type
                       hasattr(gep.type.pointee, 'elements')):  # Other struct-like types
                     return gep  # Return pointer to struct for member access
-            return builder.load(gep, name="array_load")
+            loaded = builder.load(gep, name="array_load")
+            # Preserve type metadata from array element type
+            from ftypesys import attach_type_metadata_from_llvm_type, get_array_element_type_spec
+            
+            # Try to get the element type spec from the array value's metadata
+            element_type_spec = get_array_element_type_spec(array_val)
+            print(f"[DEBUG ArrayAccess] array_val has metadata: {hasattr(array_val, '_flux_array_element_type_spec')}")
+            print(f"[DEBUG ArrayAccess] element_type_spec: {element_type_spec}")
+            if element_type_spec:
+                print(f"[DEBUG ArrayAccess] Attaching element type spec: base_type={element_type_spec.base_type}, is_signed={getattr(element_type_spec, 'is_signed', None)}")
+                from ftypesys import attach_type_metadata
+                result = attach_type_metadata(loaded, type_spec=element_type_spec)
+                print(f"[DEBUG ArrayAccess] Result has metadata: {hasattr(result, '_flux_type_spec')}")
+                if hasattr(result, '_flux_type_spec'):
+                    print(f"[DEBUG ArrayAccess] Result metadata: base_type={result._flux_type_spec.base_type}, is_signed={getattr(result._flux_type_spec, 'is_signed', None)}")
+                return result
+            
+            return attach_type_metadata_from_llvm_type(loaded, loaded.type, module)
         
         # Handle pointer types (like char*)
         elif isinstance(array_val.type, ir.PointerType):
@@ -2434,7 +2540,17 @@ class ArrayAccess(Expression):
                     hasattr(gep.type.pointee, '_name') or  # Identified struct type
                     hasattr(gep.type.pointee, 'elements')):  # Other struct-like types
                     return gep  # Return pointer to struct for member access
-            return builder.load(gep, name="ptr_load")
+            loaded = builder.load(gep, name="ptr_load")
+            # Preserve type metadata from pointer element type
+            from ftypesys import attach_type_metadata_from_llvm_type, get_array_element_type_spec
+            
+            # Try to get the element type spec from the array value's metadata
+            element_type_spec = get_array_element_type_spec(array_val)
+            if element_type_spec:
+                from ftypesys import attach_type_metadata
+                return attach_type_metadata(loaded, type_spec=element_type_spec)
+            
+            return attach_type_metadata_from_llvm_type(loaded, loaded.type, module)
         
         else:
             raise ValueError(f"Cannot access array element for type: {array_val.type}")
@@ -3209,310 +3325,34 @@ class Assignment(Statement):
     value: Expression
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        from ftypesys import AssignmentTypeHandler
+        
         # Generate code for the value to be assigned
         val = self.value.codegen(builder, module)
         
         # Handle different types of targets
         if isinstance(self.target, Identifier):
-            # Simple variable assignment
-            if builder.scope is not None and self.target.name in builder.scope:
-                # Local variable
-                ptr = builder.scope[self.target.name]
-            elif self.target.name in module.globals:
-                # Global variable
-                ptr = module.globals[self.target.name]
-            else:
-                raise NameError(f"Unknown variable: {self.target.name}")
-            
-            # Check if this is an array concatenation assignment that requires resizing
-            if (isinstance(self.value, BinaryOp) and self.value.operator == Operator.ADD and
-                isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType)):
-                # This is the result of array concatenation - update variable to point to new array
-                if builder.scope is not None and self.target.name in builder.scope:
-                    # For local variables, update the scope to point to the new array
-                    builder.scope[self.target.name] = val
-                    return val
-                else:
-                    # For global variables, we can't easily resize, so convert to element pointer
-                    zero = ir.Constant(ir.IntType(1), 0)
-                    array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
-                    builder.store(array_ptr, ptr)
-                    return array_ptr
-            
-            # Handle type compatibility for assignments
-            if val.type != ptr.type.pointee:
-                # Handle array pointer assignments - for arrays, just store the pointer directly
-                if (isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType) and
-                    isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.PointerType)):
-                    # This is assigning an array to a pointer type (like noopstr)
-                    # Get pointer to first element of array
-                    zero = ir.Constant(ir.IntType(1), 0)
-                    array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
-                    builder.store(array_ptr, ptr)
-                    return array_ptr
-                # Handle void* to typed pointer assignment (e.g., py = (@)pxk where pxk is int)
-                elif (isinstance(val.type, ir.PointerType) and 
-                      isinstance(val.type.pointee, ir.IntType) and val.type.pointee.width == 8 and
-                      isinstance(ptr.type.pointee, ir.PointerType)):
-                    # This is assigning void* (i8*) to a typed pointer
-                    val = builder.bitcast(val, ptr.type.pointee, name="void_ptr_to_typed")
-                # Handle other type mismatches as needed
-                elif isinstance(val.type, ir.IntType) and isinstance(ptr.type.pointee, ir.IntType):
-                    if val.type.width != ptr.type.pointee.width:
-                        if val.type.width < ptr.type.pointee.width:
-                            # Use zext for unsigned, sext for signed
-                            from futilities import is_unsigned
-                            if is_unsigned(val):
-                                val = builder.zext(val, ptr.type.pointee)
-                            else:
-                                val = builder.sext(val, ptr.type.pointee)
-                        else:
-                            val = builder.trunc(val, ptr.type.pointee)
-            
-            st = builder.store(val, ptr)
-            st.volatile = True
-            return val
+            # Simple variable assignment - delegate to type handler
+            return AssignmentTypeHandler.handle_identifier_assignment(
+                builder, module, self.target.name, val, self.value)
             
         elif isinstance(self.target, MemberAccess):
-            # Struct/union/object member assignment
-            # For member access, we need the pointer, not the loaded value
-            if isinstance(self.target.object, Identifier):
-                # Get the variable pointer directly from scope instead of loading
-                var_name = self.target.object.name
-                if builder.scope is not None and var_name in builder.scope:
-                    obj = builder.scope[var_name]  # This is the pointer
-                    if isinstance(obj.type, ir.PointerType) and isinstance(obj.type.pointee, ir.PointerType):
-                        # Check if the pointee-pointee is a struct
-                        if (isinstance(obj.type.pointee.pointee, ir.LiteralStructType) or
-                            hasattr(obj.type.pointee.pointee, '_name') or
-                            hasattr(obj.type.pointee.pointee, 'elements')):
-                            # This is a pointer parameter - load it to get the actual pointer
-                            obj = builder.load(obj, name=f"{var_name}_ptr")
-                elif var_name in module.globals:
-                    obj = module.globals[var_name]  # This is the pointer
-                else:
-                    raise NameError(f"Unknown variable: {var_name}")
-            else:
-                # For other expressions, generate code normally
-                obj = self.target.object.codegen(builder, module)
-            
-            member_name = self.target.member
-            
-            # Handle both literal struct types and identified struct types
-            is_struct_pointer = (isinstance(obj.type, ir.PointerType) and 
-                            (isinstance(obj.type.pointee, ir.LiteralStructType) or
-                             hasattr(obj.type.pointee, '_name') or  # Identified struct type
-                             hasattr(obj.type.pointee, 'elements')))  # Other struct-like types
-            
-            if is_struct_pointer:
-                struct_type = obj.type.pointee
-                #print(f"DEBUG Assignment: Detected struct type: {struct_type}")
-                #print(f"DEBUG Assignment: struct_type has names: {hasattr(struct_type, 'names')}")
-                #if hasattr(struct_type, 'names'):
-                    #print(f"DEBUG Assignment: struct_type.names: {struct_type.names}")
-                
-                # Check if this is a union first
-                if hasattr(module, '_union_types'):
-                    for union_name, union_type in module._union_types.items():
-                        if union_type == struct_type:
-                            # This is a union - handle union member assignment
-                            return self._handle_union_member_assignment(builder, module, obj, union_name, member_name, val)
-                
-                # Regular struct member assignment
-                if hasattr(struct_type, 'names'):
-                    try:
-                        idx = struct_type.names.index(member_name)
-                        #print(f"DEBUG Assignment: Found member '{member_name}' at index {idx}")
-                        member_ptr = builder.gep(
-                            obj,
-                            [ir.Constant(ir.IntType(1), 0),
-                             ir.Constant(ir.IntType(32), idx)],
-                            inbounds=True
-                        )
-                        builder.store(val, member_ptr)
-                        return val
-                    except ValueError:
-                        raise ValueError(f"Member '{member_name}' not found in struct")
-                else:
-                    # This is a byte-array based struct - use vtable for field assignment
-                    return self._handle_vtable_struct_assignment(builder, module, obj, member_name, val)
-            
-            raise ValueError(f"Cannot assign to member '{member_name}' of non-struct type: {obj.type}")
+            # Struct/union/object member assignment - delegate to type handler
+            return AssignmentTypeHandler.handle_member_assignment(
+                builder, module, self.target.object, self.target.member, val)
     
         elif isinstance(self.target, ArrayAccess):
-            # Array element assignment
-            array = self.target.array.codegen(builder, module)
-            index = self.target.index.codegen(builder, module)
-            
-            if isinstance(array.type, ir.PointerType) and isinstance(array.type.pointee, ir.ArrayType):
-                # Calculate element pointer for pointer-to-array
-                zero = ir.Constant(ir.IntType(1), 0)
-                elem_ptr = builder.gep(array, [zero, index], inbounds=True)
-                
-                # FIX: Handle StringLiteral assignment to byte array elements
-                element_type = array.type.pointee.element
-                if isinstance(self.value, StringLiteral) and isinstance(element_type, ir.IntType) and element_type.width == 8:
-                    # Extract first character from string literal
-                    if len(self.value.value) > 0:
-                        val = ir.Constant(ir.IntType(8), ord(self.value.value[0]))
-                    else:
-                        val = ir.Constant(ir.IntType(8), 0)
-                else:
-                    # Generate value normally
-                    val = self.value.codegen(builder, module)
-                
-                builder.store(val, elem_ptr)
-                return val
-            elif isinstance(array.type, ir.PointerType):
-                # Handle plain pointer types (like byte*) - pointer arithmetic
-                elem_ptr = builder.gep(array, [index], inbounds=True)
-                
-                # FIX: Handle StringLiteral assignment to byte pointer elements
-                element_type = array.type.pointee
-                if isinstance(self.value, StringLiteral) and isinstance(element_type, ir.IntType) and element_type.width == 8:
-                    # Extract first character from string literal
-                    if len(self.value.value) > 0:
-                        val = ir.Constant(ir.IntType(8), ord(self.value.value[0]))
-                    else:
-                        val = ir.Constant(ir.IntType(8), 0)
-                else:
-                    # Generate value normally
-                    val = self.value.codegen(builder, module)
-                
-                builder.store(val, elem_ptr)
-                return val
-            else:
-                raise ValueError("Cannot index non-array type")
+            # Array element assignment - delegate to type handler
+            return AssignmentTypeHandler.handle_array_element_assignment(
+                builder, module, self.target.array, self.target.index, self.value, val)
                 
         elif isinstance(self.target, PointerDeref):
+            # Pointer dereference assignment - delegate to type handler
             ptr = self.target.pointer.codegen(builder, module)
-            if isinstance(ptr.type, ir.PointerType):
-                # Bitcast pointer if value type doesn't match pointee type
-                if val.type != ptr.type.pointee:
-                    ptr = builder.bitcast(ptr, ir.PointerType(val.type))
-                builder.store(val, ptr)
-                return val
+            return AssignmentTypeHandler.handle_pointer_deref_assignment(builder, ptr, val)
                 
         else:
             raise ValueError(f"Cannot assign to {type(self.target).__name__}")
-    
-    def _handle_union_member_assignment(self, builder: ir.IRBuilder, module: ir.Module, union_ptr: ir.Value, union_name: str, member_name: str, val: ir.Value) -> ir.Value:
-        """Handle union member assignment - delegates to utility function"""
-        return handle_union_member_assignment(builder, module, union_ptr, union_name, member_name, val)
-    
-    def _handle_vtable_struct_assignment(self, builder: ir.IRBuilder, module: ir.Module, struct_ptr: ir.Value, member_name: str, val: ir.Value) -> ir.Value:
-        """Handle struct member assignment for byte-array based structs using vtable"""
-        # Determine struct name from the pointer type
-        struct_name = None
-        struct_type = struct_ptr.type.pointee
-        
-        # Try to match with registered struct types
-        if hasattr(module, '_struct_types'):
-            for name, registered_type in module._struct_types.items():
-                if registered_type == struct_type:
-                    struct_name = name
-                    break
-        
-        if struct_name is None:
-            # Try to infer from scope_type_info
-            if isinstance(self.target.object, Identifier):
-                var_name = self.target.object.name
-                if hasattr(builder, 'scope_type_info') and var_name in builder.scope_type_info:
-                    type_spec = builder.scope_type_info[var_name]
-                    if type_spec.custom_typename:
-                        struct_name = type_spec.custom_typename
-        
-        if struct_name is None:
-            raise ValueError(f"Cannot determine struct type for member assignment")
-        
-        # Get vtable
-        if not hasattr(module, '_struct_vtables') or struct_name not in module._struct_vtables:
-            raise ValueError(f"Vtable not found for struct '{struct_name}'")
-        
-        vtable = module._struct_vtables[struct_name]
-        
-        # Find field in vtable
-        field_info = next(
-            (f for f in vtable.fields if f[0] == member_name),
-            None
-        )
-        if not field_info:
-            raise ValueError(f"Field '{member_name}' not found in struct '{struct_name}'")
-        
-        _, bit_offset, bit_width, alignment = field_info
-        
-        # Load the current struct value
-        current_struct = builder.load(struct_ptr, name="current_struct")
-        
-        # Convert float to integer if needed
-        if isinstance(val.type, ir.FloatType):
-            int_type = ir.IntType(bit_width)
-            val = builder.bitcast(val, int_type)
-        
-        # Generate inline assignment code based on struct storage type
-        if isinstance(current_struct.type, ir.IntType):
-            # Integer type - simple bit operations
-            instance_type = current_struct.type
-            
-            # Create mask to clear the field
-            mask = ((1 << bit_width) - 1) << bit_offset
-            inverse_mask = (~mask) & ((1 << instance_type.width) - 1)
-            
-            # Clear the field
-            cleared = builder.and_(current_struct, ir.Constant(instance_type, inverse_mask))
-            
-            # Shift value to position
-            if val.type.width < instance_type.width:
-                val_extended = builder.zext(val, instance_type)
-            elif val.type.width > instance_type.width:
-                val_extended = builder.trunc(val, instance_type)
-            else:
-                val_extended = val
-            
-            if bit_offset > 0:
-                val_shifted = builder.shl(val_extended, ir.Constant(instance_type, bit_offset))
-            else:
-                val_shifted = val_extended
-            
-            # Combine
-            new_struct = builder.or_(cleared, val_shifted)
-            
-            # Store back
-            builder.store(new_struct, struct_ptr)
-            return val
-        else:
-            # Array type - byte manipulation
-            byte_offset = bit_offset // 8
-            bit_in_byte = bit_offset % 8
-            
-            if bit_in_byte == 0 and bit_width % 8 == 0:
-                # Byte-aligned field - simple case
-                field_bytes = bit_width // 8
-                
-                # Ensure val is the right type
-                if val.type.width != bit_width:
-                    if val.type.width < bit_width:
-                        val = builder.zext(val, ir.IntType(bit_width))
-                    else:
-                        val = builder.trunc(val, ir.IntType(bit_width))
-                
-                # Insert bytes into the struct
-                new_struct = current_struct
-                for i in range(field_bytes):
-                    # Extract byte from value
-                    shift_amount = i * 8
-                    byte_val = builder.lshr(val, ir.Constant(val.type, shift_amount))
-                    byte_val = builder.and_(byte_val, ir.Constant(val.type, 0xFF))
-                    byte_val = builder.trunc(byte_val, ir.IntType(8))
-                    
-                    # Insert into array
-                    new_struct = builder.insert_value(new_struct, byte_val, byte_offset + i)
-                
-                # Store back
-                builder.store(new_struct, struct_ptr)
-                return val
-            else:
-                raise NotImplementedError("Unaligned field assignment in large structs not yet supported")
 
 @dataclass
 class CompoundAssignment(Statement):
@@ -3522,167 +3362,10 @@ class CompoundAssignment(Statement):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate code for compound assignments like +=, -=, *=, /=, %="""
-        from flexer import TokenType
+        from ftypesys import AssignmentTypeHandler
         
-        # Map compound assignment tokens to binary operators
-        op_map = {
-            TokenType.PLUS_ASSIGN: Operator.ADD,
-            TokenType.MINUS_ASSIGN: Operator.SUB,
-            TokenType.MULTIPLY_ASSIGN: Operator.MUL,
-            TokenType.DIVIDE_ASSIGN: Operator.DIV,
-            TokenType.MODULO_ASSIGN: Operator.MOD,
-            TokenType.POWER_ASSIGN: Operator.POWER,
-            TokenType.XOR_ASSIGN: Operator.XOR,
-            TokenType.BITSHIFT_LEFT_ASSIGN: Operator.BITSHIFT_LEFT,
-            TokenType.BITSHIFT_RIGHT_ASSIGN: Operator.BITSHIFT_RIGHT,
-        }
-        
-        if self.op_token not in op_map:
-            raise ValueError(f"Unsupported compound assignment operator: {self.op_token}")
-        
-        binary_op = op_map[self.op_token]
-        
-        # For compound assignment like s += q, this is equivalent to s = s + q
-        # But we need to handle array concatenation specially to support dynamic resizing
-        
-        # Check if this is array concatenation (ADD operation with array operands)
-        if binary_op == Operator.ADD and isinstance(self.target, Identifier):
-            # Get the target variable
-            if builder.scope is not None and self.target.name in builder.scope:
-                target_ptr = builder.scope[self.target.name]
-            elif self.target.name in module.globals:
-                target_ptr = module.globals[self.target.name]
-            else:
-                raise NameError(f"Unknown variable: {self.target.name}")
-            
-            # Load the current value of the target
-            target_val = self.target.codegen(builder, module)
-            right_val = self.value.codegen(builder, module)
-            
-            # Check if both operands are arrays or array pointers
-            if (is_array_or_array_pointer(target_val) and is_array_or_array_pointer(right_val)):
-                # This is array concatenation - create the binary operation
-                binary_expr = BinaryOp(self.target, binary_op, self.value)
-                concat_result = binary_expr.codegen(builder, module)
-                
-                # For array concatenation, we need to resize the variable to accommodate the new array
-                # This is similar to dynamic reallocation - create new storage and update the variable
-                if isinstance(concat_result.type, ir.PointerType) and isinstance(concat_result.type.pointee, ir.ArrayType):
-                    # The concatenated result is a new array with the proper size
-                    # Update the variable to point to this new array
-                    if builder.scope is not None and self.target.name in builder.scope:
-                        # For local variables, update the scope to point to the new array
-                        builder.scope[self.target.name] = concat_result
-                        return concat_result
-                    else:
-                        # For global variables, we can't easily resize, so convert to element pointer
-                        zero = ir.Constant(ir.IntType(32), 0)
-                        array_ptr = builder.gep(concat_result, [zero, zero], name="array_to_ptr")
-                        builder.store(array_ptr, target_ptr)
-                        return array_ptr
-                else:
-                    # Direct storage for other pointer types
-                    builder.store(concat_result, target_ptr)
-                    return concat_result
-        
-        # For non-array operations, fall back to the simple approach
-        binary_expr = BinaryOp(self.target, binary_op, self.value)
-        assignment = Assignment(self.target, binary_expr)
-        return assignment.codegen(builder, module)
-    
-        """Dynamically resize arrays to accommodate new values during assignment"""
-        # Get array information
-        val_elem_type, val_len = get_array_info(val)
-        ptr_elem_type, ptr_len = get_array_info(ptr)
-        
-        # If the new array is larger, we need to reallocate
-        if val_len > ptr_len:
-            # Create new array type with the larger size
-            new_array_type = ir.ArrayType(val_elem_type, val_len)
-            
-            # Allocate new storage for the resized array
-            new_alloca = builder.alloca(new_array_type, name=f"{var_name}_resized" if var_name else "array_resized")
-            
-            # Copy existing data from old array to new array (first ptr_len elements)
-            if ptr_len > 0:
-                elem_size_bytes = ptr_elem_type.width // 8
-                old_bytes = ptr_len * elem_size_bytes
-                
-                # Get pointer to start of old array
-                zero = ir.Constant(ir.IntType(32), 0)
-                old_start = builder.gep(ptr, [zero, zero], name="old_start")
-                
-                # Get pointer to start of new array
-                new_start = builder.gep(new_alloca, [zero, zero], name="new_start")
-                
-                # Copy old data
-                emit_memcpy(builder, module, new_start, old_start, old_bytes)
-            
-            # Copy new data to the new array (overwriting all elements)
-            new_bytes = val_len * (val_elem_type.width // 8)
-            zero = ir.Constant(ir.IntType(32), 0)
-            new_start = builder.gep(new_alloca, [zero, zero], name="new_start")
-            val_start = builder.gep(val, [zero, zero], name="val_start")
-            emit_memcpy(builder, module, new_start, val_start, new_bytes)
-            
-            # Update the original variable to point to the new array
-            if var_name and builder.scope and var_name in builder.scope:
-                builder.scope[var_name] = new_alloca
-            
-            return new_alloca
-        else:
-            # If new array is smaller or same size, just copy the data
-            copy_len = min(val_len, ptr_len)
-            copy_bytes = copy_len * (val_elem_type.width // 8)
-            
-            zero = ir.Constant(ir.IntType(32), 0)
-            ptr_start = builder.gep(ptr, [zero, zero], name="ptr_start")
-            val_start = builder.gep(val, [zero, zero], name="val_start")
-            
-            # Copy the data
-            emit_memcpy(builder, module, ptr_start, val_start, copy_bytes)
-            
-            # If the new array is smaller, zero out the remaining elements
-            if val_len < ptr_len:
-                remaining_bytes = (ptr_len - val_len) * (ptr_elem_type.width // 8)
-                if remaining_bytes > 0:
-                    # Get pointer to remaining area
-                    val_len_const = ir.Constant(ir.IntType(32), val_len)
-                    remaining_start = builder.gep(ptr, [zero, val_len_const], name="remaining_start")
-                    
-                    # Declare memset if not already declared
-                    memset_name = "llvm.memset.p0i8.i64"
-                    if memset_name not in module.globals:
-                        memset_type = ir.FunctionType(
-                            ir.VoidType(),
-                            [ir.PointerType(ir.IntType(8)),  # dst
-                             ir.IntType(8),                  # val
-                             ir.IntType(64),                 # len
-                             ir.IntType(1)]                  # volatile
-                        )
-                        memset_func = ir.Function(module, memset_type, name=memset_name)
-                        memset_func.attributes.add('nounwind')
-                    else:
-                        memset_func = module.globals[memset_name]
-                    
-                    # Cast to i8* if needed
-                    i8_ptr = ir.PointerType(ir.IntType(8))
-                    if remaining_start.type != i8_ptr:
-                        remaining_start = builder.bitcast(remaining_start, i8_ptr)
-                    
-                    # Zero out remaining bytes
-                    builder.call(memset_func, [
-                        remaining_start,
-                        ir.Constant(ir.IntType(8), 0),  # zero
-                        ir.Constant(ir.IntType(64), remaining_bytes),
-                        ir.Constant(ir.IntType(1), 0)  # not volatile
-                    ])
-            
-            return ptr
-    
-    def _handle_union_member_assignment(self, builder: ir.IRBuilder, module: ir.Module, union_ptr: ir.Value, union_name: str, member_name: str, val: ir.Value) -> ir.Value:
-        """Handle union member assignment - delegates to utility function"""
-        return handle_union_member_assignment(builder, module, union_ptr, union_name, member_name, val)
+        return AssignmentTypeHandler.handle_compound_assignment(
+            builder, module, self.target, self.op_token, self.value)
     
 @dataclass
 class Block(Statement):
@@ -5022,8 +4705,7 @@ class FunctionDef(ASTNode):
         
         # Generate mangled name using FunctionTypeHandler
         mangled_name = FunctionTypeHandler.mangle_function_name(
-            self.name, self.parameters, self.return_type, self.no_mangle
-        )
+            self.name, self.parameters, self.return_type, self.no_mangle)
         
         # Check if this exact mangled function already exists
         if mangled_name in module.globals:
@@ -5044,6 +4726,7 @@ class FunctionDef(ASTNode):
         else:
             # Create new function with mangled name
             func = ir.Function(module, func_type, mangled_name)
+            
             # Extract base name for overload registration
             # If the name is namespace-qualified (e.g., "standard::types::bswap16"),
             # register it under the short name ("bswap16") so it can be found
@@ -5086,7 +4769,13 @@ class FunctionDef(ASTNode):
         for i, param in enumerate(func.args):
             param_name = self.parameters[i].name if self.parameters[i].name is not None else f"arg{i}"
             alloca = builder.alloca(param.type, name=f"{param_name}.addr")
-            builder.store(param, alloca)
+            
+            # Attach type metadata to the parameter value before storing
+            # This ensures the parameter carries the correct signedness information
+            from ftypesys import attach_type_metadata
+            param_with_metadata = attach_type_metadata(param, type_spec=self.parameters[i].type_spec)
+            
+            builder.store(param_with_metadata, alloca)
             builder.scope[param_name] = alloca
             # Store the original type spec for this parameter
             builder.scope_type_info[param_name] = self.parameters[i].type_spec
@@ -6025,9 +5714,42 @@ class StructDef(ASTNode):
             module._struct_vtables = {}
         if not hasattr(module, '_struct_storage_classes'):
             module._struct_storage_classes = {}
+        if not hasattr(module, '_struct_member_type_specs'):
+            module._struct_member_type_specs = {}
         
         module._struct_types[self.name] = instance_type
         module._struct_vtables[self.name] = self.vtable
+        
+        # Store member type specifications for signedness tracking
+        member_type_specs = {}
+        for member in self.members:
+            name = member.name
+            type_spec = member.type_spec
+            # For array types, we need to extract the element type
+            if type_spec.is_array:
+                # Create a TypeSystem for the element type
+                from ftypesys import TypeSystem, DataType
+                element_type_spec = TypeSystem(
+                    base_type=type_spec.base_type,
+                    is_signed=type_spec.is_signed,
+                    bit_width=type_spec.bit_width,
+                    custom_typename=type_spec.custom_typename,
+                    is_const=type_spec.is_const,
+                    is_volatile=type_spec.is_volatile,
+                    storage_class=type_spec.storage_class,
+                    # Don't copy array properties
+                    is_array=False,
+                    array_size=None,
+                    array_dimensions=None,
+                    is_pointer=False,
+                    pointer_depth=0
+                )
+                
+                # Attach element type to the array type spec
+                type_spec.array_element_type = element_type_spec
+                
+            member_type_specs[name] = type_spec
+        module._struct_member_type_specs[self.name] = member_type_specs
         
         if self.storage_class is not None:
             module._struct_storage_classes[self.name] = self.storage_class
@@ -6176,7 +5898,7 @@ class StructFieldAccess(Expression):
                 return builder.trunc(masked, field_type, name=self.field_name)
             return masked
 
-        # Struct value extraction by index (vtable order) — support BOTH literal and identified
+        # Struct value extraction by index (vtable order) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â support BOTH literal and identified
         if isinstance(instance.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
             field_index = None
             for i, f in enumerate(vtable.fields):
@@ -6404,100 +6126,32 @@ class ObjectDef(ASTNode):
     is_prototype: bool = False
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
-        ##print(f"[codegen] Processing object: {self.name}")
-
-        if not hasattr(module, '_struct_vtables'):
-            module._struct_vtables = {}
-        if not hasattr(module, '_struct_types'):
-            module._struct_types = {}
-
-        # First create a struct type for the object's data members
-        member_types = []
-        member_names = []
+        # Initialize object storage
+        ObjectTypeHandler.initialize_object_storage(module)
         
-        for member in self.members:
-            member_type = FunctionTypeHandler.convert_type_spec_to_llvm(member.type_spec, module)
-            member_types.append(member_type)
-            member_names.append(member.name)
+        # Create member types
+        member_types, member_names = ObjectTypeHandler.create_member_types(self.members, module)
         
-        ##print(f"[codegen] Object {self.name} has {len(member_types)} members")
-        # Create the struct type for data members
-        struct_type = ir.global_context.get_identified_type(self.name)
-        struct_type.set_body(*member_types)
-        struct_type.names = member_names
+        # Create struct type
+        struct_type = ObjectTypeHandler.create_struct_type(self.name, member_types, member_names, module)
         
-        # Store the struct type in the module
-        if not hasattr(module, '_struct_types'):
-            module._struct_types = {}
-        module._struct_types[self.name] = struct_type
-
-        fields = []
-        for i, member in enumerate(self.members):
-            # Each field: (name, bit_offset, bit_width, alignment)
-            member_type = member_types[i]
-            if isinstance(member_type, ir.IntType):
-                bit_width = member_type.width
-                alignment = member_type.width
-            elif isinstance(member_type, ir.FloatType):
-                bit_width = 32
-                alignment = 32
-            else:
-                bit_width = 64  # pointer or other
-                alignment = 64
-            
-            bit_offset = i * bit_width  # Simple sequential layout for objects
-            fields.append((member.name, bit_offset, bit_width, alignment))
-
-        # Create vtable for the object
-        vtable = StructVTable(
-            struct_name=self.name,
-            total_bits=sum(f[2] for f in fields),
-            total_bytes=(sum(f[2] for f in fields) + 7) // 8,
-            alignment=max(f[3] for f in fields) if fields else 1,
-            fields=fields
-        )
-        module._struct_vtables[self.name] = vtable
-
-        #print(f"[codegen] Created struct type for {self.name}: {struct_type}")
-        # Create methods as functions with 'this' parameter
-        # --- PASS 1: predeclare all methods (including prototypes) ---
-        method_funcs = {}  # method_name -> ir.Function
+        # Calculate field layout
+        fields = ObjectTypeHandler.calculate_field_layout(self.members, member_types)
+        
+        # Create vtable
+        ObjectTypeHandler.create_vtable(self.name, fields, module)
+        
+        # PASS 1: Predeclare all methods
+        method_funcs = {}
 
         for method in self.methods:
-            # Return type
-            if method.return_type.base_type == DataType.THIS:
-                ret_type = ir.PointerType(struct_type)
-            else:
-                ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(method.return_type, module)
-
-            # Param types: always 'this' first
-            param_types = [ir.PointerType(struct_type)]
-            param_types.extend([FunctionTypeHandler.convert_type_spec_to_llvm(p.type_spec, module) for p in method.parameters])
-
-            func_type = ir.FunctionType(ret_type, param_types)
-            func_name = f"{self.name}.{method.name}"
-
-            # Reuse existing function if prototype+definition both appear
-            existing = module.globals.get(func_name)
-            if existing is None:
-                func = ir.Function(module, func_type, func_name)
-            else:
-                # Optional: sanity-check signature matches
-                if not isinstance(existing, ir.Function):
-                    raise RuntimeError(f"{func_name} already exists and is not a function")
-                if existing.function_type != func_type:
-                    raise RuntimeError(f"Conflicting signatures for {func_name}")
-                func = existing
-
-            # Name args (safe to repeat)
-            func.args[0].name = "this"
-            for i, arg in enumerate(func.args[1:], 1):
-                param_name = method.parameters[i - 1].name if method.parameters[i - 1].name is not None else f"arg{i - 1}"
-                arg.name = param_name
+            func_type, func_name = ObjectTypeHandler.create_method_signature(
+                self.name, method.name, method, struct_type, module)
+            func = ObjectTypeHandler.predeclare_method(func_type, func_name, method, module)
 
             method_funcs[method.name] = func
 
-        # --- PASS 2: emit method bodies (skip prototypes) ---
+        # --- PASS 2: Emit method bodies (skip prototypes) ---
         for method in self.methods:
             if isinstance(method, FunctionDef) and method.is_prototype:
                 continue
@@ -6505,50 +6159,9 @@ class ObjectDef(ASTNode):
             func = method_funcs.get(method.name)
             if func is None:
                 raise RuntimeError(f"Internal error: missing function for method {method.name}")
-
-            # If body already emitted (e.g. duplicate defs), skip
-            if len(func.blocks) != 0:
-                continue
-
-            entry_block = func.append_basic_block('entry')
-            method_builder = ir.IRBuilder(entry_block)
-
-            method_builder.scope = {}
-            if not hasattr(method_builder, 'scope_type_info'):
-                method_builder.scope_type_info = {}
-
-            # Register 'this'
-            method_builder.scope["this"] = func.args[0]
-            this_type_spec = TypeSystem(base_type=DataType.DATA, custom_typename=self.name, is_pointer=True)
-            method_builder.scope_type_info['this'] = this_type_spec
-
-            # Store other params
-            for i, param in enumerate(func.args[1:], 1):
-                param_name = method.parameters[i - 1].name if method.parameters[i - 1].name is not None else f"arg{i - 1}"
-                alloca = method_builder.alloca(param.type, name=f"{param_name}.addr")
-                method_builder.store(param, alloca)
-                method_builder.scope[param_name] = alloca
-
-            # Emit body
-            method.body.codegen(method_builder, module)
-
-            # __init implicit return
-            if isinstance(method, FunctionDef) and method.name == '__init' and not method_builder.block.is_terminated:
-                method_builder.ret(func.args[0])
-
-            # Implicit return for void
-            if not method_builder.block.is_terminated:
-                if isinstance(func.function_type.return_type, ir.VoidType):
-                    method_builder.ret_void()
-                else:
-                    raise RuntimeError(f"Method {method.name} must end with return statement")
         
         # Handle nested objects and structs
-        for nested_obj in self.nested_objects:
-            nested_obj.codegen(builder, module)
-        
-        for nested_struct in self.nested_structs:
-            nested_struct.codegen(builder, module)
+        ObjectTypeHandler.emit_method_body(method, func, self.name, module)
         
         return struct_type
 
@@ -6645,11 +6258,11 @@ class NamespaceDef(ASTNode):
         # Register this namespace using NamespaceTypeHandler
         NamespaceTypeHandler.register_namespace(module, self.name)
 
-        # Register nested namespaces
+        # Register nested namespaces recursively using NamespaceTypeHandler
         for nested_ns in self.nested_namespaces:
             full_nested_name = f"{self.name}::{nested_ns.name}"
             NamespaceTypeHandler.register_namespace(module, full_nested_name)
-            self._register_nested_namespaces(nested_ns, full_nested_name, module)
+            NamespaceTypeHandler.register_nested_namespaces(nested_ns, full_nested_name, module)
         
         # Add to using namespaces using NamespaceTypeHandler
         NamespaceTypeHandler.add_using_namespace(module, self.name)
@@ -6658,46 +6271,20 @@ class NamespaceDef(ASTNode):
         original_namespace = getattr(module, '_current_namespace', '')
         module._current_namespace = self.name
         
-        # Create builder context if we're at module level
+        # Create builder context if we're at module level using NamespaceTypeHandler
         if builder is None or not hasattr(builder, 'block') or builder.block is None:
-            work_builder = self._create_init_builder(module)
+            work_builder = NamespaceTypeHandler.create_static_init_builder(module)
         else:
             work_builder = builder
 
         # Process nested namespaces FIRST (they may contain types we need)
         for nested_ns in self.nested_namespaces:
-            original_name = nested_ns.name
-            # Nested namespace gets parent path prepended
-            full_nested_name = f"{self.name}::{nested_ns.name}"
-            nested_ns.name = f"{self.name}__{nested_ns.name}"
-            # Set current namespace context
-            original_namespace = getattr(module, '_current_namespace', '')
-            module._current_namespace = full_nested_name
-            try:
-                nested_ns.codegen(work_builder, module)
-            finally:
-                nested_ns.name = original_name
-                module._current_namespace = original_namespace
+            NamespaceTypeHandler.process_nested_namespace(self.name, nested_ns, work_builder, module)
 
-        # Process variables (including type declarations)
+        # Process variables (including type declarations) using NamespaceTypeHandler
         for var in self.variables:
             try:
-                if isinstance(var, TypeDeclaration):
-                    original_name = var.name
-                    if var.base_type.custom_typename is None:
-                        var.name = f"{self.name}__{var.name}"
-                        var.codegen(None, module)
-                        var.name = original_name
-                    else:
-                        var.name = f"{self.name}__{var.name}"
-                        var.codegen(None, module)
-                        var.name = original_name
-                elif isinstance(var, VariableDeclaration):
-                    original_name = var.name
-                    # Always mangle namespace-level variables
-                    var.name = f"{self.name}__{var.name}"
-                    result = var.codegen(None, module)  # Always use None builder for globals
-                    var.name = original_name
+                NamespaceTypeHandler.process_namespace_variable(self.name, var, module)
             except Exception as e:
                 var_name = getattr(var, 'name', '<unknown>')
                 print(f"\nError processing variable '{var_name}' in namespace '{self.name}':")
@@ -6710,84 +6297,30 @@ class NamespaceDef(ASTNode):
             NamespaceTypeHandler.process_namespace_function(
                 self.name, func, work_builder, module)
 
-        # Process structs
+        # Process structs using NamespaceTypeHandler
         for struct in self.structs:
-            original_name = struct.name
-            struct.name = f"{self.name}__{struct.name}"
-            try:
-                struct.codegen(work_builder, module)
-            finally:
-                struct.name = original_name
+            NamespaceTypeHandler.process_namespace_struct(self.name, struct, work_builder, module)
         
-        # Process objects
+        # Process objects using NamespaceTypeHandler
         for obj in self.objects:
-            original_name = obj.name
-            obj.name = f"{self.name}__{obj.name}"
-            try:
-                obj.codegen(work_builder, module)
-            finally:
-                obj.name = original_name
+            NamespaceTypeHandler.process_namespace_object(self.name, obj, work_builder, module)
 
-        # Process enums
+        # Process enums using NamespaceTypeHandler
         for enum in self.enums:
-            original_name = enum.name
-            enum.name = f"{self.name}__{enum.name}"
-            try:
-                enum.codegen(work_builder, module)
-            finally:
-                enum.name = original_name
+            NamespaceTypeHandler.process_namespace_enum(self.name, enum, work_builder, module)
 
         # Process extern blocks (ALWAYS global, no namespace mangling)
         # Extern declarations are inherently global and should not be namespaced
         for extern_block in self.extern_blocks:
             extern_block.codegen(work_builder, module)
 
-        if "__static_init" in module.globals:
-            init_func = module.globals["__static_init"]
-            if init_func.blocks and not init_func.blocks[-1].is_terminated:
-                # Get a builder positioned at the end of the last block
-                final_builder = ir.IRBuilder(init_func.blocks[-1])
-                final_builder.ret_void()
+        # Finalize static init function using NamespaceTypeHandler
+        NamespaceTypeHandler.finalize_static_init(module)
         
         # Restore original namespace context
         module._current_namespace = original_namespace
 
         return None
-
-    def _register_nested_namespaces(self, namespace, parent_path, module):
-        """Recursively register all nested namespaces"""
-        for nested_ns in namespace.nested_namespaces:
-            full_nested_name = f"{parent_path}::{nested_ns.name}"
-            # _namespaces is a list, use append not add
-            if not hasattr(module, '_namespaces'):
-                module._namespaces = []
-            if full_nested_name not in module._namespaces:
-                module._namespaces.append(full_nested_name)
-            self._register_nested_namespaces(nested_ns, full_nested_name, module)
-
-    def _create_init_builder(self, module: ir.Module) -> ir.IRBuilder:
-        init_func_name = "__static_init"
-
-        # Create function if it doesn't exist
-        if init_func_name not in module.globals:
-            func_type = ir.FunctionType(ir.VoidType(), [])
-            init_func = ir.Function(module, func_type, init_func_name)
-            block = init_func.append_basic_block("entry")
-        else:
-            init_func = module.globals[init_func_name]
-
-            # ALWAYS emit into a non-terminated block
-            if not init_func.blocks:
-                block = init_func.append_basic_block("entry")
-            else:
-                block = init_func.blocks[-1]
-                if block.is_terminated:
-                    block = init_func.append_basic_block("cont")
-
-        builder = ir.IRBuilder(block)
-        builder.scope = {}
-        builder.initialized_unions = set()
-        return builder
 
 # Import statement
 @dataclass

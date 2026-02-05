@@ -1344,38 +1344,8 @@ class FluxParser:
         """
         return self.block()
     
-    def block(self) -> Union[Block, Expression]:
-        """
-        Handles both statement blocks and expression blocks.
-        Statement block: { stmt; stmt; ... }
-        Expression block: { expr }
-        """
+    def block(self) -> Block:
         self.consume(TokenType.LEFT_BRACE)
-        
-        # Check if this is an expression block (single expression, no semicolons)
-        # by looking ahead
-        saved_pos = self.position
-        
-        # Try to parse as expression block first
-        try:
-            # Don't enter scope yet - we don't know if it's a statement block
-            expr = self.expression()
-            
-            if self.expect(TokenType.RIGHT_BRACE):
-                # Single expression followed by } - this is an expression block
-                self.consume(TokenType.RIGHT_BRACE)
-                return expr
-            else:
-                # Not just an expression, must be a statement block
-                # Restore and parse as statement block
-                self.position = saved_pos
-                self.current_token = self.tokens[self.position]
-        except:
-            # Failed to parse as expression, restore and try as statement block
-            self.position = saved_pos
-            self.current_token = self.tokens[self.position]
-        
-        # Parse as statement block
         self.symbol_table.enter_scope()
         
         statements = []
@@ -2445,9 +2415,6 @@ class FluxParser:
         elif self.expect(TokenType.NO_INIT):
             self.advance()
             return NoInit()
-        #elif self.expect(TokenType.SUPER): # DEFERRED
-            #self.advance()
-            #return Identifier("super")
         elif self.expect(TokenType.LEFT_PAREN):
             self.advance()
             expr = self.expression()
@@ -2466,8 +2433,7 @@ class FluxParser:
             self.consume(TokenType.RIGHT_PAREN)
             return AcceptorPlaceholder(index)
         elif self.expect(TokenType.LEFT_BRACE):
-            # Parse block - could be statement block or expression block
-            return self.block()
+            return self.struct_literal()
         elif self.expect(TokenType.SIZEOF):
             return self.sizeof_expression()
         elif self.expect(TokenType.ALIGNOF):

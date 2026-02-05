@@ -392,7 +392,7 @@ namespace standard
                 print(int x) -> void,
                 print(i64 x) -> void,
                 print(u16 x) -> void,
-                print(uint x) -> void,
+
                 print(u32 x) -> void,
                 print(u64 x) -> void,
                 print(float x) -> void,
@@ -417,13 +417,7 @@ namespace standard
                 print(buf);
                 return;
             };
-            def print(uint x) -> void
-            {
-                byte[21] buf;
-                u32str(x,buf);
-                print(buf);
-                return;
-            };
+
             def print(u32 x) -> void
             {
                 byte[21] buf;

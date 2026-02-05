@@ -344,25 +344,25 @@ namespace standard
         // LCM overloads
         def lcm(i8 a, i8 b) -> i8
         {
-            if (a == 0 || b == 0) {return 0;};
+            if (a == 0 | b == 0) {return 0;};
             return abs(a * b) / gcd(a, b);
         };
         
         def lcm(i16 a, i16 b) -> i16
         {
-            if (a == 0 || b == 0) {return 0;};
+            if (a == 0 | b == 0) {return 0;};
             return abs(a * b) / gcd(a, b);
         };
         
         def lcm(i32 a, i32 b) -> i32
         {
-            if (a == 0 || b == 0) {return 0;};
+            if (a == 0 | b == 0) {return 0;};
             return abs(a * b) / gcd(a, b);
         };
         
         def lcm(i64 a, i64 b) -> i64
         {
-            if (a == 0 || b == 0) {return 0;};
+            if (a == 0 | b == 0) {return 0;};
             return abs(a * b) / gcd(a, b);
         };
 
@@ -370,7 +370,7 @@ namespace standard
         def floor(float x) -> float
         {
             i64 int_part = (i64)x;
-            if (x >= 0.0 || x == (float)int_part)
+            if (x >= 0.0 | x == (float)int_part)
             {
                 return (float)int_part;
             };
@@ -380,7 +380,7 @@ namespace standard
         def ceil(float x) -> float
         {
             i64 int_part = (i64)x;
-            if (x <= 0.0 || x == (float)int_part)
+            if (x <= 0.0 | x == (float)int_part)
             {
                 return (float)int_part;
             };

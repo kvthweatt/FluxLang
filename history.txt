@@ -1,3 +1,321 @@
+commit 207abb42460bbebcd4e2e932521fd6495d4ee7fb
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 5 05:35:13 2026 -0600
+
+    Refactored NamespaceDef
+
+commit b45151c7db5167fd195d65f2f6291d8299b6e5ab
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 5 03:54:16 2026 -0600
+
+    Refactored FunctionDef and FunctionCall
+
+commit 85c1e2541b808c47f4497089e857730da59bd07e
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 5 03:36:46 2026 -0600
+
+    Refactored ReturnStatement
+
+commit 81020a3a07c6ac9101e8aaa7c6250a99867d870c
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 5 03:11:19 2026 -0600
+
+    Utilities was a useless extra anyway, moved into type system
+
+commit e79e280de989739dda7b445ba1b643607d35dc66
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 5 03:02:00 2026 -0600
+
+    Refactored Identifier
+
+commit 3f3be2a2cdfa8ecfd0fe1d11634bd4dd35277b24
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 5 02:41:45 2026 -0600
+
+    Refactor Literal
+
+commit 4becd559e68b8049bde192688b7113313e1a1649
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 5 02:15:33 2026 -0600
+
+    The monster that was ArrayLiteral has been slain. Even more type system refactoring.
+
+commit 81cd4fd4c5b4cc4326f5728e6792cc602b56bae9
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 5 01:26:35 2026 -0600
+
+    Type system refactoring has begun.
+
+commit 52eb86dc51f81ed02a5711005819ad58822b6517
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Feb 4 20:51:52 2026 -0600
+
+    Added standard socket object for Windows.
+
+commit 13ae5985f6c3194de3ac13407ea412dabe5bd3c4
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Feb 4 19:12:20 2026 -0600
+
+    ilovestrings
+
+commit 8fadc9fbcb6ecb89fea64f7a4e4609f6667800e7
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Feb 4 18:19:27 2026 -0600
+
+    Fixed prototypes not fully supporting unnamed arguments.
+
+commit 2c3d5bd98112b2fc2840151365744a9eb92bafba
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Feb 4 06:34:09 2026 -0600
+
+    Added standard file object.
+
+commit 0b9b2b965e370ce6ca5c3091f74ea6c726a491d6
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Feb 4 06:10:50 2026 -0600
+
+    Objects now perform 2 pass function registration to support prototyping functions.
+
+commit 32d4ba16a27ca15105d568e1d5ed8d5359930fcc
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Feb 4 05:43:05 2026 -0600
+
+    Fixed bug where object method calls did not handle string literal decay, string object now working properly.
+
+commit b6303dcb3ededf5d723d838c2ddfccc3d6c648a6
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Feb 4 05:26:23 2026 -0600
+
+    Fixed bug in object constructors not being able to be called when the object is defined in a namespace.
+
+commit f8e9e441b5e3456d941936c47610c4c082cc50d3
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Wed Feb 4 01:20:55 2026 -0600
+
+    Houston, we have networking.
+
+commit cbf8b2456976ac8fad7473ddd2d3a2659f485da9
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Feb 3 23:57:02 2026 -0600
+
+    Added networking for Windows.
+
+commit 202873e811774b68b25f96bf17e1e054eae5843a
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Feb 3 18:05:06 2026 -0600
+
+    Fixed testing script.
+
+commit 2931100141172b5f253027d6649da7d24f2f459a
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Feb 3 17:47:18 2026 -0600
+
+    Added standard libary documentation.
+
+commit eb688d499ec5df3986e86e29d1a7b1c1ab817c14
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Feb 3 15:33:35 2026 -0600
+
+    Specification was incorrect, function pointers are `def{}* name<signature of target>=@target` not `type* ()=@`
+
+commit 9fd772f0a215af856e212ba7a0d46dc2d50bb5c4
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Feb 3 14:23:14 2026 -0600
+
+    I hate text editor save locations.
+
+commit 68f944b8c2ed353fc59d69bfbcb0663cab190a2c
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Feb 3 14:21:36 2026 -0600
+
+    Added more example programs.
+
+commit 6e97df9867e25742f86dbf3ce2ac05879775814e
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Feb 3 13:48:17 2026 -0600
+
+    Wtf happened why did things get deleted that I didn't touch?
+
+commit bef3a01d245d3ac7603e559e9a951b3b3878d408
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Feb 3 13:40:08 2026 -0600
+
+    Fixed gitignore, reset tracking.
+
+commit 42343eb46513c87c1a5bfb7a0c97ae1de94c6bc0
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Feb 3 13:34:27 2026 -0600
+
+    Somehow gitignore got deleted?
+
+commit 32ffef38e2452ff60f4a5c655eb756b8b9133023
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Tue Feb 3 13:30:33 2026 -0600
+
+    Restructure.
+
+commit ff55d7d3db3ed6c270680a8933e151be7898c6fc
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Feb 2 14:50:39 2026 -0600
+
+    Fix structs for now.
+
+commit 088810ee5b616f321db1fe1c2ec8786e14e0ee16
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Feb 2 13:46:39 2026 -0600
+
+    Fixed tests, and standard library, reworking structs to be C like to have working structs again and will reimplement the Flux design as `layout`, requiring a new keyword.
+
+commit fd92b0a19486e4f2bee8bd810b379f7d65e12e3f
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Mon Feb 2 02:10:10 2026 -0600
+
+    It begins. Minimal shitty lexer just cause.
+
+commit b86cc3972a3d6439e5dc38186fc5ce7ed8bea842
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Feb 1 20:04:16 2026 -0600
+
+    Updated Sublime Text support.
+
+commit 5701554ea1c9aa7c3e491fabb92d598f580f1776
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Feb 1 20:03:40 2026 -0600
+
+    Array packing to integer fixed again, another location in AST.
+
+commit e9854dcfd14e78b1d02a714b3a776e38d78a1db7
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Feb 1 19:40:03 2026 -0600
+
+    Removed `super` as it's not in reduced spec.
+
+commit a9b3fb625b6ab38dca34d94e96bede9fa8bc42c1
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Feb 1 19:33:37 2026 -0600
+
+    Fix for extern not respecting !! operator properly.
+
+commit 30d9d4c64b85b7726db78a8b1e3441004f4df3fc
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Feb 1 19:04:14 2026 -0600
+
+    Removed runtime changes until a fix is found for argument pass, unsure why this affects main for now.
+
+commit 07fce5358ae3ffb4a9dee2fc6528775373743416
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Feb 1 19:02:53 2026 -0600
+
+    Fix for multi-level pointer declaration. Updated language spec.
+
+commit 52f06440a5113d7539d31fc4fe3af2be89798170
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Feb 1 14:50:49 2026 -0600
+
+    v1.0.2 - Update: Added support for multiple function prototype declarations on one line, comma separated signatures.
+
+commit 5f0c63dcf8939fd99c7e82c7e49670308b382744
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sun Feb 1 14:42:11 2026 -0600
+
+    v1.0.2 - Support for anonymous prototype parameters. No need to specify parameter names, only type.
+
+commit 014c23ff43b8507a3654735ccd7d161a1eb32c34
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sat Jan 31 21:25:46 2026 -0600
+
+    IfStatement codegen was wrong, did not handle elif condition. Fixed.
+
+commit 32e942d6bec75f185dd273702b71fd1e882bb8ba
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sat Jan 31 19:21:04 2026 -0600
+
+    Update to link settings, can have one or the other: merge RO w/ text, or merge data/code. Choosing merge data/code.
+
+commit 8db8780d9a4981d4bba74936f65dbec2752bfe41
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sat Jan 31 19:00:11 2026 -0600
+
+    Function pointers working, corrected grammar to be Flux-like. Required changing `relocation-model` from static to pic
+
+commit b285e433d852b69d2b5daf053a359ef980d09d0a
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sat Jan 31 12:22:44 2026 -0600
+
+    Added `noinit` initialization state. Updated Sublime.
+
+commit 57233790aabf28812a18a94d8a6c6f32541bd7cd
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sat Jan 31 04:29:36 2026 -0600
+
+    v1.0.1 - Bug fix, array to integer packing additional fix.
+
+commit 25e164878a4a03e76954afb706f537aecd9fdcc3
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Sat Jan 31 01:53:43 2026 -0600
+
+    v1.0.1 - Bug fix, pointer to int to pointer fixed.
+
+commit 7c4612e7ac307d762bc0f0d96628fc01d4f934c1
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 30 22:44:46 2026 -0600
+
+    Update for Sublime to support additional keywords.
+
+commit cf5ffad4ab5e330a4287c13a8e97b8eaf01a30de
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 30 21:12:42 2026 -0600
+
+    v1.0.1 - Bug fix, array to integer bit packing.
+
+commit 528de8c93a12cb7dc7505fb16cffd13e45bf4717
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 30 15:31:13 2026 -0600
+
+    Version 1.0 - All base language constructs working according to reduced specification.
+
+commit 1c92fa28fb615218e739137c229a7c358bc95c7c
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 30 15:11:30 2026 -0600
+
+    Added tagged unions. Set a tag with `union name {} tag;` and access with `name._` like `name._ = myEnum.GOOD;`
+
+commit dae20e581dd13467c42901f394e8ed453bfa0c20
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 30 14:16:58 2026 -0600
+
+    Added `enum`
+
+commit 6c3697e52f9a7efbcc1d57fab9a3995fa95aa6c4
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 30 12:40:14 2026 -0600
+
+    Upgraded preprocessor, fixed multi-line imports not respecting comments. Fixed multi-line comment handling. Moved comment handling into preprocessor, Lexer can be absolved of its comment lexing duties.
+
+commit 269bb38c6fec27a70b3bac60cbb88a1a230ec6e5
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 30 04:49:48 2026 -0600
+
+    Refactor.
+
+commit c0979b86420775f8e190c1214b7fe8010c7142c7
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Jan 30 02:29:38 2026 -0600
+
+    Refactored AST, new module `futilities.py` born.
+
+commit 868f401941093ab78904a24eb6cdb2873a5353ce
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 29 23:58:04 2026 -0600
+
+    Hello from test.txt
+
+commit 24b242314b90c644301a54305dc874c464328866
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Jan 29 22:51:04 2026 -0600
+
+    Added a script to count how many days I've spent coding since switching from C++ to Python. Zero to compiler in 50 days.
+
 commit 936f3a230a89fdac549d4abdbacf15a146be21b5
 Author: kvthweatt <kvthweatt@gmail.com>
 Date:   Thu Jan 29 22:26:09 2026 -0600

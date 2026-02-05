@@ -76,17 +76,17 @@ namespace crypto
         def sha256_init(SHA256_CTX* ctx) -> void
         {
             // Initial hash values (first 32 bits of the fractional parts of the square roots of the first 8 primes)
-            *ctx.state[0] = 0x6A09E667;
-            *ctx.state[1] = 0xBB67AE85;
-            *ctx.state[2] = 0x3C6EF372;
-            *ctx.state[3] = 0xA54FF53A;
-            *ctx.state[4] = 0x510E527F;
-            *ctx.state[5] = 0x9B05688C;
-            *ctx.state[6] = 0x1F83D9AB;
-            *ctx.state[7] = 0x5BE0CD19;
+            ctx.state[0] = 0x6A09E667u;
+            ctx.state[1] = 0xBB67AE85u;
+            ctx.state[2] = 0x3C6EF372u;
+            ctx.state[3] = 0xA54FF53Au;
+            ctx.state[4] = 0x510E527Fu;
+            ctx.state[5] = 0x9B05688Cu;
+            ctx.state[6] = 0x1F83D9ABu;
+            ctx.state[7] = 0x5BE0CD19u;
             
-            *ctx.bitlen = 0;
-            *ctx.buflen = 0;
+            ctx.bitlen = 0u;
+            ctx.buflen = 0;
         };
         
         // Process a single 512-bit block
@@ -244,7 +244,7 @@ def main()->int
     print();
     print(ctx.state[1]);
     print();
-    print(ctx.state[2]);
+    print((u32)ctx.state[2]);
     print();
     print(ctx.state[3]);
     print();

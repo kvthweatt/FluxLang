@@ -13,6 +13,7 @@ from typing import List, Any, Optional, Union, Dict, Tuple
 from enum import Enum
 from llvmlite import ir
 
+from flexer import TokenType
 
 class Operator(Enum):
     """Operator enumeration (imported for constant evaluation)"""
@@ -469,6 +470,173 @@ class NamespaceTypeHandler:
             module._using_namespaces.append(namespace)
     
     @staticmethod
+    def register_nested_namespaces(namespace: 'NamespaceDef', parent_path: str, module: 'ir.Module'):
+        """
+        Recursively register all nested namespaces.
+        
+        Args:
+            namespace: The namespace definition containing nested namespaces
+            parent_path: The full path of the parent namespace (e.g., "standard::io")
+            module: LLVM module to register namespaces in
+        """
+        for nested_ns in namespace.nested_namespaces:
+            full_nested_name = f"{parent_path}::{nested_ns.name}"
+            # Use register_namespace which handles initialization and duplicate checking
+            NamespaceTypeHandler.register_namespace(module, full_nested_name)
+            # Recursively register deeper nested namespaces
+            NamespaceTypeHandler.register_nested_namespaces(nested_ns, full_nested_name, module)
+    
+    @staticmethod
+    def create_static_init_builder(module: 'ir.Module') -> 'ir.IRBuilder':
+        """
+        Create or get a builder for the __static_init function.
+        
+        This function is used to initialize static/global variables in namespaces.
+        
+        Args:
+            module: LLVM module
+            
+        Returns:
+            IRBuilder positioned in a non-terminated block of __static_init
+        """
+        init_func_name = "__static_init"
+
+        # Create function if it doesn't exist
+        if init_func_name not in module.globals:
+            func_type = ir.FunctionType(ir.VoidType(), [])
+            init_func = ir.Function(module, func_type, init_func_name)
+            block = init_func.append_basic_block("entry")
+        else:
+            init_func = module.globals[init_func_name]
+
+            # ALWAYS emit into a non-terminated block
+            if not init_func.blocks:
+                block = init_func.append_basic_block("entry")
+            else:
+                block = init_func.blocks[-1]
+                if block.is_terminated:
+                    block = init_func.append_basic_block("cont")
+
+        builder = ir.IRBuilder(block)
+        builder.scope = {}
+        builder.initialized_unions = set()
+        return builder
+    
+    @staticmethod
+    def finalize_static_init(module: 'ir.Module'):
+        """
+        Finalize the __static_init function by adding a return if needed.
+        
+        Args:
+            module: LLVM module
+        """
+        if "__static_init" in module.globals:
+            init_func = module.globals["__static_init"]
+            if init_func.blocks and not init_func.blocks[-1].is_terminated:
+                # Get a builder positioned at the end of the last block
+                final_builder = ir.IRBuilder(init_func.blocks[-1])
+                final_builder.ret_void()
+    
+    @staticmethod
+    def process_namespace_struct(namespace: str, struct_def: 'StructDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
+        """
+        Process a struct within a namespace context.
+        
+        Args:
+            namespace: The namespace path (e.g., "standard::io")
+            struct_def: The struct definition to process
+            builder: LLVM IR builder
+            module: LLVM module
+        """
+        original_name = struct_def.name
+        struct_def.name = f"{namespace.replace('::', '__')}__{struct_def.name}"
+        try:
+            struct_def.codegen(builder, module)
+        finally:
+            struct_def.name = original_name
+    
+    @staticmethod
+    def process_namespace_object(namespace: str, obj_def: 'ObjectDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
+        """
+        Process an object within a namespace context.
+        
+        Args:
+            namespace: The namespace path (e.g., "standard::io")
+            obj_def: The object definition to process
+            builder: LLVM IR builder
+            module: LLVM module
+        """
+        original_name = obj_def.name
+        obj_def.name = f"{namespace.replace('::', '__')}__{obj_def.name}"
+        try:
+            obj_def.codegen(builder, module)
+        finally:
+            obj_def.name = original_name
+    
+    @staticmethod
+    def process_namespace_enum(namespace: str, enum_def: 'EnumDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
+        """
+        Process an enum within a namespace context.
+        
+        Args:
+            namespace: The namespace path (e.g., "standard::io")
+            enum_def: The enum definition to process
+            builder: LLVM IR builder
+            module: LLVM module
+        """
+        original_name = enum_def.name
+        enum_def.name = f"{namespace.replace('::', '__')}__{enum_def.name}"
+        try:
+            enum_def.codegen(builder, module)
+        finally:
+            enum_def.name = original_name
+    
+    @staticmethod
+    def process_namespace_variable(namespace: str, var_def: 'VariableDeclaration', module: 'ir.Module'):
+        """
+        Process a variable (including type declarations) within a namespace context.
+        
+        Args:
+            namespace: The namespace path (e.g., "standard::io")
+            var_def: The variable declaration to process
+            module: LLVM module
+        """
+        original_name = var_def.name
+        # Always mangle namespace-level variables
+        var_def.name = f"{namespace.replace('::', '__')}__{var_def.name}"
+        try:
+            result = var_def.codegen(None, module)  # Always use None builder for globals
+            return result
+        finally:
+            var_def.name = original_name
+    
+    @staticmethod
+    def process_nested_namespace(parent_namespace: str, nested_ns: 'NamespaceDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
+        """
+        Process a nested namespace within a parent namespace.
+        
+        Args:
+            parent_namespace: The parent namespace path (e.g., "standard")
+            nested_ns: The nested namespace definition
+            builder: LLVM IR builder
+            module: LLVM module
+        """
+        original_name = nested_ns.name
+        # Nested namespace gets parent path prepended
+        full_nested_name = f"{parent_namespace}::{nested_ns.name}"
+        nested_ns.name = f"{parent_namespace.replace('::', '__')}__{nested_ns.name}"
+        
+        # Set current namespace context
+        original_namespace = getattr(module, '_current_namespace', '')
+        module._current_namespace = full_nested_name
+        
+        try:
+            nested_ns.codegen(builder, module)
+        finally:
+            nested_ns.name = original_name
+            module._current_namespace = original_namespace
+    
+    @staticmethod
     def process_namespace_function(namespace: str, func_def: 'FunctionDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
         """Process a function within a namespace context."""
         from fast import FunctionTypeHandler  # Import here to avoid circular dependency
@@ -601,6 +769,7 @@ class TypeSystem:
     is_array: bool = False
     array_size: Optional[Union[int, Any]] = None  # Can be int literal or Expression (evaluated at runtime if needed)
     array_dimensions: Optional[List[Optional[Union[int, Any]]]] = None  # Same for multi-dimensional arrays
+    array_element_type: Optional['TypeSystem'] = None  # For tracking element type signedness in arrays
     is_pointer: bool = False
     pointer_depth: int = 0
     custom_typename: Optional[str] = None
@@ -2389,19 +2558,29 @@ def infer_int_width(value: int, data_type: DataType) -> int:
         
     Raises:
         ValueError: If data_type is not an integer type
+    
+    Note:
+        CHANGED: Now defaults to 32-bit for all values that fit in 32 bits.
+        This ensures literals are generated as i32 instead of i64 by default.
     """
+    if data_type not in (DataType.SINT, DataType.UINT):
+        raise ValueError("Not an integer literal")
+    
+    # Default to 32-bit - only use 64-bit if value doesn't fit in 32-bit
     if data_type == DataType.SINT:
+        # Signed: -2^31 to 2^31-1
         if -(1 << 31) <= value <= (1 << 31) - 1:
             return 32
         else:
             return 64
-    elif data_type == DataType.UINT:
+    else:  # DataType.UINT
+        # Unsigned: 0 to 2^32-1
         if 0 <= value <= (1 << 32) - 1:
+            print(f"[DEBUG infer_int_width UINT] Returning 32 for value={value}")
             return 32
         else:
+            print(f"[DEBUG infer_int_width UINT] Returning 64 for value={value}")
             return 64
-    else:
-        raise ValueError("Not an integer literal")
 
 
 def attach_type_metadata(llvm_value: ir.Value, type_spec: Optional[Any] = None, 
@@ -2435,6 +2614,81 @@ def attach_type_metadata(llvm_value: ir.Value, type_spec: Optional[Any] = None,
         llvm_value._flux_type_spec = type_spec
     
     return llvm_value
+
+
+def attach_type_metadata_from_llvm_type(llvm_value: ir.Value, llvm_type: ir.Type, module: ir.Module) -> ir.Value:
+    """
+    Attach Flux type metadata to a loaded value based on LLVM type and module type aliases.
+    
+    This is used when loading from arrays or struct members to preserve signedness information.
+    
+    Args:
+        llvm_value: The LLVM value to annotate (typically just loaded)
+        llvm_type: The LLVM type of the value
+        module: LLVM module containing type alias information
+        
+    Returns:
+        The same llvm_value with metadata attached if type information is found
+    """
+    # Check if this type has a known alias in the module
+    if hasattr(module, '_type_aliases'):
+        for alias_name, alias_type in module._type_aliases.items():
+            # Compare types properly - use str() comparison or type equivalence
+            types_match = (str(alias_type) == str(llvm_type)) or (alias_type == llvm_type)
+            if types_match:
+                # Found a matching type alias - determine if it's unsigned
+                # u8, u16, u32, u64 are unsigned
+                # i8, i16, i32, i64, s8, s16, s32, s64 are signed
+                # byte is unsigned (u8)
+                is_unsigned_type = (
+                    alias_name.startswith('u') or 
+                    alias_name == 'byte'
+                )
+                
+                # Create type spec with appropriate signedness
+                type_spec = type(
+                    'TypeSystem',
+                    (),
+                    {
+                        'base_type': DataType.UINT if is_unsigned_type else DataType.SINT,
+                        'is_signed': not is_unsigned_type,
+                        'bit_width': llvm_type.width if hasattr(llvm_type, 'width') else None,
+                        'custom_typename': alias_name
+                    }
+                )()
+                
+                llvm_value._flux_type_spec = type_spec
+                return llvm_value
+    
+    # No type alias found - return value as-is
+    return llvm_value
+
+
+
+def get_array_element_type_spec(array_val: ir.Value):
+    """
+    Get the element type specification from an array value's metadata.
+    
+    This is used when indexing into arrays to preserve element signedness.
+    For example, if array_val is a pointer to u32[8], this returns the u32 TypeSystem spec.
+    
+    Args:
+        array_val: The array value (pointer to array or global array)
+        
+    Returns:
+        TypeSystem spec for array elements, or None if not found
+    """
+    # Check if the array value has type metadata attached
+    if hasattr(array_val, '_flux_array_element_type_spec'):
+        return array_val._flux_array_element_type_spec
+    
+    # Check if it has a general type spec with array element info
+    if hasattr(array_val, '_flux_type_spec'):
+        type_spec = array_val._flux_type_spec
+        if hasattr(type_spec, 'array_element_type') and type_spec.array_element_type:
+            return type_spec.array_element_type
+    
+    return None
 
 
 def is_unsigned(val: ir.Value) -> bool:
@@ -2623,6 +2877,266 @@ def cast_to_type(builder: ir.IRBuilder, value: ir.Value, target_type: ir.Type) -
 # ============================================================================
 # Function Type Helper
 # ============================================================================
+
+
+
+class ObjectTypeHandler:
+    """
+    Helper class for managing object type operations, including member types,
+    vtable creation, and method processing.
+    """
+    
+    @staticmethod
+    def initialize_object_storage(module: 'ir.Module'):
+        """
+        Initialize module attributes for object type storage.
+        
+        Args:
+            module: LLVM module
+        """
+        if not hasattr(module, '_struct_vtables'):
+            module._struct_vtables = {}
+        if not hasattr(module, '_struct_types'):
+            module._struct_types = {}
+    
+    @staticmethod
+    def create_member_types(members: List, module: 'ir.Module') -> tuple:
+        """
+        Create LLVM types for object members.
+        
+        Args:
+            members: List of StructMember objects
+            module: LLVM module
+            
+        Returns:
+            Tuple of (member_types, member_names)
+        """
+        member_types = []
+        member_names = []
+        
+        for member in members:
+            member_type = FunctionTypeHandler.convert_type_spec_to_llvm(member.type_spec, module)
+            member_types.append(member_type)
+            member_names.append(member.name)
+        
+        return member_types, member_names
+    
+    @staticmethod
+    def create_struct_type(name: str, member_types: List, member_names: List, 
+                          module: 'ir.Module') -> 'ir.Type':
+        """
+        Create and register a struct type for an object.
+        
+        Args:
+            name: Object name
+            member_types: List of LLVM member types
+            member_names: List of member names
+            module: LLVM module
+            
+        Returns:
+            Created struct type
+        """
+        struct_type = ir.global_context.get_identified_type(name)
+        struct_type.set_body(*member_types)
+        struct_type.names = member_names
+        
+        if not hasattr(module, '_struct_types'):
+            module._struct_types = {}
+        module._struct_types[name] = struct_type
+        
+        return struct_type
+    
+    @staticmethod
+    def calculate_field_layout(members: List, member_types: List) -> List[tuple]:
+        """
+        Calculate field layout for vtable.
+        
+        Args:
+            members: List of StructMember objects
+            member_types: List of LLVM member types
+            
+        Returns:
+            List of (name, bit_offset, bit_width, alignment) tuples
+        """
+        fields = []
+        for i, member in enumerate(members):
+            member_type = member_types[i]
+            if isinstance(member_type, ir.IntType):
+                bit_width = member_type.width
+                alignment = member_type.width
+            elif isinstance(member_type, ir.FloatType):
+                bit_width = 32
+                alignment = 32
+            else:
+                bit_width = 64  # pointer or other
+                alignment = 64
+            
+            bit_offset = i * bit_width
+            fields.append((member.name, bit_offset, bit_width, alignment))
+        
+        return fields
+    
+    @staticmethod
+    def create_vtable(name: str, fields: List[tuple], module: 'ir.Module'):
+        """
+        Create and register a vtable for an object.
+        
+        Args:
+            name: Object name
+            fields: List of field tuples
+            module: LLVM module
+        """
+        from fast import StructVTable
+        
+        vtable = StructVTable(
+            struct_name=name,
+            total_bits=sum(f[2] for f in fields),
+            total_bytes=(sum(f[2] for f in fields) + 7) // 8,
+            alignment=max(f[3] for f in fields) if fields else 1,
+            fields=fields
+        )
+        
+        if not hasattr(module, '_struct_vtables'):
+            module._struct_vtables = {}
+        module._struct_vtables[name] = vtable
+    
+    @staticmethod
+    def create_method_signature(object_name: str, method_name: str, method, 
+                                struct_type: 'ir.Type', module: 'ir.Module') -> tuple:
+        """
+        Create method signature with 'this' parameter.
+        
+        Args:
+            object_name: Name of the object
+            method_name: Name of the method
+            method: Method definition
+            struct_type: LLVM struct type for the object
+            module: LLVM module
+            
+        Returns:
+            Tuple of (func_type, func_name)
+        """
+        from fast import DataType
+        
+        # Return type
+        if method.return_type.base_type == DataType.THIS:
+            ret_type = ir.PointerType(struct_type)
+        else:
+            ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(method.return_type, module)
+        
+        # Param types: always 'this' first
+        param_types = [ir.PointerType(struct_type)]
+        param_types.extend([FunctionTypeHandler.convert_type_spec_to_llvm(p.type_spec, module) 
+                          for p in method.parameters])
+        
+        func_type = ir.FunctionType(ret_type, param_types)
+        func_name = f"{object_name}.{method_name}"
+        
+        return func_type, func_name
+    
+    @staticmethod
+    def predeclare_method(func_type: 'ir.FunctionType', func_name: str, method, 
+                         module: 'ir.Module') -> 'ir.Function':
+        """
+        Predeclare a method function or reuse existing.
+        
+        Args:
+            func_type: LLVM function type
+            func_name: Full method name
+            method: Method definition
+            module: LLVM module
+            
+        Returns:
+            LLVM function
+        """
+        existing = module.globals.get(func_name)
+        if existing is None:
+            func = ir.Function(module, func_type, func_name)
+        else:
+            if not isinstance(existing, ir.Function):
+                raise RuntimeError(f"{func_name} already exists and is not a function")
+            if existing.function_type != func_type:
+                raise RuntimeError(f"Conflicting signatures for {func_name}")
+            func = existing
+        
+        # Name arguments
+        func.args[0].name = "this"
+        for i, arg in enumerate(func.args[1:], 1):
+            param_name = method.parameters[i - 1].name if method.parameters[i - 1].name is not None else f"arg{i - 1}"
+            arg.name = param_name
+        
+        return func
+    
+    @staticmethod
+    def emit_method_body(method, func: 'ir.Function', object_name: str, module: 'ir.Module'):
+        """
+        Emit the body of a method.
+        
+        Args:
+            method: Method definition
+            func: LLVM function
+            object_name: Name of the object
+            module: LLVM module
+        """
+        from fast import DataType, TypeSystem, FunctionDef
+        
+        if isinstance(method, FunctionDef) and method.is_prototype:
+            return
+        
+        if len(func.blocks) != 0:
+            return
+        
+        entry_block = func.append_basic_block('entry')
+        method_builder = ir.IRBuilder(entry_block)
+        
+        method_builder.scope = {}
+        if not hasattr(method_builder, 'scope_type_info'):
+            method_builder.scope_type_info = {}
+        
+        # Register 'this'
+        method_builder.scope["this"] = func.args[0]
+        this_type_spec = TypeSystem(base_type=DataType.DATA, custom_typename=object_name, is_pointer=True)
+        method_builder.scope_type_info['this'] = this_type_spec
+        
+        # Store other params
+        for i, param in enumerate(func.args[1:], 1):
+            param_name = method.parameters[i - 1].name if method.parameters[i - 1].name is not None else f"arg{i - 1}"
+            alloca = method_builder.alloca(param.type, name=f"{param_name}.addr")
+            method_builder.store(param, alloca)
+            method_builder.scope[param_name] = alloca
+        
+        # Emit body
+        method.body.codegen(method_builder, module)
+        
+        # __init implicit return
+        if isinstance(method, FunctionDef) and method.name == '__init' and not method_builder.block.is_terminated:
+            method_builder.ret(func.args[0])
+        
+        # Implicit return for void
+        if not method_builder.block.is_terminated:
+            if isinstance(func.function_type.return_type, ir.VoidType):
+                method_builder.ret_void()
+            else:
+                raise RuntimeError(f"Method {method.name} must end with return statement")
+    
+    @staticmethod
+    def process_nested_definitions(nested_objects: List, nested_structs: List, 
+                                   builder: 'ir.IRBuilder', module: 'ir.Module'):
+        """
+        Process nested objects and structs.
+        
+        Args:
+            nested_objects: List of nested ObjectDef
+            nested_structs: List of nested StructDef
+            builder: LLVM IR builder
+            module: LLVM module
+        """
+        for nested_obj in nested_objects:
+            nested_obj.codegen(builder, module)
+        
+        for nested_struct in nested_structs:
+            nested_struct.codegen(builder, module)
+
 
 class FunctionTypeHandler:
     """
@@ -2831,6 +3345,17 @@ class FunctionTypeHandler:
                         # Type mismatch
                         match = False
                         break
+                    # Also check signedness for integer types
+                    elif isinstance(arg_val.type, ir.IntType) and isinstance(expected_llvm_type, ir.IntType):
+                        # Check if signedness matches
+                        arg_is_unsigned = is_unsigned(arg_val)
+                        param_is_unsigned = (param_type.base_type == DataType.UINT if hasattr(param_type, 'base_type') 
+                                            else not param_type.is_signed if hasattr(param_type, 'is_signed')
+                                            else False)
+                        if arg_is_unsigned != param_is_unsigned:
+                            # Signedness mismatch
+                            match = False
+                            break
                 
                 if match:
                     return candidate['function']
@@ -3676,3 +4201,532 @@ def coerce_return_value(
             raise TypeError(
                 f"Invalid return type: can only convert between integer arrays, "
                 f"got {src} -> {expected}")
+
+class AssignmentTypeHandler:
+    """
+    Helper class for managing assignment type conversions, compatibility checks,
+    and special assignment handling (array, struct member, union, pointer deref).
+    """
+    
+    @staticmethod
+    def handle_identifier_assignment(builder, module, target_name: str, val, value_expr):
+        """
+        Handle assignment to a simple identifier (variable).
+        
+        Args:
+            builder: LLVM IR builder
+            module: LLVM module
+            target_name: Name of the target variable
+            val: Value to assign (already generated)
+            value_expr: The value expression AST node (for type checking)
+            
+        Returns:
+            The assigned value
+        """
+        # Get the variable pointer
+        if builder.scope is not None and target_name in builder.scope:
+            # Local variable
+            ptr = builder.scope[target_name]
+        elif target_name in module.globals:
+            # Global variable
+            ptr = module.globals[target_name]
+        else:
+            raise NameError(f"Unknown variable: {target_name}")
+        
+        # Check if this is an array concatenation assignment that requires resizing
+        from fast import BinaryOp, Operator
+        if (isinstance(value_expr, BinaryOp) and value_expr.operator == Operator.ADD and
+            isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType)):
+            # This is the result of array concatenation - update variable to point to new array
+            if builder.scope is not None and target_name in builder.scope:
+                # For local variables, update the scope to point to the new array
+                builder.scope[target_name] = val
+                return val
+            else:
+                # For global variables, we can't easily resize, so convert to element pointer
+                zero = ir.Constant(ir.IntType(1), 0)
+                array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
+                builder.store(array_ptr, ptr)
+                return array_ptr
+        
+        # Handle type compatibility for assignments
+        val = AssignmentTypeHandler.convert_value_for_assignment(builder, val, ptr.type.pointee)
+        
+        st = builder.store(val, ptr)
+        st.volatile = True
+        return val
+    
+    @staticmethod
+    def convert_value_for_assignment(builder, val, target_type):
+        """
+        Convert value type to match target type if needed.
+        
+        Args:
+            builder: LLVM IR builder
+            val: Value to potentially convert
+            target_type: Expected target type
+            
+        Returns:
+            Converted value
+        """
+        if val.type == target_type:
+            return val
+        
+        # Handle array pointer assignments - for arrays, just store the pointer directly
+        if (isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType) and
+            isinstance(target_type, ir.PointerType)):
+            # This is assigning an array to a pointer type (like noopstr)
+            # Get pointer to first element of array
+            zero = ir.Constant(ir.IntType(1), 0)
+            array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
+            return array_ptr
+        
+        # Handle void* to typed pointer assignment (e.g., py = (@)pxk where pxk is int)
+        if (isinstance(val.type, ir.PointerType) and 
+              isinstance(val.type.pointee, ir.IntType) and val.type.pointee.width == 8 and
+              isinstance(target_type, ir.PointerType)):
+            # This is assigning void* (i8*) to a typed pointer
+            return builder.bitcast(val, target_type, name="void_ptr_to_typed")
+        
+        # Handle integer type mismatches using LoweringContext
+        if isinstance(val.type, ir.IntType) and isinstance(target_type, ir.IntType):
+            if val.type.width != target_type.width:
+                # Determine signedness from the value's metadata using LoweringContext
+                unsigned = LoweringContext.is_unsigned(val)
+                
+                # Handle widening (extending to larger type)
+                if val.type.width < target_type.width:
+                    if unsigned:
+                        result = builder.zext(val, target_type)
+                    else:
+                        result = builder.sext(val, target_type)
+                    
+                    # Preserve metadata
+                    if hasattr(val, '_flux_type_spec'):
+                        result._flux_type_spec = val._flux_type_spec
+                        result._flux_type_spec.bit_width = target_type.width
+                    
+                    return result
+                
+                # Handle narrowing (truncating to smaller type)
+                else:
+                    result = builder.trunc(val, target_type)
+                    
+                    # Preserve metadata
+                    if hasattr(val, '_flux_type_spec'):
+                        result._flux_type_spec = val._flux_type_spec
+                        result._flux_type_spec.bit_width = target_type.width
+                    
+                    return result
+        
+        return val
+    
+    @staticmethod
+    def handle_member_assignment(builder, module, target_obj_expr, member_name: str, val):
+        """
+        Handle assignment to a struct/object member.
+        
+        Args:
+            builder: LLVM IR builder
+            module: LLVM module
+            target_obj_expr: The object expression (e.g., Identifier)
+            member_name: Name of the member being assigned
+            val: Value to assign
+            
+        Returns:
+            The assigned value
+        """
+        from fast import Identifier
+        
+        # For member access, we need the pointer, not the loaded value
+        if isinstance(target_obj_expr, Identifier):
+            # Get the variable pointer directly from scope instead of loading
+            var_name = target_obj_expr.name
+            if builder.scope is not None and var_name in builder.scope:
+                obj = builder.scope[var_name]  # This is the pointer
+                if isinstance(obj.type, ir.PointerType) and isinstance(obj.type.pointee, ir.PointerType):
+                    # Check if the pointee-pointee is a struct
+                    if (isinstance(obj.type.pointee.pointee, ir.LiteralStructType) or
+                        hasattr(obj.type.pointee.pointee, '_name') or
+                        hasattr(obj.type.pointee.pointee, 'elements')):
+                        # This is a pointer parameter - load it to get the actual pointer
+                        obj = builder.load(obj, name=f"{var_name}_ptr")
+            elif var_name in module.globals:
+                obj = module.globals[var_name]  # This is the pointer
+            else:
+                raise NameError(f"Unknown variable: {var_name}")
+        else:
+            # For other expressions, generate code normally
+            obj = target_obj_expr.codegen(builder, module)
+        
+        # Handle both literal struct types and identified struct types
+        is_struct_pointer = (isinstance(obj.type, ir.PointerType) and 
+                        (isinstance(obj.type.pointee, ir.LiteralStructType) or
+                         hasattr(obj.type.pointee, '_name') or  # Identified struct type
+                         hasattr(obj.type.pointee, 'elements')))  # Other struct-like types
+        
+        if is_struct_pointer:
+            struct_type = obj.type.pointee
+            
+            # Check if this is a union first
+            if hasattr(module, '_union_types'):
+                for union_name, union_type in module._union_types.items():
+                    if union_type == struct_type:
+                        # This is a union - handle union member assignment
+                        return handle_union_member_assignment(builder, module, obj, union_name, member_name, val)
+            
+            # Regular struct member assignment
+            if hasattr(struct_type, 'names'):
+                try:
+                    idx = struct_type.names.index(member_name)
+                    member_ptr = builder.gep(
+                        obj,
+                        [ir.Constant(ir.IntType(1), 0),
+                         ir.Constant(ir.IntType(32), idx)],
+                        inbounds=True
+                    )
+                    # Convert value type to match target member type if needed
+                    member_type = member_ptr.type.pointee
+                    val = AssignmentTypeHandler.convert_value_for_assignment(builder, val, member_type)
+                    builder.store(val, member_ptr)
+                    return val
+                except ValueError:
+                    raise ValueError(f"Member '{member_name}' not found in struct")
+            else:
+                # This is a byte-array based struct - use vtable for field assignment
+                return AssignmentTypeHandler.handle_vtable_struct_assignment(
+                    builder, module, obj, target_obj_expr, member_name, val)
+        
+        raise ValueError(f"Cannot assign to member '{member_name}' of non-struct type: {obj.type}")
+    
+    @staticmethod
+    def handle_vtable_struct_assignment(builder, module, struct_ptr, target_obj_expr, member_name: str, val):
+        """
+        Handle struct member assignment for byte-array based structs using vtable.
+        
+        Args:
+            builder: LLVM IR builder
+            module: LLVM module
+            struct_ptr: Pointer to the struct
+            target_obj_expr: The target object expression (for type info)
+            member_name: Name of the member
+            val: Value to assign
+            
+        Returns:
+            The assigned value
+        """
+        from fast import Identifier
+        
+        # Determine struct name from the pointer type
+        struct_name = None
+        struct_type = struct_ptr.type.pointee
+        
+        # Try to match with registered struct types
+        if hasattr(module, '_struct_types'):
+            for name, registered_type in module._struct_types.items():
+                if registered_type == struct_type:
+                    struct_name = name
+                    break
+        
+        if struct_name is None:
+            # Try to infer from scope_type_info
+            if isinstance(target_obj_expr, Identifier):
+                var_name = target_obj_expr.name
+                if hasattr(builder, 'scope_type_info') and var_name in builder.scope_type_info:
+                    type_spec = builder.scope_type_info[var_name]
+                    if type_spec.custom_typename:
+                        struct_name = type_spec.custom_typename
+        
+        if struct_name is None:
+            raise ValueError(f"Cannot determine struct type for member assignment")
+        
+        # Get vtable
+        if not hasattr(module, '_struct_vtables') or struct_name not in module._struct_vtables:
+            raise ValueError(f"Vtable not found for struct '{struct_name}'")
+        
+        vtable = module._struct_vtables[struct_name]
+        
+        # Find field in vtable
+        field_info = next(
+            (f for f in vtable.fields if f[0] == member_name),
+            None
+        )
+        if not field_info:
+            raise ValueError(f"Field '{member_name}' not found in struct '{struct_name}'")
+        
+        _, bit_offset, bit_width, alignment = field_info
+        
+        # Load the current struct value
+        current_struct = builder.load(struct_ptr, name="current_struct")
+        
+        # Convert float to integer if needed
+        if isinstance(val.type, ir.FloatType):
+            int_type = ir.IntType(bit_width)
+            val = builder.bitcast(val, int_type)
+        
+        # Generate inline assignment code based on struct storage type
+        if isinstance(current_struct.type, ir.IntType):
+            # Integer type - simple bit operations
+            return AssignmentTypeHandler._assign_bitfield_integer(
+                builder, current_struct, struct_ptr, val, bit_offset, bit_width)
+        else:
+            # Array type - byte manipulation
+            return AssignmentTypeHandler._assign_bitfield_array(
+                builder, current_struct, struct_ptr, val, bit_offset, bit_width)
+    
+    @staticmethod
+    def _assign_bitfield_integer(builder, current_struct, struct_ptr, val, bit_offset: int, bit_width: int):
+        """
+        Assign a value to a bitfield in an integer-type struct.
+        
+        Args:
+            builder: LLVM IR builder
+            current_struct: Current struct value
+            struct_ptr: Pointer to the struct
+            val: Value to assign
+            bit_offset: Bit offset of the field
+            bit_width: Bit width of the field
+            
+        Returns:
+            The assigned value
+        """
+        instance_type = current_struct.type
+        
+        # Create mask to clear the field
+        mask = ((1 << bit_width) - 1) << bit_offset
+        inverse_mask = (~mask) & ((1 << instance_type.width) - 1)
+        
+        # Clear the field
+        cleared = builder.and_(current_struct, ir.Constant(instance_type, inverse_mask))
+        
+        # Shift value to position
+        if val.type.width < instance_type.width:
+            val_extended = builder.zext(val, instance_type)
+        elif val.type.width > instance_type.width:
+            val_extended = builder.trunc(val, instance_type)
+        else:
+            val_extended = val
+        
+        if bit_offset > 0:
+            val_shifted = builder.shl(val_extended, ir.Constant(instance_type, bit_offset))
+        else:
+            val_shifted = val_extended
+        
+        # Combine
+        new_struct = builder.or_(cleared, val_shifted)
+        
+        # Store back
+        builder.store(new_struct, struct_ptr)
+        return val
+    
+    @staticmethod
+    def _assign_bitfield_array(builder, current_struct, struct_ptr, val, bit_offset: int, bit_width: int):
+        """
+        Assign a value to a bitfield in an array-type struct.
+        
+        Args:
+            builder: LLVM IR builder
+            current_struct: Current struct value
+            struct_ptr: Pointer to the struct
+            val: Value to assign
+            bit_offset: Bit offset of the field
+            bit_width: Bit width of the field
+            
+        Returns:
+            The assigned value
+        """
+        byte_offset = bit_offset // 8
+        bit_in_byte = bit_offset % 8
+        
+        if bit_in_byte == 0 and bit_width % 8 == 0:
+            # Byte-aligned field - simple case
+            field_bytes = bit_width // 8
+            
+            # Ensure val is the right type
+            if val.type.width != bit_width:
+                if val.type.width < bit_width:
+                    val = builder.zext(val, ir.IntType(bit_width))
+                else:
+                    val = builder.trunc(val, ir.IntType(bit_width))
+            
+            # Insert bytes into the struct
+            new_struct = current_struct
+            for i in range(field_bytes):
+                # Extract byte from value
+                shift_amount = i * 8
+                byte_val = builder.lshr(val, ir.Constant(val.type, shift_amount))
+                byte_val = builder.and_(byte_val, ir.Constant(val.type, 0xFF))
+                byte_val = builder.trunc(byte_val, ir.IntType(8))
+                
+                # Insert into array
+                new_struct = builder.insert_value(new_struct, byte_val, byte_offset + i)
+            
+            # Store back
+            builder.store(new_struct, struct_ptr)
+            return val
+        else:
+            raise NotImplementedError("Unaligned field assignment in large structs not yet supported")
+    
+    @staticmethod
+    def handle_array_element_assignment(builder, module, array_expr, index_expr, value_expr, val):
+        """
+        Handle assignment to an array element.
+        
+        Args:
+            builder: LLVM IR builder
+            module: LLVM module
+            array_expr: Array expression AST node
+            index_expr: Index expression AST node
+            value_expr: Value expression AST node
+            val: Generated value to assign
+            
+        Returns:
+            The assigned value
+        """
+        from fast import StringLiteral
+        
+        array = array_expr.codegen(builder, module)
+        index = index_expr.codegen(builder, module)
+        
+        if isinstance(array.type, ir.PointerType) and isinstance(array.type.pointee, ir.ArrayType):
+            # Calculate element pointer for pointer-to-array
+            zero = ir.Constant(ir.IntType(1), 0)
+            elem_ptr = builder.gep(array, [zero, index], inbounds=True)
+            
+            # FIX: Handle StringLiteral assignment to byte array elements
+            element_type = array.type.pointee.element
+            if isinstance(value_expr, StringLiteral) and isinstance(element_type, ir.IntType) and element_type.width == 8:
+                # Extract first character from string literal
+                if len(value_expr.value) > 0:
+                    val = ir.Constant(ir.IntType(8), ord(value_expr.value[0]))
+                else:
+                    val = ir.Constant(ir.IntType(8), 0)
+            else:
+                # Convert value type to match element type if needed
+                val = AssignmentTypeHandler.convert_value_for_assignment(builder, val, element_type)
+            builder.store(val, elem_ptr)
+            return val
+        elif isinstance(array.type, ir.PointerType):
+            # Handle plain pointer types (like byte*) - pointer arithmetic
+            elem_ptr = builder.gep(array, [index], inbounds=True)
+            
+            # FIX: Handle StringLiteral assignment to byte pointer elements
+            element_type = array.type.pointee
+            if isinstance(value_expr, StringLiteral) and isinstance(element_type, ir.IntType) and element_type.width == 8:
+                # Extract first character from string literal
+                if len(value_expr.value) > 0:
+                    val = ir.Constant(ir.IntType(8), ord(value_expr.value[0]))
+                else:
+                    val = ir.Constant(ir.IntType(8), 0)
+            else:
+                # Convert value type to match element type if needed
+                val = AssignmentTypeHandler.convert_value_for_assignment(builder, val, element_type)
+            builder.store(val, elem_ptr)
+            return val
+        else:
+            raise ValueError("Cannot index non-array type")
+    
+    @staticmethod
+    def handle_pointer_deref_assignment(builder, ptr, val):
+        """
+        Handle assignment through pointer dereference.
+        
+        Args:
+            builder: LLVM IR builder
+            ptr: Pointer to dereference
+            val: Value to assign
+            
+        Returns:
+            The assigned value
+        """
+        if isinstance(ptr.type, ir.PointerType):
+            # Convert value type to match pointee type if needed
+            pointee_type = ptr.type.pointee
+            val = AssignmentTypeHandler.convert_value_for_assignment(builder, val, pointee_type)
+            builder.store(val, ptr)
+            return val
+        else:
+            raise ValueError(f"Cannot dereference non-pointer type: {ptr.type}")
+    
+    @staticmethod
+    def handle_compound_assignment(builder, module, target_expr, op_token, value_expr):
+        """
+        Handle compound assignments like +=, -=, *=, /=, %=, etc.
+        
+        Args:
+            builder: LLVM IR builder
+            module: LLVM module
+            target_expr: Target expression AST node
+            op_token: TokenType for the compound operator
+            value_expr: Value expression AST node
+            
+        Returns:
+            The assigned value
+        """
+        from fast import TokenType, Operator, Identifier, BinaryOp, Assignment
+        
+        # Map compound assignment tokens to binary operators
+        op_map = {
+            TokenType.PLUS_ASSIGN: Operator.ADD,
+            TokenType.MINUS_ASSIGN: Operator.SUB,
+            TokenType.MULTIPLY_ASSIGN: Operator.MUL,
+            TokenType.DIVIDE_ASSIGN: Operator.DIV,
+            TokenType.MODULO_ASSIGN: Operator.MOD,
+            TokenType.POWER_ASSIGN: Operator.POWER,
+            TokenType.XOR_ASSIGN: Operator.XOR,
+            TokenType.BITSHIFT_LEFT_ASSIGN: Operator.BITSHIFT_LEFT,
+            TokenType.BITSHIFT_RIGHT_ASSIGN: Operator.BITSHIFT_RIGHT,
+        }
+        
+        if op_token not in op_map:
+            raise ValueError(f"Unsupported compound assignment operator: {op_token}")
+        
+        binary_op = op_map[op_token]
+        
+        # For compound assignment like s += q, this is equivalent to s = s + q
+        # But we need to handle array concatenation specially to support dynamic resizing
+        
+        # Check if this is array concatenation (ADD operation with array operands)
+        if binary_op == Operator.ADD and isinstance(target_expr, Identifier):
+            # Get the target variable
+            if builder.scope is not None and target_expr.name in builder.scope:
+                target_ptr = builder.scope[target_expr.name]
+            elif target_expr.name in module.globals:
+                target_ptr = module.globals[target_expr.name]
+            else:
+                raise NameError(f"Unknown variable: {target_expr.name}")
+            
+            # Load the current value of the target
+            target_val = target_expr.codegen(builder, module)
+            right_val = value_expr.codegen(builder, module)
+            
+            # Check if both operands are arrays or array pointers
+            if (is_array_or_array_pointer(target_val) and is_array_or_array_pointer(right_val)):
+                # This is array concatenation - create the binary operation
+                binary_expr = BinaryOp(target_expr, binary_op, value_expr)
+                concat_result = binary_expr.codegen(builder, module)
+                
+                # For array concatenation, we need to resize the variable to accommodate the new array
+                # This is similar to dynamic reallocation - create new storage and update the variable
+                if isinstance(concat_result.type, ir.PointerType) and isinstance(concat_result.type.pointee, ir.ArrayType):
+                    # The concatenated result is a new array with the proper size
+                    # Update the variable to point to this new array
+                    if builder.scope is not None and target_expr.name in builder.scope:
+                        # For local variables, update the scope to point to the new array
+                        builder.scope[target_expr.name] = concat_result
+                        return concat_result
+                    else:
+                        # For global variables, we can't easily resize, so convert to element pointer
+                        zero = ir.Constant(ir.IntType(32), 0)
+                        array_ptr = builder.gep(concat_result, [zero, zero], name="array_to_ptr")
+                        builder.store(array_ptr, target_ptr)
+                        return array_ptr
+                else:
+                    # Direct storage for other pointer types
+                    builder.store(concat_result, target_ptr)
+                    return concat_result
+        
+        # For non-array operations, fall back to the simple approach
+        binary_expr = BinaryOp(target_expr, binary_op, value_expr)
+        assignment = Assignment(target_expr, binary_expr)
+        return assignment.codegen(builder, module)
