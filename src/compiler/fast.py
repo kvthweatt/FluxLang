@@ -331,10 +331,16 @@ class Identifier(Expression):
         
         # Check for namespace-qualified names using 'using' statements
         if hasattr(module, '_using_namespaces'):
+            # DEBUG
+            #print(f"DEBUG Identifier.codegen: Looking for '{self.name}'")
+            #print(f"DEBUG _using_namespaces = {module._using_namespaces}")
+            #print(f"DEBUG Available globals: {list(module.globals.keys())}")
+            # END DEBUG
             for namespace in module._using_namespaces:
                 # Convert namespace path to mangled name format
                 mangled_prefix = namespace.replace('::', '__') + '__'
                 mangled_name = mangled_prefix + self.name
+                #print(f"DEBUG Trying mangled_name = {mangled_name}")  # DEBUG
                 
                 # Check in global variables with mangled name
                 if mangled_name in module.globals:
@@ -1323,7 +1329,7 @@ class ArrayLiteral(Expression):
                 packed_value = 0
                 bit_offset = 0  # Start from low bits
                 
-                print(f"DEBUG: Packing nested ArrayLiteral with {len(elem.elements)} elements into {llvm_type.element}")
+                #print(f"DEBUG: Packing nested ArrayLiteral with {len(elem.elements)} elements into {llvm_type.element}")
                 
                 for inner_elem in reversed(elem.elements):
                     # For global constants, we need constant values
@@ -3365,6 +3371,120 @@ class ArrayAccess(Expression):
             raise ValueError(f"Cannot access array element for type: {array_val.type}")
 
 @dataclass
+class ArraySlice(Expression):
+    """Slice expression using Flux syntax: base[start:end]
+
+    NOTE: In Flux, `x..y` is a Range. This node is specifically for `[start:end]`.
+    For now, codegen materializes a fixed-size array value (copy) when the slice
+    length can be proven to be a compile-time constant from the AST.
+
+    This matches existing call semantics where functions may take `T[N]` by value.
+    """
+
+    array: Expression
+    start: Expression
+    end: Expression
+
+    def _try_const_len(self) -> Optional[int]:
+        """Best-effort compile-time slice length inference.
+
+        Supports common patterns like:
+          - a:b where both are integer literals
+          - i:i+K or i:(i+K)
+          - i+K:i  (NOT supported; slice must be forward)
+        """
+        # Literal case
+        if isinstance(self.start, Literal) and isinstance(self.end, Literal):
+            if isinstance(self.start.value, int) and isinstance(self.end.value, int):
+                return self.end.value - self.start.value
+
+        # i : i + K  or  i : K + i
+        if isinstance(self.end, BinaryOp) and self.end.operator == Operator.ADD:
+            lhs, rhs = self.end.left, self.end.right
+            # start matches lhs
+            if repr(lhs) == repr(self.start) and isinstance(rhs, Literal) and isinstance(rhs.value, int):
+                return rhs.value
+            # start matches rhs
+            if repr(rhs) == repr(self.start) and isinstance(lhs, Literal) and isinstance(lhs.value, int):
+                return lhs.value
+
+        # 0 : K
+        if isinstance(self.start, Literal) and isinstance(self.start.value, int) and self.start.value == 0:
+            if isinstance(self.end, Literal) and isinstance(self.end.value, int):
+                return self.end.value
+
+        return None
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        array_val = self.array.codegen(builder, module)
+        start_val = self.start.codegen(builder, module)
+        end_val = self.end.codegen(builder, module)
+
+        # Indices must be i32 for GEP
+        def as_i32(v: ir.Value, name: str) -> ir.Value:
+            if v.type == ir.IntType(32):
+                return v
+            if isinstance(v.type, ir.IntType):
+                if v.type.width > 32:
+                    return builder.trunc(v, ir.IntType(32), name=f"{name}_trunc")
+                return builder.sext(v, ir.IntType(32), name=f"{name}_ext")
+            raise ValueError("Slice indices must be integers")
+
+        start_i32 = as_i32(start_val, "slice_start")
+        end_i32 = as_i32(end_val, "slice_end")
+
+        # Flux slice semantics: [start:end] is END-EXCLUSIVE.
+        const_len = self._try_const_len()
+        if const_len is None:
+            raise ValueError(
+                "Array slice length must be statically known right now (e.g. i:i+64). "
+                "The compiler couldn't prove the length as a constant."
+            )
+        if const_len < 0:
+            raise ValueError("Array slice must be forward (start <= end)")
+
+        # Determine element type and a pointer to the first element.
+        elem_ty = None
+        src_ptr = None
+        zero = ir.Constant(ir.IntType(32), 0)
+
+        if isinstance(array_val, ir.GlobalVariable) and isinstance(array_val.type.pointee, ir.ArrayType):
+            elem_ty = array_val.type.pointee.element
+            src_ptr = builder.gep(array_val, [zero, start_i32], inbounds=True, name="slice_src")
+        elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
+            elem_ty = array_val.type.pointee.element
+            src_ptr = builder.gep(array_val, [zero, start_i32], inbounds=True, name="slice_src")
+        elif isinstance(array_val.type, ir.PointerType):
+            # Pointer-to-element (e.g. byte[] lowered as i8*)
+            elem_ty = array_val.type.pointee
+            src_ptr = builder.gep(array_val, [start_i32], inbounds=True, name="slice_src")
+        else:
+            raise ValueError(f"Cannot slice type: {array_val.type}")
+
+        # Materialize [const_len x elem] on the stack and memcpy.
+        dst_arr_ty = ir.ArrayType(elem_ty, const_len)
+        dst_alloca = builder.alloca(dst_arr_ty, name="slice_tmp")
+        dst_ptr = builder.gep(dst_alloca, [zero, zero], inbounds=True, name="slice_dst")
+
+        # Compute bytes (assume integer/float element sizes we can infer from LLVM type)
+        elem_bytes = 1
+        if isinstance(elem_ty, ir.IntType):
+            elem_bytes = max(1, elem_ty.width // 8)
+        elif isinstance(elem_ty, ir.FloatType):
+            elem_bytes = 4
+        elif isinstance(elem_ty, ir.DoubleType):
+            elem_bytes = 8
+        else:
+            # Struct/other: fallback to 1 and let LLVM complain if memcpy is wrong
+            elem_bytes = 1
+
+        total_bytes = const_len * elem_bytes
+        ArrayLiteral.emit_memcpy(builder, module, dst_ptr, src_ptr, total_bytes)
+
+        # Return ARRAY VALUE (not pointer) so it can be passed to params like `byte[64]`.
+        return builder.load(dst_alloca, name="slice_val")
+
+@dataclass
 class PointerDeref(Expression):
     pointer: Expression
 
@@ -3806,46 +3926,7 @@ class VariableDeclaration(ASTNode):
     
     def _resolve_type_spec(self, module: ir.Module) -> TypeSpec:
         """Resolve type spec with automatic array size inference for string literals."""
-        if not (self.initial_value and isinstance(self.initial_value, StringLiteral)):
-            return self.type_spec
-        
-        # Direct array type check
-        if self.type_spec.is_array and self.type_spec.array_size is None:
-            return TypeSpec(
-                base_type=self.type_spec.base_type,
-                is_signed=self.type_spec.is_signed,
-                is_const=self.type_spec.is_const,
-                is_volatile=self.type_spec.is_volatile,
-                bit_width=self.type_spec.bit_width or 8,
-                alignment=self.type_spec.alignment,
-                is_array=True,
-                array_size=len(self.initial_value.value),
-                is_pointer=self.type_spec.is_pointer,
-                custom_typename=self.type_spec.custom_typename
-            )
-        
-        # Type alias check
-        if self.type_spec.custom_typename:
-            try:
-                resolved_llvm_type = self.type_spec.get_llvm_type(module)
-                if (isinstance(resolved_llvm_type, ir.PointerType) and 
-                    isinstance(resolved_llvm_type.pointee, ir.IntType) and 
-                    resolved_llvm_type.pointee.width == 8):
-                    return TypeSpec(
-                        base_type=DataType.DATA,
-                        is_signed=False,
-                        is_const=self.type_spec.is_const,
-                        is_volatile=self.type_spec.is_volatile,
-                        bit_width=8,
-                        alignment=self.type_spec.alignment,
-                        is_array=True,
-                        array_size=len(self.initial_value.value),
-                        is_pointer=False
-                    )
-            except (NameError, AttributeError):
-                pass
-        
-        return self.type_spec
+        return VariableTypeHandler.resolve_type_spec(self.type_spec, self.initial_value, module)
     
     def _codegen_global(self, module: ir.Module, llvm_type: ir.Type, 
                        resolved_type_spec: TypeSpec) -> ir.Value:
@@ -3888,146 +3969,7 @@ class VariableDeclaration(ASTNode):
     
     def _create_global_initializer(self, module: ir.Module, llvm_type: ir.Type) -> Optional[ir.Constant]:
         """Create compile-time constant initializer for global variable."""
-        # Handle different expression types
-        if isinstance(self.initial_value, Literal):
-            return self._literal_to_constant(self.initial_value, llvm_type)
-        
-        elif isinstance(self.initial_value, Identifier):
-            return self._identifier_to_constant(self.initial_value, module)
-        
-        elif isinstance(self.initial_value, BinaryOp):
-            return self._eval_const_expr(self.initial_value, module)
-        
-        elif isinstance(self.initial_value, UnaryOp):
-            return self._eval_const_expr(self.initial_value, module)
-        
-        elif isinstance(self.initial_value, StringLiteral):
-            return ArrayLiteral.create_global_string_initializer(
-                self.initial_value.value, llvm_type
-            )
-        
-        elif isinstance(self.initial_value, ArrayLiteral):
-            # Check if target is an integer (bitfield packing) or an array
-            if isinstance(llvm_type, ir.IntType):
-                # Pack array into integer for bitfield initialization
-                return self._pack_array_literal_to_int_constant(self.initial_value, llvm_type, module)
-            else:
-                return ArrayLiteral.create_global_array_initializer(
-                    self.initial_value, llvm_type, module
-                )
-        
-        # NEW: Handle array indexing at compile time
-        elif isinstance(self.initial_value, ArrayAccess):
-            return self._eval_array_access_const(self.initial_value, module)
-        
-        return None
-
-    def _eval_array_access_const(self, array_access, module: ir.Module) -> Optional[ir.Constant]:
-        """Evaluate array indexing at compile time for global initialization."""
-        # Get the array being indexed
-        if not isinstance(array_access.array, Identifier):
-            return None  # Can only index into named globals at compile time
-        
-        array_name = array_access.array.name
-        if array_name not in module.globals:
-            return None
-        
-        global_array = module.globals[array_name]
-        if not hasattr(global_array, 'initializer') or global_array.initializer is None:
-            return None
-        
-        # Get the index
-        if not isinstance(array_access.index, Literal) or array_access.index.type != DataType.SINT:
-            return None  # Can only use constant integer indices at compile time
-        
-        index_value = array_access.index.value
-        
-        # Extract the element from the constant array
-        array_const = global_array.initializer
-        if isinstance(array_const.type, ir.ArrayType):
-            if 0 <= index_value < len(array_const.constant):
-                return array_const.constant[index_value]
-        
-        return None
-    
-    def _pack_array_literal_to_int_constant(self, array_literal: 'ArrayLiteral', 
-                                           target_type: ir.IntType, module: ir.Module) -> Optional[ir.Constant]:
-        """Pack an array literal into an integer constant for global bitfield initialization."""
-        packed_value = 0
-        bit_offset = 0
-        
-        # Pack in reverse order: first element at high bits, last element at low bits (big-endian)
-        for elem in reversed(array_literal.elements):
-            # Get the constant value and bit width
-            if isinstance(elem, Literal):
-                elem_val = elem.value
-                # Default to 32-bit for literals unless we can infer better
-                elem_width = 32
-            elif isinstance(elem, Identifier):
-                # Look up the global variable
-                var_name = elem.name
-                if var_name not in module.globals:
-                    return None  # Can't resolve at compile time
-                
-                global_var = module.globals[var_name]
-                if not hasattr(global_var, 'initializer') or global_var.initializer is None:
-                    return None
-                
-                elem_val = global_var.initializer.constant
-                
-                # Get actual bit width from the global variable's type
-                if isinstance(global_var.type, ir.PointerType):
-                    actual_type = global_var.type.pointee
-                else:
-                    actual_type = global_var.type
-                
-                if isinstance(actual_type, ir.IntType):
-                    elem_width = actual_type.width
-                else:
-                    return None  # Not an integer type
-            else:
-                return None  # Can't evaluate at compile time
-            
-            # Pack the value
-            packed_value |= (elem_val << bit_offset)
-            bit_offset += elem_width
-        
-        # Verify total bits match target
-        if bit_offset != target_type.width:
-            raise ValueError(
-                f"Bitfield packing size mismatch: packed {bit_offset} bits into {target_type.width}-bit integer"
-            )
-        
-        return ir.Constant(target_type, packed_value)
-    
-    def _literal_to_constant(self, lit: Literal, llvm_type: ir.Type) -> ir.Constant:
-        """Convert literal to LLVM constant."""
-        if lit.type == DataType.SINT:
-            return ir.Constant(llvm_type, lit.value)
-        elif lit.type == DataType.FLOAT:
-            return ir.Constant(llvm_type, lit.value)
-        elif lit.type == DataType.BOOL:
-            return ir.Constant(llvm_type, 1 if lit.value else 0)
-        return None
-    
-    def _identifier_to_constant(self, ident: Identifier, module: ir.Module) -> Optional[ir.Constant]:
-        """Get constant from identifier (reference to another global)."""
-        var_name = ident.name
-        if var_name in module.globals:
-            other_global = module.globals[var_name]
-            if hasattr(other_global, 'initializer') and other_global.initializer:
-                return other_global.initializer
-        
-        # Check namespace-qualified names
-        if hasattr(module, '_using_namespaces'):
-            for namespace in module._using_namespaces:
-                mangled_name = namespace.replace('::', '__') + '__' + var_name
-                if mangled_name in module.globals:
-                    other_global = module.globals[mangled_name]
-                    if hasattr(other_global, 'initializer') and other_global.initializer:
-                        return other_global.initializer
-        
-        return None
+        return VariableTypeHandler.create_global_initializer(self.initial_value, llvm_type, module)
     
     def _codegen_local(self, builder: ir.IRBuilder, module: ir.Module, 
                       llvm_type: ir.Type, resolved_type_spec: TypeSpec) -> ir.Value:
@@ -4144,188 +4086,7 @@ class VariableDeclaration(ASTNode):
     def _store_with_type_conversion(self, builder: ir.IRBuilder, alloca: ir.Value, 
                                     llvm_type: ir.Type, init_val: ir.Value) -> None:
         """Store value with automatic type conversion if needed."""
-        # Handle special case: cast expression to array
-        if (isinstance(self.initial_value, CastExpression) and
-            isinstance(init_val.type, ir.PointerType) and
-            isinstance(llvm_type, ir.ArrayType)):
-            array_ptr_type = ir.PointerType(llvm_type)
-            casted_ptr = builder.bitcast(init_val, array_ptr_type, name="cast_to_array_ptr")
-            array_value = builder.load(casted_ptr, name="loaded_array")
-            builder.store(array_value, alloca)
-            return
-        
-        # Handle type mismatch
-        if init_val.type != llvm_type:
-            # Special case: array concatenation result to array variable
-            # e.g., int[2] b = [a[0]] + [1];
-            # init_val.type is [2 x i32]* (pointer), llvm_type is [2 x i32] (value)
-            if (isinstance(self.initial_value, BinaryOp) and 
-                self.initial_value.operator in (Operator.ADD, Operator.SUB) and
-                isinstance(init_val.type, ir.PointerType) and 
-                isinstance(init_val.type.pointee, ir.ArrayType) and
-                isinstance(llvm_type, ir.ArrayType)):
-                # Load the array value from the concat result pointer and store it
-                array_value = builder.load(init_val, name="concat_array_value")
-                builder.store(array_value, alloca)
-                return
-
-            # Special case: array concatenation result
-            if (isinstance(self.initial_value, BinaryOp) and 
-                self.initial_value.operator in (Operator.ADD, Operator.SUB) and
-                isinstance(init_val.type, ir.PointerType) and 
-                isinstance(init_val.type.pointee, ir.ArrayType) and
-                isinstance(llvm_type, ir.PointerType) and 
-                isinstance(llvm_type.pointee, ir.IntType)):
-                zero = ir.Constant(ir.IntType(32), 0)
-                array_ptr = builder.gep(init_val, [zero, zero], name="concat_array_to_ptr")
-                builder.store(array_ptr, alloca)
-                return
-            
-            # Pointer to array to integer packing (for bitfield initialization)
-            if (isinstance(init_val.type, ir.PointerType) and 
-                isinstance(init_val.type.pointee, ir.ArrayType) and 
-                isinstance(llvm_type, ir.IntType)):
-                # Pack array bits into integer
-                init_val = ArrayLiteral._pack_array_pointer_to_integer(
-                    builder, module, init_val, llvm_type
-                )
-            
-            # Pointer to integer conversion (addresses are just numbers in Flux)
-            elif isinstance(init_val.type, ir.PointerType) and isinstance(llvm_type, ir.IntType):
-                init_val = builder.ptrtoint(init_val, llvm_type, name="ptr_to_int")
-            
-            # Integer to pointer conversion
-            elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.PointerType):
-                init_val = builder.inttoptr(init_val, llvm_type, name="int_to_ptr")
-            
-            # Pointer type conversion
-            elif isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
-                if llvm_type.pointee != init_val.type.pointee:
-                    init_val = builder.bitcast(init_val, llvm_type)
-
-                elif isinstance(init_val.type.pointee, ir.ArrayType):
-                    # Pack array bits into integer
-                    init_val = ArrayLiteral._pack_array_pointer_to_integer(
-                        builder, module, init_val, llvm_type
-                    )
-
-            # Integer type conversion
-            elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.IntType):
-                if init_val.type.width > llvm_type.width:
-                    init_val = builder.trunc(init_val, llvm_type)
-                elif init_val.type.width < llvm_type.width:
-                    # Use zext for unsigned, sext for signed
-                    from futilities import is_unsigned
-                    if is_unsigned(init_val):
-                        init_val = builder.zext(init_val, llvm_type)
-                    else:
-                        init_val = builder.sext(init_val, llvm_type)
-            
-            # Int to float conversion
-            elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.FloatType):
-                init_val = builder.sitofp(init_val, llvm_type)
-            
-            # Float to int conversion
-            elif isinstance(init_val.type, ir.FloatType) and isinstance(llvm_type, ir.IntType):
-                init_val = builder.fptosi(init_val, llvm_type)
-        
-        # Preserve _flux_type_spec metadata if present on init_val
-        # This helps maintain signedness through store/load cycles
-        if hasattr(init_val, '_flux_type_spec'):
-            # Store metadata on the alloca so it can be retrieved on loads
-            if not hasattr(alloca, '_flux_type_spec'):
-                alloca._flux_type_spec = init_val._flux_type_spec
-        
-        builder.store(init_val, alloca)
-    
-    def _eval_const_expr(self, expr: Expression, module: ir.Module) -> Optional[ir.Constant]:
-        """Recursively evaluate constant expressions at compile time."""
-        if isinstance(expr, Literal):
-            if expr.type == DataType.SINT:
-                return ir.Constant(ir.IntType(32), expr.value)
-            elif expr.type == DataType.FLOAT:
-                return ir.Constant(ir.FloatType(), expr.value)
-            elif expr.type == DataType.BOOL:
-                return ir.Constant(ir.IntType(1), 1 if expr.value else 0)
-            return None
-        
-        elif isinstance(expr, Identifier):
-            return self._identifier_to_constant(expr, module)
-        
-        elif isinstance(expr, BinaryOp):
-            left = self._eval_const_expr(expr.left, module)
-            right = self._eval_const_expr(expr.right, module)
-            
-            if left is None or right is None:
-                return None
-            
-            return self._eval_binary_op(left, right, expr.operator)
-        
-        elif isinstance(expr, UnaryOp):
-            operand = self._eval_const_expr(expr.operand, module)
-            
-            if operand is None:
-                return None
-            
-            return self._eval_unary_op(operand, expr.operator)
-        
-        return None
-    
-    def _eval_binary_op(self, left: ir.Constant, right: ir.Constant, 
-                       op: Operator) -> Optional[ir.Constant]:
-        """Evaluate binary operation on constants."""
-        if isinstance(left.type, ir.IntType):
-            ops = {
-                Operator.ADD: lambda l, r: l + r,
-                Operator.SUB: lambda l, r: l - r,
-                Operator.MUL: lambda l, r: l * r,
-                Operator.DIV: lambda l, r: l // r,
-                Operator.MOD: lambda l, r: l % r,
-                Operator.POWER: lambda l, r: l ** r,
-                Operator.AND: lambda l, r: l & r,
-                Operator.OR: lambda l, r: l | r,
-                Operator.XOR: lambda l, r: l ^ r,
-                Operator.BITSHIFT_LEFT: lambda l, r: l << r,
-                Operator.BITSHIFT_RIGHT: lambda l, r: l >> r,
-            }
-            if op in ops:
-                result = ops[op](left.constant, right.constant)
-                return ir.Constant(left.type, result)
-        
-        elif isinstance(left.type, ir.FloatType):
-            ops = {
-                Operator.ADD: lambda l, r: l + r,
-                Operator.SUB: lambda l, r: l - r,
-                Operator.MUL: lambda l, r: l * r,
-                Operator.DIV: lambda l, r: l / r,
-                Operator.MOD: lambda l, r: l % r,
-                Operator.POWER: lambda l, r: l ** r,
-            }
-            if op in ops:
-                result = ops[op](left.constant, right.constant)
-                return ir.Constant(left.type, result)
-        
-        return None
-    
-    def _eval_unary_op(self, operand: ir.Constant, op: Operator) -> Optional[ir.Constant]:
-        """Evaluate unary operation on constant."""
-        if isinstance(operand.type, ir.IntType):
-            if op == Operator.SUB:
-                result = -operand.constant
-            elif op == Operator.NOT:
-                result = ~operand.constant
-            else:
-                return None
-            return ir.Constant(operand.type, result)
-        
-        elif isinstance(operand.type, ir.FloatType):
-            if op == Operator.SUB:
-                result = -operand.constant
-            else:
-                return None
-            return ir.Constant(operand.type, result)
-        
-        return None
+        VariableTypeHandler.store_with_type_conversion(builder, alloca, llvm_type, init_val, self.initial_value, builder.module)
 
 # Type declarations
 @dataclass
@@ -4449,6 +4210,13 @@ class Assignment(Statement):
                 var_name = self.target.object.name
                 if builder.scope is not None and var_name in builder.scope:
                     obj = builder.scope[var_name]  # This is the pointer
+                    if isinstance(obj.type, ir.PointerType) and isinstance(obj.type.pointee, ir.PointerType):
+                        # Check if the pointee-pointee is a struct
+                        if (isinstance(obj.type.pointee.pointee, ir.LiteralStructType) or
+                            hasattr(obj.type.pointee.pointee, '_name') or
+                            hasattr(obj.type.pointee.pointee, 'elements')):
+                            # This is a pointer parameter - load it to get the actual pointer
+                            obj = builder.load(obj, name=f"{var_name}_ptr")
                 elif var_name in module.globals:
                     obj = module.globals[var_name]  # This is the pointer
                 else:
@@ -7995,7 +7763,9 @@ class NamespaceDef(ASTNode):
                 nested_ns.name = original_name
 
         # Process variables (including type declarations)
+        #print(f"DEBUG NamespaceDef: Processing {len(self.variables)} variables in namespace '{self.name}'")
         for var in self.variables:
+            #print(f"DEBUG NamespaceDef: Processing variable: {getattr(var, 'name', '<no name>')}, type: {type(var).__name__}")
             try:
                 if isinstance(var, TypeDeclaration):
                     original_name = var.name
@@ -8009,12 +7779,10 @@ class NamespaceDef(ASTNode):
                         var.name = original_name
                 elif isinstance(var, VariableDeclaration):
                     original_name = var.name
-                    if var.is_global:
-                        var.codegen(None, module)
-                    else:
-                        var.name = f"{self.name}__{var.name}"
-                        var.codegen(work_builder, module)
-                        var.name = original_name
+                    # Always mangle namespace-level variables
+                    var.name = f"{self.name}__{var.name}"
+                    result = var.codegen(None, module)  # Always use None builder for globals
+                    var.name = original_name
             except Exception as e:
                 var_name = getattr(var, 'name', '<unknown>')
                 print(f"\nError processing variable '{var_name}' in namespace '{self.name}':")
@@ -8078,34 +7846,28 @@ class NamespaceDef(ASTNode):
             self._register_nested_namespaces(nested_ns, full_nested_name, module)
 
     def _create_init_builder(self, module: ir.Module) -> ir.IRBuilder:
-        """Create builder for static init function"""
         init_func_name = "__static_init"
-        
+
+        # Create function if it doesn't exist
         if init_func_name not in module.globals:
             func_type = ir.FunctionType(ir.VoidType(), [])
             init_func = ir.Function(module, func_type, init_func_name)
-            entry_block = init_func.append_basic_block('entry')
-            temp_builder = ir.IRBuilder(entry_block)
-            temp_builder.scope = {}
-            temp_builder.initialized_unions = set()
-            # **NEW: Add terminator to empty init function**
-            if not temp_builder.block.is_terminated:
-                temp_builder.ret_void()
-            return temp_builder
+            block = init_func.append_basic_block("entry")
         else:
             init_func = module.globals[init_func_name]
+
+            # ALWAYS emit into a non-terminated block
             if not init_func.blocks:
-                entry_block = init_func.append_basic_block('entry')
+                block = init_func.append_basic_block("entry")
             else:
-                entry_block = init_func.blocks[0]
-            
-            temp_builder = ir.IRBuilder(entry_block)
-            if not hasattr(temp_builder, 'scope'):
-                temp_builder.scope = {}
-            if not hasattr(temp_builder, 'initialized_unions'):
-                temp_builder.initialized_unions = set()
-            
-            return temp_builder
+                block = init_func.blocks[-1]
+                if block.is_terminated:
+                    block = init_func.append_basic_block("cont")
+
+        builder = ir.IRBuilder(block)
+        builder.scope = {}
+        builder.initialized_unions = set()
+        return builder
 
 # Import statement
 @dataclass

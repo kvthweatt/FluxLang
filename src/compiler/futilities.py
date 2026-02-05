@@ -73,7 +73,6 @@ class Operator(Enum):
     CHAIN_ARROW = "<-"
 
 
-
 class LoweringContext:
     def __init__(instance, builder: ir.IRBuilder):
         instance.b = builder
@@ -90,6 +89,102 @@ class LoweringContext:
     @staticmethod
     def comparison_is_unsigned(a: ir.Value, b: ir.Value) -> bool:
         return LoweringContext.is_unsigned(a) or LoweringContext.is_unsigned(b)
+
+    # --------------------------------------------------
+    # Integer normalization
+    # --------------------------------------------------
+
+    def normalize_ints(instance, a: ir.Value, b: ir.Value, *, unsigned: bool, promote: bool):
+        """
+        Normalize two integer values to the same width.
+        
+        Args:
+            a, b: Integer values to normalize
+            unsigned: Whether to use unsigned extension semantics when extending
+            promote: If True, normalize to MAXIMUM width (for arithmetic/bitwise/comparisons).
+                     If False, normalize to MINIMUM width (for bitshifts only).
+        
+        Context:
+            - Bitshift operations (<<, >>): promote=False (shift amount matches value width)
+            - All other operations: promote=True (preserve full range and precision)
+        """
+        assert isinstance(a.type, ir.IntType)
+        assert isinstance(b.type, ir.IntType)
+
+        if a.type.width == b.type.width:
+            return a, b
+
+        # Promote to max for arithmetic/bitwise, lower to min for bitshifts
+        width = max(a.type.width, b.type.width) if promote else min(a.type.width, b.type.width)
+        ty = ir.IntType(width)
+
+        def convert(v):
+            #direction = "PROMOTING" if promote else "LOWERING"
+            #print(f"{direction} NORMALIZE", v.type, v.type.width, ty, width)
+            if v.type.width == width:
+                return v
+            elif v.type.width < width:
+                # Extending to larger width
+                result = instance.b.zext(v, ty) if unsigned else instance.b.zext(v, ty)
+            else:
+                # Truncating to smaller width
+                result = instance.b.trunc(v, ty)
+            
+            # Preserve _flux_type_spec metadata
+            if hasattr(v, '_flux_type_spec'):
+                result._flux_type_spec = v._flux_type_spec
+                # Update bit width to match new type
+                result._flux_type_spec.bit_width = width
+            
+            return result
+
+        return convert(a), convert(b)
+
+    # --------------------------------------------------
+    # Pointer helpers
+    # --------------------------------------------------
+
+    def ptr_to_i64(instance, v: ir.Value) -> ir.Value:
+        if isinstance(v.type, ir.PointerType):
+            return instance.b.ptrtoint(v, ir.IntType(64))
+        return v
+
+    # --------------------------------------------------
+    # Comparisons
+    # --------------------------------------------------
+
+    def emit_int_cmp(instance, op: str, a: ir.Value, b: ir.Value):
+        unsigned = instance.comparison_is_unsigned(a, b)
+        a, b = instance.normalize_ints(a, b, unsigned=unsigned, promote=True)
+        return (
+            instance.b.icmp_unsigned(op, a, b)
+            if unsigned
+            else instance.b.icmp_signed(op, a, b)
+        )
+
+    def emit_ptr_cmp(instance, op: str, a: ir.Value, b: ir.Value):
+        # Explicit raw-address semantics
+        a = instance.ptr_to_i64(a)
+        b = instance.ptr_to_i64(b)
+        return instance.b.icmp_unsigned(op, a, b)
+
+
+class CoercionContext:
+    def __init__(instance, builder: ir.IRBuilder):
+        instance.b = builder
+
+    # --------------------------------------------------
+    # Signedness
+    # --------------------------------------------------
+
+    @staticmethod
+    def is_unsigned(val: ir.Value) -> bool:
+        spec = getattr(val, "_flux_type_spec", None)
+        return spec is not None and not spec.is_signed
+
+    @staticmethod
+    def comparison_is_unsigned(a: ir.Value, b: ir.Value) -> bool:
+        return CoercionContext.is_unsigned(a) or CoercionContext.is_unsigned(b)
 
     # --------------------------------------------------
     # Integer normalization

@@ -158,6 +158,14 @@ enum TokenType
     NEWLINE
 };
 
+struct Token
+{
+    TokenType type;
+    string value;
+    int line;
+    int column;
+};
+
 def keyword_type(string* s) -> TokenType
 {
     // This is the dict lookup: keywords.get(result, IDENTIFIER)
@@ -225,6 +233,44 @@ def keyword_type(string* s) -> TokenType
 
     return TokenType.IDENTIFIER;
 };
+
+
+object Lexer
+{
+    string source;
+    int position, line, column, length;
+
+    def current_char()->char,
+        peek_char(int)->char,
+        advance(int)->void,
+        skip_whitespace()->void,
+        read_string(char)->string,
+        read_asm_block()->Token,
+        read_asm_block_content()->Token,
+        read_f_string()->string,
+        read_i_string()->Token,
+        read_number()->Token,
+        read_identifier()->Token,
+        tokenize()->Token[];
+
+    def __init(string source_code) -> this
+    {
+        this.source = source_code;
+        return this;
+    };
+
+    def __exit() -> void { return; };
+
+
+    // Implementations
+    def current_char() -> char
+    {
+        if (this.position >= this.length) { return (char)0; };
+        return (char)this.source[this.position];
+    };
+
+};
+
 
 // ==============================
 // Token struct (from flexer.py)

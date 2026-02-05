@@ -1904,7 +1904,7 @@ class FluxParser:
         """
         expr = self.bitwise_or_expression()
 
-        while self.expect(TokenType.XOR_OP):
+        while self.expect(TokenType.XOR_OP, TokenType.XOR):
             operator = Operator.XOR
             self.advance()
             right = self.bitwise_or_expression()
@@ -2012,7 +2012,7 @@ class FluxParser:
         """
         expr = self.bitwise_and_expression()
         
-        while self.expect(TokenType.XOR):
+        while self.expect(TokenType.XOR, TokenType.XOR_OP):
             operator = Operator.XOR
             self.advance()
             right = self.bitwise_and_expression()

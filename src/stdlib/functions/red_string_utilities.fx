@@ -163,19 +163,19 @@ namespace standard
             
             while (value > (u32)0)
             {
-                temp[pos] = (byte)((value % (u32)10) + (u32)48); // Convert digit to ASCII
+                temp[pos] = (byte)((value % (u32)10) + (u32)48);
                 value = value / (u32)10;
                 pos++;
             };
             
             // Copy reversed string to buffer
             u32 write_pos = (u32)0;
-            u32 i = pos - (u32)1;
-            while (i >= (u32)0)
+            u32 i = pos;  // Start at pos, not pos - 1
+            while (i > (u32)0)  // Check i > 0 instead of i >= 0
             {
+                i--;  // Decrement first
                 buffer[write_pos] = temp[i];
                 write_pos++;
-                i--;
             };
             
             buffer[write_pos] = (byte)0; // null terminator

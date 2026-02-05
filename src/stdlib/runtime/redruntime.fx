@@ -34,7 +34,7 @@
 // Import raw functions & builtins
 #import "string_object_raw.fx";
 #import "file_object_raw.fx";
-#import "socket_object_raw.fx";
+//#import "socket_object_raw.fx";
 //
 // ---------------------------
 //

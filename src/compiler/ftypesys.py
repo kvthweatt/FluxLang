@@ -480,3 +480,410 @@ class FunctionPointerType:
     def get_llvm_pointer_type(self, module: ir.Module) -> ir.PointerType:
         func_type = self.get_llvm_type(module)
         return ir.PointerType(func_type)
+
+class VariableTypeHandler:
+    """Handles all type-related operations for variable declarations"""
+    
+    @staticmethod
+    def resolve_type_spec(type_spec: TypeSpec, initial_value, module: ir.Module) -> TypeSpec:
+        """Resolve type spec with automatic array size inference for string literals."""
+        # Import here to avoid circular dependency
+        from fast import StringLiteral
+        
+        if not (initial_value and isinstance(initial_value, StringLiteral)):
+            return type_spec
+        
+        # Direct array type check
+        if type_spec.is_array and type_spec.array_size is None:
+            return TypeSpec(
+                base_type=type_spec.base_type,
+                is_signed=type_spec.is_signed,
+                is_const=type_spec.is_const,
+                is_volatile=type_spec.is_volatile,
+                bit_width=type_spec.bit_width or 8,
+                alignment=type_spec.alignment,
+                is_array=True,
+                array_size=len(initial_value.value),
+                is_pointer=type_spec.is_pointer,
+                custom_typename=type_spec.custom_typename
+            )
+        
+        # Type alias check
+        if type_spec.custom_typename:
+            try:
+                resolved_llvm_type = type_spec.get_llvm_type(module)
+                if (isinstance(resolved_llvm_type, ir.PointerType) and 
+                    isinstance(resolved_llvm_type.pointee, ir.IntType) and 
+                    resolved_llvm_type.pointee.width == 8):
+                    return TypeSpec(
+                        base_type=DataType.DATA,
+                        is_signed=False,
+                        is_const=type_spec.is_const,
+                        is_volatile=type_spec.is_volatile,
+                        bit_width=8,
+                        alignment=type_spec.alignment,
+                        is_array=True,
+                        array_size=len(initial_value.value),
+                        is_pointer=False
+                    )
+            except (NameError, AttributeError):
+                pass
+        
+        return type_spec
+    
+    @staticmethod
+    def create_global_initializer(initial_value, llvm_type: ir.Type, module: ir.Module) -> Optional[ir.Constant]:
+        """Create compile-time constant initializer for global variable."""
+        # Import here to avoid circular dependency
+        from fast import (Literal, Identifier, BinaryOp, UnaryOp, StringLiteral, 
+                         ArrayLiteral, ArrayAccess, DataType as FastDataType)
+        
+        # Handle different expression types
+        if isinstance(initial_value, Literal):
+            return VariableTypeHandler._literal_to_constant(initial_value, llvm_type)
+        
+        elif isinstance(initial_value, Identifier):
+            return VariableTypeHandler._identifier_to_constant(initial_value, module)
+        
+        elif isinstance(initial_value, BinaryOp):
+            return VariableTypeHandler._eval_const_expr(initial_value, module)
+        
+        elif isinstance(initial_value, UnaryOp):
+            return VariableTypeHandler._eval_const_expr(initial_value, module)
+        
+        elif isinstance(initial_value, StringLiteral):
+            return ArrayLiteral.create_global_string_initializer(
+                initial_value.value, llvm_type
+            )
+        
+        elif isinstance(initial_value, ArrayLiteral):
+            # Check if target is an integer (bitfield packing) or an array
+            if isinstance(llvm_type, ir.IntType):
+                # Pack array into integer for bitfield initialization
+                return VariableTypeHandler._pack_array_literal_to_int_constant(
+                    initial_value, llvm_type, module
+                )
+            else:
+                return ArrayLiteral.create_global_array_initializer(
+                    initial_value, llvm_type, module
+                )
+        
+        elif isinstance(initial_value, ArrayAccess):
+            return VariableTypeHandler._eval_array_access_const(initial_value, module)
+        
+        return None
+    
+    @staticmethod
+    def _eval_array_access_const(array_access, module: ir.Module) -> Optional[ir.Constant]:
+        """Evaluate array indexing at compile time for global initialization."""
+        from fast import Identifier, Literal, DataType as FastDataType
+        
+        # Get the array being indexed
+        if not isinstance(array_access.array, Identifier):
+            return None  # Can only index into named globals at compile time
+        
+        array_name = array_access.array.name
+        if array_name not in module.globals:
+            return None
+        
+        global_array = module.globals[array_name]
+        if not hasattr(global_array, 'initializer') or global_array.initializer is None:
+            return None
+        
+        # Get the index
+        if not isinstance(array_access.index, Literal) or array_access.index.type != FastDataType.SINT:
+            return None  # Can only use constant integer indices at compile time
+        
+        index_value = array_access.index.value
+        
+        # Extract the element from the constant array
+        array_const = global_array.initializer
+        if isinstance(array_const.type, ir.ArrayType):
+            if 0 <= index_value < len(array_const.constant):
+                return array_const.constant[index_value]
+        
+        return None
+    
+    @staticmethod
+    def _pack_array_literal_to_int_constant(array_literal, target_type: ir.IntType, 
+                                           module: ir.Module) -> Optional[ir.Constant]:
+        """Pack an array literal into an integer constant for global bitfield initialization."""
+        from fast import Literal, Identifier
+        
+        packed_value = 0
+        bit_offset = 0
+        
+        # Pack in reverse order: first element at high bits, last element at low bits (big-endian)
+        for elem in reversed(array_literal.elements):
+            # Get the constant value and bit width
+            if isinstance(elem, Literal):
+                elem_val = elem.value
+                # Default to 32-bit for literals unless we can infer better
+                elem_width = 32
+            elif isinstance(elem, Identifier):
+                # Look up the global variable
+                var_name = elem.name
+                if var_name not in module.globals:
+                    return None  # Can't resolve at compile time
+                
+                global_var = module.globals[var_name]
+                if not hasattr(global_var, 'initializer') or global_var.initializer is None:
+                    return None
+                
+                elem_val = global_var.initializer.constant
+                
+                # Get actual bit width from the global variable's type
+                if isinstance(global_var.type, ir.PointerType):
+                    actual_type = global_var.type.pointee
+                else:
+                    actual_type = global_var.type
+                
+                if isinstance(actual_type, ir.IntType):
+                    elem_width = actual_type.width
+                else:
+                    return None  # Not an integer type
+            else:
+                return None  # Can't evaluate at compile time
+            
+            # Pack the value
+            packed_value |= (elem_val << bit_offset)
+            bit_offset += elem_width
+        
+        # Verify total bits match target
+        if bit_offset != target_type.width:
+            raise ValueError(
+                f"Bitfield packing size mismatch: packed {bit_offset} bits into {target_type.width}-bit integer"
+            )
+        
+        return ir.Constant(target_type, packed_value)
+    
+    @staticmethod
+    def _literal_to_constant(lit, llvm_type: ir.Type) -> ir.Constant:
+        """Convert literal to LLVM constant."""
+        from fast import DataType as FastDataType
+        
+        if lit.type == FastDataType.SINT:
+            return ir.Constant(llvm_type, lit.value)
+        elif lit.type == FastDataType.FLOAT:
+            return ir.Constant(llvm_type, lit.value)
+        elif lit.type == FastDataType.BOOL:
+            return ir.Constant(llvm_type, 1 if lit.value else 0)
+        return None
+    
+    @staticmethod
+    def _identifier_to_constant(ident, module: ir.Module) -> Optional[ir.Constant]:
+        """Get constant from identifier (reference to another global)."""
+        var_name = ident.name
+        if var_name in module.globals:
+            other_global = module.globals[var_name]
+            if hasattr(other_global, 'initializer') and other_global.initializer:
+                return other_global.initializer
+        
+        # Check namespace-qualified names
+        if hasattr(module, '_using_namespaces'):
+            for namespace in module._using_namespaces:
+                mangled_name = namespace.replace('::', '__') + '__' + var_name
+                if mangled_name in module.globals:
+                    other_global = module.globals[mangled_name]
+                    if hasattr(other_global, 'initializer') and other_global.initializer:
+                        return other_global.initializer
+        
+        return None
+    
+    @staticmethod
+    def _eval_const_expr(expr, module: ir.Module) -> Optional[ir.Constant]:
+        """Recursively evaluate constant expressions at compile time."""
+        from fast import Literal, Identifier, BinaryOp, UnaryOp, DataType as FastDataType
+        
+        if isinstance(expr, Literal):
+            if expr.type == FastDataType.SINT:
+                return ir.Constant(ir.IntType(32), expr.value)
+            elif expr.type == FastDataType.FLOAT:
+                return ir.Constant(ir.FloatType(), expr.value)
+            elif expr.type == FastDataType.BOOL:
+                return ir.Constant(ir.IntType(1), 1 if expr.value else 0)
+            return None
+        
+        elif isinstance(expr, Identifier):
+            return VariableTypeHandler._identifier_to_constant(expr, module)
+        
+        elif isinstance(expr, BinaryOp):
+            left = VariableTypeHandler._eval_const_expr(expr.left, module)
+            right = VariableTypeHandler._eval_const_expr(expr.right, module)
+            
+            if left is None or right is None:
+                return None
+            
+            return VariableTypeHandler._eval_binary_op(left, right, expr.operator)
+        
+        elif isinstance(expr, UnaryOp):
+            operand = VariableTypeHandler._eval_const_expr(expr.operand, module)
+            
+            if operand is None:
+                return None
+            
+            return VariableTypeHandler._eval_unary_op(operand, expr.operator)
+        
+        return None
+    
+    @staticmethod
+    def _eval_binary_op(left: ir.Constant, right: ir.Constant, op) -> Optional[ir.Constant]:
+        """Evaluate binary operation on constants."""
+        from fast import Operator
+        
+        if isinstance(left.type, ir.IntType):
+            ops = {
+                Operator.ADD: lambda l, r: l + r,
+                Operator.SUB: lambda l, r: l - r,
+                Operator.MUL: lambda l, r: l * r,
+                Operator.DIV: lambda l, r: l // r,
+                Operator.MOD: lambda l, r: l % r,
+                Operator.POWER: lambda l, r: l ** r,
+                Operator.AND: lambda l, r: l & r,
+                Operator.OR: lambda l, r: l | r,
+                Operator.XOR: lambda l, r: l ^ r,
+                Operator.BITSHIFT_LEFT: lambda l, r: l << r,
+                Operator.BITSHIFT_RIGHT: lambda l, r: l >> r,
+            }
+            if op in ops:
+                result = ops[op](left.constant, right.constant)
+                return ir.Constant(left.type, result)
+        
+        elif isinstance(left.type, ir.FloatType):
+            ops = {
+                Operator.ADD: lambda l, r: l + r,
+                Operator.SUB: lambda l, r: l - r,
+                Operator.MUL: lambda l, r: l * r,
+                Operator.DIV: lambda l, r: l / r,
+                Operator.MOD: lambda l, r: l % r,
+                Operator.POWER: lambda l, r: l ** r,
+            }
+            if op in ops:
+                result = ops[op](left.constant, right.constant)
+                return ir.Constant(left.type, result)
+        
+        return None
+    
+    @staticmethod
+    def _eval_unary_op(operand: ir.Constant, op) -> Optional[ir.Constant]:
+        """Evaluate unary operation on constant."""
+        from fast import Operator
+        
+        if isinstance(operand.type, ir.IntType):
+            if op == Operator.SUB:
+                result = -operand.constant
+            elif op == Operator.NOT:
+                result = ~operand.constant
+            else:
+                return None
+            return ir.Constant(operand.type, result)
+        
+        elif isinstance(operand.type, ir.FloatType):
+            if op == Operator.SUB:
+                result = -operand.constant
+            else:
+                return None
+            return ir.Constant(operand.type, result)
+        
+        return None
+    
+    @staticmethod
+    def store_with_type_conversion(builder: ir.IRBuilder, alloca: ir.Value, 
+                                   llvm_type: ir.Type, init_val: ir.Value,
+                                   initial_value, module: ir.Module) -> None:
+        """Store value with automatic type conversion if needed."""
+        from fast import CastExpression, BinaryOp, Operator, ArrayLiteral
+        from futilities import is_unsigned
+        
+        # Handle special case: cast expression to array
+        if (isinstance(initial_value, CastExpression) and
+            isinstance(init_val.type, ir.PointerType) and
+            isinstance(llvm_type, ir.ArrayType)):
+            array_ptr_type = ir.PointerType(llvm_type)
+            casted_ptr = builder.bitcast(init_val, array_ptr_type, name="cast_to_array_ptr")
+            array_value = builder.load(casted_ptr, name="loaded_array")
+            builder.store(array_value, alloca)
+            return
+        
+        # Handle type mismatch
+        if init_val.type != llvm_type:
+            # Special case: array concatenation result to array variable
+            # e.g., int[2] b = [a[0]] + [1];
+            # init_val.type is [2 x i32]* (pointer), llvm_type is [2 x i32] (value)
+            if (isinstance(initial_value, BinaryOp) and 
+                initial_value.operator in (Operator.ADD, Operator.SUB) and
+                isinstance(init_val.type, ir.PointerType) and 
+                isinstance(init_val.type.pointee, ir.ArrayType) and
+                isinstance(llvm_type, ir.ArrayType)):
+                # Load the array value from the concat result pointer and store it
+                array_value = builder.load(init_val, name="concat_array_value")
+                builder.store(array_value, alloca)
+                return
+
+            # Special case: array concatenation result
+            if (isinstance(initial_value, BinaryOp) and 
+                initial_value.operator in (Operator.ADD, Operator.SUB) and
+                isinstance(init_val.type, ir.PointerType) and 
+                isinstance(init_val.type.pointee, ir.ArrayType) and
+                isinstance(llvm_type, ir.PointerType) and 
+                isinstance(llvm_type.pointee, ir.IntType)):
+                zero = ir.Constant(ir.IntType(32), 0)
+                array_ptr = builder.gep(init_val, [zero, zero], name="concat_array_to_ptr")
+                builder.store(array_ptr, alloca)
+                return
+            
+            # Pointer to array to integer packing (for bitfield initialization)
+            if (isinstance(init_val.type, ir.PointerType) and 
+                isinstance(init_val.type.pointee, ir.ArrayType) and 
+                isinstance(llvm_type, ir.IntType)):
+                # Pack array bits into integer
+                init_val = ArrayLiteral._pack_array_pointer_to_integer(
+                    builder, module, init_val, llvm_type
+                )
+            
+            # Pointer to integer conversion (addresses are just numbers in Flux)
+            elif isinstance(init_val.type, ir.PointerType) and isinstance(llvm_type, ir.IntType):
+                init_val = builder.ptrtoint(init_val, llvm_type, name="ptr_to_int")
+            
+            # Integer to pointer conversion
+            elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.PointerType):
+                init_val = builder.inttoptr(init_val, llvm_type, name="int_to_ptr")
+            
+            # Pointer type conversion
+            elif isinstance(llvm_type, ir.PointerType) and isinstance(init_val.type, ir.PointerType):
+                if llvm_type.pointee != init_val.type.pointee:
+                    init_val = builder.bitcast(init_val, llvm_type)
+
+                elif isinstance(init_val.type.pointee, ir.ArrayType):
+                    # Pack array bits into integer
+                    init_val = ArrayLiteral._pack_array_pointer_to_integer(
+                        builder, module, init_val, llvm_type
+                    )
+
+            # Integer type conversion
+            elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.IntType):
+                if init_val.type.width > llvm_type.width:
+                    init_val = builder.trunc(init_val, llvm_type)
+                elif init_val.type.width < llvm_type.width:
+                    # Use zext for unsigned, sext for signed
+                    if is_unsigned(init_val):
+                        init_val = builder.zext(init_val, llvm_type)
+                    else:
+                        init_val = builder.sext(init_val, llvm_type)
+            
+            # Int to float conversion
+            elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.FloatType):
+                init_val = builder.sitofp(init_val, llvm_type)
+            
+            # Float to int conversion
+            elif isinstance(init_val.type, ir.FloatType) and isinstance(llvm_type, ir.IntType):
+                init_val = builder.fptosi(init_val, llvm_type)
+        
+        # Preserve _flux_type_spec metadata if present on init_val
+        # This helps maintain signedness through store/load cycles
+        if hasattr(init_val, '_flux_type_spec'):
+            # Store metadata on the alloca so it can be retrieved on loads
+            if not hasattr(alloca, '_flux_type_spec'):
+                alloca._flux_type_spec = init_val._flux_type_spec
+        
+        builder.store(init_val, alloca)
