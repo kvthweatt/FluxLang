@@ -2422,6 +2422,307 @@ def cast_to_type(builder: ir.IRBuilder, value: ir.Value, target_type: ir.Type) -
 
 
 # ============================================================================
+# Function Type Helper
+# ============================================================================
+
+class FunctionTypeHelper:
+    """
+    Helper class for managing function type conversions, parameter handling,
+    and function signature operations.
+    """
+    
+    @staticmethod
+    def convert_type_spec_to_llvm(type_spec, module: ir.Module) -> ir.Type:
+        """
+        Convert a TypeSpec to LLVM type, handling arrays and pointers.
+        
+        Args:
+            type_spec: TypeSpec object to convert
+            module: LLVM module for type resolution
+            
+        Returns:
+            Corresponding LLVM type
+        """
+        return type_spec.get_llvm_type_with_array(module)
+    
+    @staticmethod
+    def create_function_type(return_type_spec, param_type_specs: List, module: ir.Module) -> ir.FunctionType:
+        """
+        Create an LLVM function type from TypeSpec objects.
+        
+        Args:
+            return_type_spec: Return type TypeSpec
+            param_type_specs: List of parameter TypeSpec objects
+            module: LLVM module
+            
+        Returns:
+            LLVM FunctionType
+        """
+        ret_type = FunctionTypeHelper.convert_type_spec_to_llvm(return_type_spec, module)
+        param_types = [FunctionTypeHelper.convert_type_spec_to_llvm(pts, module) 
+                      for pts in param_type_specs]
+        return ir.FunctionType(ret_type, param_types)
+    
+    @staticmethod
+    def build_param_metadata(parameters: List, module: ir.Module) -> List[dict]:
+        """
+        Build parameter metadata for type tracking.
+        
+        Args:
+            parameters: List of Parameter objects
+            module: LLVM module
+            
+        Returns:
+            List of metadata dictionaries
+        """
+        param_metadata = []
+        for param in parameters:
+            metadata = {
+                'name': param.name,
+                'original_type': param.type_spec.custom_typename if param.type_spec.custom_typename else None,
+                'type_spec': param.type_spec
+            }
+            param_metadata.append(metadata)
+        return param_metadata
+    
+    @staticmethod
+    def mangle_function_name(base_name: str, parameters: List, return_type_spec, 
+                            no_mangle: bool = False) -> str:
+        """
+        Generate a mangled name for a function based on its signature.
+        
+        Args:
+            base_name: Base function name
+            parameters: List of Parameter objects
+            return_type_spec: Return type TypeSpec
+            no_mangle: If True, return base name without mangling
+            
+        Returns:
+            Mangled function name
+        """
+        if no_mangle or base_name == "main":
+            return base_name
+        
+        # Start with base name
+        mangled = base_name
+        
+        # Add parameter count for quick filtering
+        mangled += f"__{len(parameters)}"
+        
+        # Add parameter type information
+        for param in parameters:
+            type_spec = param.type_spec
+            
+            # Handle custom type names
+            if type_spec.custom_typename:
+                # For custom types, use the type name (sanitized)
+                type_name = type_spec.custom_typename.replace(':', '_').replace('.', '_')
+                mangled += f"__{type_name}"
+            else:
+                # For built-in types, use base type
+                mangled += f"__{type_spec.base_type.value}"
+            
+            # Add array/pointer qualifiers
+            if type_spec.is_array:
+                if type_spec.array_size:
+                    mangled += f"_arr{type_spec.array_size}"
+                else:
+                    mangled += "_arr"
+            
+            if type_spec.is_pointer:
+                mangled += f"_ptr{type_spec.pointer_depth}"
+            
+            # Add bit width for DATA types
+            if type_spec.base_type == DataType.DATA and type_spec.bit_width:
+                mangled += f"_bits{type_spec.bit_width}"
+        
+        # Add return type information
+        if return_type_spec.custom_typename:
+            ret_name = return_type_spec.custom_typename.replace(':', '_').replace('.', '_')
+            mangled += f"__ret_{ret_name}"
+        else:
+            mangled += f"__ret_{return_type_spec.base_type.value}"
+        
+        return mangled
+    
+    @staticmethod
+    def register_function_overload(module: ir.Module, base_name: str, mangled_name: str,
+                                   parameters: List, return_type_spec, func: ir.Function):
+        """
+        Register a function as an overload in the module.
+        
+        Args:
+            module: LLVM module
+            base_name: Unmangled function name
+            mangled_name: Mangled function name
+            parameters: List of Parameter objects
+            return_type_spec: Return type TypeSpec
+            func: LLVM Function object
+        """
+        if not hasattr(module, '_function_overloads'):
+            module._function_overloads = {}
+        
+        if base_name not in module._function_overloads:
+            module._function_overloads[base_name] = []
+        
+        # Add overload info
+        overload_info = {
+            'mangled_name': mangled_name,
+            'param_types': [p.type_spec for p in parameters],
+            'return_type': return_type_spec,
+            'function': func,
+            'param_count': len(parameters)
+        }
+        module._function_overloads[base_name].append(overload_info)
+    
+    @staticmethod
+    def resolve_overload_by_types(module: ir.Module, base_name: str, 
+                                  arg_vals: List[ir.Value]) -> Optional[ir.Function]:
+        """
+        Resolve function overload by matching argument types.
+        
+        Args:
+            module: LLVM module
+            base_name: Function base name
+            arg_vals: List of argument values
+            
+        Returns:
+            Matching function or None if no match found
+        """
+        if not hasattr(module, '_function_overloads'):
+            return None
+        
+        if base_name not in module._function_overloads:
+            return None
+        
+        overloads = module._function_overloads[base_name]
+        arg_count = len(arg_vals)
+        
+        # Filter by argument count first
+        candidates = [o for o in overloads if o['param_count'] == arg_count]
+        
+        if len(candidates) == 0:
+            return None
+        elif len(candidates) == 1:
+            # Only one candidate - use it
+            return candidates[0]['function']
+        else:
+            # Multiple candidates - need type matching
+            for candidate in candidates:
+                param_types = candidate['param_types']
+                if len(param_types) != len(arg_vals):
+                    continue
+                
+                # Check if types match (with compatibility rules)
+                match = True
+                for i, (param_type, arg_val) in enumerate(zip(param_types, arg_vals)):
+                    expected_llvm_type = param_type.get_llvm_type(module)
+                    
+                    # Handle array/pointer compatibility
+                    if isinstance(arg_val.type, ir.PointerType) and isinstance(arg_val.type.pointee, ir.ArrayType):
+                        # Array pointer - check element type compatibility
+                        if isinstance(expected_llvm_type, ir.PointerType):
+                            if arg_val.type.pointee.element != expected_llvm_type.pointee:
+                                match = False
+                                break
+                        else:
+                            match = False
+                            break
+                    elif arg_val.type != expected_llvm_type:
+                        # Type mismatch
+                        match = False
+                        break
+                
+                if match:
+                    return candidate['function']
+            
+            # No exact match found
+            return None
+    
+    @staticmethod
+    def convert_argument_to_parameter_type(builder: ir.IRBuilder, module: ir.Module, 
+                                          arg_val: ir.Value, expected_type: ir.Type, 
+                                          arg_index: int) -> ir.Value:
+        """
+        Convert an argument value to match the expected parameter type.
+        Handles void* conversions, array decay, and __expr method calls.
+        
+        Args:
+            builder: LLVM IR builder
+            module: LLVM module (for __expr method lookups)
+            arg_val: Argument value to convert
+            expected_type: Expected parameter type
+            arg_index: Argument index (for naming)
+            
+        Returns:
+            Converted argument value
+        """
+        if arg_val.type == expected_type:
+            return arg_val
+        
+        # Handle void* conversions (i8*)
+        void_ptr_type = ir.PointerType(ir.IntType(8))
+        
+        # Convert TO void*
+        if (isinstance(expected_type, ir.PointerType) and 
+            isinstance(expected_type.pointee, ir.IntType) and 
+            expected_type.pointee.width == 8):
+            if isinstance(arg_val.type, ir.PointerType):
+                return builder.bitcast(arg_val, expected_type, name=f"arg{arg_index}_to_void_ptr")
+        
+        # Convert FROM void*
+        elif (isinstance(arg_val.type, ir.PointerType) and 
+              isinstance(arg_val.type.pointee, ir.IntType) and 
+              arg_val.type.pointee.width == 8 and
+              isinstance(expected_type, ir.PointerType)):
+            return builder.bitcast(arg_val, expected_type, name=f"arg{arg_index}_from_void_ptr")
+        
+        # Array to pointer decay: [N x T]* -> T*
+        if (isinstance(arg_val.type, ir.PointerType) and 
+            isinstance(arg_val.type.pointee, ir.ArrayType) and
+            isinstance(expected_type, ir.PointerType) and
+            arg_val.type.pointee.element == expected_type.pointee):
+            zero = ir.Constant(ir.IntType(32), 0)
+            return builder.gep(arg_val, [zero, zero], name=f"arg{arg_index}_decay")
+        
+        # Check if this is an object type that has a __expr method for automatic conversion
+        if isinstance(arg_val.type, ir.PointerType):
+            # Get the struct name - handle both identified and literal struct types
+            struct_name = None
+            
+            # Try to get name from identified struct types
+            if hasattr(arg_val.type.pointee, '_name'):
+                struct_name = arg_val.type.pointee._name.strip('"')
+            
+            # Try to get name from module's struct types
+            if struct_name is None and hasattr(module, '_struct_types'):
+                for name, struct_type in module._struct_types.items():
+                    # More robust comparison that handles both identified and literal struct types
+                    if (struct_type == arg_val.type.pointee or 
+                        (hasattr(struct_type, '_name') and hasattr(arg_val.type.pointee, '_name') and
+                         struct_type._name == arg_val.type.pointee._name) or
+                        (str(struct_type) == str(arg_val.type.pointee))):
+                        struct_name = name
+                        break
+            
+            # If we found a struct name, look for __expr method
+            if struct_name:
+                expr_method_name = f"{struct_name}.__expr"
+                
+                if expr_method_name in module.globals:
+                    expr_func = module.globals[expr_method_name]
+                    if isinstance(expr_func, ir.Function):
+                        # Call the __expr method to get the underlying representation
+                        converted_val = builder.call(expr_func, [arg_val])
+                        # Check if the converted type matches what's expected
+                        if converted_val.type == expected_type:
+                            return converted_val
+        
+        return arg_val
+
+
+
+# ============================================================================
 # Name Mangling
 # ============================================================================
 

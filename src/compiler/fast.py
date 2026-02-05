@@ -2008,37 +2008,8 @@ class FunctionCall(Expression):
             for arg in self.arguments:
                 arg_vals.append(arg.codegen(builder, module))
             
-            # Try to find exact type match
-            for candidate in candidates:
-                param_types = candidate['param_types']
-                if len(param_types) != len(arg_vals):
-                    continue
-                
-                # Check if types match (with compatibility rules)
-                match = True
-                for i, (param_type, arg_val) in enumerate(zip(param_types, arg_vals)):
-                    expected_llvm_type = param_type.get_llvm_type(module)
-                    
-                    # Handle array/pointer compatibility
-                    if isinstance(arg_val.type, ir.PointerType) and isinstance(arg_val.type.pointee, ir.ArrayType):
-                        # Array pointer - check element type compatibility
-                        if isinstance(expected_llvm_type, ir.PointerType):
-                            if arg_val.type.pointee.element != expected_llvm_type.pointee:
-                                match = False
-                                break
-                        else:
-                            match = False
-                            break
-                    elif arg_val.type != expected_llvm_type:
-                        # Type mismatch
-                        match = False
-                        break
-                
-                if match:
-                    return candidate['function']
-            
-            # No exact match found
-            return None
+            # Use FunctionTypeHelper to resolve by types
+            return FunctionTypeHelper.resolve_overload_by_types(module, base_name, arg_vals)
 
     def _generate_call(self, builder: ir.IRBuilder, module: ir.Module, func: ir.Function) -> ir.Value:
         """
@@ -2082,69 +2053,11 @@ class FunctionCall(Expression):
             else:
                 arg_val = arg.codegen(builder, module)
             
-            # Type checking and conversion logic
+            # Type checking and conversion logic using FunctionTypeHelper
             if param_index < len(func.args):
                 expected_type = func.args[param_index].type
-                
-                if arg_val.type != expected_type:
-                    # Handle void* conversions
-                    if (isinstance(expected_type, ir.PointerType) and 
-                        isinstance(expected_type.pointee, ir.IntType) and 
-                        expected_type.pointee.width == 8):
-                        # Expected type is void* (i8*)
-                        if isinstance(arg_val.type, ir.PointerType):
-                            # Any pointer can be cast to void*
-                            arg_val = builder.bitcast(arg_val, expected_type, name=f"arg{i}_to_void_ptr")
-                    
-                    # Handle casting FROM void* to specific pointer type
-                    elif (isinstance(arg_val.type, ir.PointerType) and 
-                          isinstance(arg_val.type.pointee, ir.IntType) and 
-                          arg_val.type.pointee.width == 8 and
-                          isinstance(expected_type, ir.PointerType)):
-                        # arg_val is void* (i8*), cast to expected pointer type
-                        arg_val = builder.bitcast(arg_val, expected_type, name=f"arg{i}_from_void_ptr")
-
-                    # If we have [N x T]* and expect T*, convert via GEP
-                    if (isinstance(arg_val.type, ir.PointerType) and 
-                        isinstance(arg_val.type.pointee, ir.ArrayType) and
-                        isinstance(expected_type, ir.PointerType) and
-                        arg_val.type.pointee.element == expected_type.pointee):
-                        # Array to pointer decay: [4 x i8]* -> i8*
-                        zero = ir.Constant(ir.IntType(32), 0)
-                        arg_val = builder.gep(arg_val, [zero, zero], name=f"arg{i}_decay")
-                    
-                    # Check if this is an object type that has a __expr method for automatic conversion
-                    elif isinstance(arg_val.type, ir.PointerType):
-                        # Get the struct name - handle both identified and literal struct types
-                        struct_name = None
-                        
-                        # Try to get name from identified struct types
-                        if hasattr(arg_val.type.pointee, '_name'):
-                            struct_name = arg_val.type.pointee._name.strip('"')
-                        
-                        # Try to get name from module's struct types
-                        if struct_name is None and hasattr(module, '_struct_types'):
-                            for name, struct_type in module._struct_types.items():
-                                # More robust comparison that handles both identified and literal struct types
-                                if (struct_type == arg_val.type.pointee or 
-                                    (hasattr(struct_type, '_name') and hasattr(arg_val.type.pointee, '_name') and
-                                     struct_type._name == arg_val.type.pointee._name) or
-                                    (str(struct_type) == str(arg_val.type.pointee))):
-                                    struct_name = name
-                                    break
-                        
-                        # If we found a struct name, look for __expr method
-                        if struct_name:
-                            expr_method_name = f"{struct_name}.__expr"
-                            
-                            if expr_method_name in module.globals:
-                                expr_func = module.globals[expr_method_name]
-                                if isinstance(expr_func, ir.Function):
-                                    # Call the __expr method to get the underlying representation
-                                    converted_val = builder.call(expr_func, [arg_val])
-                                    # Check if the converted type matches what's expected
-                                    if converted_val.type == expected_type:
-                                        arg_val = converted_val
+                arg_val = FunctionTypeHelper.convert_argument_to_parameter_type(
+                    builder, module, arg_val, expected_type, i)
             
             arg_vals.append(arg_val)
         
@@ -5024,37 +4937,23 @@ class FunctionDef(ASTNode):
     no_mangle: bool = False
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Function:
-        # Convert return type
-        ret_type = self._convert_type(self.return_type, module)
+        # Convert return type and parameter types using FunctionTypeHelper
+        ret_type = FunctionTypeHelper.convert_type_spec_to_llvm(self.return_type, module)
         
-        # Convert parameter types - preserve type aliases in metadata
+        # Convert parameter types and build metadata
         param_types = []
-        param_metadata = []
+        param_metadata = FunctionTypeHelper.build_param_metadata(self.parameters, module)
         for param in self.parameters:
-            param_type = self._convert_type(param.type_spec, module)
+            param_type = FunctionTypeHelper.convert_type_spec_to_llvm(param.type_spec, module)
             param_types.append(param_type)
-            # Store original type information for later use
-            if param.type_spec.custom_typename:
-                param_metadata.append({
-                    'name': param.name,
-                    'original_type': param.type_spec.custom_typename,
-                    'type_spec': param.type_spec
-                })
-            else:
-                param_metadata.append({
-                    'name': param.name,
-                    'original_type': None,
-                    'type_spec': param.type_spec
-                })
         
         # Create function type
         func_type = ir.FunctionType(ret_type, param_types)
         
-        # Always generate mangled name for consistency
-        if self.no_mangle or self.name == "main":
-            mangled_name = self.name
-        else:
-            mangled_name = self._mangle_name(module)
+        # Generate mangled name using FunctionTypeHelper
+        mangled_name = FunctionTypeHelper.mangle_function_name(
+            self.name, self.parameters, self.return_type, self.no_mangle
+        )
         
         # Check if this exact mangled function already exists
         if mangled_name in module.globals:
@@ -5076,22 +4975,10 @@ class FunctionDef(ASTNode):
             # Create new function with mangled name
             func = ir.Function(module, func_type, mangled_name)
             
-            # Register this as an overload if needed
-            if not hasattr(module, '_function_overloads'):
-                module._function_overloads = {}
-            
-            if self.name not in module._function_overloads:
-                module._function_overloads[self.name] = []
-            
-            # Add overload info
-            overload_info = {
-                'mangled_name': mangled_name,
-                'param_types': [p.type_spec for p in self.parameters],
-                'return_type': self.return_type,
-                'function': func,
-                'param_count': len(self.parameters)
-            }
-            module._function_overloads[self.name].append(overload_info)
+            # Register this as an overload using FunctionTypeHelper
+            FunctionTypeHelper.register_function_overload(
+                module, self.name, mangled_name, self.parameters, self.return_type, func
+            )
         
         if self.is_prototype:
             return func
@@ -5143,58 +5030,6 @@ class FunctionDef(ASTNode):
         builder.scope = old_scope
         builder.scope_type_info = old_scope_type_info
         return func
-    
-    def _mangle_name(self, module: ir.Module) -> str:
-        """Generate a mangled name for overloaded functions based on signature"""
-        # Start with base name
-        mangled = self.name
-        
-        # Add parameter count for quick filtering
-        mangled += f"__{len(self.parameters)}"
-        
-        # Add parameter type information
-        for param in self.parameters:
-            type_spec = param.type_spec
-            
-            # Handle custom type names
-            if type_spec.custom_typename:
-                # For custom types, use the type name (sanitized)
-                type_name = type_spec.custom_typename.replace(':', '_').replace('.', '_')
-                mangled += f"__{type_name}"
-            else:
-                # For built-in types, use base type
-                mangled += f"__{type_spec.base_type.value}"
-            
-            # Add array/pointer qualifiers
-            if type_spec.is_array:
-                if type_spec.array_size:
-                    mangled += f"_arr{type_spec.array_size}"
-                else:
-                    mangled += "_arr"
-            
-            if type_spec.is_pointer:
-                mangled += f"_ptr{type_spec.pointer_depth}"
-            
-            # Add bit width for DATA types
-            if type_spec.base_type == DataType.DATA and type_spec.bit_width:
-                mangled += f"_bits{type_spec.bit_width}"
-        
-        # Add return type information
-        if self.return_type.custom_typename:
-            ret_name = self.return_type.custom_typename.replace(':', '_').replace('.', '_')
-            mangled += f"__ret_{ret_name}"
-        else:
-            mangled += f"__ret_{self.return_type.base_type.value}"
-        # Hard-coded main replacement
-        #if mangled == "main__0__ret_int":
-            #mangled = "main"
-        return mangled
-    
-    def _convert_type(self, type_spec: TypeSpec, module: ir.Module = None) -> ir.Type:
-        # Use the proper method that handles arrays and pointers
-        if module is None:
-            module = ir.Module()
-        return type_spec.get_llvm_type_with_array(module)
 
 @dataclass
 class FunctionPointer(Expression):
@@ -6506,7 +6341,7 @@ class ObjectDef(ASTNode):
         member_names = []
         
         for member in self.members:
-            member_type = self._convert_type(member.type_spec, module)
+            member_type = FunctionTypeHelper.convert_type_spec_to_llvm(member.type_spec, module)
             member_types.append(member_type)
             member_names.append(member.name)
         
@@ -6558,11 +6393,11 @@ class ObjectDef(ASTNode):
             if method.return_type.base_type == DataType.THIS:
                 ret_type = ir.PointerType(struct_type)
             else:
-                ret_type = self._convert_type(method.return_type, module)
+                ret_type = FunctionTypeHelper.convert_type_spec_to_llvm(method.return_type, module)
 
             # Param types: always 'this' first
             param_types = [ir.PointerType(struct_type)]
-            param_types.extend([self._convert_type(p.type_spec, module) for p in method.parameters])
+            param_types.extend([FunctionTypeHelper.convert_type_spec_to_llvm(p.type_spec, module) for p in method.parameters])
 
             func_type = ir.FunctionType(ret_type, param_types)
             func_name = f"{self.name}.{method.name}"
@@ -6642,10 +6477,6 @@ class ObjectDef(ASTNode):
         
         return struct_type
 
-    def _convert_type(self, type_spec: TypeSpec, module: ir.Module) -> ir.Type:
-        # Use the comprehensive get_llvm_type_with_array method that handles all cases properly
-        return type_spec.get_llvm_type_with_array(module)
-
 # Extern declaration
 @dataclass
 class ExternBlock(Statement):
@@ -6669,9 +6500,10 @@ class ExternBlock(Statement):
             if not func_def.is_prototype:
                 raise ValueError(f"Extern functions must be prototypes (no body): {func_def.name}")
             
-            # Generate the function declaration with external linkage
-            ret_type = func_def._convert_type(func_def.return_type, module)
-            param_types = [func_def._convert_type(param.type_spec, module) for param in func_def.parameters]
+            # Generate the function declaration with external linkage using FunctionTypeHelper
+            ret_type = FunctionTypeHelper.convert_type_spec_to_llvm(func_def.return_type, module)
+            param_types = [FunctionTypeHelper.convert_type_spec_to_llvm(param.type_spec, module) 
+                          for param in func_def.parameters]
             func_type = ir.FunctionType(ret_type, param_types)
             
             # CRITICAL: Extern functions are ALWAYS global and should NOT have namespace mangling
@@ -6693,10 +6525,12 @@ class ExternBlock(Statement):
                 final_name = base_name
             else:
                 # Allow overload mangling based on parameter types, but start from base_name
-                # Temporarily set the name to base_name for mangling
+                # Use FunctionTypeHelper for mangling
                 original_name = func_def.name
                 func_def.name = base_name
-                final_name = func_def._mangle_name(module)
+                final_name = FunctionTypeHelper.mangle_function_name(
+                    func_def.name, func_def.parameters, func_def.return_type, func_def.no_mangle
+                )
                 func_def.name = original_name
             
             # Create or get the function
