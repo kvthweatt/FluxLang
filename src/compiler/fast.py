@@ -34,35 +34,25 @@ class Literal(ASTNode):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         if self.type in (DataType.SINT, DataType.UINT):
-            val = int(self.value, 0) if isinstance(self.value, str) else int(self.value)
-            width = infer_int_width(val, self.type)
-            
-            # For unsigned types with values >= 2^63, ensure proper handling
-            if self.type == DataType.UINT and width == 64 and val >= (1 << 63):
-                # Convert to signed equivalent for LLVM (two's complement)
-                # LLVM stores 0xFFFFFFFFFFFFFFFF as -1 internally
-                signed_val = val if val < (1 << 63) else val - (1 << 64)
-                llvm_val = ir.Constant(ir.IntType(width), signed_val)
-            else:
-                llvm_val = ir.Constant(ir.IntType(width), val)
+            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            normalized_val = LiteralTypeHandler.normalize_int_value(self.value, self.type, llvm_type.width)
+            llvm_val = ir.Constant(llvm_type, normalized_val)
             
             # Attach type metadata for signedness tracking
             return attach_type_metadata(llvm_val, base_type=self.type)
         elif self.type == DataType.FLOAT:
-            return ir.Constant(ir.FloatType(), float(self.value))
+            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            return ir.Constant(llvm_type, float(self.value))
         elif self.type == DataType.BOOL:
-            return ir.Constant(ir.IntType(1), bool(self.value))
+            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            return ir.Constant(llvm_type, bool(self.value))
         elif self.type == DataType.CHAR:
-            if isinstance(self.value, str):
-                if len(self.value) == 0:
-                    # Handle empty string - return null character
-                    return ir.Constant(ir.IntType(8), 0)
-                else:
-                    return ir.Constant(ir.IntType(8), ord(self.value[0]))
-            else:
-                return ir.Constant(ir.IntType(8), self.value)
+            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            char_val = LiteralTypeHandler.normalize_char_value(self.value)
+            return ir.Constant(llvm_type, char_val)
         elif self.type == DataType.VOID:
-            return ir.Constant(ir.IntType(1), 0)
+            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            return ir.Constant(llvm_type, 0)
         elif self.type == DataType.DATA:
             # Handle array literals
             if isinstance(self.value, list):
@@ -71,47 +61,30 @@ class Literal(ASTNode):
             # Handle struct literals (dictionaries with field names -> values)
             elif isinstance(self.value, dict):
                 return self._handle_struct_literal(builder, module)
-            # Handle other DATA types
-            if hasattr(module, '_type_aliases') and str(self.type) in module._type_aliases:
-                llvm_type = module._type_aliases[str(self.type)]
-                if isinstance(llvm_type, ir.IntType):
-                    return ir.Constant(llvm_type, int(self.value) if isinstance(self.value, str) else self.value)
-                elif isinstance(llvm_type, ir.FloatType):
-                    return ir.Constant(llvm_type, float(self.value))
+            # Handle other DATA types using LiteralTypeHandler
+            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            if isinstance(llvm_type, ir.IntType):
+                return ir.Constant(llvm_type, int(self.value) if isinstance(self.value, str) else self.value)
+            elif isinstance(llvm_type, ir.FloatType):
+                return ir.Constant(llvm_type, float(self.value))
             raise ValueError(f"Unsupported DATA literal: {self.value}")
         else:
-            # Handle custom types
-            if hasattr(module, '_type_aliases') and str(self.type) in module._type_aliases:
-                llvm_type = module._type_aliases[str(self.type)]
-                if isinstance(llvm_type, ir.IntType):
-                    return ir.Constant(llvm_type, int(self.value) if isinstance(self.value, str) else self.value)
-                elif isinstance(llvm_type, ir.FloatType):
-                    return ir.Constant(llvm_type, float(self.value))
-        raise ValueError(f"Unsupported literal type: {self.type}")
+            # Handle custom types using LiteralTypeHandler
+            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            if isinstance(llvm_type, ir.IntType):
+                return ir.Constant(llvm_type, int(self.value) if isinstance(self.value, str) else self.value)
+            elif isinstance(llvm_type, ir.FloatType):
+                return ir.Constant(llvm_type, float(self.value))
+            raise ValueError(f"Unsupported literal type: {self.type}")
 
     def _handle_struct_literal(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Handle struct literal initialization (e.g., {a = 10, b = 20})"""
         if not isinstance(self.value, dict):
             raise ValueError("Expected dictionary for struct literal")
         
-        # Look for a compatible struct type in the module
-        struct_type = None
-        field_names = list(self.value.keys())
-        
-        if hasattr(module, '_struct_types'):
-            for struct_name, candidate_type in module._struct_types.items():
-                if hasattr(candidate_type, 'names'):
-                    # Check if all fields in the literal exist in this struct
-                    if all(field in candidate_type.names for field in field_names):
-                        struct_type = candidate_type
-                        break
-        
-        if struct_type is None:
-            raise ValueError(f"No compatible struct type found for fields: {field_names}")
-        
-        ## -- URGENT
-        ## TODO -> REWORK THIS V V V
-        # Allocate space for the struct instance
+        # Resolve struct type using LiteralTypeHandler
+        struct_type = LiteralTypeHandler.resolve_struct_type(self.value, module)
+
         if builder.scope is None:
             # Global context - create a struct constant
             field_values = []
@@ -125,9 +98,7 @@ class Literal(ASTNode):
                     # Handle string literals for pointer types (like noopstr which is i8*)
                     if (isinstance(field_expr, Literal) and 
                         field_expr.type == DataType.CHAR and
-                        isinstance(expected_type, ir.PointerType) and
-                        isinstance(expected_type.pointee, ir.IntType) and
-                        expected_type.pointee.width == 8):
+                        LiteralTypeHandler.is_string_pointer_field(expected_type)):
                         # Create a global string constant
                         string_val = field_expr.value
                         string_bytes = string_val.encode('ascii')
@@ -151,8 +122,7 @@ class Literal(ASTNode):
                         field_values.append(field_value)
                 else:
                     # Field not specified, use zero initialization
-                    field_index = struct_type.names.index(member_name)
-                    field_type = struct_type.elements[field_index]
+                    field_type = LiteralTypeHandler.get_struct_field_type(struct_type, member_name)
                     field_values.append(ir.Constant(field_type, 0))
             
             # Create struct constant
@@ -163,9 +133,8 @@ class Literal(ASTNode):
             
             # Initialize each field
             for field_name, field_value_expr in self.value.items():
-                # Find field index
-                if field_name not in struct_type.names:
-                    raise ValueError(f"Field '{field_name}' not found in struct")
+                # Get field type using LiteralTypeHandler
+                expected_type = LiteralTypeHandler.get_struct_field_type(struct_type, field_name)
                 
                 field_index = struct_type.names.index(field_name)
                 
@@ -183,9 +152,7 @@ class Literal(ASTNode):
                 # Handle string literals for pointer types (like noopstr which is i8*)
                 if (isinstance(field_value_expr, Literal) and 
                     field_value_expr.type == DataType.CHAR and
-                    isinstance(expected_type, ir.PointerType) and
-                    isinstance(expected_type.pointee, ir.IntType) and
-                    expected_type.pointee.width == 8):
+                    LiteralTypeHandler.is_string_pointer_field(expected_type)):
                     # Create a global string constant for local initialization too
                     string_val = field_value_expr.value
                     string_bytes = string_val.encode('ascii')

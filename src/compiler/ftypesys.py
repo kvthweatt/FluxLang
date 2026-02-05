@@ -1715,3 +1715,177 @@ class ArrayTypeHandler:
             # Store to destination
             dst_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"dst_{i}")
             builder.store(src_val, dst_ptr)
+
+
+class LiteralTypeHandler:
+    """Handles type resolution and LLVM type determination for literal values"""
+    
+    @staticmethod
+    def get_llvm_type(literal_type: DataType, literal_value: Any, module: ir.Module) -> ir.Type:
+        """
+        Determine the LLVM type for a literal based on its DataType and value.
+        
+        Args:
+            literal_type: The DataType of the literal
+            literal_value: The actual value of the literal
+            module: LLVM module (for type aliases)
+            
+        Returns:
+            LLVM IR type for the literal
+        """
+        from futilities import infer_int_width
+        
+        if literal_type in (DataType.SINT, DataType.UINT):
+            val = int(literal_value, 0) if isinstance(literal_value, str) else int(literal_value)
+            width = infer_int_width(val, literal_type)
+            return ir.IntType(width)
+        elif literal_type == DataType.FLOAT:
+            return ir.FloatType()
+        elif literal_type == DataType.BOOL:
+            return ir.IntType(1)
+        elif literal_type == DataType.CHAR:
+            return ir.IntType(8)
+        elif literal_type == DataType.VOID:
+            return ir.IntType(1)
+        elif literal_type == DataType.DATA:
+            return LiteralTypeHandler._get_data_llvm_type(literal_value, literal_type, module)
+        else:
+            # Handle custom types
+            return LiteralTypeHandler._get_custom_llvm_type(literal_value, literal_type, module)
+    
+    @staticmethod
+    def _get_data_llvm_type(literal_value: Any, literal_type: DataType, module: ir.Module) -> ir.Type:
+        """Get LLVM type for DATA type literals."""
+        # Handle array literals
+        if isinstance(literal_value, list):
+            raise ValueError("Array literals should be handled at a higher level")
+        
+        # Handle struct literals (dictionaries with field names -> values)
+        if isinstance(literal_value, dict):
+            struct_type = LiteralTypeHandler.resolve_struct_type(literal_value, module)
+            return struct_type
+        
+        # Handle other DATA types via type aliases
+        if hasattr(module, '_type_aliases') and str(literal_type) in module._type_aliases:
+            return module._type_aliases[str(literal_type)]
+        
+        raise ValueError(f"Unsupported DATA literal: {literal_value}")
+    
+    @staticmethod
+    def _get_custom_llvm_type(literal_value: Any, literal_type: DataType, module: ir.Module) -> ir.Type:
+        """Get LLVM type for custom type literals."""
+        if hasattr(module, '_type_aliases') and str(literal_type) in module._type_aliases:
+            return module._type_aliases[str(literal_type)]
+        raise ValueError(f"Unsupported literal type: {literal_type}")
+    
+    @staticmethod
+    def resolve_struct_type(literal_value: dict, module: ir.Module):
+        """
+        Resolve the struct type for a struct literal based on its field names.
+        
+        Args:
+            literal_value: Dictionary mapping field names to values
+            module: LLVM module containing struct type definitions
+            
+        Returns:
+            LLVM struct type
+            
+        Raises:
+            ValueError: If no compatible struct type is found
+        """
+        if not isinstance(literal_value, dict):
+            raise ValueError("Expected dictionary for struct literal")
+        
+        field_names = list(literal_value.keys())
+        
+        if hasattr(module, '_struct_types'):
+            for struct_name, candidate_type in module._struct_types.items():
+                if hasattr(candidate_type, 'names'):
+                    # Check if all fields in the literal exist in this struct
+                    if all(field in candidate_type.names for field in field_names):
+                        return candidate_type
+        
+        raise ValueError(f"No compatible struct type found for fields: {field_names}")
+    
+    @staticmethod
+    def normalize_int_value(literal_value: Any, literal_type: DataType, width: int) -> int:
+        """
+        Normalize integer value for LLVM constant creation.
+        Handles unsigned types with values >= 2^63 by converting to signed equivalent.
+        
+        Args:
+            literal_value: The integer value (int or str)
+            literal_type: SINT or UINT
+            width: Bit width (32 or 64)
+            
+        Returns:
+            Normalized integer value for LLVM IR constant
+        """
+        val = int(literal_value, 0) if isinstance(literal_value, str) else int(literal_value)
+        
+        # For unsigned types with values >= 2^63, ensure proper handling
+        if literal_type == DataType.UINT and width == 64 and val >= (1 << 63):
+            # Convert to signed equivalent for LLVM (two's complement)
+            # LLVM stores 0xFFFFFFFFFFFFFFFF as -1 internally
+            return val if val < (1 << 63) else val - (1 << 64)
+        
+        return val
+    
+    @staticmethod
+    def normalize_char_value(literal_value: Any) -> int:
+        """
+        Normalize character value for LLVM constant creation.
+        
+        Args:
+            literal_value: Character value (str or int)
+            
+        Returns:
+            Integer value (0-255) for the character
+        """
+        if isinstance(literal_value, str):
+            if len(literal_value) == 0:
+                # Handle empty string - return null character
+                return 0
+            else:
+                return ord(literal_value[0])
+        else:
+            return literal_value
+    
+    @staticmethod
+    def get_struct_field_type(struct_type, field_name: str) -> ir.Type:
+        """
+        Get the LLVM type of a specific field in a struct.
+        
+        Args:
+            struct_type: LLVM struct type
+            field_name: Name of the field
+            
+        Returns:
+            LLVM type of the field
+            
+        Raises:
+            ValueError: If field is not found in struct
+        """
+        if not hasattr(struct_type, 'names'):
+            raise ValueError("Struct type does not have field names")
+        
+        if field_name not in struct_type.names:
+            raise ValueError(f"Field '{field_name}' not found in struct")
+        
+        field_index = struct_type.names.index(field_name)
+        return struct_type.elements[field_index]
+    
+    @staticmethod
+    def is_string_pointer_field(field_type: ir.Type) -> bool:
+        """
+        Check if a field type is a pointer to i8 (string pointer).
+        
+        Args:
+            field_type: LLVM type of the field
+            
+        Returns:
+            True if field is i8* (char*), False otherwise
+        """
+        return (isinstance(field_type, ir.PointerType) and
+                isinstance(field_type.pointee, ir.IntType) and
+                field_type.pointee.width == 8)
