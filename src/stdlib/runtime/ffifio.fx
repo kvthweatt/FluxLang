@@ -7,35 +7,20 @@
 
 #ifdef FLUX_STANDARD_FFI_FIO
 
-extern
-{
-    // FILE* fopen(const char* filename, const char* mode)
-    def !!fopen(byte* filename, byte* mode) -> void*;
-    
-    // int fclose(FILE* stream)
-    def !!fclose(void* stream) -> int;
-    
-    // size_t fread(void* ptr, size_t size, size_t count, FILE* stream)
-    def !!fread(void* ptr, int size, int count, void* stream) -> int;
-    
-    // size_t fwrite(const void* ptr, size_t size, size_t count, FILE* stream)
-    def !!fwrite(void* ptr, int size, int count, void* stream) -> int;
-    
-    // int fseek(FILE* stream, long offset, int whence)
-    def !!fseek(void* stream, int offset, int whence) -> int;
-    
-    // long ftell(FILE* stream)
-    def !!ftell(void* stream) -> int;
-    
-    // void rewind(FILE* stream)
-    def !!rewind(void* stream) -> void;
-    
-    // int feof(FILE* stream)
-    def !!feof(void* stream) -> int;
-    
-    // int ferror(FILE* stream)
-    def !!ferror(void* stream) -> int;
-};
+            extern
+            {
+                // FILE* fopen(const char* filename, const char* mode)
+                def !!
+                    fopen(byte*, byte*) -> void*,
+                    fclose(void*) -> int,
+                    fread(void*, int, int, void*) -> int,
+                    fwrite(void*, int, int, void*) -> int,
+                    fseek(void*, int, int) -> int,
+                    ftell(void*) -> int,
+                    rewind(void*) -> void,
+                    feof(void*) -> int,
+                    ferror(void*) -> int;
+            };
 
 namespace standard
 {
@@ -56,9 +41,9 @@ namespace standard
             // "ab" - append binary
             
             // SEEK constants for fseek
-            int SEEK_SET = 0;  // Beginning of file
-            int SEEK_CUR = 1;  // Current position
-            int SEEK_END = 2;  // End of file
+            global int SEEK_SET = 0;  // Beginning of file
+            global int SEEK_CUR = 1;  // Current position
+            global int SEEK_END = 2;  // End of file
             
             
             // ===== HIGH-LEVEL HELPER FUNCTIONS =====

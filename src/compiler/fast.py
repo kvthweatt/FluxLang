@@ -7874,6 +7874,78 @@ class ObjectDef(ASTNode):
         # Use the comprehensive get_llvm_type_with_array method that handles all cases properly
         return type_spec.get_llvm_type_with_array(module)
 
+# Extern declaration
+@dataclass
+class ExternBlock(Statement):
+    """
+    Extern block for FFI declarations.
+    
+    Syntax:
+        extern {
+            def function_name(params) -> return_type;
+        };
+    
+    Or single declaration:
+        extern def function_name(params) -> return_type;
+    """
+    declarations: List['FunctionDef']  # List of function prototypes
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
+        """Generate external function declarations"""
+        for func_def in self.declarations:
+            # Ensure these are prototypes
+            if not func_def.is_prototype:
+                raise ValueError(f"Extern functions must be prototypes (no body): {func_def.name}")
+            
+            # Generate the function declaration with external linkage
+            ret_type = func_def._convert_type(func_def.return_type, module)
+            param_types = [func_def._convert_type(param.type_spec, module) for param in func_def.parameters]
+            func_type = ir.FunctionType(ret_type, param_types)
+            
+            # CRITICAL: Extern functions are ALWAYS global and should NOT have namespace mangling
+            # Strip any namespace prefix that might have been added
+            func_name = func_def.name
+            if '__' in func_name:
+                # If the name contains __, it might be namespace-prefixed
+                # Extract the base name (last component after __)
+                parts = func_name.split('__')
+                base_name = parts[-1]
+            else:
+                base_name = func_name
+            
+            # For extern functions, we respect no_mangle flag, but they're already effectively
+            # no_mangle since we use the base name. The only mangling that happens is for
+            # overloads (parameter types), which is still needed for type safety.
+            if func_def.no_mangle:
+                # Truly no mangling at all - use exact name
+                final_name = base_name
+            else:
+                # Allow overload mangling based on parameter types, but start from base_name
+                # Temporarily set the name to base_name for mangling
+                original_name = func_def.name
+                func_def.name = base_name
+                final_name = func_def._mangle_name(module)
+                func_def.name = original_name
+            
+            # Create or get the function
+            if final_name in module.globals:
+                func = module.globals[final_name]
+                if not isinstance(func, ir.Function):
+                    raise ValueError(f"Name '{final_name}' already used for non-function")
+            else:
+                func = ir.Function(module, func_type, final_name)
+            
+            # Set external linkage
+            func.linkage = 'external'
+            
+            # Name the parameters
+            for i, param in enumerate(func.args):
+                if i < len(func_def.parameters):
+                    if func_def.parameters[i].name is not None:
+                        param.name = func_def.parameters[i].name
+                    else:
+                        param.name = f"arg{i}"
+
 # Namespace definition
 @dataclass
 class NamespaceDef(ASTNode):
@@ -7882,6 +7954,7 @@ class NamespaceDef(ASTNode):
     structs: List[StructDef] = field(default_factory=list)
     objects: List[ObjectDef] = field(default_factory=list)
     enums: List[EnumDef] = field(default_factory=list)
+    extern_blocks: List[ExternBlock] = field(default_factory=list)
     variables: List[VariableDeclaration] = field(default_factory=list)
     nested_namespaces: List['NamespaceDef'] = field(default_factory=list)
     base_namespaces: List[str] = field(default_factory=list)  # inheritance
@@ -7983,6 +8056,11 @@ class NamespaceDef(ASTNode):
             finally:
                 enum.name = original_name
 
+        # Process extern blocks (ALWAYS global, no namespace mangling)
+        # Extern declarations are inherently global and should not be namespaced
+        for extern_block in self.extern_blocks:
+            extern_block.codegen(work_builder, module)
+
         if "__static_init" in module.globals:
             init_func = module.globals["__static_init"]
             if init_func.blocks and not init_func.blocks[-1].is_terminated:
@@ -8040,56 +8118,6 @@ class UsingStatement(Statement):
         if not hasattr(module, '_using_namespaces'):
             module._using_namespaces = []
         module._using_namespaces.append(self.namespace_path)
-
-# Extern declaration
-@dataclass
-class ExternBlock(Statement):
-    """
-    Extern block for FFI declarations.
-    
-    Syntax:
-        extern {
-            def function_name(params) -> return_type;
-        };
-    
-    Or single declaration:
-        extern def function_name(params) -> return_type;
-    """
-    declarations: List['FunctionDef']  # List of function prototypes
-    
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
-        """Generate external function declarations"""
-        for func_def in self.declarations:
-            # Ensure these are prototypes
-            if not func_def.is_prototype:
-                raise ValueError(f"Extern functions must be prototypes (no body): {func_def.name}")
-            
-            # Generate the function declaration with external linkage
-            ret_type = func_def._convert_type(func_def.return_type, module)
-            param_types = [func_def._convert_type(param.type_spec, module) for param in func_def.parameters]
-            func_type = ir.FunctionType(ret_type, param_types)
-            
-            # Use mangled name unless no_mangle is set
-            if func_def.no_mangle:
-                func_name = func_def.name
-            else:
-                func_name = func_def._mangle_name(module)
-            
-            # Create or get the function
-            if func_name in module.globals:
-                func = module.globals[func_name]
-                if not isinstance(func, ir.Function):
-                    raise ValueError(f"Name '{func_name}' already used for non-function")
-            else:
-                func = ir.Function(module, func_type, func_name)
-            
-            # Set external linkage
-            func.linkage = 'external'
-            
-            # Name the parameters
-            for i, param in enumerate(func.args):
-                if i < len(func_def.parameters):
-                    param.name = func_def.parameters[i].name
 
 # Custom type definition
 @dataclass

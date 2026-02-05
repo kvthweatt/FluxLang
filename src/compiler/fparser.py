@@ -913,6 +913,7 @@ class FluxParser:
         structs = []
         objects = []
         enums = []
+        externs = []
         variables = []
         nested_namespaces = []
         
@@ -952,6 +953,9 @@ class FluxParser:
             elif self.expect(TokenType.ENUM):
                 enum = self.enum_def()
                 enums.append(enum)
+            elif self.expect(TokenType.EXTERN):
+                extern = self.extern_statement()
+                externs.append(extern)
             elif self.expect(TokenType.NAMESPACE):
                 nested_ns = self.namespace_def()
                 merged = False
@@ -985,7 +989,7 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
         self.symbol_table.exit_scope()
         
-        return NamespaceDef(name, functions, structs, objects, enums, variables, 
+        return NamespaceDef(name, functions, structs, objects, enums, externs, variables, 
                            nested_namespaces, base_namespaces)
     
     def type_spec(self) -> TypeSpec:
