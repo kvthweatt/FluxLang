@@ -17,7 +17,6 @@ from pathlib import Path
 import os
 
 from ftypesys import *
-from futilities import *
 
 # Base classes first
 @dataclass
