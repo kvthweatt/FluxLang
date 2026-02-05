@@ -2576,10 +2576,10 @@ def infer_int_width(value: int, data_type: DataType) -> int:
     else:  # DataType.UINT
         # Unsigned: 0 to 2^32-1
         if 0 <= value <= (1 << 32) - 1:
-            print(f"[DEBUG infer_int_width UINT] Returning 32 for value={value}")
+            #print(f"[DEBUG infer_int_width UINT] Returning 32 for value={value}")
             return 32
         else:
-            print(f"[DEBUG infer_int_width UINT] Returning 64 for value={value}")
+            #print(f"[DEBUG infer_int_width UINT] Returning 64 for value={value}")
             return 64
 
 
@@ -4730,3 +4730,545 @@ class AssignmentTypeHandler:
         binary_expr = BinaryOp(target_expr, binary_op, value_expr)
         assignment = Assignment(target_expr, binary_expr)
         return assignment.codegen(builder, module)
+
+
+class StructTypeHandler:
+    """
+    Helper class for managing struct type operations, including vtable creation,
+    field packing/unpacking, field access, and struct literal handling.
+    """
+    
+    @staticmethod
+    def initialize_struct_storage(module: 'ir.Module'):
+        """
+        Initialize module attributes for struct type storage.
+        
+        Args:
+            module: LLVM module
+        """
+        if not hasattr(module, '_struct_vtables'):
+            module._struct_vtables = {}
+        if not hasattr(module, '_struct_types'):
+            module._struct_types = {}
+        if not hasattr(module, '_struct_storage_classes'):
+            module._struct_storage_classes = {}
+        if not hasattr(module, '_struct_member_type_specs'):
+            module._struct_member_type_specs = {}
+    
+    @staticmethod
+    def calculate_vtable(members: List, module: 'ir.Module') -> 'StructVTable':
+        """
+        Calculate struct layout and generate vtable (TLD).
+        
+        Args:
+            members: List of StructMember objects
+            module: LLVM module
+            
+        Returns:
+            StructVTable with field layout information
+        """
+        from fast import StructVTable, get_builtin_bit_width
+        
+        fields = []
+        field_types = {}
+        current_offset = 0
+        max_alignment = 1
+        
+        for member in members:
+            member_type = member.type_spec
+            
+            # Get the LLVM type for this field - use get_llvm_type_with_array to handle arrays
+            llvm_field_type = member_type.get_llvm_type_with_array(module)
+            field_types[member.name] = llvm_field_type
+            
+            if member_type.bit_width is not None:
+                bit_width = member_type.bit_width
+                alignment = member_type.alignment if member_type.alignment is not None else bit_width
+            elif member_type.custom_typename:
+                # Use TypeSystem.get_llvm_type() which handles all type lookups properly
+                llvm_type = llvm_field_type
+                
+                # Calculate bit width and alignment from the LLVM type
+                if isinstance(llvm_type, ir.IntType):
+                    bit_width = llvm_type.width
+                    alignment = llvm_type.width
+                elif isinstance(llvm_type, ir.FloatType):
+                    bit_width = 32
+                    alignment = 32
+                elif isinstance(llvm_type, ir.DoubleType):
+                    bit_width = 64
+                    alignment = 64
+                elif isinstance(llvm_type, ir.ArrayType):
+                    # For arrays, calculate total bit width
+                    element_type = llvm_type.element
+                    if isinstance(element_type, ir.IntType):
+                        bit_width = element_type.width * llvm_type.count
+                        alignment = element_type.width
+                    else:
+                        # Default fallback
+                        bit_width = 8 * llvm_type.count
+                        alignment = 8
+                else:
+                    # Default fallback for other types
+                    bit_width = 32
+                    alignment = 32
+            else:
+                bit_width = get_builtin_bit_width(member_type.base_type)
+                alignment = bit_width
+            
+            if alignment > 1:
+                misalignment = current_offset % alignment
+                if misalignment != 0:
+                    current_offset += alignment - misalignment
+            
+            fields.append((member.name, current_offset, bit_width, alignment))
+            member.offset = current_offset
+            
+            current_offset += bit_width
+            max_alignment = max(max_alignment, alignment)
+        
+        total_bits = current_offset
+        
+        if max_alignment > 1:
+            misalignment = total_bits % max_alignment
+            if misalignment != 0:
+                total_bits += max_alignment - misalignment
+        
+        total_bytes = (total_bits + 7) // 8
+        
+        return StructVTable(
+            struct_name="",  # Will be set by caller
+            total_bits=total_bits,
+            total_bytes=total_bytes,
+            alignment=max_alignment,
+            fields=fields,
+            field_types=field_types
+        )
+    
+    @staticmethod
+    def create_struct_type(name: str, vtable: 'StructVTable', module: 'ir.Module') -> 'ir.Type':
+        """
+        Create proper LLVM struct type with named fields.
+        
+        Args:
+            name: Struct name
+            vtable: StructVTable with field information
+            module: LLVM module
+            
+        Returns:
+            Created struct type
+        """
+        field_types = [vtable.field_types[field_name] for field_name, _, _, _ in vtable.fields]
+        instance_type = ir.LiteralStructType(field_types)
+        instance_type.names = [field_name for field_name, _, _, _ in vtable.fields]
+        
+        return instance_type
+    
+    @staticmethod
+    def pack_field_value(builder: 'ir.IRBuilder', instance: 'ir.Value', field_value: 'ir.Value',
+                        bit_offset: int, bit_width: int, total_bits: int) -> 'ir.Value':
+        """
+        Pack a field value into the struct instance at the correct bit offset.
+        
+        Args:
+            builder: LLVM IR builder
+            instance: Current struct instance value
+            field_value: Value to pack into field
+            bit_offset: Bit offset of the field
+            bit_width: Bit width of the field
+            total_bits: Total bits in the struct
+            
+        Returns:
+            Updated instance value
+        """
+        if isinstance(instance.type, ir.IntType):
+            # Integer type - use bit operations
+            instance_type = instance.type
+            
+            # Convert field value to same width as instance for manipulation
+            if field_value.type.width < instance_type.width:
+                field_value_extended = builder.zext(field_value, instance_type)
+            elif field_value.type.width > instance_type.width:
+                field_value_extended = builder.trunc(field_value, instance_type)
+            else:
+                field_value_extended = field_value
+            
+            # Shift field value to correct position
+            if bit_offset > 0:
+                field_value_shifted = builder.shl(
+                    field_value_extended,
+                    ir.Constant(instance_type, bit_offset)
+                )
+            else:
+                field_value_shifted = field_value_extended
+            
+            # Create mask to clear target bits in instance
+            mask = ((1 << bit_width) - 1) << bit_offset
+            clear_mask = (~mask) & ((1 << total_bits) - 1)
+            
+            # Clear target bits
+            instance_cleared = builder.and_(
+                instance,
+                ir.Constant(instance_type, clear_mask)
+            )
+            
+            # Insert field value
+            result = builder.or_(instance_cleared, field_value_shifted)
+            
+            return result
+        else:
+            # Array type - byte-level manipulation
+            byte_offset = bit_offset // 8
+            bit_in_byte = bit_offset % 8
+            
+            # For now, support only byte-aligned fields in array structs
+            if bit_in_byte != 0 or bit_width % 8 != 0:
+                raise NotImplementedError(
+                    "Unaligned fields in large structs not yet supported"
+                )
+            
+            # Insert bytes at correct position
+            field_bytes = bit_width // 8
+            
+            # Convert float to integer representation if needed
+            if isinstance(field_value.type, ir.FloatType):
+                # Convert float to its integer bit representation
+                int_type = ir.IntType(bit_width)
+                field_value = builder.bitcast(field_value, int_type)
+            
+            # Extract bytes from field value
+            for i in range(field_bytes):
+                byte_val = builder.trunc(
+                    builder.lshr(
+                        field_value,
+                        ir.Constant(field_value.type, i * 8)
+                    ),
+                    ir.IntType(8)
+                )
+                
+                # Insert into array
+                instance = builder.insert_value(
+                    instance,
+                    byte_val,
+                    byte_offset + i
+                )
+            
+            return instance
+    
+    @staticmethod
+    def create_zeroed_instance(struct_type: 'ir.Type', vtable: 'StructVTable') -> 'ir.Constant':
+        """
+        Create a zeroed instance of a struct.
+        
+        Args:
+            struct_type: LLVM struct type
+            vtable: StructVTable with field information
+            
+        Returns:
+            Zero-initialized struct constant
+        """
+        if isinstance(struct_type, ir.IntType):
+            return ir.Constant(struct_type, 0)
+        elif isinstance(struct_type, ir.LiteralStructType):
+            # For proper struct types, initialize each field to zero
+            zero_values = []
+            for field_type in struct_type.elements:
+                if isinstance(field_type, ir.IntType):
+                    zero_values.append(ir.Constant(field_type, 0))
+                elif isinstance(field_type, ir.FloatType):
+                    zero_values.append(ir.Constant(field_type, 0.0))
+                elif isinstance(field_type, ir.DoubleType):
+                    zero_values.append(ir.Constant(field_type, 0.0))
+                else:
+                    # Default to an integer constant for other types
+                    zero_values.append(ir.Constant(ir.IntType(32), 0))
+            return ir.Constant(struct_type, zero_values)
+        else:
+            return ir.Constant(struct_type, [ir.Constant(ir.IntType(8), 0)] * vtable.total_bytes)
+    
+    @staticmethod
+    def pack_struct_literal(builder: 'ir.IRBuilder', module: 'ir.Module', struct_type: str,
+                           field_values: dict, positional_values: list) -> 'ir.Value':
+        """
+        Pack field values into a struct literal.
+        
+        Args:
+            builder: LLVM IR builder
+            module: LLVM module
+            struct_type: Name of the struct type
+            field_values: Dictionary of field_name -> Expression
+            positional_values: List of positional Expression values
+            
+        Returns:
+            Packed struct instance
+        """
+        # Get struct vtable
+        if not hasattr(module, '_struct_vtables'):
+            raise ValueError(f"Struct '{struct_type}' not defined")
+        
+        vtable = module._struct_vtables.get(struct_type)
+        if not vtable:
+            raise ValueError(f"Struct '{struct_type}' not defined")
+        
+        llvm_struct_type = module._struct_types[struct_type]
+        
+        # Handle positional initialization
+        if positional_values:
+            # Convert positional to named based on field order
+            if len(positional_values) > len(vtable.fields):
+                raise ValueError(
+                    f"Too many initializers for struct '{struct_type}': "
+                    f"got {len(positional_values)}, expected {len(vtable.fields)}"
+                )
+            
+            # Map positional values to field names
+            for i, value in enumerate(positional_values):
+                field_name = vtable.fields[i][0]
+                field_values[field_name] = value
+        
+        # Create zeroed instance
+        instance = StructTypeHandler.create_zeroed_instance(llvm_struct_type, vtable)
+        
+        # Pack field values
+        if isinstance(llvm_struct_type, ir.LiteralStructType):
+            # For proper struct types, build the constant directly with all field values
+            field_constants = []
+            for i, (field_name, _, _, _) in enumerate(vtable.fields):
+                if field_name in field_values:
+                    # Generate the field value
+                    field_value_expr = field_values[field_name]
+                    field_value = field_value_expr.codegen(builder, module)
+                    # For constants, we can use them directly
+                    if isinstance(field_value, ir.Constant):
+                        field_constants.append(field_value)
+                    else:
+                        # Non-constant value - we need to use insertvalue instructions
+                        # But for struct literals, all values should be constants
+                        raise ValueError(f"Struct literal field '{field_name}' must be a constant expression")
+                else:
+                    # Use the zero value we created
+                    field_constants.append(instance.constant_value[i])
+            
+            # Create the final struct constant
+            instance = ir.Constant(llvm_struct_type, field_constants)
+        else:
+            # For packed integer or byte array structs, use the old packing method
+            for field_name, field_value_expr in field_values.items():
+                field_info = next(
+                    (f for f in vtable.fields if f[0] == field_name),
+                    None
+                )
+                if not field_info:
+                    raise ValueError(f"Field '{field_name}' not found in struct '{struct_type}'")
+                
+                _, bit_offset, bit_width, alignment = field_info
+                
+                # Generate value
+                field_value = field_value_expr.codegen(builder, module)
+                
+                # Pack into instance
+                instance = StructTypeHandler.pack_field_value(
+                    builder, instance, field_value, 
+                    bit_offset, bit_width, vtable.total_bits
+                )
+        
+        return instance
+    
+    @staticmethod
+    def extract_field_value(builder: 'ir.IRBuilder', module: 'ir.Module', instance: 'ir.Value',
+                           struct_name: str, field_name: str, vtable: 'StructVTable') -> 'ir.Value':
+        """
+        Extract a field value from a struct instance.
+        
+        Args:
+            builder: LLVM IR builder
+            module: LLVM module
+            instance: Struct instance value
+            struct_name: Name of the struct type
+            field_name: Name of the field to extract
+            vtable: StructVTable with field information
+            
+        Returns:
+            Extracted field value
+        """
+        field_info = next((f for f in vtable.fields if f[0] == field_name), None)
+        if not field_info:
+            raise ValueError(f"Field '{field_name}' not found in struct '{struct_name}'")
+        
+        _, bit_offset, bit_width, alignment = field_info
+        
+        # If instance is integer-packed, do bit extraction
+        if isinstance(instance.type, ir.IntType):
+            instance_type = instance.type
+            
+            # Shift
+            if bit_offset > 0:
+                shifted = builder.lshr(instance, ir.Constant(instance_type, bit_offset))
+            else:
+                shifted = instance
+            
+            # Mask
+            mask = (1 << bit_width) - 1
+            masked = builder.and_(shifted, ir.Constant(instance_type, mask))
+            
+            # Trunc
+            field_type = ir.IntType(bit_width)
+            if instance_type.width != bit_width:
+                return builder.trunc(masked, field_type, name=field_name)
+            return masked
+        
+        # Struct value extraction by index (vtable order)
+        if isinstance(instance.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
+            field_index = None
+            for i, f in enumerate(vtable.fields):
+                if f[0] == field_name:
+                    field_index = i
+                    break
+            if field_index is None:
+                raise ValueError(f"Field '{field_name}' not found in struct '{struct_name}'")
+            return builder.extract_value(instance, field_index, name=field_name)
+        
+        # Array-backed packed struct (byte extraction)
+        byte_offset = bit_offset // 8
+        bit_in_byte = bit_offset % 8
+        
+        if bit_in_byte == 0 and bit_width % 8 == 0:
+            field_bytes = bit_width // 8
+            field_type = ir.IntType(bit_width)
+            
+            result = ir.Constant(field_type, 0)
+            for i in range(field_bytes):
+                byte_val = builder.extract_value(instance, byte_offset + i)
+                byte_ext = builder.zext(byte_val, field_type)
+                byte_shifted = builder.shl(byte_ext, ir.Constant(field_type, i * 8))
+                result = builder.or_(result, byte_shifted)
+            
+            # Optional typed reinterpret (if vtable carries it)
+            if hasattr(vtable, "field_types") and field_name in vtable.field_types:
+                target_type = vtable.field_types[field_name]
+                if isinstance(target_type, ir.FloatType) and isinstance(result.type, ir.IntType):
+                    result = builder.bitcast(result, target_type)
+            return result
+        
+        raise NotImplementedError("Unaligned field access in large structs not yet supported")
+    
+    @staticmethod
+    def assign_field_value(builder: 'ir.IRBuilder', module: 'ir.Module', instance_ptr: 'ir.Value',
+                          struct_name: str, field_name: str, new_value: 'ir.Value',
+                          vtable: 'StructVTable') -> 'ir.Value':
+        """
+        Assign a value to a struct field.
+        
+        Args:
+            builder: LLVM IR builder
+            module: LLVM module
+            instance_ptr: Pointer to struct instance
+            struct_name: Name of the struct type
+            field_name: Name of the field to assign
+            new_value: New value to assign
+            vtable: StructVTable with field information
+            
+        Returns:
+            Updated instance value
+        """
+        # Load current value
+        instance = builder.load(instance_ptr)
+        
+        # Find field
+        field_info = next(
+            (f for f in vtable.fields if f[0] == field_name),
+            None
+        )
+        if not field_info:
+            raise ValueError(f"Field '{field_name}' not found")
+        
+        _, bit_offset, bit_width, alignment = field_info
+        
+        # Pack new value into instance
+        if isinstance(instance.type, ir.IntType):
+            instance_type = instance.type
+            
+            # Extend/truncate new value to instance width
+            if new_value.type.width < instance_type.width:
+                new_value_extended = builder.zext(new_value, instance_type)
+            elif new_value.type.width > instance_type.width:
+                new_value_extended = builder.trunc(new_value, instance_type)
+            else:
+                new_value_extended = new_value
+            
+            # Shift to position
+            if bit_offset > 0:
+                new_value_shifted = builder.shl(
+                    new_value_extended,
+                    ir.Constant(instance_type, bit_offset)
+                )
+            else:
+                new_value_shifted = new_value_extended
+            
+            # Create clear mask
+            mask = ((1 << bit_width) - 1) << bit_offset
+            clear_mask = (~mask) & ((1 << vtable.total_bits) - 1)
+            
+            # Clear old value
+            instance_cleared = builder.and_(
+                instance,
+                ir.Constant(instance_type, clear_mask)
+            )
+            
+            # Insert new value
+            updated_instance = builder.or_(instance_cleared, new_value_shifted)
+            
+            # Store back
+            builder.store(updated_instance, instance_ptr)
+            
+            return updated_instance
+        else:
+            raise NotImplementedError(
+                "Field assignment in large structs not yet supported"
+            )
+    
+    @staticmethod
+    def perform_struct_recast(builder: 'ir.IRBuilder', module: 'ir.Module',
+                             target_type: str, source_value: 'ir.Value') -> 'ir.Value':
+        """
+        Perform zero-cost struct reinterpretation cast.
+        
+        Args:
+            builder: LLVM IR builder
+            module: LLVM module
+            target_type: Name of target struct type
+            source_value: Source value to recast
+            
+        Returns:
+            Recasted value
+        """
+        # Get target struct vtable
+        if not hasattr(module, '_struct_vtables'):
+            raise ValueError(f"Struct '{target_type}' not defined")
+        
+        target_vtable = module._struct_vtables.get(target_type)
+        if not target_vtable:
+            raise ValueError(f"Struct '{target_type}' not defined")
+        
+        llvm_target_type = module._struct_types[target_type]
+        
+        # Compile-time size check if source size is known
+        if hasattr(source_value.type, 'count'):
+            # Array type - check size at compile time
+            source_bytes = source_value.type.count
+            if source_bytes != target_vtable.total_bytes:
+                raise ValueError(
+                    f"Size mismatch in cast to {target_type}: "
+                    f"source is {source_bytes} bytes, target requires {target_vtable.total_bytes} bytes"
+                )
+        
+        # Perform zero-cost bitcast
+        if isinstance(source_value.type, ir.PointerType):
+            # Cast pointer, then load
+            casted_ptr = builder.bitcast(source_value, llvm_target_type.as_pointer())
+            result = builder.load(casted_ptr)
+        else:
+            # Direct bitcast (reinterpret bits)
+            result = builder.bitcast(source_value, llvm_target_type)
+        
+        return result
