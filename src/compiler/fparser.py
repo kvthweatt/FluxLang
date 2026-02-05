@@ -992,7 +992,7 @@ class FluxParser:
         return NamespaceDef(name, functions, structs, objects, enums, externs, variables, 
                            nested_namespaces, base_namespaces)
     
-    def type_spec(self) -> TypeSpec:
+    def type_spec(self) -> TypeSystem:
         """
         type_spec -> ('global'|'local'|'heap'|'stack'|'register')? ('const')? ('volatile')? ('signed'|'unsigned')? base_type alignment? array_spec? pointer_spec?
         array_spec -> ('[' expression? ']')+
@@ -1104,7 +1104,7 @@ class FluxParser:
             pointer_depth += 1
             self.advance()
 
-        return TypeSpec(
+        return TypeSystem(
             base_type=base_type,
             is_signed=is_signed,
             is_const=is_const,
@@ -2205,8 +2205,8 @@ class FluxParser:
             # Uses CastExpression with void* as target type
             self.advance()
             operand = self.unary_expression()
-            # Create a void pointer TypeSpec (i8*)
-            void_ptr_type = TypeSpec(
+            # Create a void pointer TypeSystem (i8*)
+            void_ptr_type = TypeSystem(
                 base_type=DataType.VOID,
                 is_pointer=True,
                 pointer_depth=1

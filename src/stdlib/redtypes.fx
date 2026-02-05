@@ -72,7 +72,7 @@ namespace standard
         // Endian swapping utilities
         def bswap16(u16 value) -> u16
         {
-            return (i16)((value & 0xFF) << 8) | (i16)((value >> 8) & 0xFF);
+            return ((value & 0xFF) << 8) | ((value >> 8) & 0xFF);
         };
 
         def bswap32(u32 value) -> u32

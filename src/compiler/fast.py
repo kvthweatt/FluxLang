@@ -297,7 +297,7 @@ class ArrayLiteral(Expression):
     - Compile-time vs runtime array creation
     """
     elements: List[Expression] = field(default_factory=list)
-    element_type: Optional[TypeSpec] = None
+    element_type: Optional[TypeSystem] = None
     is_string: bool = False
     string_value: Optional[str] = None
     storage_class: Optional[StorageClass] = None
@@ -846,7 +846,7 @@ class QualifiedName(Expression):
     member: Optional[str] = None
     
     def __str__(self):
-        qual_str = "::".join(self.qualifiers)
+        qual_str = "__".join(self.qualifiers)
         if self.member:
             return f"{qual_str}.{self.member}"
         return qual_str
@@ -1154,7 +1154,7 @@ class UnaryOp(Expression):
 
 @dataclass
 class CastExpression(Expression):
-    target_type: TypeSpec
+    target_type: TypeSystem
     expression: Expression
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
@@ -1438,7 +1438,7 @@ class RangeExpression(Expression):
 class ArrayComprehension(Expression):
     expression: Expression  # The expression to evaluate for each element
     variable: str  # Loop variable name
-    variable_type: Optional[TypeSpec]  # Type of loop variable
+    variable_type: Optional[TypeSystem]  # Type of loop variable
     iterable: Expression  # What to iterate over (e.g., range expression or ArrayLiteral)
     condition: Optional[Expression] = None  # Optional filter condition
 
@@ -1848,8 +1848,8 @@ class FStringLiteral(Expression):
         
         # Handle sizeof/alignof with compile-time types
         elif isinstance(expr, SizeOf):
-            if isinstance(expr.target, TypeSpec):
-                # We can compute sizeof for TypeSpec at compile time
+            if isinstance(expr.target, TypeSystem):
+                # We can compute sizeof for TypeSystem at compile time
                 llvm_type = expr.target.get_llvm_type_with_array(module)
                 if isinstance(llvm_type, ir.IntType):
                     return llvm_type.width // 8  # Convert bits to bytes
@@ -1879,16 +1879,47 @@ class FunctionCall(Expression):
         Generate code for function calls with full overload resolution support.
         
         Resolution order:
-        1. Check direct name in module.globals
-        2. Check for overloaded functions in _function_overloads
-        3. Check namespace-qualified names via _using_namespaces
-        4. Check namespace-qualified overloads
-        5. Raise error if still not found
+        1. Check if this is a function pointer variable
+        2. Check direct name in module.globals
+        3. Check for overloaded functions in _function_overloads
+        4. Check namespace-qualified names via _using_namespaces
+        5. Check namespace-qualified overloads
+        6. Raise error if still not found
         """
         
-        # Step 0: Check if this is a function pointer variable (local or global)
-        # Function pointer variables should be called using FunctionPointerCall
-        is_func_ptr_var = False
+        # Step 1: Check if this is a function pointer variable
+        if self._is_function_pointer_variable(builder, module):
+            func_ptr_call = FunctionPointerCall(
+                pointer=Identifier(self.name),
+                arguments=self.arguments
+            )
+            return func_ptr_call.codegen(builder, module)
+        
+        # Step 2: Try direct lookup
+        func = self._try_direct_lookup(module)
+        
+        # Step 3: If not found, try overload resolution
+        if func is None:
+            func = self._try_overload_resolution(builder, module, self.name)
+        
+        # Step 4: If still not found, try namespace-qualified names
+        if func is None and hasattr(module, '_using_namespaces'):
+            func = self._try_namespace_resolution(builder, module)
+        
+        # Step 5: Error if still not found
+        if func is None:
+            self._raise_function_not_found_error(module)
+        
+        # Generate the actual function call
+        return self._generate_call(builder, module, func)
+    
+    def _is_function_pointer_variable(self, builder: ir.IRBuilder, module: ir.Module) -> bool:
+        """
+        Check if the function name refers to a function pointer variable.
+        
+        Returns:
+            True if this is a function pointer variable, False otherwise
+        """
         
         # Check local scope
         if builder.scope and self.name in builder.scope:
@@ -1899,98 +1930,108 @@ class FunctionCall(Expression):
                 pointee = var_ptr.type.pointee
                 # Check for both direct function pointer and double-pointer (from alloca)
                 if isinstance(pointee, ir.FunctionType):
-                    # Direct pointer to function (shouldn't happen for locals, but check anyway)
-                    is_func_ptr_var = True
+                    return True
                 elif isinstance(pointee, ir.PointerType) and isinstance(pointee.pointee, ir.FunctionType):
-                    # Pointer to pointer to function (local variable from alloca)
-                    is_func_ptr_var = True
+                    return True
         
         # Check global scope
         elif self.name in module.globals:
             gvar = module.globals[self.name]
             if not isinstance(gvar, ir.Function):
-                # It's a global variable, check if it's a function pointer
                 if isinstance(gvar.type, ir.PointerType):
                     if isinstance(gvar.type.pointee, ir.FunctionType):
-                        is_func_ptr_var = True
+                        return True
+
+        return False
+
+    def _try_direct_lookup(self, module: ir.Module) -> Optional[ir.Function]:
+        """
+        Try to find the function by direct name lookup.
         
-        # If it's a function pointer variable, delegate to FunctionPointerCall
-        if is_func_ptr_var:
-            func_ptr_call = FunctionPointerCall(
-                pointer=Identifier(self.name),
-                arguments=self.arguments
-            )
-            return func_ptr_call.codegen(builder, module)
-        
-        # Step 1: Try direct lookup
+        Returns:
+            Function object if found, None otherwise
+        """
         func = module.globals.get(self.name, None)
-        mangled_name = None
-
-        mangled_names = []
-        for x in module._function_overloads.items():
-            mangled_names.append(x[1][0]["mangled_name"].lstrip())
-        #print(f"MANGLED LIST:\n{'\n'.join(mangled_names)}")
+        if func and isinstance(func, ir.Function):
+            return func
+        return None
+    
+    def _try_overload_resolution(self, builder: ir.IRBuilder, module: ir.Module, 
+                                 base_name: str) -> Optional[ir.Function]:
+        """
+        Try to resolve the function through overload resolution.
         
-        for x in module._function_overloads.items():
-            # Step 2: If not found or not a function, check for overloads BEFORE namespace search
-            if func is None or not isinstance(func, ir.Function):
-                # Check if this is an overloaded function
-                if hasattr(module, '_function_overloads') and self.name in module._function_overloads:
-                    #print("FUNCTION OVERLOADS:")
-                    for y in x:
-                        if (type(y) == str):
-                            continue
-                        mangled_name = y[0]["mangled_name"]
-                        func = self._resolve_overload(builder, module, mangled_name, module._function_overloads[self.name])
-                        if func is not None:
-                            #print("CREATED FUNCTION!")
-                            # Found via overload resolution
-                            return self._generate_call(builder, module, func)
+        Args:
+            builder: LLVM IR builder
+            module: LLVM module
+            base_name: Base function name (unmangled)
+        Returns:
+            Function object if found, None otherwise
+        """
+        if not hasattr(module, '_function_overloads'):
+            return None
+        # Use _resolve_overload which internally uses FunctionTypeHandler
+        return self._resolve_overload(builder, module, base_name, 
+                                     module._function_overloads[base_name])
+    
+    def _try_namespace_resolution(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Function]:
+        """
+        Try to resolve the function through namespace-qualified names.
+        
+        Returns:
+            Function object if found, None otherwise
+        """
+        # Get current namespace context from module
+        current_namespace = getattr(module, '_current_namespace', '')
+        
+        # Use FunctionResolver to find the function name
+        resolved_name = FunctionResolver.resolve_function_name(self.name, module, current_namespace)
+        
+        if resolved_name and resolved_name in module.globals:
+            candidate_func = module.globals[resolved_name]
+            if isinstance(candidate_func, ir.Function):
+                return candidate_func
             
-            # Step 3: Try namespace-qualified names
-            if func is None or not isinstance(func, ir.Function):
-                if hasattr(module, '_using_namespaces'):
-                    for namespace in module._using_namespaces:
-                        # Convert namespace path to mangled name format
-                        mangled_prefix = namespace.replace('::', '__') + '__'
-                        mangled_name = mangled_prefix + self.name
-                        
-                        # Check for direct mangled function name
-                        if mangled_name in module.globals:
-                            candidate_func = module.globals[mangled_name]
-                            if isinstance(candidate_func, ir.Function):
-                                func = candidate_func
-                                break
-                        
-                        # Step 4: Check for namespace-qualified overloads
-                        if hasattr(module, '_function_overloads') and mangled_name in module._function_overloads:
-                            func = self._resolve_overload(builder, module, mangled_name, module._function_overloads[mangled_name])
-                            if func is not None:
-                                break
-
-            # Step 5: Error if still not found
-            if func is None or not isinstance(func, ir.Function):
-                # Check if the function exists in overloads before accessing it
-                if hasattr(module, '_function_overloads') and self.name in module._function_overloads:
-                    available_counts = [o['param_count'] for o in module._function_overloads[self.name]]
-                    #print("AVAILABLE COUNTS:",available_counts)
-                    if len(self.arguments) > len(available_counts):
-                        raise ValueError(f"Function {self.name} accepts {available_counts} arguments but [{len(self.arguments)}] arguments were passed.")
-                else:
-                    # Function not found anywhere - raise a clear error
-                    raise NameError(f"Function '{self.name}' not found in module or any imported namespaces")
+            # Also check for overloaded versions of the resolved name
+            func = self._try_overload_resolution(builder, module, resolved_name)
+            if func is not None:
+                return func
         
-        # Generate the actual function call
-        return self._generate_call(builder, module, func)
+        return None
+    
+    def _raise_function_not_found_error(self, module: ir.Module) -> None:
+        """
+        Raise an appropriate error when the function cannot be found.
+        
+        Raises:
+            ValueError: If function exists but with wrong argument count
+            NameError: If function not found at all
+        """
+        if hasattr(module, '_function_overloads') and self.name in module._function_overloads:
+            available_counts = [o['param_count'] for o in module._function_overloads[self.name]]
+            if len(self.arguments) not in available_counts:
+                raise ValueError(
+                    f"Function '{self.name}' found but no overload accepts {len(self.arguments)} arguments. "
+                    f"Available overloads accept: {available_counts} arguments."
+                )
+        
+        # Function not found anywhere - raise a clear error
+        raise NameError(f"Function '{self.name}' not found in module or any imported namespaces")
 
     def _resolve_overload(self, builder: ir.IRBuilder, module: ir.Module, base_name: str, overloads: list) -> ir.Function:
         """
         Resolve function overload by matching argument count and types.
         
+        Uses FunctionTypeHandler for type-based resolution.
+        
+        Args:
+            builder: LLVM IR builder
+            module: LLVM module
+            base_name: Base function name
+            overloads: List of overload metadata
         Returns:
             Matching function or None if no match found
         """
-        #print("IN _RESOLVE_OVERLOAD() FOR",base_name,"\n")
         arg_count = len(self.arguments)
         
         # Filter by argument count first
@@ -2002,20 +2043,16 @@ class FunctionCall(Expression):
             # Only one candidate - use it
             return candidates[0]['function']
         else:
-            # Multiple candidates - need type matching
-            # Generate argument values to determine their types
-            arg_vals = []
-            for arg in self.arguments:
-                arg_vals.append(arg.codegen(builder, module))
+            # Multiple candidates - generate argument values and use FunctionTypeHandler
+            arg_vals = [arg.codegen(builder, module) for arg in self.arguments]
             
-            # Use FunctionTypeHelper to resolve by types
-            return FunctionTypeHelper.resolve_overload_by_types(module, base_name, arg_vals)
+            # Delegate to FunctionTypeHandler for type-based resolution
+            return FunctionTypeHandler.resolve_overload_by_types(module, base_name, arg_vals)
 
     def _generate_call(self, builder: ir.IRBuilder, module: ir.Module, func: ir.Function) -> ir.Value:
         """
         Generate the actual function call with argument processing.
-        
-        This is the second half of the original codegen() method.
+        Uses FunctionTypeHandler for argument type conversion.
         """
         # Check if this is a method call (has dot in name)
         is_method_call = '.' in self.name
@@ -2026,42 +2063,75 @@ class FunctionCall(Expression):
         for i, arg in enumerate(self.arguments):
             param_index = i + parameter_offset
             
-            if (isinstance(arg, Literal) and arg.type == DataType.CHAR and 
-                param_index < len(func.args) and isinstance(func.args[param_index].type, ir.PointerType) and 
-                isinstance(func.args[param_index].type.pointee, ir.IntType) and func.args[param_index].type.pointee.width == 8):
-                # This is a string literal being passed to a function expecting i8*
-                # Create a global string constant and return pointer to it
-                string_val = arg.value
-                string_bytes = string_val.encode('ascii')
-                str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
-                str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
-                
-                # Create global variable for the string with globally unique name
-                # Use class-level counter to ensure uniqueness across all function calls
-                str_name = f".str.{FunctionCall._string_counter}"
-                FunctionCall._string_counter += 1
-                
-                gv = ir.GlobalVariable(module, str_val.type, name=str_name)
-                gv.linkage = 'internal'
-                gv.global_constant = True
-                gv.initializer = str_val
-                
-                # Get pointer to the first character of the string
-                zero = ir.Constant(ir.IntType(32), 0)
-                str_ptr = builder.gep(gv, [zero, zero], name=f"arg{i}_str_ptr")
-                arg_val = str_ptr
+            # Handle string literals specially
+            if self._is_string_literal_for_pointer(arg, func, param_index):
+                arg_val = self._create_string_constant(builder, module, arg, i)
             else:
                 arg_val = arg.codegen(builder, module)
             
-            # Type checking and conversion logic using FunctionTypeHelper
+            # Use FunctionTypeHandler for type checking and conversion
             if param_index < len(func.args):
                 expected_type = func.args[param_index].type
-                arg_val = FunctionTypeHelper.convert_argument_to_parameter_type(
+                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(
                     builder, module, arg_val, expected_type, i)
             
             arg_vals.append(arg_val)
         
         return builder.call(func, arg_vals)
+
+    def _is_string_literal_for_pointer(self, arg: Expression, func: ir.Function, 
+                                      param_index: int) -> bool:
+        """
+        Check if argument is a string literal being passed to an i8* parameter.
+        
+        Args:
+            arg: Argument expression
+            func: Target function
+            param_index: Parameter index
+            
+        Returns:
+            True if this is a string literal that needs special handling
+        """
+        return (isinstance(arg, Literal) and 
+                arg.type == DataType.CHAR and 
+                param_index < len(func.args) and 
+                isinstance(func.args[param_index].type, ir.PointerType) and 
+                isinstance(func.args[param_index].type.pointee, ir.IntType) and 
+                func.args[param_index].type.pointee.width == 8)
+    
+    def _create_string_constant(self, builder: ir.IRBuilder, module: ir.Module, 
+                               arg: Literal, arg_index: int) -> ir.Value:
+        """
+        Create a global string constant for a string literal argument.
+        
+        Args:
+            builder: LLVM IR builder
+            module: LLVM module
+            arg: String literal argument
+            arg_index: Argument index (for naming)
+            
+        Returns:
+            Pointer to the string constant
+        """
+        string_val = arg.value
+        string_bytes = string_val.encode('ascii')
+        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+        str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+        
+        # Create global variable for the string with globally unique name
+        # Use class-level counter to ensure uniqueness across all function calls
+        str_name = f".str.{FunctionCall._string_counter}"
+        FunctionCall._string_counter += 1
+        
+        gv = ir.GlobalVariable(module, str_val.type, name=str_name)
+        gv.linkage = 'internal'
+        gv.global_constant = True
+        gv.initializer = str_val
+        
+        # Get pointer to the first character of the string
+        zero = ir.Constant(ir.IntType(32), 0)
+        return builder.gep(gv, [zero, zero], name=f"arg{arg_index}_str_ptr")
+
 
 @dataclass
 class MemberAccess(Expression):
@@ -2678,7 +2748,7 @@ class AddressOf(Expression):
 
 @dataclass
 class AlignOf(Expression):
-    target: Union[TypeSpec, Expression]
+    target: Union[TypeSystem, Expression]
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """
@@ -2687,8 +2757,8 @@ class AlignOf(Expression):
         - Data types: alignment equals width in bytes (data{bits})
         - Other types: Natural alignment from target platform
         """
-        # Get alignment for TypeSpec
-        if isinstance(self.target, TypeSpec):
+        # Get alignment for TypeSystem
+        if isinstance(self.target, TypeSystem):
             # Use explicitly specified alignment if present
             if self.target.alignment is not None:
                 return ir.Constant(ir.IntType(32), self.target.alignment)
@@ -2765,14 +2835,14 @@ class TypeOf(Expression):
 
 @dataclass
 class SizeOf(Expression):
-    target: Union[TypeSpec, Expression]
+    target: Union[TypeSystem, Expression]
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate LLVM IR that returns size in BITS"""
         #print(f"DEBUG SizeOf: target type = {type(self.target).__name__}, target = {self.target}")
-        # Handle TypeSpec case (like sizeof(data{8}[]))
-        if isinstance(self.target, TypeSpec):
-            #print(f"DEBUG SizeOf: Taking TypeSpec path")
+        # Handle TypeSystem case (like sizeof(data{8}[]))
+        if isinstance(self.target, TypeSystem):
+            #print(f"DEBUG SizeOf: Taking TypeSystem path")
             llvm_type = self.target.get_llvm_type_with_array(module)
             
             # Calculate size in BITS
@@ -2798,7 +2868,7 @@ class SizeOf(Expression):
                 ptr = builder.scope[self.target.name]
                 if isinstance(ptr.type, ir.PointerType):
                     llvm_type = ptr.type.pointee  # Get the type being pointed to
-                    # Calculate size in BITS using the same logic as TypeSpec
+                    # Calculate size in BITS using the same logic as TypeSystem
                     if isinstance(llvm_type, ir.IntType):
                         return ir.Constant(ir.IntType(llvm_type.width), llvm_type.width)
                     elif isinstance(llvm_type, ir.ArrayType):
@@ -2845,7 +2915,7 @@ class SizeOf(Expression):
                 gvar = module.globals[self.target.name]
                 if isinstance(gvar.type, ir.PointerType):
                     llvm_type = gvar.type.pointee  # Get the type being pointed to
-                    # Calculate size in BITS using the same logic as TypeSpec
+                    # Calculate size in BITS using the same logic as TypeSystem
                     if isinstance(llvm_type, ir.IntType):
                         return ir.Constant(ir.IntType(32), llvm_type.width)
                     elif isinstance(llvm_type, ir.ArrayType):
@@ -2902,7 +2972,7 @@ class NoInit(Expression):
 @dataclass
 class VariableDeclaration(ASTNode):
     name: str
-    type_spec: TypeSpec
+    type_spec: TypeSystem
     initial_value: Optional[Expression] = None
     is_global: bool = False
 
@@ -2925,12 +2995,12 @@ class VariableDeclaration(ASTNode):
         # Handle local variables
         return self._codegen_local(builder, module, llvm_type, resolved_type_spec)
     
-    def _resolve_type_spec(self, module: ir.Module) -> TypeSpec:
+    def _resolve_type_spec(self, module: ir.Module) -> TypeSystem:
         """Resolve type spec with automatic array size inference for string literals."""
         return VariableTypeHandler.resolve_type_spec(self.type_spec, self.initial_value, module)
     
     def _codegen_global(self, module: ir.Module, llvm_type: ir.Type, 
-                       resolved_type_spec: TypeSpec) -> ir.Value:
+                       resolved_type_spec: TypeSystem) -> ir.Value:
         """Generate code for global variable."""
         # Check if global already exists
         if self.name in module.globals:
@@ -2973,7 +3043,7 @@ class VariableDeclaration(ASTNode):
         return VariableTypeHandler.create_global_initializer(self.initial_value, llvm_type, module)
     
     def _codegen_local(self, builder: ir.IRBuilder, module: ir.Module, 
-                      llvm_type: ir.Type, resolved_type_spec: TypeSpec) -> ir.Value:
+                      llvm_type: ir.Type, resolved_type_spec: TypeSystem) -> ir.Value:
         """Generate code for local variable."""
         alloca = builder.alloca(llvm_type, name=self.name)
         
@@ -3094,7 +3164,7 @@ class VariableDeclaration(ASTNode):
 class TypeDeclaration(Expression):
     """AST node for type declarations using AS keyword"""
     name: str
-    base_type: TypeSpec
+    base_type: TypeSystem
     initial_value: Optional[Expression] = None
     
     def __repr__(self):
@@ -3102,7 +3172,7 @@ class TypeDeclaration(Expression):
         return f"TypeDeclaration({self.base_type} as {self.name}{init_str})"
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        # Use TypeSpec's proper resolution instead of guessing
+        # Use TypeSystem's proper resolution instead of guessing
         llvm_type = self.base_type.get_llvm_type_with_array(module)
         
         # Register the type alias
@@ -4504,7 +4574,7 @@ class SwitchStatement(Statement):
 @dataclass
 class TryBlock(Statement):
     try_body: Block
-    catch_blocks: List[Tuple[Optional[TypeSpec], str, Block]]
+    catch_blocks: List[Tuple[Optional[TypeSystem], str, Block]]
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Flag-based try/catch using stack-allocated exception state"""
@@ -4743,7 +4813,7 @@ class AssertStatement(Statement):
 @dataclass
 class Parameter:
     name: Optional[str] # Can be none for unnamed prototype parameters
-    type_spec: TypeSpec
+    type_spec: TypeSystem
     
     def __post_init__(self):
         # Store the original type name for debugging/metadata
@@ -4929,7 +4999,7 @@ class InlineAsm(Expression):
 class FunctionDef(ASTNode):
     name: str
     parameters: List[Parameter]
-    return_type: TypeSpec
+    return_type: TypeSystem
     body: Block
     is_const: bool = False
     is_volatile: bool = False
@@ -4937,21 +5007,21 @@ class FunctionDef(ASTNode):
     no_mangle: bool = False
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Function:
-        # Convert return type and parameter types using FunctionTypeHelper
-        ret_type = FunctionTypeHelper.convert_type_spec_to_llvm(self.return_type, module)
+        # Convert return type and parameter types using FunctionTypeHandler
+        ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(self.return_type, module)
         
         # Convert parameter types and build metadata
         param_types = []
-        param_metadata = FunctionTypeHelper.build_param_metadata(self.parameters, module)
+        param_metadata = FunctionTypeHandler.build_param_metadata(self.parameters, module)
         for param in self.parameters:
-            param_type = FunctionTypeHelper.convert_type_spec_to_llvm(param.type_spec, module)
+            param_type = FunctionTypeHandler.convert_type_spec_to_llvm(param.type_spec, module)
             param_types.append(param_type)
         
         # Create function type
         func_type = ir.FunctionType(ret_type, param_types)
         
-        # Generate mangled name using FunctionTypeHelper
-        mangled_name = FunctionTypeHelper.mangle_function_name(
+        # Generate mangled name using FunctionTypeHandler
+        mangled_name = FunctionTypeHandler.mangle_function_name(
             self.name, self.parameters, self.return_type, self.no_mangle
         )
         
@@ -4974,10 +5044,15 @@ class FunctionDef(ASTNode):
         else:
             # Create new function with mangled name
             func = ir.Function(module, func_type, mangled_name)
+            # Extract base name for overload registration
+            # If the name is namespace-qualified (e.g., "standard::types::bswap16"),
+            # register it under the short name ("bswap16") so it can be found
+            # by calls within the same namespace
+            base_name = self.name.split('::')[-1] if '::' in self.name else self.name
             
-            # Register this as an overload using FunctionTypeHelper
-            FunctionTypeHelper.register_function_overload(
-                module, self.name, mangled_name, self.parameters, self.return_type, func
+            # Register this as an overload using FunctionTypeHandler
+            FunctionTypeHandler.register_function_overload(
+                module, base_name, mangled_name, self.parameters, self.return_type, func
             )
         
         if self.is_prototype:
@@ -5042,8 +5117,8 @@ class FunctionPointer(Expression):
     - Function pointer calls: result = fp(arg1, arg2)
     """
     name: str
-    return_type: TypeSpec
-    parameter_types: List[TypeSpec]
+    return_type: TypeSystem
+    parameter_types: List[TypeSystem]
     
     def get_function_type(self, module: ir.Module) -> ir.FunctionType:
         """Get LLVM function type for this function pointer"""
@@ -5077,8 +5152,8 @@ class FunctionPointerType:
     Used for parsing function pointer type syntax like: void{}* (int, int)
     This is the TYPE, not a declaration or expression.
     """
-    return_type: TypeSpec
-    parameter_types: List[TypeSpec]
+    return_type: TypeSystem
+    parameter_types: List[TypeSystem]
     
     def get_llvm_type(self, module: ir.Module) -> ir.FunctionType:
         """Convert to LLVM function type"""
@@ -5194,7 +5269,7 @@ class FunctionPointerAssignment(Statement):
 @dataclass
 class DestructuringAssignment(Statement):
     """Destructuring assignment"""
-    variables: List[Union[str, Tuple[str, TypeSpec]]]  # Can be simple names or (name, type) pairs
+    variables: List[Union[str, Tuple[str, TypeSystem]]]  # Can be simple names or (name, type) pairs
     source: Expression
     source_type: Optional[Identifier]  # For the "from" clause
     is_explicit: bool  # True if using "as" syntax
@@ -5228,7 +5303,7 @@ class EnumDefStatement(Statement):
 @dataclass
 class UnionMember(ASTNode):
     name: str
-    type_spec: TypeSpec
+    type_spec: TypeSystem
     initial_value: Optional[Expression] = None
 
 @dataclass
@@ -5380,7 +5455,7 @@ class StructMember(ASTNode):
         initial_value: Optional initialization expression (not stored in vtable)
     """
     name: str
-    type_spec: TypeSpec
+    type_spec: TypeSystem
     offset: Optional[int] = None  # Bit offset, calculated during vtable gen
     is_private: bool = False
     initial_value: Optional[Expression] = None
@@ -5815,7 +5890,7 @@ class StructDef(ASTNode):
                     bit_width = member_type.bit_width
                     alignment = member_type.alignment if member_type.alignment is not None else bit_width
                 elif member_type.custom_typename:
-                    # Use TypeSpec.get_llvm_type() which handles all type lookups properly
+                    # Use TypeSystem.get_llvm_type() which handles all type lookups properly
                     llvm_type = llvm_field_type
                     
                     # Calculate bit width and alignment from the LLVM type
@@ -6308,7 +6383,7 @@ def get_struct_vtable(module: ir.Module, struct_name: str) -> Optional[StructVTa
 class ObjectMethod(ASTNode):
     name: str
     parameters: List[Parameter]
-    return_type: TypeSpec
+    return_type: TypeSystem
     body: Block
     is_private: bool = False
     is_const: bool = False
@@ -6341,7 +6416,7 @@ class ObjectDef(ASTNode):
         member_names = []
         
         for member in self.members:
-            member_type = FunctionTypeHelper.convert_type_spec_to_llvm(member.type_spec, module)
+            member_type = FunctionTypeHandler.convert_type_spec_to_llvm(member.type_spec, module)
             member_types.append(member_type)
             member_names.append(member.name)
         
@@ -6393,11 +6468,11 @@ class ObjectDef(ASTNode):
             if method.return_type.base_type == DataType.THIS:
                 ret_type = ir.PointerType(struct_type)
             else:
-                ret_type = FunctionTypeHelper.convert_type_spec_to_llvm(method.return_type, module)
+                ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(method.return_type, module)
 
             # Param types: always 'this' first
             param_types = [ir.PointerType(struct_type)]
-            param_types.extend([FunctionTypeHelper.convert_type_spec_to_llvm(p.type_spec, module) for p in method.parameters])
+            param_types.extend([FunctionTypeHandler.convert_type_spec_to_llvm(p.type_spec, module) for p in method.parameters])
 
             func_type = ir.FunctionType(ret_type, param_types)
             func_name = f"{self.name}.{method.name}"
@@ -6444,7 +6519,7 @@ class ObjectDef(ASTNode):
 
             # Register 'this'
             method_builder.scope["this"] = func.args[0]
-            this_type_spec = TypeSpec(base_type=DataType.DATA, custom_typename=self.name, is_pointer=True)
+            this_type_spec = TypeSystem(base_type=DataType.DATA, custom_typename=self.name, is_pointer=True)
             method_builder.scope_type_info['this'] = this_type_spec
 
             # Store other params
@@ -6500,9 +6575,9 @@ class ExternBlock(Statement):
             if not func_def.is_prototype:
                 raise ValueError(f"Extern functions must be prototypes (no body): {func_def.name}")
             
-            # Generate the function declaration with external linkage using FunctionTypeHelper
-            ret_type = FunctionTypeHelper.convert_type_spec_to_llvm(func_def.return_type, module)
-            param_types = [FunctionTypeHelper.convert_type_spec_to_llvm(param.type_spec, module) 
+            # Generate the function declaration with external linkage using FunctionTypeHandler
+            ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(func_def.return_type, module)
+            param_types = [FunctionTypeHandler.convert_type_spec_to_llvm(param.type_spec, module) 
                           for param in func_def.parameters]
             func_type = ir.FunctionType(ret_type, param_types)
             
@@ -6525,10 +6600,10 @@ class ExternBlock(Statement):
                 final_name = base_name
             else:
                 # Allow overload mangling based on parameter types, but start from base_name
-                # Use FunctionTypeHelper for mangling
+                # Use FunctionTypeHandler for mangling
                 original_name = func_def.name
                 func_def.name = base_name
-                final_name = FunctionTypeHelper.mangle_function_name(
+                final_name = FunctionTypeHandler.mangle_function_name(
                     func_def.name, func_def.parameters, func_def.return_type, func_def.no_mangle
                 )
                 func_def.name = original_name
@@ -6567,23 +6642,21 @@ class NamespaceDef(ASTNode):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
         """Generate LLVM IR for a namespace definition."""
-        # Register this namespace for symbol resolution
-        if not hasattr(module, '_namespaces'):
-            module._namespaces = set()
-        module._namespaces.add(self.name)
-        
+        # Register this namespace using NamespaceTypeHandler
+        NamespaceTypeHandler.register_namespace(module, self.name)
+
         # Register nested namespaces
         for nested_ns in self.nested_namespaces:
             full_nested_name = f"{self.name}::{nested_ns.name}"
-            module._namespaces.add(full_nested_name)
+            NamespaceTypeHandler.register_namespace(module, full_nested_name)
             self._register_nested_namespaces(nested_ns, full_nested_name, module)
         
-        # Setup namespace context for type resolution
-        if not hasattr(module, '_using_namespaces'):
-            module._using_namespaces = []
-        
-        if self.name not in module._using_namespaces:
-            module._using_namespaces.append(self.name)
+        # Add to using namespaces using NamespaceTypeHandler
+        NamespaceTypeHandler.add_using_namespace(module, self.name)
+
+        # Set current namespace context for this namespace
+        original_namespace = getattr(module, '_current_namespace', '')
+        module._current_namespace = self.name
         
         # Create builder context if we're at module level
         if builder is None or not hasattr(builder, 'block') or builder.block is None:
@@ -6594,16 +6667,20 @@ class NamespaceDef(ASTNode):
         # Process nested namespaces FIRST (they may contain types we need)
         for nested_ns in self.nested_namespaces:
             original_name = nested_ns.name
+            # Nested namespace gets parent path prepended
+            full_nested_name = f"{self.name}::{nested_ns.name}"
             nested_ns.name = f"{self.name}__{nested_ns.name}"
+            # Set current namespace context
+            original_namespace = getattr(module, '_current_namespace', '')
+            module._current_namespace = full_nested_name
             try:
                 nested_ns.codegen(work_builder, module)
             finally:
                 nested_ns.name = original_name
+                module._current_namespace = original_namespace
 
         # Process variables (including type declarations)
-        #print(f"DEBUG NamespaceDef: Processing {len(self.variables)} variables in namespace '{self.name}'")
         for var in self.variables:
-            #print(f"DEBUG NamespaceDef: Processing variable: {getattr(var, 'name', '<no name>')}, type: {type(var).__name__}")
             try:
                 if isinstance(var, TypeDeclaration):
                     original_name = var.name
@@ -6628,12 +6705,10 @@ class NamespaceDef(ASTNode):
                 traceback.print_exc()
                 raise
 
-        # Process functions
+        # Process functions using NamespaceTypeHandler
         for func in self.functions:
-            original_name = func.name
-            func.name = f"{self.name}__{func.name}"
-            func.codegen(work_builder, module)
-            func.name = original_name
+            NamespaceTypeHandler.process_namespace_function(
+                self.name, func, work_builder, module)
 
         # Process structs
         for struct in self.structs:
@@ -6673,14 +6748,21 @@ class NamespaceDef(ASTNode):
                 # Get a builder positioned at the end of the last block
                 final_builder = ir.IRBuilder(init_func.blocks[-1])
                 final_builder.ret_void()
-                
+        
+        # Restore original namespace context
+        module._current_namespace = original_namespace
+
         return None
 
     def _register_nested_namespaces(self, namespace, parent_path, module):
         """Recursively register all nested namespaces"""
         for nested_ns in namespace.nested_namespaces:
             full_nested_name = f"{parent_path}::{nested_ns.name}"
-            module._namespaces.add(full_nested_name)
+            # _namespaces is a list, use append not add
+            if not hasattr(module, '_namespaces'):
+                module._namespaces = []
+            if full_nested_name not in module._namespaces:
+                module._namespaces.append(full_nested_name)
             self._register_nested_namespaces(nested_ns, full_nested_name, module)
 
     def _create_init_builder(self, module: ir.Module) -> ir.IRBuilder:
@@ -6723,7 +6805,7 @@ class UsingStatement(Statement):
 @dataclass
 class CustomTypeStatement(Statement):
     name: str
-    type_spec: TypeSpec
+    type_spec: TypeSystem
 
 # Function definition statement
 @dataclass
@@ -6804,7 +6886,7 @@ if __name__ == "__main__":
     main_func = FunctionDef(
         name="main",
         parameters=[],
-        return_type=TypeSpec(base_type=DataType.SINT),
+        return_type=TypeSystem(base_type=DataType.SINT),
         body=Block([
             ReturnStatement(Literal(0, DataType.SINT))
         ])

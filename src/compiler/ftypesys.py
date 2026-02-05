@@ -340,9 +340,257 @@ class TypeChecker:
         return a
 
 
+@dataclass  
+class FunctionResolver:
+    """Resolves function names within namespace contexts"""
+    
+    @staticmethod
+    def resolve_function_name(func_name: str, module: 'ir.Module', current_namespace: str = "") -> Optional[str]:
+        """
+        Resolve a function name to its fully qualified name.
+        Searches in order:
+        1. Exact match (for already-mangled or global names)
+        2. Current namespace
+        3. Parent namespaces of current namespace
+        4. Using namespaces
+        5. All registered namespaces
+        
+        Args:
+            func_name: The function name to resolve
+            module: LLVM module
+            current_namespace: Current namespace context (e.g., "standard::types")
+            
+        Returns:
+            Fully qualified function name if found, None otherwise
+        """
+        # Try exact match first (handles already-mangled names or global functions)
+        if func_name in module.globals:
+            candidate = module.globals[func_name]
+            if isinstance(candidate, ir.Function):
+                return func_name
+        
+        # Try current namespace
+        if current_namespace:
+            mangled = f"{current_namespace.replace('::', '__')}__{func_name}"
+            if mangled in module.globals:
+                candidate = module.globals[mangled]
+                if isinstance(candidate, ir.Function):
+                    return mangled
+        
+        # Try parent namespaces of current namespace
+        if current_namespace:
+            parts = current_namespace.split('::')
+            while parts:
+                parts.pop()
+                parent_ns = '::'.join(parts)
+                mangled = f"{parent_ns.replace('::', '__')}__{func_name}" if parent_ns else func_name
+                if mangled in module.globals:
+                    candidate = module.globals[mangled]
+                    if isinstance(candidate, ir.Function):
+                        return mangled
+        
+        # Try using namespaces
+        if hasattr(module, '_using_namespaces'):
+            for namespace in module._using_namespaces:
+                mangled = f"{namespace.replace('::', '__')}__{func_name}"
+                if mangled in module.globals:
+                    candidate = module.globals[mangled]
+                    if isinstance(candidate, ir.Function):
+                        return mangled
+        
+        # Try all registered namespaces as a last resort
+        if hasattr(module, '_namespaces'):
+            for namespace in module._namespaces:
+                mangled = f"{namespace.replace('::', '__')}__{func_name}"
+                if mangled in module.globals:
+                    candidate = module.globals[mangled]
+                    if isinstance(candidate, ir.Function):
+                        return mangled
+        
+        return None
+
+
 @dataclass
-class TypeSpec:
-    """Legacy TypeSpec for backward compatibility - will be phased out"""
+class NamespaceTypeHandler:
+    """Handles type resolution and registration within namespace contexts."""
+    
+    def __init__(self, namespace_path: str = ""):
+        self.namespace_path = namespace_path
+        self.type_registry = {}  # Maps unmangled names to mangled names
+        
+    def register_type(self, unmangled_name: str, mangled_name: str):
+        """Register a type alias with both its unmangled and mangled names."""
+        self.type_registry[unmangled_name] = mangled_name
+    
+    def resolve_type_name(self, typename: str, current_namespace: str = "") -> str:
+        """
+        Resolve a type name to its fully qualified mangled name.
+        Searches in order:
+        1. Current namespace
+        2. Parent namespaces
+        3. Global namespace
+        """
+        # Try current namespace first
+        if current_namespace:
+            mangled = f"{current_namespace}__{typename}"
+            if mangled in self.type_registry.values():
+                return mangled
+        
+        # Try parent namespaces
+        parts = current_namespace.split("::") if current_namespace else []
+        while parts:
+            parts.pop()
+            parent_ns = "__".join(parts)
+            mangled = f"{parent_ns}__{typename}" if parent_ns else typename
+            if mangled in self.type_registry.values():
+                return mangled
+        
+        # Try global/unmangled name
+        if typename in self.type_registry.values():
+            return typename
+        
+        # Return as-is if not found (will be caught later)
+        return typename
+    
+    @staticmethod
+    def register_namespace(module: 'ir.Module', namespace: str):
+        """Register a namespace with the module."""
+        if not hasattr(module, '_namespaces'):
+            module._namespaces = []
+        if namespace not in module._namespaces:
+            module._namespaces.append(namespace)
+    
+    @staticmethod
+    def add_using_namespace(module: 'ir.Module', namespace: str):
+        """Add a namespace to the using namespaces list."""
+        if not hasattr(module, '_using_namespaces'):
+            module._using_namespaces = []
+        if namespace not in module._using_namespaces:
+            module._using_namespaces.append(namespace)
+    
+    @staticmethod
+    def process_namespace_function(namespace: str, func_def: 'FunctionDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
+        """Process a function within a namespace context."""
+        from fast import FunctionTypeHandler  # Import here to avoid circular dependency
+        
+        original_name = func_def.name
+        base_name = f"{namespace}::{func_def.name}"
+
+        # Temporarily set the function name
+        func_def.name = base_name
+        
+        # Set current namespace context on module
+        original_namespace = getattr(module, '_current_namespace', '')
+        module._current_namespace = namespace
+        
+        # Generate the function
+        try:
+            func_def.codegen(builder, module)
+        finally:
+            # Restore original context
+            func_def.name = original_name
+            module._current_namespace = original_namespace
+    
+    @staticmethod
+    def resolve_custom_type(module: 'ir.Module', typename: str, current_namespace: str = "") -> Optional['ir.Type']:
+        """
+        Resolve a custom type name to its LLVM type.
+        Searches namespaces in the following order:
+        1. Exact match (for fully qualified names)
+        2. Current namespace 
+        3. Parent namespaces of current namespace
+        4. Using namespaces
+        5. All registered namespaces
+        """
+        # Try exact match first (handles already-mangled names)
+        if hasattr(module, '_type_aliases') and typename in module._type_aliases:
+            return module._type_aliases[typename]
+        
+        if hasattr(module, '_struct_types') and typename in module._struct_types:
+            return module._struct_types[typename]
+        
+        if hasattr(module, '_union_types') and typename in module._union_types:
+            return module._union_types[typename]
+        
+        if hasattr(module, '_enum_types') and typename in module._enum_types:
+            return module._enum_types[typename]
+        
+        # Try current namespace
+        if current_namespace:
+            mangled = f"{current_namespace.replace('::', '__')}__{typename}"
+            
+            if hasattr(module, '_type_aliases') and mangled in module._type_aliases:
+                return module._type_aliases[mangled]
+            
+            if hasattr(module, '_struct_types') and mangled in module._struct_types:
+                return module._struct_types[mangled]
+            
+            if hasattr(module, '_union_types') and mangled in module._union_types:
+                return module._union_types[mangled]
+            
+            if hasattr(module, '_enum_types') and mangled in module._enum_types:
+                return module._enum_types[mangled]
+        
+        # Try parent namespaces of current namespace
+        if current_namespace:
+            parts = current_namespace.split('::')
+            while parts:
+                parts.pop()
+                parent_ns = '::'.join(parts)
+                mangled = f"{parent_ns.replace('::', '__')}__{typename}" if parent_ns else typename
+                
+                if hasattr(module, '_type_aliases') and mangled in module._type_aliases:
+                    return module._type_aliases[mangled]
+                
+                if hasattr(module, '_struct_types') and mangled in module._struct_types:
+                    return module._struct_types[mangled]
+                
+                if hasattr(module, '_union_types') and mangled in module._union_types:
+                    return module._union_types[mangled]
+                
+                if hasattr(module, '_enum_types') and mangled in module._enum_types:
+                    return module._enum_types[mangled]
+        
+        # Try using namespaces
+        if hasattr(module, '_using_namespaces'):
+            for namespace in module._using_namespaces:
+                mangled = f"{namespace.replace('::', '__')}__{typename}"
+                
+                if hasattr(module, '_type_aliases') and mangled in module._type_aliases:
+                    return module._type_aliases[mangled]
+                
+                if hasattr(module, '_struct_types') and mangled in module._struct_types:
+                    return module._struct_types[mangled]
+                
+                if hasattr(module, '_union_types') and mangled in module._union_types:
+                    return module._union_types[mangled]
+                
+                if hasattr(module, '_enum_types') and mangled in module._enum_types:
+                    return module._enum_types[mangled]
+        
+        # Try all registered namespaces as a last resort
+        if hasattr(module, '_namespaces'):
+            for namespace in module._namespaces:
+                mangled = f"{namespace.replace('::', '__')}__{typename}"
+                
+                if hasattr(module, '_type_aliases') and mangled in module._type_aliases:
+                    return module._type_aliases[mangled]
+                
+                if hasattr(module, '_struct_types') and mangled in module._struct_types:
+                    return module._struct_types[mangled]
+                
+                if hasattr(module, '_union_types') and mangled in module._union_types:
+                    return module._union_types[mangled]
+                
+                if hasattr(module, '_enum_types') and mangled in module._enum_types:
+                    return module._enum_types[mangled]
+        
+        return None
+
+
+@dataclass
+class TypeSystem:
+    """Legacy TypeSystem for backward compatibility - will be phased out"""
     base_type: Union[DataType, str]
     is_signed: bool = True
     is_const: bool = False
@@ -359,7 +607,7 @@ class TypeSpec:
     storage_class: Optional[StorageClass] = None
     
     def to_new_type(self) -> BaseType:
-        """Convert TypeSpec to new Type system"""
+        """Convert TypeSystem to new Type system"""
         base = None
         
         if self.custom_typename:
@@ -384,71 +632,22 @@ class TypeSpec:
     
     def get_llvm_type(self, module: ir.Module) -> ir.Type:
         if self.custom_typename:
-            if hasattr(module, '_type_aliases') and self.custom_typename in module._type_aliases:
-                base_type = module._type_aliases[self.custom_typename]
-                if isinstance(base_type, ir.ArrayType) and not self.is_array:
-                    return ir.PointerType(base_type.element)
-                return base_type
-
-            if hasattr(module, '_enum_types') and self.custom_typename in module._enum_types:
-                return ir.IntType(32)
+            # Get the current namespace context
+            current_namespace = getattr(module, '_current_namespace', '')
             
-            if hasattr(module, '_struct_types') and self.custom_typename in module._struct_types:
-                return module._struct_types[self.custom_typename]
+            # Use NamespaceTypeHandler to resolve the custom type
+            resolved_type = NamespaceTypeHandler.resolve_custom_type(
+                module, self.custom_typename, current_namespace
+            )
             
-            if hasattr(module, '_union_types') and self.custom_typename in module._union_types:
-                return module._union_types[self.custom_typename]
-            
-            if hasattr(module, '_using_namespaces'):
-                for namespace in module._using_namespaces:
-                    mangled_name = namespace.replace('::', '__') + '__' + self.custom_typename
-                    
-                    if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
-                        base_type = module._type_aliases[mangled_name]
-                        if isinstance(base_type, ir.ArrayType) and not self.is_array:
-                            return ir.PointerType(base_type.element)
-                        return base_type
-                    
-                    if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
-                        return module._struct_types[mangled_name]
-                    
-                    if hasattr(module, '_union_types') and mangled_name in module._union_types:
-                        return module._union_types[mangled_name]
-            
-            if hasattr(module, '_namespaces'):
-                for registered_namespace in module._namespaces:
-                    mangled_name = registered_namespace.replace('::', '__') + '__' + self.custom_typename
-                    
-                    if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
-                        base_type = module._type_aliases[mangled_name]
-                        if isinstance(base_type, ir.ArrayType) and not self.is_array:
-                            return ir.PointerType(base_type.element)
-                        return base_type
-                    
-                    if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
-                        return module._struct_types[mangled_name]
-                    
-                    if hasattr(module, '_union_types') and mangled_name in module._union_types:
-                        return module._union_types[mangled_name]
-            
-            if hasattr(module, '_using_namespaces'):
-                for namespace in module._using_namespaces:
-                    namespace_parts = namespace.split('::')
-                    for i in range(len(namespace_parts), 0, -1):
-                        parent_namespace = '::'.join(namespace_parts[:i])
-                        mangled_name = parent_namespace.replace('::', '__') + '__' + self.custom_typename
-                        
-                        if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
-                            base_type = module._type_aliases[mangled_name]
-                            if isinstance(base_type, ir.ArrayType) and not self.is_array:
-                                return ir.PointerType(base_type.element)
-                            return base_type
-                        
-                        if hasattr(module, '_struct_types') and mangled_name in module._struct_types:
-                            return module._struct_types[mangled_name]
-                        
-                        if hasattr(module, '_union_types') and mangled_name in module._union_types:
-                            return module._union_types[mangled_name]
+            if resolved_type is not None:
+                # Handle array types that shouldn't be returned as-is
+                if isinstance(resolved_type, ir.ArrayType) and not self.is_array:
+                    return ir.PointerType(resolved_type.element)
+                # Handle enum types
+                if isinstance(resolved_type, int):  # Enum types are stored as int
+                    return ir.IntType(32)
+                return resolved_type
             
             raise NameError(f"Unknown type: {self.custom_typename}")
         
@@ -519,8 +718,8 @@ class TypeSpec:
 
 
 class FunctionPointerType:
-    return_type: TypeSpec
-    parameter_types: List[TypeSpec]
+    return_type: TypeSystem
+    parameter_types: List[TypeSystem]
     
     def get_llvm_type(self, module: ir.Module) -> ir.FunctionType:
         ret_type = self.return_type.get_llvm_type(module)
@@ -535,7 +734,7 @@ class VariableTypeHandler:
     """Handles all type-related operations for variable declarations"""
     
     @staticmethod
-    def resolve_type_spec(type_spec: TypeSpec, initial_value, module: ir.Module) -> TypeSpec:
+    def resolve_type_spec(type_spec: TypeSystem, initial_value, module: ir.Module) -> TypeSystem:
         """Resolve type spec with automatic array size inference for string literals."""
         # Import here to avoid circular dependency
         from fast import StringLiteral
@@ -545,7 +744,7 @@ class VariableTypeHandler:
         
         # Direct array type check
         if type_spec.is_array and type_spec.array_size is None:
-            return TypeSpec(
+            return TypeSystem(
                 base_type=type_spec.base_type,
                 is_signed=type_spec.is_signed,
                 is_const=type_spec.is_const,
@@ -565,7 +764,7 @@ class VariableTypeHandler:
                 if (isinstance(resolved_llvm_type, ir.PointerType) and 
                     isinstance(resolved_llvm_type.pointee, ir.IntType) and 
                     resolved_llvm_type.pointee.width == 8):
-                    return TypeSpec(
+                    return TypeSystem(
                         base_type=DataType.DATA,
                         is_signed=False,
                         is_const=type_spec.is_const,
@@ -1945,7 +2144,7 @@ class IdentifierTypeHandler:
     @staticmethod
     def get_type_spec(name: str, builder: ir.IRBuilder, module: ir.Module):
         """
-        Get the TypeSpec for an identifier from scope or global type info.
+        Get the TypeSystem for an identifier from scope or global type info.
         
         Args:
             name: The identifier name
@@ -1953,7 +2152,7 @@ class IdentifierTypeHandler:
             module: LLVM module (for global type info)
             
         Returns:
-            TypeSpec if found, None otherwise
+            TypeSystem if found, None otherwise
         """
         # Check local scope first
         if builder.scope is not None:
@@ -1991,11 +2190,11 @@ class IdentifierTypeHandler:
     @staticmethod
     def attach_type_metadata(llvm_value: ir.Value, type_spec) -> ir.Value:
         """
-        Attach TypeSpec metadata to an LLVM value if not already present.
+        Attach TypeSystem metadata to an LLVM value if not already present.
         
         Args:
             llvm_value: The LLVM value to attach metadata to
-            type_spec: The TypeSpec to attach (or None)
+            type_spec: The TypeSystem to attach (or None)
             
         Returns:
             The same llvm_value with metadata attached
@@ -2212,8 +2411,8 @@ def attach_type_metadata(llvm_value: ir.Value, type_spec: Optional[Any] = None,
     
     Args:
         llvm_value: The LLVM value to annotate
-        type_spec: Optional TypeSpec object
-        base_type: Optional DataType for creating default TypeSpec
+        type_spec: Optional TypeSystem object
+        base_type: Optional DataType for creating default TypeSystem
         
     Returns:
         The same llvm_value with metadata attached
@@ -2221,9 +2420,9 @@ def attach_type_metadata(llvm_value: ir.Value, type_spec: Optional[Any] = None,
     bit_width = llvm_value.type.width if hasattr(llvm_value.type, 'width') else None
     
     if type_spec is None and base_type is not None:
-        # Create a minimal TypeSpec-like structure
+        # Create a minimal TypeSystem-like structure
         type_spec = type(
-            'TypeSpec',
+            'TypeSystem',
             (),
             {
                 'base_type': base_type,
@@ -2425,7 +2624,7 @@ def cast_to_type(builder: ir.IRBuilder, value: ir.Value, target_type: ir.Type) -
 # Function Type Helper
 # ============================================================================
 
-class FunctionTypeHelper:
+class FunctionTypeHandler:
     """
     Helper class for managing function type conversions, parameter handling,
     and function signature operations.
@@ -2434,10 +2633,10 @@ class FunctionTypeHelper:
     @staticmethod
     def convert_type_spec_to_llvm(type_spec, module: ir.Module) -> ir.Type:
         """
-        Convert a TypeSpec to LLVM type, handling arrays and pointers.
+        Convert a TypeSystem to LLVM type, handling arrays and pointers.
         
         Args:
-            type_spec: TypeSpec object to convert
+            type_spec: TypeSystem object to convert
             module: LLVM module for type resolution
             
         Returns:
@@ -2448,18 +2647,18 @@ class FunctionTypeHelper:
     @staticmethod
     def create_function_type(return_type_spec, param_type_specs: List, module: ir.Module) -> ir.FunctionType:
         """
-        Create an LLVM function type from TypeSpec objects.
+        Create an LLVM function type from TypeSystem objects.
         
         Args:
-            return_type_spec: Return type TypeSpec
-            param_type_specs: List of parameter TypeSpec objects
+            return_type_spec: Return type TypeSystem
+            param_type_specs: List of parameter TypeSystem objects
             module: LLVM module
             
         Returns:
             LLVM FunctionType
         """
-        ret_type = FunctionTypeHelper.convert_type_spec_to_llvm(return_type_spec, module)
-        param_types = [FunctionTypeHelper.convert_type_spec_to_llvm(pts, module) 
+        ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(return_type_spec, module)
+        param_types = [FunctionTypeHandler.convert_type_spec_to_llvm(pts, module) 
                       for pts in param_type_specs]
         return ir.FunctionType(ret_type, param_types)
     
@@ -2494,7 +2693,7 @@ class FunctionTypeHelper:
         Args:
             base_name: Base function name
             parameters: List of Parameter objects
-            return_type_spec: Return type TypeSpec
+            return_type_spec: Return type TypeSystem
             no_mangle: If True, return base name without mangling
             
         Returns:
@@ -2556,7 +2755,7 @@ class FunctionTypeHelper:
             base_name: Unmangled function name
             mangled_name: Mangled function name
             parameters: List of Parameter objects
-            return_type_spec: Return type TypeSpec
+            return_type_spec: Return type TypeSystem
             func: LLVM Function object
         """
         if not hasattr(module, '_function_overloads'):
@@ -2719,7 +2918,6 @@ class FunctionTypeHelper:
                             return converted_val
         
         return arg_val
-
 
 
 # ============================================================================
