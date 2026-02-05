@@ -41,11 +41,6 @@ namespace standard
             def mac_print(byte* msg, int x) -> void;
 #endif;
 
-            // GENERIC
-            def print(noopstr s, int len) -> void;
-            def print(noopstr s) -> void;
-            def print(byte s) -> void; // print single character
-
 // INPUT DEFINITIONS BEGIN
 #ifdef __WINDOWS__
             def reset_from_input() -> void;
@@ -385,7 +380,12 @@ namespace standard
                 return;
             };
 
-            def printchar(noopstr x) -> void,
+            // GENERIC
+            def print(noopstr, int) -> void,
+                print(noopstr) -> void,
+                print(byte) -> void, // print single character
+                print(bool) -> void,
+                printchar(noopstr x) -> void,
                 print(byte x) -> void,
                 print(i8 x) -> void,
                 print(i16 x) -> void,
@@ -396,6 +396,11 @@ namespace standard
                 print(u64 x) -> void,
                 print(float x) -> void,
                 print(float x, int y) -> void;
+
+            def print(bool b) -> void
+            {
+                if (b) { print("True\0"); } else { print("False\0"); };
+            };
 
             def print(byte s) -> void
             {

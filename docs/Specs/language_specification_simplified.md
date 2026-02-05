@@ -330,6 +330,16 @@ object Obj1
 
 ---
 
+## **Enumerated Lists:**
+
+Definition: `enum myEnum {val1, val2, val3, val4, ...};`  
+Instance: `myEnum newEnum;`
+Member access: `newEnum.val1;`
+
+Enumerated lists are type `int`, but in a later update when full RTTI is added to Flux there will be more specification around enums and type sizes.
+
+---
+
 ## **Unions:**
 
 Prototype: `union myUnion;`

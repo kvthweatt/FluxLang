@@ -38,6 +38,7 @@ namespace standard
                 indexof_char(char) -> int,
                 lastindexof_char(char) -> int,
                 count_occurrences(byte*) -> int,
+                count_spaces() -> int, // count_occurances(" \0")
                 
                 // Character access
                 charat(int) -> char,

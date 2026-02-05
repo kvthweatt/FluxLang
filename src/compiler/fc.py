@@ -597,31 +597,31 @@ class FluxCompiler:
                         self.logger.step(f"Falling back to clang...", LogLevel.INFO, "linker")
                         try:
                             result = subprocess.run(
-    f"clang {str(obj_file)} -o build\\{output_dir}\\{output_bin} "
-    "-fuse-ld=lld-link "
-    "-Os "
-    "-flto "
-    "-fvisibility=hidden "
-    "-fmerge-all-constants "
-    "-fno-unwind-tables "
-    "-fno-asynchronous-unwind-tables "
-    "-nodefaultlibs "  # Don't use default libs, but we'll specify our own
-    "-Wl,/OPT:REF "
-    "-Wl,/OPT:ICF "
-    "-Wl,/DEBUG:NONE "
-    "-Wl,/INCREMENTAL:NO "
-    "-Wl,/LTCG "
-    "-Wl,/MERGE:.rdata=.text "
-    #"-Wl,/ALIGN:16 "
-    "-Wl,/ENTRY:FRTStartup "  # Use CRT startup for compatibility
-    "-Wl,/SUBSYSTEM:CONSOLE "
-    # Link only necessary libraries:
-    "-lkernel32 "  # Windows kernel functions (CreateFile, ReadFile, etc.)
-    "-lucrt "  # Modern C runtime (strlen, fopen, etc.)
-    "-llegacy_stdio_definitions "  # For stdio functions in UCRT
-    # Alternatively for older MSVCRT:
-    # "-lmsvcrt "  # Old C runtime (smaller but may have issues)
-)
+                                f"clang {str(obj_file)} -o build\\{output_dir}\\{output_bin} "
+                                "-fuse-ld=lld-link "
+                                "-Os "
+                                "-flto "
+                                "-fvisibility=hidden "
+                                "-fmerge-all-constants "
+                                "-fno-unwind-tables "
+                                "-fno-asynchronous-unwind-tables "
+                                "-nodefaultlibs "  # Don't use default libs, but we'll specify our own
+                                "-Wl,/OPT:REF "
+                                "-Wl,/OPT:ICF "
+                                "-Wl,/DEBUG:NONE "
+                                "-Wl,/INCREMENTAL:NO "
+                                "-Wl,/LTCG "
+                                "-Wl,/MERGE:.rdata=.text "
+                                #"-Wl,/ALIGN:16 "
+                                "-Wl,/ENTRY:FRTStartup "  # Use CRT startup for compatibility
+                                "-Wl,/SUBSYSTEM:CONSOLE "
+                                # Link only necessary libraries:
+                                "-lkernel32 "  # Windows kernel functions (CreateFile, ReadFile, etc.)
+                                "-lucrt "  # Modern C runtime (strlen, fopen, etc.)
+                                "-llegacy_stdio_definitions "  # For stdio functions in UCRT
+                                # Alternatively for older MSVCRT:
+                                # "-lmsvcrt "  # Old C runtime (smaller but may have issues)
+                            )
                             print(result)
                             if result.stderr:
                                 print(result.stderr)
