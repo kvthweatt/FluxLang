@@ -1889,3 +1889,145 @@ class LiteralTypeHandler:
         return (isinstance(field_type, ir.PointerType) and
                 isinstance(field_type.pointee, ir.IntType) and
                 field_type.pointee.width == 8)
+
+
+class IdentifierTypeHandler:
+    """Handles type resolution and metadata attachment for identifiers"""
+    
+    @staticmethod
+    def get_type_spec(name: str, builder: ir.IRBuilder, module: ir.Module):
+        """
+        Get the TypeSpec for an identifier from scope or global type info.
+        
+        Args:
+            name: The identifier name
+            builder: LLVM IR builder (for scope access)
+            module: LLVM module (for global type info)
+            
+        Returns:
+            TypeSpec if found, None otherwise
+        """
+        # Check local scope first
+        if builder.scope is not None:
+            if hasattr(builder, 'scope_type_info') and name in builder.scope_type_info:
+                return builder.scope_type_info[name]
+        
+        # Check global type info
+        if hasattr(module, '_global_type_info') and name in module._global_type_info:
+            return module._global_type_info[name]
+        
+        return None
+    
+    @staticmethod
+    def should_return_pointer(llvm_value: ir.Value) -> bool:
+        """
+        Determine if an identifier should return a pointer (not load).
+        Arrays and structs return pointers; other types are loaded.
+        
+        Args:
+            llvm_value: The LLVM value (typically from scope or globals)
+            
+        Returns:
+            True if should return pointer, False if should load
+        """
+        # For arrays, return the pointer directly (don't load)
+        if isinstance(llvm_value.type, ir.PointerType) and isinstance(llvm_value.type.pointee, ir.ArrayType):
+            return True
+        
+        # For structs, return the pointer directly (don't load)
+        if isinstance(llvm_value.type, ir.PointerType) and isinstance(llvm_value.type.pointee, ir.LiteralStructType):
+            return True
+        
+        return False
+    
+    @staticmethod
+    def attach_type_metadata(llvm_value: ir.Value, type_spec) -> ir.Value:
+        """
+        Attach TypeSpec metadata to an LLVM value if not already present.
+        
+        Args:
+            llvm_value: The LLVM value to attach metadata to
+            type_spec: The TypeSpec to attach (or None)
+            
+        Returns:
+            The same llvm_value with metadata attached
+        """
+        if type_spec and not hasattr(llvm_value, '_flux_type_spec'):
+            llvm_value._flux_type_spec = type_spec
+        return llvm_value
+    
+    @staticmethod
+    def is_volatile(name: str, builder: ir.IRBuilder) -> bool:
+        """
+        Check if an identifier is marked as volatile.
+        
+        Args:
+            name: The identifier name
+            builder: LLVM IR builder
+            
+        Returns:
+            True if volatile, False otherwise
+        """
+        return hasattr(builder, 'volatile_vars') and name in getattr(builder, 'volatile_vars', set())
+    
+    @staticmethod
+    def check_validity(name: str, builder: ir.IRBuilder) -> None:
+        """
+        Check if an identifier is valid (not moved/tied).
+        
+        Args:
+            name: The identifier name
+            builder: LLVM IR builder
+            
+        Raises:
+            RuntimeError: If variable was moved (use after tie)
+        """
+        if (hasattr(builder, 'object_validity_flags') and 
+            name in builder.object_validity_flags):
+            error_msg = f"COMPILE ERROR: Use after tie: variable '{name}' was moved"
+            print(error_msg)
+            raise RuntimeError(error_msg)
+    
+    @staticmethod
+    def resolve_namespace_mangled_name(name: str, module: ir.Module) -> Optional[str]:
+        """
+        Resolve an identifier using namespace 'using' statements.
+        
+        Args:
+            name: The unqualified identifier name
+            module: LLVM module containing _using_namespaces
+            
+        Returns:
+            Mangled name if found in a using namespace, None otherwise
+        """
+        if not hasattr(module, '_using_namespaces'):
+            return None
+        
+        for namespace in module._using_namespaces:
+            # Convert namespace path to mangled name format
+            mangled_prefix = namespace.replace('::', '__') + '__'
+            mangled_name = mangled_prefix + name
+            
+            # Check in global variables with mangled name
+            if mangled_name in module.globals:
+                return mangled_name
+            
+            # Check in type aliases with mangled name
+            if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
+                return mangled_name
+        
+        return None
+    
+    @staticmethod
+    def is_type_alias(name: str, module: ir.Module) -> bool:
+        """
+        Check if an identifier is a custom type alias.
+        
+        Args:
+            name: The identifier name
+            module: LLVM module
+            
+        Returns:
+            True if name is a type alias, False otherwise
+        """
+        return hasattr(module, '_type_aliases') and name in module._type_aliases

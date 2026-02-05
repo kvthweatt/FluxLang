@@ -206,40 +206,23 @@ class Identifier(Expression):
             ptr = builder.scope[self.name]
             
             # Get type information if available
-            type_spec = None
-            if hasattr(builder, 'scope_type_info') and self.name in builder.scope_type_info:
-                type_spec = builder.scope_type_info[self.name]
+            type_spec = IdentifierTypeHandler.get_type_spec(self.name, builder, module)
 
-            if (hasattr(builder, 'object_validity_flags') and 
-                self.name in builder.object_validity_flags):
-                
-                error_msg = f"COMPILE ERROR: Use after tie: variable '{self.name}' was moved"
-                print(error_msg)
-                raise RuntimeError(error_msg)
+            # Check validity (use after tie)
+            IdentifierTypeHandler.check_validity(self.name, builder)
 
             # Handle special case for 'this' pointer
             if self.name == "this":
-                if type_spec and not hasattr(ptr, '_flux_type_spec'):
-                    ptr._flux_type_spec = type_spec
-                return ptr
-            
-            # For arrays, return the pointer directly (don't load)
-            if isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.ArrayType):
-                if type_spec and not hasattr(ptr, '_flux_type_spec'):
-                    ptr._flux_type_spec = type_spec
-                return ptr
-            
-            # For structs, return the pointer directly (don't load)
-            elif isinstance(ptr.type, ir.PointerType) and isinstance(ptr.type.pointee, ir.LiteralStructType):
-                if type_spec and not hasattr(ptr, '_flux_type_spec'):
-                    ptr._flux_type_spec = type_spec
-                return ptr
+                return IdentifierTypeHandler.attach_type_metadata(ptr, type_spec)
+
+            # For arrays and structs, return the pointer directly (don't load)
+            if IdentifierTypeHandler.should_return_pointer(ptr):
+                return IdentifierTypeHandler.attach_type_metadata(ptr, type_spec)
             
             # Load the value if it's a non-array, non-struct pointer type
             elif isinstance(ptr.type, ir.PointerType):
-                is_volatile = hasattr(builder, 'volatile_vars') and self.name in builder.volatile_vars
                 ret_val = builder.load(ptr, name=self.name)
-                if is_volatile:
+                if IdentifierTypeHandler.is_volatile(self.name, builder):
                     ret_val.volatile = True
                 # Attach type metadata to loaded value from multiple sources
                 if not hasattr(ret_val, '_flux_type_spec'):
@@ -252,102 +235,51 @@ class Identifier(Expression):
                 return ret_val
             
             # For non-pointer types, attach metadata and return
-            if type_spec and not hasattr(ptr, '_flux_type_spec'):
-                ptr._flux_type_spec = type_spec
-            return ptr
+            return IdentifierTypeHandler.attach_type_metadata(ptr, type_spec)
         
         # Check for global variables
         if self.name in module.globals:
             gvar = module.globals[self.name]
+            type_spec = IdentifierTypeHandler.get_type_spec(self.name, builder, module)
             
-            # Try to get type information from global metadata
-            type_spec = None
-            if hasattr(module, '_global_type_info') and self.name in module._global_type_info:
-                type_spec = module._global_type_info[self.name]
-            
-            # For arrays, return the pointer directly (don't load)
-            if isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.ArrayType):
-                if type_spec and not hasattr(gvar, '_flux_type_spec'):
-                    gvar._flux_type_spec = type_spec
-                return gvar
-            
-            # For structs, return the pointer directly (don't load)
-            elif isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.LiteralStructType):
-                if type_spec and not hasattr(gvar, '_flux_type_spec'):
-                    gvar._flux_type_spec = type_spec
-                return gvar
+            # For arrays and structs, return the pointer directly (don't load)
+            if IdentifierTypeHandler.should_return_pointer(gvar):
+                return IdentifierTypeHandler.attach_type_metadata(gvar, type_spec)
             
             # Load the value if it's a non-array, non-struct pointer type
             elif isinstance(gvar.type, ir.PointerType):
-                is_volatile = hasattr(builder, 'volatile_vars') and self.name in getattr(builder, 'volatile_vars', set())
                 ret_val = builder.load(gvar, name=self.name)
-                if is_volatile:
+                if IdentifierTypeHandler.is_volatile(self.name, builder):
                     ret_val.volatile = True
-                # Attach type metadata
-                if type_spec and not hasattr(ret_val, '_flux_type_spec'):
-                    ret_val._flux_type_spec = type_spec
-                return ret_val
-            
-            if type_spec and not hasattr(gvar, '_flux_type_spec'):
-                gvar._flux_type_spec = type_spec
-            return gvar
+                return IdentifierTypeHandler.attach_type_metadata(ret_val, type_spec)
+            return IdentifierTypeHandler.attach_type_metadata(gvar, type_spec)
         
         # Check if this is a custom type
-        if hasattr(module, '_type_aliases') and self.name in module._type_aliases:
+        if IdentifierTypeHandler.is_type_alias(self.name, module):
             return module._type_aliases[self.name]
         
         # Check for namespace-qualified names using 'using' statements
-        if hasattr(module, '_using_namespaces'):
-            # DEBUG
-            #print(f"DEBUG Identifier.codegen: Looking for '{self.name}'")
-            #print(f"DEBUG _using_namespaces = {module._using_namespaces}")
-            #print(f"DEBUG Available globals: {list(module.globals.keys())}")
-            # END DEBUG
-            for namespace in module._using_namespaces:
-                # Convert namespace path to mangled name format
-                mangled_prefix = namespace.replace('::', '__') + '__'
-                mangled_name = mangled_prefix + self.name
-                #print(f"DEBUG Trying mangled_name = {mangled_name}")  # DEBUG
+        mangled_name = IdentifierTypeHandler.resolve_namespace_mangled_name(self.name, module)
+        if mangled_name:
+            # Check in global variables with mangled name
+            if mangled_name in module.globals:
+                gvar = module.globals[mangled_name]
+                type_spec = IdentifierTypeHandler.get_type_spec(mangled_name, builder, module)
+                # For arrays and structs, return the pointer directly (don't load)
+                if IdentifierTypeHandler.should_return_pointer(gvar):
+                    return IdentifierTypeHandler.attach_type_metadata(gvar, type_spec)
+                # Load the value if it's a non-array, non-struct pointer type
+                elif isinstance(gvar.type, ir.PointerType):
+                    ret_val = builder.load(gvar, name=self.name)
+                    if IdentifierTypeHandler.is_volatile(self.name, builder):
+                        ret_val.volatile = True
+                    return IdentifierTypeHandler.attach_type_metadata(ret_val, type_spec)
                 
-                # Check in global variables with mangled name
-                if mangled_name in module.globals:
-                    gvar = module.globals[mangled_name]
-                    
-                    # Try to get type information
-                    type_spec = None
-                    if hasattr(module, '_global_type_info') and mangled_name in module._global_type_info:
-                        type_spec = module._global_type_info[mangled_name]
-                    
-                    # For arrays, return the pointer directly (don't load)
-                    if isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.ArrayType):
-                        if type_spec and not hasattr(gvar, '_flux_type_spec'):
-                            gvar._flux_type_spec = type_spec
-                        return gvar
-                    
-                    # For structs, return the pointer directly (don't load)
-                    elif isinstance(gvar.type, ir.PointerType) and isinstance(gvar.type.pointee, ir.LiteralStructType):
-                        if type_spec and not hasattr(gvar, '_flux_type_spec'):
-                            gvar._flux_type_spec = type_spec
-                        return gvar
-                    
-                    # Load the value if it's a non-array, non-struct pointer type
-                    elif isinstance(gvar.type, ir.PointerType):
-                        is_volatile = hasattr(builder, 'volatile_vars') and self.name in getattr(builder, 'volatile_vars', set())
-                        ret_val = builder.load(gvar, name=self.name)
-                        if is_volatile:
-                            ret_val.volatile = True
-                        # Attach type metadata
-                        if type_spec and not hasattr(ret_val, '_flux_type_spec'):
-                            ret_val._flux_type_spec = type_spec
-                        return ret_val
-                    
-                    if type_spec and not hasattr(gvar, '_flux_type_spec'):
-                        gvar._flux_type_spec = type_spec
-                    return gvar
-                
-                # Check in type aliases with mangled name
-                if hasattr(module, '_type_aliases') and mangled_name in module._type_aliases:
-                    return module._type_aliases[mangled_name]
+                return IdentifierTypeHandler.attach_type_metadata(gvar, type_spec)
+            
+            # Check in type aliases with mangled name
+            if IdentifierTypeHandler.is_type_alias(mangled_name, module):
+                return module._type_aliases[mangled_name]
             
         raise NameError(f"Unknown identifier: {self.name}")
 
