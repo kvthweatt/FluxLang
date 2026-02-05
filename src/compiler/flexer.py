@@ -677,8 +677,6 @@ class FluxLexer:
                 '&=': TokenType.AND_ASSIGN,
                 '|=': TokenType.OR_ASSIGN,
                 '^^': TokenType.XOR_OP,
-                '&&': TokenType.AND,
-                '||': TokenType.OR,
                 '->': TokenType.RETURN_ARROW,
                 '<-': TokenType.CHAIN_ARROW,
                 '<~': TokenType.RECURSE_ARROW,

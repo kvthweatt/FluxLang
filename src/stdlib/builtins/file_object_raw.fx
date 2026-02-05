@@ -14,7 +14,7 @@
 enum file_error_states
 {
     GOOD,
-    NOT_OPEN_OR_ZERO
+    NOT_OPEN
 };
 
 namespace standard
@@ -41,7 +41,8 @@ namespace standard
             {
                 this.handle = fopen(path, mode);
                 this.size = this.size();
-                if (this.is_open()) { this.error_state = 0; };
+                if (this.is_open()) { this.error_state = 0; }
+                else { this.error_state = 1; };
                 return this;
             };
 
@@ -73,7 +74,7 @@ namespace standard
             {
                 if (this.handle == 0)
                 {
-                    this.error_state = file_error_states.NOT_OPEN_OR_ZERO;
+                    this.error_state = 1;
                     return -1;
                 };
 
@@ -94,8 +95,8 @@ namespace standard
                 int s = this.size();
                 if (s <= 0)
                 {
-                    string empty("\0");
-                    return empty;
+                    string empty1("\0");
+                    return empty1;
                 };
 
                 byte* buf = malloc((u64)s + 1);

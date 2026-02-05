@@ -399,7 +399,6 @@ class FluxParser:
         # Check if this is a multi-function prototype declaration
         # Pattern: def foo() -> int, foo() -> bool, foo(int) -> void;
         if self.expect(TokenType.COMMA):
-            print("GOT MULTI-FUNCTION PROTOTYPE DECLARATION")
             # This is a multi-function prototype declaration
             prototypes = []
             

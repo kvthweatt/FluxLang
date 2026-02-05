@@ -22,6 +22,9 @@ class DataType(Enum):
     BOOL = "bool"
     DATA = "data"
     STRUCT = "struct"
+    ENUM = "enum"
+    UNION = "union"
+    OBJECT = "object"
     VOID = "void"
     THIS = "this"
 
@@ -336,6 +339,9 @@ class TypeSpec:
                 if isinstance(base_type, ir.ArrayType) and not self.is_array:
                     return ir.PointerType(base_type.element)
                 return base_type
+
+            if hasattr(module, '_enum_types') and self.custom_typename in module._enum_types:
+                return ir.IntType(32)
             
             if hasattr(module, '_struct_types') and self.custom_typename in module._struct_types:
                 return module._struct_types[self.custom_typename]
@@ -408,6 +414,8 @@ class TypeSpec:
             return ir.IntType(8)
         elif self.base_type == DataType.STRUCT:
             return ir.IntType(8)
+        elif self.base_type == DataType.ENUM:
+            return ir.IntType(32)
         elif self.base_type == DataType.VOID:
             return ir.VoidType()
         elif self.base_type == DataType.DATA:

@@ -1,10 +1,13 @@
 // Input/Output Operations
-//import "redsys.fx";
 #ifndef FLUX_STANDARD
 #def FLUX_STANDARD 1;
 #endif;
 
 #import "redsys.fx";
+
+
+#ifndef FLUX_STANDARD_IO
+#def FLUX_STANDARD_IO
 
 namespace standard
 {
@@ -883,3 +886,5 @@ namespace standard
 
 using standard::io::console;
 using standard::io::file;
+
+#endif;

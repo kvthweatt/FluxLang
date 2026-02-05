@@ -2878,10 +2878,15 @@ class FunctionCall(Expression):
 
             # Step 5: Error if still not found
             if func is None or not isinstance(func, ir.Function):
-                available_counts = [o['param_count'] for o in module._function_overloads[self.name]]
-                #print("AVAILABLE COUNTS:",available_counts)
-                if len(self.arguments) > len(available_counts):
-                    raise ValueError(f"Function {self.name} accepts {available_counts} arguments but [{len(self.arguments)}] arguments were passed.")
+                # Check if the function exists in overloads before accessing it
+                if hasattr(module, '_function_overloads') and self.name in module._function_overloads:
+                    available_counts = [o['param_count'] for o in module._function_overloads[self.name]]
+                    #print("AVAILABLE COUNTS:",available_counts)
+                    if len(self.arguments) > len(available_counts):
+                        raise ValueError(f"Function {self.name} accepts {available_counts} arguments but [{len(self.arguments)}] arguments were passed.")
+                else:
+                    # Function not found anywhere - raise a clear error
+                    raise NameError(f"Function '{self.name}' not found in module or any imported namespaces")
         
         # Generate the actual function call
         return self._generate_call(builder, module, func)
@@ -3228,31 +3233,40 @@ class MethodCall(Expression):
             obj_ptr = self.object.codegen(builder, module)
         
         # Determine the object's type to construct the method name
-        if isinstance(obj_ptr.type, ir.PointerType):
-            pointee_type = obj_ptr.type.pointee
-            # Check if it's a named struct type
-            if hasattr(module, '_struct_types'):
-                for type_name, struct_type in module._struct_types.items():
-                    if struct_type == pointee_type:
-                        obj_type_name = type_name
-                        break
-                else:
-                    raise ValueError(f"Cannot determine object type for method call: {pointee_type}")
-            else:
-                raise ValueError(f"Method call requires pointer to object, got: {obj_ptr.type}")
+        if not isinstance(obj_ptr.type, ir.PointerType):
+            raise ValueError(f"Method call internal error, expected alloca pointer, got: {obj_ptr.type}")
+
+        slot_pointee = obj_ptr.type.pointee
+
+        # Case A: variable is an object stored locally: slot is T* where T is struct
+        if isinstance(slot_pointee, ir.IdentifiedStructType):
+            this_ptr = obj_ptr  # already a pointer to the object
+
+        # Case B: variable is a pointer to an object: slot is (T*)*  => T**
+        elif isinstance(slot_pointee, ir.PointerType) and isinstance(slot_pointee.pointee, ir.IdentifiedStructType):
+            this_ptr = builder.load(obj_ptr, name=f"{var_name}_load")  # load T* out of T**
+
         else:
-            raise ValueError(f"Method call requires pointer to object, got: {obj_ptr.type}")
-        
-        # Construct the method name: ObjectType.methodName
+            raise ValueError(f"Cannot determine object type for method call: {obj_ptr.type}")
+
+        # Now infer the object type name from the struct type (NOT pointer)
+        struct_ty = this_ptr.type.pointee
+        obj_type_name = None
+        if hasattr(module, "_struct_types"):
+            for type_name, struct_type in module._struct_types.items():
+                if struct_type == struct_ty:
+                    obj_type_name = type_name
+                    break
+        if obj_type_name is None:
+            raise ValueError(f"Cannot determine object type for method call: {struct_ty}")
+
         method_func_name = f"{obj_type_name}.{self.method_name}"
-        
-        # Look up the method function
         func = module.globals.get(method_func_name)
         if func is None:
             raise NameError(f"Unknown method: {method_func_name}")
-        
-        # Generate arguments with 'this' pointer as first argument
-        args = [obj_ptr]  # 'this' pointer is the object pointer
+
+        args = [this_ptr]  # 'this' is ALWAYS a T* now
+        # (then keep your existing arg generation loop)
 
         for i, arg_expr in enumerate(self.arguments):
             arg_val = arg_expr.codegen(builder, module)
@@ -6043,7 +6057,7 @@ class AssertStatement(Statement):
 # Function parameter
 @dataclass
 class Parameter:
-    name: str
+    name: Optional[str] # Can be none for unnamed prototype parameters
     type_spec: TypeSpec
     
     def __post_init__(self):
@@ -6310,9 +6324,12 @@ class FunctionDef(ASTNode):
         if self.is_prototype:
             return func
         
-        # Set parameter names
+        # Set parameter names (use generic names for unnamed parameters)
         for i, param in enumerate(func.args):
-            param.name = self.parameters[i].name
+            if self.parameters[i].name is not None:
+                param.name = self.parameters[i].name
+            else:
+                param.name = f"arg{i}"
         
         # Create entry block
         entry_block = func.append_basic_block('entry')
@@ -6333,11 +6350,12 @@ class FunctionDef(ASTNode):
         
         # Allocate space for parameters and store initial values WITH type information
         for i, param in enumerate(func.args):
-            alloca = builder.alloca(param.type, name=f"{param.name}.addr")
+            param_name = self.parameters[i].name if self.parameters[i].name is not None else f"arg{i}"
+            alloca = builder.alloca(param.type, name=f"{param_name}.addr")
             builder.store(param, alloca)
-            builder.scope[self.parameters[i].name] = alloca
+            builder.scope[param_name] = alloca
             # Store the original type spec for this parameter
-            builder.scope_type_info[self.parameters[i].name] = self.parameters[i].type_spec
+            builder.scope_type_info[param_name] = self.parameters[i].type_spec
         
         # Generate function body
         self.body.codegen(builder, module)
@@ -7346,205 +7364,170 @@ class StructDef(ASTNode):
         
         return instance_type
 
-# ============================================================================
-# Struct Operations
-# ============================================================================
-
 @dataclass
 class StructFieldAccess(Expression):
     """
-    Access a field from a struct instance.
-    
+    Access a field from a struct/object instance.
+
     Syntax: instance.field_name
-    
-    This generates inline bit manipulation code to extract the field value
-    from the packed struct data using vtable metadata.
     """
     struct_instance: Expression
     field_name: str
-    
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        """Generate inline field access code."""
-        # Get struct instance value
         instance_val = self.struct_instance.codegen(builder, module)
 
-        # Determine struct type - check if instance is from a variable
-        struct_name = None
-        is_pointer = False
-        
+        struct_name: Optional[str] = None
+        is_pointer_hint = False
+
         # If accessing from an Identifier, look up its type in scope_type_info
         if isinstance(self.struct_instance, Identifier):
             var_name = self.struct_instance.name
-            if hasattr(builder, 'scope_type_info') and var_name in builder.scope_type_info:
+            if hasattr(builder, "scope_type_info") and var_name in builder.scope_type_info:
                 type_spec = builder.scope_type_info[var_name]
-                if type_spec.custom_typename:
+                if getattr(type_spec, "custom_typename", None):
                     struct_name = type_spec.custom_typename
-                    is_pointer = type_spec.is_pointer
+                is_pointer_hint = bool(getattr(type_spec, "is_pointer", False))
 
-        # If it's a pointer, use GEP to access fields
-        if is_pointer and isinstance(instance_val.type, ir.PointerType):
-            # Get vtable to find field offset
-            vtable = module._struct_vtables.get(struct_name)
-            if not vtable:
-                raise ValueError(f"Cannot determine struct type for field access")
-            
-            # Find field index
-            field_index = None
-            for i, field_info in enumerate(vtable.fields):
-                if field_info[0] == self.field_name:
-                    field_index = i
-                    break
-            
-            if field_index is None:
-                raise ValueError(f"Field '{self.field_name}' not found in struct '{struct_name}'")
-            
-            # Use GEP to get pointer to field
-            zero = ir.Constant(ir.IntType(32), 0)
-            field_idx = ir.Constant(ir.IntType(32), field_index)
-            field_ptr = builder.gep(instance_val, [zero, field_idx], name=f"{self.field_name}_ptr")
-            
-            # If the field is an array, return the pointer for indexing
-            # If it's a struct, return the pointer for member access
-            # Otherwise, load the value
-            if isinstance(field_ptr.type, ir.PointerType):
-                pointee = field_ptr.type.pointee
-                if isinstance(pointee, ir.ArrayType):
-                    return field_ptr  # Return pointer to array for indexing
-                elif (isinstance(pointee, ir.LiteralStructType) or
-                      hasattr(pointee, '_name') or
-                      hasattr(pointee, 'elements')):
-                    return field_ptr  # Return pointer to struct for member access
-            
-            return builder.load(field_ptr, name=self.field_name)
-        
-        # Otherwise, handle as before (load if pointer to value)
+        # Resolve namespace-mangled struct name (using/imports) for vtables/types
+        def _resolve_struct_name(name: Optional[str]) -> Optional[str]:
+            if not name:
+                return None
+
+            # Prefer vtable hits (field access uses vtable metadata elsewhere)
+            if hasattr(module, "_struct_vtables") and name in module._struct_vtables:
+                return name
+
+            if hasattr(module, "_using_namespaces") and hasattr(module, "_struct_vtables"):
+                for ns in module._using_namespaces:
+                    mangled = ns.replace("::", "__") + "__" + name
+                    if mangled in module._struct_vtables:
+                        return mangled
+
+            # Fallback: also try _struct_types (some paths may rely on that)
+            if hasattr(module, "_struct_types") and name in module._struct_types:
+                return name
+
+            if hasattr(module, "_using_namespaces") and hasattr(module, "_struct_types"):
+                for ns in module._using_namespaces:
+                    mangled = ns.replace("::", "__") + "__" + name
+                    if mangled in module._struct_types:
+                        return mangled
+
+            return name
+
+        struct_name = _resolve_struct_name(struct_name)
+
+        # --- Fast path: pointer-to-struct/object -> use LLVM struct GEP by FIELD INDEX ---
+        # This is the correct behavior for normal object/struct fields.
+        if isinstance(instance_val.type, ir.PointerType):
+            pointee = instance_val.type.pointee
+
+            # Treat identified + literal structs as structs
+            is_struct = isinstance(pointee, (ir.LiteralStructType, ir.IdentifiedStructType))
+            if is_struct:
+                struct_type = pointee
+
+                # Ensure we have names metadata
+                if not hasattr(struct_type, "names") or not struct_type.names:
+                    raise ValueError("Struct type missing member names")
+
+                try:
+                    field_index = struct_type.names.index(self.field_name)
+                except ValueError:
+                    raise ValueError(f"Field '{self.field_name}' not found in struct")
+
+                zero = ir.Constant(ir.IntType(32), 0)
+                idx = ir.Constant(ir.IntType(32), field_index)
+                field_ptr = builder.gep(instance_val, [zero, idx], inbounds=True, name=f"{self.field_name}_ptr")
+
+                # Arrays/struct fields return pointer for further indexing/member access
+                if isinstance(field_ptr.type, ir.PointerType):
+                    fp = field_ptr.type.pointee
+                    if isinstance(fp, ir.ArrayType):
+                        return field_ptr
+                    if isinstance(fp, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                        return field_ptr
+
+                return builder.load(field_ptr, name=self.field_name)
+
+        # --- Non-pointer / packed representation fallback ---
+        # Load if we have a pointer-to-value (non-struct pointer scenarios)
         if isinstance(instance_val.type, ir.PointerType):
             instance = builder.load(instance_val, name="struct_load")
         else:
             instance = instance_val
 
-        # Fallback: try to infer from type
+        # Infer struct name if we didn't get it from scope info (or using-resolve failed)
         if struct_name is None:
             struct_name = infer_struct_name(instance, module)
-        
-        # Get vtable
-        vtable = module._struct_vtables.get(struct_name)
+            struct_name = _resolve_struct_name(struct_name)
+
+        # Need vtable for packed extraction paths
+        vtable = getattr(module, "_struct_vtables", {}).get(struct_name)
         if not vtable:
-            raise ValueError(f"Cannot determine struct type for field access")
-        
-        # Find field in vtable
-        field_info = next(
-            (f for f in vtable.fields if f[0] == self.field_name),
-            None
-        )
+            raise ValueError("Cannot determine struct type for field access")
+
+        field_info = next((f for f in vtable.fields if f[0] == self.field_name), None)
         if not field_info:
             raise ValueError(f"Field '{self.field_name}' not found in struct '{struct_name}'")
-        
+
         _, bit_offset, bit_width, alignment = field_info
-        
-        # Generate inline extraction code
+
+        # If instance is integer-packed, do bit extraction
         if isinstance(instance.type, ir.IntType):
-            # Integer type - simple bit operations
             instance_type = instance.type
-            
-            # Shift to position
+
+            # Shift
             if bit_offset > 0:
-                shifted = builder.lshr(
-                    instance,
-                    ir.Constant(instance_type, bit_offset)
-                )
+                shifted = builder.lshr(instance, ir.Constant(instance_type, bit_offset))
             else:
                 shifted = instance
-            
-            # Mask to field width
+
+            # Mask
             mask = (1 << bit_width) - 1
-            masked = builder.and_(
-                shifted,
-                ir.Constant(instance_type, mask)
-            )
-            
-            # Truncate to field width if needed
+            masked = builder.and_(shifted, ir.Constant(instance_type, mask))
+
+            # Trunc
             field_type = ir.IntType(bit_width)
             if instance_type.width != bit_width:
-                result = builder.trunc(masked, field_type)
-            else:
-                result = masked
-            
-            return result
-        elif isinstance(instance.type, ir.LiteralStructType):
-            # Proper struct type - use extractvalue with field index
-            # Find field index
+                return builder.trunc(masked, field_type, name=self.field_name)
+            return masked
+
+        # Struct value extraction by index (vtable order) — support BOTH literal and identified
+        if isinstance(instance.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
             field_index = None
-            for i, field_info in enumerate(vtable.fields):
-                if field_info[0] == self.field_name:
+            for i, f in enumerate(vtable.fields):
+                if f[0] == self.field_name:
                     field_index = i
                     break
-            
             if field_index is None:
                 raise ValueError(f"Field '{self.field_name}' not found in struct '{struct_name}'")
-            
-            # Extract the field value directly using the field index
-            result = builder.extract_value(instance, field_index, name=self.field_name)
+            return builder.extract_value(instance, field_index, name=self.field_name)
+
+        # Array-backed packed struct (byte extraction)
+        byte_offset = bit_offset // 8
+        bit_in_byte = bit_offset % 8
+
+        if bit_in_byte == 0 and bit_width % 8 == 0:
+            field_bytes = bit_width // 8
+            field_type = ir.IntType(bit_width)
+
+            result = ir.Constant(field_type, 0)
+            for i in range(field_bytes):
+                byte_val = builder.extract_value(instance, byte_offset + i)
+                byte_ext = builder.zext(byte_val, field_type)
+                byte_shifted = builder.shl(byte_ext, ir.Constant(field_type, i * 8))
+                result = builder.or_(result, byte_shifted)
+
+            # Optional typed reinterpret (if your vtable carries it)
+            if hasattr(vtable, "field_types") and self.field_name in vtable.field_types:
+                target_type = vtable.field_types[self.field_name]
+                if isinstance(target_type, ir.FloatType) and isinstance(result.type, ir.IntType):
+                    result = builder.bitcast(result, target_type)
             return result
-        else:
-            # Array type - byte extraction
-            byte_offset = bit_offset // 8
-            bit_in_byte = bit_offset % 8
-            
-            if bit_in_byte == 0 and bit_width % 8 == 0:
-                # Byte-aligned - simple extraction
-                field_bytes = bit_width // 8
-                field_type = ir.IntType(bit_width)
-                
-                # Extract bytes and combine
-                result = ir.Constant(field_type, 0)
-                for i in range(field_bytes):
-                    byte_val = builder.extract_value(instance, byte_offset + i)
-                    byte_extended = builder.zext(byte_val, field_type)
-                    byte_shifted = builder.shl(
-                        byte_extended,
-                        ir.Constant(field_type, i * 8)
-                    )
-                    result = builder.or_(result, byte_shifted)
-                
-                # Convert to proper type if needed (e.g., float)
-                #print(f"DEBUG StructFieldAccess: field_name={self.field_name}, vtable.field_types={vtable.field_types}")
-                if self.field_name in vtable.field_types:
-                    target_type = vtable.field_types[self.field_name]
-                    #print(f"DEBUG StructFieldAccess: target_type={target_type}, result.type={result.type}")
-                    if isinstance(target_type, ir.FloatType) and isinstance(result.type, ir.IntType):
-                        # Convert integer bit representation back to float
-                        #print(f"DEBUG StructFieldAccess: Converting {result.type} to {target_type}")
-                        result = builder.bitcast(result, target_type)
-                else:
-                    raise ValueError(f"StructFieldAccess: field_name '{self.field_name}' not in vtable.field_types")
-                
-                return result
-            else:
-                # Unaligned - complex bit manipulation
-                raise NotImplementedError("Unaligned field access in large structs not yet supported")
-    
-    def _infer_struct_name(self, instance: ir.Value, module: ir.Module) -> str:
-        """Infer struct name from instance type."""
-        # Try to get from scope_type_info if accessing an Identifier
-        if isinstance(self.struct_instance, Identifier):
-            var_name = self.struct_instance.name
-            if hasattr(module, '_current_builder'):
-                builder = module._current_builder
-                if hasattr(builder, 'scope_type_info') and var_name in builder.scope_type_info:
-                    type_spec = builder.scope_type_info[var_name]
-                    if type_spec.custom_typename:
-                        return type_spec.custom_typename
-        
-        # Fallback: match by type
-        if not hasattr(module, '_struct_types'):
-            raise ValueError("No struct types defined")
-        
-        for struct_name, struct_type in module._struct_types.items():
-            if instance.type == struct_type:
-                return struct_name
-        
-        raise ValueError("Cannot determine struct type from instance")
+
+        raise NotImplementedError("Unaligned field access in large structs not yet supported")
 
 @dataclass
 class StructFieldAssign(Statement):
@@ -7827,7 +7810,8 @@ class ObjectDef(ASTNode):
             # Name args (safe to repeat)
             func.args[0].name = "this"
             for i, arg in enumerate(func.args[1:], 1):
-                arg.name = method.parameters[i - 1].name
+                param_name = method.parameters[i - 1].name if method.parameters[i - 1].name is not None else f"arg{i - 1}"
+                arg.name = param_name
 
             method_funcs[method.name] = func
 
@@ -7858,9 +7842,10 @@ class ObjectDef(ASTNode):
 
             # Store other params
             for i, param in enumerate(func.args[1:], 1):
-                alloca = method_builder.alloca(param.type, name=f"{param.name}.addr")
+                param_name = method.parameters[i - 1].name if method.parameters[i - 1].name is not None else f"arg{i - 1}"
+                alloca = method_builder.alloca(param.type, name=f"{param_name}.addr")
                 method_builder.store(param, alloca)
-                method_builder.scope[method.parameters[i - 1].name] = alloca
+                method_builder.scope[param_name] = alloca
 
             # Emit body
             method.body.codegen(method_builder, module)

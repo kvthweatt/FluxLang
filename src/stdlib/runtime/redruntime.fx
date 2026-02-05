@@ -22,8 +22,16 @@
 #import "redmemory.fx";             // FFI-based Memory Operations (CRT)
 #endif;
 
-// Import raw functions & builtins
 #import "red_string_utilities.fx";
+
+#ifndef FLUX_STANDARD_SYSTEM
+#import "redsys.fx";
+#endif;
+#ifndef FLUX_STANDARD_IO
+#import "redio.fx";
+#endif;
+
+// Import raw functions & builtins
 #import "string_object_raw.fx";
 #import "file_object_raw.fx";
 //
@@ -34,13 +42,6 @@
 //
 // ---------------------------
 //
-
-#ifndef FLUX_STANDARD_SYSTEM
-#import "redsys.fx";
-#endif;
-#ifndef FLUX_STANDARD_IO
-#import "redio.fx";
-#endif;
 
 extern
 {
