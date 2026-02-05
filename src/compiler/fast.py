@@ -1464,11 +1464,8 @@ class ArrayComprehension(Expression):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate code for array comprehension [expr for var in iterable]"""
-        # Resolve element type from the declared loop variable type
-        if self.variable_type is not None:
-            element_type = self.variable_type.get_llvm_type(module)
-        else:
-            element_type = ir.IntType(32)
+        # Resolve element type using type handler
+        element_type = ArrayTypeHandler.resolve_comprehension_element_type(self.variable_type, module)
         
         # Handle ArrayLiteral as iterable
         if isinstance(self.iterable, ArrayLiteral):
@@ -1485,12 +1482,7 @@ class ArrayComprehension(Expression):
                 elem_val = elem_expr.codegen(builder, module)
                 
                 # Cast to element_type if needed
-                from llvmlite import ir as _ir
-                if isinstance(elem_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
-                    if elem_val.type.width > element_type.width:
-                        elem_val = builder.trunc(elem_val, element_type)
-                    elif elem_val.type.width < element_type.width:
-                        elem_val = builder.sext(elem_val, element_type)
+                elem_val = ArrayTypeHandler.cast_to_target_int_type(builder, elem_val, element_type)
                 
                 elem_ptr = builder.gep(iterable_array_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), i)])
                 builder.store(elem_val, elem_ptr)
@@ -1527,12 +1519,7 @@ class ArrayComprehension(Expression):
             expr_val = self.expression.codegen(builder, module)
             
             # Cast result to element_type if needed
-            from llvmlite import ir as _ir
-            if isinstance(expr_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
-                if expr_val.type.width > element_type.width:
-                    expr_val = builder.trunc(expr_val, element_type)
-                elif expr_val.type.width < element_type.width:
-                    expr_val = builder.sext(expr_val, element_type)
+            expr_val = ArrayTypeHandler.cast_to_target_int_type(builder, expr_val, element_type)
             
             # Store result
             result_elem_ptr = builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), current_index])
@@ -1555,26 +1542,8 @@ class ArrayComprehension(Expression):
             end_val = self.iterable.end.codegen(builder, module)
             
             # Cast range bounds to element_type
-            from llvmlite import ir as _ir
-            if isinstance(start_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
-                if start_val.type.width > element_type.width:
-                    start_val_sized = builder.trunc(start_val, element_type)
-                elif start_val.type.width < element_type.width:
-                    start_val_sized = builder.sext(start_val, element_type)
-                else:
-                    start_val_sized = start_val
-            else:
-                start_val_sized = start_val
-                
-            if isinstance(end_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
-                if end_val.type.width > element_type.width:
-                    end_val_sized = builder.trunc(end_val, element_type)
-                elif end_val.type.width < element_type.width:
-                    end_val_sized = builder.sext(end_val, element_type)
-                else:
-                    end_val_sized = end_val
-            else:
-                end_val_sized = end_val
+            start_val_sized = ArrayTypeHandler.cast_to_target_int_type(builder, start_val, element_type)
+            end_val_sized = ArrayTypeHandler.cast_to_target_int_type(builder, end_val, element_type)
                 
             size_val = builder.sub(end_val_sized, start_val_sized, name="range_size")
             
@@ -1588,18 +1557,9 @@ class ArrayComprehension(Expression):
             var_ptr = builder.alloca(element_type, name=self.variable)
             builder.scope[self.variable] = var_ptr
             
-            # Cast start_val if needed
-            if isinstance(start_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
-                if start_val.type.width > element_type.width:
-                    start_val = builder.trunc(start_val, element_type)
-                elif start_val.type.width < element_type.width:
-                    start_val = builder.sext(start_val, element_type)
-                    
-            if isinstance(end_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
-                if end_val.type.width > element_type.width:
-                    end_val = builder.trunc(end_val, element_type)
-                elif end_val.type.width < element_type.width:
-                    end_val = builder.sext(end_val, element_type)
+            # Cast start_val and end_val if needed
+            start_val = ArrayTypeHandler.cast_to_target_int_type(builder, start_val, element_type)
+            end_val = ArrayTypeHandler.cast_to_target_int_type(builder, end_val, element_type)
             
             func = builder.block.function
             loop_cond = func.append_basic_block('comp_loop_cond')
@@ -1618,11 +1578,7 @@ class ArrayComprehension(Expression):
             
             expr_val = self.expression.codegen(builder, module)
             
-            if isinstance(expr_val.type, _ir.IntType) and isinstance(element_type, _ir.IntType):
-                if expr_val.type.width > element_type.width:
-                    expr_val = builder.trunc(expr_val, element_type)
-                elif expr_val.type.width < element_type.width:
-                    expr_val = builder.sext(expr_val, element_type)
+            expr_val = ArrayTypeHandler.cast_to_target_int_type(builder, expr_val, element_type)
             
             current_index = builder.load(index_ptr, name="current_index")
             array_elem_ptr = builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), current_index], inbounds=True)
@@ -2484,22 +2440,7 @@ class ArrayAccess(Expression):
                     return gep  # Return pointer to struct for member access
             loaded = builder.load(gep, name="array_load")
             # Preserve type metadata from array element type
-            from ftypesys import attach_type_metadata_from_llvm_type, get_array_element_type_spec
-            
-            # Try to get the element type spec from the array value's metadata
-            element_type_spec = get_array_element_type_spec(array_val)
-            #print(f"[DEBUG ArrayAccess] array_val has metadata: {hasattr(array_val, '_flux_array_element_type_spec')}")
-            #print(f"[DEBUG ArrayAccess] element_type_spec: {element_type_spec}")
-            if element_type_spec:
-                #print(f"[DEBUG ArrayAccess] Attaching element type spec: base_type={element_type_spec.base_type}, is_signed={getattr(element_type_spec, 'is_signed', None)}")
-                #from ftypesys import attach_type_metadata
-                result = attach_type_metadata(loaded, type_spec=element_type_spec)
-                #print(f"[DEBUG ArrayAccess] Result has metadata: {hasattr(result, '_flux_type_spec')}")
-                #if hasattr(result, '_flux_type_spec'):
-                    #print(f"[DEBUG ArrayAccess] Result metadata: base_type={result._flux_type_spec.base_type}, is_signed={getattr(result._flux_type_spec, 'is_signed', None)}")
-                return result
-            
-            return attach_type_metadata_from_llvm_type(loaded, loaded.type, module)
+            return ArrayTypeHandler.preserve_array_element_type_metadata(loaded, array_val, module)
         
         # Handle local arrays
         elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
@@ -2515,22 +2456,7 @@ class ArrayAccess(Expression):
                     return gep  # Return pointer to struct for member access
             loaded = builder.load(gep, name="array_load")
             # Preserve type metadata from array element type
-            from ftypesys import attach_type_metadata_from_llvm_type, get_array_element_type_spec
-            
-            # Try to get the element type spec from the array value's metadata
-            element_type_spec = get_array_element_type_spec(array_val)
-            #print(f"[DEBUG ArrayAccess] array_val has metadata: {hasattr(array_val, '_flux_array_element_type_spec')}")
-            #print(f"[DEBUG ArrayAccess] element_type_spec: {element_type_spec}")
-            if element_type_spec:
-                #print(f"[DEBUG ArrayAccess] Attaching element type spec: base_type={element_type_spec.base_type}, is_signed={getattr(element_type_spec, 'is_signed', None)}")
-                #from ftypesys import attach_type_metadata
-                result = attach_type_metadata(loaded, type_spec=element_type_spec)
-                #print(f"[DEBUG ArrayAccess] Result has metadata: {hasattr(result, '_flux_type_spec')}")
-                #if hasattr(result, '_flux_type_spec'):
-                    #print(f"[DEBUG ArrayAccess] Result metadata: base_type={result._flux_type_spec.base_type}, is_signed={getattr(result._flux_type_spec, 'is_signed', None)}")
-                return result
-            
-            return attach_type_metadata_from_llvm_type(loaded, loaded.type, module)
+            return ArrayTypeHandler.preserve_array_element_type_metadata(loaded, array_val, module)
         
         # Handle pointer types (like char*)
         elif isinstance(array_val.type, ir.PointerType):
@@ -2543,15 +2469,7 @@ class ArrayAccess(Expression):
                     return gep  # Return pointer to struct for member access
             loaded = builder.load(gep, name="ptr_load")
             # Preserve type metadata from pointer element type
-            from ftypesys import attach_type_metadata_from_llvm_type, get_array_element_type_spec
-            
-            # Try to get the element type spec from the array value's metadata
-            element_type_spec = get_array_element_type_spec(array_val)
-            if element_type_spec:
-                from ftypesys import attach_type_metadata
-                return attach_type_metadata(loaded, type_spec=element_type_spec)
-            
-            return attach_type_metadata_from_llvm_type(loaded, loaded.type, module)
+            return ArrayTypeHandler.preserve_array_element_type_metadata(loaded, array_val, module)
         
         else:
             raise ValueError(f"Cannot access array element for type: {array_val.type}")
@@ -2629,20 +2547,18 @@ class ArraySlice(Expression):
         if const_len < 0:
             raise ValueError("Array slice must be forward (start <= end)")
 
-        # Determine element type and a pointer to the first element.
-        elem_ty = None
-        src_ptr = None
+        # Determine element type using type handler
+        elem_ty = ArrayTypeHandler.get_element_type_from_array_value(array_val)
+        
+        # Get pointer to first element
         zero = ir.Constant(ir.IntType(32), 0)
 
         if isinstance(array_val, ir.GlobalVariable) and isinstance(array_val.type.pointee, ir.ArrayType):
-            elem_ty = array_val.type.pointee.element
             src_ptr = builder.gep(array_val, [zero, start_i32], inbounds=True, name="slice_src")
         elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
-            elem_ty = array_val.type.pointee.element
             src_ptr = builder.gep(array_val, [zero, start_i32], inbounds=True, name="slice_src")
         elif isinstance(array_val.type, ir.PointerType):
             # Pointer-to-element (e.g. byte[] lowered as i8*)
-            elem_ty = array_val.type.pointee
             src_ptr = builder.gep(array_val, [start_i32], inbounds=True, name="slice_src")
         else:
             raise ValueError(f"Cannot slice type: {array_val.type}")
@@ -2652,17 +2568,8 @@ class ArraySlice(Expression):
         dst_alloca = builder.alloca(dst_arr_ty, name="slice_tmp")
         dst_ptr = builder.gep(dst_alloca, [zero, zero], inbounds=True, name="slice_dst")
 
-        # Compute bytes (assume integer/float element sizes we can infer from LLVM type)
-        elem_bytes = 1
-        if isinstance(elem_ty, ir.IntType):
-            elem_bytes = max(1, elem_ty.width // 8)
-        elif isinstance(elem_ty, ir.FloatType):
-            elem_bytes = 4
-        elif isinstance(elem_ty, ir.DoubleType):
-            elem_bytes = 8
-        else:
-            # Struct/other: fallback to 1 and let LLVM complain if memcpy is wrong
-            elem_bytes = 1
+        # Compute bytes using type handler
+        elem_bytes = ArrayTypeHandler.compute_element_size_bytes(elem_ty)
 
         total_bytes = const_len * elem_bytes
         ArrayTypeHandler.emit_memcpy(builder, module, dst_ptr, src_ptr, total_bytes)
@@ -2874,32 +2781,20 @@ class AlignOf(Expression):
         - Data types: alignment equals width in bytes (data{bits})
         - Other types: Natural alignment from target platform
         """
-        # Get alignment for TypeSystem
-        if isinstance(self.target, TypeSystem):
-            # Use explicitly specified alignment if present
-            if self.target.alignment is not None:
-                return ir.Constant(ir.IntType(32), self.target.alignment)
-            
-            # Special case: Data types default to width alignment
-            if self.target.base_type == DataType.DATA and self.target.bit_width is not None:
-                return ir.Constant(ir.IntType(32), (self.target.bit_width + 7) // 8)
-            
-            # Default case: Use platform alignment
-            llvm_type = self.target.get_llvm_type(module)
-            return ir.Constant(ir.IntType(32), module.data_layout.preferred_alignment(llvm_type))
-        
-        # Get alignment for expressions
+
+        align = AlignOfTypeHandler.alignof_bytes_for_target(self.target, builder, module)
+        if align is not None:
+            return ir.Constant(ir.IntType(32), align)
+
+        # Fallback: evaluate expression to discover LLVM type
         val = self.target.codegen(builder, module)
         val_type = val.type.pointee if isinstance(val.type, ir.PointerType) else val.type
-        
-        # Handle data types in expressions
-        if (isinstance(self.target, VariableDeclaration) and 
-            self.target.type_spec.base_type == DataType.DATA and
-            self.target.type_spec.bit_width is not None):
-            return ir.Constant(ir.IntType(32), (self.target.type_spec.bit_width + 7) // 8)
-        
-        # Default case for expressions
-        return ir.Constant(ir.IntType(32), module.data_layout.preferred_alignment(val_type))
+
+        align2 = AlignOfTypeHandler.alignment_from_llvm_type(val_type, module)
+        if align2 is None:
+            raise ValueError(f"Cannot determine alignment of type: {val_type}")
+
+        return ir.Constant(ir.IntType(32), align2)
 
 @dataclass
 class TypeOf(Expression):
@@ -2956,110 +2851,18 @@ class SizeOf(Expression):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate LLVM IR that returns size in BITS"""
-        #print(f"DEBUG SizeOf: target type = {type(self.target).__name__}, target = {self.target}")
-        # Handle TypeSystem case (like sizeof(data{8}[]))
-        if isinstance(self.target, TypeSystem):
-            #print(f"DEBUG SizeOf: Taking TypeSystem path")
-            llvm_type = self.target.get_llvm_type_with_array(module)
-            
-            # Calculate size in BITS
-            if isinstance(llvm_type, ir.IntType):
-                return ir.Constant(ir.IntType(llvm_type.width), llvm_type.width)  # Already in bits
-            elif isinstance(llvm_type, ir.ArrayType):
-                element_bits = llvm_type.element.width
-                return ir.Constant(ir.IntType(llvm_type.width), element_bits * llvm_type.count)
-            elif isinstance(llvm_type, ir.PointerType):
-                return ir.Constant(ir.IntType(llvm_type.width), llvm_type.width)  # 64-bit pointers = 64 bits
-            else:
-                raise ValueError(f"Unknown type in sizeof: {llvm_type}")
-        
-        # Handle Identifier case - look up the declared type instead of loading the value
-        if isinstance(self.target, Identifier):
-            # First check if this is a struct type name
-            if hasattr(module, '_struct_vtables') and self.target.name in module._struct_vtables:
-                vtable = module._struct_vtables[self.target.name]
-                return ir.Constant(ir.IntType(32), vtable.total_bits)
-            
-            # Look up the variable declaration in the current scope
-            if builder.scope is not None and self.target.name in builder.scope:
-                ptr = builder.scope[self.target.name]
-                if isinstance(ptr.type, ir.PointerType):
-                    llvm_type = ptr.type.pointee  # Get the type being pointed to
-                    # Calculate size in BITS using the same logic as TypeSystem
-                    if isinstance(llvm_type, ir.IntType):
-                        return ir.Constant(ir.IntType(llvm_type.width), llvm_type.width)
-                    elif isinstance(llvm_type, ir.ArrayType):
-                        element_bits = llvm_type.element.width
-                        return ir.Constant(ir.IntType(llvm_type.element.width), element_bits * llvm_type.count)
-                    elif isinstance(llvm_type, ir.PointerType):
-                        # For parameter that is a pointer (like i8* from unsized array parameter), 
-                        # we can't determine the size at compile time, so return 0
-                        # In a real implementation, this might require runtime size tracking
-                        return ir.Constant(ir.IntType(32), 0)
-                    elif isinstance(llvm_type, ir.LiteralStructType):
-                        # Calculate struct size in bits by summing all member sizes
-                        total_bits = 0
-                        for element in llvm_type.elements:
-                            if isinstance(element, ir.IntType):
-                                total_bits += element.width
-                            elif isinstance(element, ir.FloatType):
-                                total_bits += 32  # Float is 32 bits
-                            else:
-                                # For other types, use data layout to get size in bytes, then convert to bits
-                                bytes_size = module.data_layout.get_type_size(element)
-                                total_bits += bytes_size * 8
-                        return ir.Constant(ir.IntType(32), total_bits)
-                    elif hasattr(llvm_type, 'elements'):  # Identified struct type
-                        # Calculate struct size in bits by summing all member sizes
-                        total_bits = 0
-                        for element in llvm_type.elements:
-                            if isinstance(element, ir.IntType):
-                                total_bits += element.width
-                            elif isinstance(element, ir.FloatType):
-                                total_bits += 32  # Float is 32 bits
-                            elif isinstance(element, ir.PointerType):
-                                total_bits += 64  # Assume 64-bit pointers
-                            else:
-                                # For other types, use data layout to get size in bytes, then convert to bits
-                                bytes_size = module.data_layout.get_type_size(element)
-                                total_bits += bytes_size * 8
-                        return ir.Constant(ir.IntType(32), total_bits)
-                    else:
-                        raise ValueError(f"Unknown type in sizeof for identifier {self.target.name}: {llvm_type}")
-                
-            # Check for global variables
-            if self.target.name in module.globals:
-                gvar = module.globals[self.target.name]
-                if isinstance(gvar.type, ir.PointerType):
-                    llvm_type = gvar.type.pointee  # Get the type being pointed to
-                    # Calculate size in BITS using the same logic as TypeSystem
-                    if isinstance(llvm_type, ir.IntType):
-                        return ir.Constant(ir.IntType(32), llvm_type.width)
-                    elif isinstance(llvm_type, ir.ArrayType):
-                        element_bits = llvm_type.element.width
-                        return ir.Constant(ir.IntType(32), element_bits * llvm_type.count)
-                    elif isinstance(llvm_type, ir.PointerType):
-                        # For pointer variables, return 0 (unknown size)
-                        return ir.Constant(ir.IntType(32), 0)
-                    else:
-                        raise ValueError(f"Unknown type in sizeof for global {self.target.name}: {llvm_type}")
-        
-        # Handle other Expression cases (like sizeof(expression))
-        target_val = self.target.codegen(builder, module)
-        val_type = target_val.type
-        
-        # Pointer types (arrays decay to pointers)
-        if isinstance(val_type, ir.PointerType):
-            if isinstance(val_type.pointee, ir.ArrayType):
-                arr_type = val_type.pointee
-                element_bits = arr_type.element.width
-                return ir.Constant(ir.IntType(32), element_bits * arr_type.count)
-            return ir.Constant(ir.IntType(32), 64)  # Pointer size
-        
-        # Direct types
-        if hasattr(val_type, 'width'):
-            return ir.Constant(ir.IntType(32), val_type.width)  # Already in bits
-        raise ValueError(f"Cannot determine size of type: {val_type}")
+
+        bits = SizeOfTypeHandler.sizeof_bits_for_target(self.target, builder, module)
+        if bits is not None:
+            return ir.Constant(ir.IntType(32), bits)
+
+        # Fallback: evaluate expression to discover LLVM type
+        value = self.target.codegen(builder, module)
+        bits2 = SizeOfTypeHandler.bits_from_llvm_type(value.type, module)
+        if bits2 is None:
+            raise ValueError(f"Cannot determine size of type: {value.type}")
+
+        return ir.Constant(ir.IntType(32), bits2)
 
 @dataclass
 class NoInit(Expression):
@@ -5695,6 +5498,7 @@ def register_struct_type(module: ir.Module, type_name: str, bit_width: int, alig
     module._custom_types[type_name] = {
         'bit_width': bit_width,
         'alignment': alignment
+        #'endianness': endianness
     }
 
 def get_struct_vtable(module: ir.Module, struct_name: str) -> Optional[StructVTable]:

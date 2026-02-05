@@ -244,7 +244,7 @@ def main()->int
     print();
     print(ctx.state[1]);
     print();
-    print((u32)ctx.state[2]);
+    print(ctx.state[2]);
     print();
     print(ctx.state[3]);
     print();

@@ -1344,7 +1344,63 @@ class ArrayTypeHandler:
             return (array_type.element, array_type.count)
         else:
             raise ValueError(f"Value is not an array or array pointer: {val.type}")
+
+    @staticmethod
+    def preserve_array_element_type_metadata(loaded_val: ir.Value, array_val: ir.Value, module: ir.Module) -> ir.Value:
+        """
+        Preserve type metadata when loading an element from an array.
+        
+        This extracts the element type spec from the array's metadata and attaches it
+        to the loaded value, maintaining type information through array access operations.
+        
+        Args:
+            loaded_val: The loaded element value
+            array_val: The source array
+            module: LLVM module for type resolution
+            
+        Returns:
+            The loaded value with appropriate type metadata attached
+        """
+        # Try to get the element type spec from the array value's metadata
+        element_type_spec = get_array_element_type_spec(array_val)
+        
+        if element_type_spec:
+            return attach_type_metadata(loaded_val, type_spec=element_type_spec)
+        
+        return attach_type_metadata_from_llvm_type(loaded_val, loaded_val.type, module)
     
+    @staticmethod
+    def _store_bytes_to_array(builder: ir.IRBuilder, array_ptr: ir.Value, bytes_data: bytes, start_index: int = 0) -> None:
+        """Store a sequence of bytes into an array at the given starting index."""
+        zero = ir.Constant(ir.IntType(32), 0)
+        for i, byte_val in enumerate(bytes_data):
+            index = ir.Constant(ir.IntType(32), start_index + i)
+            elem_ptr = builder.gep(array_ptr, [zero, index])
+            char_val = ir.Constant(ir.IntType(8), byte_val)
+            builder.store(char_val, elem_ptr)
+    
+    @staticmethod
+    def _pack_value_into_integer(builder: ir.IRBuilder, result: ir.Value, elem_val: ir.Value, 
+                                 target_type: ir.IntType, bit_offset: int) -> Tuple[ir.Value, int]:
+        """
+        Pack a single integer value into a larger integer at the specified bit offset.
+        Returns (new_result, new_bit_offset).
+        """
+        elem_width = elem_val.type.width
+        
+        # Extend/truncate to target width if needed
+        if elem_val.type.width != target_type.width:
+            elem_val = builder.zext(elem_val, target_type)
+        
+        # Shift into position
+        if bit_offset > 0:
+            shift_amount = ir.Constant(target_type, bit_offset)
+            elem_val = builder.shl(elem_val, shift_amount)
+        
+        # OR into result
+        result = builder.or_(result, elem_val)
+        return result, bit_offset + elem_width
+
     @staticmethod
     def emit_memcpy(builder: ir.IRBuilder, module: ir.Module, dst_ptr: ir.Value, src_ptr: ir.Value, bytes: int) -> None:
         """Emit llvm.memcpy intrinsic call."""
@@ -1463,40 +1519,28 @@ class ArrayTypeHandler:
     def create_global_array_concat(module: ir.Module, left_val: ir.Value, 
                                     right_val: ir.Value, result_array_type: ir.ArrayType, 
                                     operator) -> ir.Value:
-        """Create compile-time array concatenation for global constants."""
+        """Create compile-time global array concatenation."""
         from fast import Operator
         
-        # Get the initializers from both global constants
-        left_init = left_val.initializer if hasattr(left_val, 'initializer') else None
-        right_init = right_val.initializer if hasattr(right_val, 'initializer') else None
+        # Get array initializers
+        left_init = left_val.initializer
+        right_init = right_val.initializer
         
-        if left_init is None or right_init is None:
-            raise ValueError("Both operands must be global constants for compile-time concatenation")
-        
-        # Extract array elements
-        left_elements = list(left_init.constant)
-        right_elements = list(right_init.constant) if operator == Operator.ADD else []
-        
-        # Create new array with concatenated elements
+        # Create concatenated constant
         if operator == Operator.ADD:
-            new_elements = left_elements + right_elements
+            result_elements = list(left_init.constant) + list(right_init.constant)
         else:  # SUB
-            left_len = len(left_elements)
-            right_len = len(right_elements)
-            new_len = max(left_len - right_len, 0)
-            new_elements = left_elements[:new_len]
+            result_elements = list(left_init.constant[:result_array_type.count])
         
-        # Create global constant
-        global_name = f".array_concat_{id(module)}_{id(left_val)}_{id(right_val)}"
-        global_array = ir.GlobalVariable(module, result_array_type, name=global_name)
-        global_array.linkage = 'internal'
-        global_array.global_constant = True
-        global_array.initializer = ir.Constant(result_array_type, new_elements)
+        result_constant = ir.Constant(result_array_type, result_elements)
         
-        # Mark as array pointer
-        global_array.type._is_array_pointer = True
+        # Create new global variable
+        global_var = ir.GlobalVariable(module, result_array_type, name=module.get_unique_name("array_concat"))
+        global_var.initializer = result_constant
+        global_var.global_constant = True
+        global_var.linkage = 'internal'
         
-        return global_array
+        return global_var
     
     @staticmethod
     def create_runtime_array_concat(builder: ir.IRBuilder, module: ir.Module, 
@@ -1837,21 +1881,24 @@ class ArrayTypeHandler:
                 # Verify we used all the bits
                 if bit_offset != llvm_type.element.width:
                     raise ValueError(
-                        f"Bit offset mismatch after packing: expected {llvm_type.element.width}, got {bit_offset}"
+                        f"Array packing size mismatch: packed {bit_offset} bits into {llvm_type.element.width}-bit integer"
                     )
                 
                 const_elements.append(ir.Constant(llvm_type.element, packed_value))
-
+            
+            # Direct constant elements
             elif isinstance(elem, Literal):
-                if elem.type == FastDataType.SINT or elem.type == FastDataType.UINT:
-                    const_elements.append(ir.Constant(llvm_type.element, elem.value))
-                elif elem.type == FastDataType.FLOAT:
-                    const_elements.append(ir.Constant(llvm_type.element, elem.value))
-                elif elem.type == FastDataType.BOOL:
-                    const_elements.append(ir.Constant(llvm_type.element, 1 if elem.value else 0))
+                llvm_val = elem.to_llvm_constant(module)
+                if llvm_val.type != llvm_type.element:
+                    raise ValueError(f"Array element type mismatch: expected {llvm_type.element}, got {llvm_val.type}")
+                const_elements.append(llvm_val)
+            
             else:
-                # Can't evaluate at compile time
-                const_elements.append(ir.Constant(llvm_type.element, 0))
+                raise ValueError(f"Cannot create global initializer for element type: {type(elem)}")
+        
+        # Pad with zeros if needed
+        while len(const_elements) < llvm_type.count:
+            const_elements.append(ir.Constant(llvm_type.element, 0))
         
         return ir.Constant(llvm_type, const_elements)
 
@@ -1862,56 +1909,47 @@ class ArrayTypeHandler:
         """Initialize a local array variable with an array literal."""
         from fast import StringLiteral
         
-        if not isinstance(llvm_type, ir.ArrayType):
-            raise ValueError(f"ArrayLiteral can only initialize array types, got {llvm_type}")
+        zero = ir.Constant(ir.IntType(32), 0)
         
-        # Initialize each array element individually
         for i, elem in enumerate(array_literal.elements):
-            zero = ir.Constant(ir.IntType(32), 0)
-            index = ir.Constant(ir.IntType(32), i)
-            elem_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"elem_{i}")
+            if i >= llvm_type.count:
+                break
             
-            # Generate code for each element
-            # Handle packing strings to integers
+            # Pack StringLiteral into integer if the target is integer type
             if isinstance(elem, StringLiteral) and isinstance(llvm_type.element, ir.IntType):
                 string_val = elem.value
                 byte_count = min(len(string_val), llvm_type.element.width // 8)
                 packed_value = 0
                 for j in range(byte_count):
                     packed_value |= (ord(string_val[j]) << (j * 8))
-                elem_val = ir.Constant(llvm_type.element, packed_value)
-            
-            # Handle packing array literals to integers
-            elif hasattr(elem, 'elements') and isinstance(llvm_type.element, ir.IntType):
-                # This is an array that needs to be packed into an integer
-                elem_val = ArrayTypeHandler.pack_array_to_integer(builder, module, elem, llvm_type.element)
-            
+                
+                index = ir.Constant(ir.IntType(32), i)
+                elem_ptr = builder.gep(alloca, [zero, index], name=f"elem_{i}")
+                packed_const = ir.Constant(llvm_type.element, packed_value)
+                builder.store(packed_const, elem_ptr)
             else:
                 elem_val = elem.codegen(builder, module)
                 
-                # Handle result being an array pointer that needs packing
-                if (isinstance(elem_val.type, ir.PointerType) and 
-                    isinstance(elem_val.type.pointee, ir.ArrayType) and
-                    isinstance(llvm_type.element, ir.IntType)):
-                    # Load and pack the array into the target integer
-                    elem_val = ArrayTypeHandler.pack_array_pointer_to_integer(
-                        builder, module, elem_val, llvm_type.element
-                    )
-            
-            # Ensure type matches
-            if elem_val.type != llvm_type.element:
-                if isinstance(elem_val.type, ir.IntType) and isinstance(llvm_type.element, ir.IntType):
-                    if elem_val.type.width > llvm_type.element.width:
-                        elem_val = builder.trunc(elem_val, llvm_type.element)
-                    elif elem_val.type.width < llvm_type.element.width:
-                        elem_val = builder.sext(elem_val, llvm_type.element)
-            
-            builder.store(elem_val, elem_ptr)
+                if isinstance(elem_val.type, ir.PointerType):
+                    elem_val = builder.load(elem_val)
+                
+                if elem_val.type != llvm_type.element:
+                    if isinstance(elem_val.type, ir.IntType) and isinstance(llvm_type.element, ir.IntType):
+                        if elem_val.type.width < llvm_type.element.width:
+                            elem_val = builder.sext(elem_val, llvm_type.element)
+                        elif elem_val.type.width > llvm_type.element.width:
+                            elem_val = builder.trunc(elem_val, llvm_type.element)
+                    else:
+                        raise ValueError(f"Array element type mismatch: expected {llvm_type.element}, got {elem_val.type}")
+                
+                index = ir.Constant(ir.IntType(32), i)
+                elem_ptr = builder.gep(alloca, [zero, index], name=f"elem_{i}")
+                builder.store(elem_val, elem_ptr)
 
     @staticmethod
     def pack_array_to_integer(builder: ir.IRBuilder, module: ir.Module, 
-                               array_lit, target_type: ir.IntType) -> ir.Value:
-        """Pack an array literal's elements into a single integer."""
+                             array_lit, target_type: ir.IntType) -> ir.Value:
+        """Pack array literal elements into a single integer (compile-time if possible)."""
         packed_value = 0
         bit_offset = 0
         
@@ -1966,20 +2004,10 @@ class ArrayTypeHandler:
             if not isinstance(elem_val.type, ir.IntType):
                 raise ValueError(f"Cannot pack non-integer type {elem_val.type} into integer")
             
-            elem_width = elem_val.type.width
-            
-            # Extend/truncate to target width if needed
-            if elem_val.type.width != target_type.width:
-                elem_val = builder.zext(elem_val, target_type)
-            
-            # Shift into position
-            if bit_offset > 0:
-                shift_amount = ir.Constant(target_type, bit_offset)
-                elem_val = builder.shl(elem_val, shift_amount)
-            
-            # OR into result
-            result = builder.or_(result, elem_val)
-            bit_offset += elem_width
+            # Use helper to pack value
+            result, bit_offset = ArrayTypeHandler._pack_value_into_integer(
+                builder, result, elem_val, target_type, bit_offset
+            )
         
         return result
 
@@ -2018,18 +2046,10 @@ class ArrayTypeHandler:
             elem_ptr = builder.gep(array_ptr, [zero, index], inbounds=True)
             elem_val = builder.load(elem_ptr)
             
-            # Extend to target width
-            if elem_type.width != target_type.width:
-                elem_val = builder.zext(elem_val, target_type)
-            
-            # Shift into position
-            if bit_offset > 0:
-                shift_amount = ir.Constant(target_type, bit_offset)
-                elem_val = builder.shl(elem_val, shift_amount)
-            
-            # OR into result
-            result = builder.or_(result, elem_val)
-            bit_offset += elem_type.width
+            # Use helper to pack value
+            result, bit_offset = ArrayTypeHandler._pack_value_into_integer(
+                builder, result, elem_val, target_type, bit_offset
+            )
         
         return result
 
@@ -2048,15 +2068,10 @@ class ArrayTypeHandler:
             # Store string data on stack
             string_bytes = string_val.encode('ascii')
             str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
-            
             str_alloca = builder.alloca(str_array_ty, name="str_data")
             
-            for i, byte_val in enumerate(string_bytes):
-                zero = ir.Constant(ir.IntType(32), 0)
-                index = ir.Constant(ir.IntType(32), i)
-                elem_ptr = builder.gep(str_alloca, [zero, index], name=f"char_{i}")
-                char_val = ir.Constant(ir.IntType(8), byte_val)
-                builder.store(char_val, elem_ptr)
+            # Use helper to store bytes
+            ArrayTypeHandler._store_bytes_to_array(builder, str_alloca, string_bytes)
             
             zero = ir.Constant(ir.IntType(32), 0)
             str_ptr = builder.gep(str_alloca, [zero, zero], name="str_ptr")
@@ -2067,24 +2082,16 @@ class ArrayTypeHandler:
              isinstance(llvm_type.element, ir.IntType) and \
              llvm_type.element.width == 8:
             
-            for i, char in enumerate(string_val):
-                if i >= llvm_type.count:
-                    break
-                
-                zero = ir.Constant(ir.IntType(32), 0)
-                index = ir.Constant(ir.IntType(32), i)
-                elem_ptr = builder.gep(alloca, [zero, index], name=f"char_{i}")
-                
-                char_val = ir.Constant(ir.IntType(8), ord(char))
-                builder.store(char_val, elem_ptr)
+            # Store string characters
+            string_bytes = string_val.encode('ascii')[:llvm_type.count]
+            ArrayTypeHandler._store_bytes_to_array(builder, alloca, string_bytes)
             
             # Null-terminate remaining
-            for i in range(len(string_val), llvm_type.count):
-                zero = ir.Constant(ir.IntType(32), 0)
+            zero = ir.Constant(ir.IntType(32), 0)
+            for i in range(len(string_bytes), llvm_type.count):
                 index = ir.Constant(ir.IntType(32), i)
-                elem_ptr = builder.gep(alloca, [zero, index], name=f"char_{i}")
-                zero_char = ir.Constant(ir.IntType(8), 0)
-                builder.store(zero_char, elem_ptr)
+                elem_ptr = builder.gep(alloca, [zero, index])
+                builder.store(ir.Constant(ir.IntType(8), 0), elem_ptr)
 
     @staticmethod
     def create_local_string_for_arg(builder: ir.IRBuilder, module: ir.Module, 
@@ -2092,15 +2099,10 @@ class ArrayTypeHandler:
         """Create a local string on the stack for passing as an argument."""
         string_bytes = string_value.encode('ascii')
         str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
-        
         str_alloca = builder.alloca(str_array_ty, name=f"{name_hint}_str_data")
         
-        for j, byte_val in enumerate(string_bytes):
-            zero = ir.Constant(ir.IntType(32), 0)
-            index = ir.Constant(ir.IntType(32), j)
-            elem_ptr = builder.gep(str_alloca, [zero, index])
-            char_val = ir.Constant(ir.IntType(8), byte_val)
-            builder.store(char_val, elem_ptr)
+        # Use helper to store bytes
+        ArrayTypeHandler._store_bytes_to_array(builder, str_alloca, string_bytes)
         
         zero = ir.Constant(ir.IntType(32), 0)
         str_ptr = builder.gep(str_alloca, [zero, zero], name=f"{name_hint}_str_ptr")
@@ -2132,7 +2134,6 @@ class ArrayTypeHandler:
             # Store to destination
             dst_ptr = builder.gep(alloca, [zero, index], inbounds=True, name=f"dst_{i}")
             builder.store(src_val, dst_ptr)
-
 
 class LiteralTypeHandler:
     """Handles type resolution and LLVM type determination for literal values"""
@@ -2237,6 +2238,105 @@ class LiteralTypeHandler:
         Returns:
             Normalized integer value for LLVM IR constant
         """
+    @staticmethod
+    def preserve_array_element_type_metadata(loaded_val: ir.Value, array_val: ir.Value, module: ir.Module) -> ir.Value:
+        """
+        Preserve type metadata when loading an element from an array.
+        
+        This extracts the element type spec from the array's metadata and attaches it
+        to the loaded value, maintaining type information through array access operations.
+        
+        Args:
+            loaded_val: The loaded element value
+            array_val: The source array
+            module: LLVM module for type resolution
+            
+        Returns:
+            The loaded value with appropriate type metadata attached
+        """
+        # Try to get the element type spec from the array value's metadata
+        element_type_spec = get_array_element_type_spec(array_val)
+        
+        if element_type_spec:
+            return attach_type_metadata(loaded_val, type_spec=element_type_spec)
+        
+        return attach_type_metadata_from_llvm_type(loaded_val, loaded_val.type, module)
+    
+    @staticmethod
+    def cast_to_target_int_type(builder: ir.IRBuilder, value: ir.Value, target_type: ir.Type) -> ir.Value:
+        """
+        Cast an integer value to a target integer type using appropriate trunc/sext.
+        
+        This handles type conversions needed when storing values into arrays with
+        """
+        return builder.sext(value, target_type)
+    
+    @staticmethod
+    def get_element_type_from_array_value(array_val: ir.Value) -> ir.Type:
+        """
+        Extract the element type from an array value.
+        
+        Handles global arrays, local arrays (pointer to array), and raw pointers.
+        
+        Args:
+            array_val: Array value (GlobalVariable, pointer to array, or pointer)
+            
+        Returns:
+            The LLVM element type
+            
+        Raises:
+            ValueError: If unable to determine element type
+        """
+        if isinstance(array_val, ir.GlobalVariable) and isinstance(array_val.type.pointee, ir.ArrayType):
+            return array_val.type.pointee.element
+        elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
+            return array_val.type.pointee.element
+        elif isinstance(array_val.type, ir.PointerType):
+            # Pointer-to-element (e.g. byte[] lowered as i8*)
+            return array_val.type.pointee
+        else:
+            raise ValueError(f"Cannot determine element type for: {array_val.type}")
+    
+    @staticmethod
+    def compute_element_size_bytes(elem_type: ir.Type) -> int:
+        """
+        Compute the size in bytes of an element type.
+        
+        Handles common LLVM types with sensible defaults.
+        
+        Args:
+            elem_type: LLVM element type
+            
+        Returns:
+            Size in bytes
+        """
+        if isinstance(elem_type, ir.IntType):
+            return max(1, elem_type.width // 8)
+        elif isinstance(elem_type, ir.FloatType):
+            return 4
+        elif isinstance(elem_type, ir.DoubleType):
+            return 8
+        else:
+            # Struct/other: fallback to 1 byte
+            return 1
+    
+    @staticmethod
+    def resolve_comprehension_element_type(variable_type, module: ir.Module) -> ir.Type:
+        """
+        Resolve the element type for an array comprehension from the variable type.
+        
+        Args:
+            variable_type: TypeSystem object for the loop variable, or None
+            module: LLVM module for type resolution
+            
+        Returns:
+            LLVM type for array elements (defaults to i32 if not specified)
+        """
+        if variable_type is not None:
+            return variable_type.get_llvm_type(module)
+        else:
+            return ir.IntType(32)
+
         val = int(literal_value, 0) if isinstance(literal_value, str) else int(literal_value)
         
         # For unsigned types with values >= 2^63, ensure proper handling
@@ -4202,6 +4302,7 @@ def coerce_return_value(
                 f"Invalid return type: can only convert between integer arrays, "
                 f"got {src} -> {expected}")
 
+
 class AssignmentTypeHandler:
     """
     Helper class for managing assignment type conversions, compatibility checks,
@@ -5272,3 +5373,169 @@ class StructTypeHandler:
             result = builder.bitcast(source_value, llvm_target_type)
         
         return result
+
+
+class SizeOfTypeHandler:
+    """
+    Type-only handling for sizeof().
+    Returns size in BITS or None if it cannot be determined at compile time.
+    """
+
+    @staticmethod
+    def bits_from_llvm_type(llvm_type: ir.Type, module: ir.Module) -> Optional[int]:
+        # Integers
+        if isinstance(llvm_type, ir.IntType):
+            return llvm_type.width
+
+        # Floats
+        if isinstance(llvm_type, ir.FloatType):
+            return 32
+        if isinstance(llvm_type, ir.DoubleType):
+            return 64
+
+        # Arrays
+        if isinstance(llvm_type, ir.ArrayType):
+            elem_bits = SizeOfTypeHandler.bits_from_llvm_type(
+                llvm_type.element, module
+            )
+            if elem_bits is None:
+                return module.data_layout.get_type_size(llvm_type) * 8
+            return elem_bits * llvm_type.count
+
+        # Pointers (Flux assumption)
+        if isinstance(llvm_type, ir.PointerType):
+            return 64
+
+        # Structs (literal or identified)
+        if isinstance(llvm_type, ir.LiteralStructType) or hasattr(llvm_type, "elements"):
+            elements = getattr(llvm_type, "elements", None)
+            if elements is None:
+                return module.data_layout.get_type_size(llvm_type) * 8
+
+            total = 0
+            for el in elements:
+                el_bits = SizeOfTypeHandler.bits_from_llvm_type(el, module)
+                if el_bits is None:
+                    total += module.data_layout.get_type_size(el) * 8
+                else:
+                    total += el_bits
+            return total
+
+        # Fallback to data layout if LLVM knows
+        try:
+            return module.data_layout.get_type_size(llvm_type) * 8
+        except Exception:
+            return None
+
+    @staticmethod
+    def sizeof_bits_for_target(target, builder, module) -> Optional[int]:
+        """
+        Resolve sizeof(target) using TYPE INFORMATION ONLY.
+        No IR emission, no value loading.
+        """
+        from fast import Identifier
+
+        # sizeof(TypeSystem)
+        if isinstance(target, TypeSystem):
+            llvm_type = target.get_llvm_type_with_array(module)
+            return SizeOfTypeHandler.bits_from_llvm_type(llvm_type, module)
+
+        # sizeof(identifier)
+        if isinstance(target, Identifier):
+            # Struct type name
+            if hasattr(module, "_struct_vtables") and target.name in module._struct_vtables:
+                return module._struct_vtables[target.name].total_bits
+
+            # Preferred path: type system info
+            ts = IdentifierTypeHandler.get_type_spec(target.name, builder, module)
+            if ts is not None:
+                llvm_type = ts.get_llvm_type_with_array(module)
+                return SizeOfTypeHandler.bits_from_llvm_type(llvm_type, module)
+
+            # Fallback: derive from existing LLVM storage
+            if getattr(builder, "scope", None) is not None and target.name in builder.scope:
+                ptr = builder.scope[target.name]
+                if isinstance(ptr.type, ir.PointerType):
+                    return SizeOfTypeHandler.bits_from_llvm_type(ptr.type.pointee, module)
+
+            if target.name in module.globals:
+                gvar = module.globals[target.name]
+                if isinstance(gvar.type, ir.PointerType):
+                    return SizeOfTypeHandler.bits_from_llvm_type(gvar.type.pointee, module)
+
+            return None
+
+        return None
+
+
+class AlignOfTypeHandler:
+    """
+    Type-only handling for alignof().
+    Returns alignment in BYTES or None if it cannot be determined at compile time.
+    """
+
+    @staticmethod
+    def alignment_from_llvm_type(llvm_type: ir.Type, module: ir.Module) -> Optional[int]:
+        try:
+            return module.data_layout.preferred_alignment(llvm_type)
+        except Exception:
+            return None
+
+    @staticmethod
+    def alignment_bytes_for_type_spec(type_spec: 'TypeSystem', module: ir.Module) -> int:
+        # Explicit alignment wins
+        if type_spec.alignment is not None:
+            return type_spec.alignment
+
+        # Flux special-case: data{bits} defaults to width alignment (in bytes)
+        if type_spec.base_type == DataType.DATA and type_spec.bit_width is not None:
+            return (type_spec.bit_width + 7) // 8
+
+        # Default: platform preferred alignment for the LLVM type
+        llvm_type = type_spec.get_llvm_type(module)
+        return module.data_layout.preferred_alignment(llvm_type)
+
+    @staticmethod
+    def alignof_bytes_for_target(target, builder, module) -> Optional[int]:
+        """
+        Resolve alignof(target) using type information only.
+        No IR emission, no value loading.
+        """
+        from fast import Identifier
+
+        # alignof(TypeSystem)
+        if isinstance(target, TypeSystem):
+            return AlignOfTypeHandler.alignment_bytes_for_type_spec(target, module)
+
+        # alignof(identifier) using stored type info first
+        if isinstance(target, Identifier):
+            # If the identifier names a struct type, use vtable info if it exists
+            if hasattr(module, "_struct_vtables") and target.name in module._struct_vtables:
+                vt = module._struct_vtables[target.name]
+                if hasattr(vt, "alignment_bytes"):
+                    return vt.alignment_bytes
+                if hasattr(vt, "alignment"):
+                    return vt.alignment
+
+            ts = IdentifierTypeHandler.get_type_spec(target.name, builder, module)
+            if ts is not None:
+                return AlignOfTypeHandler.alignment_bytes_for_type_spec(ts, module)
+
+            # Fallback: derive from existing LLVM storage (scope/globals)
+            if getattr(builder, "scope", None) is not None and target.name in builder.scope:
+                ptr = builder.scope[target.name]
+                if isinstance(ptr.type, ir.PointerType):
+                    return AlignOfTypeHandler.alignment_from_llvm_type(ptr.type.pointee, module)
+
+            if target.name in module.globals:
+                gvar = module.globals[target.name]
+                if isinstance(gvar.type, ir.PointerType):
+                    return AlignOfTypeHandler.alignment_from_llvm_type(gvar.type.pointee, module)
+
+            return None
+
+        # Some callsites may accidentally pass a decl node; support it without importing AST classes.
+        if hasattr(target, "type_spec") and isinstance(getattr(target, "type_spec"), TypeSystem):
+            return AlignOfTypeHandler.alignment_bytes_for_type_spec(target.type_spec, module)
+
+        return None
