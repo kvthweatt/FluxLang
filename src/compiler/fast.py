@@ -4291,7 +4291,7 @@ class TryBlock(Statement):
             catch_body.codegen(builder, module)
             
             # Remove exception variable from scope
-            if exc_name and not module.symbol_table.is_global_scope() and emodule.symbol_table.get_llvm_value(xc_name) is not None:
+            if exc_name and not module.symbol_table.is_global_scope() and module.symbol_table.get_llvm_value(exc_name) is not None:
                 module.symbol_table.delete_variable(exc_name)
             
             # Branch to end if not already terminated

@@ -9,8 +9,12 @@
 #ifndef FLUX_STANDARD_NET
 #def FLUX_STANDARD_NET 1;
 
+#ifndef FLUX_STANDARD_TYPES
 #import "redtypes.fx";
+#endif;
+#ifndef FLUX_STANDARD_MEMORY
 #import "redmemory.fx";
+#endif;
 
 // ============ WINSOCK FFI DECLARATIONS ============
 extern
@@ -191,15 +195,15 @@ namespace standard
         // Initialize sockaddr_in structure
         def init_sockaddr(sockaddr_in* addr, u32 ip_addr, u16 port) -> void
         {
-            *addr.sin_family = (u16)AF_INET;
-            *addr.sin_port = htons(port);
-            *addr.sin_addr = ip_addr;
+            addr.sin_family = (u16)AF_INET;
+            addr.sin_port = htons(port);
+            addr.sin_addr = ip_addr;
             
             // Zero out padding
             int i = 0;
             while (i < 8)
             {
-                *addr.sin_zero[i] = 0;
+                addr.sin_zero[i] = 0;
                 i = i + 1;
             };
         };
@@ -207,9 +211,9 @@ namespace standard
         // Initialize sockaddr_in with string IP (dotted decimal)
 def init_sockaddr_str(sockaddr_in* addr, byte* ip_str, u16 port) -> void
 {
-    *addr.sin_family = (u16)AF_INET;
-    *addr.sin_port = htons(port);
-    *addr.sin_addr = htonl(inet_addr(ip_str));
+    addr.sin_family = (u16)AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr = htonl(inet_addr(ip_str));
     
     print("After init_sockaddr_str:\n\0");
     print("  sin_family = \0");
@@ -226,7 +230,7 @@ def init_sockaddr_str(sockaddr_in* addr, byte* ip_str, u16 port) -> void
     int i = 0;
     while (i < 8)
     {
-        *addr.sin_zero[i] = (byte)0;
+        addr.sin_zero[i] = (byte)0;
         i = i + 1;
     };
 };
@@ -346,7 +350,7 @@ def init_sockaddr_str(sockaddr_in* addr, byte* ip_str, u16 port) -> void
 
             if (connect_result < 0)
             {
-                int err = net::get_last_error();  // Call it RIGHT HERE
+                int err = get_last_error();  // Call it RIGHT HERE
                 print("connect failed. WSA Error: \0");
                 print(err);
                 print("\n\0");

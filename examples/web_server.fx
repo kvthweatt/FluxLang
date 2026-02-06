@@ -190,7 +190,7 @@ def handle_client(int client_sock) -> void
 def main() -> int
 {
     // Initialize Winsock
-    int init_result = net::init();
+    int init_result = init();
     if (init_result != 0)
     {
         print("Failed to initialize Winsock\n\0");
@@ -206,7 +206,7 @@ def main() -> int
         print("Failed to create server socket\nserver_sock = \0");
         print(server_sock);
         print();
-        net::cleanup();
+        cleanup();
         return 1;
     };
     
@@ -222,8 +222,8 @@ def main() -> int
         if (client_sock >= 0)
         {
             // Get client info
-            byte* client_ip = net::get_ip_string(@client_addr);
-            u16 client_port = net::get_port(@client_addr);
+            byte* client_ip = get_ip_string(@client_addr);
+            u16 client_port = get_port(@client_addr);
             
             print("Connection from: \0");
             int ip_len = 0;
@@ -238,7 +238,7 @@ def main() -> int
     
     // Cleanup (never reached in this simple server)
     tcp_close(server_sock);
-    net::cleanup();
+    cleanup();
     
     return 0;
 };
