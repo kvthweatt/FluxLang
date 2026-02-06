@@ -1,5 +1,4 @@
 #import "standard.fx";
-#import "red_string_utilities.fx";
 
 def main() -> int
 {

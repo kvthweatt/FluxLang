@@ -872,7 +872,7 @@ class BinaryOp(Expression):
         return is_unsigned(left_val) or is_unsigned(right_val)
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        ctx = LoweringContext(builder)
+        ctx = CoercionContext(builder)
 
         lhs = self.left.codegen(builder, module)
         rhs = self.right.codegen(builder, module)
@@ -975,6 +975,12 @@ class BinaryOp(Expression):
 
             if isinstance(lhs.type, ir.PointerType) or isinstance(rhs.type, ir.PointerType):
                 return ctx.emit_ptr_cmp(op, lhs, rhs)
+
+            # Coerce integer operands to same width before comparison
+            if isinstance(lhs.type, ir.IntType) and isinstance(rhs.type, ir.IntType):
+                if lhs.type.width != rhs.type.width:
+                    unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
+                    lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=unsigned, promote=True)
 
             return ctx.emit_int_cmp(op, lhs, rhs)
 
@@ -2027,7 +2033,7 @@ class FunctionCall(Expression):
                 
                 # Also check for overloaded versions of the resolved name
                 func = self._try_overload_resolution(builder, module, resolved_name)
-                print("TRYING OVERLOAD RESOLUTION")
+                #print("TRYING OVERLOAD RESOLUTION")
                 if func is not None:
                     #print(f"[NAMESPACE RESOLVE]   Found via overload resolution!", file=sys.stderr)
                     return func
@@ -3098,11 +3104,19 @@ class VariableDeclaration(ASTNode):
     def _initialize_local(self, builder: ir.IRBuilder, module: ir.Module, 
                          alloca: ir.Value, llvm_type: ir.Type) -> None:
         """Initialize local variable with initial value."""
-        # Delegate array literal initialization to ArrayLiteral
+        # Handle array instance initialization
         if isinstance(self.initial_value, ArrayLiteral):
-            ArrayTypeHandler.initialize_local_array(
-                builder, module, alloca, llvm_type, self.initial_value
-            )
+            # If target is an integer, pack the array into it
+            if isinstance(llvm_type, ir.IntType):
+                packed_val = ArrayTypeHandler.pack_array_to_integer(
+                    builder, module, self.initial_value, llvm_type
+                )
+                builder.store(packed_val, alloca)
+            # Otherwise, initialize as array
+            else:
+                ArrayTypeHandler.initialize_local_array(
+                    builder, module, alloca, llvm_type, self.initial_value
+                )
             return
 
         if isinstance(self.initial_value, ArrayComprehension):
@@ -3294,7 +3308,7 @@ class Block(Statement):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         result = None
-        print(self.statements)
+        #print(self.statements)
         #print(f"DEBUG Block: Processing {len(self.statements)} statements")
         for i, stmt in enumerate(self.statements):
             #print(f"DEBUG Block: Processing statement {i}: {type(stmt).__name__}")

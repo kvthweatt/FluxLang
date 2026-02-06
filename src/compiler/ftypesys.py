@@ -2526,6 +2526,7 @@ class ArrayTypeHandler:
     @staticmethod
     def initialize_local_array(builder: ir.IRBuilder, module: ir.Module, alloca: ir.Value, llvm_type: ir.Type, array_literal) -> None:
         """Initialize a local array variable with an array literal."""
+        print("[TYPESYS] In initialize_local_array()")
         from fast import StringLiteral
         
         zero = ArrayTypeHandler._zero()
@@ -2543,8 +2544,17 @@ class ArrayTypeHandler:
                 elem_ptr = builder.gep(alloca, [zero, ArrayTypeHandler._index(i)], name=f"elem_{i}")
                 builder.store(ir.Constant(llvm_type.element, packed_value), elem_ptr)
             else:
-                elem_val = elem.codegen(builder, module)
-                elem_val = ArrayTypeHandler._load_if_pointer(builder, elem_val)
+                print("Packing into integer ...")
+                from fast import ArrayLiteral
+                
+                # Handle nested array packing: if element is an ArrayLiteral and target is integer, pack it
+                if isinstance(elem, ArrayLiteral) and isinstance(llvm_type.element, ir.IntType):
+                    # Pack the nested array literal into an integer
+                    elem_val = ArrayTypeHandler.pack_array_to_integer(
+                        builder, module, elem, llvm_type.element)
+                else:
+                    elem_val = elem.codegen(builder, module)
+                    elem_val = ArrayTypeHandler._load_if_pointer(builder, elem_val)
                 
                 if elem_val.type != llvm_type.element:
                     if isinstance(elem_val.type, ir.IntType) and isinstance(llvm_type.element, ir.IntType):
@@ -2560,6 +2570,7 @@ class ArrayTypeHandler:
     def pack_array_to_integer(builder: ir.IRBuilder, module: ir.Module, 
                              array_lit, target_type: ir.IntType) -> ir.Value:
         """Pack array literal elements into a single integer (compile-time if possible)."""
+        print("[TYPESYS] In pack_array_to_integer()")
         packed_value = 0
         bit_offset = 0
         
@@ -3157,7 +3168,7 @@ class IdentifierTypeHandler:
         return hasattr(module, '_type_aliases') and name in module._type_aliases
 
 
-class LoweringContext:
+class CoercionContext:
     def __init__(instance, builder: ir.IRBuilder):
         instance.b = builder
 
@@ -3172,7 +3183,7 @@ class LoweringContext:
 
     @staticmethod
     def comparison_is_unsigned(a: ir.Value, b: ir.Value) -> bool:
-        return LoweringContext.is_unsigned(a) or LoweringContext.is_unsigned(b)
+        return CoercionContext.is_unsigned(a) or CoercionContext.is_unsigned(b)
 
     # --------------------------------------------------
     # Integer normalization
@@ -3209,7 +3220,7 @@ class LoweringContext:
                 return v
             elif v.type.width < width:
                 # Extending to larger width
-                result = instance.b.zext(v, ty) if unsigned else instance.b.zext(v, ty)
+                result = instance.b.zext(v, ty) if unsigned else instance.b.sext(v, ty)
             else:
                 # Truncating to smaller width
                 result = instance.b.trunc(v, ty)
@@ -3967,9 +3978,10 @@ class FunctionTypeHandler:
             if type_spec.is_pointer:
                 mangled += f"_ptr{type_spec.pointer_depth}"
             
-            # Add bit width for DATA types
+            # Add bit width for DATA types (with signedness)
             if type_spec.base_type == DataType.DATA and type_spec.bit_width:
-                mangled += f"_bits{type_spec.bit_width}"
+                sign_prefix = "sbits" if type_spec.is_signed else "ubits"
+                mangled += f"_{sign_prefix}{type_spec.bit_width}"
         
         # Add return type information
         if return_type_spec.custom_typename:
@@ -4076,7 +4088,7 @@ class FunctionTypeHandler:
             Matching function or None if no match found
         """
         # DEBUG: Overload resolution
-        print(f"[OVERLOAD DEBUG] Resolving {base_name} with {len(arg_vals)} args", file=sys.stderr)
+        #print(f"[OVERLOAD DEBUG] Resolving {base_name} with {len(arg_vals)} args", file=sys.stderr)
         if not hasattr(module, '_function_overloads'):
             return None
         
@@ -4105,9 +4117,9 @@ class FunctionTypeHandler:
                 # Check if types match (with compatibility rules)
                 match = True
                 for i, (param_type, arg_val) in enumerate(zip(param_types, arg_vals)):
-                    print(f"[OVERLOAD] Param {i}: custom_typename={getattr(param_type, 'custom_typename', None)}, is_array={getattr(param_type, 'is_array', None)}, is_pointer={getattr(param_type, 'is_pointer', None)}", file=sys.stderr)
+                    #print(f"[OVERLOAD] Param {i}: custom_typename={getattr(param_type, 'custom_typename', None)}, is_array={getattr(param_type, 'is_array', None)}, is_pointer={getattr(param_type, 'is_pointer', None)}", file=sys.stderr)
                     expected_llvm_type = param_type.get_llvm_type_with_array(module)
-                    print(f"[OVERLOAD] Arg {i}: arg_type={arg_val.type}, expected={expected_llvm_type}", file=sys.stderr)
+                    #print(f"[OVERLOAD] Arg {i}: arg_type={arg_val.type}, expected={expected_llvm_type}", file=sys.stderr)
                     
                     # Check for exact type match first
                     if arg_val.type == expected_llvm_type:
@@ -4233,6 +4245,19 @@ class FunctionTypeHandler:
             arg_val.type.pointee.element == expected_type.pointee):
             zero = ir.Constant(ir.IntType(32), 0)
             return builder.gep(arg_val, [zero, zero], name=f"arg{arg_index}_decay")
+        
+        # Integer type coercion - handle width mismatches
+        if isinstance(arg_val.type, ir.IntType) and isinstance(expected_type, ir.IntType):
+            if arg_val.type.width != expected_type.width:
+                # Check if argument is unsigned
+                unsigned = CoercionContext.is_unsigned(arg_val)
+                
+                if arg_val.type.width < expected_type.width:
+                    # Extending to larger width
+                    return builder.zext(arg_val, expected_type) if unsigned else builder.sext(arg_val, expected_type)
+                else:
+                    # Truncating to smaller width
+                    return builder.trunc(arg_val, expected_type)
         
         # Check if this is an object type that has a __expr method for automatic conversion
         if isinstance(arg_val.type, ir.PointerType):
@@ -4951,7 +4976,7 @@ def coerce_return_value(
     Raises:
         TypeError: If the value cannot be coerced to the expected type
     """
-    ctx = LoweringContext(builder)
+    ctx = CoercionContext(builder)
     src = value.type
 
     # Exact match
@@ -4964,7 +4989,7 @@ def coerce_return_value(
     if isinstance(src, ir.IntType) and isinstance(expected, ir.IntType):
         if src.width < expected.width:
             # Widening: use zero-extension for unsigned, sign-extension for signed
-            unsigned = LoweringContext.is_unsigned(value)
+            unsigned = CoercionContext.is_unsigned(value)
             result = builder.zext(value, expected) if unsigned else builder.sext(value, expected)
             # Preserve type metadata
             if hasattr(value, '_flux_type_spec'):
@@ -5115,11 +5140,11 @@ class AssignmentTypeHandler:
             # This is assigning void* (i8*) to a typed pointer
             return builder.bitcast(val, target_type, name="void_ptr_to_typed")
         
-        # Handle integer type mismatches using LoweringContext
+        # Handle integer type mismatches using CoercionContext
         if isinstance(val.type, ir.IntType) and isinstance(target_type, ir.IntType):
             if val.type.width != target_type.width:
-                # Determine signedness from the value's metadata using LoweringContext
-                unsigned = LoweringContext.is_unsigned(val)
+                # Determine signedness from the value's metadata using CoercionContext
+                unsigned = CoercionContext.is_unsigned(val)
                 
                 # Handle widening (extending to larger type)
                 if val.type.width < target_type.width:

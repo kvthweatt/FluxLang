@@ -1,3 +1,33 @@
+commit f5d7b72856f9e76d0f95c9f89ac3e65a5180fe42
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Fri Feb 6 02:14:02 2026 -0600
+
+    The only way out is through.
+
+commit 95c97b10c110553db433152964f8f72c9f9edfa4
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 5 12:59:46 2026 -0600
+
+    Past the roadblock, now onto solving signed/unsigned integer flip flopping.
+
+commit 748ad73c1f93ca8bcdfbead9d9952f6745b61619
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 5 11:20:16 2026 -0600
+
+    Begin refactoring type system before continuing AST refactor. Things will be broken for a little bit. Use previous commits to enjoy the language until resolved.
+
+commit fa893b8ccff7d60d7d8455fa6bac40465c7d792c
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 5 08:51:17 2026 -0600
+
+    Refactored all struct classes and their type handling into the type system.
+
+commit 80c0e0637c2acfc1cf80233f8f91b1c70ea6f7e3
+Author: kvthweatt <kvthweatt@gmail.com>
+Date:   Thu Feb 5 08:23:46 2026 -0600
+
+    Refactored Assignment, CompoundAssignment, and ObjectDef type handling into the type system.
+
 commit 207abb42460bbebcd4e2e932521fd6495d4ee7fb
 Author: kvthweatt <kvthweatt@gmail.com>
 Date:   Thu Feb 5 05:35:13 2026 -0600

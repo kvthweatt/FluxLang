@@ -554,7 +554,7 @@ class FluxParser:
         self.consume(TokenType.RETURN_ARROW)
         return_type = self.type_spec()
         
-        print("GOT FUNCTION POINTER")
+        #print("GOT FUNCTION POINTER")
         
         return FunctionPointerType(return_type, parameter_types)
 
@@ -1164,10 +1164,16 @@ class FluxParser:
             pointer_depth += 1
             self.advance()
 
+        #if custom_typename == "byte":
+        #    print(custom_typename)
+        #    exit()
+
         # ---- FULL TYPE ALIAS RESOLUTION (canonicalize) ----
         resolved_spec = None
         if custom_typename is not None:
             resolved_spec = self.symbol_table.get_type_spec(custom_typename)
+            #print(resolved_spec)
+            #exit()
 
         if resolved_spec is not None:
             # Start from the alias' full TypeSystem (canonical)
@@ -2515,7 +2521,7 @@ class FluxParser:
             self.advance()
             return self.parse_f_string(f_string_content)
         elif self.expect(TokenType.I_STRING):
-            print("GOT I-STRING")
+            #print("GOT I-STRING")
             return
         elif self.expect(TokenType.TRUE):
             self.advance()
@@ -2661,7 +2667,7 @@ class FluxParser:
         
         # Check if this is an array comprehension
         if self.expect(TokenType.FOR):
-            print("DOING ARRAY ArrayComprehension")
+            #print("DOING ARRAY ArrayComprehension")
             # This is an array comprehension: [expr for (type var in iterable)]
             self.advance()  # consume 'for'
             self.consume(TokenType.LEFT_PAREN)

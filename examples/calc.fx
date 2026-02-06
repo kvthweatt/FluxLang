@@ -49,37 +49,12 @@ def main() -> int
             print(result);
             print("\n\0");
         }
-        case (2)
-        {
-            result = num1 - num2;
-            print("Result: \0");
-            print(result);
-            print("\n\0");
-        }
-        case (3)
-        {
-            result = num1 * num2;
-            print("Result: \0");
-            print(result);
-            print("\n\0");
-        }
-        case (4)
-        {
-            if (num2 == 0)
-            {
-                print("Error: Division by zero!\n\0");
-                return 1;
-            };
-            result = num1 / num2;
-            print("Result: \0");
-            print(result);
-            print("\n\0");
-        }
+
         default
         {
             print("Invalid choice!\n\0");
             return 1;
-        }
+        };
     };
     
     return 0;

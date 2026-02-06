@@ -2,18 +2,17 @@
 
 def main() -> int
 {
-    int x = 1000;
     try
     {
-        print("Throwing...\0");
-        throw(x);
+        throw(100);
     }
-    catch (int s)
+    catch (int err)
     {
-        print("\nCaught \0");
-        print(s);
+        print("Caught \0");
+        print(err);
         print("!\n\0");
     };
-    
+
+    print("Done\n\0");
     return 0;
 };
