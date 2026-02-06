@@ -17,48 +17,36 @@ Usage:
     python3 parser.py file.fx -a       # Show AST structure
 """
 
+import os
+from pathlib import Path
+from typing import Set, Dict, Optional, List
+from dataclasses import dataclass
+from enum import Enum
+import sys
+from flogger import FluxLogger, FluxLoggerConfig, LogLevel
+from flexer import FluxLexer
+from fpreprocess import *
+
+# Import preprocessor and lexer
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from fpreprocess import FXPreprocessor
+    from flexer import FluxLexer
+except ImportError:
+    # If running from different location, try alternate paths
+    try:
+        from .fpreprocess import FXPreprocessor
+        from .flexer import FluxLexer
+    except ImportError:
+        raise ImportError("Could not import FXPreprocessor or FluxLexer")
+
+
 import sys
 from contextlib import contextmanager
 from typing import List, Optional, Union, Any
 from flexer import FluxLexer, TokenType, Token
 from fast import *
-
-class SymbolKind(Enum):
-    TYPE = "type"
-    VARIABLE = "variable"
-    FUNCTION = "function"
-    NAMESPACE = "namespace"
-
-class SymbolTable:
-    def __init__(self):
-        self.scopes: List[Dict[str, SymbolKind]] = [{}]
-        self._initialize_builtins()
     
-    def _initialize_builtins(self):
-        builtins = ['int', 'uint', 'float', 'char', 'bool', 'void', 'data']
-        for typename in builtins:
-            self.scopes[0][typename] = SymbolKind.TYPE
-    
-    def enter_scope(self):
-        self.scopes.append({})
-    
-    def exit_scope(self):
-        if len(self.scopes) > 1:
-            self.scopes.pop()
-    
-    def define(self, name: str, kind: SymbolKind):
-        self.scopes[-1][name] = kind
-    
-    def lookup(self, name: str) -> Optional[SymbolKind]:
-        for scope in reversed(self.scopes):
-            if name in scope:
-                return scope[name]
-        return None
-    
-    def is_type(self, name: str) -> bool:
-        kind = self.lookup(name)
-        return kind == SymbolKind.TYPE
-
 class ParseError(Exception):
     """Exception raised when parsing fails"""
     def __init__(self, message: str, token: Optional[Token] = None):
@@ -74,6 +62,33 @@ class FluxParser:
         self.parse_errors = []  # Track parse errors
         self._processing_imports = set()
         self.symbol_table = SymbolTable()
+        self._preprocessor_macros = []
+        self._namespace_stack = []  # Track current namespace path for symbol registration
+
+
+    @classmethod
+    def from_file(self, source_file: str, compiler_macros: Optional[Dict[str, str]] = None):
+        """
+        Create a parser by preprocessing and lexing a source file.
+        """
+        # Step 1: Preprocess
+        preprocessor = FXPreprocessor(source_file, compiler_macros or {})
+        preprocessed_source = preprocessor.process()
+
+        # Step 2: Lex
+        print(f"[INFO] [lexer] ► Lexical analysis")
+        lexer = FluxLexer(preprocessed_source)
+        tokens = lexer.tokenize()
+
+        # Step 3: Create parser
+        print(f"[INFO] [parser] ► Parsing")
+        parser = self(tokens)
+        print(f"[INFO] [parser] ► AST generated.")
+
+        # Expose final macro set to parser/codegen if needed
+        parser._preprocessor_macros = dict(preprocessor.macros)
+
+        return parser
 
     @contextmanager
     def _lookahead(self):
@@ -160,7 +175,7 @@ class FluxParser:
                 print(error_msg, file=sys.stderr)
                 self.parse_errors.append(error_msg)
                 self.synchronize()
-        return Program(statements)
+        return Program(self.symbol_table,statements=statements)
     
     def has_errors(self) -> bool:
         """Check if any parse errors occurred during parsing"""
@@ -303,7 +318,9 @@ class FluxParser:
         namespace_path = self.consume(TokenType.IDENTIFIER).value
         while self.expect(TokenType.SCOPE):  # ::
             self.advance()
-            namespace_path += "::" + self.consume(TokenType.IDENTIFIER).value
+            namespace_path += "__" + self.consume(TokenType.IDENTIFIER).value
+
+        #print("PARSER: USING_STATEMENT()",namespace_path)
         
         # For now, handle only single namespace per statement
         # TODO: Add support for comma-separated namespaces
@@ -385,8 +402,6 @@ class FluxParser:
             self.consume(TokenType.NO_MANGLE)
         name = self.consume(TokenType.IDENTIFIER).value
         
-        self.symbol_table.enter_scope()
-        
         self.consume(TokenType.LEFT_PAREN)
         parameters = []
         if not self.expect(TokenType.RIGHT_PAREN):
@@ -453,9 +468,7 @@ class FluxParser:
         # Only add named parameters to symbol table
         for param in parameters:
             if param.name:
-                self.symbol_table.define(param.name, SymbolKind.VARIABLE)
-        
-        self.symbol_table.exit_scope()
+                self.symbol_table.define(param.name, SymbolKind.VARIABLE, param.type_spec)
         
         return FunctionDef(name, parameters, return_type, body, is_const, 
                           is_volatile, is_prototype, no_mangle)
@@ -901,29 +914,37 @@ class FluxParser:
         return ObjectDef(name, methods, members, nested_objects, nested_structs)
     
     def namespace_def(self) -> NamespaceDef:
+        """
+        namespace_def -> 'namespace' IDENTIFIER '{' namespace_body* '}' ';'
+        """
         self.consume(TokenType.NAMESPACE)
-        namespace_parts = [self.consume(TokenType.IDENTIFIER).value]
-        while self.expect(TokenType.SCOPE):
-            self.consume(TokenType.SCOPE)
-            namespace_parts.append(self.consume(TokenType.IDENTIFIER).value)
-        name = '__'.join(namespace_parts)
+        name = self.consume(TokenType.IDENTIFIER).value
         
+        # ADDED: Push namespace onto stack for qualified name tracking
+        self._namespace_stack.append(name)
+        current_namespace = '__'.join(self._namespace_stack)
+        
+        # Parse optional base namespaces
         base_namespaces = []
+        if self.expect(TokenType.COLON):
+            self.advance()
+            base_name = self.consume(TokenType.IDENTIFIER).value
+            base_namespaces.append(base_name)
+            
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                base_name = self.consume(TokenType.IDENTIFIER).value
+                base_namespaces.append(base_name)
+        
+        self.consume(TokenType.LEFT_BRACE)
+        
         functions = []
         structs = []
         objects = []
         enums = []
-        externs = []
+        extern_blocks = []
         variables = []
         nested_namespaces = []
-        
-        if self.expect(TokenType.SEMICOLON):
-            self.advance()
-            return NamespaceDef(name, functions, structs, objects, variables, 
-                               nested_namespaces, base_namespaces)
-        
-        self.symbol_table.enter_scope()
-        self.consume(TokenType.LEFT_BRACE)
         
         while not self.expect(TokenType.RIGHT_BRACE):
             if self.expect(TokenType.GLOBAL, TokenType.LOCAL, TokenType.HEAP, 
@@ -940,23 +961,40 @@ class FluxParser:
                 if isinstance(func, list):
                     for f in func:
                         functions.append(f)
+                        # CHANGED: Register with full namespace-qualified name
+                        qualified_name = f"{current_namespace}__{f.name}"
+                        self.symbol_table.define(qualified_name, SymbolKind.FUNCTION)
+                        # ALSO register the simple name for lookups within the namespace
                         self.symbol_table.define(f.name, SymbolKind.FUNCTION)
                 else:
                     functions.append(func)
+                    # CHANGED: Register with full namespace-qualified name
+                    qualified_name = f"{current_namespace}__{func.name}"
+                    self.symbol_table.define(qualified_name, SymbolKind.FUNCTION)
+                    # ALSO register the simple name for lookups within the namespace
                     self.symbol_table.define(func.name, SymbolKind.FUNCTION)
             elif self.expect(TokenType.STRUCT):
                 struct = self.struct_def()
                 structs.append(struct)
+                # ADDED: Register struct type in symbol table
+                qualified_name = f"{current_namespace}__{struct.name}"
+                self.symbol_table.define(qualified_name, SymbolKind.TYPE)
+                self.symbol_table.define(struct.name, SymbolKind.TYPE)
             elif self.expect(TokenType.OBJECT):
                 obj = self.object_def()
                 objects.append(obj)
             elif self.expect(TokenType.ENUM):
                 enum = self.enum_def()
                 enums.append(enum)
+                # ADDED: Register enum type in symbol table
+                qualified_name = f"{current_namespace}__{enum.name}"
+                self.symbol_table.define(qualified_name, SymbolKind.TYPE)
+                self.symbol_table.define(enum.name, SymbolKind.TYPE)
             elif self.expect(TokenType.EXTERN):
                 extern = self.extern_statement()
-                externs.append(extern)
+                extern_blocks.append(extern)
             elif self.expect(TokenType.NAMESPACE):
+                # Nested namespace - recursion will handle namespace stack
                 nested_ns = self.namespace_def()
                 merged = False
                 for existing_ns in nested_namespaces:
@@ -979,29 +1017,50 @@ class FluxParser:
                 var_decl = self.variable_declaration()
                 if isinstance(var_decl, list):
                     variables.extend(var_decl)
+                    # ADDED: Register variables with qualified names
+                    for vd in var_decl:
+                        qualified_name = f"{current_namespace}__{vd.name}"
+                        self.symbol_table.define(qualified_name, SymbolKind.VARIABLE, vd.type_spec)
+                        self.symbol_table.define(vd.name, SymbolKind.VARIABLE, vd.type_spec)
                 else:
                     variables.append(var_decl)
+                    # ADDED: Register variable with qualified name
+                    qualified_name = f"{current_namespace}__{var_decl.name}"
+                    self.symbol_table.define(qualified_name, SymbolKind.VARIABLE, var_decl.type_spec)
+                    self.symbol_table.define(var_decl.name, SymbolKind.VARIABLE, var_decl.type_spec)
                 self.consume(TokenType.SEMICOLON)
             else:
                 self.error("Expected function, struct, object, namespace, or variable declaration")
         
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
-        self.symbol_table.exit_scope()
         
-        return NamespaceDef(name, functions, structs, objects, enums, externs, variables, 
-                           nested_namespaces, base_namespaces)
+        # ADDED: Pop namespace from stack
+        self._namespace_stack.pop()
+
+        return NamespaceDef(
+            name=name,
+            functions=functions,
+            structs=structs,
+            objects=objects,
+            enums=enums,
+            extern_blocks=extern_blocks,
+            variables=variables,
+            nested_namespaces=nested_namespaces,
+            base_namespaces=base_namespaces
+        )
     
     def type_spec(self) -> TypeSystem:
         """
         type_spec -> ('global'|'local'|'heap'|'stack'|'register')? ('const')? ('volatile')? ('signed'|'unsigned')? base_type alignment? array_spec? pointer_spec?
         array_spec -> ('[' expression? ']')+
-        
+
         NOTE: Storage class can come FIRST, before qualifiers
         """
         is_const = False
         is_volatile = False
         is_signed = True
+        signedness_explicit = False
         storage_class = None
 
         # Parse storage class FIRST (before qualifiers)
@@ -1026,18 +1085,20 @@ class FluxParser:
         if self.expect(TokenType.CONST):
             is_const = True
             self.advance()
-        
+
         if self.expect(TokenType.VOLATILE):
             is_volatile = True
             self.advance()
-        
+
         if self.expect(TokenType.SIGNED):
             is_signed = True
+            signedness_explicit = True
             self.advance()
         elif self.expect(TokenType.UNSIGNED):
             is_signed = False
+            signedness_explicit = True
             self.advance()
-        
+
         # Base type parsing
         base_type_result = self.base_type()
         custom_typename = None
@@ -1046,7 +1107,7 @@ class FluxParser:
         if self.expect(TokenType.FUNCTION_POINTER):
             self.advance()
             return self.function_pointer_type()
-        
+
         # Handle custom type names
         if isinstance(base_type_result, list):
             base_type = base_type_result[0]
@@ -1057,13 +1118,13 @@ class FluxParser:
         # Bit width and alignment for data types
         bit_width = None
         alignment = None
-        endianness = 0 # Default is little-endian in Flux. Primary guarantee, second in AST.
-        
+        endianness = 1  # Default is big-endian in Flux. Primary guarantee, second in AST.
+
         if base_type == DataType.DATA and custom_typename is None:
             if self.expect(TokenType.LEFT_BRACE):
                 self.advance()
                 bit_width = int(self.consume(TokenType.SINT_LITERAL).value)
-                
+
                 if self.expect(TokenType.COLON):
                     self.advance()
                     alignment = int(self.consume(TokenType.SINT_LITERAL).value)
@@ -1074,12 +1135,11 @@ class FluxParser:
                     self.advance()
                     alignment = bit_width
                     endianness = int(self.consume(TokenType.SINT_LITERAL).value)
-                
+
                 self.consume(TokenType.RIGHT_BRACE)
-        
+
         # Array specification - support multiple dimensions
         array_dims = []
-        
         while self.expect(TokenType.LEFT_BRACKET):
             self.advance()
             if not self.expect(TokenType.RIGHT_BRACKET):
@@ -1093,17 +1153,73 @@ class FluxParser:
             else:
                 array_dims.append(None)
             self.consume(TokenType.RIGHT_BRACKET)
-        
+
         is_array = len(array_dims) > 0
         array_size = array_dims[0] if array_dims else None
         array_dimensions = array_dims if array_dims else None
-        
+
         # Pointer specification - support multiple levels
         pointer_depth = 0
         while self.expect(TokenType.MULTIPLY):
             pointer_depth += 1
             self.advance()
 
+        # ---- FULL TYPE ALIAS RESOLUTION (canonicalize) ----
+        resolved_spec = None
+        if custom_typename is not None:
+            resolved_spec = self.symbol_table.get_type_spec(custom_typename)
+
+        if resolved_spec is not None:
+            # Start from the alias' full TypeSystem (canonical)
+            t = TypeSystem(
+                base_type=resolved_spec.base_type,
+                is_signed=resolved_spec.is_signed,
+                is_const=resolved_spec.is_const,
+                is_volatile=resolved_spec.is_volatile,
+                bit_width=resolved_spec.bit_width,
+                alignment=resolved_spec.alignment,
+                endianness=resolved_spec.endianness,
+                is_array=resolved_spec.is_array,
+                array_size=resolved_spec.array_size,
+                array_dimensions=list(resolved_spec.array_dimensions) if resolved_spec.array_dimensions else None,
+                array_element_type=resolved_spec.array_element_type,
+                is_pointer=resolved_spec.is_pointer,
+                pointer_depth=resolved_spec.pointer_depth,
+                custom_typename=resolved_spec.custom_typename,
+                storage_class=resolved_spec.storage_class,
+            )
+
+            # Apply use-site qualifiers (override / add)
+            if is_const:
+                t.is_const = True
+            if is_volatile:
+                t.is_volatile = True
+            if storage_class is not None:
+                t.storage_class = storage_class
+
+            # Only override signedness if user explicitly wrote signed/unsigned
+            if signedness_explicit:
+                t.is_signed = is_signed
+
+            # Apply use-site arrays (append dimensions if alias already has them)
+            if is_array:
+                if t.array_dimensions:
+                    t.is_array = True
+                    t.array_dimensions = t.array_dimensions + (array_dimensions or [])
+                    t.array_size = t.array_dimensions[0] if t.array_dimensions else t.array_size
+                else:
+                    t.is_array = True
+                    t.array_dimensions = array_dimensions
+                    t.array_size = array_size
+
+            # Apply use-site pointers (add depth)
+            if pointer_depth > 0:
+                t.is_pointer = True
+                t.pointer_depth = (t.pointer_depth or 0) + pointer_depth
+
+            return t
+
+        # No alias: return what we parsed normally
         return TypeSystem(
             base_type=base_type,
             is_signed=is_signed,
@@ -1115,11 +1231,13 @@ class FluxParser:
             is_array=is_array,
             array_size=array_size,
             array_dimensions=array_dimensions,
+            array_element_type=None,
             is_pointer=pointer_depth > 0,
             pointer_depth=pointer_depth,
             custom_typename=custom_typename,
             storage_class=storage_class
         )
+
     
     def base_type(self) -> Union[DataType, List]:
         """
@@ -1245,7 +1363,8 @@ class FluxParser:
         if self.expect(TokenType.AS):
             self.advance()
             type_name = self.consume(TokenType.IDENTIFIER).value
-            self.symbol_table.define(type_name, SymbolKind.TYPE)
+            # Register type alias in current scope
+            self.symbol_table.define(type_name, SymbolKind.TYPE, type_spec)
             
             initial_value = None
             if self.expect(TokenType.ASSIGN):
@@ -1261,7 +1380,7 @@ class FluxParser:
             return TypeDeclaration(type_name, type_spec, initial_value)
         else:
             name = self.consume(TokenType.IDENTIFIER).value
-            self.symbol_table.define(name, SymbolKind.VARIABLE)
+            self.symbol_table.define(name, SymbolKind.VARIABLE, type_spec)
             
             if self.expect(TokenType.LEFT_PAREN):
                 self.advance()
@@ -1285,7 +1404,7 @@ class FluxParser:
             while self.expect(TokenType.COMMA):
                 self.advance()
                 var_name = self.consume(TokenType.IDENTIFIER).value
-                self.symbol_table.define(var_name, SymbolKind.VARIABLE)
+                self.symbol_table.define(var_name, SymbolKind.VARIABLE, type_spec)
                 names.append(var_name)
             
             # Parse initializers if present
@@ -1346,7 +1465,6 @@ class FluxParser:
     
     def block(self) -> Block:
         self.consume(TokenType.LEFT_BRACE)
-        self.symbol_table.enter_scope()
         
         statements = []
         while not self.expect(TokenType.RIGHT_BRACE):
@@ -1359,7 +1477,6 @@ class FluxParser:
                     statements.append(stmt)
         
         self.consume(TokenType.RIGHT_BRACE)
-        self.symbol_table.exit_scope()
         
         return Block(statements)
 
@@ -1834,7 +1951,7 @@ class FluxParser:
         
         if self.expect(TokenType.NULL_COALESCE):
             self.advance()
-            print("GOT NULL COALESCE")
+            #print("GOT NULL COALESCE")
             right = self.null_coalesce_expression()  # Right associative
             return NullCoalesce(expr, right)
         

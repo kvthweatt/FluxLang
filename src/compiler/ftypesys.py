@@ -8,12 +8,281 @@ Contributors:
     Piotr Bednarski
 """
 
+import sys, traceback, faulthandler
 from dataclasses import dataclass, field
 from typing import List, Any, Optional, Union, Dict, Tuple
 from enum import Enum
 from llvmlite import ir
 
 from flexer import TokenType
+
+
+#faulthandler.enable()
+
+debug_counter = 0
+
+class SymbolKind(Enum):
+    TYPE = "type"
+    VARIABLE = "variable"
+    FUNCTION = "function"
+    NAMESPACE = "namespace"
+    OBJECT = "object"
+    STRUCT = "struct"
+    UNION = "union"
+    ENUM = "enum"
+
+@dataclass
+class SymbolEntry:
+    """Complete symbol information"""
+    kind: SymbolKind
+    name: str
+    namespace: str = ""
+    type_spec: Optional[Any] = None
+    llvm_type: Optional[ir.Type] = None
+    llvm_value: Optional[ir.Value] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    @property
+    def mangled_name(self) -> str:
+        if not self.namespace:
+            return self.name
+        # DEBUG: Check types
+        if not isinstance(self.namespace, str):
+            print(f"[ERROR] namespace is {type(self.namespace)}, not str!", file=sys.stderr)
+            print(f"[ERROR] namespace value: {self.namespace}", file=sys.stderr)
+            raise TypeError(f"namespace must be str, got {type(self.namespace)}")
+        if not isinstance(self.name, str):
+            print(f"[ERROR] name is {type(self.name)}, not str!", file=sys.stderr)
+            print(f"[ERROR] name value: {self.name}", file=sys.stderr)
+            print(f"[ERROR] namespace: {self.namespace}", file=sys.stderr)
+            raise TypeError(f"name must be str, got {type(self.name)}")
+        return self.namespace.replace('::', '__') + '__' + self.name
+    
+    @property
+    def full_name(self) -> str:
+        if not self.namespace:
+            return self.name
+        return f"{self.namespace}::{self.name}"
+
+class SymbolTable:
+    """UNIFIED symbol and scope management"""
+    def __init__(self):
+        self.scopes: List[Dict[str, SymbolEntry]] = [{}]
+        self.current_namespace: str = ""
+        self.using_namespaces: List[str] = []
+        self.registered_namespaces: List[str] = []
+        self._global_symbols: Dict[str, SymbolEntry] = {}
+    
+    @property
+    def scope_level(self):
+        """Current scope depth (0 = global)"""
+        return len(self.scopes) - 1
+    
+    def enter_scope(self):
+        """Enter function/block scope"""
+        self.scopes.append({})
+        #print(f"[SCOPE] enter_scope() called - now at level {self.scope_level}, total scopes: {len(self.scopes)}", file=sys.stderr)
+        #print(f"[SCOPE] Call stack:", file=sys.stderr)
+        #for line in traceback.format_stack()[-4:-1]:
+            #print(f"  {line.strip()}", file=sys.stderr)
+    
+    def exit_scope(self):
+        """Exit function/block scope"""
+        if len(self.scopes) > 1:
+            popped = self.scopes.pop()
+            #print(f"[SCOPE] exit_scope() called - now at level {self.scope_level}, total scopes: {len(self.scopes)}", file=sys.stderr)
+            #print(f"[SCOPE]   Popped scope had {len(popped)} entries: {list(popped.keys())}", file=sys.stderr)
+        #else:
+        #    print(f"[SCOPE] exit_scope() called but already at global scope!", file=sys.stderr)
+
+    def is_global_scope(self) -> bool:
+        """Check if we're at global scope (scope_level == 0)"""
+        return self.scope_level == 0
+    
+    def set_namespace(self, namespace: str):
+        self.current_namespace = namespace
+        if namespace and namespace not in self.registered_namespaces:
+            self.registered_namespaces.append(namespace)
+    
+    def add_using_namespace(self, namespace: str):
+        if namespace not in self.using_namespaces:
+            self.using_namespaces.append(namespace)
+    
+    def define(self, name: str, kind: SymbolKind, type_spec=None, 
+               llvm_type=None, llvm_value=None, **metadata):
+        """Define symbol in current scope"""
+        
+        # SAFETY: Validate name is actually a string
+        if not isinstance(name, str):
+            print(f"[ERROR] define() called with non-string name!", file=sys.stderr)
+            print(f"[ERROR]   name type: {type(name)}", file=sys.stderr)
+            print(f"[ERROR]   name value: {name}", file=sys.stderr)
+            print(f"[ERROR]   kind: {kind}", file=sys.stderr)
+            import traceback
+            traceback.print_stack()
+            raise TypeError(f"SymbolTable.define() requires name to be str, got {type(name)}")
+
+        #print(f"[SYMBOL_TABLE] define(name='{name}', kind={kind})", file=sys.stderr)
+        #print(f"[SYMBOL_TABLE]   scope_level: {self.scope_level}", file=sys.stderr)
+        #print(f"[SYMBOL_TABLE]   current_namespace: {self.current_namespace}", file=sys.stderr)
+        #print(f"[SYMBOL_TABLE]   scopes count: {len(self.scopes)}", file=sys.stderr)
+        
+        entry = SymbolEntry(
+            kind=kind,
+            name=name,
+            namespace=self.current_namespace if self.scope_level == 0 else "",
+            type_spec=type_spec,
+            llvm_type=llvm_type,
+            llvm_value=llvm_value,
+            metadata=metadata
+        )
+        
+        self.scopes[-1][name] = entry
+        #print(f"[SYMBOL_TABLE]   Added '{name}' to scope {len(self.scopes)-1}", file=sys.stderr)
+        
+        # Only globals go into _global_symbols
+        if self.scope_level == 0:
+            self._global_symbols[entry.mangled_name] = entry
+            if name not in self._global_symbols:
+                self._global_symbols[name] = entry
+    
+    def lookup(self, name: str) -> Optional[Tuple[SymbolKind, Any]]:
+        """LEGACY backward compat"""
+        entry = self.lookup_any(name)
+        if entry:
+            return (entry.kind, entry.type_spec)
+        return None
+    
+    def lookup_any(self, name: str, current_namespace: str = None) -> Optional[SymbolEntry]:
+        """Lookup with namespace resolution"""
+        #print(f"[SYMBOL_TABLE] lookup_any('{name}')", file=sys.stderr)
+        #print(f"[SYMBOL_TABLE]   current_namespace: {current_namespace or self.current_namespace}", file=sys.stderr)
+        #print(f"[SYMBOL_TABLE]   scope_level: {self.scope_level}", file=sys.stderr)
+        #print(f"[SYMBOL_TABLE]   scopes: {[list(s.keys()) for s in self.scopes]}", file=sys.stderr)
+        
+        if current_namespace is None:
+            current_namespace = self.current_namespace
+        
+        # Check local scopes first (reverse order)
+        for i, scope in enumerate(reversed(self.scopes)):
+            if name in scope:
+                #print(f"[SYMBOL_TABLE]   Found '{name}' in scope {len(self.scopes)-1-i}", file=sys.stderr)
+                return scope[name]
+        
+        # Then global with namespace resolution
+        result = self._resolve_with_namespaces(name, current_namespace)
+        #if result:
+        #    print(f"[SYMBOL_TABLE]   Found '{name}' via namespace resolution", file=sys.stderr)
+        #else:
+        #    print(f"[SYMBOL_TABLE]   NOT FOUND: '{name}'", file=sys.stderr)
+        return result
+    
+    def lookup_type(self, name: str, current_namespace: str = None) -> Optional[SymbolEntry]:
+        entry = self.lookup_any(name, current_namespace)
+        if entry and entry.kind in (SymbolKind.TYPE, SymbolKind.STRUCT, 
+                                    SymbolKind.UNION, SymbolKind.ENUM):
+            return entry
+        return None
+    
+    def lookup_variable(self, name: str, current_namespace: str = None) -> Optional[SymbolEntry]:
+        entry = self.lookup_any(name, current_namespace)
+        #print(f"[SYMBOL_TABLE] lookup_variable('{name}')", file=sys.stderr)
+        #if entry:
+        #    print(f"[SYMBOL_TABLE]   Found entry: kind={entry.kind}, type(kind)={type(entry.kind)}", file=sys.stderr)
+        #    print(f"[SYMBOL_TABLE]   SymbolKind.VARIABLE={SymbolKind.VARIABLE}, type={type(SymbolKind.VARIABLE)}", file=sys.stderr)
+        #    print(f"[SYMBOL_TABLE]   Comparison: {entry.kind} == {SymbolKind.VARIABLE} = {entry.kind == SymbolKind.VARIABLE}", file=sys.stderr)
+        #else:
+        #    print(f"[SYMBOL_TABLE]   No entry found", file=sys.stderr)
+        if entry and entry.kind == SymbolKind.VARIABLE:
+            #print(f"[SYMBOL_TABLE]   Returning variable entry", file=sys.stderr)
+            return entry
+        #print(f"[SYMBOL_TABLE]   Entry is not a VARIABLE (or None), returning None", file=sys.stderr)
+        return
+    
+    def lookup_function(self, name: str, current_namespace: str = None) -> Optional[SymbolEntry]:
+        entry = self.lookup_any(name, current_namespace)
+        if entry and entry.kind == SymbolKind.FUNCTION:
+            return entry
+        return None
+    
+    def _resolve_with_namespaces(self, name: str, current_namespace: str) -> Optional[SymbolEntry]:
+        # 1. Exact match
+        if name in self._global_symbols:
+            return self._global_symbols[name]
+        
+        # 2. Current namespace
+        if current_namespace:
+            mangled = self._mangle_name(current_namespace, name)
+            if mangled in self._global_symbols:
+                return self._global_symbols[mangled]
+        
+        # 3. Parent namespaces
+        if current_namespace:
+            parts = current_namespace.split('::')
+            while parts:
+                parts.pop()
+                parent_ns = '::'.join(parts)
+                mangled = self._mangle_name(parent_ns, name) if parent_ns else name
+                if mangled in self._global_symbols:
+                    return self._global_symbols[mangled]
+        
+        # 4. Using namespaces
+        for namespace in self.using_namespaces:
+            mangled = self._mangle_name(namespace, name)
+            if mangled in self._global_symbols:
+                return self._global_symbols[mangled]
+        
+        # 5. All registered namespaces
+        for namespace in self.registered_namespaces:
+            mangled = self._mangle_name(namespace, name)
+            if mangled in self._global_symbols:
+                return self._global_symbols[mangled]
+        
+        return None
+    
+    @staticmethod
+    def _mangle_name(namespace: str, name: str) -> str:
+        if not namespace:
+            return name
+        return namespace.replace('::', '__') + '__' + name
+    
+    def is_type(self, name: str) -> bool:
+        entry = self.lookup_any(name)
+        return entry is not None and entry.kind in (
+            SymbolKind.TYPE, SymbolKind.STRUCT, SymbolKind.UNION, SymbolKind.ENUM
+        )
+    
+    def get_type_spec(self, name: str):
+        entry = self.lookup_any(name)
+        if entry:
+            return entry.type_spec
+        return None
+
+    def get_llvm_value(self, name: str):
+        """Get LLVM value for a variable"""
+        entry = self.lookup_variable(name)
+        if entry:
+            return entry.llvm_value
+        return None
+    
+    def update_llvm_value(self, name: str, llvm_value):
+        """Update LLVM value for an existing variable in current scope"""
+        for scope in reversed(self.scopes):
+            if name in scope:
+                scope[name].llvm_value = llvm_value
+                return True
+        return False
+    
+    def delete_variable(self, name: str) -> bool:
+        """Delete a variable from current scope"""
+        if name in self.scopes[-1]:
+            del self.scopes[-1][name]
+            return True
+        return False
+
+    def len(self) -> int:
+        return len(self.scopes)
+
 
 class Operator(Enum):
     """Operator enumeration (imported for constant evaluation)"""
@@ -372,6 +641,7 @@ class TypeResolver:
         Returns:
             Resolved item or None
         """
+        #print("IN RESOLVE_WITH_NAMESPACE()")
         if lookup_func is None:
             lookup_func = TypeResolver.lookup_type
         
@@ -425,14 +695,11 @@ class TypeResolver:
     # ============================================================================
     
     @staticmethod
-    def resolve_type(module: ir.Module, typename: str, 
-                     current_namespace: str = "") -> Optional[ir.Type]:
+    def resolve_type(module: ir.Module, typename: str, current_namespace: str = "") -> Optional[ir.Type]:
         """
         Resolve a type name.
         
-        Replaces:
-        - TypeResolver.resolve()
-        - NamespaceTypeHandler.resolve_custom_type()
+        UPDATED: Now uses symbol_table as the PRIMARY source of truth
         
         Args:
             module: LLVM module
@@ -442,18 +709,47 @@ class TypeResolver:
         Returns:
             LLVM type or None
         """
+        #print("IN TYPERESOLVER RESOLVE_TYPE()")
+        # 1. SYMBOL TABLE - HIGHEST PRIORITY (PRIMARY SOURCE)
+        if hasattr(module, 'symbol_table'):
+            result = module.symbol_table.lookup(typename)
+            
+            if result and result[0] == SymbolKind.TYPE:
+                # result[1] should be the TypeSystem for this type alias
+                if result[1] is not None:
+                    # Convert TypeSystem to LLVM type
+                    return result[1].get_llvm_type(module)
+                
+                # If no TypeSystem stored but it's marked as a type,
+                # try to find it in module storage
+                # First try direct name
+                for storage_name in ['_type_aliases', '_struct_types', '_union_types', '_enum_types']:
+                    if hasattr(module, storage_name):
+                        storage = getattr(module, storage_name)
+                        if typename in storage:
+                            return storage[typename]
+                
+                # Try mangled name in current namespace
+                if current_namespace:
+                    mangled = TypeResolver.mangle_name(current_namespace, typename)
+                    for storage_name in ['_type_aliases', '_struct_types', '_union_types', '_enum_types']:
+                        if hasattr(module, storage_name):
+                            storage = getattr(module, storage_name)
+                            if mangled in storage:
+                                return storage[mangled]
+        
+        # 2. NAMESPACE RESOLUTION - fallback for types not in symbol table yet
+        # (e.g., during parsing before all types are registered)
         return TypeResolver.resolve_with_namespace(
             module, typename, current_namespace, TypeResolver.lookup_type
         )
     
     @staticmethod
-    def resolve_function(module: ir.Module, func_name: str,
-                        current_namespace: str = "") -> Optional[str]:
+    def resolve_function(module: ir.Module, func_name: str, current_namespace: str = "") -> Optional[str]:
         """
         Resolve a function name and return its mangled name.
         
-        Replaces:
-        - FunctionResolver.resolve_function_name()
+        UPDATED: Now uses symbol_table as PRIMARY source
         
         Args:
             module: LLVM module
@@ -463,6 +759,33 @@ class TypeResolver:
         Returns:
             Mangled function name or None
         """
+        # 1. SYMBOL TABLE - HIGHEST PRIORITY
+        #print("IN RESOLVE_FUNCTION()")
+        if hasattr(module, 'symbol_table'):
+            result = module.symbol_table.lookup(func_name)
+            #print(f"Symbol table lookup for {func_name}",result)
+            
+            if result and result[0] == SymbolKind.FUNCTION:
+                # Try to find the actual function in globals
+                # First try direct name
+                if func_name in module.globals:
+                    return func_name
+                
+                # Try mangled name with current namespace
+                if current_namespace:
+                    mangled = TypeResolver.mangle_name(current_namespace, func_name)
+                    #print("GOT HERE, mangled:",mangled)
+                    if mangled in module.globals:
+                        return mangled
+                
+                # Try using namespaces
+                if hasattr(module, '_using_namespaces'):
+                    for ns in module._using_namespaces:
+                        mangled = TypeResolver.mangle_name(ns, func_name)
+                        if mangled in module.globals:
+                            return mangled
+        
+        # 2. NAMESPACE RESOLUTION - fallback
         result = TypeResolver.resolve_with_namespace(
             module, func_name, current_namespace, TypeResolver.lookup_global
         )
@@ -473,14 +796,11 @@ class TypeResolver:
         return None
     
     @staticmethod
-    def resolve_identifier(module: ir.Module, name: str,
-                          current_namespace: str = "") -> Optional[str]:
+    def resolve_identifier(module: ir.Module, name: str, current_namespace: str = "") -> Optional[str]:
         """
         Resolve an identifier (variable or type alias) and return its mangled name.
         
-        Replaces:
-        - IdentifierTypeHandler.resolve_namespace_mangled_name()
-        - VariableTypeHandler.identifier_to_constant() namespace lookup
+        UPDATED: Now uses symbol_table as PRIMARY source
         
         Args:
             module: LLVM module
@@ -490,7 +810,36 @@ class TypeResolver:
         Returns:
             Mangled name or None
         """
-        # Try globals first
+        # 1. SYMBOL TABLE - HIGHEST PRIORITY
+        if hasattr(module, 'symbol_table'):
+            #print("IN RESOLVE_IDENTIFIER()")
+            result = module.symbol_table.lookup(name)
+            
+            if result:
+                kind = result[0]
+                
+                # Variable or type - try to find in module
+                if kind == SymbolKind.VARIABLE or kind == SymbolKind.TYPE:
+                    # Try direct name first
+                    if name in module.globals:
+                        return name
+                    
+                    # Try mangled name with current namespace
+                    if current_namespace:
+                        mangled = TypeResolver.mangle_name(current_namespace, name)
+                        if mangled in module.globals:
+                            return mangled
+                    
+                    # Try type aliases for TYPE kind
+                    if kind == SymbolKind.TYPE and hasattr(module, '_type_aliases'):
+                        if name in module._type_aliases:
+                            return name
+                        if current_namespace:
+                            mangled = TypeResolver.mangle_name(current_namespace, name)
+                            if mangled in module._type_aliases:
+                                return mangled
+        
+        # 2. MODULE GLOBALS - direct resolution (fallback)
         result = TypeResolver.resolve_with_namespace(
             module, name, current_namespace, TypeResolver.lookup_global
         )
@@ -511,7 +860,7 @@ class TypeResolver:
                     if mangled in module.globals:
                         return mangled
         
-        # Try type aliases
+        # 3. TYPE ALIASES - fallback
         result = TypeResolver.resolve_with_namespace(
             module, name, current_namespace, TypeResolver.lookup_type
         )
@@ -600,8 +949,71 @@ class FunctionResolver:
     def resolve_function_name(func_name: str, module: ir.Module, current_namespace: str = "") -> Optional[str]:
         """
         Resolve function name and return mangled name.
+        First tries symbol table if available, then falls back to type resolver.
         """
+        # Try symbol table first if available
+        if hasattr(module, 'symbol_table'):
+            symbol_result = FunctionResolver._resolve_from_symbol_table(
+                func_name, module.symbol_table, current_namespace)
+            if symbol_result:
+                return symbol_result
+        
+        # Fall back to existing type resolver
         return TypeResolver.resolve_function(module, func_name, current_namespace)
+    
+    @staticmethod
+    def _resolve_from_symbol_table(func_name: str, symbol_table, current_namespace: str = "", module: ir.Module = None) -> Optional[str]:
+        """
+        Resolve a function using the symbol table.
+        
+        Args:
+            func_name: The function name to resolve
+            symbol_table: The SymbolTable instance
+            current_namespace: Current namespace context
+            module: LLVM module (to check for actual function existence)
+            
+        Returns:
+            The resolved function name (potentially mangled) or None if not found
+        """
+        
+        # Look up the function in the symbol table
+        #print("IN _RESOLVE_FROMsymbol_table()")
+        result = symbol_table.lookup(func_name)
+        
+        if result and result[0] == SymbolKind.FUNCTION:
+            # If we have a module, verify the function actually exists
+            if module:
+                # Try direct name first
+                if func_name in module.globals:
+                    return func_name
+                
+                # Try current namespace mangled name
+                if current_namespace:
+                    mangled = TypeResolver.mangle_name(current_namespace, func_name)
+                    if mangled in module.globals:
+                        return mangled
+                
+                # Try using namespaces
+                if hasattr(module, '_using_namespaces'):
+                    for ns in module._using_namespaces:
+                        mangled = TypeResolver.mangle_name(ns, func_name)
+                        if mangled in module.globals:
+                            return mangled
+                # FALLBACK: Try ALL registered namespaces
+                # This handles cases where _current_namespace is wrong or using_namespaces incomplete
+                if hasattr(module, '_namespaces'):
+                    for ns in module._namespaces:
+                        mangled = TypeResolver.mangle_name(ns, func_name)
+                        if mangled in module.globals:
+                            return mangled
+            else:
+                # No module provided - fall back to old behavior
+                if current_namespace:
+                    mangled = TypeResolver.mangle_name(current_namespace, func_name)
+                    return mangled
+                return func_name
+        
+        return None
 
 
 @dataclass
@@ -711,7 +1123,7 @@ class NamespaceTypeHandler:
                     block = init_func.append_basic_block("cont")
 
         builder = ir.IRBuilder(block)
-        builder.scope = {}
+        # Scope management now handled by module.symbol_table
         builder.initialized_unions = set()
         return builder
     
@@ -743,10 +1155,23 @@ class NamespaceTypeHandler:
         """
         original_name = struct_def.name
         struct_def.name = f"{namespace.replace('::', '__')}__{struct_def.name}"
+        
+        # Set current namespace context on BOTH module and symbol_table
+        original_namespace = getattr(module, '_current_namespace', '')
+        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
+        
+        module._current_namespace = namespace
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.set_namespace(namespace)
+        
         try:
             struct_def.codegen(builder, module)
         finally:
+            # Restore original context
             struct_def.name = original_name
+            module._current_namespace = original_namespace
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.set_namespace(original_st_namespace)
     
     @staticmethod
     def process_namespace_object(namespace: str, obj_def: 'ObjectDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
@@ -761,10 +1186,23 @@ class NamespaceTypeHandler:
         """
         original_name = obj_def.name
         obj_def.name = f"{namespace.replace('::', '__')}__{obj_def.name}"
+        
+        # Set current namespace context on BOTH module and symbol_table
+        original_namespace = getattr(module, '_current_namespace', '')
+        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
+        
+        module._current_namespace = namespace
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.set_namespace(namespace)
+        
         try:
             obj_def.codegen(builder, module)
         finally:
+            # Restore original context
             obj_def.name = original_name
+            module._current_namespace = original_namespace
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.set_namespace(original_st_namespace)
     
     @staticmethod
     def process_namespace_enum(namespace: str, enum_def: 'EnumDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
@@ -779,10 +1217,23 @@ class NamespaceTypeHandler:
         """
         original_name = enum_def.name
         enum_def.name = f"{namespace.replace('::', '__')}__{enum_def.name}"
+        
+        # Set current namespace context on BOTH module and symbol_table
+        original_namespace = getattr(module, '_current_namespace', '')
+        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
+        
+        module._current_namespace = namespace
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.set_namespace(namespace)
+        
         try:
             enum_def.codegen(builder, module)
         finally:
+            # Restore original context
             enum_def.name = original_name
+            module._current_namespace = original_namespace
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.set_namespace(original_st_namespace)
     
     @staticmethod
     def process_namespace_variable(namespace: str, var_def: 'VariableDeclaration', module: 'ir.Module'):
@@ -797,11 +1248,24 @@ class NamespaceTypeHandler:
         original_name = var_def.name
         # Always mangle namespace-level variables
         var_def.name = f"{namespace.replace('::', '__')}__{var_def.name}"
+        
+        # Set current namespace context on BOTH module and symbol_table
+        original_namespace = getattr(module, '_current_namespace', '')
+        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
+        
+        module._current_namespace = namespace
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.set_namespace(namespace)
+        
         try:
             result = var_def.codegen(None, module)  # Always use None builder for globals
             return result
         finally:
+            # Restore original context
             var_def.name = original_name
+            module._current_namespace = original_namespace
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.set_namespace(original_st_namespace)
     
     @staticmethod
     def process_nested_namespace(parent_namespace: str, nested_ns: 'NamespaceDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
@@ -819,15 +1283,25 @@ class NamespaceTypeHandler:
         full_nested_name = f"{parent_namespace}::{nested_ns.name}"
         nested_ns.name = f"{parent_namespace.replace('::', '__')}__{nested_ns.name}"
         
-        # Set current namespace context
+        # Set current namespace context on BOTH module and symbol_table
         original_namespace = getattr(module, '_current_namespace', '')
+        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
+        
         module._current_namespace = full_nested_name
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.set_namespace(full_nested_name)
+        
+        # CRITICAL FIX: Register nested namespace in using_namespaces for function resolution
+        NamespaceTypeHandler.add_using_namespace(module, full_nested_name)
         
         try:
             nested_ns.codegen(builder, module)
         finally:
+            # Restore original context
             nested_ns.name = original_name
             module._current_namespace = original_namespace
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.set_namespace(original_st_namespace)
     
     @staticmethod
     def process_namespace_function(namespace: str, func_def: 'FunctionDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
@@ -835,14 +1309,20 @@ class NamespaceTypeHandler:
         from fast import FunctionTypeHandler  # Import here to avoid circular dependency
         
         original_name = func_def.name
-        base_name = f"{namespace}::{func_def.name}"
-
-        # Temporarily set the function name
-        func_def.name = base_name
+        # Mangle the name for LLVM IR (so functions don't collide)
+        mangled_func_name = f"{namespace}__{func_def.name}"
         
-        # Set current namespace context on module
+        # Temporarily set the function name for LLVM
+        func_def.name = mangled_func_name
+        
+        # Set current namespace context on BOTH module and symbol_table  
+        # This will be used by FunctionDef.codegen to register in symbol table
         original_namespace = getattr(module, '_current_namespace', '')
+        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
+        
         module._current_namespace = namespace
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.set_namespace(namespace)
         
         # Generate the function
         try:
@@ -851,13 +1331,68 @@ class NamespaceTypeHandler:
             # Restore original context
             func_def.name = original_name
             module._current_namespace = original_namespace
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.set_namespace(original_st_namespace)
     
-    def resolve_custom_type(module: ir.Module, typename: str,
-                           current_namespace: str = "") -> Optional[ir.Type]:
+    @staticmethod
+    def resolve_custom_type(module: ir.Module, typename: str, current_namespace: str = "") -> Optional[ir.Type]:
         """
-        Resolve custom type name.
+        Resolve a custom type name (struct, enum, type alias) to its LLVM type.
+        
+        UPDATED: Now uses symbol_table as PRIMARY source
+        
+        Args:
+            module: LLVM module
+            typename: Type name to resolve (unmangled)
+            current_namespace: Current namespace context
+            
+        Returns:
+            LLVM type or None
         """
+        # 1. SYMBOL TABLE - HIGHEST PRIORITY
+        if hasattr(module, 'symbol_table'):
+            #print("IN RESOLVE_CUSTOM_TYPE")
+            result = module.symbol_table.lookup(typename)
+            
+            if result and result[0] == SymbolKind.TYPE:
+                # If we have a TypeSystem stored, use it
+                if result[1] is not None:
+                    return result[1].get_llvm_type(module)
+        
+        # 2. Use TypeResolver for comprehensive namespace resolution
         return TypeResolver.resolve_type(module, typename, current_namespace)
+
+    @staticmethod
+    def is_type_defined(typename: str, module) -> bool:
+        """
+        Check if a type is defined, prioritizing symbol_table.
+        
+        Args:
+            typename: Type name to check
+            module: LLVM module
+            
+        Returns:
+            True if type is defined, False otherwise
+        """
+        # 1. Check symbol table first
+        #print("IN IS_TYPE_DEFINED")
+        if hasattr(module, 'symbol_table'):
+            result = module.symbol_table.lookup(typename)
+            if result and result[0] == SymbolKind.TYPE:
+                return True
+        #print("FALLING BACK IN IS_TYPE_DEFINED")
+        
+        # 2. Check module storage (fallback)
+        if hasattr(module, '_type_aliases') and typename in module._type_aliases:
+            return True
+        if hasattr(module, '_struct_types') and typename in module._struct_types:
+            return True
+        if hasattr(module, '_union_types') and typename in module._union_types:
+            return True
+        if hasattr(module, '_enum_types') and typename in module._enum_types:
+            return True
+        
+        return False
 
 
 @dataclass
@@ -904,6 +1439,7 @@ class TypeSystem:
         return base
     
     def get_llvm_type(self, module: ir.Module) -> ir.Type:
+        #print("IN GET_LLVM_TYPE()")
         if self.custom_typename:
             # Get the current namespace context
             current_namespace = getattr(module, '_current_namespace', '')
@@ -1196,6 +1732,7 @@ class VariableTypeHandler:
         """
         Look up identifier in using namespaces for constant resolution.
         """
+        #print("IN IDENTIFIER_TO_CONSTANT_NAMESPACE_LOOKUP()")
         current_ns = TypeResolver.get_current_namespace(module)
         mangled_name = TypeResolver.resolve_identifier(module, var_name, current_ns)
         
@@ -1203,6 +1740,61 @@ class VariableTypeHandler:
             other_global = module.globals[mangled_name]
             if hasattr(other_global, 'initializer') and other_global.initializer:
                 return other_global.initializer
+        
+        return None
+    
+    @staticmethod
+    def identifier_to_constant(identifier, module: ir.Module) -> Optional[ir.Constant]:
+        """
+        Convert an identifier to a compile-time constant for global initialization.
+        
+        UPDATED: Now uses symbol_table for identifier resolution
+        
+        Args:
+            identifier: Identifier AST node
+            module: LLVM module
+            
+        Returns:
+            LLVM constant or None
+        """
+        
+        # 1. Check symbol table first
+        if hasattr(module, 'symbol_table'):
+            #print("IN IDENTIFIER_TO_CONSTANT()")
+            result = module.symbol_table.lookup(identifier.name)
+            if result:
+                kind, type_spec = result
+                
+                # If it's a variable, try to find it in globals
+                if kind == SymbolKind.VARIABLE:
+                    # Try direct name
+                    if identifier.name in module.globals:
+                        global_var = module.globals[identifier.name]
+                        if hasattr(global_var, 'initializer'):
+                            return global_var.initializer
+                    
+                    # Try with namespace mangling
+                    current_ns = TypeResolver.get_current_namespace(module)
+                    mangled = TypeResolver.resolve_identifier(module, identifier.name, current_ns)
+                    if mangled and mangled in module.globals:
+                        global_var = module.globals[mangled]
+                        if hasattr(global_var, 'initializer'):
+                            return global_var.initializer
+        
+        # 2. Fallback to namespace resolution (for backwards compatibility)
+        current_ns = TypeResolver.get_current_namespace(module)
+        mangled_name = TypeResolver.resolve_identifier(module, identifier.name, current_ns)
+        
+        if mangled_name and mangled_name in module.globals:
+            global_var = module.globals[mangled_name]
+            if hasattr(global_var, 'initializer'):
+                return global_var.initializer
+        
+        # 3. Direct lookup (last resort)
+        if identifier.name in module.globals:
+            global_var = module.globals[identifier.name]
+            if hasattr(global_var, 'initializer'):
+                return global_var.initializer
         
         return None
     
@@ -1446,6 +2038,11 @@ class ArrayTypeHandler:
     @staticmethod
     def preserve_array_element_type_metadata(loaded_val: ir.Value, array_val: ir.Value, module: ir.Module) -> ir.Value:
         element_type_spec = get_array_element_type_spec(array_val)
+        #print(f"[PRESERVE] element_type_spec={element_type_spec}", file=sys.stderr)
+        #if element_type_spec:
+            #print(f"[PRESERVE]   base_type={element_type_spec.base_type}", file=sys.stderr)
+            #print(f"[PRESERVE]   is_signed={element_type_spec.is_signed}", file=sys.stderr)
+            #print(f"[PRESERVE]   custom_typename={element_type_spec.custom_typename}", file=sys.stderr)
         
         if element_type_spec:
             return attach_type_metadata(loaded_val, type_spec=element_type_spec)
@@ -1693,8 +2290,8 @@ class ArrayTypeHandler:
             ArrayTypeHandler.emit_memcpy(builder, module, new_start, val_start, new_bytes)
             
             # Update scope
-            if var_name and builder.scope and var_name in builder.scope:
-                builder.scope[var_name] = new_alloca
+            if var_name and module.symbol_table.get_llvm_value(var_name) is not None:
+                module.symbol_table.update_llvm_value(var_name, new_alloca)
             
             return new_alloca
         else:
@@ -2431,6 +3028,8 @@ class IdentifierTypeHandler:
         """
         Get the TypeSystem for an identifier from scope or global type info.
         
+        UPDATED: Now checks symbol_table FIRST before other sources
+        
         Args:
             name: The identifier name
             builder: LLVM IR builder (for scope access)
@@ -2439,12 +3038,28 @@ class IdentifierTypeHandler:
         Returns:
             TypeSystem if found, None otherwise
         """
-        # Check local scope first
-        if builder.scope is not None:
-            if hasattr(builder, 'scope_type_info') and name in builder.scope_type_info:
-                return builder.scope_type_info[name]
+        # 1. SYMBOL TABLE - HIGHEST PRIORITY (NEW: moved to top)
+        if hasattr(module, 'symbol_table'):
+            #print("IDENTIFIERTYPEHANDLER GET_TYPE_SPEC()")
+            result = module.symbol_table.lookup(name)
+            if result:
+                kind, type_spec = result
+                
+                # For variables, return the TypeSystem directly
+                if kind == SymbolKind.VARIABLE and type_spec is not None:
+                    return type_spec
+                
+                # For types, the type_spec might be a TypeSystem or None
+                if kind == SymbolKind.TYPE and type_spec is not None:
+                    return type_spec
         
-        # Check global type info
+        # 2. Check local scope (for local variables not yet in symbol table)
+        # Type info now stored in symbol_table
+        entry = module.symbol_table.lookup_variable(name)
+        if entry and entry.type_spec is not None:
+            return entry.type_spec
+        
+        # 3. Check global type info (fallback)
         if hasattr(module, '_global_type_info') and name in module._global_type_info:
             return module._global_type_info[name]
         
@@ -2733,10 +3348,17 @@ def attach_type_metadata_from_llvm_type(llvm_value: ir.Value, llvm_type: ir.Type
                 # u8, u16, u32, u64 are unsigned
                 # i8, i16, i32, i64, s8, s16, s32, s64 are signed
                 # byte is unsigned (u8)
-                is_unsigned_type = (
-                    alias_name.startswith('u') or 
-                    alias_name == 'byte'
-                )
+                # Check _type_alias_specs for correct signedness
+                is_unsigned_type = False
+                if hasattr(module, '_type_alias_specs') and alias_name in module._type_alias_specs:
+                    alias_spec = module._type_alias_specs[alias_name]
+                    if hasattr(alias_spec, 'is_signed'):
+                        is_unsigned_type = not alias_spec.is_signed
+                    elif hasattr(alias_spec, 'base_type') and alias_spec.base_type == DataType.UINT:
+                        is_unsigned_type = True
+                else:
+                    # Fallback to name-based heuristic
+                    is_unsigned_type = alias_name.startswith('u') or alias_name == 'byte'
                 
                 # Create type spec with appropriate signedness
                 type_spec = type(
@@ -2749,7 +3371,8 @@ def attach_type_metadata_from_llvm_type(llvm_value: ir.Value, llvm_type: ir.Type
                         'custom_typename': alias_name
                     }
                 )()
-                
+                #print("IN ATTACH_TYPE_METADATA_FROM_LLVM_TYPE() JUST BEFORE BASE_NAME ERROR, PRINTING TRACEBACK STACK")
+                #traceback.print_stack()
                 llvm_value._flux_type_spec = type_spec
                 return llvm_value
     
@@ -3182,21 +3805,22 @@ class ObjectTypeHandler:
         entry_block = func.append_basic_block('entry')
         method_builder = ir.IRBuilder(entry_block)
         
-        method_builder.scope = {}
-        if not hasattr(method_builder, 'scope_type_info'):
-            method_builder.scope_type_info = {}
+        # Enter method scope
+        module.symbol_table.enter_scope()
         
         # Register 'this'
-        method_builder.scope["this"] = func.args[0]
         this_type_spec = TypeSystem(base_type=DataType.DATA, custom_typename=object_name, is_pointer=True)
-        method_builder.scope_type_info['this'] = this_type_spec
+        this_alloca = method_builder.alloca(func.args[0].type, name="this.addr")
+        method_builder.store(func.args[0], this_alloca)
+        module.symbol_table.define("this", SymbolKind.VARIABLE, llvm_value=this_alloca, type_spec=this_type_spec)
+        # this type_spec already stored in symbol_table.define above
         
         # Store other params
         for i, param in enumerate(func.args[1:], 1):
             param_name = method.parameters[i - 1].name if method.parameters[i - 1].name is not None else f"arg{i - 1}"
             alloca = method_builder.alloca(param.type, name=f"{param_name}.addr")
             method_builder.store(param, alloca)
-            method_builder.scope[param_name] = alloca
+            module.symbol_table.define(param_name, SymbolKind.VARIABLE, llvm_value=alloca)
         
         # Emit body
         method.body.codegen(method_builder, module)
@@ -3211,6 +3835,9 @@ class ObjectTypeHandler:
                 method_builder.ret_void()
             else:
                 raise RuntimeError(f"Method {method.name} must end with return statement")
+        
+        # Exit method scope
+        module.symbol_table.exit_scope()
     
     @staticmethod
     def process_nested_definitions(nested_objects: List, nested_structs: List, 
@@ -3306,8 +3933,10 @@ class FunctionTypeHandler:
         Returns:
             Mangled function name
         """
+        #print("MANGLE_FUNCTION_NAME BEFORE IF CHECK OR BASE_NAME == 'main'")
         if no_mangle or base_name == "main":
             return base_name
+        #print("MANGLE_FUNCTION_NAME AFTER IF CHECK OR BASE_NAME == 'main'")
         
         # Start with base name
         mangled = base_name
@@ -3368,18 +3997,69 @@ class FunctionTypeHandler:
         if not hasattr(module, '_function_overloads'):
             module._function_overloads = {}
         
+        #print("IN REGISTER_FUNCTION_OVERLOAD BEFORE BASE_NAME NOT IN MODULE")
         if base_name not in module._function_overloads:
             module._function_overloads[base_name] = []
+        #print("IN REGISTER_FUNCTION_OVERLOAD AFTER BASE_NAME NOT IN MODULE")
         
         # Add overload info
+        # CRITICAL: Resolve custom type names to get correct signedness
+        resolved_param_types = []
+        for p in parameters:
+            param_type = p.type_spec
+            if param_type is None:
+                raise ValueError(f"Parameter '{p.name}' has no type specification (symbol lookup may have failed)")
+            # If this is a custom type, resolve it to get correct signedness
+            if param_type.custom_typename and hasattr(module, '_type_alias_specs'):
+                alias_spec = None
+                type_name = param_type.custom_typename
+                
+                # Try to resolve through namespaces (same as in overload resolution)
+                if hasattr(module, "_using_namespaces"):
+                    for ns in module._using_namespaces:
+                        #print("REGISTER FUNCTION OVERLOAD:",ns)
+                        mangled_type_name = TypeResolver.mangle_name(ns, type_name)
+                        if mangled_type_name in module._type_alias_specs:
+                            alias_spec = module._type_alias_specs[mangled_type_name]
+                            break
+                
+                # Also try direct lookup for global types
+                if not alias_spec and type_name in module._type_alias_specs:
+                    alias_spec = module._type_alias_specs[type_name]
+                
+                # If we found the alias spec, use it
+                if alias_spec:
+                    # Copy the is_signed from the resolved type
+                    from ftypesys import TypeSystem
+                    param_type = TypeSystem(
+                        base_type=param_type.base_type,
+                        is_signed=alias_spec.is_signed,  # Use resolved signedness
+                        is_const=param_type.is_const,
+                        is_volatile=param_type.is_volatile,
+                        bit_width=param_type.bit_width,
+                        alignment=param_type.alignment,
+                        endianness=param_type.endianness,
+                        is_array=param_type.is_array,
+                        array_size=param_type.array_size,
+                        array_dimensions=param_type.array_dimensions,
+                        array_element_type=param_type.array_element_type,
+                        is_pointer=param_type.is_pointer,
+                        pointer_depth=param_type.pointer_depth,
+                        custom_typename=param_type.custom_typename,
+                        storage_class=param_type.storage_class
+                    )
+            resolved_param_types.append(param_type)
+        
         overload_info = {
             'mangled_name': mangled_name,
-            'param_types': [p.type_spec for p in parameters],
+            'param_types': resolved_param_types,
             'return_type': return_type_spec,
             'function': func,
             'param_count': len(parameters)
         }
+        #print("END OF REGISTER_FUNCTION_OVERLOAD()")
         module._function_overloads[base_name].append(overload_info)
+        #print("AFTER APPENDING OVERLOAD_INFO")
     
     @staticmethod
     def resolve_overload_by_types(module: ir.Module, base_name: str, 
@@ -3395,6 +4075,8 @@ class FunctionTypeHandler:
         Returns:
             Matching function or None if no match found
         """
+        # DEBUG: Overload resolution
+        print(f"[OVERLOAD DEBUG] Resolving {base_name} with {len(arg_vals)} args", file=sys.stderr)
         if not hasattr(module, '_function_overloads'):
             return None
         
@@ -3415,6 +4097,7 @@ class FunctionTypeHandler:
         else:
             # Multiple candidates - need type matching
             for candidate in candidates:
+
                 param_types = candidate['param_types']
                 if len(param_types) != len(arg_vals):
                     continue
@@ -3422,33 +4105,82 @@ class FunctionTypeHandler:
                 # Check if types match (with compatibility rules)
                 match = True
                 for i, (param_type, arg_val) in enumerate(zip(param_types, arg_vals)):
-                    expected_llvm_type = param_type.get_llvm_type(module)
+                    print(f"[OVERLOAD] Param {i}: custom_typename={getattr(param_type, 'custom_typename', None)}, is_array={getattr(param_type, 'is_array', None)}, is_pointer={getattr(param_type, 'is_pointer', None)}", file=sys.stderr)
+                    expected_llvm_type = param_type.get_llvm_type_with_array(module)
+                    print(f"[OVERLOAD] Arg {i}: arg_type={arg_val.type}, expected={expected_llvm_type}", file=sys.stderr)
                     
-                    # Handle array/pointer compatibility
-                    if isinstance(arg_val.type, ir.PointerType) and isinstance(arg_val.type.pointee, ir.ArrayType):
-                        # Array pointer - check element type compatibility
-                        if isinstance(expected_llvm_type, ir.PointerType):
-                            if arg_val.type.pointee.element != expected_llvm_type.pointee:
-                                match = False
-                                break
-                        else:
-                            match = False
-                            break
-                    elif arg_val.type != expected_llvm_type:
-                        # Type mismatch
-                        match = False
-                        break
-                    # Also check signedness for integer types
-                    elif isinstance(arg_val.type, ir.IntType) and isinstance(expected_llvm_type, ir.IntType):
+                    # Check for exact type match first
+                    if arg_val.type == expected_llvm_type:
+                        continue
+                    
+                    # Handle array-to-pointer decay: [N x T]* can decay to T*
+                    if (isinstance(arg_val.type, ir.PointerType) and 
+                        isinstance(arg_val.type.pointee, ir.ArrayType) and
+                        isinstance(expected_llvm_type, ir.PointerType)):
+                        # Check if array element type matches pointer pointee type
+                        if arg_val.type.pointee.element == expected_llvm_type.pointee:
+                            continue  # Compatible via array decay
+                    
+                    # Check signedness for integer types (even if width matches)
+                    if isinstance(arg_val.type, ir.IntType) and isinstance(expected_llvm_type, ir.IntType):
                         # Check if signedness matches
+                        #print(f"[SIGN DEBUG] Checking arg {i}: arg_is_unsigned={is_unsigned(arg_val)}", file=sys.stderr)
+                        #if hasattr(param_type, "base_type"):
+                            #print(f"[SIGN DEBUG]   param has base_type={param_type.base_type}", file=sys.stderr)
+                        #if hasattr(param_type, "is_signed"):
+                            #print(f"[SIGN DEBUG]   param has is_signed={param_type.is_signed}", file=sys.stderr)
                         arg_is_unsigned = is_unsigned(arg_val)
-                        param_is_unsigned = (param_type.base_type == DataType.UINT if hasattr(param_type, 'base_type') 
-                                            else not param_type.is_signed if hasattr(param_type, 'is_signed')
-                                            else False)
+                        # Determine parameter signedness by resolving type aliases
+                        param_is_unsigned = False
+                        
+                        # If param has custom_typename, resolve it to get the underlying type
+                        if hasattr(param_type, 'custom_typename') and param_type.custom_typename:
+                            # Try to resolve the custom type from module type aliases
+                            type_name = param_type.custom_typename
+                            resolved_type_spec = None
+                            
+                            #print(f"[TYPE RESOLVE] Looking for {type_name} in type aliases", file=sys.stderr)
+                            
+                            # Use TypeResolver to resolve type through namespace system
+                            # Types in namespaces are mangled (u32 -> standard__types__u32)
+                            if hasattr(module, "_using_namespaces"):
+                                for ns in module._using_namespaces:
+                                    mangled_name = TypeResolver.mangle_name(ns, type_name)
+                                    if hasattr(module, '_type_alias_specs') and mangled_name in module._type_alias_specs:
+                                        resolved_type_spec = module._type_alias_specs[mangled_name]
+                                        #print(f"[TYPE RESOLVE] Found {type_name} as {mangled_name}", file=sys.stderr)
+                                        break
+                            
+                            # Also try direct lookup for global types
+                            if not resolved_type_spec and hasattr(module, '_type_alias_specs'):
+                                if type_name in module._type_alias_specs:
+                                    resolved_type_spec = module._type_alias_specs[type_name]
+                                    #print(f"[TYPE RESOLVE] Found {type_name} directly", file=sys.stderr)
+                            
+                            # If we resolved the type spec, use it
+                            if resolved_type_spec:
+                                if hasattr(resolved_type_spec, 'base_type') and resolved_type_spec.base_type == DataType.UINT:
+                                    param_is_unsigned = True
+                                elif hasattr(resolved_type_spec, 'is_signed'):
+                                    param_is_unsigned = not resolved_type_spec.is_signed
+                            # Fall back to using param_type's own is_signed if available
+                            elif hasattr(param_type, 'is_signed'):
+                                param_is_unsigned = not param_type.is_signed
+                        # Check base_type directly
+                        elif hasattr(param_type, 'base_type') and param_type.base_type == DataType.UINT:
+                            param_is_unsigned = True
+                        elif hasattr(param_type, 'is_signed'):
+                            param_is_unsigned = not param_type.is_signed
                         if arg_is_unsigned != param_is_unsigned:
                             # Signedness mismatch
                             match = False
                             break
+                        # Signedness matches, continue
+                        continue
+                    
+                    # No other compatibility - types don't match
+                    match = False
+                    break
                 
                 if match:
                     return candidate['function']
@@ -3554,6 +4286,7 @@ def mangle_name(base_name: str, param_types: List[ir.Type], module: ir.Module) -
     Returns:
         Mangled function name
     """
+    #print("IN MANGLE_NAME()")
     if not param_types:
         return base_name
     
@@ -4318,9 +5051,9 @@ class AssignmentTypeHandler:
             The assigned value
         """
         # Get the variable pointer
-        if builder.scope is not None and target_name in builder.scope:
+        if module.symbol_table.get_llvm_value(target_name) is not None:
             # Local variable
-            ptr = builder.scope[target_name]
+            ptr = module.symbol_table.get_llvm_value(target_name)
         elif target_name in module.globals:
             # Global variable
             ptr = module.globals[target_name]
@@ -4332,9 +5065,9 @@ class AssignmentTypeHandler:
         if (isinstance(value_expr, BinaryOp) and value_expr.operator == Operator.ADD and
             isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType)):
             # This is the result of array concatenation - update variable to point to new array
-            if builder.scope is not None and target_name in builder.scope:
+            if module.symbol_table.get_llvm_value(target_name) is not None:
                 # For local variables, update the scope to point to the new array
-                builder.scope[target_name] = val
+                module.symbol_table.update_llvm_value(target_name, val)
                 return val
             else:
                 # For global variables, we can't easily resize, so convert to element pointer
@@ -4436,8 +5169,8 @@ class AssignmentTypeHandler:
         if isinstance(target_obj_expr, Identifier):
             # Get the variable pointer directly from scope instead of loading
             var_name = target_obj_expr.name
-            if builder.scope is not None and var_name in builder.scope:
-                obj = builder.scope[var_name]  # This is the pointer
+            if module.symbol_table.get_llvm_value(var_name) is not None:
+                obj = module.symbol_table.get_llvm_value(var_name)  # This is the pointer
                 if isinstance(obj.type, ir.PointerType) and isinstance(obj.type.pointee, ir.PointerType):
                     # Check if the pointee-pointee is a struct
                     if (isinstance(obj.type.pointee.pointee, ir.LiteralStructType) or
@@ -4523,11 +5256,12 @@ class AssignmentTypeHandler:
                     break
         
         if struct_name is None:
-            # Try to infer from scope_type_info
+            # Try to infer from symbol table type information
             if isinstance(target_obj_expr, Identifier):
                 var_name = target_obj_expr.name
-                if hasattr(builder, 'scope_type_info') and var_name in builder.scope_type_info:
-                    type_spec = builder.scope_type_info[var_name]
+                entry = module.symbol_table.lookup_variable(var_name)
+                if entry and entry.type_spec is not None:
+                    type_spec = entry.type_spec
                     if type_spec.custom_typename:
                         struct_name = type_spec.custom_typename
         
@@ -4783,8 +5517,8 @@ class AssignmentTypeHandler:
         # Check if this is array concatenation (ADD operation with array operands)
         if binary_op == Operator.ADD and isinstance(target_expr, Identifier):
             # Get the target variable
-            if builder.scope is not None and target_expr.name in builder.scope:
-                target_ptr = builder.scope[target_expr.name]
+            if module.symbol_table.get_llvm_value(target_expr.name) is not None:
+                target_ptr = module.symbol_table.get_llvm_value(target_expr.name)
             elif target_expr.name in module.globals:
                 target_ptr = module.globals[target_expr.name]
             else:
@@ -4805,9 +5539,9 @@ class AssignmentTypeHandler:
                 if isinstance(concat_result.type, ir.PointerType) and isinstance(concat_result.type.pointee, ir.ArrayType):
                     # The concatenated result is a new array with the proper size
                     # Update the variable to point to this new array
-                    if builder.scope is not None and target_expr.name in builder.scope:
+                    if module.symbol_table.get_llvm_value(target_expr.name) is not None:
                         # For local variables, update the scope to point to the new array
-                        builder.scope[target_expr.name] = concat_result
+                        module.symbol_table.update_llvm_value(target_expr.name, concat_result)
                         return concat_result
                     else:
                         # For global variables, we can't easily resize, so convert to element pointer
@@ -5446,8 +6180,8 @@ class SizeOfTypeHandler:
                 return SizeOfTypeHandler.bits_from_llvm_type(llvm_type, module)
 
             # Fallback: derive from existing LLVM storage
-            if getattr(builder, "scope", None) is not None and target.name in builder.scope:
-                ptr = builder.scope[target.name]
+            if module.symbol_table.get_llvm_value(target.name) is not None:
+                ptr = module.symbol_table.get_llvm_value(target.name)
                 if isinstance(ptr.type, ir.PointerType):
                     return SizeOfTypeHandler.bits_from_llvm_type(ptr.type.pointee, module)
 
@@ -5515,8 +6249,8 @@ class AlignOfTypeHandler:
                 return AlignOfTypeHandler.alignment_bytes_for_type_spec(ts, module)
 
             # Fallback: derive from existing LLVM storage (scope/globals)
-            if getattr(builder, "scope", None) is not None and target.name in builder.scope:
-                ptr = builder.scope[target.name]
+            if module.symbol_table.get_llvm_value(target.name) is not None:
+                ptr = module.symbol_table.get_llvm_value(target.name)
                 if isinstance(ptr.type, ir.PointerType):
                     return AlignOfTypeHandler.alignment_from_llvm_type(ptr.type.pointee, module)
 

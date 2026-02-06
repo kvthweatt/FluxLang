@@ -2,7 +2,7 @@
 
 def main() -> int
 {
-    print("Hello World!\n\0");
+    print("Hello World!\0");
 
     return 0;
 };

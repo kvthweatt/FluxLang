@@ -86,7 +86,7 @@ class Literal(ASTNode):
         # Resolve struct type using LiteralTypeHandler
         struct_type = LiteralTypeHandler.resolve_struct_type(self.value, module)
 
-        if builder.scope is None:
+        if module.symbol_table.is_global_scope():
             # Global context - create a struct constant
             field_values = []
             for member_name in struct_type.names:
@@ -202,9 +202,13 @@ class Identifier(Expression):
     name: str
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        #print(f"[IDENTIFIER] Looking up '{self.name}'", file=sys.stderr)
+        #print(f"[IDENTIFIER]   Scope level: {module.symbol_table.scope_level}", file=sys.stderr)
+        #print(f"[IDENTIFIER]   Scopes count: {len(module.symbol_table.scopes)}", file=sys.stderr)
+        
         # Look up the name in the current scope
-        if builder.scope is not None and self.name in builder.scope:
-            ptr = builder.scope[self.name]
+        if not module.symbol_table.is_global_scope() and module.symbol_table.get_llvm_value(self.name) is not None:
+            ptr = module.symbol_table.get_llvm_value(self.name)
             
             # Get type information if available
             type_spec = IdentifierTypeHandler.get_type_spec(self.name, builder, module)
@@ -517,8 +521,8 @@ class ArrayLiteral(Expression):
             ArrayTypeHandler.emit_memcpy(builder, module, new_start, val_start, new_bytes)
             
             # Update the original variable to point to the new array
-            if var_name and builder.scope and var_name in builder.scope:
-                builder.scope[var_name] = new_alloca
+            if var_name and module.symbol_table.get_llvm_value(var_name) is not None:
+                module.symbol_table.define(var_name, SymbolKind.VARIABLE, llvm_value=new_alloca)
             
             return new_alloca
         else:
@@ -570,14 +574,14 @@ class ArrayLiteral(Expression):
         # Determine storage location based on storage_class and context
         use_global = (
             self.storage_class == StorageClass.GLOBAL or
-            builder.scope is None  # Global scope
+            module.symbol_table.is_global_scope()  # Global scope
         )
         
         use_heap = self.storage_class == StorageClass.HEAP
         use_stack = (
             self.storage_class == StorageClass.STACK or
             self.storage_class == StorageClass.LOCAL or
-            (builder.scope is not None and not use_global and not use_heap)
+            (not module.symbol_table.is_global_scope() and not use_global and not use_heap)
         )
         
         if use_heap:
@@ -633,7 +637,7 @@ class ArrayLiteral(Expression):
                 element_llvm_type = self.element_type.get_llvm_type(module)
                 # Create zero-length array
                 array_type = ir.ArrayType(element_llvm_type, 0)
-                if builder.scope is None:
+                if module.symbol_table.is_global_scope():
                     # Global empty array
                     gvar = ir.GlobalVariable(module, array_type, name=f".empty_array.{id(self)}")
                     gvar.linkage = 'internal'
@@ -662,7 +666,7 @@ class ArrayLiteral(Expression):
                 
                 # Pack string into integer (little endian)
                 if isinstance(target_type, ir.IntType):
-                    print("PACKING STRING")
+                    #print("PACKING STRING")
                     string_val = elem.value
                     byte_count = min(len(string_val), target_type.width // 8)
                     packed_value = 0
@@ -692,13 +696,13 @@ class ArrayLiteral(Expression):
         # Create array type and constant
         array_type = ir.ArrayType(element_type, len(element_values))
         
-        if builder.scope is None or all(isinstance(val, ir.Constant) for val in element_values):
+        if module.symbol_table.is_global_scope() or all(isinstance(val, ir.Constant) for val in element_values):
             # Global or compile-time constant array
             const_elements = [val if isinstance(val, ir.Constant) else 
                             ir.Constant(element_type, 0) for val in element_values]
             const_array = ir.Constant(array_type, const_elements)
             
-            if builder.scope is None:
+            if module.symbol_table.is_global_scope():
                 # Global constant
                 gvar = ir.GlobalVariable(module, array_type, name=f".array_literal.{id(self)}")
                 gvar.linkage = 'internal'
@@ -780,14 +784,14 @@ class StringLiteral(Expression):
         # Determine storage location
         use_global = (
             self.storage_class == StorageClass.GLOBAL or
-            builder.scope is None  # Global scope
+            module.symbol_table.is_global_scope()  # Global scope
         )
         
         use_heap = self.storage_class == StorageClass.HEAP
         use_stack = (
             self.storage_class == StorageClass.STACK or
             self.storage_class == StorageClass.LOCAL or
-            (builder.scope is not None and not use_global and not use_heap)
+            (not module.symbol_table.is_global_scope() and not use_global and not use_heap)
         )
         
         if use_heap:
@@ -1064,13 +1068,13 @@ class UnaryOp(Expression):
         
         if self.operator == Operator.NOT:
             # Handle NOT in global scope by creating constant
-            if builder.scope is None and isinstance(operand_val, ir.Constant):
+            if module.symbol_table.is_global_scope() and isinstance(operand_val, ir.Constant):
                 if isinstance(operand_val.type, ir.IntType):
                     return ir.Constant(operand_val.type, ~operand_val.constant)
             return builder.not_(operand_val)
         elif self.operator == Operator.SUB:
             # Handle negation - for constants in global scope, create negative constant
-            if builder.scope is None and isinstance(operand_val, ir.Constant):
+            if module.symbol_table.is_global_scope() and isinstance(operand_val, ir.Constant):
                 if isinstance(operand_val.type, ir.IntType):
                     return ir.Constant(operand_val.type, -operand_val.constant)
                 elif isinstance(operand_val.type, ir.FloatType):
@@ -1097,8 +1101,8 @@ class UnaryOp(Expression):
             
             if isinstance(self.operand, Identifier):
                 # Retrieve the variable's pointer from the current scope or globals and store the updated value
-                if builder.scope is not None and self.operand.name in builder.scope:
-                    ptr = builder.scope[self.operand.name]
+                if not module.symbol_table.is_global_scope() and module.symbol_table.get_llvm_value(self.operand.name) is not None:
+                    ptr = module.symbol_table.get_llvm_value(self.operand.name)
                 elif self.operand.name in module.globals:
                     ptr = module.globals[self.operand.name]
                 else:
@@ -1120,8 +1124,8 @@ class UnaryOp(Expression):
             
             if isinstance(self.operand, Identifier):
                 # Retrieve the variable's pointer from the current scope or globals and store the updated value
-                if builder.scope is not None and self.operand.name in builder.scope:
-                    ptr = builder.scope[self.operand.name]
+                if not module.symbol_table.is_global_scope() and module.symbol_table.get_llvm_value(self.operand.name) is not None:
+                    ptr = module.symbol_table.get_llvm_value(self.operand.name)
                 elif self.operand.name in module.globals:
                     ptr = module.globals[self.operand.name]
                 else:
@@ -1304,8 +1308,8 @@ class CastExpression(Expression):
             if hasattr(source_val, 'name') and source_val.name and 'struct' in source_val.name:
                 # This is a loaded struct - find the original pointer in scope
                 source_name = source_val.name.replace('_struct_load', '').replace('_load', '')
-                if builder.scope and source_name in builder.scope:
-                    original_ptr = builder.scope[source_name]
+                if module.symbol_table.get_llvm_value(source_name) is not None:
+                    original_ptr = module.symbol_table.get_llvm_value(source_name)
                     return builder.bitcast(original_ptr, target_llvm_type, name="struct_to_ptr")
             
             # Create persistent storage for the struct that won't go out of scope
@@ -1338,10 +1342,10 @@ class CastExpression(Expression):
         if isinstance(self.expression, Identifier):
             var_name = self.expression.name
             
-            if builder.scope is not None and var_name in builder.scope:
-                var_ptr = builder.scope[var_name]
+            if not module.symbol_table.is_global_scope() and module.symbol_table.get_llvm_value(var_name) is not None:
+                var_ptr = module.symbol_table.get_llvm_value(var_name)
                 self._generate_runtime_free(builder, module, var_ptr, var_name)
-                del builder.scope[var_name]
+                module.symbol_table.delete_variable(var_name)
                 
             elif var_name in module.globals:
                 gvar = module.globals[var_name]
@@ -1489,7 +1493,7 @@ class ArrayComprehension(Expression):
             
             # Create loop variable and index
             var_ptr = builder.alloca(element_type, name=self.variable)
-            builder.scope[self.variable] = var_ptr
+            module.symbol_table.define(self.variable, SymbolKind.VARIABLE, llvm_value=var_ptr)
             index_ptr = builder.alloca(ir.IntType(32), name="comp_index")
             builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
             
@@ -1555,7 +1559,7 @@ class ArrayComprehension(Expression):
             builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
             
             var_ptr = builder.alloca(element_type, name=self.variable)
-            builder.scope[self.variable] = var_ptr
+            module.symbol_table.define(self.variable, SymbolKind.VARIABLE, llvm_value=var_ptr)
             
             # Cast start_val and end_val if needed
             start_val = ArrayTypeHandler.cast_to_target_int_type(builder, start_val, element_type)
@@ -1858,34 +1862,49 @@ class FunctionCall(Expression):
         1. Check if this is a function pointer variable
         2. Check direct name in module.globals
         3. Check for overloaded functions in _function_overloads
-        4. Check namespace-qualified names via _using_namespaces
-        5. Check namespace-qualified overloads
-        6. Raise error if still not found
+        4. Check symbol table for function definitions
+        5. Check namespace-qualified names via _using_namespaces
+        6. Check namespace-qualified overloads
+        7. Raise error if still not found
         """
         
         # Step 1: Check if this is a function pointer variable
         if self._is_function_pointer_variable(builder, module):
-            func_ptr_call = FunctionPointerCall(
-                pointer=Identifier(self.name),
-                arguments=self.arguments
-            )
+            func_ptr_call = FunctionPointerCall(pointer=Identifier(self.name), arguments=self.arguments)
             return func_ptr_call.codegen(builder, module)
         
         # Step 2: Try direct lookup
         func = self._try_direct_lookup(module)
+        #if func:
+            #print(f"[RESOLUTION] Found '{self.name}' via direct lookup", file=sys.stderr)
         
         # Step 3: If not found, try overload resolution
         if func is None:
             func = self._try_overload_resolution(builder, module, self.name)
+            #if func:
+            #    print(f"[RESOLUTION] Found '{self.name}' via overload resolution", file=sys.stderr)
+            #else:
+            #    print(f"[RESOLUTION] Overload resolution for '{self.name}' returned None", file=sys.stderr)
         
-        # Step 4: If still not found, try namespace-qualified names
-        if func is None and hasattr(module, '_using_namespaces'):
-            func = self._try_namespace_resolution(builder, module)
-        
-        # Step 5: Error if still not found
+        # Step 4: If still not found, try symbol table resolution
         if func is None:
+            func = self._try_symbol_table_resolution(builder, module)
+            #if func:
+            #    print(f"[RESOLUTION] Found '{self.name}' via symbol table", file=sys.stderr)
+        
+        # Step 5: If still not found, try namespace-qualified names
+        if func is None and hasattr(module, '_using_namespaces'):
+            #print(f"[RESOLUTION] Trying namespace resolution for '{self.name}'", file=sys.stderr)
+            func = self._try_namespace_resolution(builder, module)
+            #if func:
+            #    print(f"[RESOLUTION] Found '{self.name}' via namespace resolution", file=sys.stderr)
+        
+        # Step 6: Error if still not found
+        if func is None:
+            #print(f"[RESOLUTION] All resolution steps failed for '{self.name}'", file=sys.stderr)
             self._raise_function_not_found_error(module)
         
+        #print(f"Generating function call for {self.name}")
         # Generate the actual function call
         return self._generate_call(builder, module, func)
     
@@ -1898,8 +1917,8 @@ class FunctionCall(Expression):
         """
         
         # Check local scope
-        if builder.scope and self.name in builder.scope:
-            var_ptr = builder.scope[self.name]
+        if module.symbol_table.get_llvm_value(self.name) is not None:
+            var_ptr = module.symbol_table.get_llvm_value(self.name)
             # Check if it's a pointer to a function type
             # Note: Local variables are allocated with alloca, so we get a pointer to the pointer
             if isinstance(var_ptr.type, ir.PointerType):
@@ -1946,22 +1965,92 @@ class FunctionCall(Expression):
         """
         if not hasattr(module, '_function_overloads'):
             return None
+        # Check if this base_name has any overloads registered
+        if base_name not in module._function_overloads:
+            return None
         # Use _resolve_overload which internally uses FunctionTypeHandler
         return self._resolve_overload(builder, module, base_name, 
                                      module._function_overloads[base_name])
     
     def _try_namespace_resolution(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Function]:
         """
-        Try to resolve the function through namespace-qualified names.
+        Try to resolve the function through namespace-qualified names using SymbolTable.
         
         Returns:
             Function object if found, None otherwise
         """
+        #print(f"[NAMESPACE RESOLVE] Trying to resolve '{self.name}'", file=sys.stderr)
+        
+        # Get current namespace context from symbol table or module
+        if hasattr(module, 'symbol_table'):
+            current_namespace = module.symbol_table.current_namespace
+            #print(f"[NAMESPACE RESOLVE]   current_namespace='{current_namespace}' (from symbol_table)", file=sys.stderr)
+            
+            # Try to lookup the function in the symbol table
+            func_entry = module.symbol_table.lookup_function(self.name, current_namespace)
+            if func_entry:
+                #print(f"[NAMESPACE RESOLVE]   Found in symbol_table: {func_entry.mangled_name}", file=sys.stderr)
+                
+                # First, try to get it directly from llvm_value (fastest)
+                if func_entry.llvm_value and isinstance(func_entry.llvm_value, ir.Function):
+                    #print(f"[NAMESPACE RESOLVE]   Found function in symbol_table.llvm_value!", file=sys.stderr)
+                    return func_entry.llvm_value
+                
+                # Fallback: Try to get the function from module.globals
+                if func_entry.mangled_name in module.globals:
+                    candidate_func = module.globals[func_entry.mangled_name]
+                    if isinstance(candidate_func, ir.Function):
+                        #print(f"[NAMESPACE RESOLVE]   Found function in globals via mangled_name!", file=sys.stderr)
+                        return candidate_func
+                
+                # Last resort: try the unmangled name
+                if self.name in module.globals:
+                    candidate_func = module.globals[self.name]
+                    if isinstance(candidate_func, ir.Function):
+                        #print(f"[NAMESPACE RESOLVE]   Found function in globals via unmangled name!", file=sys.stderr)
+                        return candidate_func
+        else:
+            current_namespace = getattr(module, '_current_namespace', '')
+            #print(f"[NAMESPACE RESOLVE]   current_namespace='{current_namespace}' (from module attr)", file=sys.stderr)
+        
+        # Fallback: use old TypeResolver method
+        #print(f"[NAMESPACE RESOLVE]   Trying TypeResolver.resolve_type", file=sys.stderr)
+        resolved_name = TypeResolver.resolve_type(module, self.name, current_namespace)
+        if resolved_name:
+            #print(f"[NAMESPACE RESOLVE]   resolved_name='{resolved_name}'", file=sys.stderr)
+            
+            if resolved_name in module.globals:
+                candidate_func = module.globals[resolved_name]
+                if isinstance(candidate_func, ir.Function):
+                    #print(f"[NAMESPACE RESOLVE]   Found function in globals!", file=sys.stderr)
+                    return candidate_func
+                
+                # Also check for overloaded versions of the resolved name
+                func = self._try_overload_resolution(builder, module, resolved_name)
+                print("TRYING OVERLOAD RESOLUTION")
+                if func is not None:
+                    #print(f"[NAMESPACE RESOLVE]   Found via overload resolution!", file=sys.stderr)
+                    return func
+        
+        #print(f"[NAMESPACE RESOLVE]   NOT FOUND", file=sys.stderr)
+        return None
+
+    def _try_symbol_table_resolution(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Function]:
+        """
+        Try to resolve the function using the symbol table.
+        
+        Returns:
+            Function object if found, None otherwise
+        """
+        if not hasattr(module, 'symbol_table'):
+            return None
+        
         # Get current namespace context from module
         current_namespace = getattr(module, '_current_namespace', '')
         
-        # Use FunctionResolver to find the function name
-        resolved_name = FunctionResolver.resolve_function_name(self.name, module, current_namespace)
+        # Use FunctionResolver to check symbol table
+        resolved_name = FunctionResolver._resolve_from_symbol_table(
+            self.name, module.symbol_table, current_namespace, module)
         
         if resolved_name and resolved_name in module.globals:
             candidate_func = module.globals[resolved_name]
@@ -1971,6 +2060,7 @@ class FunctionCall(Expression):
             # Also check for overloaded versions of the resolved name
             func = self._try_overload_resolution(builder, module, resolved_name)
             if func is not None:
+                #print("FUNC NOT NONE")
                 return func
         
         return None
@@ -2048,11 +2138,10 @@ class FunctionCall(Expression):
             # Use FunctionTypeHandler for type checking and conversion
             if param_index < len(func.args):
                 expected_type = func.args[param_index].type
-                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(
-                    builder, module, arg_val, expected_type, i)
+                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(builder, module, arg_val, expected_type, i)
             
             arg_vals.append(arg_val)
-        
+        #print(f"Generated call for {self.name}")
         return builder.call(func, arg_vals)
 
     def _is_string_literal_for_pointer(self, arg: Expression, func: ir.Function, 
@@ -2328,8 +2417,8 @@ class MethodCall(Expression):
         if isinstance(self.object, Identifier):
             # Look up the variable in scope to get the pointer directly
             var_name = self.object.name
-            if builder.scope and var_name in builder.scope:
-                obj_ptr = builder.scope[var_name]
+            if module.symbol_table.get_llvm_value(var_name) is not None:
+                obj_ptr = module.symbol_table.get_llvm_value(var_name)
             else:
                 raise NameError(f"Unknown variable: {var_name}")
         else:
@@ -2610,8 +2699,8 @@ class AddressOf(Expression):
             var_name = self.expression.name
             
             # Check if it's a local variable
-            if builder.scope is not None and var_name in builder.scope:
-                ptr = builder.scope[var_name]
+            if not module.symbol_table.is_global_scope() and module.symbol_table.get_llvm_value(var_name) is not None:
+                ptr = module.symbol_table.get_llvm_value(var_name)
                 # Special case: if this is a function parameter that's already a pointer type
                 # (like array parameters), return the loaded value directly
                 if (isinstance(ptr.type, ir.PointerType) and 
@@ -2905,12 +2994,12 @@ class VariableDeclaration(ASTNode):
         is_global_scope = (
             builder is None or 
             self.is_global or 
-            (hasattr(builder, 'scope') and builder.scope is None)
+            module.symbol_table.is_global_scope()
         )
         
         # Handle global variables
-        if is_global_scope:
-            return self._codegen_global(module, llvm_type, resolved_type_spec)
+        #if is_global_scope:
+        #    return self._codegen_global(module, llvm_type, resolved_type_spec)
         
         # Handle local variables
         return self._codegen_local(builder, module, llvm_type, resolved_type_spec)
@@ -2956,6 +3045,18 @@ class VariableDeclaration(ASTNode):
             gvar.initializer = get_default_initializer(llvm_type)
         
         gvar.linkage = 'internal'
+        
+        # Register global variable in symbol table
+        if hasattr(module, 'symbol_table'):
+            #print(f"[GLOBAL VAR] Registering global variable '{self.name}' in symbol table", file=sys.stderr)
+            module.symbol_table.define(
+                self.name,
+                SymbolKind.VARIABLE,
+                type_spec=resolved_type_spec,
+                llvm_type=llvm_type,
+                llvm_value=gvar
+            )
+        
         return gvar
     
     def _create_global_initializer(self, module: ir.Module, llvm_type: ir.Type) -> Optional[ir.Constant]:
@@ -2967,10 +3068,7 @@ class VariableDeclaration(ASTNode):
         """Generate code for local variable."""
         alloca = builder.alloca(llvm_type, name=self.name)
         
-        # Store type information in scope metadata
-        if not hasattr(builder, 'scope_type_info'):
-            builder.scope_type_info = {}
-        builder.scope_type_info[self.name] = resolved_type_spec
+        # Type information is now stored in symbol table during define()
 
         # Handle noinit keyword - skip initialization entirely
         if isinstance(self.initial_value, NoInit):
@@ -2986,7 +3084,10 @@ class VariableDeclaration(ASTNode):
         # This maintains backward compatibility with existing behavior
         
         # Register in scope
-        builder.scope[self.name] = alloca
+        #print(f"[LOCAL VAR] Registering local variable '{self.name}' in scope level {module.symbol_table.scope_level}", file=sys.stderr)
+        #print(f"[LOCAL VAR]   Scopes count: {len(module.symbol_table.scopes)}", file=sys.stderr)
+        module.symbol_table.define(self.name, SymbolKind.VARIABLE, type_spec=resolved_type_spec, llvm_value=alloca)
+        #print(f"[LOCAL VAR]   Variable '{self.name}' registered successfully", file=sys.stderr)
         if resolved_type_spec.is_volatile:
             if not hasattr(builder, 'volatile_vars'):
                 builder.volatile_vars = set()
@@ -3084,21 +3185,37 @@ class VariableDeclaration(ASTNode):
 class TypeDeclaration(Expression):
     """AST node for type declarations using AS keyword"""
     name: str
-    base_type: TypeSystem
+    type_spec: TypeSystem
     initial_value: Optional[Expression] = None
     
     def __repr__(self):
         init_str = f" = {self.initial_value}" if self.initial_value else ""
-        return f"TypeDeclaration({self.base_type} as {self.name}{init_str})"
+        return f"TypeDeclaration({self.type_spec} as {self.name}{init_str})"
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Use TypeSystem's proper resolution instead of guessing
-        llvm_type = self.base_type.get_llvm_type_with_array(module)
+        llvm_type = self.type_spec.get_llvm_type_with_array(module)
         
         # Register the type alias
         if not hasattr(module, '_type_aliases'):
             module._type_aliases = {}
         module._type_aliases[self.name] = llvm_type
+        
+        # CRITICAL: Also store the TypeSystem spec for signedness tracking
+        if not hasattr(module, "_type_alias_specs"):
+            module._type_alias_specs = {}
+        module._type_alias_specs[self.name] = self.type_spec
+        
+        # Register type alias in symbol table
+        if hasattr(module, 'symbol_table'):
+            #print(f"[TYPE ALIAS] Registering type alias '{self.name}' in symbol table", file=sys.stderr)
+            module.symbol_table.define(
+                self.name,
+                SymbolKind.TYPE,
+                type_spec=self.type_spec,
+                llvm_type=llvm_type,
+                llvm_value=None
+            )
         
         # If there's an initial value, create a global constant
         if self.initial_value:
@@ -3177,16 +3294,18 @@ class Block(Statement):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         result = None
+        print(self.statements)
         #print(f"DEBUG Block: Processing {len(self.statements)} statements")
         for i, stmt in enumerate(self.statements):
             #print(f"DEBUG Block: Processing statement {i}: {type(stmt).__name__}")
             if stmt is not None:  # Skip None statements
                 try:
+                    #traceback.print_exc()
                     stmt_result = stmt.codegen(builder, module)
                     if stmt_result is not None:  # Only update result if not None
                         result = stmt_result
                 except Exception as e:
-                    raise ValueError(f"DEBUG Block: Error in statement {i} ({type(stmt).__name__}): {e}")
+                    raise ValueError(f"DEBUG Block: Error in statement {i} ({type(stmt).__name__}): {e} \n\n {stmt} \n\n {module.name}")
         return result
 
 
@@ -3878,7 +3997,7 @@ class ForInLoop(Statement):
             # Store in loop variable
             var_ptr = builder.alloca(elem_type, name=self.variables[0])
             builder.store(elem_val, var_ptr)
-            builder.scope[self.variables[0]] = var_ptr
+            module.symbol_table.define(self.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
             
         elif isinstance(collection.type, ir.PointerType) and isinstance(collection.type.pointee, ir.IntType(8)):
             # String iteration (char*)
@@ -3901,7 +4020,7 @@ class ForInLoop(Statement):
             builder.position_at_start(body_block)
             var_ptr = builder.alloca(ir.IntType(8), name=self.variables[0])
             builder.store(char_val, var_ptr)
-            builder.scope[self.variables[0]] = var_ptr
+            module.symbol_table.define(self.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
             
             # Increment pointer
             next_ptr = builder.gep(ptr_val, [ir.Constant(ir.IntType(32), 1)], name='next.ptr')
@@ -4152,15 +4271,15 @@ class TryBlock(Statement):
                 builder.store(exc_val, exc_var)
                 
                 # Add to scope
-                if hasattr(builder, 'scope') and builder.scope is not None:
-                    builder.scope[exc_name] = exc_var
+                if not module.symbol_table.is_global_scope():
+                    module.symbol_table.define(exc_name, SymbolKind.VARIABLE, llvm_value=exc_var)
             
             # Generate catch body
             catch_body.codegen(builder, module)
             
             # Remove exception variable from scope
-            if exc_name and hasattr(builder, 'scope') and builder.scope is not None and exc_name in builder.scope:
-                del builder.scope[exc_name]
+            if exc_name and not module.symbol_table.is_global_scope() and emodule.symbol_table.get_llvm_value(xc_name) is not None:
+                module.symbol_table.delete_variable(exc_name)
             
             # Branch to end if not already terminated
             if not builder.block.is_terminated:
@@ -4353,8 +4472,8 @@ class InlineAsm(Expression):
                 output_matches = re.findall(r'"([^"]+)"\s*\(([^)]+)\)', output_part)
                 for constraint, var_name in output_matches:
                     # Look up the variable
-                    if builder.scope and var_name in builder.scope:
-                        var_ptr = builder.scope[var_name]
+                    if module.symbol_table.get_llvm_value(var_name) is not None:
+                        var_ptr = module.symbol_table.get_llvm_value(var_name)
                         output_operands.append(var_ptr)
                         output_constraints.append(constraint)
                     elif var_name in module.globals:
@@ -4373,8 +4492,8 @@ class InlineAsm(Expression):
                 for constraint, var_name in input_matches:
                     #print(f"DEBUG: Looking for variable '{var_name}' with constraint '{constraint}'")
                     # Look up the variable
-                    if builder.scope and var_name in builder.scope:
-                        var_ptr = builder.scope[var_name]
+                    if module.symbol_table.get_llvm_value(var_name) is not None:
+                        var_ptr = module.symbol_table.get_llvm_value(var_name)
                         # For arrays or memory constraints, pass the pointer; for register constraints, load the value
                         if constraint in ['m'] or (isinstance(var_ptr.type, ir.PointerType) and isinstance(var_ptr.type.pointee, ir.ArrayType)):
                             input_operands.append(var_ptr)
@@ -4531,16 +4650,61 @@ class FunctionDef(ASTNode):
             # Create new function with mangled name
             func = ir.Function(module, func_type, mangled_name)
             
-            # Extract base name for overload registration
-            # If the name is namespace-qualified (e.g., "standard::types::bswap16"),
-            # register it under the short name ("bswap16") so it can be found
-            # by calls within the same namespace
-            base_name = self.name.split('::')[-1] if '::' in self.name else self.name
+            # Extract base name for symbol table registration
+            # The function name might be namespace-mangled like "standard__types__bswap16"
+            # We need to extract just "bswap16" for the symbol table (namespace is tracked separately)
+            # Check if we're in a namespace
+            if hasattr(module, 'symbol_table') and module.symbol_table.current_namespace:
+                # Remove the namespace prefix from the name
+                namespace_prefix = module.symbol_table.current_namespace + "__"
+                if self.name.startswith(namespace_prefix):
+                    base_name = self.name[len(namespace_prefix):]
+                else:
+                    # No prefix, use as-is
+                    base_name = self.name
+            else:
+                # Not in a namespace or no :: in name
+                base_name = self.name.split('::')[-1] if '::' in self.name else self.name
             
             # Register this as an overload using FunctionTypeHandler
             FunctionTypeHandler.register_function_overload(
                 module, base_name, mangled_name, self.parameters, self.return_type, func
             )
+
+            # Also register in symbol table if available
+            if hasattr(module, 'symbol_table'):
+                try:
+                    #print(f"DEFINING FUNCTION: {base_name} -> {mangled_name}", file=sys.stderr)
+                    module.symbol_table.define(
+                        base_name, 
+                        SymbolKind.FUNCTION, 
+                        type_spec=self.return_type,
+                        llvm_type=func_type,
+                        llvm_value=func
+                    )
+                    # Also register the full name if it's different
+                    if base_name != self.name:
+                        module.symbol_table.define(
+                            self.name, 
+                            SymbolKind.FUNCTION, 
+                            type_spec=self.return_type,
+                            llvm_type=func_type,
+                            llvm_value=func
+                        )
+                except Exception as e:
+                    import traceback
+                    print(f"[ERROR] Failed to register function in symbol table:", file=sys.stderr)
+                    print(f"[ERROR]   base_name={base_name}", file=sys.stderr)
+                    print(f"[ERROR]   self.name={self.name}", file=sys.stderr)
+                    print(f"[ERROR]   mangled_name={mangled_name}", file=sys.stderr)
+                    print(f"[ERROR]   symbol_table type: {type(module.symbol_table)}", file=sys.stderr)
+                    print(f"[ERROR]   symbol_table.scope_level: {module.symbol_table.scope_level if hasattr(module, 'symbol_table') else 'N/A'}", file=sys.stderr)
+                    print(f"[ERROR]   symbol_table.current_namespace: {module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else 'N/A'}", file=sys.stderr)
+                    print(f"[ERROR]   symbol_table.scopes: {module.symbol_table.scopes if hasattr(module, 'symbol_table') else 'N/A'}", file=sys.stderr)
+                    print(f"[ERROR]   Exception type: {type(e).__name__}", file=sys.stderr)
+                    print(f"[ERROR]   Exception: {e}", file=sys.stderr)
+                    traceback.print_exc()
+                    raise
         
         if self.is_prototype:
             return func
@@ -4557,17 +4721,12 @@ class FunctionDef(ASTNode):
         builder.position_at_start(entry_block)
         
         # Create new scope for function body
-        old_scope = builder.scope
-        builder.scope = {}
+        module.symbol_table.enter_scope()  # Enter function scope
         # Initialize union tracking for this function scope
         if not hasattr(builder, 'initialized_unions'):
             builder.initialized_unions = set()
         
         # Store parameter type information in scope metadata
-        if not hasattr(builder, 'scope_type_info'):
-            builder.scope_type_info = {}
-        old_scope_type_info = builder.scope_type_info
-        builder.scope_type_info = {}
         
         # Allocate space for parameters and store initial values WITH type information
         for i, param in enumerate(func.args):
@@ -4580,9 +4739,13 @@ class FunctionDef(ASTNode):
             param_with_metadata = attach_type_metadata(param, type_spec=self.parameters[i].type_spec)
             
             builder.store(param_with_metadata, alloca)
-            builder.scope[param_name] = alloca
-            # Store the original type spec for this parameter
-            builder.scope_type_info[param_name] = self.parameters[i].type_spec
+            # Define parameter in symbol table with type information
+            module.symbol_table.define(
+                param_name, 
+                SymbolKind.VARIABLE,
+                type_spec=self.parameters[i].type_spec,
+                llvm_value=alloca
+            )
         
         # Generate function body
         self.body.codegen(builder, module)
@@ -4595,8 +4758,7 @@ class FunctionDef(ASTNode):
                 raise RuntimeError("Function must end with return statement")
         
         # Restore previous scope
-        builder.scope = old_scope
-        builder.scope_type_info = old_scope_type_info
+        module.symbol_table.exit_scope()  # Exit function scope
         return func
 
 @dataclass
@@ -4625,7 +4787,7 @@ class FunctionPointer(Expression):
         ptr_type = ir.PointerType(func_type)
         
         # Allocate space for function pointer
-        if builder.scope is None:
+        if module.symbol_table.is_global_scope():
             # Global function pointer
             gvar = ir.GlobalVariable(module, ptr_type, self.name)
             gvar.initializer = ir.Constant(ptr_type, None)
@@ -4634,7 +4796,7 @@ class FunctionPointer(Expression):
         else:
             # Local function pointer
             alloca = builder.alloca(ptr_type, name=self.name)
-            builder.scope[self.name] = alloca
+            module.symbol_table.define(self.name, SymbolKind.VARIABLE, type_spec=resolved_type_spec, llvm_value=alloca)
             return alloca
 
 @dataclass
@@ -4675,12 +4837,11 @@ class FunctionPointerDeclaration(Statement):
         ptr_type = self.fp_type.get_llvm_pointer_type(module)
         
         # Store type information for later lookup
-        if not hasattr(builder, 'scope_type_info'):
-            builder.scope_type_info = {}
-        builder.scope_type_info[self.name] = self.fp_type
+        
+        # Type information will be stored in symbol table during define()
         
         # Allocate storage
-        if builder.scope is None:
+        if module.symbol_table.is_global_scope():
             # Global function pointer
             gvar = ir.GlobalVariable(module, ptr_type, self.name)
             gvar.linkage = 'internal'
@@ -4696,7 +4857,7 @@ class FunctionPointerDeclaration(Statement):
         else:
             # Local function pointer
             alloca = builder.alloca(ptr_type, name=self.name)
-            builder.scope[self.name] = alloca
+            module.symbol_table.define(self.name, SymbolKind.VARIABLE, type_spec=resolved_type_spec, llvm_value=alloca)
             
             if self.initializer:
                 init_val = self.initializer.codegen(builder, module)
@@ -4745,8 +4906,8 @@ class FunctionPointerAssignment(Statement):
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Assign function address to function pointer"""
         # Get the function pointer storage location
-        if builder.scope and self.pointer_name in builder.scope:
-            ptr_storage = builder.scope[self.pointer_name]
+        if module.symbol_table.get_llvm_value(self.pointer_name) is not None:
+            ptr_storage = module.symbol_table.get_llvm_value(self.pointer_name)
         elif self.pointer_name in module.globals:
             ptr_storage = module.globals[self.pointer_name]
         else:
@@ -4777,12 +4938,34 @@ class EnumDef(ASTNode):
             module._enum_types = {}
         module._enum_types[self.name] = self.values
         
+        # Register enum in symbol table
+        if hasattr(module, 'symbol_table'):
+            #print(f"[ENUM] Registering enum '{self.name}' in symbol table", file=sys.stderr)
+            module.symbol_table.define(
+                self.name,
+                SymbolKind.ENUM,
+                type_spec=None,  # Enums don't have a TypeSystem
+                llvm_type=ir.IntType(32),  # Enums are i32
+                llvm_value=None  # Enums don't have a single value
+            )
+        
         for name, value in self.values.items():
             const_name = f"{self.name}.{name}"
             const_value = ir.Constant(ir.IntType(32), value)
             global_const = ir.GlobalVariable(module, ir.IntType(32), name=const_name)
             global_const.initializer = const_value
             global_const.global_constant = True
+            
+            # Register each enum value in symbol table
+            if hasattr(module, 'symbol_table'):
+                full_name = f"{self.name}.{name}"
+                module.symbol_table.define(
+                    full_name,
+                    SymbolKind.VARIABLE,  # Enum values are constants (variables)
+                    type_spec=None,
+                    llvm_type=ir.IntType(32),
+                    llvm_value=global_const
+                )
 
 @dataclass
 class EnumDefStatement(Statement):
@@ -4867,6 +5050,17 @@ class UnionDef(ASTNode):
             'is_tagged': bool(self.tag_name)
         }
         
+        # Register union in symbol table
+        if hasattr(module, 'symbol_table'):
+            #print(f"[UNION] Registering union '{self.name}' in symbol table", file=sys.stderr)
+            module.symbol_table.define(
+                self.name,
+                SymbolKind.UNION,
+                type_spec=None,
+                llvm_type=union_type,
+                llvm_value=None
+            )
+        
         return union_type
 
 @dataclass
@@ -4888,8 +5082,8 @@ class TieExpression(Expression):
         var_name = self.operand.name
         
         # Get the variable pointer
-        if builder.scope and var_name in builder.scope:
-            var_ptr = builder.scope[var_name]
+        if module.symbol_table.get_llvm_value(var_name) is not None:
+            var_ptr = module.symbol_table.get_llvm_value(var_name)
         elif var_name in module.globals:
             var_ptr = module.globals[var_name]
         else:
@@ -5199,6 +5393,17 @@ class StructDef(ASTNode):
         module._struct_types[self.name] = instance_type
         module._struct_vtables[self.name] = self.vtable
         
+        # Register in symbol table
+        if hasattr(module, 'symbol_table'):
+            #print(f"[STRUCT] Registering struct '{self.name}' in symbol table", file=sys.stderr)
+            module.symbol_table.define(
+                self.name,
+                SymbolKind.STRUCT,
+                type_spec=None,  # Structs don't have a TypeSystem, they ARE a type
+                llvm_type=instance_type,
+                llvm_value=vtable_global
+            )
+        
         # Store member type specifications for signedness tracking
         member_type_specs = {}
         for member in self.members:
@@ -5206,11 +5411,17 @@ class StructDef(ASTNode):
             type_spec = member.type_spec
             # For array types, we need to extract the element type
             if type_spec.is_array:
-                # Create a TypeSystem for the element type
-                from ftypesys import TypeSystem, DataType
+
+                # Determine correct is_signed value - look up from type system
+                is_signed_value = type_spec.is_signed
+                if type_spec.custom_typename and hasattr(module, '_type_alias_specs'):
+                    if type_spec.custom_typename in module._type_alias_specs:
+                        alias_spec = module._type_alias_specs[type_spec.custom_typename]
+                        is_signed_value = alias_spec.is_signed
+                        
                 element_type_spec = TypeSystem(
                     base_type=type_spec.base_type,
-                    is_signed=type_spec.is_signed,
+                    is_signed=is_signed_value,
                     bit_width=type_spec.bit_width,
                     custom_typename=type_spec.custom_typename,
                     is_const=type_spec.is_const,
@@ -5228,6 +5439,12 @@ class StructDef(ASTNode):
                 type_spec.array_element_type = element_type_spec
                 
             member_type_specs[name] = type_spec
+        # DEBUG: Print member type specs
+        #print(f"[STRUCT] Storing member specs for {self.name}", file=sys.stderr)
+        #for mem_name, mem_spec in member_type_specs.items():
+        #    print(f"  {mem_name}: is_array={mem_spec.is_array}, array_element_type={mem_spec.array_element_type}", file=sys.stderr)
+        #    if mem_spec.array_element_type:
+        #        print(f"    element is_signed={mem_spec.array_element_type.is_signed}", file=sys.stderr)
         module._struct_member_type_specs[self.name] = member_type_specs
         
         if self.storage_class is not None:
@@ -5263,11 +5480,12 @@ class StructFieldAccess(Expression):
         struct_name: Optional[str] = None
         is_pointer_hint = False
 
-        # If accessing from an Identifier, look up its type in scope_type_info
+        # If accessing from an Identifier, look up its type in symbol table
         if isinstance(self.struct_instance, Identifier):
             var_name = self.struct_instance.name
-            if hasattr(builder, "scope_type_info") and var_name in builder.scope_type_info:
-                type_spec = builder.scope_type_info[var_name]
+            entry = module.symbol_table.lookup_variable(var_name)
+            if entry and entry.type_spec:
+                type_spec = entry.type_spec
                 if getattr(type_spec, "custom_typename", None):
                     struct_name = type_spec.custom_typename
                 is_pointer_hint = bool(getattr(type_spec, "is_pointer", False))
@@ -5377,7 +5595,7 @@ class StructFieldAccess(Expression):
                 return builder.trunc(masked, field_type, name=self.field_name)
             return masked
 
-        # Struct value extraction by index (vtable order) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â support BOTH literal and identified
+        # Struct value extraction by index (vtable order)
         if isinstance(instance.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
             field_index = None
             for i, f in enumerate(vtable.fields):
@@ -5548,6 +5766,17 @@ class ObjectDef(ASTNode):
         # Create vtable
         ObjectTypeHandler.create_vtable(self.name, fields, module)
         
+        # Register object in symbol table
+        if hasattr(module, 'symbol_table'):
+            #print(f"[OBJECT] Registering object '{self.name}' in symbol table", file=sys.stderr)
+            module.symbol_table.define(
+                self.name,
+                SymbolKind.STRUCT,  # Objects are treated like structs for type purposes
+                type_spec=None,
+                llvm_type=struct_type,
+                llvm_value=None
+            )
+        
         # PASS 1: Predeclare all methods
         method_funcs = {}
 
@@ -5603,30 +5832,25 @@ class ExternBlock(Statement):
             
             # CRITICAL: Extern functions are ALWAYS global and should NOT have namespace mangling
             # Strip any namespace prefix that might have been added
-            func_name = func_def.name
-            if '__' in func_name:
-                # If the name contains __, it might be namespace-prefixed
-                # Extract the base name (last component after __)
-                parts = func_name.split('__')
-                base_name = parts[-1]
-            else:
-                base_name = func_name
-            
-            # For extern functions, we respect no_mangle flag, but they're already effectively
-            # no_mangle since we use the base name. The only mangling that happens is for
-            # overloads (parameter types), which is still needed for type safety.
+            func_name = func_def.name or ""
+
+            # Always define base_name no matter what
+            base_name = func_name
+
+            # Strip any namespace/prefix schemes you use
+            if "::" in base_name:
+                base_name = base_name.split("::")[-1]
+            if "__" in base_name:
+                base_name = base_name.split("__")[-1]
+
+            # Now base_name is guaranteed defined
             if func_def.no_mangle:
-                # Truly no mangling at all - use exact name
                 final_name = base_name
             else:
-                # Allow overload mangling based on parameter types, but start from base_name
-                # Use FunctionTypeHandler for mangling
-                original_name = func_def.name
-                func_def.name = base_name
+                # DO NOT mutate func_def.name; just pass base_name into mangler
                 final_name = FunctionTypeHandler.mangle_function_name(
-                    func_def.name, func_def.parameters, func_def.return_type, func_def.no_mangle
+                    base_name, func_def.parameters, func_def.return_type, False
                 )
-                func_def.name = original_name
             
             # Create or get the function
             if final_name in module.globals:
@@ -5667,7 +5891,8 @@ class NamespaceDef(ASTNode):
 
         # Register nested namespaces recursively using NamespaceTypeHandler
         for nested_ns in self.nested_namespaces:
-            full_nested_name = f"{self.name}::{nested_ns.name}"
+            full_nested_name = f"{self.name}__{nested_ns.name}"
+            #print("FULL NESTED NAME:",full_nested_name)
             NamespaceTypeHandler.register_namespace(module, full_nested_name)
             NamespaceTypeHandler.register_nested_namespaces(nested_ns, full_nested_name, module)
         
@@ -5695,7 +5920,6 @@ class NamespaceDef(ASTNode):
             except Exception as e:
                 var_name = getattr(var, 'name', '<unknown>')
                 print(f"\nError processing variable '{var_name}' in namespace '{self.name}':")
-                import traceback
                 traceback.print_exc()
                 raise
 
@@ -5739,13 +5963,9 @@ class UsingStatement(Statement):
         # For now, just store the namespace information for symbol resolution
         if not hasattr(module, '_using_namespaces'):
             module._using_namespaces = []
+        self.namespace_path = self.namespace_path.replace("::","__")
         module._using_namespaces.append(self.namespace_path)
-
-# Custom type definition
-@dataclass
-class CustomTypeStatement(Statement):
-    name: str
-    type_spec: TypeSystem
+        #print(f"[USING] Registered namespace: {self.namespace_path}", file=sys.stderr)
 
 # Function definition statement
 @dataclass
@@ -5798,25 +6018,56 @@ class NamespaceDefStatement(Statement):
 # Program root
 @dataclass
 class Program(ASTNode):
+    symbol_table: 'SymbolTable'  # Forward reference since SymbolTable is in ftypesys
     statements: List[Statement] = field(default_factory=list)
 
     def codegen(self, module: ir.Module = None) -> ir.Module:
+        print("[AST] Begining codegen for Flux program ...")
         if module is None:
-            module = ir.Module(name='flux_module')
+            module = ir.Module(name='flux_module') # Update to support module system.
+        
+        # Validate and attach symbol table to module
+        if not isinstance(self.symbol_table, SymbolTable):
+            print(f"[ERROR] Program.symbol_table is {type(self.symbol_table)}, not SymbolTable!", file=sys.stderr)
+            print(f"[ERROR] Creating new SymbolTable to replace it", file=sys.stderr)
+            self.symbol_table = SymbolTable()
+        
+        module.symbol_table = self.symbol_table
         
         # Create global builder with no function context
         builder = ir.IRBuilder()
-        builder.scope = None  # Indicates global scope
+        # Symbol table already at global scope (level 0)
         # Track initialized unions for immutability enforcement
         builder.initialized_unions = set()
         
-        # Process all statements
+        # TWO-PASS COMPILATION
+        # Pass 1: Process all using statements first to populate _using_namespaces
+        print("[AST] Pass 1: Processing using statements...")
         for stmt in self.statements:
-            try:
-                stmt.codegen(builder, module)
-            except Exception as e:
-                print(f"Error generating code for statement: {stmt}")
-                raise
+            if isinstance(stmt, UsingStatement):
+                #try:
+                    stmt.codegen(builder, module)
+                #except Exception as e:
+                    #print(f"Error processing using statement: {stmt.name}")
+                    #raise
+        #print(module.symbol_table.scopes)
+        # Debug: Show what namespaces were registered
+        #if hasattr(module, '_using_namespaces'):
+        #    print(f"[DEBUG] Registered {len(module._using_namespaces)} using namespaces:", file=sys.stderr)
+        #    for ns in module._using_namespaces:
+        #        print(f"[DEBUG]   - {ns}", file=sys.stderr)
+        #else:
+        #    print(f"[DEBUG] NO using namespaces registered!", file=sys.stderr)
+        
+        # Pass 2: Process all other statements
+        print("[AST] Pass 2: Processing all other statements...")
+        for stmt in self.statements:
+            if not isinstance(stmt, UsingStatement):
+                #try:
+                    stmt.codegen(builder, module)
+                #except Exception as e:
+                    #print(f"Error generating code for: {stmt.name}")
+                    #raise
         
         return module
 
@@ -5834,7 +6085,6 @@ if __name__ == "__main__":
     
     program = Program(
         statements=[
-            ImportStatement("standard.fx"),
             FunctionDefStatement(main_func)
         ]
     )

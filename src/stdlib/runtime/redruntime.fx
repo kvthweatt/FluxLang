@@ -27,19 +27,20 @@
 #ifndef FLUX_STANDARD_SYSTEM
 #import "redsys.fx";
 #endif;
+
 #ifndef FLUX_STANDARD_IO
 #import "redio.fx";
 #endif;
 
 // Import raw functions & builtins
-#import "string_object_raw.fx";
-#import "file_object_raw.fx";
+//#import "string_object_raw.fx";
+//#import "file_object_raw.fx";
 //#import "socket_object_raw.fx";
 //
 // ---------------------------
 //
 // Import runtime helpers
-#import "ffifio.fx";                 // FFI-based File Input/Output (CRT)
+//#import "ffifio.fx";                 // FFI-based File Input/Output (CRT)
 //
 // ---------------------------
 //
@@ -136,7 +137,8 @@ def !!FRTStartup() -> int
     return return_code; // Unreached
 };
 #endif;
-
+///
 #ifndef FLUX_STANDARD_EXCEPTIONS
 #import "redexceptions.fx";
 #endif;
+///

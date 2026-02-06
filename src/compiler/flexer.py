@@ -60,6 +60,7 @@ class TokenType(Enum):
     DO = auto()
     ELIF = auto()
     ELSE = auto()
+    ENDIANOF = auto()
     ENUM = auto()
     EXTERN = auto()
     FALSE = auto()
@@ -113,8 +114,11 @@ class TokenType(Enum):
     DECREMENT = auto()      # --
     LOGICAL_AND = auto()    # &
     LOGICAL_OR = auto()     # |
+
     BITAND_OP = auto()      # `&
     BITOR_OP = auto()       # `|
+    BITNAND_OP = auto()     # `!&
+    BITNOR_OP = auto()      # `!|
     
     # Comparison
     EQUAL = auto()          # ==
@@ -123,6 +127,9 @@ class TokenType(Enum):
     LESS_EQUAL = auto()     # <=
     GREATER_THAN = auto()   # >
     GREATER_EQUAL = auto()  # >=
+
+    BITNAND_OP_EQ = auto(), # `!&=
+    BITNOR_OP_EQ = auto(),  # `!|=
     
     # Shift
     BITSHIFT_LEFT = auto()     # <<
@@ -215,6 +222,7 @@ class FluxLexer:
             'do': TokenType.DO,
             'elif': TokenType.ELIF,
             'else': TokenType.ELSE,
+            'endianof': TokenType.ENDIANOF,
             'enum': TokenType.ENUM,
             'extern': TokenType.EXTERN,
             'false': TokenType.FALSE,
@@ -645,6 +653,12 @@ class FluxLexer:
                         self.column = saved_col
                 
                 continue
+
+            # Quad-character tokens dictionary - Watch out!
+            quadruple_char_tokens = {
+                '`!&=': TokenType.BITNAND_OP_EQ,
+                '`!|=': TokenType.BITNOR_OP_EQ
+            }
             
             # Triple-character tokens dictionary
             triple_char_tokens = {
@@ -654,6 +668,8 @@ class FluxLexer:
                 '{}*': TokenType.FUNCTION_POINTER,
                 '(@)': TokenType.ADDRESS_CAST,
                 '<:-': TokenType.LAMBDA_ARROW,
+                '`!&': TokenType.BITNAND_OP,
+                '`!|': TokenType.BITNOR_OP
             }
             
             # Double-character tokens dictionary  

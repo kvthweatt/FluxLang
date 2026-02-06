@@ -2,8 +2,7 @@
 
 def main() -> int
 {
-    u64[1] x = [0x5F20];
-
-    x[0] = 0x3333u;
+    i32 x = 0;
+    if (x == 1) { return x; };
     return 0;
 };

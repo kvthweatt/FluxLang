@@ -1242,7 +1242,7 @@ def !!strstr(byte* haystack, byte* needle) -> byte*
 };
 
 
-#import "string_object_raw.fx";
+//#import "string_object_raw.fx";
 #endif;
 
 #endif;

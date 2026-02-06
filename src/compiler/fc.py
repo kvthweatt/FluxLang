@@ -12,10 +12,8 @@ Contributors:
 import sys, os, subprocess
 from pathlib import Path
 from llvmlite import ir
-from flexer import FluxLexer
 from fparser import FluxParser, ParseError
 from fast import *
-from fpreprocess import *
 from flogger import FluxLogger, FluxLoggerConfig, LogLevel
 from fconfig import *
 
@@ -84,13 +82,8 @@ class FluxCompiler:
         """
         # Initialize logger
         self.debug_levels = set_debug_level()
-        if logger:
-            self.logger = logger
-        else:
-            # Map legacy verbosity to new log levels
-            if verbosity is not None:
-                logger_kwargs['level'] = min(verbosity, 5)
-            self.logger = FluxLoggerConfig.create_logger(**logger_kwargs)
+        logger_kwargs['level'] = min(0, 5)
+        self.logger = FluxLoggerConfig.create_logger(**logger_kwargs)
 
         self.temp_files = []
         
@@ -156,6 +149,7 @@ class FluxCompiler:
             
         debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
                                               f"Module triple: {self.module_triple}"])
+        print("GOT HERE")
 
     def compile_file(self, filename: str, output_bin: str = None) -> str:
         """
@@ -168,6 +162,7 @@ class FluxCompiler:
         Returns:
             Path to the generated executable
         """
+        print("IN COMPILE FILE:",self.logger)
         try:
             self.logger.section(f"Preprocessing Flux file: {filename}", LogLevel.INFO)
             self.predefined_macros = {
@@ -262,68 +257,20 @@ class FluxCompiler:
             for key, value in self.predefined_macros.items():
                 print("[COMPILER]", key, value)
             
-            # Pass to preprocessor
-            print("\n[PREPROCESSOR] Standard library / user-defined macros:\n")
-            preprocessor = FXPreprocessor(filename, compiler_macros=self.predefined_macros)
-            result = preprocessor.process()
             # NOTE: ADD DEBUG LEVEL IN COMPILER & CONFIG FOR PREPROCESSOR
             # WRAP IN DEBUGGER
             #print("[PREPROCESSOR] All Macros:")
             #for key, value in preprocessor.macros.items():
             #    print("[PREPROCESSOR]", key, value)
             # /WRAP
-            
-            # Store macros in AST
-            if not hasattr(self.module, '_preprocessor_macros'):
-                self.module._preprocessor_macros = {}
-            self.module._preprocessor_macros.update(preprocessor.macros)
-            self.module._preprocessor_macros.update(self.predefined_macros)
-            self.logger.section(f"Compiling Flux file: {filename}", LogLevel.INFO)
-
-            base_name = Path(filename).stem
-            
-            # Step 1: Read source code
-            self.logger.step("Reading source file", LogLevel.INFO, "compiler")
-            try:
-                with open(filename, 'r') as f:
-                    source = f.read()
-                debugger(self.debug_levels, [4,8], [f"Compiler: Read {len(source)} characters from {filename}"])
-            except Exception as e:
-                debugger(self.debug_levels, [4,8], [f"Compiler: Failed to read source file {filename}: {e}"])
-                raise
-            
-            # Step 2: Lexical analysis
-            self.logger.step("Lexical analysis", LogLevel.INFO, "lexer")
-            try:
-                lexer = FluxLexer(result)
-                tokens = lexer.tokenize()
-                # Log tokens if requested (legacy compatibility + new system)
-                debugger(self.debug_levels, [1,8], ["Lexer",tokens])
-            except Exception as e:
-                self.logger.error(f"Lexical analysis failed: {e}", "lexer")
-                raise
-            
-            # Step 3: Parsing
-            self.logger.step("Parsing", LogLevel.INFO, "parser")
-            try:
-                debugger(self.debug_levels, [2,8], [result])
-                parser = FluxParser(tokens)
-                ast = parser.parse()
-                
-                # Check if parse errors occurred
-                if parser.has_errors():
-                    e = "error" + "s" if len(parser.get_errors()) > 1 else ""
-                    raise RuntimeError(f"{len(parser.get_errors())} parse {'error' + ('s' if len(parser.get_errors()) > 1 else '')} detected, compilation aborted")
-                
-                # Log AST if requested (legacy compatibility + new system)
-                if self.verbosity == 1 or self.logger.level >= LogLevel.DEBUG:
-                    self.logger.log_data(LogLevel.DEBUG, "Generated AST", ast, "parser")
-                
-                debugger(self.debug_levels, [3,8], [ast])
-                    
-            except Exception as e:
-                debugger(self.debug_levels, [2,8], [f"Parser: {e}"])
-                raise
+            #self.logger.step("[INFO] ► Reading source file", LogLevel.INFO, "compiler")
+            parser = FluxParser.from_file(filename, compiler_macros=self.predefined_macros)
+            ast = parser.parse()
+            #print("*"*40)
+            #print("==== PARSER GENERATED SYMBOL TABLE ====")
+            #print(parser.symbol_table.scopes)
+            #print("==== PARSER GENERATED SYMBOL TABLE ====")
+            #print("*"*40)
 
             # CHECK FIRST
             #
@@ -344,6 +291,9 @@ class FluxCompiler:
             except Exception as e:
                 self.logger.error(f"Code generation failed: {e}", "codegen")
                 raise
+
+            source_path = Path(filename)
+            base_name = source_path.stem
             
             # Step 5: Create build directory
             self.logger.step("Preparing build environment", LogLevel.DEBUG, "build")

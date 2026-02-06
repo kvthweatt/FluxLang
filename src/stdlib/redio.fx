@@ -9,6 +9,10 @@
 #ifndef FLUX_STANDARD_IO
 #def FLUX_STANDARD_IO
 
+#ifndef FLUX_STANDARD_TYPES
+//#import "redtypes.fx";
+#endif;
+
 namespace standard
 {
     namespace io
@@ -394,7 +398,7 @@ namespace standard
                 print(u16 x) -> void,
 
                 print(u32 x) -> void,
-                print(u64 x) -> void,
+                //print(u64 x) -> void,
                 print(float x) -> void,
                 print(float x, int y) -> void;
 
@@ -431,14 +435,14 @@ namespace standard
                 i64str(x,buf);
                 print(buf);
                 return;
-            };
+            };///
             def print(u64 x) -> void
             {
                 byte[21] buf;
                 u64str(x,buf);
                 print(buf);
                 return;
-            };
+            };///
             def print(float x) -> void
             {
                 byte[256] buffer;
