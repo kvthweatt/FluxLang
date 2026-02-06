@@ -2,9 +2,10 @@
 
 int a = 0dUUTF;
 
+int x = 5;
+
 def main() -> int
 {
-    noopstr x = f"{a}\0";
-    print(x);
+    print(a);
     return 0dSUCCESS;  // Not 0 so Windows thinks this program didn't end properly.
 };

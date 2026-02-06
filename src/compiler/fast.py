@@ -3004,8 +3004,8 @@ class VariableDeclaration(ASTNode):
         )
         
         # Handle global variables
-        #if is_global_scope:
-        #    return self._codegen_global(module, llvm_type, resolved_type_spec)
+        if is_global_scope:
+            return self._codegen_global(module, llvm_type, resolved_type_spec)
         
         # Handle local variables
         return self._codegen_local(builder, module, llvm_type, resolved_type_spec)
@@ -3130,8 +3130,7 @@ class VariableDeclaration(ASTNode):
         # Delegate string literal initialization to ArrayLiteral
         if isinstance(self.initial_value, StringLiteral):
             ArrayTypeHandler.initialize_local_string(
-                builder, module, alloca, llvm_type, self.initial_value
-            )
+                builder, module, alloca, llvm_type, self.initial_value)
             return
         
         # Handle constructor calls
