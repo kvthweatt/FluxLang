@@ -762,28 +762,18 @@ class TypeResolver:
         # 1. SYMBOL TABLE - HIGHEST PRIORITY
         #print("IN RESOLVE_FUNCTION()")
         if hasattr(module, 'symbol_table'):
-            result = module.symbol_table.lookup(func_name)
-            #print(f"Symbol table lookup for {func_name}",result)
+            # Use lookup_function which does full namespace resolution
+            func_entry = module.symbol_table.lookup_function(func_name, current_namespace)
             
-            if result and result[0] == SymbolKind.FUNCTION:
-                # Try to find the actual function in globals
-                # First try direct name
+            if func_entry:
+                # Found in symbol table - now find it in module.globals
+                # Try mangled name first
+                if func_entry.mangled_name in module.globals:
+                    return func_entry.mangled_name
+                
+                # Try unmangled name
                 if func_name in module.globals:
                     return func_name
-                
-                # Try mangled name with current namespace
-                if current_namespace:
-                    mangled = TypeResolver.mangle_name(current_namespace, func_name)
-                    #print("GOT HERE, mangled:",mangled)
-                    if mangled in module.globals:
-                        return mangled
-                
-                # Try using namespaces
-                if hasattr(module, '_using_namespaces'):
-                    for ns in module._using_namespaces:
-                        mangled = TypeResolver.mangle_name(ns, func_name)
-                        if mangled in module.globals:
-                            return mangled
         
         # 2. NAMESPACE RESOLUTION - fallback
         result = TypeResolver.resolve_with_namespace(
@@ -885,16 +875,10 @@ class TypeResolver:
     
     @staticmethod
     def get_current_namespace(module: ir.Module) -> str:
-        """
-        Get the current namespace from module.
-        
-        Args:
-            module: LLVM module
-            
-        Returns:
-            Current namespace or empty string
-        """
-        return getattr(module, '_current_namespace', '')
+        """Get current namespace from symbol table (UNIFIED)."""
+        if hasattr(module, 'symbol_table'):
+            return module.symbol_table.current_namespace
+        return ''
 
 
 class TypeChecker:
@@ -1161,17 +1145,17 @@ class NamespaceTypeHandler:
         original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
         
         module._current_namespace = namespace
-        if hasattr(module, 'symbol_table'):
-            module.symbol_table.set_namespace(namespace)
-        
+        if not hasattr(module, 'symbol_table'):
+            raise RuntimeError("Module must have symbol_table for namespace support")
+
+        original_namespace = module.symbol_table.current_namespace
+        module.symbol_table.set_namespace(namespace)
+
         try:
             struct_def.codegen(builder, module)
         finally:
-            # Restore original context
             struct_def.name = original_name
-            module._current_namespace = original_namespace
-            if hasattr(module, 'symbol_table'):
-                module.symbol_table.set_namespace(original_st_namespace)
+            module.symbol_table.set_namespace(original_namespace)
     
     @staticmethod
     def process_namespace_object(namespace: str, obj_def: 'ObjectDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
@@ -1192,17 +1176,17 @@ class NamespaceTypeHandler:
         original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
         
         module._current_namespace = namespace
-        if hasattr(module, 'symbol_table'):
-            module.symbol_table.set_namespace(namespace)
-        
+        if not hasattr(module, 'symbol_table'):
+            raise RuntimeError("Module must have symbol_table for namespace support")
+
+        original_namespace = module.symbol_table.current_namespace
+        module.symbol_table.set_namespace(namespace)
+
         try:
             obj_def.codegen(builder, module)
         finally:
-            # Restore original context
             obj_def.name = original_name
-            module._current_namespace = original_namespace
-            if hasattr(module, 'symbol_table'):
-                module.symbol_table.set_namespace(original_st_namespace)
+            module.symbol_table.set_namespace(original_namespace)
     
     @staticmethod
     def process_namespace_enum(namespace: str, enum_def: 'EnumDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
@@ -1223,17 +1207,17 @@ class NamespaceTypeHandler:
         original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
         
         module._current_namespace = namespace
-        if hasattr(module, 'symbol_table'):
-            module.symbol_table.set_namespace(namespace)
-        
+        if not hasattr(module, 'symbol_table'):
+            raise RuntimeError("Module must have symbol_table for namespace support")
+
+        original_namespace = module.symbol_table.current_namespace
+        module.symbol_table.set_namespace(namespace)
+
         try:
             enum_def.codegen(builder, module)
         finally:
-            # Restore original context
             enum_def.name = original_name
-            module._current_namespace = original_namespace
-            if hasattr(module, 'symbol_table'):
-                module.symbol_table.set_namespace(original_st_namespace)
+            module.symbol_table.set_namespace(original_namespace)
     
     @staticmethod
     def process_namespace_variable(namespace: str, var_def: 'VariableDeclaration', module: 'ir.Module'):
@@ -1288,20 +1272,18 @@ class NamespaceTypeHandler:
         original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
         
         module._current_namespace = full_nested_name
-        if hasattr(module, 'symbol_table'):
-            module.symbol_table.set_namespace(full_nested_name)
-        
-        # CRITICAL FIX: Register nested namespace in using_namespaces for function resolution
-        NamespaceTypeHandler.add_using_namespace(module, full_nested_name)
-        
+        if not hasattr(module, 'symbol_table'):
+            raise RuntimeError("Module must have symbol_table for namespace support")
+
+        original_namespace = module.symbol_table.current_namespace
+        module.symbol_table.set_namespace(parent_namespace)
+
+        # nested_ns is NamespaceDef
         try:
             nested_ns.codegen(builder, module)
         finally:
-            # Restore original context
             nested_ns.name = original_name
-            module._current_namespace = original_namespace
-            if hasattr(module, 'symbol_table'):
-                module.symbol_table.set_namespace(original_st_namespace)
+            module.symbol_table.set_namespace(original_namespace)
     
     @staticmethod
     def process_namespace_function(namespace: str, func_def: 'FunctionDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
@@ -1321,18 +1303,17 @@ class NamespaceTypeHandler:
         original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
         
         module._current_namespace = namespace
-        if hasattr(module, 'symbol_table'):
-            module.symbol_table.set_namespace(namespace)
-        
-        # Generate the function
+        if not hasattr(module, 'symbol_table'):
+            raise RuntimeError("Module must have symbol_table for namespace support")
+
+        original_namespace = module.symbol_table.current_namespace
+        module.symbol_table.set_namespace(namespace)
+
         try:
             func_def.codegen(builder, module)
         finally:
-            # Restore original context
             func_def.name = original_name
-            module._current_namespace = original_namespace
-            if hasattr(module, 'symbol_table'):
-                module.symbol_table.set_namespace(original_st_namespace)
+            module.symbol_table.set_namespace(original_namespace)
     
     @staticmethod
     def resolve_custom_type(module: ir.Module, typename: str, current_namespace: str = "") -> Optional[ir.Type]:
@@ -2526,7 +2507,7 @@ class ArrayTypeHandler:
     @staticmethod
     def initialize_local_array(builder: ir.IRBuilder, module: ir.Module, alloca: ir.Value, llvm_type: ir.Type, array_literal) -> None:
         """Initialize a local array variable with an array literal."""
-        print("[TYPESYS] In initialize_local_array()")
+        #print("[TYPESYS] In initialize_local_array()")
         from fast import StringLiteral
         
         zero = ArrayTypeHandler._zero()
@@ -2544,7 +2525,7 @@ class ArrayTypeHandler:
                 elem_ptr = builder.gep(alloca, [zero, ArrayTypeHandler._index(i)], name=f"elem_{i}")
                 builder.store(ir.Constant(llvm_type.element, packed_value), elem_ptr)
             else:
-                print("Packing into integer ...")
+                #print("Packing into integer ...")
                 from fast import ArrayLiteral
                 
                 # Handle nested array packing: if element is an ArrayLiteral and target is integer, pack it
@@ -3816,28 +3797,20 @@ class ObjectTypeHandler:
             # The base name is just object_name.actual_method_name
             base_name = f"{object_part}.{method.name}"
             
-            print(f"[REGISTER METHOD] Registering method overload:", file=sys.stderr)
-            print(f"  Full name: {func_name}", file=sys.stderr)
-            print(f"  Method name: {method.name}", file=sys.stderr)
-            print(f"  Base name: {base_name}", file=sys.stderr)
+            #print(f"[REGISTER METHOD] Registering method overload:", file=sys.stderr)
+            #print(f"  Full name: {func_name}", file=sys.stderr)
+            #print(f"  Method name: {method.name}", file=sys.stderr)
+            #print(f"  Base name: {base_name}", file=sys.stderr)
             
             FunctionTypeHandler.register_function_overload(
                 module, base_name, func_name, method.parameters, method.return_type, func
             )
         
         return func
+
     
     @staticmethod
     def emit_method_body(method, func: 'ir.Function', object_name: str, module: 'ir.Module'):
-        """
-        Emit the body of a method.
-        
-        Args:
-            method: Method definition
-            func: LLVM function
-            object_name: Name of the object
-            module: LLVM module
-        """
         from fast import DataType, TypeSystem, FunctionDef
         
         if isinstance(method, FunctionDef) and method.is_prototype:
@@ -3849,15 +3822,18 @@ class ObjectTypeHandler:
         entry_block = func.append_basic_block('entry')
         method_builder = ir.IRBuilder(entry_block)
         
+        # CRITICAL FIX: Save the current namespace context
+        saved_namespace = module.symbol_table.current_namespace
+        
         # Enter method scope
         module.symbol_table.enter_scope()
         
-        # Register 'this' as the actual receiver pointer (T*), not a stack slot (T**)
+        # Register 'this' parameter
         this_type_spec = TypeSystem(base_type=DataType.DATA, custom_typename=object_name, is_pointer=True)
         module.symbol_table.define(
             "this",
             SymbolKind.VARIABLE,
-            llvm_value=func.args[0],   # <-- keep it as T*
+            llvm_value=func.args[0],
             type_spec=this_type_spec
         )
         
@@ -3868,7 +3844,7 @@ class ObjectTypeHandler:
             method_builder.store(param, alloca)
             module.symbol_table.define(param_name, SymbolKind.VARIABLE, llvm_value=alloca)
         
-        # Emit body
+        # Emit body - namespace context is still available via saved_namespace
         method.body.codegen(method_builder, module)
         
         # __init implicit return
@@ -3884,24 +3860,27 @@ class ObjectTypeHandler:
         
         # Exit method scope
         module.symbol_table.exit_scope()
-    
-    @staticmethod
-    def process_nested_definitions(nested_objects: List, nested_structs: List, 
-                                   builder: 'ir.IRBuilder', module: 'ir.Module'):
-        """
-        Process nested objects and structs.
         
-        Args:
-            nested_objects: List of nested ObjectDef
-            nested_structs: List of nested StructDef
-            builder: LLVM IR builder
-            module: LLVM module
-        """
-        for nested_obj in nested_objects:
-            nested_obj.codegen(builder, module)
+        # CRITICAL FIX: Restore the namespace context
+        module.symbol_table.current_namespace = saved_namespace
         
-        for nested_struct in nested_structs:
-            nested_struct.codegen(builder, module)
+        @staticmethod
+        def process_nested_definitions(nested_objects: List, nested_structs: List, 
+                                       builder: 'ir.IRBuilder', module: 'ir.Module'):
+            """
+            Process nested objects and structs.
+            
+            Args:
+                nested_objects: List of nested ObjectDef
+                nested_structs: List of nested StructDef
+                builder: LLVM IR builder
+                module: LLVM module
+            """
+            for nested_obj in nested_objects:
+                nested_obj.codegen(builder, module)
+            
+            for nested_struct in nested_structs:
+                nested_struct.codegen(builder, module)
 
 
 class FunctionTypeHandler:

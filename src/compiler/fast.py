@@ -1873,6 +1873,7 @@ class FunctionCall(Expression):
         6. Check namespace-qualified overloads
         7. Raise error if still not found
         """
+        #print(f"[RESOLUTION START] Trying to resolve function '{self.name}'", file=sys.stderr)
         
         # Step 1: Check if this is a function pointer variable
         if self._is_function_pointer_variable(builder, module):
@@ -1882,7 +1883,7 @@ class FunctionCall(Expression):
         # Step 2: Try direct lookup
         func = self._try_direct_lookup(module)
         #if func:
-            #print(f"[RESOLUTION] Found '{self.name}' via direct lookup", file=sys.stderr)
+        #    print(f"[RESOLUTION] Found '{self.name}' via direct lookup", file=sys.stderr)
         
         # Step 3: If not found, try overload resolution
         if func is None:
@@ -1894,7 +1895,14 @@ class FunctionCall(Expression):
         
         # Step 4: If still not found, try symbol table resolution
         if func is None:
-            func = self._try_symbol_table_resolution(builder, module)
+            #print(f"[SYMBOL TABLE] Trying TypeResolver.resolve_function for '{self.name}'", file=sys.stderr)
+            current_ns = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ""
+            resolved_name = TypeResolver.resolve_function(module, self.name, current_ns)
+            #print(f"[SYMBOL TABLE] TypeResolver returned: {resolved_name}", file=sys.stderr)
+            if resolved_name and resolved_name in module.globals:
+                func = module.globals[resolved_name]
+                if not isinstance(func, ir.Function):
+                    func = None
             #if func:
             #    print(f"[RESOLUTION] Found '{self.name}' via symbol table", file=sys.stderr)
         
@@ -1952,9 +1960,20 @@ class FunctionCall(Expression):
         Returns:
             Function object if found, None otherwise
         """
+        #print(f"[DIRECT LOOKUP] Checking for '{self.name}' in module.globals", file=sys.stderr)
+        #print(f"[DIRECT LOOKUP] Total items in module.globals: {len(module.globals)}", file=sys.stderr)
+        
+        # Show all functions in globals
+        all_funcs = [name for name, obj in module.globals.items() if isinstance(obj, ir.Function)]
+        #print(f"[DIRECT LOOKUP] All functions in globals: {all_funcs[:20]}", file=sys.stderr)
+        
         func = module.globals.get(self.name, None)
-        if func and isinstance(func, ir.Function):
-            return func
+        if func:
+            #print(f"[DIRECT LOOKUP] Found '{self.name}': {type(func)}", file=sys.stderr)
+            if isinstance(func, ir.Function):
+                return func
+        #else:
+        #    print(f"[DIRECT LOOKUP] '{self.name}' not in module.globals", file=sys.stderr)
         return None
     
     def _try_overload_resolution(self, builder: ir.IRBuilder, module: ir.Module, 
@@ -1969,11 +1988,16 @@ class FunctionCall(Expression):
         Returns:
             Function object if found, None otherwise
         """
+        #print(f"[OVERLOAD] Checking for overloads of '{base_name}'", file=sys.stderr)
         if not hasattr(module, '_function_overloads'):
+            #print(f"[OVERLOAD] No _function_overloads attribute on module", file=sys.stderr)
             return None
         # Check if this base_name has any overloads registered
         if base_name not in module._function_overloads:
+            #print(f"[OVERLOAD] '{base_name}' not in _function_overloads", file=sys.stderr)
+            #print(f"[OVERLOAD] Available overloaded functions: {list(module._function_overloads.keys())}", file=sys.stderr)
             return None
+        #print(f"[OVERLOAD] Found {len(module._function_overloads[base_name])} overload(s) for '{base_name}'", file=sys.stderr)
         # Use _resolve_overload which internally uses FunctionTypeHandler
         return self._resolve_overload(builder, module, base_name, 
                                      module._function_overloads[base_name])
@@ -2016,7 +2040,7 @@ class FunctionCall(Expression):
                         #print(f"[NAMESPACE RESOLVE]   Found function in globals via unmangled name!", file=sys.stderr)
                         return candidate_func
         else:
-            current_namespace = getattr(module, '_current_namespace', '')
+            current_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
             #print(f"[NAMESPACE RESOLVE]   current_namespace='{current_namespace}' (from module attr)", file=sys.stderr)
         
         # Fallback: use old TypeResolver method
@@ -2052,7 +2076,14 @@ class FunctionCall(Expression):
             return None
         
         # Get current namespace context from module
-        current_namespace = getattr(module, '_current_namespace', '')
+        current_namespace = module.symbol_table.current_namespace
+
+        # ALSO ADD fallback for extern functions:
+        # After existing resolution attempts, add:
+        if self.name in module.globals:
+            candidate = module.globals[self.name]
+            if isinstance(candidate, ir.Function):
+                return candidate
         
         # Use FunctionResolver to check symbol table
         resolved_name = FunctionResolver._resolve_from_symbol_table(
@@ -2093,16 +2124,6 @@ class FunctionCall(Expression):
     def _resolve_overload(self, builder: ir.IRBuilder, module: ir.Module, base_name: str, overloads: list) -> ir.Function:
         """
         Resolve function overload by matching argument count and types.
-        
-        Uses FunctionTypeHandler for type-based resolution.
-        
-        Args:
-            builder: LLVM IR builder
-            module: LLVM module
-            base_name: Base function name
-            overloads: List of overload metadata
-        Returns:
-            Matching function or None if no match found
         """
         arg_count = len(self.arguments)
         
@@ -2113,7 +2134,20 @@ class FunctionCall(Expression):
             return None
         elif len(candidates) == 1:
             # Only one candidate - use it
-            return candidates[0]['function']
+            func = candidates[0]['function']
+            
+            # DEFENSIVE CHECK: If function is a string, look it up in module.globals
+            if isinstance(func, str):
+                import sys
+                print(f"[WARNING] Overload metadata contains string '{func}' instead of function object", file=sys.stderr)
+                print(f"[WARNING] This indicates a bug in overload registration", file=sys.stderr)
+                if func in module.globals:
+                    func = module.globals[func]
+                    if isinstance(func, ir.Function):
+                        return func
+                return None
+            
+            return func
         else:
             # Multiple candidates - generate argument values and use FunctionTypeHandler
             arg_vals = [arg.codegen(builder, module) for arg in self.arguments]
@@ -2484,10 +2518,10 @@ class MethodCall(Expression):
                 temp_call = FunctionCall(name=method_func_name, arguments=self.arguments)
                 func = temp_call._resolve_overload(builder, module, method_func_name,
                                                    module._function_overloads[method_func_name])
-                #if func:
-                #    print(f"[METHOD CALL] Resolved to: {func.name}", file=sys.stderr)
-                #else:
-                #    print(f"[METHOD CALL] Overload resolution returned None!", file=sys.stderr)
+            #    if func:
+            #        print(f"[METHOD CALL] Resolved to: {func.name}", file=sys.stderr)
+            #    else:
+            #        print(f"[METHOD CALL] Overload resolution returned None!", file=sys.stderr)
             #else:
             #    print(f"[METHOD CALL] Not found in overloads table", file=sys.stderr)
         
@@ -3395,7 +3429,7 @@ class Block(Statement):
                     if stmt_result is not None:  # Only update result if not None
                         result = stmt_result
                 except Exception as e:
-                    raise ValueError(f"DEBUG Block: Error in statement {i} ({type(stmt).__name__}): {e} \n\n {stmt} \n\n {module.name}")
+                    raise ValueError(f"Block{{}} Debug: Error in statement {i} ({type(stmt).__name__}): {e} \n\n {stmt} \n\n {module.name}")
         return result
 
 
@@ -3565,7 +3599,10 @@ class IfStatement(Statement):
         
         # Normal if statement inside a function
         # Generate condition
-        cond_val = self.condition.codegen(builder, module)
+        try:
+            cond_val = self.condition.codegen(builder, module)
+        except Exception as e:
+            print(f"if statement condition: {e}")
         
         # Create basic blocks
         func = builder.block.function
@@ -4757,9 +4794,11 @@ class FunctionDef(ASTNode):
                 base_name = self.name.split('::')[-1] if '::' in self.name else self.name
             
             # Register this as an overload using FunctionTypeHandler
+            #print(f"[FUNC REG] Registering {base_name} (mangled: {mangled_name})", file=sys.stderr)
             FunctionTypeHandler.register_function_overload(
                 module, base_name, mangled_name, self.parameters, self.return_type, func
             )
+            #print(f"[FUNC REG] Registered! Overloads for {base_name}: {len(module._function_overloads.get(base_name, []))}", file=sys.stderr)
 
             # Also register in symbol table if available
             if hasattr(module, 'symbol_table'):
@@ -5975,6 +6014,9 @@ class NamespaceDef(ASTNode):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
         """Generate LLVM IR for a namespace definition."""
+        #print(f"[NAMESPACE] Processing namespace: {self.name}", file=sys.stderr)
+        #print(f"[NAMESPACE]   Functions: {len(self.functions)}", file=sys.stderr)
+        #print(f"[NAMESPACE]   Nested namespaces: {len(self.nested_namespaces)}", file=sys.stderr)
         # Register this namespace using NamespaceTypeHandler
         NamespaceTypeHandler.register_namespace(module, self.name)
 
@@ -5989,8 +6031,11 @@ class NamespaceDef(ASTNode):
         NamespaceTypeHandler.add_using_namespace(module, self.name)
 
         # Set current namespace context for this namespace
-        original_namespace = getattr(module, '_current_namespace', '')
-        module._current_namespace = self.name
+        if not hasattr(module, 'symbol_table'):
+            raise RuntimeError("Module must have symbol_table for namespace support")
+
+        original_namespace = module.symbol_table.current_namespace
+        module.symbol_table.set_namespace(self.name)
         
         # Create builder context if we're at module level using NamespaceTypeHandler
         if builder is None or not hasattr(builder, 'block') or builder.block is None:
@@ -5998,6 +6043,10 @@ class NamespaceDef(ASTNode):
         else:
             work_builder = builder
 
+        # Process extern blocks (ALWAYS global, no namespace mangling)
+        # Extern declarations are inherently global and should not be namespaced
+        for extern_block in self.extern_blocks:
+            extern_block.codegen(work_builder, module)
         # Process nested namespaces FIRST (they may contain types we need)
         for nested_ns in self.nested_namespaces:
             NamespaceTypeHandler.process_nested_namespace(self.name, nested_ns, work_builder, module)
@@ -6110,8 +6159,18 @@ class Program(ASTNode):
     symbol_table: 'SymbolTable'  # Forward reference since SymbolTable is in ftypesys
     statements: List[Statement] = field(default_factory=list)
 
+    # DO NOT DO TRY/EXCEPT AROUND THE STATEMENT CODEGEN CALLS IN THIS CODEGEN
+    # IT WILL CAPTURE EVERYTHING AND MAKE A VAGUE ERROR UNLOCATABLE
+    # CAPTURE CODEGEN CALLS AT OTHER NODES TO IDENTIFY THE CALL SITE
+
     def codegen(self, module: ir.Module = None) -> ir.Module:
         print("[AST] Begining codegen for Flux program ...")
+        print(f"[AST] Total statements in AST: {len(self.statements)}", file=sys.stderr)
+        namespace_count = sum(1 for s in self.statements if isinstance(s, NamespaceDef))
+        print(f"[AST] Namespace definitions: {namespace_count}", file=sys.stderr)
+        for s in self.statements:
+            if isinstance(s, NamespaceDef):
+                print(f"[AST]   - namespace {s.name} (funcs: {len(s.functions)}, nested: {len(s.nested_namespaces)})", file=sys.stderr)
         if module is None:
             module = ir.Module(name='flux_module') # Update to support module system.
         
@@ -6128,35 +6187,23 @@ class Program(ASTNode):
         # Symbol table already at global scope (level 0)
         # Track initialized unions for immutability enforcement
         builder.initialized_unions = set()
-        
-        # TWO-PASS COMPILATION
-        # Pass 1: Process all using statements first to populate _using_namespaces
-        print("[AST] Pass 1: Processing using statements...")
+
+        # 3-pass compilation
+        print("[AST] Pass 1: Processing extern blocks...")
+        for stmt in self.statements:
+            if isinstance(stmt, ExternBlock):
+                stmt.codegen(builder, module)
+
+        print("[AST] Pass 2: Processing using statements...")
         for stmt in self.statements:
             if isinstance(stmt, UsingStatement):
-                #try:
-                    stmt.codegen(builder, module)
-                #except Exception as e:
-                    #print(f"Error processing using statement: {stmt.name}")
-                    #raise
-        #print(module.symbol_table.scopes)
-        # Debug: Show what namespaces were registered
-        #if hasattr(module, '_using_namespaces'):
-        #    print(f"[DEBUG] Registered {len(module._using_namespaces)} using namespaces:", file=sys.stderr)
-        #    for ns in module._using_namespaces:
-        #        print(f"[DEBUG]   - {ns}", file=sys.stderr)
-        #else:
-        #    print(f"[DEBUG] NO using namespaces registered!", file=sys.stderr)
-        
-        # Pass 2: Process all other statements
-        print("[AST] Pass 2: Processing all other statements...")
+                stmt.codegen(builder, module)
+
+        # Pass 3: Process all other statements
+        print("[AST] Pass 3: Processing all other statements...")
         for stmt in self.statements:
-            if not isinstance(stmt, UsingStatement):
-                #try:
-                    stmt.codegen(builder, module)
-                #except Exception as e:
-                    #print(f"Error generating code for: {stmt.name}")
-                    #raise
+            if not isinstance(stmt, UsingStatement) and not isinstance(stmt, ExternBlock):
+                stmt.codegen(builder, module)
         
         return module
 

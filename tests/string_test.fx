@@ -1,4 +1,4 @@
-#import "redio.fx", "redmemory.fx";
+#import "redtypes.fx", "red_string_utilities.fx", "redio.fx", "redmemory.fx";
 
 namespace standard
 {
@@ -765,13 +765,13 @@ namespace standard
                     if (i == this.length | (char)this.value[i] == delimiter)
                     {
                         int part_len = i - start;
-                        *result[part_idx] = copy_n(this.value + start, part_len);
+                        result[part_idx] = copy_n(this.value + start, part_len);
                         part_idx = part_idx + 1;
                         start = i + 1;
                     };
                 };
 
-                *result[part_idx] = (byte*)0; // Null-terminate array
+                result[part_idx] = (byte*)0; // Null-terminate array
                 return result;
             };
 
