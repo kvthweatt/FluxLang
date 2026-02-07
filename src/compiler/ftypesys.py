@@ -2507,7 +2507,7 @@ class ArrayTypeHandler:
     @staticmethod
     def initialize_local_array(builder: ir.IRBuilder, module: ir.Module, alloca: ir.Value, llvm_type: ir.Type, array_literal) -> None:
         """Initialize a local array variable with an array literal."""
-        #print("[TYPESYS] In initialize_local_array()")
+        print("[TYPESYS] In initialize_local_array()")
         from fast import StringLiteral
         
         zero = ArrayTypeHandler._zero()
@@ -2525,7 +2525,7 @@ class ArrayTypeHandler:
                 elem_ptr = builder.gep(alloca, [zero, ArrayTypeHandler._index(i)], name=f"elem_{i}")
                 builder.store(ir.Constant(llvm_type.element, packed_value), elem_ptr)
             else:
-                #print("Packing into integer ...")
+                print("Packing into integer ...")
                 from fast import ArrayLiteral
                 
                 # Handle nested array packing: if element is an ArrayLiteral and target is integer, pack it
@@ -3077,6 +3077,12 @@ class IdentifierTypeHandler:
         if isinstance(llvm_value.type, ir.PointerType) and isinstance(llvm_value.type.pointee, ir.LiteralStructType):
             return True
         
+        
+        # For pointer-to-pointer (T**) used as arrays, don't load
+        # Example: byte** result for array of strings
+        if (isinstance(llvm_value.type, ir.PointerType) and 
+            isinstance(llvm_value.type.pointee, ir.PointerType)):
+            return True
         return False
     
     @staticmethod
@@ -3797,10 +3803,10 @@ class ObjectTypeHandler:
             # The base name is just object_name.actual_method_name
             base_name = f"{object_part}.{method.name}"
             
-            #print(f"[REGISTER METHOD] Registering method overload:", file=sys.stderr)
-            #print(f"  Full name: {func_name}", file=sys.stderr)
-            #print(f"  Method name: {method.name}", file=sys.stderr)
-            #print(f"  Base name: {base_name}", file=sys.stderr)
+            print(f"[REGISTER METHOD] Registering method overload:", file=sys.stderr)
+            print(f"  Full name: {func_name}", file=sys.stderr)
+            print(f"  Method name: {method.name}", file=sys.stderr)
+            print(f"  Base name: {base_name}", file=sys.stderr)
             
             FunctionTypeHandler.register_function_overload(
                 module, base_name, func_name, method.parameters, method.return_type, func
@@ -5138,6 +5144,17 @@ class AssignmentTypeHandler:
         if val.type == target_type:
             return val
         
+        # Handle pointer type compatibility - if both are pointers to the same pointee type
+        if isinstance(val.type, ir.PointerType) and isinstance(target_type, ir.PointerType):
+            # Check if pointee types are equivalent
+            if val.type.pointee == target_type.pointee:
+                # Types are structurally identical, just use bitcast to make LLVM happy
+                return builder.bitcast(val, target_type, name="ptr_compat")
+            # Special case: both are pointers to i8 (byte* compatibility)
+            if (isinstance(val.type.pointee, ir.IntType) and val.type.pointee.width == 8 and
+                isinstance(target_type.pointee, ir.IntType) and target_type.pointee.width == 8):
+                return builder.bitcast(val, target_type, name="i8ptr_compat")
+        
         # Handle array pointer assignments - for arrays, just store the pointer directly
         if (isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType) and
             isinstance(target_type, ir.PointerType)):
@@ -5442,7 +5459,7 @@ class AssignmentTypeHandler:
         Args:
             builder: LLVM IR builder
             module: LLVM module
-            array_expr: Array expression AST node
+            array_expr: Array expression AST node (the array part, not the whole ArrayAccess)
             index_expr: Index expression AST node
             value_expr: Value expression AST node
             val: Generated value to assign
@@ -5450,10 +5467,17 @@ class AssignmentTypeHandler:
         Returns:
             The assigned value
         """
-        from fast import StringLiteral
+        from fast import StringLiteral, Identifier
         
+        # For array assignment, generate the array expression normally
+        # This handles all the loading logic correctly through Identifier codegen
         array = array_expr.codegen(builder, module)
+        
         index = index_expr.codegen(builder, module)
+        
+        import sys
+        print(f"[ARRAY ASSIGN] array.type: {array.type}", file=sys.stderr)
+        print(f"[ARRAY ASSIGN] val.type: {val.type}", file=sys.stderr)
         
         if isinstance(array.type, ir.PointerType) and isinstance(array.type.pointee, ir.ArrayType):
             # Calculate element pointer for pointer-to-array
@@ -5469,13 +5493,17 @@ class AssignmentTypeHandler:
                 else:
                     val = ir.Constant(ir.IntType(8), 0)
             else:
-                # Convert value type to match element type if needed
-                val = AssignmentTypeHandler.convert_value_for_assignment(builder, val, element_type)
+                # No conversion - LLVM handles compatible pointer types
+                pass
             builder.store(val, elem_ptr)
             return val
         elif isinstance(array.type, ir.PointerType):
             # Handle plain pointer types (like byte*) - pointer arithmetic
             elem_ptr = builder.gep(array, [index], inbounds=True)
+            
+            import sys
+            print(f"[PTR ASSIGN] elem_ptr.type: {elem_ptr.type}", file=sys.stderr)
+            print(f"[PTR ASSIGN] elem_ptr.type.pointee: {elem_ptr.type.pointee}", file=sys.stderr)
             
             # FIX: Handle StringLiteral assignment to byte pointer elements
             element_type = array.type.pointee
@@ -5485,9 +5513,23 @@ class AssignmentTypeHandler:
                     val = ir.Constant(ir.IntType(8), ord(value_expr.value[0]))
                 else:
                     val = ir.Constant(ir.IntType(8), 0)
-            else:
-                # Convert value type to match element type if needed
-                val = AssignmentTypeHandler.convert_value_for_assignment(builder, val, element_type)
+            
+            print(f"[PTR ASSIGN] val.type: {val.type}", file=sys.stderr)
+            print(f"[PTR ASSIGN] element_type: {element_type}", file=sys.stderr)
+            print(f"[PTR ASSIGN] isinstance(val.type, ir.PointerType): {isinstance(val.type, ir.PointerType)}", file=sys.stderr)
+            print(f"[PTR ASSIGN] isinstance(element_type, ir.PointerType): {isinstance(element_type, ir.PointerType)}", file=sys.stderr)
+            
+            # Handle pointer type compatibility - if both are pointers, bitcast if needed
+            if isinstance(val.type, ir.PointerType) and isinstance(element_type, ir.PointerType):
+                print(f"[PTR ASSIGN] Both are pointers, checking equality", file=sys.stderr)
+                print(f"[PTR ASSIGN] val.type == element_type: {val.type == element_type}", file=sys.stderr)
+                if val.type != element_type:
+                    print(f"[PTR ASSIGN] Doing bitcast", file=sys.stderr)
+                    val = builder.bitcast(val, element_type, name="ptr_cast")
+            
+            # Note: val is already generated in the caller, so we just use it directly
+            # No type conversion needed - LLVM handles compatible pointer types
+            print(f"[PTR ASSIGN] About to store, val.type: {val.type}", file=sys.stderr)
             builder.store(val, elem_ptr)
             return val
         else:
