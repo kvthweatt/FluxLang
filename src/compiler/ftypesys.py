@@ -3757,7 +3757,16 @@ class ObjectTypeHandler:
                           for p in method.parameters])
         
         func_type = ir.FunctionType(ret_type, param_types)
-        func_name = f"{object_name}.{method_name}"
+        mangled_method_name = FunctionTypeHandler.mangle_function_name(
+            method_name, 
+            method.parameters, 
+            method.return_type,
+            no_mangle=False  # Always mangle object methods
+        )
+        
+        # Combine object name with mangled method name
+        # For namespace__objectname, this produces: namespace__objectname.__init_0_ret_void
+        func_name = f"{object_name}.{mangled_method_name}"
         
         return func_type, func_name
     
@@ -3791,6 +3800,30 @@ class ObjectTypeHandler:
         for i, arg in enumerate(func.args[1:], 1):
             param_name = method.parameters[i - 1].name if method.parameters[i - 1].name is not None else f"arg{i - 1}"
             arg.name = param_name
+
+        # Register method in function overloads table for proper resolution
+        # We have the actual method name from the method object, so we don't need to parse it
+        # The base name is: object_name.method_name (without mangling)
+        # func_name has the structure: object_name.mangled_method_name
+        
+        if '.' in func_name:
+            # Find the dot that separates object from method
+            dot_index = func_name.rfind('.')
+            
+            # Everything before the dot is the object name (with namespace prefix)
+            object_part = func_name[:dot_index]
+            
+            # The base name is just object_name.actual_method_name
+            base_name = f"{object_part}.{method.name}"
+            
+            print(f"[REGISTER METHOD] Registering method overload:", file=sys.stderr)
+            print(f"  Full name: {func_name}", file=sys.stderr)
+            print(f"  Method name: {method.name}", file=sys.stderr)
+            print(f"  Base name: {base_name}", file=sys.stderr)
+            
+            FunctionTypeHandler.register_function_overload(
+                module, base_name, func_name, method.parameters, method.return_type, func
+            )
         
         return func
     
@@ -3819,12 +3852,14 @@ class ObjectTypeHandler:
         # Enter method scope
         module.symbol_table.enter_scope()
         
-        # Register 'this'
+        # Register 'this' as the actual receiver pointer (T*), not a stack slot (T**)
         this_type_spec = TypeSystem(base_type=DataType.DATA, custom_typename=object_name, is_pointer=True)
-        this_alloca = method_builder.alloca(func.args[0].type, name="this.addr")
-        method_builder.store(func.args[0], this_alloca)
-        module.symbol_table.define("this", SymbolKind.VARIABLE, llvm_value=this_alloca, type_spec=this_type_spec)
-        # this type_spec already stored in symbol_table.define above
+        module.symbol_table.define(
+            "this",
+            SymbolKind.VARIABLE,
+            llvm_value=func.args[0],   # <-- keep it as T*
+            type_spec=this_type_spec
+        )
         
         # Store other params
         for i, param in enumerate(func.args[1:], 1):

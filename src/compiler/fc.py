@@ -488,6 +488,8 @@ class FluxCompiler:
             output_dir = output_bin.replace(".exe","")
             if self.platform == "Windows" and not output_bin.endswith('.exe'):
                 output_bin += ".exe"
+
+            failure_flag = True
             
             self.logger.step(f"Linking executable: {output_bin}", LogLevel.INFO, "linker")
             
@@ -541,6 +543,7 @@ class FluxCompiler:
                     self.logger.trace(f"Linker output: {result.stdout}", "linker")
                     if result.stderr:
                         self.logger.warning(f"Linker stderr: {result.stderr}", "linker")
+                    print(f"\n\nRESULT\n{result}\n\n")
                 except subprocess.CalledProcessError as e:
                     self.logger.error(f"Linking failed: {e.stderr}", "linker")
                     if config['linker'] == "lld-link":
@@ -572,13 +575,11 @@ class FluxCompiler:
                                 # Alternatively for older MSVCRT:
                                 # "-lmsvcrt "  # Old C runtime (smaller but may have issues)
                             )
-                            print(result)
-                            if result.stderr:
-                                print(result.stderr)
-                                raise RuntimeError("Copmilation failed.")
-
                         except Exception as e:
-                            print()
+                            print("EXCEPTION:",e)
+                            raise
+                    if result.returncode == 1:
+                        raise RuntimeError(f"\n{result.args}")
             else:  # Linux and others
                 link_cmd = [
                     "ld",
@@ -635,6 +636,7 @@ class FluxCompiler:
                     self.logger.trace(f"Linker output: {result.stdout}", "linker")
                     if result.stderr:
                         self.logger.warning(f"Linker stderr: {result.stderr}", "linker")
+                        failed = True
                 except subprocess.CalledProcessError as e:
                     self.logger.error(f"Linking failed: {e.stderr}", "linker")
                     raise

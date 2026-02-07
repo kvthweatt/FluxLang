@@ -2333,7 +2333,6 @@ class MemberAccess(Expression):
                 
                 loaded = builder.load(member_ptr)
                 # Preserve type metadata from struct member type
-                from ftypesys import attach_type_metadata_from_llvm_type, attach_type_metadata
                 
                 # Try to find the struct name and get the member type spec
                 struct_name = None
@@ -2460,7 +2459,40 @@ class MethodCall(Expression):
             raise ValueError(f"Cannot determine object type for method call: {struct_ty}")
 
         method_func_name = f"{obj_type_name}.{self.method_name}"
-        func = module.globals.get(method_func_name)
+        # Construct the base method name (e.g., "standard__strings__string.val")
+        method_func_name = f"{obj_type_name}.{self.method_name}"
+        
+        #print(f"[METHOD CALL] Looking for method: {method_func_name}", file=sys.stderr)
+        #print(f"[METHOD CALL]   Object type: {obj_type_name}", file=sys.stderr)
+        #print(f"[METHOD CALL]   Method name: {self.method_name}", file=sys.stderr)
+        #print(f"[METHOD CALL]   Arguments: {len(self.arguments)}", file=sys.stderr)
+        
+        # Try to find the method using overload resolution
+        # This is necessary because methods are now mangled with parameter/return type info
+        func = module.globals.get(method_func_name, None)
+        
+        #if func:
+        #    print(f"[METHOD CALL] Found via direct lookup!", file=sys.stderr)
+        
+        # If not found directly, try overload resolution
+        if func is None and hasattr(module, '_function_overloads'):
+            #print(f"[METHOD CALL] Trying overload resolution...", file=sys.stderr)
+            if method_func_name in module._function_overloads:
+                #print(f"[METHOD CALL]   Found in overloads table with {len(module._function_overloads[method_func_name])} overload(s)", file=sys.stderr)
+                # We need to resolve which overload matches our arguments
+                # Create a temporary FunctionCall to reuse its overload resolution
+                temp_call = FunctionCall(name=method_func_name, arguments=self.arguments)
+                func = temp_call._resolve_overload(builder, module, method_func_name,
+                                                   module._function_overloads[method_func_name])
+                #if func:
+                #    print(f"[METHOD CALL] Resolved to: {func.name}", file=sys.stderr)
+                #else:
+                #    print(f"[METHOD CALL] Overload resolution returned None!", file=sys.stderr)
+            #else:
+            #    print(f"[METHOD CALL] Not found in overloads table", file=sys.stderr)
+        
+        #if func is None:
+        #    print(f"[METHOD CALL] ERROR: Could not find method!", file=sys.stderr)
         if func is None:
             raise NameError(f"Unknown method: {method_func_name}")
 
@@ -3151,42 +3183,89 @@ class VariableDeclaration(ASTNode):
             self._store_with_type_conversion(builder, alloca, llvm_type, init_val)
     
     def _call_constructor(self, builder: ir.IRBuilder, module: ir.Module, alloca: ir.Value) -> None:
-        """Call constructor for object initialization."""
-        ctor_name = self.initial_value.name
-        constructor_func = module.globals.get(ctor_name)
-
-        # If not found, try resolving through `using` namespaces (same idea as FunctionCall.codegen)
-        if constructor_func is None and hasattr(module, "_using_namespaces"):
+        """Call constructor for object initialization using proper overload resolution."""
+        # Use the FunctionCall's existing resolution logic to find the constructor
+        # This handles namespace resolution, overloading, and name mangling properly
+        func_call = self.initial_value  # This is a FunctionCall with name like "string.__init"
+        
+        print(f"[CONSTRUCTOR] Looking for constructor: {func_call.name}", file=sys.stderr)
+        print(f"[CONSTRUCTOR] Available globals matching pattern:", file=sys.stderr)
+        for name in module.globals:
+            if '__init' in name:
+                print(f"  - {name}", file=sys.stderr)
+        
+        if hasattr(module, '_function_overloads'):
+            print(f"[CONSTRUCTOR] Available overloads:", file=sys.stderr)
+            for base_name in module._function_overloads:
+                if '__init' in base_name or 'string' in base_name:
+                    print(f"  - {base_name}: {len(module._function_overloads[base_name])} overload(s)", file=sys.stderr)
+        
+        # Try to resolve the constructor using the same multi-step resolution as regular calls
+        func = None
+        
+        # Step 1: Try direct lookup
+        func = module.globals.get(func_call.name, None)
+        if func and isinstance(func, ir.Function):
+            print(f"[CONSTRUCTOR] Found via direct lookup: {func_call.name}", file=sys.stderr)
+            pass  # Found it
+        else:
+            print("[CONSTRUCTOR] ATTEMPTING OVERLOAD RESOLUTION", file=sys.stderr)
+            # Step 2: Try overload resolution
+            if hasattr(module, '_function_overloads') and func_call.name in module._function_overloads:
+                func = func_call._resolve_overload(builder, module, func_call.name, 
+                                                   module._function_overloads[func_call.name])
+                if func:
+                    print(f"[CONSTRUCTOR] Found via overload resolution: {func_call.name}", file=sys.stderr)
+        
+        # Step 3: Try namespace resolution if still not found
+        if func is None and hasattr(module, '_using_namespaces'):
+            print("[CONSTRUCTOR] NOT FOUND, USING NAMESPACE RESOLUTION", file=sys.stderr)
             for namespace in module._using_namespaces:
+                print(f"[CONSTRUCTOR]   Trying namespace: {namespace}", file=sys.stderr)
                 mangled_prefix = namespace.replace("::", "__") + "__"
-                mangled_name = mangled_prefix + ctor_name  # e.g. standard__strings__ + string.__init
-                constructor_func = module.globals.get(mangled_name)
-                if constructor_func is not None:
-                    ctor_name = mangled_name
+                mangled_name = mangled_prefix + func_call.name
+                print(f"[CONSTRUCTOR]   Mangled name: {mangled_name}", file=sys.stderr)
+                
+                # Try direct lookup with namespace prefix
+                func = module.globals.get(mangled_name, None)
+                if func and isinstance(func, ir.Function):
+                    print(f"[CONSTRUCTOR] Found via namespace direct lookup: {mangled_name}", file=sys.stderr)
                     break
-
-        if constructor_func is None:
-            raise NameError(f"Constructor not found: {self.initial_value.name}")
-
+                
+                # Try overload resolution with namespace prefix
+                if hasattr(module, '_function_overloads'):
+                    print(f"[CONSTRUCTOR]   Checking overloads for: {mangled_name}", file=sys.stderr)
+                    if mangled_name in module._function_overloads:
+                        print(f"[CONSTRUCTOR]   FOUND in overloads!", file=sys.stderr)
+                        func = func_call._resolve_overload(builder, module, mangled_name,
+                                                           module._function_overloads[mangled_name])
+                        if func:
+                            print(f"[CONSTRUCTOR] Found via namespace overload resolution: {mangled_name}", file=sys.stderr)
+                            break
+        
+        if func is None:
+            raise NameError(f"Constructor not found: {func_call.name}")
+        
+        # Build arguments: 'this' pointer first, then constructor arguments
         args = [alloca]
 
-        for i, arg_expr in enumerate(self.initial_value.arguments):
+        for i, arg_expr in enumerate(func_call.arguments):
             param_index = i + 1
             if (isinstance(arg_expr, StringLiteral) and
-                param_index < len(constructor_func.args) and
-                isinstance(constructor_func.args[param_index].type, ir.PointerType) and
-                isinstance(constructor_func.args[param_index].type.pointee, ir.IntType) and
-                constructor_func.args[param_index].type.pointee.width == 8):
-
+                param_index < len(func.args) and
+                isinstance(func.args[param_index].type, ir.PointerType) and
+                isinstance(func.args[param_index].type.pointee, ir.IntType) and
+                func.args[param_index].type.pointee.width == 8):
+                
                 arg_val = ArrayTypeHandler.create_local_string_for_arg(
                     builder, module, arg_expr.value, f"ctor_arg{i}"
                 )
             else:
                 arg_val = arg_expr.codegen(builder, module)
-
+            
             args.append(arg_val)
-
-        builder.call(constructor_func, args)
+        
+        builder.call(func, args)
     
     def _store_with_type_conversion(self, builder: ir.IRBuilder, alloca: ir.Value, 
                                     llvm_type: ir.Type, init_val: ir.Value) -> None:
@@ -3259,7 +3338,6 @@ class Assignment(Statement):
     value: Expression
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        from ftypesys import AssignmentTypeHandler
         
         # Generate code for the value to be assigned
         val = self.value.codegen(builder, module)
@@ -3296,7 +3374,6 @@ class CompoundAssignment(Statement):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate code for compound assignments like +=, -=, *=, /=, %="""
-        from ftypesys import AssignmentTypeHandler
         
         return AssignmentTypeHandler.handle_compound_assignment(
             builder, module, self.target, self.op_token, self.value)
@@ -4748,7 +4825,6 @@ class FunctionDef(ASTNode):
             
             # Attach type metadata to the parameter value before storing
             # This ensures the parameter carries the correct signedness information
-            from ftypesys import attach_type_metadata
             param_with_metadata = attach_type_metadata(param, type_spec=self.parameters[i].type_spec)
             
             builder.store(param_with_metadata, alloca)
@@ -5809,8 +5885,8 @@ class ObjectDef(ASTNode):
             if func is None:
                 raise RuntimeError(f"Internal error: missing function for method {method.name}")
         
-        # Handle nested objects and structs
-        ObjectTypeHandler.emit_method_body(method, func, self.name, module)
+            # Handle nested objects and structs
+            ObjectTypeHandler.emit_method_body(method, func, self.name, module)
         
         return struct_type
 
