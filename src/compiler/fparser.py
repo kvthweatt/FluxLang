@@ -1223,6 +1223,8 @@ class FluxParser:
                 t.is_pointer = True
                 t.pointer_depth = (t.pointer_depth or 0) + pointer_depth
 
+            import sys
+            print(f"[TYPE_SPEC DEBUG] Resolved alias: custom_typename={custom_typename}, is_array={t.is_array}, array_size={t.array_size}, is_pointer={t.is_pointer}, pointer_depth={t.pointer_depth}", file=sys.stderr)
             return t
 
         # No alias: return what we parsed normally
@@ -1244,6 +1246,8 @@ class FluxParser:
             storage_class=storage_class
         )
 
+        import sys
+        print(f"[TYPE_SPEC DEBUG] Non-alias: custom_typename={custom_typename}, is_array={is_array}, array_size={array_size}, is_pointer={pointer_depth > 0}, pointer_depth={pointer_depth}", file=sys.stderr)
     
     def base_type(self) -> Union[DataType, List]:
         """

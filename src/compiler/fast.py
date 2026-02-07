@@ -221,7 +221,7 @@ class Identifier(Expression):
                 return IdentifierTypeHandler.attach_type_metadata(ptr, type_spec)
 
             # For arrays and structs, return the pointer directly (don't load)
-            if IdentifierTypeHandler.should_return_pointer(ptr):
+            if IdentifierTypeHandler.should_return_pointer(ptr, type_spec):
                 return IdentifierTypeHandler.attach_type_metadata(ptr, type_spec)
             
             # Load the value if it's a non-array, non-struct pointer type
@@ -248,7 +248,7 @@ class Identifier(Expression):
             type_spec = IdentifierTypeHandler.get_type_spec(self.name, builder, module)
             
             # For arrays and structs, return the pointer directly (don't load)
-            if IdentifierTypeHandler.should_return_pointer(gvar):
+            if IdentifierTypeHandler.should_return_pointer(gvar, type_spec):
                 return IdentifierTypeHandler.attach_type_metadata(gvar, type_spec)
             
             # Load the value if it's a non-array, non-struct pointer type
@@ -271,7 +271,7 @@ class Identifier(Expression):
                 gvar = module.globals[mangled_name]
                 type_spec = IdentifierTypeHandler.get_type_spec(mangled_name, builder, module)
                 # For arrays and structs, return the pointer directly (don't load)
-                if IdentifierTypeHandler.should_return_pointer(gvar):
+                if IdentifierTypeHandler.should_return_pointer(gvar, type_spec):
                     return IdentifierTypeHandler.attach_type_metadata(gvar, type_spec)
                 # Load the value if it's a non-array, non-struct pointer type
                 elif isinstance(gvar.type, ir.PointerType):
@@ -1071,6 +1071,15 @@ class UnaryOp(Expression):
             return self._handle_increment_address_of(builder, module)
         
         operand_val = self.operand.codegen(builder, module)
+        
+        # For increment/decrement, we need the actual value, not just the pointer
+        # If operand is a pointer variable (T**), load it to get the value (T*)
+        if self.operator in (Operator.INCREMENT, Operator.DECREMENT):
+            if isinstance(self.operand, Identifier):
+                # Check if we got a pointer that needs loading
+                if isinstance(operand_val.type, ir.PointerType) and isinstance(operand_val.type.pointee, ir.PointerType):
+                    # This is T** - load to get T*
+                    operand_val = builder.load(operand_val, name=f"{self.operand.name}_loaded")
         
         if self.operator == Operator.NOT:
             # Handle NOT in global scope by creating constant
@@ -2561,6 +2570,15 @@ class ArrayAccess(Expression):
         # Get the array (should be a pointer to array or global)
         array_val = self.array.codegen(builder, module)
         
+        # CRITICAL FIX: If we got i8** (pointer-to-pointer), we need to load it
+        # This happens with scalar pointer variables like `noopstr src` (byte*)
+        # which are stored as i8** but need to be loaded to i8* for array indexing
+        if (isinstance(array_val.type, ir.PointerType) and 
+            isinstance(array_val.type.pointee, ir.PointerType) and
+            not isinstance(array_val.type.pointee.pointee, ir.ArrayType)):
+            # This is T** where T is NOT an array - load to get T*
+            array_val = builder.load(array_val, name="ptr_loaded_for_access")
+        
         # Check if this is a range expression (array slicing)
         if isinstance(self.index, RangeExpression):
             # Delegate to ArrayLiteral for slicing
@@ -3061,6 +3079,8 @@ class VariableDeclaration(ASTNode):
         # Resolve type (with automatic array size inference if needed)
         resolved_type_spec = self._resolve_type_spec(module)
         llvm_type = resolved_type_spec.get_llvm_type_with_array(module)
+        import sys
+        print(f"[VAR DECL] name={self.name}, type_spec={resolved_type_spec}, llvm_type={llvm_type}", file=sys.stderr)
         
         # Check if this is global scope
         is_global_scope = (
@@ -3395,6 +3415,11 @@ class Assignment(Statement):
         elif isinstance(self.target, PointerDeref):
             # Pointer dereference assignment - delegate to type handler
             ptr = self.target.pointer.codegen(builder, module)
+            # CRITICAL FIX: If we got T** (pointer-to-pointer), load to get T*
+            if (isinstance(ptr.type, ir.PointerType) and 
+                isinstance(ptr.type.pointee, ir.PointerType)):
+                # Load the pointer value
+                ptr = builder.load(ptr, name="deref_ptr_loaded")
             return AssignmentTypeHandler.handle_pointer_deref_assignment(builder, ptr, val)
                 
         else:
@@ -4962,6 +4987,7 @@ class FunctionPointerDeclaration(Statement):
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate function pointer variable"""
+        resolved_type_spec = TypeResolver.resolve_type(module)
         ptr_type = self.fp_type.get_llvm_pointer_type(module)
         
         # Store type information for later lookup

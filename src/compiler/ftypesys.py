@@ -1467,13 +1467,25 @@ class TypeSystem:
     def get_llvm_type_with_array(self, module: ir.Module) -> ir.Type:
         base_type = self.get_llvm_type(module)
         
+        # CRITICAL FIX: Handle arrays of pointers (like noopstr[3] -> [3 x i8*])
+        # We need to create the element type FIRST (including pointer indirection),
+        # THEN wrap it in an array type
+        
+        # Step 1: Create the element type (including pointer depth)
+        element_type = base_type
         if self.is_pointer:
             if self.base_type == DataType.VOID or self.base_type == DataType.STRUCT:
-                return ir.PointerType(ir.IntType(8))
-            return ir.PointerType(base_type)
+                element_type = ir.PointerType(ir.IntType(8))
+            else:
+                # Apply pointer depth to get element type
+                # For noopstr (byte*), pointer_depth=1, so element_type = i8*
+                # For noopstr* (byte**), pointer_depth=2, so element_type = i8**
+                for _ in range(self.pointer_depth if hasattr(self, 'pointer_depth') and self.pointer_depth else 1):
+                    element_type = ir.PointerType(element_type)
         
+        # Step 2: If this is an array, wrap element_type in ArrayType
         if self.is_array and self.array_dimensions:
-            current_type = base_type
+            current_type = element_type
             for dim in reversed(self.array_dimensions):
                 if dim is not None:
                     # Only handle compile-time constant dimensions
@@ -1482,7 +1494,7 @@ class TypeSystem:
                     else:
                         # Runtime size - return pointer to element type
                         # The actual allocation will be handled in _codegen_local
-                        return ir.PointerType(base_type)
+                        return ir.PointerType(element_type)
                 else:
                     current_type = ir.PointerType(current_type)
             return current_type
@@ -1490,21 +1502,21 @@ class TypeSystem:
             if self.array_size is not None:
                 # Check if it's a compile-time constant
                 if isinstance(self.array_size, int):
-                    return ir.ArrayType(base_type, self.array_size)
+                    # Return array of element_type
+                    # For noopstr[3], this returns [3 x i8*]
+                    return ir.ArrayType(element_type, self.array_size)
                 else:
                     # Runtime size - return pointer to element type
                     # The actual allocation will be handled in _codegen_local
-                    return ir.PointerType(base_type)
+                    return ir.PointerType(element_type)
             else:
-                if isinstance(base_type, ir.PointerType):
-                    return base_type
+                if isinstance(element_type, ir.PointerType):
+                    return element_type
                 else:
-                    return ir.PointerType(base_type)
+                    return ir.PointerType(element_type)
         
-        if self.is_pointer:
-            return ir.PointerType(base_type)
-        
-        return base_type
+        # Step 3: If not an array, just return element_type (which may be a pointer)
+        return element_type
 
 
 class FunctionPointerType:
@@ -2525,7 +2537,6 @@ class ArrayTypeHandler:
                 elem_ptr = builder.gep(alloca, [zero, ArrayTypeHandler._index(i)], name=f"elem_{i}")
                 builder.store(ir.Constant(llvm_type.element, packed_value), elem_ptr)
             else:
-                print("Packing into integer ...")
                 from fast import ArrayLiteral
                 
                 # Handle nested array packing: if element is an ArrayLiteral and target is integer, pack it
@@ -2535,7 +2546,18 @@ class ArrayTypeHandler:
                         builder, module, elem, llvm_type.element)
                 else:
                     elem_val = elem.codegen(builder, module)
-                    elem_val = ArrayTypeHandler._load_if_pointer(builder, elem_val)
+                    
+                    # CRITICAL FIX: If target element is a pointer and elem_val is pointer-to-array,
+                    # convert to pointer-to-element (for string literals in pointer arrays)
+                    if isinstance(llvm_type.element, ir.PointerType) and isinstance(elem_val.type, ir.PointerType):
+                        # Check if this is a pointer to array (like [8 x i8]*)
+                        if isinstance(elem_val.type.pointee, ir.ArrayType):
+                            # Convert [N x i8]* to i8* by GEP to first element
+                            zero_idx = ir.Constant(ir.IntType(32), 0)
+                            elem_val = builder.gep(elem_val, [zero_idx, zero_idx], name="str_to_ptr")
+                    else:
+                        # For non-pointer targets, load if needed
+                        elem_val = ArrayTypeHandler._load_if_pointer(builder, elem_val)
                 
                 if elem_val.type != llvm_type.element:
                     if isinstance(elem_val.type, ir.IntType) and isinstance(llvm_type.element, ir.IntType):
@@ -3058,31 +3080,50 @@ class IdentifierTypeHandler:
         return None
     
     @staticmethod
-    def should_return_pointer(llvm_value: ir.Value) -> bool:
+    def should_return_pointer(llvm_value: ir.Value, type_spec=None) -> bool:
         """
         Determine if an identifier should return a pointer (not load).
         Arrays and structs return pointers; other types are loaded.
         
         Args:
             llvm_value: The LLVM value (typically from scope or globals)
+            type_spec: The TypeSystem for this identifier (optional)
             
         Returns:
             True if should return pointer, False if should load
         """
+        import sys
+        print(f"[SHOULD_RETURN_PTR] llvm_value.type: {llvm_value.type}", file=sys.stderr)
+        if type_spec:
+            print(f"[SHOULD_RETURN_PTR] type_spec: {type_spec}", file=sys.stderr)
+        
         # For arrays, return the pointer directly (don't load)
         if isinstance(llvm_value.type, ir.PointerType) and isinstance(llvm_value.type.pointee, ir.ArrayType):
+            print(f"[SHOULD_RETURN_PTR] Returning True - is ArrayType", file=sys.stderr)
             return True
         
         # For structs, return the pointer directly (don't load)
         if isinstance(llvm_value.type, ir.PointerType) and isinstance(llvm_value.type.pointee, ir.LiteralStructType):
+            print(f"[SHOULD_RETURN_PTR] Returning True - is StructType", file=sys.stderr)
             return True
         
+        # CRITICAL: Check type_spec parameter for arrays of pointers (like noopstr[3])
+        # These are stored as i8** in LLVM but should not be loaded
+        if type_spec is not None:
+            if hasattr(type_spec, 'array_size') and type_spec.array_size is not None:
+                # This is an array variable - don't load it
+                print(f"[SHOULD_RETURN_PTR] Returning True - has array_size: {type_spec.array_size}", file=sys.stderr)
+                return True
         
-        # For pointer-to-pointer (T**) used as arrays, don't load
-        # Example: byte** result for array of strings
-        if (isinstance(llvm_value.type, ir.PointerType) and 
-            isinstance(llvm_value.type.pointee, ir.PointerType)):
-            return True
+        # Fallback: Check type metadata already attached
+        if hasattr(llvm_value, '_flux_type_spec'):
+            ts = llvm_value._flux_type_spec
+            if hasattr(ts, 'array_size') and ts.array_size is not None:
+                # This is an array variable - don't load it
+                print(f"[SHOULD_RETURN_PTR] Returning True - has _flux_type_spec.array_size: {ts.array_size}", file=sys.stderr)
+                return True
+        
+        print(f"[SHOULD_RETURN_PTR] Returning False - will load", file=sys.stderr)
         return False
     
     @staticmethod
@@ -3870,23 +3911,24 @@ class ObjectTypeHandler:
         # CRITICAL FIX: Restore the namespace context
         module.symbol_table.current_namespace = saved_namespace
         
-        @staticmethod
-        def process_nested_definitions(nested_objects: List, nested_structs: List, 
-                                       builder: 'ir.IRBuilder', module: 'ir.Module'):
-            """
-            Process nested objects and structs.
-            
-            Args:
-                nested_objects: List of nested ObjectDef
-                nested_structs: List of nested StructDef
-                builder: LLVM IR builder
-                module: LLVM module
-            """
-            for nested_obj in nested_objects:
-                nested_obj.codegen(builder, module)
-            
-            for nested_struct in nested_structs:
-                nested_struct.codegen(builder, module)
+
+    @staticmethod
+    def process_nested_definitions(nested_objects: List, nested_structs: List, 
+                                   builder: 'ir.IRBuilder', module: 'ir.Module'):
+        """
+        Process nested objects and structs.
+        
+        Args:
+            nested_objects: List of nested ObjectDef
+            nested_structs: List of nested StructDef
+            builder: LLVM IR builder
+            module: LLVM module
+        """
+        for nested_obj in nested_objects:
+            nested_obj.codegen(builder, module)
+        
+        for nested_struct in nested_structs:
+            nested_struct.codegen(builder, module)
 
 
 class FunctionTypeHandler:
@@ -5144,6 +5186,15 @@ class AssignmentTypeHandler:
         if val.type == target_type:
             return val
         
+        # CRITICAL FIX: If val is T** and target is T*, load to get T*
+        # This happens when assigning a pointer variable to a struct member
+        if (isinstance(val.type, ir.PointerType) and 
+            isinstance(val.type.pointee, ir.PointerType) and
+            isinstance(target_type, ir.PointerType) and
+            val.type.pointee == target_type):
+            # Load T** to get T*
+            return builder.load(val, name="ptr_val_loaded")
+        
         # Handle pointer type compatibility - if both are pointers to the same pointee type
         if isinstance(val.type, ir.PointerType) and isinstance(target_type, ir.PointerType):
             # Check if pointee types are equivalent
@@ -5473,6 +5524,39 @@ class AssignmentTypeHandler:
         # This handles all the loading logic correctly through Identifier codegen
         array = array_expr.codegen(builder, module)
         
+        import sys
+        print(f"[ARRAY ASSIGN DEBUG] INITIAL array.type: {array.type}", file=sys.stderr)
+        if hasattr(array, '_flux_type_spec'):
+            print(f"[ARRAY ASSIGN DEBUG] array has _flux_type_spec: {array._flux_type_spec}", file=sys.stderr)
+        
+        # CRITICAL FIX: If we got i8** (pointer-to-pointer), we need to load it
+        # This happens with scalar pointer variables like `noopstr dest` (byte*)
+        # which are stored as i8** but need to be loaded to i8* for array indexing
+        # HOWEVER: Don't load if:
+        # 1. This is an array of pointers (like noopstr[3]) with array_size in metadata
+        # 2. This is a pointer to pointer type (like byte**) used for dynamic arrays
+        if (isinstance(array.type, ir.PointerType) and 
+            isinstance(array.type.pointee, ir.PointerType) and
+            not isinstance(array.type.pointee.pointee, ir.ArrayType)):
+            
+            # Check type metadata to determine if we should load
+            should_load = True
+            if hasattr(array, '_flux_type_spec'):
+                type_spec = array._flux_type_spec
+                # Case 1: Array variable (noopstr[3]) - has array_size
+                if hasattr(type_spec, 'array_size') and type_spec.array_size is not None:
+                    should_load = False
+                # Case 2: Pointer-to-pointer variable (byte**) - has pointer_depth >= 2
+                # These are used for dynamic arrays and should NOT be loaded
+                elif hasattr(type_spec, 'pointer_depth') and type_spec.pointer_depth >= 2:
+                    should_load = False
+            
+            if should_load:
+                # This is T* stored as T** - load to get T*
+                import sys
+                print(f"[LOAD DEBUG] BEFORE load: array.type = {array.type}", file=sys.stderr)
+                array = builder.load(array, name="ptr_loaded_for_indexing")
+                print(f"[LOAD DEBUG] AFTER load: array.type = {array.type}", file=sys.stderr)
         index = index_expr.codegen(builder, module)
         
         import sys
@@ -5499,6 +5583,9 @@ class AssignmentTypeHandler:
             return val
         elif isinstance(array.type, ir.PointerType):
             # Handle plain pointer types (like byte*) - pointer arithmetic
+            import sys
+            print(f"[PTR ASSIGN DEBUG] array.type: {array.type}", file=sys.stderr)
+            print(f"[PTR ASSIGN DEBUG] array.type.pointee: {array.type.pointee}", file=sys.stderr)
             elem_ptr = builder.gep(array, [index], inbounds=True)
             
             import sys

@@ -27,7 +27,7 @@ import shutil
 from typing import List, Dict, Tuple, Optional
 
 class TestRunner:
-    def __init__(self, verbose: bool = False, keep_artifacts: bool = False, 
+    def __init__(self, examples: bool = False, verbose: bool = False, keep_artifacts: bool = False, 
                  compile_only: bool = False, filter_pattern: str = None):
         self.verbose = verbose
         self.keep_artifacts = keep_artifacts
@@ -42,7 +42,10 @@ class TestRunner:
         self.compiler_path = self.project_root / "fc.py"
         
         # Tests directory is at project root
-        self.test_dir = self.project_root / "tests"
+        if examples:
+            self.test_dir = self.project_root / "examples"
+        else:
+            self.test_dir = self.project_root / "tests"
         self.build_dir = self.project_root / "build"
         
         # Ensure compiler exists
@@ -368,10 +371,13 @@ Examples:
                        help="Only compile, don't run the executables")
     parser.add_argument("--filter", type=str,
                        help="Only run tests matching pattern (substring match)")
+    parser.add_argument("--examples", action="store_true",
+                        help="Only test examples")
     
     args = parser.parse_args()
     
     runner = TestRunner(
+        examples=args.examples,
         verbose=args.verbose,
         keep_artifacts=args.keep_artifacts,
         compile_only=args.compile_only,
