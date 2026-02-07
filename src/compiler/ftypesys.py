@@ -1519,18 +1519,28 @@ class TypeSystem:
         return element_type
 
 
+@dataclass
 class FunctionPointerType:
+    """
+    Represents a function pointer type specification.
+    
+    Used for parsing function pointer type syntax like: void{}* (int, int)
+    This is the TYPE, not a declaration or expression.
+    """
     return_type: TypeSystem
     parameter_types: List[TypeSystem]
     
     def get_llvm_type(self, module: ir.Module) -> ir.FunctionType:
+        """Convert to LLVM function type"""
         ret_type = self.return_type.get_llvm_type(module)
         param_types = [param.get_llvm_type(module) for param in self.parameter_types]
         return ir.FunctionType(ret_type, param_types)
     
     def get_llvm_pointer_type(self, module: ir.Module) -> ir.PointerType:
+        """Get pointer to this function type"""
         func_type = self.get_llvm_type(module)
         return ir.PointerType(func_type)
+        
 
 class VariableTypeHandler:
     """Handles all type-related operations for variable declarations"""
