@@ -209,7 +209,7 @@ class Identifier(Expression):
             
             # Get type information if available
             type_spec = TypeResolver.resolve_type_spec(self.name, module)
-            print("TYPE SPEC FROM TYPE RESOLVER:",type_spec)
+            #print("TYPE SPEC FROM TYPE RESOLVER:",type_spec)
 
             # Check validity (use after tie)
             IdentifierTypeHandler.check_validity(self.name, builder)
@@ -377,96 +377,6 @@ class ArrayLiteral(Expression):
         gv.type._is_array_pointer = True
         
         return gv
-    
-    def literal_string_to_array_ptr(self, builder: ir.IRBuilder, module: ir.Module, 
-                                   lit: Union[Literal, 'ArrayLiteral'], name_hint: str) -> ir.Value:
-        """Turn a string literal into a pointer-to-array value preserving array semantics."""
-        if isinstance(lit, Literal):
-            if lit.type != DataType.CHAR or not isinstance(lit.value, str):
-                raise ValueError("Expected string Literal for conversion")
-            string_val = lit.value
-        elif isinstance(lit, ArrayLiteral):
-            if not lit.is_string or lit.string_value is None:
-                raise ValueError("Expected string ArrayLiteral for conversion")
-            string_val = lit.string_value
-        else:
-            raise ValueError("Expected Literal or ArrayLiteral for conversion")
-        
-        # Create global array
-        gv = self.create_global_string(module, string_val, name_hint)
-        
-        # Return pointer to first element
-        zero = ir.Constant(ir.IntType(32), 0)
-        ptr = builder.gep(gv, [zero, zero], name=f"{name_hint}_str_ptr")
-        ptr.type._is_array_pointer = True
-        return ptr
-    
-    def resize_array_if_needed(self, builder: ir.IRBuilder, module: ir.Module, 
-                              ptr: ir.Value, val: ir.Value, var_name: str = None) -> ir.Value:
-        """Dynamically resize arrays to accommodate new values during assignment."""
-        # Get array information
-        val_elem_type, val_len = ArrayTypeHandler.get_array_info(val)
-        ptr_elem_type, ptr_len = ArrayTypeHandler.get_array_info(ptr)
-        
-        # If the new array is larger, we need to reallocate
-        if val_len > ptr_len:
-            # Create new array type with the larger size
-            new_array_type = ir.ArrayType(val_elem_type, val_len)
-            
-            # Allocate new storage for the resized array
-            new_alloca = builder.alloca(new_array_type, name=f"{var_name}_resized" if var_name else "array_resized")
-            
-            # Copy existing data from old array to new array (first ptr_len elements)
-            if ptr_len > 0:
-                elem_size_bytes = ptr_elem_type.width // 8
-                old_bytes = ptr_len * elem_size_bytes
-                
-                # Get pointer to start of old array
-                zero = ir.Constant(ir.IntType(32), 0)
-                old_start = builder.gep(ptr, [zero, zero], name="old_start")
-                
-                # Get pointer to start of new array
-                new_start = builder.gep(new_alloca, [zero, zero], name="new_start")
-                
-                # Copy old data
-                ArrayTypeHandler.emit_memcpy(builder, module, new_start, old_start, old_bytes)
-            
-            # Copy new data to the new array (overwriting all elements)
-            new_bytes = val_len * (val_elem_type.width // 8)
-            zero = ir.Constant(ir.IntType(32), 0)
-            new_start = builder.gep(new_alloca, [zero, zero], name="new_start")
-            val_start = builder.gep(val, [zero, zero], name="val_start")
-            ArrayTypeHandler.emit_memcpy(builder, module, new_start, val_start, new_bytes)
-            
-            # Update the original variable to point to the new array
-            if var_name and module.symbol_table.get_llvm_value(var_name) is not None:
-                module.symbol_table.define(var_name, SymbolKind.VARIABLE, llvm_value=new_alloca)
-            
-            return new_alloca
-        else:
-            # If new array is smaller or same size, just copy the data
-            copy_len = min(val_len, ptr_len)
-            copy_bytes = copy_len * (val_elem_type.width // 8)
-            
-            zero = ir.Constant(ir.IntType(32), 0)
-            ptr_start = builder.gep(ptr, [zero, zero], name="ptr_start")
-            val_start = builder.gep(val, [zero, zero], name="val_start")
-            
-            # Copy the data
-            ArrayTypeHandler.emit_memcpy(builder, module, ptr_start, val_start, copy_bytes)
-            
-            # If the new array is smaller, zero out the remaining elements
-            if val_len < ptr_len:
-                remaining_bytes = (ptr_len - val_len) * (ptr_elem_type.width // 8)
-                if remaining_bytes > 0:
-                    # Get pointer to remaining area
-                    val_len_const = ir.Constant(ir.IntType(32), val_len)
-                    remaining_start = builder.gep(ptr, [zero, val_len_const], name="remaining_start")
-                    
-                    # Zero out remaining bytes
-                    ArrayTypeHandler.emit_memset(builder, module, remaining_start, 0, remaining_bytes)
-            
-            return ptr
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate code for array literal."""
@@ -650,34 +560,6 @@ class ArrayLiteral(Expression):
             # Mark as array pointer
             alloca.type._is_array_pointer = True
             return alloca
-    
-    @classmethod
-    def from_string_literal(cls, string_value: str, storage_class: Optional[StorageClass] = None) -> 'ArrayLiteral':
-        """Create an ArrayLiteral from a string value."""
-        # Convert string to list of char literals
-        elements = []
-        for char in string_value:
-            elements.append(Literal(char, DataType.CHAR))
-        
-        return cls(
-            elements=elements,
-            is_string=True,
-            string_value=string_value,
-            storage_class=storage_class
-        )
-    
-    @classmethod
-    def from_char_literal(cls, lit: Literal, storage_class: Optional[StorageClass] = None) -> 'ArrayLiteral':
-        """Create an ArrayLiteral from a single char literal."""
-        if lit.type != DataType.CHAR:
-            raise ValueError("Expected char literal")
-        
-        return cls(
-            elements=[lit],
-            is_string=True,
-            string_value=lit.value if isinstance(lit.value, str) else chr(lit.value),
-            storage_class=storage_class
-        )
 
 @dataclass
 class StringLiteral(Expression):
@@ -768,13 +650,6 @@ class BinaryOp(Expression):
     left: Expression
     operator: Operator
     right: Expression
-
-    def _get_comparison_signedness(self, left_val: ir.Value, right_val: ir.Value) -> bool:
-        """
-        Determine if comparison should be unsigned.
-        If either operand is unsigned, use unsigned comparison.
-        """
-        return is_unsigned(left_val) or is_unsigned(right_val)
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         ctx = CoercionContext(builder)
@@ -2009,43 +1884,6 @@ class FunctionCall(Expression):
                     return func
         
         #print(f"[NAMESPACE RESOLVE]   NOT FOUND", file=sys.stderr)
-        return None
-
-    def _try_symbol_table_resolution(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Function]:
-        """
-        Try to resolve the function using the symbol table.
-        
-        Returns:
-            Function object if found, None otherwise
-        """
-        if not hasattr(module, 'symbol_table'):
-            return None
-        
-        # Get current namespace context from module
-        current_namespace = module.symbol_table.current_namespace
-
-        # ALSO ADD fallback for extern functions:
-        # After existing resolution attempts, add:
-        if self.name in module.globals:
-            candidate = module.globals[self.name]
-            if isinstance(candidate, ir.Function):
-                return candidate
-        
-        # Use FunctionResolver to check symbol table
-        resolved_name = TypeResolver._resolve_from_symbol_table(
-            self.name, module.symbol_table, current_namespace, module)
-        
-        if resolved_name and resolved_name in module.globals:
-            candidate_func = module.globals[resolved_name]
-            if isinstance(candidate_func, ir.Function):
-                return candidate_func
-            
-            # Also check for overloaded versions of the resolved name
-            func = self._try_overload_resolution(builder, module, resolved_name)
-            if func is not None:
-                #print("FUNC NOT NONE")
-                return func
-        
         return None
     
     def _raise_function_not_found_error(self, module: ir.Module) -> None:
@@ -3312,6 +3150,16 @@ class Block(Statement):
     statements: List[Statement] = field(default_factory=list)
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        debug = False
+        if debug:
+            current_frame = inspect.currentframe()
+            caller_frame = current_frame.f_back
+            caller_name = caller_frame.f_code.co_name
+            stack = inspect.stack()
+            print("Full call stack (from current to outermost):")
+            for i, frame_info in enumerate(reversed(stack)):
+                print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
+
         result = None
         #print(self.statements)
         #print(f"DEBUG Block: Processing {len(self.statements)} statements")
@@ -5107,32 +4955,9 @@ class TieExpression(Expression):
         
         return tied_value
 
-"""
-Flux Struct Implementation according to struct_specification.md
-
-This implements structs as type contracts with runtime-queryable vtables,
-enabling zero-cost data reinterpretation through destructive casting.
-
-Key concepts:
-1. Struct declarations create vtables (metadata about memory layout)
-2. Struct instances are pure data with no vtable pointers
-3. Field access consults vtable at compile time
-4. Casting between structs is zero-cost bitcast operation
-"""
-
 # Struct member
 @dataclass
 class StructMember(ASTNode):
-    """
-    Struct member with explicit type specification.
-    
-    Attributes:
-        name: Member field name
-        type_spec: Type specification (must include bit_width for data types)
-        offset: Calculated bit offset in struct (set during vtable generation)
-        is_private: Whether this is a private member
-        initial_value: Optional initialization expression (not stored in vtable)
-    """
     name: str
     type_spec: TypeSystem
     offset: Optional[int] = None  # Bit offset, calculated during vtable gen
@@ -5234,20 +5059,6 @@ class StructLiteral(Expression):
 # Struct pointer vtable
 @dataclass
 class StructVTable:
-    """
-    Virtual table containing struct layout metadata.
-    
-    This is generated at compile time and stored as a global constant.
-    It enables zero-cost struct reinterpretation and field access.
-    
-    Attributes:
-        struct_name: Name of the struct
-        total_bits: Total size in bits
-        total_bytes: Total size in bytes (rounded up)
-        alignment: Required alignment in bits
-        fields: List of (name, offset, width, alignment) tuples
-        field_types: Dict mapping field name to LLVM type (for proper type conversion)
-    """
     struct_name: str
     total_bits: int
     total_bytes: int
@@ -5315,52 +5126,6 @@ class StructDef(ASTNode):
             #print(f"DEBUG calculate_vtable: Created vtable for '{self.name}' with field_types={vtable.field_types}")
             return vtable
     
-    def _get_custom_type_info(self, typename: str, module: ir.Module) -> Dict:
-        """Look up custom type information from module's type registry."""
-        # First check _custom_types (for types registered via register_struct_type)
-        if hasattr(module, '_custom_types') and typename in module._custom_types:
-            return module._custom_types[typename]
-        
-        # Fall back to _type_aliases (for types registered via TypeDeclaration)
-        if hasattr(module, '_type_aliases') and typename in module._type_aliases:
-            llvm_type = module._type_aliases[typename]
-            
-            # Calculate bit width and alignment from the LLVM type
-            if isinstance(llvm_type, ir.IntType):
-                bit_width = llvm_type.width
-                alignment = llvm_type.width
-            elif isinstance(llvm_type, ir.FloatType):
-                bit_width = 32
-                alignment = 32
-            elif isinstance(llvm_type, ir.DoubleType):
-                bit_width = 64
-                alignment = 64
-            elif isinstance(llvm_type, ir.ArrayType):
-                # For arrays, calculate total bit width
-                element_type = llvm_type.element
-                if isinstance(element_type, ir.IntType):
-                    bit_width = element_type.width * llvm_type.count
-                    alignment = element_type.width
-                else:
-                    # Default fallback
-                    bit_width = 8 * llvm_type.count
-                    alignment = 8
-            else:
-                # Default fallback for other types
-                bit_width = 32
-                alignment = 32
-            
-            return {
-                'bit_width': bit_width,
-                'alignment': alignment
-            }
-        
-        # Type not found in either registry
-        raise NameError(
-            f"Custom type '{typename}' not defined. "
-            f"Make sure the type is defined before the struct or imported properly."
-        )
-    
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
         """Generate LLVM IR for struct definition."""
         self.vtable = self.calculate_vtable(module)
@@ -5402,30 +5167,61 @@ class StructDef(ASTNode):
             name = member.name
             type_spec = member.type_spec
             # For array types, we need to extract the element type
-            if type_spec.is_array:
+            # First check if type_spec is a TypeSystem instance with array properties
+            if isinstance(type_spec, TypeSystem) and type_spec.is_array:
 
                 # Determine correct is_signed value - look up from type system
-                is_signed_value = type_spec.is_signed
-                if type_spec.custom_typename and hasattr(module, '_type_alias_specs'):
+                # Handle case where type_spec might be DataType instead of TypeSystem
+                if isinstance(type_spec, DataType):
+                    # If it's a raw DataType, default signedness based on the type
+                    is_signed_value = type_spec in (DataType.SINT, DataType.CHAR, DataType.FLOAT)
+                elif hasattr(type_spec, 'is_signed'):
+                    is_signed_value = type_spec.is_signed
+                else:
+                    # Default to True for unknown types
+                    is_signed_value = True
+                    
+                if hasattr(type_spec, 'custom_typename') and type_spec.custom_typename and hasattr(module, '_type_alias_specs'):
                     if type_spec.custom_typename in module._type_alias_specs:
                         alias_spec = module._type_alias_specs[type_spec.custom_typename]
-                        is_signed_value = alias_spec.is_signed
+                        if hasattr(alias_spec, 'is_signed'):
+                            is_signed_value = alias_spec.is_signed
                         
-                element_type_spec = TypeSystem(
-                    base_type=type_spec.base_type,
-                    is_signed=is_signed_value,
-                    bit_width=type_spec.bit_width,
-                    custom_typename=type_spec.custom_typename,
-                    is_const=type_spec.is_const,
-                    is_volatile=type_spec.is_volatile,
-                    storage_class=type_spec.storage_class,
-                    # Don't copy array properties
-                    is_array=False,
-                    array_size=None,
-                    array_dimensions=None,
-                    is_pointer=False,
-                    pointer_depth=0
-                )
+                # Create element type spec - handle both TypeSystem and DataType
+                if isinstance(type_spec, TypeSystem):
+                    element_type_spec = TypeSystem(
+                        base_type=type_spec.base_type,
+                        is_signed=is_signed_value,
+                        bit_width=type_spec.bit_width if hasattr(type_spec, 'bit_width') else None,
+                        custom_typename=type_spec.custom_typename if hasattr(type_spec, 'custom_typename') else None,
+                        is_const=type_spec.is_const if hasattr(type_spec, 'is_const') else False,
+                        is_volatile=type_spec.is_volatile if hasattr(type_spec, 'is_volatile') else False,
+                        storage_class=type_spec.storage_class if hasattr(type_spec, 'storage_class') else None,
+                        # Don't copy array properties
+                        is_array=False,
+                        array_size=None,
+                        array_dimensions=None,
+                        is_pointer=False,
+                        pointer_depth=0
+                    )
+                elif isinstance(type_spec, DataType):
+                    # If type_spec is a raw DataType, create a basic TypeSystem
+                    element_type_spec = TypeSystem(
+                        base_type=type_spec,
+                        is_signed=is_signed_value,
+                        bit_width=None,
+                        custom_typename=None,
+                        is_const=False,
+                        is_volatile=False,
+                        storage_class=None,
+                        is_array=False,
+                        array_size=None,
+                        array_dimensions=None,
+                        is_pointer=False,
+                        pointer_depth=0
+                    )
+                else:
+                    raise TypeError(f"Expected TypeSystem or DataType, got {type(type_spec)}")
                 
                 # Attach element type to the array type spec
                 type_spec.array_element_type = element_type_spec
@@ -5624,13 +5420,6 @@ class StructFieldAccess(Expression):
 
 @dataclass
 class StructFieldAssign(Statement):
-    """
-    Assign a value to a struct field.
-    
-    Syntax: instance.field_name = value;
-    
-    Generates inline bit manipulation to update the field in place.
-    """
     struct_instance: Expression
     field_name: str
     value: Expression

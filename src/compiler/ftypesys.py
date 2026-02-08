@@ -8,7 +8,7 @@ Contributors:
     Piotr Bednarski
 """
 
-import sys, traceback, faulthandler
+import sys, traceback, faulthandler, inspect
 from dataclasses import dataclass, field
 from typing import List, Any, Optional, Union, Dict, Tuple
 from enum import Enum
@@ -531,7 +531,6 @@ class SymbolTable:
         #print("AFTER APPENDING OVERLOAD_INFO")
     
     def lookup(self, name: str) -> Optional[Tuple[SymbolKind, Any]]:
-        """LEGACY backward compat"""
         entry = self.lookup_any(name)
         if entry:
             return (entry.kind, entry.type_spec)
@@ -760,8 +759,10 @@ class TypeResolver:
             if result and result[0] == SymbolKind.TYPE:
                 # result[1] should be the TypeSystem for this type alias
                 if result[1] is not None:
-                    # Convert TypeSystem to LLVM type
-                    return TypeSystem.get_llvm_type(result[1], module)
+                    t = TypeSystem.get_llvm_type(result[1], module, include_array=True)
+                    if isinstance(t, ir.VoidType):
+                        print(f"[TYPE RESOLVE] WARNING: resolved {typename} to void", file=sys.stderr)
+                    return t
                 
                 # If no TypeSystem stored but it's marked as a type,
                 # try to find it in module storage
@@ -992,7 +993,6 @@ class TypeChecker:
 
 @dataclass
 class TypeSystem:
-    """Legacy TypeSystem for backward compatibility - will be phased out"""
     base_type: Union[DataType, str]
     is_signed: bool = True
     is_const: bool = False
@@ -1008,6 +1008,24 @@ class TypeSystem:
     pointer_depth: int = 0
     custom_typename: Optional[str] = None
     storage_class: Optional[StorageClass] = None
+    
+    def __repr__(self) -> str:
+        return f"\n\
+TypeSystem(base_type:     {self.base_type}\n\
+           is_signed:     {self.is_signed}\n\
+           is_const:      {self.is_const}\n\
+           is_volatile:   {self.is_volatile}\n\
+           bit_width:     {self.bit_width}\n\
+           alignment:     {self.alignment}\n\
+           endianness:    {self.endianness}\n\
+           is_array:      {self.is_array}\n\
+           array_size:    {self.array_size}\n\
+           array_dimensions: {self.array_dimensions}\n\
+           array_element_type: {self.array_element_type}\n\
+           is_pointer:    {self.is_pointer}\n\
+           pointer_depth: {self.pointer_depth}\n\
+           custom_typename: {self.custom_typename}\n\
+           storage_class: {self.storage_class})\n\n"
     
     def to_new_type(self) -> BaseType:
         """Convert TypeSystem to new Type system"""
@@ -1150,13 +1168,24 @@ class TypeSystem:
         else:
             raise ValueError(f"Unsupported type: {type_spec.base_type}")
         
-        # If include_array is False, just return base type
-        if not include_array:
-            return base_type
         
         # Include array dimensions (get_llvm_type_with_array behavior)
         # Step 1: Create the element type (including pointer depth)
         element_type = base_type
+        debug = False
+        if debug:
+            current_frame = inspect.currentframe()
+            caller_frame = current_frame.f_back
+            caller_name = caller_frame.f_code.co_name
+            stack = inspect.stack()
+            print("Full call stack (from current to outermost):")
+            for i, frame_info in enumerate(reversed(stack)):
+                print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
+            print(f"[TYPE SYSTEM] Debug Output\n\
+|--v- get_llvm_type()\n\
+   |----> base_type: {base_type}\n\
+    `---> type_spec: {type_spec}")
+
         if type_spec.is_pointer:
             if type_spec.base_type == DataType.VOID or type_spec.base_type == DataType.STRUCT:
                 element_type = ir.PointerType(ir.IntType(8))
@@ -1167,6 +1196,10 @@ class TypeSystem:
                 for _ in range(type_spec.pointer_depth if hasattr(type_spec, 'pointer_depth') and type_spec.pointer_depth else 1):
                     element_type = ir.PointerType(element_type)
         
+        # If include_array is False, just return base type
+        if not include_array:
+            return element_type
+
         # Step 2: If this is an array, wrap element_type in ArrayType
         if type_spec.is_array and type_spec.array_dimensions:
             current_type = element_type
@@ -1203,7 +1236,6 @@ class TypeSystem:
         return element_type
     
     def get_llvm_type_with_array(self, module: ir.Module) -> ir.Type:
-        """Legacy instance method - redirects to static method with include_array=True"""
         return TypeSystem.get_llvm_type(self, module, include_array=True)
 
     @staticmethod
@@ -1234,16 +1266,12 @@ class TypeSystem:
                         is_unsigned_type = alias_name.startswith('u') or alias_name == 'byte'
                     
                     # Create type spec with appropriate signedness
-                    type_spec = type(
-                        'TypeSystem',
-                        (),
-                        {
-                            'base_type': DataType.UINT if is_unsigned_type else DataType.SINT,
-                            'is_signed': not is_unsigned_type,
-                            'bit_width': llvm_type.width if hasattr(llvm_type, 'width') else None,
-                            'custom_typename': alias_name
-                        }
-                    )()
+                    type_spec = TypeSystem(
+                        base_type=DataType.UINT if is_unsigned_type else DataType.SINT,
+                        is_signed=not is_unsigned_type,
+                        bit_width=llvm_type.width if hasattr(llvm_type, 'width') else None,
+                        custom_typename=alias_name
+                    )
                     llvm_value._flux_type_spec = type_spec
                     return llvm_value
         
@@ -2704,7 +2732,14 @@ class CoercionContext:
     @staticmethod
     def is_unsigned(val: ir.Value) -> bool:
         spec = getattr(val, "_flux_type_spec", None)
-        return spec is not None and not spec.is_signed
+        if spec is None:
+            return False
+        # Be defensive: older code sometimes attached raw DataType enums.
+        if isinstance(spec, DataType):
+            return spec == DataType.UINT
+        if not hasattr(spec, 'is_signed'):
+            return False
+        return not spec.is_signed
 
     @staticmethod
     def comparison_is_unsigned(a: ir.Value, b: ir.Value) -> bool:
@@ -3078,7 +3113,7 @@ class ObjectTypeHandler:
                           for p in method.parameters])
         
         func_type = ir.FunctionType(ret_type, param_types)
-        mangled_method_name = FunctionTypeHandler.mangle_function_name(
+        mangled_method_name = SymbolTable.mangle_function_name(
             method_name, 
             method.parameters, 
             method.return_type,
@@ -3125,7 +3160,7 @@ class ObjectTypeHandler:
             #print(f"  Method name: {method.name}", file=sys.stderr)
             #print(f"  Base name: {base_name}", file=sys.stderr)
             
-            FunctionTypeHandler.register_function_overload(
+            SymbolTable.register_function_overload(
                 module, base_name, func_name, method.parameters, method.return_type, func
             )
         
@@ -4788,7 +4823,7 @@ class MemberAccessTypeHandler:
         member_types = union_info['member_types']
         member_index = member_names.index(member_name)
         return member_types[member_index]
-        
+
     @staticmethod
     def is_static_struct_member(type_name: str, module) -> bool:
         """Check if a type name refers to a struct type (for static member access)."""
