@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from typing import List, Any, Optional, Union, Dict, Tuple
 from enum import Enum
 from llvmlite import ir
-
 from flexer import TokenType
 
 
@@ -46,16 +45,8 @@ class SymbolEntry:
     def mangled_name(self) -> str:
         if not self.namespace:
             return self.name
-        # DEBUG: Check types
-        if not isinstance(self.namespace, str):
-            print(f"[ERROR] namespace is {type(self.namespace)}, not str!", file=sys.stderr)
-            print(f"[ERROR] namespace value: {self.namespace}", file=sys.stderr)
-            raise TypeError(f"namespace must be str, got {type(self.namespace)}")
-        if not isinstance(self.name, str):
-            print(f"[ERROR] name is {type(self.name)}, not str!", file=sys.stderr)
-            print(f"[ERROR] name value: {self.name}", file=sys.stderr)
-            print(f"[ERROR] namespace: {self.namespace}", file=sys.stderr)
-            raise TypeError(f"name must be str, got {type(self.name)}")
+        if not isinstance(self.namespace, str) or not isinstance(self.name, str):
+            raise TypeError(f"namespace and name must be str, got {type(self.namespace)} and {type(self.name)}")
         return self.namespace.replace('::', '__') + '__' + self.name
     
     @property
@@ -112,15 +103,8 @@ class SymbolTable:
                llvm_type=None, llvm_value=None, **metadata):
         """Define symbol in current scope"""
         
-        # SAFETY: Validate name is actually a string
         if not isinstance(name, str):
-            print(f"[ERROR] define() called with non-string name!", file=sys.stderr)
-            print(f"[ERROR]   name type: {type(name)}", file=sys.stderr)
-            print(f"[ERROR]   name value: {name}", file=sys.stderr)
-            print(f"[ERROR]   kind: {kind}", file=sys.stderr)
-            import traceback
-            traceback.print_stack()
-            raise TypeError(f"SymbolTable.define() requires name to be str, got {type(name)}")
+            raise TypeError(f"SymbolTable.define() requires name to be str, got {type(name)}: {name}")
 
         #print(f"[SYMBOL_TABLE] define(name='{name}', kind={kind})", file=sys.stderr)
         #print(f"[SYMBOL_TABLE]   scope_level: {self.scope_level}", file=sys.stderr)
@@ -177,33 +161,18 @@ class SymbolTable:
         #    print(f"[SYMBOL_TABLE]   NOT FOUND: '{name}'", file=sys.stderr)
         return result
     
-    def lookup_type(self, name: str, current_namespace: str = None) -> Optional[SymbolEntry]:
+    def _lookup_with_kinds(self, name: str, kinds, current_namespace: str = None) -> Optional[SymbolEntry]:
         entry = self.lookup_any(name, current_namespace)
-        if entry and entry.kind in (SymbolKind.TYPE, SymbolKind.STRUCT, 
-                                    SymbolKind.UNION, SymbolKind.ENUM):
-            return entry
-        return None
+        return entry if (entry and entry.kind in kinds) else None
+    
+    def lookup_type(self, name: str, current_namespace: str = None) -> Optional[SymbolEntry]:
+        return self._lookup_with_kinds(name, (SymbolKind.TYPE, SymbolKind.STRUCT, SymbolKind.UNION, SymbolKind.ENUM), current_namespace)
     
     def lookup_variable(self, name: str, current_namespace: str = None) -> Optional[SymbolEntry]:
-        entry = self.lookup_any(name, current_namespace)
-        #print(f"[SYMBOL_TABLE] lookup_variable('{name}')", file=sys.stderr)
-        #if entry:
-        #    print(f"[SYMBOL_TABLE]   Found entry: kind={entry.kind}, type(kind)={type(entry.kind)}", file=sys.stderr)
-        #    print(f"[SYMBOL_TABLE]   SymbolKind.VARIABLE={SymbolKind.VARIABLE}, type={type(SymbolKind.VARIABLE)}", file=sys.stderr)
-        #    print(f"[SYMBOL_TABLE]   Comparison: {entry.kind} == {SymbolKind.VARIABLE} = {entry.kind == SymbolKind.VARIABLE}", file=sys.stderr)
-        #else:
-        #    print(f"[SYMBOL_TABLE]   No entry found", file=sys.stderr)
-        if entry and entry.kind == SymbolKind.VARIABLE:
-            #print(f"[SYMBOL_TABLE]   Returning variable entry", file=sys.stderr)
-            return entry
-        #print(f"[SYMBOL_TABLE]   Entry is not a VARIABLE (or None), returning None", file=sys.stderr)
-        return
+        return self._lookup_with_kinds(name, (SymbolKind.VARIABLE,), current_namespace)
     
     def lookup_function(self, name: str, current_namespace: str = None) -> Optional[SymbolEntry]:
-        entry = self.lookup_any(name, current_namespace)
-        if entry and entry.kind == SymbolKind.FUNCTION:
-            return entry
-        return None
+        return self._lookup_with_kinds(name, (SymbolKind.FUNCTION,), current_namespace)
     
     def _resolve_with_namespaces(self, name: str, current_namespace: str) -> Optional[SymbolEntry]:
         # 1. Exact match
@@ -212,9 +181,7 @@ class SymbolTable:
         
         # 2. Current namespace
         if current_namespace:
-            mangled = self._mangle_name(current_namespace, name)
-            if mangled in self._global_symbols:
-                return self._global_symbols[mangled]
+            mangled = TypeResolver.mangle_name(current_namespace, name)
         
         # 3. Parent namespaces
         if current_namespace:
@@ -222,29 +189,24 @@ class SymbolTable:
             while parts:
                 parts.pop()
                 parent_ns = '::'.join(parts)
-                mangled = self._mangle_name(parent_ns, name) if parent_ns else name
-                if mangled in self._global_symbols:
-                    return self._global_symbols[mangled]
+                mangled = TypeResolver.mangle_name(parent_ns, name) if parent_ns else name
         
         # 4. Using namespaces
         for namespace in self.using_namespaces:
-            mangled = self._mangle_name(namespace, name)
-            if mangled in self._global_symbols:
-                return self._global_symbols[mangled]
+            mangled = TypeResolver.mangle_name(namespace, name)
         
         # 5. All registered namespaces
         for namespace in self.registered_namespaces:
-            mangled = self._mangle_name(namespace, name)
+            mangled = TypeResolver.mangle_name(namespace, name)
+
+        try:
             if mangled in self._global_symbols:
                 return self._global_symbols[mangled]
-        
-        return None
+            else:
+                return None
+        except:
+            return None
     
-    @staticmethod
-    def _mangle_name(namespace: str, name: str) -> str:
-        if not namespace:
-            return name
-        return namespace.replace('::', '__') + '__' + name
     
     def is_type(self, name: str) -> bool:
         entry = self.lookup_any(name)
@@ -285,42 +247,58 @@ class SymbolTable:
 
 
 class Operator(Enum):
-    """Operator enumeration (imported for constant evaluation)"""
-    ADD = "+"
-    SUB = "-"
-    MUL = "*"
-    DIV = "/"
-    MOD = "%"
-    NOT = "!"
-    POWER = "^"
-    XOR = "^^"
-    OR = "|"
-    AND = "&"
-    BITOR = "`|"
-    BITAND = "`&"
-    NOR = "!|"
-    NAND = "!&"
-    INCREMENT = "++"
-    DECREMENT = "--"
-    
-    EQUAL = "=="
-    NOT_EQUAL = "!="
-    LESS_THAN = "<"
-    LESS_EQUAL = "<="
-    GREATER_THAN = ">"
-    GREATER_EQUAL = ">="
-    
+    # Regular operators
+    ADD = "+" #
+    SUB = "-" #
+    INCREMENT = "++" #
+    DECREMENT = "--" #
+    MUL = "*" #
+    DIV = "/" #
+    MOD = "%" #
+    NOT = "!" #
+    POWER = "^" #
+    # Logical
+    AND = "&" #
+    OR = "|" #
+    NAND = "!&" #
+    NOR = "!|" #
+    XOR = "^^" #
+    # Comparison
+    EQUAL = "==" #
+    NOT_EQUAL = "!=" #
+    LESS_THAN = "<" #
+    LESS_EQUAL = "<=" #
+    GREATER_THAN = ">" #
+    GREATER_EQUAL = ">=" #
+    # Assignment
+    ASSIGN = "=" #
+    PLUS_ASSIGN = "+=" #
+    MINUS_ASSIGN = "-=" #
+    MULTIPLY_ASSIGN = "*=" #
+    DIVIDE_ASSIGN = "/=" #
+    MODULO_ASSIGN = "%=" #
+    POWER_ASSIGN = "^=" #
+    # Bitwise operators
+    # Logical
+    BITNOT = "`!" #
+    BITAND = "`&" #
+    BITOR = "`|" #
+    BITNAND = "`!&" #
+    BITNOR = "`!|" #
+    BITXOR = "`^^" #
+    # Assignment
+    AND_ASSIGN = "&=" #
+    OR_ASSIGN = "|=" #
+    XOR_ASSIGN = "^^=" #
+    BITAND_ASSIGN = "`&=" #
+    BITOR_ASSIGN = "`|=" #
+    BITNAND_ASSIGN = "`!&=" #
+    BITNOR_ASSIGN = "`!|=" #
+    BITXOR_ASSIGN = "`^^=" #
+
+    # Shift
     BITSHIFT_LEFT = "<<"
     BITSHIFT_RIGHT = ">>"
-    
-    ASSIGN = "="
-    PLUS_ASSIGN = "+="
-    MINUS_ASSIGN = "-="
-    MULTIPLY_ASSIGN = "*="
-    DIVIDE_ASSIGN = "/="
-    MODULO_ASSIGN = "%="
-    POWER_ASSIGN = "^="
-    XOR_ASSIGN = "^^="
     BITSHIFT_LEFT_ASSIGN = "<<="
     BITSHIFT_RIGHT_ASSIGN = ">>="
     
@@ -329,9 +307,15 @@ class Operator(Enum):
     SCOPE = "::"
     QUESTION = "?"
     COLON = ":"
-    
+    TIE = "~"
+    LAMBDA_ARROW = "<:-"
     RETURN_ARROW = "->"
     CHAIN_ARROW = "<-"
+    RECURSE_ARROW = "<~"
+    NULL_COALESCE = "??"
+    NO_MANGLE = "!!"
+    FUNCTION_POINTER = "{}*"
+    ADDRESS_CAST = "(@)"
 
 
 class DataType(Enum):
@@ -525,17 +509,6 @@ class TypeResolver:
     
     @staticmethod
     def mangle_name(namespace: str, name: str) -> str:
-        """
-        Convert namespace::name to namespace__name.
-        THIS is the ONLY place where :: -> __ conversion should happen.
-        
-        Args:
-            namespace: Namespace path (e.g., 'std::types')
-            name: Unmangled name
-            
-        Returns:
-            Mangled name (e.g., 'std__types__name')
-        """
         if not namespace:
             return name
         return namespace.replace('::', '__') + '__' + name
@@ -547,18 +520,6 @@ class TypeResolver:
     @staticmethod
     def lookup_in_storage(module: ir.Module, name: str, 
                           storage_name: str) -> Optional[Any]:
-        """
-        Direct lookup in a specific module storage.
-        
-        Args:
-            module: LLVM module
-            name: Name to look up
-            storage_name: '_type_aliases', '_struct_types', '_union_types', 
-                         '_enum_types', 'globals', '_struct_vtables'
-            
-        Returns:
-            Found item or None
-        """
         if not hasattr(module, storage_name):
             return None
         
@@ -576,18 +537,6 @@ class TypeResolver:
     
     @staticmethod
     def lookup_type(module: ir.Module, name: str) -> Optional[ir.Type]:
-        """
-        Look up a type in type-related storage (_type_aliases, _struct_types, etc).
-        Direct lookup only - no namespace resolution.
-        
-        Args:
-            module: LLVM module
-            name: Type name (can be mangled)
-            
-        Returns:
-            LLVM type or None
-        """
-        # Check all type storage in order
         for storage_name in ['_type_aliases', '_struct_types', '_union_types', '_enum_types']:
             result = TypeResolver.lookup_in_storage(module, name, storage_name)
             if result is not None:
@@ -596,17 +545,6 @@ class TypeResolver:
     
     @staticmethod
     def lookup_global(module: ir.Module, name: str) -> Optional[Any]:
-        """
-        Look up in module.globals (variables and functions).
-        Direct lookup only - no namespace resolution.
-        
-        Args:
-            module: LLVM module  
-            name: Global name (can be mangled)
-            
-        Returns:
-            Global variable/function or None
-        """
         return TypeResolver.lookup_in_storage(module, name, 'globals')
     
     # ============================================================================
@@ -614,33 +552,7 @@ class TypeResolver:
     # ============================================================================
     
     @staticmethod
-    def resolve_with_namespace(
-        module: ir.Module,
-        name: str,
-        current_namespace: str = "",
-        lookup_func=None
-    ) -> Optional[Any]:
-        """
-        Resolve a name through the namespace hierarchy.
-        
-        CORE RESOLUTION ALGORITHM
-        Search order:
-        1. Exact match (name as-is)
-        2. Current namespace + name
-        3. Parent namespaces + name (walking up)
-        4. Using namespaces + name
-        5. All registered namespaces + name
-        
-        Args:
-            module: LLVM module
-            name: Name to resolve (unmangled)
-            current_namespace: Current namespace context (e.g., 'std::types')
-            lookup_func: Function to do actual lookup (default: lookup_type)
-                        Should be lookup_type or lookup_global
-            
-        Returns:
-            Resolved item or None
-        """
+    def resolve_with_namespace(module: ir.Module, name: str, current_namespace: str = "", lookup_func=None) -> Optional[Any]:
         #print("IN RESOLVE_WITH_NAMESPACE()")
         if lookup_func is None:
             lookup_func = TypeResolver.lookup_type
@@ -696,20 +608,6 @@ class TypeResolver:
     
     @staticmethod
     def resolve_type(module: ir.Module, typename: str, current_namespace: str = "") -> Optional[ir.Type]:
-        """
-        Resolve a type name.
-        
-        UPDATED: Now uses symbol_table as the PRIMARY source of truth
-        
-        Args:
-            module: LLVM module
-            typename: Type name to resolve
-            current_namespace: Current namespace context
-            
-        Returns:
-            LLVM type or None
-        """
-        #print("IN TYPERESOLVER RESOLVE_TYPE()")
         # 1. SYMBOL TABLE - HIGHEST PRIORITY (PRIMARY SOURCE)
         if hasattr(module, 'symbol_table'):
             result = module.symbol_table.lookup(typename)
@@ -718,7 +616,7 @@ class TypeResolver:
                 # result[1] should be the TypeSystem for this type alias
                 if result[1] is not None:
                     # Convert TypeSystem to LLVM type
-                    return result[1].get_llvm_type(module)
+                    return TypeSystem.get_llvm_type(result[1], module)
                 
                 # If no TypeSystem stored but it's marked as a type,
                 # try to find it in module storage
@@ -740,25 +638,10 @@ class TypeResolver:
         
         # 2. NAMESPACE RESOLUTION - fallback for types not in symbol table yet
         # (e.g., during parsing before all types are registered)
-        return TypeResolver.resolve_with_namespace(
-            module, typename, current_namespace, TypeResolver.lookup_type
-        )
+        return TypeResolver.resolve_with_namespace(module, typename, current_namespace, TypeResolver.lookup_type)
     
     @staticmethod
     def resolve_function(module: ir.Module, func_name: str, current_namespace: str = "") -> Optional[str]:
-        """
-        Resolve a function name and return its mangled name.
-        
-        UPDATED: Now uses symbol_table as PRIMARY source
-        
-        Args:
-            module: LLVM module
-            func_name: Function name to resolve
-            current_namespace: Current namespace context
-            
-        Returns:
-            Mangled function name or None
-        """
         # 1. SYMBOL TABLE - HIGHEST PRIORITY
         #print("IN RESOLVE_FUNCTION()")
         if hasattr(module, 'symbol_table'):
@@ -776,9 +659,7 @@ class TypeResolver:
                     return func_name
         
         # 2. NAMESPACE RESOLUTION - fallback
-        result = TypeResolver.resolve_with_namespace(
-            module, func_name, current_namespace, TypeResolver.lookup_global
-        )
+        result = TypeResolver.resolve_with_namespace(module, func_name, current_namespace, TypeResolver.lookup_global)
         
         if result is not None and isinstance(result, ir.Function):
             return result.name
@@ -787,19 +668,6 @@ class TypeResolver:
     
     @staticmethod
     def resolve_identifier(module: ir.Module, name: str, current_namespace: str = "") -> Optional[str]:
-        """
-        Resolve an identifier (variable or type alias) and return its mangled name.
-        
-        UPDATED: Now uses symbol_table as PRIMARY source
-        
-        Args:
-            module: LLVM module
-            name: Identifier name
-            current_namespace: Current namespace context
-            
-        Returns:
-            Mangled name or None
-        """
         # 1. SYMBOL TABLE - HIGHEST PRIORITY
         if hasattr(module, 'symbol_table'):
             #print("IN RESOLVE_IDENTIFIER()")
@@ -830,9 +698,7 @@ class TypeResolver:
                                 return mangled
         
         # 2. MODULE GLOBALS - direct resolution (fallback)
-        result = TypeResolver.resolve_with_namespace(
-            module, name, current_namespace, TypeResolver.lookup_global
-        )
+        result = TypeResolver.resolve_with_namespace(module, name, current_namespace, TypeResolver.lookup_global)
         
         if result is not None:
             # Find the actual key used in globals
@@ -851,9 +717,7 @@ class TypeResolver:
                         return mangled
         
         # 3. TYPE ALIASES - fallback
-        result = TypeResolver.resolve_with_namespace(
-            module, name, current_namespace, TypeResolver.lookup_type
-        )
+        result = TypeResolver.resolve_with_namespace(module, name, current_namespace, TypeResolver.lookup_type)
         
         if result is not None:
             if hasattr(module, '_type_aliases'):
@@ -879,6 +743,64 @@ class TypeResolver:
         if hasattr(module, 'symbol_table'):
             return module.symbol_table.current_namespace
         return ''
+    
+    @staticmethod
+    def resolve_type_spec(name: str, module: ir.Module):
+        """Get TypeSystem for identifier - UNIFIED method replacing duplicates in all TypeHandlers."""
+        if hasattr(module, 'symbol_table'):
+            result = module.symbol_table.lookup(name)
+            if result:
+                kind, type_spec = result
+                if kind == SymbolKind.VARIABLE and type_spec is not None:
+                    return type_spec
+                if kind == SymbolKind.TYPE and type_spec is not None:
+                    return type_spec
+            entry = module.symbol_table.lookup_variable(name)
+            if entry and entry.type_spec is not None:
+                return entry.type_spec
+        if hasattr(module, '_global_type_info') and name in module._global_type_info:
+            return module._global_type_info[name]
+        return None
+    
+    @staticmethod
+    def resolve_custom_type(module: ir.Module, typename: str, current_namespace: str = "") -> Optional[ir.Type]:
+        """Resolve custom type name to LLVM type - UNIFIED method."""
+        if hasattr(module, 'symbol_table'):
+            result = module.symbol_table.lookup(typename)
+            if result and result[0] == SymbolKind.TYPE:
+                if result[1] is not None:
+                    return TypeSystem.get_llvm_type(result[1], module)
+        return TypeResolver.resolve_type(module, typename, current_namespace)
+    
+    @staticmethod
+    def is_type_defined(typename: str, module) -> bool:
+        """Check if type is defined - UNIFIED method."""
+        if hasattr(module, 'symbol_table'):
+            result = module.symbol_table.lookup(typename)
+            if result and result[0] == SymbolKind.TYPE:
+                return True
+        if hasattr(module, '_type_aliases') and typename in module._type_aliases:
+            return True
+        if hasattr(module, '_struct_types') and typename in module._struct_types:
+            return True
+        if hasattr(module, '_union_types') and typename in module._union_types:
+            return True
+        if hasattr(module, '_enum_types') and typename in module._enum_types:
+            return True
+        return False
+    
+    @staticmethod
+    def resolve_struct_type(literal_value: dict, module: ir.Module):
+        """Resolve struct type for a struct literal based on its field names."""
+        if not isinstance(literal_value, dict):
+            raise ValueError("Expected dictionary for struct literal")
+        field_names = list(literal_value.keys())
+        if hasattr(module, '_struct_types'):
+            for struct_name, candidate_type in module._struct_types.items():
+                if hasattr(candidate_type, 'names'):
+                    if all(field in candidate_type.names for field in field_names):
+                        return candidate_type
+        raise ValueError(f"No compatible struct type found for fields: {field_names}")
 
 
 class TypeChecker:
@@ -931,11 +853,6 @@ class FunctionResolver:
     """Resolves function names within namespace contexts"""
     
     def resolve_function_name(func_name: str, module: ir.Module, current_namespace: str = "") -> Optional[str]:
-        """
-        Resolve function name and return mangled name.
-        First tries symbol table if available, then falls back to type resolver.
-        """
-        # Try symbol table first if available
         if hasattr(module, 'symbol_table'):
             symbol_result = FunctionResolver._resolve_from_symbol_table(
                 func_name, module.symbol_table, current_namespace)
@@ -947,20 +864,6 @@ class FunctionResolver:
     
     @staticmethod
     def _resolve_from_symbol_table(func_name: str, symbol_table, current_namespace: str = "", module: ir.Module = None) -> Optional[str]:
-        """
-        Resolve a function using the symbol table.
-        
-        Args:
-            func_name: The function name to resolve
-            symbol_table: The SymbolTable instance
-            current_namespace: Current namespace context
-            module: LLVM module (to check for actual function existence)
-            
-        Returns:
-            The resolved function name (potentially mangled) or None if not found
-        """
-        
-        # Look up the function in the symbol table
         #print("IN _RESOLVE_FROMsymbol_table()")
         result = symbol_table.lookup(func_name)
         
@@ -1009,17 +912,9 @@ class NamespaceTypeHandler:
         self.type_registry = {}  # Maps unmangled names to mangled names
         
     def register_type(self, unmangled_name: str, mangled_name: str):
-        """Register a type alias with both its unmangled and mangled names."""
         self.type_registry[unmangled_name] = mangled_name
     
     def resolve_type_name(self, typename: str, current_namespace: str = "") -> str:
-        """
-        Resolve a type name to its fully qualified mangled name.
-        Searches in order:
-        1. Current namespace
-        2. Parent namespaces
-        3. Global namespace
-        """
         # Try current namespace first
         if current_namespace:
             mangled = f"{current_namespace}__{typename}"
@@ -1044,7 +939,6 @@ class NamespaceTypeHandler:
     
     @staticmethod
     def register_namespace(module: 'ir.Module', namespace: str):
-        """Register a namespace with the module."""
         if not hasattr(module, '_namespaces'):
             module._namespaces = []
         if namespace not in module._namespaces:
@@ -1052,7 +946,6 @@ class NamespaceTypeHandler:
     
     @staticmethod
     def add_using_namespace(module: 'ir.Module', namespace: str):
-        """Add a namespace to the using namespaces list."""
         if not hasattr(module, '_using_namespaces'):
             module._using_namespaces = []
         if namespace not in module._using_namespaces:
@@ -1060,14 +953,6 @@ class NamespaceTypeHandler:
     
     @staticmethod
     def register_nested_namespaces(namespace: 'NamespaceDef', parent_path: str, module: 'ir.Module'):
-        """
-        Recursively register all nested namespaces.
-        
-        Args:
-            namespace: The namespace definition containing nested namespaces
-            parent_path: The full path of the parent namespace (e.g., "standard::io")
-            module: LLVM module to register namespaces in
-        """
         for nested_ns in namespace.nested_namespaces:
             full_nested_name = f"{parent_path}::{nested_ns.name}"
             # Use register_namespace which handles initialization and duplicate checking
@@ -1077,17 +962,6 @@ class NamespaceTypeHandler:
     
     @staticmethod
     def create_static_init_builder(module: 'ir.Module') -> 'ir.IRBuilder':
-        """
-        Create or get a builder for the __static_init function.
-        
-        This function is used to initialize static/global variables in namespaces.
-        
-        Args:
-            module: LLVM module
-            
-        Returns:
-            IRBuilder positioned in a non-terminated block of __static_init
-        """
         init_func_name = "__static_init"
 
         # Create function if it doesn't exist
@@ -1113,12 +987,6 @@ class NamespaceTypeHandler:
     
     @staticmethod
     def finalize_static_init(module: 'ir.Module'):
-        """
-        Finalize the __static_init function by adding a return if needed.
-        
-        Args:
-            module: LLVM module
-        """
         if "__static_init" in module.globals:
             init_func = module.globals["__static_init"]
             if init_func.blocks and not init_func.blocks[-1].is_terminated:
@@ -1128,15 +996,6 @@ class NamespaceTypeHandler:
     
     @staticmethod
     def process_namespace_struct(namespace: str, struct_def: 'StructDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
-        """
-        Process a struct within a namespace context.
-        
-        Args:
-            namespace: The namespace path (e.g., "standard::io")
-            struct_def: The struct definition to process
-            builder: LLVM IR builder
-            module: LLVM module
-        """
         original_name = struct_def.name
         struct_def.name = f"{namespace.replace('::', '__')}__{struct_def.name}"
         
@@ -1159,15 +1018,6 @@ class NamespaceTypeHandler:
     
     @staticmethod
     def process_namespace_object(namespace: str, obj_def: 'ObjectDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
-        """
-        Process an object within a namespace context.
-        
-        Args:
-            namespace: The namespace path (e.g., "standard::io")
-            obj_def: The object definition to process
-            builder: LLVM IR builder
-            module: LLVM module
-        """
         original_name = obj_def.name
         obj_def.name = f"{namespace.replace('::', '__')}__{obj_def.name}"
         
@@ -1190,15 +1040,6 @@ class NamespaceTypeHandler:
     
     @staticmethod
     def process_namespace_enum(namespace: str, enum_def: 'EnumDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
-        """
-        Process an enum within a namespace context.
-        
-        Args:
-            namespace: The namespace path (e.g., "standard::io")
-            enum_def: The enum definition to process
-            builder: LLVM IR builder
-            module: LLVM module
-        """
         original_name = enum_def.name
         enum_def.name = f"{namespace.replace('::', '__')}__{enum_def.name}"
         
@@ -1221,14 +1062,6 @@ class NamespaceTypeHandler:
     
     @staticmethod
     def process_namespace_variable(namespace: str, var_def: 'VariableDeclaration', module: 'ir.Module'):
-        """
-        Process a variable (including type declarations) within a namespace context.
-        
-        Args:
-            namespace: The namespace path (e.g., "standard::io")
-            var_def: The variable declaration to process
-            module: LLVM module
-        """
         original_name = var_def.name
         # Always mangle namespace-level variables
         var_def.name = f"{namespace.replace('::', '__')}__{var_def.name}"
@@ -1253,15 +1086,6 @@ class NamespaceTypeHandler:
     
     @staticmethod
     def process_nested_namespace(parent_namespace: str, nested_ns: 'NamespaceDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
-        """
-        Process a nested namespace within a parent namespace.
-        
-        Args:
-            parent_namespace: The parent namespace path (e.g., "standard")
-            nested_ns: The nested namespace definition
-            builder: LLVM IR builder
-            module: LLVM module
-        """
         original_name = nested_ns.name
         # Nested namespace gets parent path prepended
         full_nested_name = f"{parent_namespace}::{nested_ns.name}"
@@ -1317,63 +1141,11 @@ class NamespaceTypeHandler:
     
     @staticmethod
     def resolve_custom_type(module: ir.Module, typename: str, current_namespace: str = "") -> Optional[ir.Type]:
-        """
-        Resolve a custom type name (struct, enum, type alias) to its LLVM type.
-        
-        UPDATED: Now uses symbol_table as PRIMARY source
-        
-        Args:
-            module: LLVM module
-            typename: Type name to resolve (unmangled)
-            current_namespace: Current namespace context
-            
-        Returns:
-            LLVM type or None
-        """
-        # 1. SYMBOL TABLE - HIGHEST PRIORITY
-        if hasattr(module, 'symbol_table'):
-            #print("IN RESOLVE_CUSTOM_TYPE")
-            result = module.symbol_table.lookup(typename)
-            
-            if result and result[0] == SymbolKind.TYPE:
-                # If we have a TypeSystem stored, use it
-                if result[1] is not None:
-                    return result[1].get_llvm_type(module)
-        
-        # 2. Use TypeResolver for comprehensive namespace resolution
-        return TypeResolver.resolve_type(module, typename, current_namespace)
+        return TypeResolver.resolve_custom_type(module, typename, current_namespace)
 
     @staticmethod
     def is_type_defined(typename: str, module) -> bool:
-        """
-        Check if a type is defined, prioritizing symbol_table.
-        
-        Args:
-            typename: Type name to check
-            module: LLVM module
-            
-        Returns:
-            True if type is defined, False otherwise
-        """
-        # 1. Check symbol table first
-        #print("IN IS_TYPE_DEFINED")
-        if hasattr(module, 'symbol_table'):
-            result = module.symbol_table.lookup(typename)
-            if result and result[0] == SymbolKind.TYPE:
-                return True
-        #print("FALLING BACK IN IS_TYPE_DEFINED")
-        
-        # 2. Check module storage (fallback)
-        if hasattr(module, '_type_aliases') and typename in module._type_aliases:
-            return True
-        if hasattr(module, '_struct_types') and typename in module._struct_types:
-            return True
-        if hasattr(module, '_union_types') and typename in module._union_types:
-            return True
-        if hasattr(module, '_enum_types') and typename in module._enum_types:
-            return True
-        
-        return False
+        return TypeResolver.is_type_defined(typename, module)
 
 
 @dataclass
@@ -1419,58 +1191,106 @@ class TypeSystem:
         
         return base
     
-    def get_llvm_type(self, module: ir.Module) -> ir.Type:
+    @staticmethod
+    def get_llvm_type(type_spec: Union['TypeSystem', 'FunctionPointerType', DataType], module: ir.Module, 
+                      literal_value: Any = None) -> ir.Type:
+        """Centralized method to get LLVM type from various type representations"""
+        # Handle FunctionPointerType
+        if hasattr(type_spec, 'return_type') and hasattr(type_spec, 'parameter_types'):
+            ret_type = TypeSystem.get_llvm_type(type_spec.return_type, module)
+            param_types = [TypeSystem.get_llvm_type(param, module) for param in type_spec.parameter_types]
+            return ir.FunctionType(ret_type, param_types)
+        
+        # Handle DataType (from LiteralTypeHandler)
+        if isinstance(type_spec, DataType):
+            if type_spec in (DataType.SINT, DataType.UINT):
+                if literal_value is not None:
+                    val = int(literal_value, 0) if isinstance(literal_value, str) else int(literal_value)
+                    width = infer_int_width(val, type_spec)
+                    return ir.IntType(width)
+                return ir.IntType(32)
+            elif type_spec == DataType.FLOAT:
+                return ir.FloatType()
+            elif type_spec == DataType.BOOL:
+                return ir.IntType(1)
+            elif type_spec == DataType.CHAR:
+                return ir.IntType(8)
+            elif type_spec == DataType.VOID:
+                return ir.VoidType()
+            elif type_spec == DataType.STRUCT:
+                return ir.IntType(8)
+            elif type_spec == DataType.ENUM:
+                return ir.IntType(32)
+            elif type_spec == DataType.DATA:
+                if literal_value is not None:
+                    # Handle array literals
+                    if isinstance(literal_value, list):
+                        raise ValueError("Array literals should be handled at a higher level")
+                    # Handle struct literals (dictionaries with field names -> values)
+                    if isinstance(literal_value, dict):
+                        struct_type = LiteralTypeHandler.resolve_struct_type(literal_value, module)
+                        return struct_type
+                    # Handle other DATA types via type aliases
+                    if hasattr(module, '_type_aliases') and str(type_spec) in module._type_aliases:
+                        return module._type_aliases[str(type_spec)]
+                    raise ValueError(f"Unsupported DATA literal: {literal_value}")
+                raise ValueError(f"DATA type requires literal_value or bit_width")
+            else:
+                # Handle custom types
+                if hasattr(module, '_type_aliases') and str(type_spec) in module._type_aliases:
+                    return module._type_aliases[str(type_spec)]
+                raise ValueError(f"Unsupported literal type: {type_spec}")
+        
+        # Handle TypeSystem instance
+        if not isinstance(type_spec, TypeSystem):
+            raise TypeError(f"Expected TypeSystem, FunctionPointerType, or DataType, got {type(type_spec)}")
+        
         #print("IN GET_LLVM_TYPE()")
-        if self.custom_typename:
+        if type_spec.custom_typename:
             # Get the current namespace context
             current_namespace = getattr(module, '_current_namespace', '')
             
             # Use NamespaceTypeHandler to resolve the custom type
             resolved_type = NamespaceTypeHandler.resolve_custom_type(
-                module, self.custom_typename, current_namespace
+                module, type_spec.custom_typename, current_namespace
             )
             
             if resolved_type is not None:
                 # Handle array types that shouldn't be returned as-is
-                if isinstance(resolved_type, ir.ArrayType) and not self.is_array:
+                if isinstance(resolved_type, ir.ArrayType) and not type_spec.is_array:
                     return ir.PointerType(resolved_type.element)
                 # Handle enum types
                 if isinstance(resolved_type, int):  # Enum types are stored as int
                     return ir.IntType(32)
                 return resolved_type
             
-            raise NameError(f"Unknown type: {self.custom_typename}")
+            raise NameError(f"Unknown type: {type_spec.custom_typename}")
         
-        if self.base_type == DataType.SINT:
+        if type_spec.base_type == DataType.SINT:
             return ir.IntType(32)
-        elif self.base_type == DataType.UINT:
+        elif type_spec.base_type == DataType.UINT:
             return ir.IntType(32)
-        elif self.base_type == DataType.FLOAT:
+        elif type_spec.base_type == DataType.FLOAT:
             return ir.FloatType()
-        elif self.base_type == DataType.BOOL:
+        elif type_spec.base_type == DataType.BOOL:
             return ir.IntType(1)
-        elif self.base_type == DataType.CHAR:
+        elif type_spec.base_type == DataType.CHAR:
             return ir.IntType(8)
-        elif self.base_type == DataType.STRUCT:
+        elif type_spec.base_type == DataType.STRUCT:
             return ir.IntType(8)
-        elif self.base_type == DataType.ENUM:
+        elif type_spec.base_type == DataType.ENUM:
             return ir.IntType(32)
-        elif self.base_type == DataType.VOID:
+        elif type_spec.base_type == DataType.VOID:
             return ir.VoidType()
-        elif self.base_type == DataType.DATA:
-            if self.bit_width is None:
-                raise ValueError(f"DATA type missing bit_width for {self}")
-            return ir.IntType(self.bit_width)
+        elif type_spec.base_type == DataType.DATA:
+            if type_spec.bit_width is None:
+                raise ValueError(f"DATA type missing bit_width for {type_spec}")
+            return ir.IntType(type_spec.bit_width)
         else:
-            raise ValueError(f"Unsupported type: {self.base_type}")
-    
+            raise ValueError(f"Unsupported type: {type_spec.base_type}")
     def get_llvm_type_with_array(self, module: ir.Module) -> ir.Type:
-        base_type = self.get_llvm_type(module)
-        
-        # CRITICAL FIX: Handle arrays of pointers (like noopstr[3] -> [3 x i8*])
-        # We need to create the element type FIRST (including pointer indirection),
-        # THEN wrap it in an array type
-        
+        base_type = TypeSystem.get_llvm_type(self, module)
+
         # Step 1: Create the element type (including pointer depth)
         element_type = base_type
         if self.is_pointer:
@@ -1521,32 +1341,20 @@ class TypeSystem:
 
 @dataclass
 class FunctionPointerType:
-    """
-    Represents a function pointer type specification.
-    
-    Used for parsing function pointer type syntax like: void{}* (int, int)
-    This is the TYPE, not a declaration or expression.
-    """
     return_type: TypeSystem
     parameter_types: List[TypeSystem]
     
-    def get_llvm_type(self, module: ir.Module) -> ir.FunctionType:
-        """Convert to LLVM function type"""
-        ret_type = self.return_type.get_llvm_type(module)
-        param_types = [param.get_llvm_type(module) for param in self.parameter_types]
-        return ir.FunctionType(ret_type, param_types)
-    
-    def get_llvm_pointer_type(self, module: ir.Module) -> ir.PointerType:
+def get_llvm_pointer_type(self, module: ir.Module) -> ir.PointerType:
         """Get pointer to this function type"""
-        func_type = self.get_llvm_type(module)
+        func_type = TypeSystem.get_llvm_type(self, module)
         return ir.PointerType(func_type)
-        
+
 
 class VariableTypeHandler:
     """Handles all type-related operations for variable declarations"""
     
     @staticmethod
-    def resolve_type_spec(type_spec: TypeSystem, initial_value, module: ir.Module) -> TypeSystem:
+    def infer_array_size(type_spec: TypeSystem, initial_value, module: ir.Module) -> TypeSystem:
         """Resolve type spec with automatic array size inference for string literals."""
         # Import here to avoid circular dependency
         from fast import StringLiteral
@@ -1566,13 +1374,12 @@ class VariableTypeHandler:
                 is_array=True,
                 array_size=len(initial_value.value),
                 is_pointer=type_spec.is_pointer,
-                custom_typename=type_spec.custom_typename
-            )
+                custom_typename=type_spec.custom_typename)
         
         # Type alias check
         if type_spec.custom_typename:
             try:
-                resolved_llvm_type = type_spec.get_llvm_type(module)
+                resolved_llvm_type = TypeSystem.get_llvm_type(type_spec, module)
                 if (isinstance(resolved_llvm_type, ir.PointerType) and 
                     isinstance(resolved_llvm_type.pointee, ir.IntType) and 
                     resolved_llvm_type.pointee.width == 8):
@@ -1585,8 +1392,7 @@ class VariableTypeHandler:
                         alignment=type_spec.alignment,
                         is_array=True,
                         array_size=len(initial_value.value),
-                        is_pointer=False
-                    )
+                        is_pointer=False)
             except (NameError, AttributeError):
                 pass
         
@@ -1621,13 +1427,9 @@ class VariableTypeHandler:
             # Check if target is an integer (bitfield packing) or an array
             if isinstance(llvm_type, ir.IntType):
                 # Pack array into integer for bitfield initialization
-                return VariableTypeHandler._pack_array_literal_to_int_constant(
-                    initial_value, llvm_type, module
-                )
+                return VariableTypeHandler._pack_array_literal_to_int_constant(initial_value, llvm_type, module)
             else:
-                return ArrayTypeHandler.create_global_array_initializer(
-                    initial_value, llvm_type, module
-                )
+                return ArrayTypeHandler.create_global_array_initializer(initial_value, llvm_type, module)
         
         elif isinstance(initial_value, ArrayAccess):
             return VariableTypeHandler._eval_array_access_const(initial_value, module)
@@ -1668,7 +1470,6 @@ class VariableTypeHandler:
     @staticmethod
     def _pack_array_literal_to_int_constant(array_literal, target_type: ir.IntType, 
                                            module: ir.Module) -> Optional[ir.Constant]:
-        """Pack an array literal into an integer constant for global bitfield initialization."""
         from fast import Literal, Identifier
         
         packed_value = 0
@@ -1732,9 +1533,6 @@ class VariableTypeHandler:
         return None
     
     def identifier_to_constant_namespace_lookup(var_name: str, module: ir.Module) -> Optional[ir.Constant]:
-        """
-        Look up identifier in using namespaces for constant resolution.
-        """
         #print("IN IDENTIFIER_TO_CONSTANT_NAMESPACE_LOOKUP()")
         current_ns = TypeResolver.get_current_namespace(module)
         mangled_name = TypeResolver.resolve_identifier(module, var_name, current_ns)
@@ -1855,6 +1653,13 @@ class VariableTypeHandler:
                 Operator.XOR: lambda l, r: l ^ r,
                 Operator.BITSHIFT_LEFT: lambda l, r: l << r,
                 Operator.BITSHIFT_RIGHT: lambda l, r: l >> r,
+                Operator.BITAND: lambda l, r: l & r,
+                Operator.BITOR: lambda l, r: l | r,
+                Operator.BITXOR: lambda l, r: l ^ r,
+                Operator.NAND: lambda l, r: ~(l & r),
+                Operator.NOR: lambda l, r: ~(l | r),
+                Operator.BITNAND: lambda l, r: ~(l & r),
+                Operator.BITNOR: lambda l, r: ~(l | r),
             }
             if op in ops:
                 result = ops[op](left.constant, right.constant)
@@ -1998,20 +1803,12 @@ class VariableTypeHandler:
         
         builder.store(init_val, alloca)
 
+
 class ArrayTypeHandler:
     """
     Handles all array type operations and conversions.
-    
-    This includes:
-    - Array type checking and information
-    - Array concatenation (compile-time and runtime)
-    - Array resizing for assignment
-    - Array slicing
-    - Array initialization (global and local)
-    - Array packing into integers (for bitfields)
-    - Memory operations (memcpy, memset)
     """
-    
+
     @staticmethod
     def is_array_or_array_pointer(val: ir.Value) -> bool:
         """Check if value is an array type or a pointer to an array type."""
@@ -2064,10 +1861,6 @@ class ArrayTypeHandler:
     
     @staticmethod
     def _get_array_element_ptr(builder: ir.IRBuilder, array_val: ir.Value, index: ir.Value, name: str = "elem") -> ir.Value:
-        """
-        Get pointer to an element in an array, handling all array types.
-        Works with: GlobalVariable arrays, local arrays (pointer to array), and raw pointers.
-        """
         zero = ArrayTypeHandler._zero()
         
         if isinstance(array_val, ir.GlobalVariable) or \
@@ -2740,105 +2533,11 @@ class LiteralTypeHandler:
     """Handles type resolution and LLVM type determination for literal values"""
     
     @staticmethod
-    def get_llvm_type(literal_type: DataType, literal_value: Any, module: ir.Module) -> ir.Type:
-        """
-        Determine the LLVM type for a literal based on its DataType and value.
-        
-        Args:
-            literal_type: The DataType of the literal
-            literal_value: The actual value of the literal
-            module: LLVM module (for type aliases)
-            
-        Returns:
-            LLVM IR type for the literal
-        """
-        
-        if literal_type in (DataType.SINT, DataType.UINT):
-            val = int(literal_value, 0) if isinstance(literal_value, str) else int(literal_value)
-            width = infer_int_width(val, literal_type)
-            return ir.IntType(width)
-        elif literal_type == DataType.FLOAT:
-            return ir.FloatType()
-        elif literal_type == DataType.BOOL:
-            return ir.IntType(1)
-        elif literal_type == DataType.CHAR:
-            return ir.IntType(8)
-        elif literal_type == DataType.VOID:
-            return ir.IntType(1)
-        elif literal_type == DataType.DATA:
-            return LiteralTypeHandler._get_data_llvm_type(literal_value, literal_type, module)
-        else:
-            # Handle custom types
-            return LiteralTypeHandler._get_custom_llvm_type(literal_value, literal_type, module)
-    
-    @staticmethod
-    def _get_data_llvm_type(literal_value: Any, literal_type: DataType, module: ir.Module) -> ir.Type:
-        """Get LLVM type for DATA type literals."""
-        # Handle array literals
-        if isinstance(literal_value, list):
-            raise ValueError("Array literals should be handled at a higher level")
-        
-        # Handle struct literals (dictionaries with field names -> values)
-        if isinstance(literal_value, dict):
-            struct_type = LiteralTypeHandler.resolve_struct_type(literal_value, module)
-            return struct_type
-        
-        # Handle other DATA types via type aliases
-        if hasattr(module, '_type_aliases') and str(literal_type) in module._type_aliases:
-            return module._type_aliases[str(literal_type)]
-        
-        raise ValueError(f"Unsupported DATA literal: {literal_value}")
-    
-    @staticmethod
-    def _get_custom_llvm_type(literal_value: Any, literal_type: DataType, module: ir.Module) -> ir.Type:
-        """Get LLVM type for custom type literals."""
-        if hasattr(module, '_type_aliases') and str(literal_type) in module._type_aliases:
-            return module._type_aliases[str(literal_type)]
-        raise ValueError(f"Unsupported literal type: {literal_type}")
-    
-    @staticmethod
     def resolve_struct_type(literal_value: dict, module: ir.Module):
-        """
-        Resolve the struct type for a struct literal based on its field names.
-        
-        Args:
-            literal_value: Dictionary mapping field names to values
-            module: LLVM module containing struct type definitions
-            
-        Returns:
-            LLVM struct type
-            
-        Raises:
-            ValueError: If no compatible struct type is found
-        """
-        if not isinstance(literal_value, dict):
-            raise ValueError("Expected dictionary for struct literal")
-        
-        field_names = list(literal_value.keys())
-        
-        if hasattr(module, '_struct_types'):
-            for struct_name, candidate_type in module._struct_types.items():
-                if hasattr(candidate_type, 'names'):
-                    # Check if all fields in the literal exist in this struct
-                    if all(field in candidate_type.names for field in field_names):
-                        return candidate_type
-        
-        raise ValueError(f"No compatible struct type found for fields: {field_names}")
+        return TypeResolver.resolve_struct_type(literal_value, module)
     
     @staticmethod
     def normalize_int_value(literal_value: Any, literal_type: DataType, width: int) -> int:
-        """
-        Normalize integer value for LLVM constant creation.
-        Handles unsigned types with values >= 2^63 by converting to signed equivalent.
-        
-        Args:
-            literal_value: The integer value (int or str)
-            literal_type: SINT or UINT
-            width: Bit width (32 or 64)
-            
-        Returns:
-            Normalized integer value for LLVM IR constant
-        """
         # Parse the value if it's a string (hex literals come as strings)
         val = int(literal_value, 0) if isinstance(literal_value, str) else int(literal_value)
         
@@ -2855,20 +2554,6 @@ class LiteralTypeHandler:
         
     @staticmethod
     def preserve_array_element_type_metadata(loaded_val: ir.Value, array_val: ir.Value, module: ir.Module) -> ir.Value:
-        """
-        Preserve type metadata when loading an element from an array.
-        
-        This extracts the element type spec from the array's metadata and attaches it
-        to the loaded value, maintaining type information through array access operations.
-        
-        Args:
-            loaded_val: The loaded element value
-            array_val: The source array
-            module: LLVM module for type resolution
-            
-        Returns:
-            The loaded value with appropriate type metadata attached
-        """
         # Try to get the element type spec from the array value's metadata
         element_type_spec = get_array_element_type_spec(array_val)
         
@@ -2879,20 +2564,6 @@ class LiteralTypeHandler:
     
     @staticmethod
     def cast_to_target_int_type(builder: ir.IRBuilder, value: ir.Value, target_type: ir.Type) -> ir.Value:
-        """
-        Cast an integer value to a target integer type using appropriate trunc/sext.
-        
-        This handles type conversions needed when storing values into arrays with
-        specific element types, or when converting between different integer widths.
-        
-        Args:
-            builder: IR builder
-            value: Source integer value
-            target_type: Target integer type
-            
-        Returns:
-            Value cast to target type (or original if no cast needed)
-        """
         # Only handle integer-to-integer casts
         if not (isinstance(value.type, ir.IntType) and isinstance(target_type, ir.IntType)):
             return value
@@ -2910,20 +2581,6 @@ class LiteralTypeHandler:
     
     @staticmethod
     def get_element_type_from_array_value(array_val: ir.Value) -> ir.Type:
-        """
-        Extract the element type from an array value.
-        
-        Handles global arrays, local arrays (pointer to array), and raw pointers.
-        
-        Args:
-            array_val: Array value (GlobalVariable, pointer to array, or pointer)
-            
-        Returns:
-            The LLVM element type
-            
-        Raises:
-            ValueError: If unable to determine element type
-        """
         if isinstance(array_val, ir.GlobalVariable) and isinstance(array_val.type.pointee, ir.ArrayType):
             return array_val.type.pointee.element
         elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
@@ -2936,17 +2593,6 @@ class LiteralTypeHandler:
     
     @staticmethod
     def compute_element_size_bytes(elem_type: ir.Type) -> int:
-        """
-        Compute the size in bytes of an element type.
-        
-        Handles common LLVM types with sensible defaults.
-        
-        Args:
-            elem_type: LLVM element type
-            
-        Returns:
-            Size in bytes
-        """
         if isinstance(elem_type, ir.IntType):
             return max(1, elem_type.width // 8)
         elif isinstance(elem_type, ir.FloatType):
@@ -2959,18 +2605,8 @@ class LiteralTypeHandler:
     
     @staticmethod
     def resolve_comprehension_element_type(variable_type, module: ir.Module) -> ir.Type:
-        """
-        Resolve the element type for an array comprehension from the variable type.
-        
-        Args:
-            variable_type: TypeSystem object for the loop variable, or None
-            module: LLVM module for type resolution
-            
-        Returns:
-            LLVM type for array elements (defaults to i32 if not specified)
-        """
         if variable_type is not None:
-            return variable_type.get_llvm_type(module)
+            return TypeSystem.get_llvm_type(variable_type, module)
         else:
             return ir.IntType(32)
 
@@ -2986,15 +2622,6 @@ class LiteralTypeHandler:
     
     @staticmethod
     def normalize_char_value(literal_value: Any) -> int:
-        """
-        Normalize character value for LLVM constant creation.
-        
-        Args:
-            literal_value: Character value (str or int)
-            
-        Returns:
-            Integer value (0-255) for the character
-        """
         if isinstance(literal_value, str):
             if len(literal_value) == 0:
                 # Handle empty string - return null character
@@ -3006,19 +2633,6 @@ class LiteralTypeHandler:
     
     @staticmethod
     def get_struct_field_type(struct_type, field_name: str) -> ir.Type:
-        """
-        Get the LLVM type of a specific field in a struct.
-        
-        Args:
-            struct_type: LLVM struct type
-            field_name: Name of the field
-            
-        Returns:
-            LLVM type of the field
-            
-        Raises:
-            ValueError: If field is not found in struct
-        """
         if not hasattr(struct_type, 'names'):
             raise ValueError("Struct type does not have field names")
         
@@ -3030,15 +2644,6 @@ class LiteralTypeHandler:
     
     @staticmethod
     def is_string_pointer_field(field_type: ir.Type) -> bool:
-        """
-        Check if a field type is a pointer to i8 (string pointer).
-        
-        Args:
-            field_type: LLVM type of the field
-            
-        Returns:
-            True if field is i8* (char*), False otherwise
-        """
         return (isinstance(field_type, ir.PointerType) and
                 isinstance(field_type.pointee, ir.IntType) and
                 field_type.pointee.width == 8)
@@ -3048,81 +2653,26 @@ class IdentifierTypeHandler:
     """Handles type resolution and metadata attachment for identifiers"""
     
     @staticmethod
-    def get_type_spec(name: str, builder: ir.IRBuilder, module: ir.Module):
-        """
-        Get the TypeSystem for an identifier from scope or global type info.
-        
-        UPDATED: Now checks symbol_table FIRST before other sources
-        
-        Args:
-            name: The identifier name
-            builder: LLVM IR builder (for scope access)
-            module: LLVM module (for global type info)
-            
-        Returns:
-            TypeSystem if found, None otherwise
-        """
-        # 1. SYMBOL TABLE - HIGHEST PRIORITY (NEW: moved to top)
-        if hasattr(module, 'symbol_table'):
-            #print("IDENTIFIERTYPEHANDLER GET_TYPE_SPEC()")
-            result = module.symbol_table.lookup(name)
-            if result:
-                kind, type_spec = result
-                
-                # For variables, return the TypeSystem directly
-                if kind == SymbolKind.VARIABLE and type_spec is not None:
-                    return type_spec
-                
-                # For types, the type_spec might be a TypeSystem or None
-                if kind == SymbolKind.TYPE and type_spec is not None:
-                    return type_spec
-        
-        # 2. Check local scope (for local variables not yet in symbol table)
-        # Type info now stored in symbol_table
-        entry = module.symbol_table.lookup_variable(name)
-        if entry and entry.type_spec is not None:
-            return entry.type_spec
-        
-        # 3. Check global type info (fallback)
-        if hasattr(module, '_global_type_info') and name in module._global_type_info:
-            return module._global_type_info[name]
-        
-        return None
-    
-    @staticmethod
     def should_return_pointer(llvm_value: ir.Value, type_spec=None) -> bool:
-        """
-        Determine if an identifier should return a pointer (not load).
-        Arrays and structs return pointers; other types are loaded.
-        
-        Args:
-            llvm_value: The LLVM value (typically from scope or globals)
-            type_spec: The TypeSystem for this identifier (optional)
-            
-        Returns:
-            True if should return pointer, False if should load
-        """
-        import sys
-        print(f"[SHOULD_RETURN_PTR] llvm_value.type: {llvm_value.type}", file=sys.stderr)
-        if type_spec:
-            print(f"[SHOULD_RETURN_PTR] type_spec: {type_spec}", file=sys.stderr)
+        #print(f"[SHOULD_RETURN_PTR] llvm_value.type: {llvm_value.type}", file=sys.stderr)
+        #if type_spec:
+        #    print(f"[SHOULD_RETURN_PTR] type_spec: {type_spec}", file=sys.stderr)
         
         # For arrays, return the pointer directly (don't load)
         if isinstance(llvm_value.type, ir.PointerType) and isinstance(llvm_value.type.pointee, ir.ArrayType):
-            print(f"[SHOULD_RETURN_PTR] Returning True - is ArrayType", file=sys.stderr)
+            #print(f"[SHOULD_RETURN_PTR] Returning True - is ArrayType", file=sys.stderr)
             return True
         
         # For structs, return the pointer directly (don't load)
         if isinstance(llvm_value.type, ir.PointerType) and isinstance(llvm_value.type.pointee, ir.LiteralStructType):
-            print(f"[SHOULD_RETURN_PTR] Returning True - is StructType", file=sys.stderr)
+            #print(f"[SHOULD_RETURN_PTR] Returning True - is StructType", file=sys.stderr)
             return True
         
-        # CRITICAL: Check type_spec parameter for arrays of pointers (like noopstr[3])
         # These are stored as i8** in LLVM but should not be loaded
         if type_spec is not None:
             if hasattr(type_spec, 'array_size') and type_spec.array_size is not None:
                 # This is an array variable - don't load it
-                print(f"[SHOULD_RETURN_PTR] Returning True - has array_size: {type_spec.array_size}", file=sys.stderr)
+                #print(f"[SHOULD_RETURN_PTR] Returning True - has array_size: {type_spec.array_size}", file=sys.stderr)
                 return True
         
         # Fallback: Check type metadata already attached
@@ -3130,54 +2680,32 @@ class IdentifierTypeHandler:
             ts = llvm_value._flux_type_spec
             if hasattr(ts, 'array_size') and ts.array_size is not None:
                 # This is an array variable - don't load it
-                print(f"[SHOULD_RETURN_PTR] Returning True - has _flux_type_spec.array_size: {ts.array_size}", file=sys.stderr)
+                #print(f"[SHOULD_RETURN_PTR] Returning True - has _flux_type_spec.array_size: {ts.array_size}", file=sys.stderr)
                 return True
         
-        print(f"[SHOULD_RETURN_PTR] Returning False - will load", file=sys.stderr)
+        #print(f"[SHOULD_RETURN_PTR] Returning False - will load", file=sys.stderr)
         return False
     
     @staticmethod
     def attach_type_metadata(llvm_value: ir.Value, type_spec) -> ir.Value:
-        """
-        Attach TypeSystem metadata to an LLVM value if not already present.
-        
-        Args:
-            llvm_value: The LLVM value to attach metadata to
-            type_spec: The TypeSystem to attach (or None)
-            
-        Returns:
-            The same llvm_value with metadata attached
-        """
         if type_spec and not hasattr(llvm_value, '_flux_type_spec'):
+            # If type_spec is a DataType enum, convert it to a TypeSystem object
+            if isinstance(type_spec, DataType):
+                bit_width = llvm_value.type.width if hasattr(llvm_value.type, 'width') else None
+                type_spec = TypeSystem(
+                    base_type=type_spec,
+                    is_signed=(type_spec == DataType.SINT),
+                    bit_width=bit_width
+                )
             llvm_value._flux_type_spec = type_spec
         return llvm_value
     
     @staticmethod
     def is_volatile(name: str, builder: ir.IRBuilder) -> bool:
-        """
-        Check if an identifier is marked as volatile.
-        
-        Args:
-            name: The identifier name
-            builder: LLVM IR builder
-            
-        Returns:
-            True if volatile, False otherwise
-        """
         return hasattr(builder, 'volatile_vars') and name in getattr(builder, 'volatile_vars', set())
     
     @staticmethod
     def check_validity(name: str, builder: ir.IRBuilder) -> None:
-        """
-        Check if an identifier is valid (not moved/tied).
-        
-        Args:
-            name: The identifier name
-            builder: LLVM IR builder
-            
-        Raises:
-            RuntimeError: If variable was moved (use after tie)
-        """
         if (hasattr(builder, 'object_validity_flags') and 
             name in builder.object_validity_flags):
             error_msg = f"COMPILE ERROR: Use after tie: variable '{name}' was moved"
@@ -3185,24 +2713,11 @@ class IdentifierTypeHandler:
             raise RuntimeError(error_msg)
     
     def resolve_namespace_mangled_name(name: str, module: ir.Module) -> Optional[str]:
-        """
-        Resolve identifier using namespace 'using' statements.
-        """
         current_ns = TypeResolver.get_current_namespace(module)
         return TypeResolver.resolve_identifier(module, name, current_ns)
     
     @staticmethod
     def is_type_alias(name: str, module: ir.Module) -> bool:
-        """
-        Check if an identifier is a custom type alias.
-        
-        Args:
-            name: The identifier name
-            module: LLVM module
-            
-        Returns:
-            True if name is a type alias, False otherwise
-        """
         return hasattr(module, '_type_aliases') and name in module._type_aliases
 
 
@@ -3228,19 +2743,6 @@ class CoercionContext:
     # --------------------------------------------------
 
     def normalize_ints(instance, a: ir.Value, b: ir.Value, *, unsigned: bool, promote: bool):
-        """
-        Normalize two integer values to the same width.
-        
-        Args:
-            a, b: Integer values to normalize
-            unsigned: Whether to use unsigned extension semantics when extending
-            promote: If True, normalize to MAXIMUM width (for arithmetic/bitwise/comparisons).
-                     If False, normalize to MINIMUM width (for bitshifts only).
-        
-        Context:
-            - Bitshift operations (<<, >>): promote=False (shift amount matches value width)
-            - All other operations: promote=True (preserve full range and precision)
-        """
         assert isinstance(a.type, ir.IntType)
         assert isinstance(b.type, ir.IntType)
 
@@ -3303,23 +2805,6 @@ class CoercionContext:
 
 
 def infer_int_width(value: int, data_type: DataType) -> int:
-    """
-    Infer the integer width (32 or 64 bits) based on value and type.
-    
-    Args:
-        value: The integer value
-        data_type: SINT or UINT
-        
-    Returns:
-        32 or 64 (bit width)
-        
-    Raises:
-        ValueError: If data_type is not an integer type
-    
-    Note:
-        CHANGED: Now defaults to 32-bit for all values that fit in 32 bits.
-        This ensures literals are generated as i32 instead of i64 by default.
-    """
     if data_type not in (DataType.SINT, DataType.UINT):
         raise ValueError("Not an integer literal")
     
@@ -3342,30 +2827,17 @@ def infer_int_width(value: int, data_type: DataType) -> int:
 
 def attach_type_metadata(llvm_value: ir.Value, type_spec: Optional[Any] = None, 
                         base_type: Optional[DataType] = None) -> ir.Value:
-    """
-    Attach Flux type information to LLVM value for proper signedness tracking.
-    
-    Args:
-        llvm_value: The LLVM value to annotate
-        type_spec: Optional TypeSystem object
-        base_type: Optional DataType for creating default TypeSystem
-        
-    Returns:
-        The same llvm_value with metadata attached
-    """
     bit_width = llvm_value.type.width if hasattr(llvm_value.type, 'width') else None
     
     if type_spec is None and base_type is not None:
         # Create a minimal TypeSystem-like structure
         type_spec = type(
-            'TypeSystem',
-            (),
+            'TypeSystem', (),
             {
                 'base_type': base_type,
                 'is_signed': (base_type == DataType.SINT),
                 'bit_width': bit_width
-            }
-        )()
+            })()
     
     if type_spec is not None:
         llvm_value._flux_type_spec = type_spec
@@ -3374,19 +2846,6 @@ def attach_type_metadata(llvm_value: ir.Value, type_spec: Optional[Any] = None,
 
 
 def attach_type_metadata_from_llvm_type(llvm_value: ir.Value, llvm_type: ir.Type, module: ir.Module) -> ir.Value:
-    """
-    Attach Flux type metadata to a loaded value based on LLVM type and module type aliases.
-    
-    This is used when loading from arrays or struct members to preserve signedness information.
-    
-    Args:
-        llvm_value: The LLVM value to annotate (typically just loaded)
-        llvm_type: The LLVM type of the value
-        module: LLVM module containing type alias information
-        
-    Returns:
-        The same llvm_value with metadata attached if type information is found
-    """
     # Check if this type has a known alias in the module
     if hasattr(module, '_type_aliases'):
         for alias_name, alias_type in module._type_aliases.items():
@@ -3394,10 +2853,6 @@ def attach_type_metadata_from_llvm_type(llvm_value: ir.Value, llvm_type: ir.Type
             types_match = (str(alias_type) == str(llvm_type)) or (alias_type == llvm_type)
             if types_match:
                 # Found a matching type alias - determine if it's unsigned
-                # u8, u16, u32, u64 are unsigned
-                # i8, i16, i32, i64, s8, s16, s32, s64 are signed
-                # byte is unsigned (u8)
-                # Check _type_alias_specs for correct signedness
                 is_unsigned_type = False
                 if hasattr(module, '_type_alias_specs') and alias_name in module._type_alias_specs:
                     alias_spec = module._type_alias_specs[alias_name]
@@ -3431,18 +2886,6 @@ def attach_type_metadata_from_llvm_type(llvm_value: ir.Value, llvm_type: ir.Type
 
 
 def get_array_element_type_spec(array_val: ir.Value):
-    """
-    Get the element type specification from an array value's metadata.
-    
-    This is used when indexing into arrays to preserve element signedness.
-    For example, if array_val is a pointer to u32[8], this returns the u32 TypeSystem spec.
-    
-    Args:
-        array_val: The array value (pointer to array or global array)
-        
-    Returns:
-        TypeSystem spec for array elements, or None if not found
-    """
     # Check if the array value has type metadata attached
     if hasattr(array_val, '_flux_array_element_type_spec'):
         return array_val._flux_array_element_type_spec
@@ -3457,15 +2900,6 @@ def get_array_element_type_spec(array_val: ir.Value):
 
 
 def is_unsigned(val: ir.Value) -> bool:
-    """
-    Determine if an LLVM value represents an unsigned integer.
-    
-    Args:
-        val: LLVM value to check
-        
-    Returns:
-        True if unsigned, False otherwise
-    """
     if hasattr(val, '_flux_type_spec'):
         type_spec = val._flux_type_spec
         if hasattr(type_spec, 'base_type'):
@@ -3476,16 +2910,6 @@ def is_unsigned(val: ir.Value) -> bool:
 
 
 def get_comparison_signedness(left_val: ir.Value, right_val: ir.Value) -> bool:
-    """
-    Determine signedness for comparison operations.
-    
-    Args:
-        left_val: Left operand
-        right_val: Right operand
-        
-    Returns:
-        True if signed comparison, False if unsigned
-    """
     left_unsigned = is_unsigned(left_val)
     right_unsigned = is_unsigned(right_val)
     
@@ -3496,18 +2920,6 @@ def get_comparison_signedness(left_val: ir.Value, right_val: ir.Value) -> bool:
 
 
 def get_builtin_bit_width(base_type: DataType) -> int:
-    """
-    Get the bit width for built-in types.
-    
-    Args:
-        base_type: The Flux DataType
-        
-    Returns:
-        Bit width as integer
-        
-    Raises:
-        ValueError: If type doesn't have a defined bit width
-    """
     if base_type in (DataType.SINT, DataType.UINT):
         return 32  # Default integer width
     elif base_type == DataType.FLOAT:
@@ -3521,19 +2933,6 @@ def get_builtin_bit_width(base_type: DataType) -> int:
 
 
 def get_custom_type_info(typename: str, module: ir.Module) -> Dict:
-    """
-    Retrieve information about a custom type from the module.
-    
-    Args:
-        typename: Name of the custom type
-        module: LLVM module containing type definitions
-        
-    Returns:
-        Dictionary with type information
-        
-    Raises:
-        ValueError: If type is not found
-    """
     if hasattr(module, '_type_aliases') and typename in module._type_aliases:
         llvm_type = module._type_aliases[typename]
         return {
@@ -3547,18 +2946,6 @@ def get_custom_type_info(typename: str, module: ir.Module) -> Dict:
 
 
 def find_common_type(types: List[ir.Type]) -> ir.Type:
-    """
-    Find a common type for a list of LLVM types (for array elements, etc.).
-    
-    Args:
-        types: List of LLVM types
-        
-    Returns:
-        The common type or the first type if all compatible
-        
-    Raises:
-        ValueError: If no common type can be determined
-    """
     if not types:
         raise ValueError("Cannot find common type of empty list")
     
@@ -3582,17 +2969,6 @@ def find_common_type(types: List[ir.Type]) -> ir.Type:
 
 
 def cast_to_type(builder: ir.IRBuilder, value: ir.Value, target_type: ir.Type) -> ir.Value:
-    """
-    Cast an LLVM value to a target type with appropriate conversion.
-    
-    Args:
-        builder: LLVM IR builder
-        value: Value to cast
-        target_type: Target LLVM type
-        
-    Returns:
-        Casted LLVM value
-    """
     source_type = value.type
     
     # No cast needed if types match
@@ -3653,12 +3029,6 @@ class ObjectTypeHandler:
     
     @staticmethod
     def initialize_object_storage(module: 'ir.Module'):
-        """
-        Initialize module attributes for object type storage.
-        
-        Args:
-            module: LLVM module
-        """
         if not hasattr(module, '_struct_vtables'):
             module._struct_vtables = {}
         if not hasattr(module, '_struct_types'):
@@ -3666,16 +3036,6 @@ class ObjectTypeHandler:
     
     @staticmethod
     def create_member_types(members: List, module: 'ir.Module') -> tuple:
-        """
-        Create LLVM types for object members.
-        
-        Args:
-            members: List of StructMember objects
-            module: LLVM module
-            
-        Returns:
-            Tuple of (member_types, member_names)
-        """
         member_types = []
         member_names = []
         
@@ -3689,18 +3049,6 @@ class ObjectTypeHandler:
     @staticmethod
     def create_struct_type(name: str, member_types: List, member_names: List, 
                           module: 'ir.Module') -> 'ir.Type':
-        """
-        Create and register a struct type for an object.
-        
-        Args:
-            name: Object name
-            member_types: List of LLVM member types
-            member_names: List of member names
-            module: LLVM module
-            
-        Returns:
-            Created struct type
-        """
         struct_type = ir.global_context.get_identified_type(name)
         struct_type.set_body(*member_types)
         struct_type.names = member_names
@@ -3713,16 +3061,6 @@ class ObjectTypeHandler:
     
     @staticmethod
     def calculate_field_layout(members: List, member_types: List) -> List[tuple]:
-        """
-        Calculate field layout for vtable.
-        
-        Args:
-            members: List of StructMember objects
-            member_types: List of LLVM member types
-            
-        Returns:
-            List of (name, bit_offset, bit_width, alignment) tuples
-        """
         fields = []
         for i, member in enumerate(members):
             member_type = member_types[i]
@@ -3743,14 +3081,6 @@ class ObjectTypeHandler:
     
     @staticmethod
     def create_vtable(name: str, fields: List[tuple], module: 'ir.Module'):
-        """
-        Create and register a vtable for an object.
-        
-        Args:
-            name: Object name
-            fields: List of field tuples
-            module: LLVM module
-        """
         from fast import StructVTable
         
         vtable = StructVTable(
@@ -3768,19 +3098,6 @@ class ObjectTypeHandler:
     @staticmethod
     def create_method_signature(object_name: str, method_name: str, method, 
                                 struct_type: 'ir.Type', module: 'ir.Module') -> tuple:
-        """
-        Create method signature with 'this' parameter.
-        
-        Args:
-            object_name: Name of the object
-            method_name: Name of the method
-            method: Method definition
-            struct_type: LLVM struct type for the object
-            module: LLVM module
-            
-        Returns:
-            Tuple of (func_type, func_name)
-        """
         from fast import DataType
         
         # Return type
@@ -3811,18 +3128,6 @@ class ObjectTypeHandler:
     @staticmethod
     def predeclare_method(func_type: 'ir.FunctionType', func_name: str, method, 
                          module: 'ir.Module') -> 'ir.Function':
-        """
-        Predeclare a method function or reuse existing.
-        
-        Args:
-            func_type: LLVM function type
-            func_name: Full method name
-            method: Method definition
-            module: LLVM module
-            
-        Returns:
-            LLVM function
-        """
         existing = module.globals.get(func_name)
         if existing is None:
             func = ir.Function(module, func_type, func_name)
@@ -3839,11 +3144,6 @@ class ObjectTypeHandler:
             param_name = method.parameters[i - 1].name if method.parameters[i - 1].name is not None else f"arg{i - 1}"
             arg.name = param_name
 
-        # Register method in function overloads table for proper resolution
-        # We have the actual method name from the method object, so we don't need to parse it
-        # The base name is: object_name.method_name (without mangling)
-        # func_name has the structure: object_name.mangled_method_name
-        
         if '.' in func_name:
             # Find the dot that separates object from method
             dot_index = func_name.rfind('.')
@@ -3854,10 +3154,10 @@ class ObjectTypeHandler:
             # The base name is just object_name.actual_method_name
             base_name = f"{object_part}.{method.name}"
             
-            print(f"[REGISTER METHOD] Registering method overload:", file=sys.stderr)
-            print(f"  Full name: {func_name}", file=sys.stderr)
-            print(f"  Method name: {method.name}", file=sys.stderr)
-            print(f"  Base name: {base_name}", file=sys.stderr)
+            #print(f"[REGISTER METHOD] Registering method overload:", file=sys.stderr)
+            #print(f"  Full name: {func_name}", file=sys.stderr)
+            #print(f"  Method name: {method.name}", file=sys.stderr)
+            #print(f"  Base name: {base_name}", file=sys.stderr)
             
             FunctionTypeHandler.register_function_overload(
                 module, base_name, func_name, method.parameters, method.return_type, func
@@ -3915,25 +3215,15 @@ class ObjectTypeHandler:
             else:
                 raise RuntimeError(f"Method {method.name} must end with return statement")
         
-        # Exit method scope
         module.symbol_table.exit_scope()
         
-        # CRITICAL FIX: Restore the namespace context
         module.symbol_table.current_namespace = saved_namespace
+        return
         
 
     @staticmethod
     def process_nested_definitions(nested_objects: List, nested_structs: List, 
                                    builder: 'ir.IRBuilder', module: 'ir.Module'):
-        """
-        Process nested objects and structs.
-        
-        Args:
-            nested_objects: List of nested ObjectDef
-            nested_structs: List of nested StructDef
-            builder: LLVM IR builder
-            module: LLVM module
-        """
         for nested_obj in nested_objects:
             nested_obj.codegen(builder, module)
         
@@ -3949,31 +3239,10 @@ class FunctionTypeHandler:
     
     @staticmethod
     def convert_type_spec_to_llvm(type_spec, module: ir.Module) -> ir.Type:
-        """
-        Convert a TypeSystem to LLVM type, handling arrays and pointers.
-        
-        Args:
-            type_spec: TypeSystem object to convert
-            module: LLVM module for type resolution
-            
-        Returns:
-            Corresponding LLVM type
-        """
         return type_spec.get_llvm_type_with_array(module)
     
     @staticmethod
     def create_function_type(return_type_spec, param_type_specs: List, module: ir.Module) -> ir.FunctionType:
-        """
-        Create an LLVM function type from TypeSystem objects.
-        
-        Args:
-            return_type_spec: Return type TypeSystem
-            param_type_specs: List of parameter TypeSystem objects
-            module: LLVM module
-            
-        Returns:
-            LLVM FunctionType
-        """
         ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(return_type_spec, module)
         param_types = [FunctionTypeHandler.convert_type_spec_to_llvm(pts, module) 
                       for pts in param_type_specs]
@@ -3981,16 +3250,6 @@ class FunctionTypeHandler:
     
     @staticmethod
     def build_param_metadata(parameters: List, module: ir.Module) -> List[dict]:
-        """
-        Build parameter metadata for type tracking.
-        
-        Args:
-            parameters: List of Parameter objects
-            module: LLVM module
-            
-        Returns:
-            List of metadata dictionaries
-        """
         param_metadata = []
         for param in parameters:
             metadata = {
@@ -4004,18 +3263,6 @@ class FunctionTypeHandler:
     @staticmethod
     def mangle_function_name(base_name: str, parameters: List, return_type_spec, 
                             no_mangle: bool = False) -> str:
-        """
-        Generate a mangled name for a function based on its signature.
-        
-        Args:
-            base_name: Base function name
-            parameters: List of Parameter objects
-            return_type_spec: Return type TypeSystem
-            no_mangle: If True, return base name without mangling
-            
-        Returns:
-            Mangled function name
-        """
         #print("MANGLE_FUNCTION_NAME BEFORE IF CHECK OR BASE_NAME == 'main'")
         if no_mangle or base_name == "main":
             return base_name
@@ -4067,17 +3314,6 @@ class FunctionTypeHandler:
     @staticmethod
     def register_function_overload(module: ir.Module, base_name: str, mangled_name: str,
                                    parameters: List, return_type_spec, func: ir.Function):
-        """
-        Register a function as an overload in the module.
-        
-        Args:
-            module: LLVM module
-            base_name: Unmangled function name
-            mangled_name: Mangled function name
-            parameters: List of Parameter objects
-            return_type_spec: Return type TypeSystem
-            func: LLVM Function object
-        """
         if not hasattr(module, '_function_overloads'):
             module._function_overloads = {}
         
@@ -4148,18 +3384,6 @@ class FunctionTypeHandler:
     @staticmethod
     def resolve_overload_by_types(module: ir.Module, base_name: str, 
                                   arg_vals: List[ir.Value]) -> Optional[ir.Function]:
-        """
-        Resolve function overload by matching argument types.
-        
-        Args:
-            module: LLVM module
-            base_name: Function base name
-            arg_vals: List of argument values
-            
-        Returns:
-            Matching function or None if no match found
-        """
-        # DEBUG: Overload resolution
         #print(f"[OVERLOAD DEBUG] Resolving {base_name} with {len(arg_vals)} args", file=sys.stderr)
         if not hasattr(module, '_function_overloads'):
             return None
@@ -4180,24 +3404,72 @@ class FunctionTypeHandler:
             return candidates[0]['function']
         else:
             # Multiple candidates - need type matching
+            # STRATEGY: 
+            # 1. First pass: look for exact custom_typename matches (most specific)
+            # 2. Second pass: look for exact LLVM type matches
+            # No fallback to "compatible" matches - exact matches only
+            
+            # First pass: Prefer exact custom_typename matches
             for candidate in candidates:
-
                 param_types = candidate['param_types']
                 if len(param_types) != len(arg_vals):
                     continue
                 
-                # Check if types match (with compatibility rules)
-                match = True
+                # Check if ALL parameters have matching custom typenames AND LLVM types
+                all_match = True
                 for i, (param_type, arg_val) in enumerate(zip(param_types, arg_vals)):
-                    #print(f"[OVERLOAD] Param {i}: custom_typename={getattr(param_type, 'custom_typename', None)}, is_array={getattr(param_type, 'is_array', None)}, is_pointer={getattr(param_type, 'is_pointer', None)}", file=sys.stderr)
-                    expected_llvm_type = param_type.get_llvm_type_with_array(module)
-                    #print(f"[OVERLOAD] Arg {i}: arg_type={arg_val.type}, expected={expected_llvm_type}", file=sys.stderr)
+                    # Get the custom typename from the argument's metadata
+                    arg_custom_typename = getattr(arg_val, 'custom_typename', None)
+                    param_custom_typename = getattr(param_type, 'custom_typename', None)
                     
-                    # Check for exact type match first
+                    # Both must have custom typenames and they must match
+                    if not (param_custom_typename and arg_custom_typename and param_custom_typename == arg_custom_typename):
+                        all_match = False
+                        break
+                    
+                    # Also verify LLVM types match
+                    expected_llvm_type = param_type.get_llvm_type_with_array(module)
+                    if arg_val.type != expected_llvm_type:
+                        all_match = False
+                        break
+                
+                if all_match:
+                    return candidate['function']
+            
+            # Second pass: Look for exact LLVM type matches (for cases without custom typenames)
+            for candidate in candidates:
+                param_types = candidate['param_types']
+                if len(param_types) != len(arg_vals):
+                    continue
+                
+                # Check if ALL parameters have exact LLVM type matches
+                exact_match = True
+                for i, (param_type, arg_val) in enumerate(zip(param_types, arg_vals)):
+                    expected_llvm_type = param_type.get_llvm_type_with_array(module)
+                    if arg_val.type != expected_llvm_type:
+                        exact_match = False
+                        break
+                
+                if exact_match:
+                    return candidate['function']
+
+            # Third pass: Allow array-to-pointer decay ONLY
+            # e.g., [5 x i8]* -> i8*
+            for candidate in candidates:
+                param_types = candidate['param_types']
+                if len(param_types) != len(arg_vals):
+                    continue
+                
+                # Check if ALL parameters match with array decay allowed
+                all_match = True
+                for i, (param_type, arg_val) in enumerate(zip(param_types, arg_vals)):
+                    expected_llvm_type = param_type.get_llvm_type_with_array(module)
+                    
+                    # Exact match is fine
                     if arg_val.type == expected_llvm_type:
                         continue
                     
-                    # Handle array-to-pointer decay: [N x T]* can decay to T*
+                    # Allow array-to-pointer decay: [N x T]* can decay to T*
                     if (isinstance(arg_val.type, ir.PointerType) and 
                         isinstance(arg_val.type.pointee, ir.ArrayType) and
                         isinstance(expected_llvm_type, ir.PointerType)):
@@ -4205,41 +3477,52 @@ class FunctionTypeHandler:
                         if arg_val.type.pointee.element == expected_llvm_type.pointee:
                             continue  # Compatible via array decay
                     
-                    # Check signedness for integer types (even if width matches)
+                    # No match - this candidate doesn't work
+                    all_match = False
+                    break
+                
+                if all_match:
+                    return candidate['function']
+
+            # Fourth pass: Match by bit width and signedness for integer types
+            for candidate in candidates:
+                param_types = candidate['param_types']
+                if len(param_types) != len(arg_vals):
+                    continue
+                
+                # Check if ALL parameters match by width and signedness
+                all_match = True
+                for i, (param_type, arg_val) in enumerate(zip(param_types, arg_vals)):
+                    expected_llvm_type = param_type.get_llvm_type_with_array(module)
+                    
+                    # For integer types, check bit width and signedness
                     if isinstance(arg_val.type, ir.IntType) and isinstance(expected_llvm_type, ir.IntType):
-                        # Check if signedness matches
-                        #print(f"[SIGN DEBUG] Checking arg {i}: arg_is_unsigned={is_unsigned(arg_val)}", file=sys.stderr)
-                        #if hasattr(param_type, "base_type"):
-                            #print(f"[SIGN DEBUG]   param has base_type={param_type.base_type}", file=sys.stderr)
-                        #if hasattr(param_type, "is_signed"):
-                            #print(f"[SIGN DEBUG]   param has is_signed={param_type.is_signed}", file=sys.stderr)
+                        # Width must match
+                        if arg_val.type.width != expected_llvm_type.width:
+                            all_match = False
+                            break
+                        
+                        # Signedness must match
                         arg_is_unsigned = is_unsigned(arg_val)
-                        # Determine parameter signedness by resolving type aliases
                         param_is_unsigned = False
                         
-                        # If param has custom_typename, resolve it to get the underlying type
+                        # Determine parameter signedness by resolving type aliases
                         if hasattr(param_type, 'custom_typename') and param_type.custom_typename:
-                            # Try to resolve the custom type from module type aliases
                             type_name = param_type.custom_typename
                             resolved_type_spec = None
                             
-                            #print(f"[TYPE RESOLVE] Looking for {type_name} in type aliases", file=sys.stderr)
-                            
                             # Use TypeResolver to resolve type through namespace system
-                            # Types in namespaces are mangled (u32 -> standard__types__u32)
                             if hasattr(module, "_using_namespaces"):
                                 for ns in module._using_namespaces:
                                     mangled_name = TypeResolver.mangle_name(ns, type_name)
                                     if hasattr(module, '_type_alias_specs') and mangled_name in module._type_alias_specs:
                                         resolved_type_spec = module._type_alias_specs[mangled_name]
-                                        #print(f"[TYPE RESOLVE] Found {type_name} as {mangled_name}", file=sys.stderr)
                                         break
                             
                             # Also try direct lookup for global types
                             if not resolved_type_spec and hasattr(module, '_type_alias_specs'):
                                 if type_name in module._type_alias_specs:
                                     resolved_type_spec = module._type_alias_specs[type_name]
-                                    #print(f"[TYPE RESOLVE] Found {type_name} directly", file=sys.stderr)
                             
                             # If we resolved the type spec, use it
                             if resolved_type_spec:
@@ -4247,26 +3530,27 @@ class FunctionTypeHandler:
                                     param_is_unsigned = True
                                 elif hasattr(resolved_type_spec, 'is_signed'):
                                     param_is_unsigned = not resolved_type_spec.is_signed
-                            # Fall back to using param_type's own is_signed if available
                             elif hasattr(param_type, 'is_signed'):
                                 param_is_unsigned = not param_type.is_signed
-                        # Check base_type directly
                         elif hasattr(param_type, 'base_type') and param_type.base_type == DataType.UINT:
                             param_is_unsigned = True
                         elif hasattr(param_type, 'is_signed'):
                             param_is_unsigned = not param_type.is_signed
+                        
+                        # Signedness must match
                         if arg_is_unsigned != param_is_unsigned:
-                            # Signedness mismatch
-                            match = False
+                            all_match = False
                             break
-                        # Signedness matches, continue
+                        
+                        # Both width and signedness match
                         continue
                     
-                    # No other compatibility - types don't match
-                    match = False
-                    break
+                    # For non-integer types, must be exact match
+                    if arg_val.type != expected_llvm_type:
+                        all_match = False
+                        break
                 
-                if match:
+                if all_match:
                     return candidate['function']
             
             # No exact match found
@@ -4276,20 +3560,6 @@ class FunctionTypeHandler:
     def convert_argument_to_parameter_type(builder: ir.IRBuilder, module: ir.Module, 
                                           arg_val: ir.Value, expected_type: ir.Type, 
                                           arg_index: int) -> ir.Value:
-        """
-        Convert an argument value to match the expected parameter type.
-        Handles void* conversions, array decay, and __expr method calls.
-        
-        Args:
-            builder: LLVM IR builder
-            module: LLVM module (for __expr method lookups)
-            arg_val: Argument value to convert
-            expected_type: Expected parameter type
-            arg_index: Argument index (for naming)
-            
-        Returns:
-            Converted argument value
-        """
         if arg_val.type == expected_type:
             return arg_val
         
@@ -4368,40 +3638,11 @@ class FunctionTypeHandler:
 
 
 # ============================================================================
-# Name Mangling
+# Note: Refactor
 # ============================================================================
-
-def mangle_name(base_name: str, param_types: List[ir.Type], module: ir.Module) -> str:
-    """
-    Generate a mangled name for function overloading.
-    
-    Args:
-        base_name: Base function name
-        param_types: List of parameter types
-        module: LLVM module
-        
-    Returns:
-        Mangled function name
-    """
-    #print("IN MANGLE_NAME()")
-    if not param_types:
-        return base_name
-    
-    type_suffix = "_".join(_type_to_string(t, module) for t in param_types)
-    return f"{base_name}__{type_suffix}"
 
 
 def _type_to_string(llvm_type: ir.Type, module: ir.Module) -> str:
-    """
-    Convert an LLVM type to a string representation for mangling.
-    
-    Args:
-        llvm_type: LLVM type to convert
-        module: LLVM module (for struct name lookups)
-        
-    Returns:
-        String representation of the type
-    """
     if isinstance(llvm_type, ir.IntType):
         return f"i{llvm_type.width}"
     elif isinstance(llvm_type, ir.FloatType):
@@ -4428,17 +3669,6 @@ def _type_to_string(llvm_type: ir.Type, module: ir.Module) -> str:
 
 def eval_const_binary_op(left: ir.Constant, right: ir.Constant, 
                         op: Operator) -> Optional[ir.Constant]:
-    """
-    Evaluate a binary operation on constants at compile time.
-    
-    Args:
-        left: Left constant operand
-        right: Right constant operand
-        op: Binary operator
-        
-    Returns:
-        Result constant or None if not evaluable
-    """
     # Only handle integer constants for now
     if not (isinstance(left.type, ir.IntType) and isinstance(right.type, ir.IntType)):
         return None
@@ -4462,16 +3692,32 @@ def eval_const_binary_op(left: ir.Constant, right: ir.Constant,
             if right_val == 0:
                 return None
             result = left_val % right_val
+        elif op == Operator.POWER:
+            result = left_val ** right_val
         elif op == Operator.BITAND:
             result = left_val & right_val
         elif op == Operator.BITOR:
             result = left_val | right_val
         elif op == Operator.XOR:
             result = left_val ^ right_val
+        elif op == Operator.BITXOR:
+            result = left_val ^ right_val
+        elif op == Operator.AND:
+            result = left_val & right_val
+        elif op == Operator.OR:
+            result = left_val | right_val
         elif op == Operator.BITSHIFT_LEFT:
             result = left_val << right_val
         elif op == Operator.BITSHIFT_RIGHT:
             result = left_val >> right_val
+        elif op == Operator.NAND:
+            result = ~(left_val & right_val)
+        elif op == Operator.NOR:
+            result = ~(left_val | right_val)
+        elif op == Operator.BITNAND:
+            result = ~(left_val & right_val)
+        elif op == Operator.BITNOR:
+            result = ~(left_val | right_val)
         else:
             return None
         
@@ -4480,17 +3726,8 @@ def eval_const_binary_op(left: ir.Constant, right: ir.Constant,
         return None
 
 
+
 def eval_const_unary_op(operand: ir.Constant, op: Operator) -> Optional[ir.Constant]:
-    """
-    Evaluate a unary operation on a constant at compile time.
-    
-    Args:
-        operand: Constant operand
-        op: Unary operator
-        
-    Returns:
-        Result constant or None if not evaluable
-    """
     if not isinstance(operand.type, ir.IntType):
         return None
     
@@ -4515,15 +3752,6 @@ def eval_const_unary_op(operand: ir.Constant, op: Operator) -> Optional[ir.Const
 # ============================================================================
 
 def get_default_initializer(llvm_type: ir.Type) -> ir.Constant:
-    """
-    Get a default zero initializer for an LLVM type.
-    
-    Args:
-        llvm_type: The LLVM type to initialize
-        
-    Returns:
-        Zero/null constant of the appropriate type
-    """
     if isinstance(llvm_type, ir.IntType):
         return ir.Constant(llvm_type, 0)
     elif isinstance(llvm_type, (ir.FloatType, ir.DoubleType)):
@@ -4548,19 +3776,6 @@ def get_default_initializer(llvm_type: ir.Type) -> ir.Constant:
 def pack_array_to_integer(builder: ir.IRBuilder, module: ir.Module,
                          array_val: ir.Value, element_type: ir.Type,
                          element_count: int) -> ir.Value:
-    """
-    Pack a small array into an integer for efficient storage (compile-time known).
-    
-    Args:
-        builder: LLVM IR builder
-        module: LLVM module
-        array_val: Array value to pack
-        element_type: Type of array elements
-        element_count: Number of elements
-        
-    Returns:
-        Packed integer value
-    """
     if not isinstance(element_type, ir.IntType):
         raise ValueError("Can only pack integer arrays")
     
@@ -4595,20 +3810,6 @@ def pack_array_to_integer_runtime(builder: ir.IRBuilder,
                                   array_ptr: ir.Value,
                                   element_type: ir.Type,
                                   element_count: ir.Value) -> ir.Value:
-    """
-    Pack array to integer at runtime with dynamic element count.
-    
-    Args:
-        builder: LLVM IR builder
-        array_ptr: Pointer to array
-        element_type: Type of elements
-        element_count: Runtime element count
-        
-    Returns:
-        Packed integer value
-    """
-    # Similar to compile-time version but with loops
-    # This is a simplified version - full implementation would use loops
     element_bits = element_type.width
     
     # For now, assume max 64 bits total
@@ -4623,19 +3824,6 @@ def pack_array_to_integer_runtime(builder: ir.IRBuilder,
 def pack_array_pointer_to_integer(builder: ir.IRBuilder, module: ir.Module,
                                   array_ptr: ir.Value, element_type: ir.Type,
                                   element_count: int) -> ir.Value:
-    """
-    Pack array (given by pointer) to integer.
-    
-    Args:
-        builder: LLVM IR builder
-        module: LLVM module
-        array_ptr: Pointer to array
-        element_type: Type of array elements
-        element_count: Number of elements
-        
-    Returns:
-        Packed integer value
-    """
     if not isinstance(element_type, ir.IntType):
         raise ValueError("Can only pack integer arrays")
     
@@ -4668,17 +3856,6 @@ def pack_array_pointer_to_integer(builder: ir.IRBuilder, module: ir.Module,
 
 def create_global_array_concat(module: ir.Module, left_val: ir.Value,
                                right_val: ir.Value) -> ir.Value:
-    """
-    Concatenate two arrays at global/compile time.
-    
-    Args:
-        module: LLVM module
-        left_val: Left array constant
-        right_val: Right array constant
-        
-    Returns:
-        Concatenated array constant
-    """
     if not (isinstance(left_val, ir.Constant) and isinstance(right_val, ir.Constant)):
         raise ValueError("Global array concatenation requires constants")
     
@@ -4707,18 +3884,6 @@ def create_global_array_concat(module: ir.Module, left_val: ir.Value,
 
 def create_runtime_array_concat(builder: ir.IRBuilder, module: ir.Module,
                                 left_val: ir.Value, right_val: ir.Value) -> ir.Value:
-    """
-    Concatenate two arrays at runtime.
-    
-    Args:
-        builder: LLVM IR builder
-        module: LLVM module
-        left_val: Left array value (pointer)
-        right_val: Right array value (pointer)
-        
-    Returns:
-        Pointer to new concatenated array
-    """
     # Get array types
     left_type = left_val.type.pointee if isinstance(left_val.type, ir.PointerType) else left_val.type
     right_type = right_val.type.pointee if isinstance(right_val.type, ir.PointerType) else right_val.type
@@ -4943,27 +4108,6 @@ def array_heap_allocation(builder: ir.IRBuilder, module: ir.Module, str_val):
 # ============================================================================
 
 def handle_union_member_assignment(builder, module, union_ptr, union_name, member_name, val):
-    """
-    Handle union member assignment by casting the union to the appropriate member type.
-    
-    This function handles both regular unions and tagged unions, with special support
-    for the ._ syntax to access/modify the tag field in tagged unions.
-    
-    Args:
-        builder: LLVM IR builder
-        module: LLVM module containing union type information
-        union_ptr: Pointer to the union instance
-        union_name: Name of the union type
-        member_name: Name of the member to assign (or '_' for tag)
-        val: Value to assign
-        
-    Returns:
-        The assigned value
-        
-    Raises:
-        ValueError: If union info not found, member not found, or invalid tag access
-        RuntimeError: If trying to reassign an already initialized union member
-    """
     # Get union member information
     if not hasattr(module, '_union_member_info') or union_name not in module._union_member_info:
         raise ValueError(f"Union member info not found for '{union_name}'")
@@ -5029,25 +4173,7 @@ def handle_union_member_assignment(builder, module, union_ptr, union_name, membe
         return val
 
 
-def coerce_return_value(
-    builder: ir.IRBuilder,
-    value: ir.Value,
-    expected: ir.Type
-) -> ir.Value:
-    """
-    Coerce a return value to the expected function return type.
-    
-    Args:
-        builder: LLVM IR builder
-        value: The value being returned
-        expected: The expected return type
-        
-    Returns:
-        The coerced value
-        
-    Raises:
-        TypeError: If the value cannot be coerced to the expected type
-    """
+def coerce_return_value(builder: ir.IRBuilder,value: ir.Value,expected: ir.Type) -> ir.Value:
     ctx = CoercionContext(builder)
     src = value.type
 
@@ -5134,19 +4260,6 @@ class AssignmentTypeHandler:
     
     @staticmethod
     def handle_identifier_assignment(builder, module, target_name: str, val, value_expr):
-        """
-        Handle assignment to a simple identifier (variable).
-        
-        Args:
-            builder: LLVM IR builder
-            module: LLVM module
-            target_name: Name of the target variable
-            val: Value to assign (already generated)
-            value_expr: The value expression AST node (for type checking)
-            
-        Returns:
-            The assigned value
-        """
         # Get the variable pointer
         if module.symbol_table.get_llvm_value(target_name) is not None:
             # Local variable
@@ -5182,17 +4295,6 @@ class AssignmentTypeHandler:
     
     @staticmethod
     def convert_value_for_assignment(builder, val, target_type):
-        """
-        Convert value type to match target type if needed.
-        
-        Args:
-            builder: LLVM IR builder
-            val: Value to potentially convert
-            target_type: Expected target type
-            
-        Returns:
-            Converted value
-        """
         if val.type == target_type:
             return val
         
@@ -5267,19 +4369,6 @@ class AssignmentTypeHandler:
     
     @staticmethod
     def handle_member_assignment(builder, module, target_obj_expr, member_name: str, val):
-        """
-        Handle assignment to a struct/object member.
-        
-        Args:
-            builder: LLVM IR builder
-            module: LLVM module
-            target_obj_expr: The object expression (e.g., Identifier)
-            member_name: Name of the member being assigned
-            val: Value to assign
-            
-        Returns:
-            The assigned value
-        """
         from fast import Identifier
         
         # For member access, we need the pointer, not the loaded value
@@ -5345,20 +4434,6 @@ class AssignmentTypeHandler:
     
     @staticmethod
     def handle_vtable_struct_assignment(builder, module, struct_ptr, target_obj_expr, member_name: str, val):
-        """
-        Handle struct member assignment for byte-array based structs using vtable.
-        
-        Args:
-            builder: LLVM IR builder
-            module: LLVM module
-            struct_ptr: Pointer to the struct
-            target_obj_expr: The target object expression (for type info)
-            member_name: Name of the member
-            val: Value to assign
-            
-        Returns:
-            The assigned value
-        """
         from fast import Identifier
         
         # Determine struct name from the pointer type
@@ -5421,20 +4496,6 @@ class AssignmentTypeHandler:
     
     @staticmethod
     def _assign_bitfield_integer(builder, current_struct, struct_ptr, val, bit_offset: int, bit_width: int):
-        """
-        Assign a value to a bitfield in an integer-type struct.
-        
-        Args:
-            builder: LLVM IR builder
-            current_struct: Current struct value
-            struct_ptr: Pointer to the struct
-            val: Value to assign
-            bit_offset: Bit offset of the field
-            bit_width: Bit width of the field
-            
-        Returns:
-            The assigned value
-        """
         instance_type = current_struct.type
         
         # Create mask to clear the field
@@ -5466,20 +4527,6 @@ class AssignmentTypeHandler:
     
     @staticmethod
     def _assign_bitfield_array(builder, current_struct, struct_ptr, val, bit_offset: int, bit_width: int):
-        """
-        Assign a value to a bitfield in an array-type struct.
-        
-        Args:
-            builder: LLVM IR builder
-            current_struct: Current struct value
-            struct_ptr: Pointer to the struct
-            val: Value to assign
-            bit_offset: Bit offset of the field
-            bit_width: Bit width of the field
-            
-        Returns:
-            The assigned value
-        """
         byte_offset = bit_offset // 8
         bit_in_byte = bit_offset % 8
         
@@ -5514,30 +4561,15 @@ class AssignmentTypeHandler:
     
     @staticmethod
     def handle_array_element_assignment(builder, module, array_expr, index_expr, value_expr, val):
-        """
-        Handle assignment to an array element.
-        
-        Args:
-            builder: LLVM IR builder
-            module: LLVM module
-            array_expr: Array expression AST node (the array part, not the whole ArrayAccess)
-            index_expr: Index expression AST node
-            value_expr: Value expression AST node
-            val: Generated value to assign
-            
-        Returns:
-            The assigned value
-        """
         from fast import StringLiteral, Identifier
         
         # For array assignment, generate the array expression normally
         # This handles all the loading logic correctly through Identifier codegen
         array = array_expr.codegen(builder, module)
         
-        import sys
-        print(f"[ARRAY ASSIGN DEBUG] INITIAL array.type: {array.type}", file=sys.stderr)
-        if hasattr(array, '_flux_type_spec'):
-            print(f"[ARRAY ASSIGN DEBUG] array has _flux_type_spec: {array._flux_type_spec}", file=sys.stderr)
+        #print(f"[ARRAY ASSIGN DEBUG] INITIAL array.type: {array.type}", file=sys.stderr)
+        #if hasattr(array, '_flux_type_spec'):
+        #    print(f"[ARRAY ASSIGN DEBUG] array has _flux_type_spec: {array._flux_type_spec}", file=sys.stderr)
         
         # CRITICAL FIX: If we got i8** (pointer-to-pointer), we need to load it
         # This happens with scalar pointer variables like `noopstr dest` (byte*)
@@ -5563,15 +4595,13 @@ class AssignmentTypeHandler:
             
             if should_load:
                 # This is T* stored as T** - load to get T*
-                import sys
-                print(f"[LOAD DEBUG] BEFORE load: array.type = {array.type}", file=sys.stderr)
+                #print(f"[LOAD DEBUG] BEFORE load: array.type = {array.type}", file=sys.stderr)
                 array = builder.load(array, name="ptr_loaded_for_indexing")
-                print(f"[LOAD DEBUG] AFTER load: array.type = {array.type}", file=sys.stderr)
+                #print(f"[LOAD DEBUG] AFTER load: array.type = {array.type}", file=sys.stderr)
         index = index_expr.codegen(builder, module)
         
-        import sys
-        print(f"[ARRAY ASSIGN] array.type: {array.type}", file=sys.stderr)
-        print(f"[ARRAY ASSIGN] val.type: {val.type}", file=sys.stderr)
+        #print(f"[ARRAY ASSIGN] array.type: {array.type}", file=sys.stderr)
+        #print(f"[ARRAY ASSIGN] val.type: {val.type}", file=sys.stderr)
         
         if isinstance(array.type, ir.PointerType) and isinstance(array.type.pointee, ir.ArrayType):
             # Calculate element pointer for pointer-to-array
@@ -5593,14 +4623,12 @@ class AssignmentTypeHandler:
             return val
         elif isinstance(array.type, ir.PointerType):
             # Handle plain pointer types (like byte*) - pointer arithmetic
-            import sys
-            print(f"[PTR ASSIGN DEBUG] array.type: {array.type}", file=sys.stderr)
-            print(f"[PTR ASSIGN DEBUG] array.type.pointee: {array.type.pointee}", file=sys.stderr)
+            #print(f"[PTR ASSIGN DEBUG] array.type: {array.type}", file=sys.stderr)
+            #print(f"[PTR ASSIGN DEBUG] array.type.pointee: {array.type.pointee}", file=sys.stderr)
             elem_ptr = builder.gep(array, [index], inbounds=True)
             
-            import sys
-            print(f"[PTR ASSIGN] elem_ptr.type: {elem_ptr.type}", file=sys.stderr)
-            print(f"[PTR ASSIGN] elem_ptr.type.pointee: {elem_ptr.type.pointee}", file=sys.stderr)
+            #print(f"[PTR ASSIGN] elem_ptr.type: {elem_ptr.type}", file=sys.stderr)
+            #print(f"[PTR ASSIGN] elem_ptr.type.pointee: {elem_ptr.type.pointee}", file=sys.stderr)
             
             # FIX: Handle StringLiteral assignment to byte pointer elements
             element_type = array.type.pointee
@@ -5611,22 +4639,22 @@ class AssignmentTypeHandler:
                 else:
                     val = ir.Constant(ir.IntType(8), 0)
             
-            print(f"[PTR ASSIGN] val.type: {val.type}", file=sys.stderr)
-            print(f"[PTR ASSIGN] element_type: {element_type}", file=sys.stderr)
-            print(f"[PTR ASSIGN] isinstance(val.type, ir.PointerType): {isinstance(val.type, ir.PointerType)}", file=sys.stderr)
-            print(f"[PTR ASSIGN] isinstance(element_type, ir.PointerType): {isinstance(element_type, ir.PointerType)}", file=sys.stderr)
+            #print(f"[PTR ASSIGN] val.type: {val.type}", file=sys.stderr)
+            #print(f"[PTR ASSIGN] element_type: {element_type}", file=sys.stderr)
+            #print(f"[PTR ASSIGN] isinstance(val.type, ir.PointerType): {isinstance(val.type, ir.PointerType)}", file=sys.stderr)
+            #print(f"[PTR ASSIGN] isinstance(element_type, ir.PointerType): {isinstance(element_type, ir.PointerType)}", file=sys.stderr)
             
             # Handle pointer type compatibility - if both are pointers, bitcast if needed
             if isinstance(val.type, ir.PointerType) and isinstance(element_type, ir.PointerType):
-                print(f"[PTR ASSIGN] Both are pointers, checking equality", file=sys.stderr)
-                print(f"[PTR ASSIGN] val.type == element_type: {val.type == element_type}", file=sys.stderr)
+                #print(f"[PTR ASSIGN] Both are pointers, checking equality", file=sys.stderr)
+                #print(f"[PTR ASSIGN] val.type == element_type: {val.type == element_type}", file=sys.stderr)
                 if val.type != element_type:
-                    print(f"[PTR ASSIGN] Doing bitcast", file=sys.stderr)
+                    #print(f"[PTR ASSIGN] Doing bitcast", file=sys.stderr)
                     val = builder.bitcast(val, element_type, name="ptr_cast")
             
             # Note: val is already generated in the caller, so we just use it directly
             # No type conversion needed - LLVM handles compatible pointer types
-            print(f"[PTR ASSIGN] About to store, val.type: {val.type}", file=sys.stderr)
+            #print(f"[PTR ASSIGN] About to store, val.type: {val.type}", file=sys.stderr)
             builder.store(val, elem_ptr)
             return val
         else:
@@ -5634,17 +4662,6 @@ class AssignmentTypeHandler:
     
     @staticmethod
     def handle_pointer_deref_assignment(builder, ptr, val):
-        """
-        Handle assignment through pointer dereference.
-        
-        Args:
-            builder: LLVM IR builder
-            ptr: Pointer to dereference
-            val: Value to assign
-            
-        Returns:
-            The assigned value
-        """
         if isinstance(ptr.type, ir.PointerType):
             # Convert value type to match pointee type if needed
             pointee_type = ptr.type.pointee
@@ -5656,19 +4673,6 @@ class AssignmentTypeHandler:
     
     @staticmethod
     def handle_compound_assignment(builder, module, target_expr, op_token, value_expr):
-        """
-        Handle compound assignments like +=, -=, *=, /=, %=, etc.
-        
-        Args:
-            builder: LLVM IR builder
-            module: LLVM module
-            target_expr: Target expression AST node
-            op_token: TokenType for the compound operator
-            value_expr: Value expression AST node
-            
-        Returns:
-            The assigned value
-        """
         from fast import TokenType, Operator, Identifier, BinaryOp, Assignment
         
         # Map compound assignment tokens to binary operators
@@ -5679,7 +4683,14 @@ class AssignmentTypeHandler:
             TokenType.DIVIDE_ASSIGN: Operator.DIV,
             TokenType.MODULO_ASSIGN: Operator.MOD,
             TokenType.POWER_ASSIGN: Operator.POWER,
+            TokenType.AND_ASSIGN: Operator.AND,
+            TokenType.OR_ASSIGN: Operator.OR,
             TokenType.XOR_ASSIGN: Operator.XOR,
+            TokenType.BITAND_ASSIGN: Operator.BITAND,
+            TokenType.BITOR_ASSIGN: Operator.BITOR,
+            TokenType.BITXOR_ASSIGN: Operator.BITXOR,
+            TokenType.BITNAND_ASSIGN: Operator.BITNAND,
+            TokenType.BITNOR_ASSIGN: Operator.BITNOR,
             TokenType.BITSHIFT_LEFT_ASSIGN: Operator.BITSHIFT_LEFT,
             TokenType.BITSHIFT_RIGHT_ASSIGN: Operator.BITSHIFT_RIGHT,
         }
@@ -5746,12 +4757,6 @@ class StructTypeHandler:
     
     @staticmethod
     def initialize_struct_storage(module: 'ir.Module'):
-        """
-        Initialize module attributes for struct type storage.
-        
-        Args:
-            module: LLVM module
-        """
         if not hasattr(module, '_struct_vtables'):
             module._struct_vtables = {}
         if not hasattr(module, '_struct_types'):
@@ -5763,16 +4768,6 @@ class StructTypeHandler:
     
     @staticmethod
     def calculate_vtable(members: List, module: 'ir.Module') -> 'StructVTable':
-        """
-        Calculate struct layout and generate vtable (TLD).
-        
-        Args:
-            members: List of StructMember objects
-            module: LLVM module
-            
-        Returns:
-            StructVTable with field layout information
-        """
         from fast import StructVTable, get_builtin_bit_width
         
         fields = []
@@ -5853,17 +4848,6 @@ class StructTypeHandler:
     
     @staticmethod
     def create_struct_type(name: str, vtable: 'StructVTable', module: 'ir.Module') -> 'ir.Type':
-        """
-        Create proper LLVM struct type with named fields.
-        
-        Args:
-            name: Struct name
-            vtable: StructVTable with field information
-            module: LLVM module
-            
-        Returns:
-            Created struct type
-        """
         field_types = [vtable.field_types[field_name] for field_name, _, _, _ in vtable.fields]
         instance_type = ir.LiteralStructType(field_types)
         instance_type.names = [field_name for field_name, _, _, _ in vtable.fields]
@@ -5873,20 +4857,6 @@ class StructTypeHandler:
     @staticmethod
     def pack_field_value(builder: 'ir.IRBuilder', instance: 'ir.Value', field_value: 'ir.Value',
                         bit_offset: int, bit_width: int, total_bits: int) -> 'ir.Value':
-        """
-        Pack a field value into the struct instance at the correct bit offset.
-        
-        Args:
-            builder: LLVM IR builder
-            instance: Current struct instance value
-            field_value: Value to pack into field
-            bit_offset: Bit offset of the field
-            bit_width: Bit width of the field
-            total_bits: Total bits in the struct
-            
-        Returns:
-            Updated instance value
-        """
         if isinstance(instance.type, ir.IntType):
             # Integer type - use bit operations
             instance_type = instance.type
@@ -5963,16 +4933,6 @@ class StructTypeHandler:
     
     @staticmethod
     def create_zeroed_instance(struct_type: 'ir.Type', vtable: 'StructVTable') -> 'ir.Constant':
-        """
-        Create a zeroed instance of a struct.
-        
-        Args:
-            struct_type: LLVM struct type
-            vtable: StructVTable with field information
-            
-        Returns:
-            Zero-initialized struct constant
-        """
         if isinstance(struct_type, ir.IntType):
             return ir.Constant(struct_type, 0)
         elif isinstance(struct_type, ir.LiteralStructType):
@@ -5995,19 +4955,6 @@ class StructTypeHandler:
     @staticmethod
     def pack_struct_literal(builder: 'ir.IRBuilder', module: 'ir.Module', struct_type: str,
                            field_values: dict, positional_values: list) -> 'ir.Value':
-        """
-        Pack field values into a struct literal.
-        
-        Args:
-            builder: LLVM IR builder
-            module: LLVM module
-            struct_type: Name of the struct type
-            field_values: Dictionary of field_name -> Expression
-            positional_values: List of positional Expression values
-            
-        Returns:
-            Packed struct instance
-        """
         # Get struct vtable
         if not hasattr(module, '_struct_vtables'):
             raise ValueError(f"Struct '{struct_type}' not defined")
@@ -6083,20 +5030,6 @@ class StructTypeHandler:
     @staticmethod
     def extract_field_value(builder: 'ir.IRBuilder', module: 'ir.Module', instance: 'ir.Value',
                            struct_name: str, field_name: str, vtable: 'StructVTable') -> 'ir.Value':
-        """
-        Extract a field value from a struct instance.
-        
-        Args:
-            builder: LLVM IR builder
-            module: LLVM module
-            instance: Struct instance value
-            struct_name: Name of the struct type
-            field_name: Name of the field to extract
-            vtable: StructVTable with field information
-            
-        Returns:
-            Extracted field value
-        """
         field_info = next((f for f in vtable.fields if f[0] == field_name), None)
         if not field_info:
             raise ValueError(f"Field '{field_name}' not found in struct '{struct_name}'")
@@ -6162,21 +5095,6 @@ class StructTypeHandler:
     def assign_field_value(builder: 'ir.IRBuilder', module: 'ir.Module', instance_ptr: 'ir.Value',
                           struct_name: str, field_name: str, new_value: 'ir.Value',
                           vtable: 'StructVTable') -> 'ir.Value':
-        """
-        Assign a value to a struct field.
-        
-        Args:
-            builder: LLVM IR builder
-            module: LLVM module
-            instance_ptr: Pointer to struct instance
-            struct_name: Name of the struct type
-            field_name: Name of the field to assign
-            new_value: New value to assign
-            vtable: StructVTable with field information
-            
-        Returns:
-            Updated instance value
-        """
         # Load current value
         instance = builder.load(instance_ptr)
         
@@ -6236,18 +5154,6 @@ class StructTypeHandler:
     @staticmethod
     def perform_struct_recast(builder: 'ir.IRBuilder', module: 'ir.Module',
                              target_type: str, source_value: 'ir.Value') -> 'ir.Value':
-        """
-        Perform zero-cost struct reinterpretation cast.
-        
-        Args:
-            builder: LLVM IR builder
-            module: LLVM module
-            target_type: Name of target struct type
-            source_value: Source value to recast
-            
-        Returns:
-            Recasted value
-        """
         # Get target struct vtable
         if not hasattr(module, '_struct_vtables'):
             raise ValueError(f"Struct '{target_type}' not defined")
@@ -6352,7 +5258,7 @@ class SizeOfTypeHandler:
                 return module._struct_vtables[target.name].total_bits
 
             # Preferred path: type system info
-            ts = IdentifierTypeHandler.get_type_spec(target.name, builder, module)
+            ts = module.symbol_table.get_type_spec(target.name)
             if ts is not None:
                 llvm_type = ts.get_llvm_type_with_array(module)
                 return SizeOfTypeHandler.bits_from_llvm_type(llvm_type, module)
@@ -6397,7 +5303,7 @@ class AlignOfTypeHandler:
             return (type_spec.bit_width + 7) // 8
 
         # Default: platform preferred alignment for the LLVM type
-        llvm_type = type_spec.get_llvm_type(module)
+        llvm_type = TypeSystem.get_llvm_type(type_spec, module)
         return module.data_layout.preferred_alignment(llvm_type)
 
     @staticmethod

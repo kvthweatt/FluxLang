@@ -1223,8 +1223,7 @@ class FluxParser:
                 t.is_pointer = True
                 t.pointer_depth = (t.pointer_depth or 0) + pointer_depth
 
-            import sys
-            print(f"[TYPE_SPEC DEBUG] Resolved alias: custom_typename={custom_typename}, is_array={t.is_array}, array_size={t.array_size}, is_pointer={t.is_pointer}, pointer_depth={t.pointer_depth}", file=sys.stderr)
+            #print(f"[TYPE_SPEC DEBUG] Resolved alias: custom_typename={custom_typename}, is_array={t.is_array}, array_size={t.array_size}, is_pointer={t.is_pointer}, pointer_depth={t.pointer_depth}", file=sys.stderr)
             return t
 
         # No alias: return what we parsed normally
@@ -1246,7 +1245,6 @@ class FluxParser:
             storage_class=storage_class
         )
 
-        import sys
         print(f"[TYPE_SPEC DEBUG] Non-alias: custom_typename={custom_typename}, is_array={is_array}, array_size={array_size}, is_pointer={pointer_depth > 0}, pointer_depth={pointer_depth}", file=sys.stderr)
     
     def base_type(self) -> Union[DataType, List]:
@@ -1928,10 +1926,10 @@ class FluxParser:
                 return Assignment(expr, value)
             else:
                 return Assignment(expr, value)
-        # NOTE: MUST ADD BITWISE ASSIGNMENTS
         elif self.expect(TokenType.PLUS_ASSIGN, TokenType.MINUS_ASSIGN, TokenType.MULTIPLY_ASSIGN, 
                          TokenType.DIVIDE_ASSIGN, TokenType.MODULO_ASSIGN, TokenType.POWER_ASSIGN,
-                         TokenType.XOR_ASSIGN, TokenType.BITSHIFT_LEFT_ASSIGN, TokenType.BITSHIFT_RIGHT_ASSIGN):
+                         TokenType.XOR_ASSIGN, TokenType.BITXOR_ASSIGN, TokenType.BITSHIFT_LEFT_ASSIGN, TokenType.BITSHIFT_RIGHT_ASSIGN,
+                         TokenType.BITAND_ASSIGN, TokenType.BITOR_ASSIGN, TokenType.BITNAND_ASSIGN, TokenType.BITNOR_ASSIGN):
             # Handle compound assignments
             op_token = self.current_token.type
             self.advance()
@@ -2123,8 +2121,11 @@ class FluxParser:
         """
         expr = self.equality_expression()
         
-        while self.expect(TokenType.BITAND_OP):
-            operator = Operator.BITAND
+        while self.expect(TokenType.BITAND_OP, TokenType.BITNAND_OP):
+            if self.current_token.type == TokenType.BITAND_OP:
+                operator = Operator.BITAND
+            else:  # BITNAND_OP
+                operator = Operator.BITNAND
             self.advance()
             right = self.equality_expression()
             expr = BinaryOp(expr, operator, right)
@@ -2274,6 +2275,11 @@ class FluxParser:
             return UnaryOp(operator, operand)
         elif self.expect(TokenType.NOT):
             operator = Operator.NOT
+            self.advance()
+            operand = self.unary_expression()
+            return UnaryOp(operator, operand)
+        elif self.expect(TokenType.BITNOT_OP):
+            operator = Operator.BITNOT
             self.advance()
             operand = self.unary_expression()
             return UnaryOp(operator, operand)

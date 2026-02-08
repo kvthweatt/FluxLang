@@ -38,88 +38,84 @@ class TokenType(Enum):
     IDENTIFIER = auto()
     
     # Keywords
-    ALIGNOF = auto()
-    AND = auto()
-    AS = auto()
-    ASM = auto()
-    ASM_BLOCK = auto()
-    AT = auto()
-    ASSERT = auto()
-    AUTO = auto()
-    BREAK = auto()
-    BOOL_KW = auto()
-    CASE = auto()
-    CATCH = auto()
-    COMPT = auto()
-    CONST = auto()
-    CONTINUE = auto()
-    CONTRACT = auto()
-    DATA = auto()
-    DEF = auto()
-    DEFAULT = auto()
-    DO = auto()
-    ELIF = auto()
-    ELSE = auto()
-    ENDIANOF = auto()
-    ENUM = auto()
-    EXTERN = auto()
-    FALSE = auto()
-    FLOAT_KW = auto()
-    FOR = auto()
-    FROM = auto()
-    GLOBAL = auto()
-    HEAP = auto()
-    IF = auto()
-    IN = auto()
-    IS = auto()
-    SINT = auto()  # int
-    UINT = auto()  # uint
-    LOCAL = auto()
-    NAMESPACE = auto()
-    NOT = auto()
-    NO_INIT = auto()
-    OBJECT = auto()
-    OR = auto()
-    PRIVATE = auto()
-    PUBLIC = auto()
-    REGISTER = auto()
-    RETURN = auto()
-    SIGNED = auto()
-    SIZEOF = auto()
-    STACK = auto()
-    STRUCT = auto()
-    SWITCH = auto()
-    THIS = auto()
-    THROW = auto()
-    TRUE = auto()
-    TRY = auto()
-    TYPEOF = auto()
-    UNION = auto()
-    UNSIGNED = auto()
-    USING = auto()
-    VOID = auto()
-    VOLATILE = auto()
-    WHILE = auto()
-    XOR = auto()
+    ALIGNOF = auto()      # builtin: alignof()
+    ASSERT = auto()       # builtin: assert()
+    ENDIANOF = auto()     # builtin: endianof()
+    SIZEOF = auto()       # builtin: sizeof()
+    TYPEOF = auto()       # builtin: typeof()
+    AND = auto()          # keyword: and
+    AS = auto()           # "        
+    ASM = auto()          # "        asm
+    ASM_BLOCK = auto()    # {inline assembly code}
+    AUTO = auto()         # "        auto
+    BREAK = auto()        # "        break
+    BOOL_KW = auto()      # "        bool
+    CASE = auto()         # "        case
+    CATCH = auto()        # "        catch
+    COMPT = auto()        # "        compt
+    CONST = auto()        # "        const
+    CONTINUE = auto()     # "        continue
+    CONTRACT = auto()     # "        contract
+    DATA = auto()         # "        data
+    DEF = auto()          # "        def
+    DEFAULT = auto()      # "        default
+    DO = auto()           # "        do
+    ELIF = auto()         # "        elif | else if
+    ELSE = auto()         # "        else
+    ENUM = auto()         # "        enum
+    EXTERN = auto()       # "        extern
+    FALSE = auto()        # "        false
+    FLOAT_KW = auto()     # "        float
+    FOR = auto()          # "        for
+    FROM = auto()         # "        from
+    GLOBAL = auto()       # "        global
+    HEAP = auto()         # "        heap
+    IF = auto()           # "        if
+    IN = auto()           # "        in
+    IS = auto()           # "        is
+    SINT = auto()         # "        int
+    UINT = auto()         # "        uint
+    LOCAL = auto()        # "        local
+    NAMESPACE = auto()    # "        namespace
+    NOT = auto()          # "        not            Represents operator: !
+    NO_INIT = auto()      # "        noinit
+    OBJECT = auto()       # "        object
+    OR = auto()           # "        or             Represents operator: |
+    PRIVATE = auto()      # "        private
+    PUBLIC = auto()       # "        public
+    REGISTER = auto()     # "        register
+    RETURN = auto()       # "        return
+    SIGNED = auto()       # "        signed
+    STACK = auto()        # "        stack
+    STRUCT = auto()       # "        struct
+    SWITCH = auto()       # "        switch
+    THIS = auto()         # "        this
+    THROW = auto()        # "        throw
+    TRUE = auto()         # "        true
+    TRY = auto()          # "        try
+    UNION = auto()        # "        union
+    UNSIGNED = auto()     # "        unsigned
+    USING = auto()        # "        using
+    VOID = auto()         # "        void
+    VOLATILE = auto()     # "        volatile
+    WHILE = auto()        # "        while
+    XOR = auto()          # "        xor            Represents operator: ^^
     
-    # Operators
+    # Regular Operators
     PLUS = auto()           # +
     MINUS = auto()          # -
+    INCREMENT = auto()      # ++
+    DECREMENT = auto()      # --
     MULTIPLY = auto()       # *
     DIVIDE = auto()         # /
     MODULO = auto()         # %
     POWER = auto()          # ^
-    XOR_OP = auto()         # ^^
-    INCREMENT = auto()      # ++
-    DECREMENT = auto()      # --
+    # Logical
     LOGICAL_AND = auto()    # &
     LOGICAL_OR = auto()     # |
-
-    BITAND_OP = auto()      # `&
-    BITOR_OP = auto()       # `|
-    BITNAND_OP = auto()     # `!&
-    BITNOR_OP = auto()      # `!|
-    
+    NAND_OP = auto()        # !&
+    NOR_OP = auto()         # !|
+    XOR_OP = auto()         # ^^
     # Comparison
     EQUAL = auto()          # ==
     NOT_EQUAL = auto()      # !=
@@ -127,14 +123,6 @@ class TokenType(Enum):
     LESS_EQUAL = auto()     # <=
     GREATER_THAN = auto()   # >
     GREATER_EQUAL = auto()  # >=
-
-    BITNAND_OP_EQ = auto(), # `!&=
-    BITNOR_OP_EQ = auto(),  # `!|=
-    
-    # Shift
-    BITSHIFT_LEFT = auto()     # <<
-    BITSHIFT_RIGHT = auto()    # >>
-    
     # Assignment
     ASSIGN = auto()         # =
     PLUS_ASSIGN = auto()    # +=
@@ -142,10 +130,29 @@ class TokenType(Enum):
     MULTIPLY_ASSIGN = auto()# *=
     DIVIDE_ASSIGN = auto()  # /=
     MODULO_ASSIGN = auto()  # %=
-    AND_ASSIGN = auto()     # &=
-    OR_ASSIGN = auto()      # |=
     POWER_ASSIGN = auto()   # ^=
-    XOR_ASSIGN = auto()     # ^^=
+    # Bitwise Operators
+    # Logical
+    BITNOT_OP = auto()      # `!
+    BITAND_OP = auto()      # `&
+    BITOR_OP = auto()       # `|
+    BITNAND_OP = auto()     # `!&
+    BITNOR_OP = auto()      # `!|
+    BITXOR_OP = auto()      # `^^
+    # Assignment
+    AND_ASSIGN = auto()      # &=
+    OR_ASSIGN = auto()       # |=
+    XOR_ASSIGN = auto()      # ^^=
+    BITAND_ASSIGN = auto()   # `&=
+    BITOR_ASSIGN = auto()    # `|=
+    BITNAND_ASSIGN = auto(), # `!&=
+    BITNOR_ASSIGN = auto(),  # `!|=
+    BITXOR_ASSIGN = auto(),  # `^^=
+    
+    # Shift
+    BITSHIFT_LEFT = auto()     # <<
+    BITSHIFT_RIGHT = auto()    # >>
+    # Assignment
     BITSHIFT_LEFT_ASSIGN = auto()  # <<=
     BITSHIFT_RIGHT_ASSIGN = auto() # >>=
     
@@ -153,14 +160,14 @@ class TokenType(Enum):
     ADDRESS_OF = auto()     # @
     RANGE = auto()          # ..
     SCOPE = auto()          # ::
-    QUESTION = auto()       # ?     ?: = Parse as ternary
+    QUESTION = auto()       # ?     a?b:c = Parse as ternary
     COLON = auto()          # :
-    TIE = auto()            # ~ Ownership/move semantics
+    TIE = auto()            # ~             Ownership/move semantics
+    LAMBDA_ARROW = auto()   # <:-
 
     # Directionals
     RETURN_ARROW = auto()   # ->
     CHAIN_ARROW = auto()    # <-
-    LAMBDA_ARROW = auto()   # <:-    { a / b } <:- (type a: expr, type b: expr)
     RECURSE_ARROW = auto()  # <~
     NULL_COALESCE = auto()  # ??
     NO_MANGLE = auto()      # !! tell the compiler not to mangle this name at all for any reason.
@@ -655,9 +662,18 @@ class FluxLexer:
                 continue
 
             # Quad-character tokens dictionary - Watch out!
-            quadruple_char_tokens = {
-                '`!&=': TokenType.BITNAND_OP_EQ,
-                '`!|=': TokenType.BITNOR_OP_EQ
+            quadruple_binary_tokens = {
+                '`!&=': TokenType.BITNAND_ASSIGN,
+                '`!|=': TokenType.BITNOR_ASSIGN,
+                '`^^=': TokenType.BITXOR_ASSIGN
+            }
+
+            triple_binary_tokens = {
+                '`!&': TokenType.BITNAND_OP,
+                '`!|': TokenType.BITNOR_OP,
+                '`&=': TokenType.BITAND_ASSIGN,
+                '`|=': TokenType.BITOR_ASSIGN,
+                '`^^': TokenType.BITXOR_OP
             }
             
             # Triple-character tokens dictionary
@@ -668,16 +684,17 @@ class FluxLexer:
                 '{}*': TokenType.FUNCTION_POINTER,
                 '(@)': TokenType.ADDRESS_CAST,
                 '<:-': TokenType.LAMBDA_ARROW,
-                '`!&': TokenType.BITNAND_OP,
-                '`!|': TokenType.BITNOR_OP
+            } | triple_binary_tokens
+
+            double_binary_tokens = {
+                '`&': TokenType.BITAND_OP,
+                '`|': TokenType.BITOR_OP
             }
             
             # Double-character tokens dictionary  
             double_char_tokens = {
                 '==': TokenType.EQUAL,
                 '!=': TokenType.NOT_EQUAL,
-                '!!': TokenType.NO_MANGLE,
-                '??': TokenType.NULL_COALESCE,
                 '<=': TokenType.LESS_EQUAL,
                 '>=': TokenType.GREATER_EQUAL,
                 '<<': TokenType.BITSHIFT_LEFT,
@@ -692,15 +709,19 @@ class FluxLexer:
                 '^=': TokenType.POWER_ASSIGN,
                 '&=': TokenType.AND_ASSIGN,
                 '|=': TokenType.OR_ASSIGN,
+                '!&': TokenType.NAND_OP,
+                '!|': TokenType.NOR_OP,
+                '&=': TokenType.AND_ASSIGN,
+                '|=': TokenType.OR_ASSIGN,
                 '^^': TokenType.XOR_OP,
+                '!!': TokenType.NO_MANGLE,
+                '??': TokenType.NULL_COALESCE,
                 '->': TokenType.RETURN_ARROW,
                 '<-': TokenType.CHAIN_ARROW,
                 '<~': TokenType.RECURSE_ARROW,
                 '..': TokenType.RANGE,
-                '::': TokenType.SCOPE,
-                '`&': TokenType.BITAND_OP,
-                '`|': TokenType.BITOR_OP
-            }
+                '::': TokenType.SCOPE
+            } | double_binary_tokens
             
             # Single-character tokens dictionary
             single_char_tokens = {
@@ -732,6 +753,13 @@ class FluxLexer:
             }
             
             # Cascading check - longest first
+            # Check for 4-char tokens
+            quad_char = char + (self.peek_char() or '') + (self.peek_char(2) or '') + (self.peek_char(3) or '')
+            if quad_char in quadruple_binary_tokens:
+                tokens.append(Token(quadruple_binary_tokens[quad_char], quad_char, start_pos[0], start_pos[1]))
+                self.advance(count=3)
+                continue
+
             # Check for 3-char tokens
             triple_char = char + (self.peek_char() or '') + (self.peek_char(2) or '')
             if triple_char in triple_char_tokens:

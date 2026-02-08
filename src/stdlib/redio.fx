@@ -393,12 +393,12 @@ namespace standard
                 print(byte x) -> void,
                 print(i8 x) -> void,
                 print(i16 x) -> void,
+                print(u16 x) -> void,
                 print(int x) -> void,
                 print(i32 x) -> void,
-                print(i64 x) -> void,
-                print(u16 x) -> void,
-
+                print(uint x) -> void,
                 print(u32 x) -> void,
+                print(i64 x) -> void,
                 print(u64 x) -> void,
                 print(float x) -> void,
                 print(float x, int y) -> void;
@@ -407,14 +407,19 @@ namespace standard
             {
                 if (b) { print("True\0"); } else { print("False\0"); };
             };
-
             def print(byte s) -> void
             {
                 byte[2] x = [s, 0];
                 print(x);
                 return;
             };
-
+            def print(int x) -> void
+            {
+                byte[21] buf;
+                i32str(x,buf);
+                print(buf);
+                return;
+            };
             def print(i32 x) -> void
             {
                 byte[21] buf;
@@ -422,7 +427,6 @@ namespace standard
                 print(buf);
                 return;
             };
-
             def print(u32 x) -> void
             {
                 byte[21] buf;
@@ -430,21 +434,20 @@ namespace standard
                 print(buf);
                 return;
             };
-
             def print(i64 x) -> void
             {
                 byte[21] buf;
                 i64str(x,buf);
                 print(buf);
                 return;
-            };///
+            };
             def print(u64 x) -> void
             {
                 byte[21] buf;
                 u64str(x,buf);
                 print(buf);
                 return;
-            };///
+            };
             def print(float x) -> void
             {
                 byte[256] buffer;

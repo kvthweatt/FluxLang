@@ -7,6 +7,12 @@
 
 #ifdef FLUX_STANDARD_FFI_FIO
 
+namespace standard
+{
+    namespace io
+    {
+        namespace file
+        {
             extern
             {
                 // FILE* fopen(const char* filename, const char* mode)
@@ -21,13 +27,6 @@
                     feof(void*) -> int,
                     ferror(void*) -> int;
             };
-
-namespace standard
-{
-    namespace io
-    {
-        namespace file
-        {
             // C stdio.h FFI declarations
             
             // Mode constants (as string literals you'll use)

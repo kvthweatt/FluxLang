@@ -20,13 +20,6 @@ class FXPreprocessor:
         # Step 2: Build combined source
         combined_source = '\n'.join(self.output_lines)
         
-        # Step 3: Remove all empty lines
-        lines = combined_source.split('\n')
-        cleaned_lines = []
-        for line in lines:
-            if line.strip():  # Only keep non-empty lines
-                cleaned_lines.append(line)
-        combined_source = '\n'.join(cleaned_lines)
         
         # Step 4: Keep replacing macros until no more replacements occur
         replaced = True

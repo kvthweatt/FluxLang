@@ -14,7 +14,7 @@ from typing import List, Any, Optional, Union, Dict, Tuple, ClassVar
 from enum import Enum
 from llvmlite import ir
 from pathlib import Path
-import os
+import os, sys
 
 from ftypesys import *
 
@@ -34,25 +34,22 @@ class Literal(ASTNode):
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         #print(f"[DEBUG Literal.codegen] value={self.value}, type={self.type}")
         if self.type in (DataType.SINT, DataType.UINT):
-            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             normalized_val = LiteralTypeHandler.normalize_int_value(self.value, self.type, llvm_type.width)
             llvm_val = ir.Constant(llvm_type, normalized_val)
-            
-            # Attach type metadata for signedness tracking
-            #print(f"[DEBUG Literal.codegen] Created llvm_val type={llvm_val.type}, width={llvm_val.type.width if hasattr(llvm_val.type, 'width') else 'N/A'}")
-            return attach_type_metadata(llvm_val, base_type=self.type)
+            return IdentifierTypeHandler.attach_type_metadata(llvm_val, self.type)
         elif self.type == DataType.FLOAT:
-            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             return ir.Constant(llvm_type, float(self.value))
         elif self.type == DataType.BOOL:
-            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             return ir.Constant(llvm_type, bool(self.value))
         elif self.type == DataType.CHAR:
-            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             char_val = LiteralTypeHandler.normalize_char_value(self.value)
             return ir.Constant(llvm_type, char_val)
         elif self.type == DataType.VOID:
-            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             return ir.Constant(llvm_type, 0)
         elif self.type == DataType.DATA:
             # Handle array literals
@@ -63,7 +60,7 @@ class Literal(ASTNode):
             elif isinstance(self.value, dict):
                 return self._handle_struct_literal(builder, module)
             # Handle other DATA types using LiteralTypeHandler
-            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             if isinstance(llvm_type, ir.IntType):
                 return ir.Constant(llvm_type, int(self.value) if isinstance(self.value, str) else self.value)
             elif isinstance(llvm_type, ir.FloatType):
@@ -71,7 +68,7 @@ class Literal(ASTNode):
             raise ValueError(f"Unsupported DATA literal: {self.value}")
         else:
             # Handle custom types using LiteralTypeHandler
-            llvm_type = LiteralTypeHandler.get_llvm_type(self.type, self.value, module)
+            llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             if isinstance(llvm_type, ir.IntType):
                 return ir.Constant(llvm_type, int(self.value) if isinstance(self.value, str) else self.value)
             elif isinstance(llvm_type, ir.FloatType):
@@ -211,7 +208,7 @@ class Identifier(Expression):
             ptr = module.symbol_table.get_llvm_value(self.name)
             
             # Get type information if available
-            type_spec = IdentifierTypeHandler.get_type_spec(self.name, builder, module)
+            type_spec = TypeResolver.resolve_type_spec(self.name, module)
 
             # Check validity (use after tie)
             IdentifierTypeHandler.check_validity(self.name, builder)
@@ -245,7 +242,7 @@ class Identifier(Expression):
         # Check for global variables
         if self.name in module.globals:
             gvar = module.globals[self.name]
-            type_spec = IdentifierTypeHandler.get_type_spec(self.name, builder, module)
+            type_spec = module.symbol_table.get_type_spec(self.name)
             
             # For arrays and structs, return the pointer directly (don't load)
             if IdentifierTypeHandler.should_return_pointer(gvar, type_spec):
@@ -269,7 +266,7 @@ class Identifier(Expression):
             # Check in global variables with mangled name
             if mangled_name in module.globals:
                 gvar = module.globals[mangled_name]
-                type_spec = IdentifierTypeHandler.get_type_spec(mangled_name, builder, module)
+                type_spec = module.symbol_table.get_type_spec(mangled_name)
                 # For arrays and structs, return the pointer directly (don't load)
                 if IdentifierTypeHandler.should_return_pointer(gvar, type_spec):
                     return IdentifierTypeHandler.attach_type_metadata(gvar, type_spec)
@@ -916,8 +913,13 @@ class BinaryOp(Expression):
         # Arithmetic
         # --------------------------------------------------
 
-        if self.operator in (Operator.ADD, Operator.SUB, Operator.MUL, Operator.DIV, Operator.MOD):
+        if self.operator in (Operator.ADD, Operator.SUB, Operator.MUL, Operator.DIV, Operator.MOD, Operator.POWER):
             if isinstance(lhs.type, ir.FloatType):
+                if self.operator == Operator.POWER:
+                    # Use LLVM pow intrinsic for floating point power
+                    pow_fn_type = ir.FunctionType(lhs.type, [lhs.type, lhs.type])
+                    pow_fn = ir.Function(module, pow_fn_type, name="llvm.pow.f64" if lhs.type == ir.DoubleType() else "llvm.pow.f32")
+                    return builder.call(pow_fn, [lhs, rhs])
                 return {
                     Operator.ADD: builder.fadd,
                     Operator.SUB: builder.fsub,
@@ -934,19 +936,36 @@ class BinaryOp(Expression):
                 if lhs.type.width != rhs.type.width:
                     lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=unsigned, promote=True)
 
-            result = {
-                Operator.ADD: builder.add,
-                Operator.SUB: builder.sub,
-                Operator.MUL: builder.mul,
-                Operator.DIV: builder.udiv if unsigned else builder.sdiv,
-                Operator.MOD: builder.urem if unsigned else builder.srem,
-            }[self.operator](lhs, rhs)
+            if self.operator == Operator.POWER:
+                # Use LLVM powi intrinsic for integer exponent
+                # Convert base to double, use powi, then convert back
+                base_as_float = builder.sitofp(lhs, ir.DoubleType()) if not unsigned else builder.uitofp(lhs, ir.DoubleType())
+                powi_fn_type = ir.FunctionType(ir.DoubleType(), [ir.DoubleType(), ir.IntType(32)])
+                powi_fn = ir.Function(module, powi_fn_type, name="llvm.powi.f64.i32")
+                # Cast exponent to i32 if needed
+                if rhs.type.width > 32:
+                    exp_i32 = builder.trunc(rhs, ir.IntType(32))
+                elif rhs.type.width < 32:
+                    exp_i32 = builder.sext(rhs, ir.IntType(32))
+                else:
+                    exp_i32 = rhs
+                result_float = builder.call(powi_fn, [base_as_float, exp_i32])
+                # Convert back to integer
+                result = builder.fptoui(result_float, lhs.type) if unsigned else builder.fptosi(result_float, lhs.type)
+            else:
+                result = {
+                    Operator.ADD: builder.add,
+                    Operator.SUB: builder.sub,
+                    Operator.MUL: builder.mul,
+                    Operator.DIV: builder.udiv if unsigned else builder.sdiv,
+                    Operator.MOD: builder.urem if unsigned else builder.srem,
+                }[self.operator](lhs, rhs)
             
             # Preserve type metadata (signedness) to result
             if unsigned:
-                return attach_type_metadata(result, base_type=DataType.UINT)
+                return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT)
             else:
-                return attach_type_metadata(result, base_type=DataType.SINT)
+                return IdentifierTypeHandler.attach_type_metadata(result, DataType.SINT)
 
         # --------------------------------------------------
         # Comparisons
@@ -988,7 +1007,7 @@ class BinaryOp(Expression):
         # Bitwise
         # --------------------------------------------------
 
-        if self.operator in (Operator.BITAND, Operator.BITOR):
+        if self.operator in (Operator.BITAND, Operator.BITOR, Operator.BITXOR):
             lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=True)
             result = {
                 Operator.AND: builder.and_,
@@ -996,10 +1015,11 @@ class BinaryOp(Expression):
                 Operator.OR: builder.or_,
                 Operator.BITOR: builder.or_,
                 Operator.XOR: builder.xor,
+                Operator.BITXOR: builder.xor,
             }[self.operator](lhs, rhs)
             # Bitwise operations preserve signedness from operands
             unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
-            return attach_type_metadata(result, base_type=DataType.UINT if unsigned else DataType.SINT)
+            return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
         if self.operator in (Operator.AND, Operator.OR, Operator.XOR):
             lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=True)
@@ -1012,7 +1032,7 @@ class BinaryOp(Expression):
             }[self.operator](lhs, rhs)
             # Bitwise operations preserve signedness from operands
             unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
-            return attach_type_metadata(result, base_type=DataType.UINT if unsigned else DataType.SINT)
+            return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
         # --------------------------------------------------
         # Shifts
@@ -1035,7 +1055,7 @@ class BinaryOp(Expression):
                 result = builder.shl(lhs, rhs)
                 # Shifts preserve signedness of left operand
                 unsigned = ctx.is_unsigned(lhs)
-                return attach_type_metadata(result, base_type=DataType.UINT if unsigned else DataType.SINT)
+                return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
             result = (
                 builder.lshr(lhs, rhs)
@@ -1044,7 +1064,7 @@ class BinaryOp(Expression):
             )
             # Shifts preserve signedness of left operand
             unsigned = ctx.is_unsigned(lhs)
-            return attach_type_metadata(result, base_type=DataType.UINT if unsigned else DataType.SINT)
+            return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
         # --------------------------------------------------
         # Boolean composites
@@ -1055,6 +1075,17 @@ class BinaryOp(Expression):
 
         if self.operator is Operator.NAND:
             return builder.not_(builder.and_(lhs, rhs))
+
+        if self.operator is Operator.BITNAND:
+            result = builder.not_(builder.and_(lhs, rhs))
+            unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
+            return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
+
+        if self.operator is Operator.BITNOR:
+            result = builder.not_(builder.or_(lhs, rhs))
+            unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
+            return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
+
 
         raise ValueError(f"Unsupported operator: {self.operator}")
 
@@ -2147,7 +2178,6 @@ class FunctionCall(Expression):
             
             # DEFENSIVE CHECK: If function is a string, look it up in module.globals
             if isinstance(func, str):
-                import sys
                 print(f"[WARNING] Overload metadata contains string '{func}' instead of function object", file=sys.stderr)
                 print(f"[WARNING] This indicates a bug in overload registration", file=sys.stderr)
                 if func in module.globals:
@@ -2169,6 +2199,15 @@ class FunctionCall(Expression):
         Generate the actual function call with argument processing.
         Uses FunctionTypeHandler for argument type conversion.
         """
+        # Handle deferred type resolution
+        if isinstance(func, tuple) and func[0] == '__NEEDS_TYPE_RESOLUTION__':
+            _, base_name, candidates = func
+            # NOW generate argument values for type resolution
+            arg_vals = [arg.codegen(builder, module) for arg in self.arguments]
+            # Resolve using types
+            func = FunctionTypeHandler.resolve_overload_by_types(module, base_name, arg_vals)
+            if func is None:
+                raise ValueError(f"Could not resolve overload for {base_name} with argument types {[str(v.type) for v in arg_vals]}")
         # Check if this is a method call (has dot in name)
         is_method_call = '.' in self.name
         parameter_offset = 1 if is_method_call else 0  # Account for implicit 'this' parameter
@@ -2396,7 +2435,7 @@ class MemberAccess(Expression):
                             # Member is an array, but we don't load it here (returned pointer above)
                             # This shouldn't happen
                             pass
-                        return attach_type_metadata(loaded, type_spec=type_spec)
+                        return IdentifierTypeHandler.attach_type_metadata(loaded, type_spec=type_spec)
                 
                 # Fallback to original method
                 return attach_type_metadata_from_llvm_type(loaded, loaded.type, module)
@@ -3077,10 +3116,9 @@ class VariableDeclaration(ASTNode):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Resolve type (with automatic array size inference if needed)
-        resolved_type_spec = self._resolve_type_spec(module)
+        resolved_type_spec = VariableTypeHandler.infer_array_size(self.type_spec, self.initial_value, module)
         llvm_type = resolved_type_spec.get_llvm_type_with_array(module)
-        import sys
-        print(f"[VAR DECL] name={self.name}, type_spec={resolved_type_spec}, llvm_type={llvm_type}", file=sys.stderr)
+        #print(f"[VAR DECL] name={self.name}, type_spec={resolved_type_spec}, llvm_type={llvm_type}", file=sys.stderr)
         
         # Check if this is global scope
         is_global_scope = (
@@ -3095,10 +3133,6 @@ class VariableDeclaration(ASTNode):
         
         # Handle local variables
         return self._codegen_local(builder, module, llvm_type, resolved_type_spec)
-    
-    def _resolve_type_spec(self, module: ir.Module) -> TypeSystem:
-        """Resolve type spec with automatic array size inference for string literals."""
-        return VariableTypeHandler.resolve_type_spec(self.type_spec, self.initial_value, module)
     
     def _codegen_global(self, module: ir.Module, llvm_type: ir.Type, 
                        resolved_type_spec: TypeSystem) -> ir.Value:
