@@ -134,7 +134,7 @@ class TestRunner:
                         return False, "Executable not generated", elapsed
             else:
                 # Compilation failed
-                print(f"FAILED ({elapsed:.2f}s)")
+                print(f"\nFAILED ({elapsed:.2f}s)")
                 if self.verbose:
                     # Clean up the output by removing/replacing problematic characters
                     clean_stderr = result.stderr.encode('ascii', 'replace').decode('ascii')

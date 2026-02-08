@@ -37,7 +37,7 @@ class Literal(ASTNode):
             llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             normalized_val = LiteralTypeHandler.normalize_int_value(self.value, self.type, llvm_type.width)
             llvm_val = ir.Constant(llvm_type, normalized_val)
-            return IdentifierTypeHandler.attach_type_metadata(llvm_val, self.type)
+            return TypeSystem.attach_type_metadata(llvm_val, self.type)
         elif self.type == DataType.FLOAT:
             llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             return ir.Constant(llvm_type, float(self.value))
@@ -209,17 +209,18 @@ class Identifier(Expression):
             
             # Get type information if available
             type_spec = TypeResolver.resolve_type_spec(self.name, module)
+            print("TYPE SPEC FROM TYPE RESOLVER:",type_spec)
 
             # Check validity (use after tie)
             IdentifierTypeHandler.check_validity(self.name, builder)
 
             # Handle special case for 'this' pointer
             if self.name == "this":
-                return IdentifierTypeHandler.attach_type_metadata(ptr, type_spec)
+                return TypeSystem.attach_type_metadata(ptr, type_spec)
 
             # For arrays and structs, return the pointer directly (don't load)
             if IdentifierTypeHandler.should_return_pointer(ptr, type_spec):
-                return IdentifierTypeHandler.attach_type_metadata(ptr, type_spec)
+                return TypeSystem.attach_type_metadata(ptr, type_spec)
             
             # Load the value if it's a non-array, non-struct pointer type
             elif isinstance(ptr.type, ir.PointerType):
@@ -237,7 +238,7 @@ class Identifier(Expression):
                 return ret_val
             
             # For non-pointer types, attach metadata and return
-            return IdentifierTypeHandler.attach_type_metadata(ptr, type_spec)
+            return TypeSystem.attach_type_metadata(ptr, type_spec)
         
         # Check for global variables
         if self.name in module.globals:
@@ -246,15 +247,15 @@ class Identifier(Expression):
             
             # For arrays and structs, return the pointer directly (don't load)
             if IdentifierTypeHandler.should_return_pointer(gvar, type_spec):
-                return IdentifierTypeHandler.attach_type_metadata(gvar, type_spec)
+                return TypeSystem.attach_type_metadata(gvar, type_spec)
             
             # Load the value if it's a non-array, non-struct pointer type
             elif isinstance(gvar.type, ir.PointerType):
                 ret_val = builder.load(gvar, name=self.name)
                 if IdentifierTypeHandler.is_volatile(self.name, builder):
                     ret_val.volatile = True
-                return IdentifierTypeHandler.attach_type_metadata(ret_val, type_spec)
-            return IdentifierTypeHandler.attach_type_metadata(gvar, type_spec)
+                return TypeSystem.attach_type_metadata(ret_val, type_spec)
+            return TypeSystem.attach_type_metadata(gvar, type_spec)
         
         # Check if this is a custom type
         if IdentifierTypeHandler.is_type_alias(self.name, module):
@@ -269,15 +270,15 @@ class Identifier(Expression):
                 type_spec = module.symbol_table.get_type_spec(mangled_name)
                 # For arrays and structs, return the pointer directly (don't load)
                 if IdentifierTypeHandler.should_return_pointer(gvar, type_spec):
-                    return IdentifierTypeHandler.attach_type_metadata(gvar, type_spec)
+                    return TypeSystem.attach_type_metadata(gvar, type_spec)
                 # Load the value if it's a non-array, non-struct pointer type
                 elif isinstance(gvar.type, ir.PointerType):
                     ret_val = builder.load(gvar, name=self.name)
                     if IdentifierTypeHandler.is_volatile(self.name, builder):
                         ret_val.volatile = True
-                    return IdentifierTypeHandler.attach_type_metadata(ret_val, type_spec)
+                    return TypeSystem.attach_type_metadata(ret_val, type_spec)
                 
-                return IdentifierTypeHandler.attach_type_metadata(gvar, type_spec)
+                return TypeSystem.attach_type_metadata(gvar, type_spec)
             
             # Check in type aliases with mangled name
             if IdentifierTypeHandler.is_type_alias(mangled_name, module):
@@ -399,86 +400,6 @@ class ArrayLiteral(Expression):
         ptr = builder.gep(gv, [zero, zero], name=f"{name_hint}_str_ptr")
         ptr.type._is_array_pointer = True
         return ptr
-    
-    def create_global_array_concat(self, module: ir.Module, left_val: ir.Value, right_val: ir.Value, 
-                                  result_array_type: ir.ArrayType, operator: Operator) -> ir.Value:
-        """Create compile-time array concatenation for global constants."""
-        # Get the initializers from both global constants
-        left_init = left_val.initializer if hasattr(left_val, 'initializer') else None
-        right_init = right_val.initializer if hasattr(right_val, 'initializer') else None
-        
-        if left_init is None or right_init is None:
-            raise ValueError("Both operands must be global constants for compile-time concatenation")
-        
-        # Extract array elements
-        left_elements = list(left_init.constant)
-        right_elements = list(right_init.constant) if operator == Operator.ADD else []
-        
-        # Create new array with concatenated elements
-        if operator == Operator.ADD:
-            new_elements = left_elements + right_elements
-        else:  # SUB
-            left_len = len(left_elements)
-            right_len = len(right_elements)
-            new_len = max(left_len - right_len, 0)
-            new_elements = left_elements[:new_len]
-        
-        # Create global constant
-        global_name = f".array_concat_{id(self)}"
-        global_array = ir.GlobalVariable(module, result_array_type, name=global_name)
-        global_array.linkage = 'internal'
-        global_array.global_constant = True
-        global_array.initializer = ir.Constant(result_array_type, new_elements)
-        
-        # Mark as array pointer
-        global_array.type._is_array_pointer = True
-        
-        return global_array
-    
-    def create_runtime_array_concat(self, builder: ir.IRBuilder, module: ir.Module, 
-                                   left_val: ir.Value, right_val: ir.Value, 
-                                   result_array_type: ir.ArrayType, operator: Operator) -> ir.Value:
-        """Create runtime array concatenation using memcpy."""
-        # Get array info
-        left_elem_type, left_len = ArrayTypeHandler.get_array_info(left_val)
-        right_elem_type, right_len = ArrayTypeHandler.get_array_info(right_val)
-        
-        # Calculate element size in bytes
-        elem_size_bytes = left_elem_type.width // 8
-        
-        # Allocate new array for result
-        result_ptr = builder.alloca(result_array_type, name="array_concat_result")
-        
-        # Copy left array to result
-        if left_len > 0:
-            # Get pointer to first element of result array
-            zero = ir.Constant(ir.IntType(32), 0)
-            result_start = builder.gep(result_ptr, [zero, zero], name="result_start")
-            
-            # Get pointer to source array start
-            left_start = builder.gep(left_val, [zero, zero], name="left_start")
-            
-            # Copy left array
-            left_bytes = left_len * elem_size_bytes
-            ArrayTypeHandler.emit_memcpy(builder, module, result_start, left_start, left_bytes)
-        
-        # Copy right array to result (for ADD operation)
-        if operator == Operator.ADD and right_len > 0:
-            # Get pointer to position after left array in result
-            left_len_const = ir.Constant(ir.IntType(32), left_len)
-            result_right_start = builder.gep(result_ptr, [zero, left_len_const], name="result_right_start")
-            
-            # Get pointer to source array start
-            right_start = builder.gep(right_val, [zero, zero], name="right_start")
-            
-            # Copy right array
-            right_bytes = right_len * elem_size_bytes
-            ArrayTypeHandler.emit_memcpy(builder, module, result_right_start, right_start, right_bytes)
-        
-        # Mark as array pointer
-        result_ptr.type._is_array_pointer = True
-        
-        return result_ptr
     
     def resize_array_if_needed(self, builder: ir.IRBuilder, module: ir.Module, 
                               ptr: ir.Value, val: ir.Value, var_name: str = None) -> ir.Value:
@@ -631,7 +552,7 @@ class ArrayLiteral(Expression):
         if not self.elements:
             # Empty array - need element type to determine size
             if self.element_type:
-                element_llvm_type = self.element_type.get_llvm_type(module)
+                element_llvm_type = TypeSystem.get_llvm_type(self.element_type, module)
                 # Create zero-length array
                 array_type = ir.ArrayType(element_llvm_type, 0)
                 if module.symbol_table.is_global_scope():
@@ -657,7 +578,7 @@ class ArrayLiteral(Expression):
             if isinstance(elem, StringLiteral):
                 # Determine target type - default to i32 if not specified
                 if self.element_type:
-                    target_type = self.element_type.get_llvm_type(module)
+                    target_type = TypeSystem.get_llvm_type(self.element_type, module)
                 else:
                     target_type = ir.IntType(32)  # Default to 32-bit int
                 
@@ -843,19 +764,6 @@ class StringLiteral(Expression):
             return gv
 
 @dataclass
-class QualifiedName(Expression):
-    """Represents qualified names with super:: or virtual:: or super::virtual:: for objects or structs"""
-    qualifiers: List[str]
-    member: Optional[str] = None
-    
-    def __str__(self):
-        qual_str = "__".join(self.qualifiers)
-        if self.member:
-            return f"{qual_str}.{self.member}"
-        return qual_str
-
-
-@dataclass
 class BinaryOp(Expression):
     left: Expression
     operator: Operator
@@ -928,7 +836,6 @@ class BinaryOp(Expression):
                     Operator.MOD: builder.frem,
                 }[self.operator](lhs, rhs)
 
-            # CRITICAL: Check if EITHER operand is unsigned
             unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
             
             # Normalize operand widths BEFORE operation
@@ -963,9 +870,9 @@ class BinaryOp(Expression):
             
             # Preserve type metadata (signedness) to result
             if unsigned:
-                return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT)
+                return TypeSystem.attach_type_metadata(result, DataType.UINT)
             else:
-                return IdentifierTypeHandler.attach_type_metadata(result, DataType.SINT)
+                return TypeSystem.attach_type_metadata(result, DataType.SINT)
 
         # --------------------------------------------------
         # Comparisons
@@ -1019,7 +926,7 @@ class BinaryOp(Expression):
             }[self.operator](lhs, rhs)
             # Bitwise operations preserve signedness from operands
             unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
-            return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
+            return TypeSystem.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
         if self.operator in (Operator.AND, Operator.OR, Operator.XOR):
             lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=True)
@@ -1032,7 +939,7 @@ class BinaryOp(Expression):
             }[self.operator](lhs, rhs)
             # Bitwise operations preserve signedness from operands
             unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
-            return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
+            return TypeSystem.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
         # --------------------------------------------------
         # Shifts
@@ -1055,7 +962,7 @@ class BinaryOp(Expression):
                 result = builder.shl(lhs, rhs)
                 # Shifts preserve signedness of left operand
                 unsigned = ctx.is_unsigned(lhs)
-                return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
+                return TypeSystem.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
             result = (
                 builder.lshr(lhs, rhs)
@@ -1064,7 +971,7 @@ class BinaryOp(Expression):
             )
             # Shifts preserve signedness of left operand
             unsigned = ctx.is_unsigned(lhs)
-            return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
+            return TypeSystem.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
         # --------------------------------------------------
         # Boolean composites
@@ -1079,12 +986,12 @@ class BinaryOp(Expression):
         if self.operator is Operator.BITNAND:
             result = builder.not_(builder.and_(lhs, rhs))
             unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
-            return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
+            return TypeSystem.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
         if self.operator is Operator.BITNOR:
             result = builder.not_(builder.or_(lhs, rhs))
             unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
-            return IdentifierTypeHandler.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
+            return TypeSystem.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
 
         raise ValueError(f"Unsupported operator: {self.operator}")
@@ -1230,9 +1137,8 @@ class CastExpression(Expression):
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate code for cast expressions, including zero-cost struct reinterpretation and void casting"""
         
-        # CRITICAL: Use get_llvm_type() which handles type alias resolution
         # This must happen BEFORE any struct checking logic
-        target_llvm_type = self.target_type.get_llvm_type_with_array(module)
+        target_llvm_type = TypeSystem.get_llvm_type(self.target_type, module, include_array=True)
         
         # Handle void casting - frees memory according to Flux specification
         if isinstance(target_llvm_type, ir.VoidType):
@@ -1416,9 +1322,9 @@ class CastExpression(Expression):
             void_ptr = ptr_value
         
         # Check OS macros
-        is_windows = is_macro_defined(module, '__WINDOWS__')
-        is_linux = is_macro_defined(module, '__LINUX__')
-        is_macos = is_macro_defined(module, '__MACOS__')
+        is_windows = SymbolTable.is_macro_defined(module, '__WINDOWS__')
+        is_linux = SymbolTable.is_macro_defined(module, '__LINUX__')
+        is_macos = SymbolTable.is_macro_defined(module, '__MACOS__')
         
         if is_windows:
             # Windows free syscall - use proper Intel syntax with size suffixes
@@ -1876,7 +1782,7 @@ class FStringLiteral(Expression):
         elif isinstance(expr, SizeOf):
             if isinstance(expr.target, TypeSystem):
                 # We can compute sizeof for TypeSystem at compile time
-                llvm_type = expr.target.get_llvm_type_with_array(module)
+                llvm_type = TypeSystem.get_llvm_type(expr.target, module, include_array=True)
                 if isinstance(llvm_type, ir.IntType):
                     return llvm_type.width // 8  # Convert bits to bytes
                 elif isinstance(llvm_type, ir.ArrayType):
@@ -2126,7 +2032,7 @@ class FunctionCall(Expression):
                 return candidate
         
         # Use FunctionResolver to check symbol table
-        resolved_name = FunctionResolver._resolve_from_symbol_table(
+        resolved_name = TypeResolver._resolve_from_symbol_table(
             self.name, module.symbol_table, current_namespace, module)
         
         if resolved_name and resolved_name in module.globals:
@@ -2295,24 +2201,21 @@ class MemberAccess(Expression):
         # Handle enum member access FIRST (before trying to codegen the identifier)
         if isinstance(self.object, Identifier):
             type_name = self.object.name
-            if hasattr(module, '_enum_types') and type_name in module._enum_types:
-                enum_values = module._enum_types[type_name]
-                if self.member not in enum_values:
-                    raise NameError(f"Enum value '{self.member}' not found in enum '{type_name}'")
-                return ir.Constant(ir.IntType(32), enum_values[self.member])
+            if MemberAccessTypeHandler.is_enum_type(type_name, module):
+                enum_value = MemberAccessTypeHandler.get_enum_value(type_name, self.member, module)
+                return ir.Constant(ir.IntType(32), enum_value)
         
         # Check if this is a struct type
         if hasattr(module, '_struct_types'):
             obj = self.object.codegen(builder, module)
-            for struct_name, struct_type in module._struct_types.items():
-                if obj.type == struct_type or (isinstance(obj.type, ir.PointerType) and obj.type.pointee == struct_type):
-                    # This is struct field access
-                    field_access = StructFieldAccess(self.object, self.member)
-                    return field_access.codegen(builder, module)
+            if MemberAccessTypeHandler.is_struct_type(obj, module):
+                # This is struct field access
+                field_access = StructFieldAccess(self.object, self.member)
+                return field_access.codegen(builder, module)
         # Handle static struct/union member access (A.x where A is a struct/union type)
         if isinstance(self.object, Identifier):
             type_name = self.object.name
-            if hasattr(module, '_struct_types') and type_name in module._struct_types:
+            if MemberAccessTypeHandler.is_static_struct_member(type_name, module):
                 # Look for the global variable representing this member
                 global_name = f"{type_name}.{self.member}"
                 for global_var in module.global_values:
@@ -2321,7 +2224,7 @@ class MemberAccess(Expression):
                 
                 raise NameError(f"Static member '{self.member}' not found in struct '{type_name}'")
             # Check for union types
-            elif hasattr(module, '_union_types') and type_name in module._union_types:
+            elif MemberAccessTypeHandler.is_static_union_member(type_name, module):
                 # Look for the global variable representing this member
                 global_name = f"{type_name}.{self.member}"
                 for global_var in module.global_values:
@@ -2334,38 +2237,24 @@ class MemberAccess(Expression):
         obj_val = self.object.codegen(builder, module)
         
         # Special case: if this is accessing 'this' in a method, handle the double pointer issue
-        if (isinstance(self.object, Identifier) and self.object.name == "this" and 
-            isinstance(obj_val.type, ir.PointerType) and 
-            isinstance(obj_val.type.pointee, ir.PointerType) and
-            isinstance(obj_val.type.pointee.pointee, ir.LiteralStructType)):
+        if (isinstance(self.object, Identifier) and self.object.name == "this" and \
+            MemberAccessTypeHandler.is_this_double_pointer(obj_val)):
             # Load the actual 'this' pointer from the alloca
             obj_val = builder.load(obj_val, name="this_ptr")
         
         if isinstance(obj_val.type, ir.PointerType):
             # Handle pointer to struct (both literal and identified struct types)
-            is_struct_pointer = (isinstance(obj_val.type.pointee, ir.LiteralStructType) or
-                                hasattr(obj_val.type.pointee, '_name') or  # Identified struct type
-                                hasattr(obj_val.type.pointee, 'elements'))  # Other struct-like types
-            
-            if is_struct_pointer:
+            if MemberAccessTypeHandler.is_struct_pointer(obj_val.type):
                 struct_type = obj_val.type.pointee
                 
                 # Check if this is actually a union (unions are implemented as structs)
-                if hasattr(module, '_union_types'):
-                    for union_name, union_type in module._union_types.items():
-                        if union_type == struct_type:
-                            # This is a union - handle union member access
-                            return self._handle_union_member_access(builder, module, obj_val, union_name)
+                if MemberAccessTypeHandler.is_union_type(struct_type, module):
+                    union_name = MemberAccessTypeHandler.get_union_name_from_type(struct_type, module)
+                    # This is a union - handle union member access
+                    return self._handle_union_member_access(builder, module, obj_val, union_name)
                 
                 # Regular struct member access
-                if not hasattr(struct_type, 'names'):
-                    raise ValueError("Struct type missing member names")
-                
-                member_index = 0
-                try:
-                    member_index = struct_type.names.index(self.member)
-                except ValueError:
-                    raise ValueError(f"Member '{self.member}' not found in struct")
+                member_index = MemberAccessTypeHandler.get_member_index(struct_type, self.member)
                 
                 # FIXED: Pass indices as a single list argument
                 member_ptr = builder.gep(
@@ -2382,73 +2271,27 @@ class MemberAccess(Expression):
                     if isinstance(pointee, ir.ArrayType):
                         # Return pointer to array for indexing
                         # Attach element type spec if available
-                        struct_name = None
-                        if hasattr(module, '_struct_types'):
-                            for name, stype in module._struct_types.items():
-                                if stype == struct_type:
-                                    struct_name = name
-                                    break
+                        struct_name = MemberAccessTypeHandler.get_struct_name_from_type(struct_type, module)
                         
-                        if (struct_name and hasattr(module, '_struct_member_type_specs') and 
-                            struct_name in module._struct_member_type_specs):
-                            member_specs = module._struct_member_type_specs[struct_name]
-                            #print(f"[DEBUG MemberAccess] Found struct {struct_name}, looking for member {self.member}")
-                            #print(f"[DEBUG MemberAccess] Available members: {list(member_specs.keys())}")
-                            if self.member in member_specs:
-                                type_spec = member_specs[self.member]
-                                #print(f"[DEBUG MemberAccess] Member type spec: {type_spec}")
-                                #print(f"[DEBUG MemberAccess] Has array_element_type: {hasattr(type_spec, 'array_element_type')}")
-                                if hasattr(type_spec, 'array_element_type'):
-                                    #print(f"[DEBUG MemberAccess] array_element_type: {type_spec.array_element_type}")
-                                    pass
-                                # For array types, attach the element type spec
-                                if hasattr(type_spec, 'array_element_type') and type_spec.array_element_type:
-                                    #print(f"[DEBUG MemberAccess] Attaching element type to array pointer")
-                                    member_ptr._flux_array_element_type_spec = type_spec.array_element_type
-                                    #print(f"[DEBUG MemberAccess] Element type base_type: {type_spec.array_element_type.base_type}")
+                        if struct_name:
+                            type_spec = MemberAccessTypeHandler.get_member_type_spec(struct_name, self.member, module)
+                            if type_spec:
+                                MemberAccessTypeHandler.attach_array_element_type_spec(member_ptr, type_spec, module)
                         
                         return member_ptr
-                    elif (isinstance(pointee, ir.LiteralStructType) or
-                          hasattr(pointee, '_name') or
-                          hasattr(pointee, 'elements')):
+                    elif MemberAccessTypeHandler.should_return_pointer_for_member(pointee):
                         return member_ptr  # Return pointer to struct for member access
                 
                 loaded = builder.load(member_ptr)
                 # Preserve type metadata from struct member type
-                
-                # Try to find the struct name and get the member type spec
-                struct_name = None
-                if hasattr(module, '_struct_types'):
-                    for name, stype in module._struct_types.items():
-                        if stype == struct_type:
-                            struct_name = name
-                            break
-                
-                # If we found the struct and have member type specs, use them
-                if (struct_name and hasattr(module, '_struct_member_type_specs') and 
-                    struct_name in module._struct_member_type_specs):
-                    member_specs = module._struct_member_type_specs[struct_name]
-                    if self.member in member_specs:
-                        type_spec = member_specs[self.member]
-                        # For array types, get the element type spec
-                        if hasattr(type_spec, 'array_element_type') and type_spec.array_element_type:
-                            # Member is an array, but we don't load it here (returned pointer above)
-                            # This shouldn't happen
-                            pass
-                        return IdentifierTypeHandler.attach_type_metadata(loaded, type_spec=type_spec)
-                
-                # Fallback to original method
-                return attach_type_metadata_from_llvm_type(loaded, loaded.type, module)
+                return MemberAccessTypeHandler.attach_member_type_metadata(loaded, struct_type, self.member, module)
         
         raise ValueError(f"Member access on unsupported type: {obj_val.type}")
     
     def _handle_union_member_access(self, builder: ir.IRBuilder, module: ir.Module, union_ptr: ir.Value, union_name: str) -> ir.Value:
         """Handle union member access by casting the union to the appropriate member type"""
         # Get union member information
-        if not hasattr(module, '_union_member_info') or union_name not in module._union_member_info:
-            raise ValueError(f"Union member info not found for '{union_name}'")
-        
-        union_info = module._union_member_info[union_name]
+        union_info = MemberAccessTypeHandler.get_union_member_info(union_name, module)
         member_names = union_info['member_names']
         member_types = union_info['member_types']
         is_tagged = union_info['is_tagged']
@@ -2468,11 +2311,10 @@ class MemberAccess(Expression):
             return builder.load(tag_ptr, name="union_tag_value")
         
         # Find the requested member
-        if self.member not in member_names:
-            raise ValueError(f"Member '{self.member}' not found in union '{union_name}'")
+        MemberAccessTypeHandler.validate_union_member(union_name, self.member, module)
         
-        member_index = member_names.index(self.member)
-        member_type = member_types[member_index]
+        member_index = MemberAccessTypeHandler.get_union_member_index(union_name, self.member, module)
+        member_type = MemberAccessTypeHandler.get_union_member_type(union_name, self.member, module)
         
         # For tagged unions, we need to cast the data field (index 1), not the whole union
         if is_tagged:
@@ -2492,6 +2334,7 @@ class MemberAccess(Expression):
             member_ptr_type = ir.PointerType(member_type)
             casted_ptr = builder.bitcast(union_ptr, member_ptr_type, name=f"union_as_{self.member}")
             return builder.load(casted_ptr, name=f"union_{self.member}_value")
+
 
 @dataclass
 class MethodCall(Expression):
@@ -2609,7 +2452,6 @@ class ArrayAccess(Expression):
         # Get the array (should be a pointer to array or global)
         array_val = self.array.codegen(builder, module)
         
-        # CRITICAL FIX: If we got i8** (pointer-to-pointer), we need to load it
         # This happens with scalar pointer variables like `noopstr src` (byte*)
         # which are stored as i8** but need to be loaded to i8* for array indexing
         if (isinstance(array_val.type, ir.PointerType) and 
@@ -3117,7 +2959,7 @@ class VariableDeclaration(ASTNode):
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Resolve type (with automatic array size inference if needed)
         resolved_type_spec = VariableTypeHandler.infer_array_size(self.type_spec, self.initial_value, module)
-        llvm_type = resolved_type_spec.get_llvm_type_with_array(module)
+        llvm_type = TypeSystem.get_llvm_type(resolved_type_spec, module, include_array=True)
         #print(f"[VAR DECL] name={self.name}, type_spec={resolved_type_spec}, llvm_type={llvm_type}", file=sys.stderr)
         
         # Check if this is global scope
@@ -3165,10 +3007,10 @@ class VariableDeclaration(ASTNode):
             if init_const is not None:
                 gvar.initializer = init_const
             else:
-                gvar.initializer = get_default_initializer(llvm_type)
+                gvar.initializer = TypeSystem.get_default_initializer(llvm_type)
         else:
             # Default behavior: zero-initialize
-            gvar.initializer = get_default_initializer(llvm_type)
+            gvar.initializer = TypeSystem.get_default_initializer(llvm_type)
         
         gvar.linkage = 'internal'
         
@@ -3228,15 +3070,11 @@ class VariableDeclaration(ASTNode):
         if isinstance(self.initial_value, ArrayLiteral):
             # If target is an integer, pack the array into it
             if isinstance(llvm_type, ir.IntType):
-                packed_val = ArrayTypeHandler.pack_array_to_integer(
-                    builder, module, self.initial_value, llvm_type
-                )
+                packed_val = ArrayTypeHandler.pack_array_to_integer(builder, module, self.initial_value, llvm_type)
                 builder.store(packed_val, alloca)
             # Otherwise, initialize as array
             else:
-                ArrayTypeHandler.initialize_local_array(
-                    builder, module, alloca, llvm_type, self.initial_value
-                )
+                ArrayTypeHandler.initialize_local_array(builder, module, alloca, llvm_type, self.initial_value)
             return
 
         if isinstance(self.initial_value, ArrayComprehension):
@@ -3374,14 +3212,13 @@ class TypeDeclaration(Expression):
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Use TypeSystem's proper resolution instead of guessing
-        llvm_type = self.type_spec.get_llvm_type_with_array(module)
+        llvm_type = TypeSystem.get_llvm_type(self.type_spec, module, include_array=True)
         
         # Register the type alias
         if not hasattr(module, '_type_aliases'):
             module._type_aliases = {}
         module._type_aliases[self.name] = llvm_type
         
-        # CRITICAL: Also store the TypeSystem spec for signedness tracking
         if not hasattr(module, "_type_alias_specs"):
             module._type_alias_specs = {}
         module._type_alias_specs[self.name] = self.type_spec
@@ -3449,7 +3286,6 @@ class Assignment(Statement):
         elif isinstance(self.target, PointerDeref):
             # Pointer dereference assignment - delegate to type handler
             ptr = self.target.pointer.codegen(builder, module)
-            # CRITICAL FIX: If we got T** (pointer-to-pointer), load to get T*
             if (isinstance(ptr.type, ir.PointerType) and 
                 isinstance(ptr.type.pointee, ir.PointerType)):
                 # Load the pointer value
@@ -3638,11 +3474,6 @@ class AcceptorBlock(Expression):
         # For literals, identifiers, and other leaf nodes, return as-is
         # (they don't contain placeholders)
         return expr
-
-
-@dataclass
-class XorStatement(Statement):
-    expressions: List[Expression] = field(default_factory=list)
 
 @dataclass
 class IfStatement(Statement):
@@ -4262,7 +4093,7 @@ class ReturnStatement(Statement):
             raise RuntimeError("Cannot determine function return type")
 
         # Rework to use lowering context.
-        ret_val = coerce_return_value(builder, ret_val, expected)
+        ret_val = CoercionContext.coerce_return_value(builder, ret_val, expected)
 
         builder.ret(ret_val)
         return None
@@ -4437,7 +4268,7 @@ class TryBlock(Statement):
                 
                 # Allocate local variable for exception
                 if exc_type:
-                    exc_type_llvm = exc_type.get_llvm_type(module)
+                    exc_type_llvm = TypeSystem.get_llvm_type(exc_type, module)
                 else:
                     exc_type_llvm = ir.IntType(32)
                 
@@ -4813,8 +4644,7 @@ class FunctionDef(ASTNode):
         func_type = ir.FunctionType(ret_type, param_types)
         
         # Generate mangled name using FunctionTypeHandler
-        mangled_name = FunctionTypeHandler.mangle_function_name(
-            self.name, self.parameters, self.return_type, self.no_mangle)
+        mangled_name = SymbolTable.mangle_function_name(self.name, self.parameters, self.return_type, self.no_mangle)
         
         # Check if this exact mangled function already exists
         if mangled_name in module.globals:
@@ -4854,9 +4684,7 @@ class FunctionDef(ASTNode):
             
             # Register this as an overload using FunctionTypeHandler
             #print(f"[FUNC REG] Registering {base_name} (mangled: {mangled_name})", file=sys.stderr)
-            FunctionTypeHandler.register_function_overload(
-                module, base_name, mangled_name, self.parameters, self.return_type, func
-            )
+            SymbolTable.register_function_overload(module, base_name, mangled_name, self.parameters, self.return_type, func)
             #print(f"[FUNC REG] Registered! Overloads for {base_name}: {len(module._function_overloads.get(base_name, []))}", file=sys.stderr)
 
             # Also register in symbol table if available
@@ -4868,8 +4696,7 @@ class FunctionDef(ASTNode):
                         SymbolKind.FUNCTION, 
                         type_spec=self.return_type,
                         llvm_type=func_type,
-                        llvm_value=func
-                    )
+                        llvm_value=func)
                     # Also register the full name if it's different
                     if base_name != self.name:
                         module.symbol_table.define(
@@ -4877,8 +4704,7 @@ class FunctionDef(ASTNode):
                             SymbolKind.FUNCTION, 
                             type_spec=self.return_type,
                             llvm_type=func_type,
-                            llvm_value=func
-                        )
+                            llvm_value=func)
                 except Exception as e:
                     import traceback
                     print(f"[ERROR] Failed to register function in symbol table:", file=sys.stderr)
@@ -4923,7 +4749,7 @@ class FunctionDef(ASTNode):
             
             # Attach type metadata to the parameter value before storing
             # This ensures the parameter carries the correct signedness information
-            param_with_metadata = attach_type_metadata(param, type_spec=self.parameters[i].type_spec)
+            param_with_metadata = TypeSystem.attach_type_metadata(param, type_spec=self.parameters[i].type_spec)
             
             builder.store(param_with_metadata, alloca)
             # Define parameter in symbol table with type information
@@ -4964,8 +4790,8 @@ class FunctionPointer(Expression):
     
     def get_function_type(self, module: ir.Module) -> ir.FunctionType:
         """Get LLVM function type for this function pointer"""
-        ret_type = self.return_type.get_llvm_type(module)
-        param_types = [param.get_llvm_type(module) for param in self.parameter_types]
+        ret_type = TypeSystem.get_llvm_type(self.return_type, module)
+        param_types = [TypeSystem.get_llvm_type(param, module) for param in self.parameter_types]
         return ir.FunctionType(ret_type, param_types)
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
@@ -5162,7 +4988,7 @@ class UnionDef(ASTNode):
         max_type = None
         
         for member in self.members:
-            member_type = member.type_spec.get_llvm_type(module)
+            member_type = TypeSystem.get_llvm_type(member.type_spec, module)
             if isinstance(member_type, str):
                 # Handle named types
                 if hasattr(module, '_type_aliases') and member_type in module._type_aliases:
@@ -5727,7 +5553,7 @@ class StructFieldAccess(Expression):
 
         # Infer struct name if we didn't get it from scope info (or using-resolve failed)
         if struct_name is None:
-            struct_name = infer_struct_name(instance, module)
+            struct_name = StructTypeHandler.infer_struct_name(instance, module)
             struct_name = _resolve_struct_name(struct_name)
 
         # Need vtable for packed extraction paths
@@ -5822,7 +5648,7 @@ class StructFieldAssign(Statement):
         instance = builder.load(instance_ptr)
         
         # Get struct type
-        struct_name = infer_struct_name(instance, module)
+        struct_name = StructTypeHandler.infer_struct_name(instance, module)
         vtable = module._struct_vtables[struct_name]
         
         # Generate new value
@@ -5842,7 +5668,7 @@ class StructRecast(Expression):
     Syntax: (TargetStruct)source_data
     
     This performs:
-    1. Runtime size check (can be optimized away if sizes known)
+    1. Runtime size check (can be optimized away if size is known)
     2. Bitcast pointer (zero cost)
     3. No data movement or copying
     """
@@ -5854,8 +5680,6 @@ class StructRecast(Expression):
         Generate zero-cost reinterpret cast.
         
         Size checking is done at compile time when possible.
-        If sizes don't match at compile time, it's a compilation error.
-        Runtime size checks only occur for dynamic arrays.
         Invalid casts result in undefined behavior (programmer's responsibility).
         """
         # Get source value
@@ -5991,12 +5815,10 @@ class ExternBlock(Statement):
                 raise ValueError(f"Extern functions must be prototypes (no body): {func_def.name}")
             
             # Generate the function declaration with external linkage using FunctionTypeHandler
-            ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(func_def.return_type, module)
-            param_types = [FunctionTypeHandler.convert_type_spec_to_llvm(param.type_spec, module) 
-                          for param in func_def.parameters]
+            ret_type = TypeSystem.get_llvm_type(func_def.return_type,module)
+            param_types = [TypeSystem.get_llvm_type(param.type_spec, module) for param in func_def.parameters]
             func_type = ir.FunctionType(ret_type, param_types)
             
-            # CRITICAL: Extern functions are ALWAYS global and should NOT have namespace mangling
             # Strip any namespace prefix that might have been added
             func_name = func_def.name or ""
 
@@ -6014,9 +5836,7 @@ class ExternBlock(Statement):
                 final_name = base_name
             else:
                 # DO NOT mutate func_def.name; just pass base_name into mangler
-                final_name = FunctionTypeHandler.mangle_function_name(
-                    base_name, func_def.parameters, func_def.return_type, False
-                )
+                final_name = SymbolTable.mangle_function_name(base_name, func_def.parameters, func_def.return_type, False)
             
             # Create or get the function
             if final_name in module.globals:
@@ -6056,14 +5876,14 @@ class NamespaceDef(ASTNode):
         #print(f"[NAMESPACE]   Functions: {len(self.functions)}", file=sys.stderr)
         #print(f"[NAMESPACE]   Nested namespaces: {len(self.nested_namespaces)}", file=sys.stderr)
         # Register this namespace using NamespaceTypeHandler
-        NamespaceTypeHandler.register_namespace(module, self.name)
+        SymbolTable.register_namespace(module, self.name)
 
         # Register nested namespaces recursively using NamespaceTypeHandler
         for nested_ns in self.nested_namespaces:
             full_nested_name = f"{self.name}__{nested_ns.name}"
             #print("FULL NESTED NAME:",full_nested_name)
-            NamespaceTypeHandler.register_namespace(module, full_nested_name)
-            NamespaceTypeHandler.register_nested_namespaces(nested_ns, full_nested_name, module)
+            SymbolTable.register_namespace(module, full_nested_name)
+            SymbolTable.register_nested_namespaces(nested_ns, full_nested_name, module)
         
         # Add to using namespaces using NamespaceTypeHandler
         NamespaceTypeHandler.add_using_namespace(module, self.name)
