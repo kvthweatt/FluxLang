@@ -1251,63 +1251,100 @@ class FluxCompiler:
         except:
             pass
 
+class TeeOutput:
+    """Writes to both console and file simultaneously"""
+    def __init__(self, console, file):
+        self.console = console
+        self.file = file
+    
+    def write(self, message):
+        self.console.write(message)
+        self.file.write(message)
+        self.file.flush()  # Ensure immediate write to file
+    
+    def flush(self):
+        self.console.flush()
+        self.file.flush()
+
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python fc.py input.fx [output_binary] ...arguments...\n\n")
-        print("\tArguments:\n")
-        print("\t\t-vX\tVerbose output. X = 0..4\n")
-        print("\t\t\t\t0: Tokens")
-        print("\t\t\t\t1: AST")
-        print("\t\t\t\t2: LLVM IR")
-        print("\t\t\t\t3: ASM")
-        print("\t\t\t\t4: Everything")
-        sys.exit(1)
-
-    input_file = None
-    output_bin = None
-
-    if len(sys.argv) == 2:
-        input_file = sys.argv[1]
-        output_bin = sys.argv[2] if len(sys.argv) > 2 else None
-
-    verbosity = None
-
-    if len(sys.argv) > 2:
-        input_file = sys.argv[1]
-        output_bin = sys.argv[2] if len(sys.argv) > 2 else None
-        for arg in sys.argv:
-            if arg.lower().startswith("-v"):
-                if len(arg) > 2 and arg[2:].isdigit():
-                    verbosity = int(arg[2:])
-            elif arg.lower() == "-o":
-                    with open(input_file, 'r') as f:
-                        source = f.read()
-                    lexer = FluxLexer(source)
-                    tokens = lexer.tokenize()
-                    parser = FluxParser(tokens)
-                    ast = parser.parse()
-                    return
-
+    # Setup debug output redirection
+    original_stdout = sys.stdout
+    debug_file = None
     
-    if not input_file.endswith('.fx'):
-        print("Error: Input file must have .fx extension", file=sys.stderr)
-        sys.exit(1)
-    
-    compiler = FluxCompiler(verbosity=verbosity)
     try:
-        match (config['target']):
-            case "bootloader":
-                print("BOOTLOADER")
-                binary_path = compiler.compile_bootloader(input_file, output_bin)
-                print(f"Bootloader created at: {binary_path}")
-                return
-            case _:
-                binary_path = compiler.compile_file(input_file, output_bin)
-                print(f"Executable created at: {binary_path}")
-                return
-    except:
-        pass
-    return
+        # Create build directory if it doesn't exist
+        build_dir = Path.cwd() / "build"
+        build_dir.mkdir(exist_ok=True)
+        
+        # Open debug.txt for writing
+        debug_path = build_dir / "debug.txt"
+        debug_file = open(debug_path, 'w', encoding='utf-8', buffering=1)  # Line buffering
+        
+        # Redirect stdout to both console and file
+        sys.stdout = TeeOutput(original_stdout, debug_file)
+        
+        if len(sys.argv) < 2:
+            print("Usage: python fc.py input.fx [output_binary] ...arguments...\n\n")
+            print("\tArguments:\n")
+            print("\t\t-vX\tVerbose output. X = 0..4\n")
+            print("\t\t\t\t0: Tokens")
+            print("\t\t\t\t1: AST")
+            print("\t\t\t\t2: LLVM IR")
+            print("\t\t\t\t3: ASM")
+            print("\t\t\t\t4: Everything")
+            sys.exit(1)
+
+        input_file = None
+        output_bin = None
+
+        if len(sys.argv) == 2:
+            input_file = sys.argv[1]
+            output_bin = sys.argv[2] if len(sys.argv) > 2 else None
+
+        verbosity = None
+
+        if len(sys.argv) > 2:
+            input_file = sys.argv[1]
+            output_bin = sys.argv[2] if len(sys.argv) > 2 else None
+            for arg in sys.argv:
+                if arg.lower().startswith("-v"):
+                    if len(arg) > 2 and arg[2:].isdigit():
+                        verbosity = int(arg[2:])
+                elif arg.lower() == "-o":
+                        with open(input_file, 'r') as f:
+                            source = f.read()
+                        lexer = FluxLexer(source)
+                        tokens = lexer.tokenize()
+                        parser = FluxParser(tokens)
+                        ast = parser.parse()
+                        return
+
+        
+        if not input_file.endswith('.fx'):
+            print("Error: Input file must have .fx extension", file=sys.stderr)
+            sys.exit(1)
+        
+        compiler = FluxCompiler(verbosity=verbosity)
+        try:
+            match (config['target']):
+                case "bootloader":
+                    print("BOOTLOADER")
+                    binary_path = compiler.compile_bootloader(input_file, output_bin)
+                    print(f"Bootloader created at: {binary_path}")
+                    return
+                case _:
+                    binary_path = compiler.compile_file(input_file, output_bin)
+                    print(f"Executable created at: {binary_path}")
+                    return
+        except:
+            pass
+        return
+    
+    finally:
+        # Always restore stdout and close debug file
+        sys.stdout = original_stdout
+        if debug_file:
+            debug_file.close()
 
 if __name__ == "__main__":
     main()

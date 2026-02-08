@@ -49,8 +49,7 @@ class Literal(ASTNode):
             char_val = LiteralTypeHandler.normalize_char_value(self.value)
             return ir.Constant(llvm_type, char_val)
         elif self.type == DataType.VOID:
-            llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
-            return ir.Constant(llvm_type, 0)
+            return ir.Constant(ir.IntType(1), 0)
         elif self.type == DataType.DATA:
             # Handle array literals
             if isinstance(self.value, list):
@@ -1018,7 +1017,20 @@ class CastExpression(Expression):
         # Handle void casting - frees memory according to Flux specification
         if isinstance(target_llvm_type, ir.VoidType):
             return self._handle_void_cast(builder, module)
-        
+
+        # Flux void-literal: treat as zero/null *in cast contexts*
+        if isinstance(self.expression, Literal) and self.expression.type == DataType.VOID:
+            # pointer target => null pointer (not inttoptr)
+            if isinstance(target_llvm_type, ir.PointerType):
+                return ir.Constant(target_llvm_type, None)
+            # integer target => 0
+            if isinstance(target_llvm_type, ir.IntType):
+                return ir.Constant(target_llvm_type, 0)
+            # float target => 0.0
+            if isinstance(target_llvm_type, (ir.HalfType, ir.FloatType, ir.DoubleType)):
+                return ir.Constant(target_llvm_type, 0.0)
+            raise TypeError(f"cannot cast void-literal to {target_llvm_type}")
+
         source_val = self.expression.codegen(builder, module)
         
         # If source and target are the same type, no cast needed
@@ -3150,16 +3162,6 @@ class Block(Statement):
     statements: List[Statement] = field(default_factory=list)
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        debug = False
-        if debug:
-            current_frame = inspect.currentframe()
-            caller_frame = current_frame.f_back
-            caller_name = caller_frame.f_code.co_name
-            stack = inspect.stack()
-            print("Full call stack (from current to outermost):")
-            for i, frame_info in enumerate(reversed(stack)):
-                print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
-
         result = None
         #print(self.statements)
         #print(f"DEBUG Block: Processing {len(self.statements)} statements")
@@ -3167,11 +3169,17 @@ class Block(Statement):
             #print(f"DEBUG Block: Processing statement {i}: {type(stmt).__name__}")
             if stmt is not None:  # Skip None statements
                 try:
-                    #traceback.print_exc()
                     stmt_result = stmt.codegen(builder, module)
                     if stmt_result is not None:  # Only update result if not None
                         result = stmt_result
                 except Exception as e:
+                    current_frame = inspect.currentframe()
+                    caller_frame = current_frame.f_back
+                    caller_name = caller_frame.f_code.co_name
+                    stack = inspect.stack()
+                    print("Full call stack (from current to outermost):")
+                    for i, frame_info in enumerate(reversed(stack)):
+                        print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
                     raise ValueError(f"Block{{}} Debug: Error in statement {i} ({type(stmt).__name__}): {e} \n\n {stmt} \n\n {module.name}")
         return result
 
@@ -4670,14 +4678,20 @@ class FunctionPointerDeclaration(Statement):
     name: str
     fp_type: FunctionPointerType
     initializer: Optional[Expression] = None
+
+    @staticmethod
+    def get_llvm_type(func_ptr, module: ir.Module) -> ir.FunctionType:
+        """Convert to LLVM function type"""
+        ret_type = func_ptr.return_type.get_llvm_type(func_ptr, module)
+        param_types = [param.get_llvm_type(func_ptr, module) for param in func_ptr.parameter_types]
+        return ir.FunctionType(ret_type, param_types)
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate function pointer variable"""
         resolved_type_spec = None
-        ptr_type = self.fp_type.get_llvm_pointer_type(module)
+        ptr_type = self.fp_type.get_llvm_pointer_type(self, module)
         
         # Store type information for later lookup
-        
         # Type information will be stored in symbol table during define()
         
         # Allocate storage

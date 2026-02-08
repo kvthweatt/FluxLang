@@ -130,6 +130,10 @@ def !!FRTStartup() -> int
     if (return_code != 0)
     {
         // Handle error
+        if (return_code == 3221225477)
+        {
+            print("SEGFAULT\n\0");
+        };
     };
     #ifdef __LINUX__
     exit(return_code);  // Should pass return_code

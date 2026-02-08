@@ -1483,6 +1483,18 @@ class FunctionPointerType:
     return_type: TypeSystem
     parameter_types: List[TypeSystem]
 
+    @staticmethod
+    def get_llvm_type(func_ptr, module: ir.Module) -> ir.FunctionType:
+        """Convert to LLVM function type"""
+        ret_type = func_ptr.return_type.get_llvm_type(module)
+        param_types = [param.get_llvm_type(module) for param in func_ptr.parameter_types]
+        return ir.FunctionType(ret_type, param_types)
+
+    @staticmethod
+    def get_llvm_pointer_type(func_ptr, module: ir.Module) -> ir.PointerType:
+        """Get pointer to this function type"""
+        func_type = func_ptr.get_llvm_type(module)
+        return ir.PointerType(func_type)
 
 class VariableTypeHandler:
     """Handles all type-related operations for variable declarations"""
