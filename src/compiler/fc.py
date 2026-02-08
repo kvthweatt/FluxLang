@@ -361,10 +361,10 @@ class FluxCompiler:
                 success = False
                 try:
                     result = subprocess.run(command_line, check=True, capture_output=True, text=True)
-                    print(result)
                     success = True
                 except Exception as e:
-                    self.logger.warning(f"{compiler}: {e}", "compiler")
+                    print(result)
+                    self.logger.error(f"{compiler}: {e}", "compiler")
                 
                 if not success:
                     self.logger.error(f"{compiler} could compile LLVM IR", "compiler")
@@ -541,7 +541,7 @@ class FluxCompiler:
                     self.logger.trace(f"Linker output: {result.stdout}", "linker")
                     if result.stderr:
                         self.logger.warning(f"Linker stderr: {result.stderr}", "linker")
-                    print(f"\n\nRESULT\n{result}\n\n")
+                        print(f"\n\nRESULT\n{result}\n\n")
                 except subprocess.CalledProcessError as e:
                     self.logger.error(f"Linking failed: {e.stderr}", "linker")
                     if config['linker'] == "lld-link":

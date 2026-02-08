@@ -2346,7 +2346,7 @@ class ArrayTypeHandler:
     @staticmethod
     def initialize_local_array(builder: ir.IRBuilder, module: ir.Module, alloca: ir.Value, llvm_type: ir.Type, array_literal) -> None:
         """Initialize a local array variable with an array literal."""
-        print("[TYPESYS] In initialize_local_array()")
+        #print("[TYPESYS] In initialize_local_array()")
         from fast import StringLiteral
         
         zero = ArrayTypeHandler._zero()
