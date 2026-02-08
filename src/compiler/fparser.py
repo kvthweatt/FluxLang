@@ -198,11 +198,10 @@ class FluxParser:
                   | assignment_statement
                   | control_statement
         """
-        storage_class = None
-        is_const = False
-        is_volatile = False
-        
         # Parse storage class FIRST (global, local, heap, stack, register)
+        # BUT NOT const/volatile - those belong to type_spec()!
+        storage_class = None
+        
         if self.expect(TokenType.GLOBAL):
             storage_class = 'global'
             self.advance()
@@ -219,23 +218,35 @@ class FluxParser:
             storage_class = 'register'
             self.advance()
         
-        # Parse qualifiers AFTER storage class (const, volatile)
-        if self.expect(TokenType.CONST):
-            is_const = True
-            self.advance()
-        
-        if self.expect(TokenType.VOLATILE):
-            is_volatile = True
-            self.advance()
-        
-        # If we have storage class OR qualifiers, it MUST be a variable declaration or function
-        if storage_class or is_const or is_volatile:
-            if self.expect(TokenType.ASM):
+        # Check for const/volatile (but DON'T consume them - type_spec will handle that)
+        # OR check if we just parsed a storage class
+        if storage_class or self.expect(TokenType.CONST, TokenType.VOLATILE):
+            # Look ahead to determine what kind of statement this is
+            saved_pos = self.position
+            saved_token = self.current_token
+            
+            # Skip past const/volatile to see what comes next
+            while self.expect(TokenType.CONST, TokenType.VOLATILE):
+                self.advance()
+            
+            is_asm = self.expect(TokenType.ASM)
+            is_func = self.expect(TokenType.DEF)
+            
+            # Restore position
+            self.position = saved_pos
+            self.current_token = saved_token
+            
+            if is_asm:
+                # Special case: volatile asm
+                is_volatile = False
+                if self.expect(TokenType.VOLATILE):
+                    is_volatile = True
+                    self.advance()
                 return self.asm_statement(is_volatile=is_volatile)
-            elif self.expect(TokenType.DEF):
+            elif is_func:
                 return self.function_def()
             else:
-                # It's a variable declaration - consume it
+                # It's a variable declaration - type_spec() will parse const/volatile
                 var_decl = self.variable_declaration()
                 self.consume(TokenType.SEMICOLON)
                 return var_decl

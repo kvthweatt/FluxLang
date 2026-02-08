@@ -3592,6 +3592,13 @@ class AssignmentTypeHandler:
             ptr = module.globals[target_name]
         else:
             raise NameError(f"Unknown variable: {target_name}")
+
+        # Check if variable is const - prevent modification
+        symbol_entry = module.symbol_table.lookup_any(target_name)
+        #print(f"[TYPESYS] symbol_entry = {symbol_entry}")
+        if symbol_entry and symbol_entry.type_spec and hasattr(symbol_entry.type_spec, 'is_const'):
+            if symbol_entry.type_spec.is_const:
+                raise TypeError(f"Cannot assign to const variable '{target_name}'")
         
         # Check if this is an array concatenation assignment that requires resizing
         from fast import BinaryOp, Operator
@@ -3990,6 +3997,13 @@ class AssignmentTypeHandler:
     @staticmethod
     def handle_compound_assignment(builder, module, target_expr, op_token, value_expr):
         from fast import TokenType, Operator, Identifier, BinaryOp, Assignment
+
+        # Check if target is a const variable - prevent modification
+        if isinstance(target_expr, Identifier):
+            symbol_entry = module.symbol_table.lookup_any(target_expr.name)
+            if symbol_entry and symbol_entry.type_spec and hasattr(symbol_entry.type_spec, 'is_const'):
+                if symbol_entry.type_spec.is_const:
+                    raise TypeError(f"Cannot modify const variable '{target_expr.name}' with compound assignment")
         
         # Map compound assignment tokens to binary operators
         op_map = {
@@ -4034,7 +4048,7 @@ class AssignmentTypeHandler:
             right_val = value_expr.codegen(builder, module)
             
             # Check if both operands are arrays or array pointers
-            if (is_array_or_array_pointer(target_val) and is_array_or_array_pointer(right_val)):
+            if (ArrayTypeHandler.is_array_or_array_pointer(target_val) and ArrayTypeHandler.is_array_or_array_pointer(right_val)):
                 # This is array concatenation - create the binary operation
                 binary_expr = BinaryOp(target_expr, binary_op, value_expr)
                 concat_result = binary_expr.codegen(builder, module)
