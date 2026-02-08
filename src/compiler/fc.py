@@ -149,7 +149,6 @@ class FluxCompiler:
             
         debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
                                               f"Module triple: {self.module_triple}"])
-        print("GOT HERE")
 
     def compile_file(self, filename: str, output_bin: str = None) -> str:
         """
@@ -162,7 +161,6 @@ class FluxCompiler:
         Returns:
             Path to the generated executable
         """
-        print("IN COMPILE FILE:",self.logger)
         try:
             self.logger.section(f"Preprocessing Flux file: {filename}", LogLevel.INFO)
             self.predefined_macros = {

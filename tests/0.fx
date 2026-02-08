@@ -6,7 +6,6 @@ def main() -> int
 	int y = ~x;
 	print(y);
 	print();
-    print("Testing *(@)*(void*)void;\n\0");
-	*(@)*(void*)void;
+	*(void*)void = void;
 	return 0;
 };
