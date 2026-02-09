@@ -530,8 +530,8 @@ class SymbolTable:
         module._function_overloads[base_name].append(overload_info)
         #print("AFTER APPENDING OVERLOAD_INFO")
     
-    def lookup(self, name: str) -> Optional[Tuple[SymbolKind, Any]]:
-        entry = self.lookup_any(name)
+    def lookup(self, name: str, current_namespace: str = None) -> Optional[Tuple[SymbolKind, Any]]:
+        entry = self.lookup_any(name, current_namespace)
         if entry:
             return (entry.kind, entry.type_spec)
         return None
@@ -581,30 +581,33 @@ class SymbolTable:
         # 2. Current namespace
         if current_namespace:
             mangled = TypeResolver.mangle_namespace_name(current_namespace, name)
-        
-        # 3. Parent namespaces
+            if mangled in self._global_symbols:
+                return self._global_symbols[mangled]
+
+        # 3. Parent namespaces (FIX: proper indentation!)
         if current_namespace:
             parts = current_namespace.split('::')
             while parts:
                 parts.pop()
                 parent_ns = '::'.join(parts)
                 mangled = TypeResolver.mangle_namespace_name(parent_ns, name) if parent_ns else name
-        
+                if mangled in self._global_symbols:  # ← FIX: Move inside while loop!
+                    return self._global_symbols[mangled]
+
         # 4. Using namespaces
         for namespace in self.using_namespaces:
             mangled = TypeResolver.mangle_namespace_name(namespace, name)
+            if mangled in self._global_symbols:
+                return self._global_symbols[mangled]
         
         # 5. All registered namespaces
         for namespace in self.registered_namespaces:
             mangled = TypeResolver.mangle_namespace_name(namespace, name)
 
-        try:
             if mangled in self._global_symbols:
                 return self._global_symbols[mangled]
-            else:
-                return None
-        except:
-            return None
+        
+        return None
     
     def get_type_spec(self, name: str):
         entry = self.lookup_any(name)
@@ -754,7 +757,7 @@ class TypeResolver:
     def resolve_type(module: ir.Module, typename: str, current_namespace: str = "") -> Optional[ir.Type]:
         # 1. SYMBOL TABLE - HIGHEST PRIORITY (PRIMARY SOURCE)
         if hasattr(module, 'symbol_table'):
-            result = module.symbol_table.lookup(typename)
+            result = module.symbol_table.lookup(typename, current_namespace)
             
             if result and result[0] == SymbolKind.TYPE:
                 # result[1] should be the TypeSystem for this type alias
@@ -952,7 +955,7 @@ class TypeResolver:
     def resolve_custom_type(module: ir.Module, typename: str, current_namespace: str = "") -> Optional[ir.Type]:
         """Resolve custom type name to LLVM type - UNIFIED method."""
         if hasattr(module, 'symbol_table'):
-            result = module.symbol_table.lookup(typename)
+            result = module.symbol_table.lookup(typename, current_namespace)
             if result and result[0] == SymbolKind.TYPE:
                 if result[1] is not None:
                     return TypeSystem.get_llvm_type(result[1], module)
@@ -1333,66 +1336,78 @@ class NamespaceTypeHandler:
         original_name = struct_def.name
         struct_def.name = f"{namespace.replace('::', '__')}__{struct_def.name}"
         
-        # Set current namespace context on BOTH module and symbol_table
-        original_namespace = getattr(module, '_current_namespace', '')
+        # SAVE BOTH namespace contexts (matching pattern from process_namespace_function)
+        original_module_namespace = getattr(module, '_current_namespace', '')
         original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
         
+        # SET namespace on module (for type resolution during codegen)
         module._current_namespace = namespace
+        
         if not hasattr(module, 'symbol_table'):
             raise RuntimeError("Module must have symbol_table for namespace support")
 
-        original_namespace = module.symbol_table.current_namespace
+        # SET namespace on symbol table (for symbol lookup)
         module.symbol_table.set_namespace(namespace)
 
         try:
             struct_def.codegen(builder, module)
         finally:
+            # RESTORE ALL saved state
             struct_def.name = original_name
-            module.symbol_table.set_namespace(original_namespace)
+            module._current_namespace = original_module_namespace
+            module.symbol_table.set_namespace(original_st_namespace)
     
     @staticmethod
     def process_namespace_object(namespace: str, obj_def: 'ObjectDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
         original_name = obj_def.name
         obj_def.name = f"{namespace.replace('::', '__')}__{obj_def.name}"
         
-        # Set current namespace context on BOTH module and symbol_table
-        original_namespace = getattr(module, '_current_namespace', '')
+        # SAVE BOTH namespace contexts (matching pattern from process_namespace_function)
+        original_module_namespace = getattr(module, '_current_namespace', '')
         original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
         
+        # SET namespace on module (for type resolution during codegen)
         module._current_namespace = namespace
+        
         if not hasattr(module, 'symbol_table'):
             raise RuntimeError("Module must have symbol_table for namespace support")
 
-        original_namespace = module.symbol_table.current_namespace
+        # SET namespace on symbol table (for symbol lookup)
         module.symbol_table.set_namespace(namespace)
 
         try:
             obj_def.codegen(builder, module)
         finally:
+            # RESTORE ALL saved state
             obj_def.name = original_name
-            module.symbol_table.set_namespace(original_namespace)
+            module._current_namespace = original_module_namespace
+            module.symbol_table.set_namespace(original_st_namespace)
     
     @staticmethod
     def process_namespace_enum(namespace: str, enum_def: 'EnumDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
         original_name = enum_def.name
         enum_def.name = f"{namespace.replace('::', '__')}__{enum_def.name}"
         
-        # Set current namespace context on BOTH module and symbol_table
-        original_namespace = getattr(module, '_current_namespace', '')
+        # SAVE BOTH namespace contexts (matching pattern from process_namespace_function)
+        original_module_namespace = getattr(module, '_current_namespace', '')
         original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
         
+        # SET namespace on module (for type resolution during codegen)
         module._current_namespace = namespace
+        
         if not hasattr(module, 'symbol_table'):
             raise RuntimeError("Module must have symbol_table for namespace support")
 
-        original_namespace = module.symbol_table.current_namespace
+        # SET namespace on symbol table (for symbol lookup)
         module.symbol_table.set_namespace(namespace)
 
         try:
             enum_def.codegen(builder, module)
         finally:
+            # RESTORE ALL saved state
             enum_def.name = original_name
-            module.symbol_table.set_namespace(original_namespace)
+            module._current_namespace = original_module_namespace
+            module.symbol_table.set_namespace(original_st_namespace)
     
     @staticmethod
     def process_namespace_variable(namespace: str, var_def: 'VariableDeclaration', module: 'ir.Module'):
@@ -1455,23 +1470,26 @@ class NamespaceTypeHandler:
         # Temporarily set the function name for LLVM
         func_def.name = mangled_func_name
         
-        # Set current namespace context on BOTH module and symbol_table  
-        # This will be used by FunctionDef.codegen to register in symbol table
-        original_namespace = getattr(module, '_current_namespace', '')
+        # SAVE BOTH namespace contexts (use distinct variable names to avoid overwriting)
+        original_module_namespace = getattr(module, '_current_namespace', '')
         original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
         
+        # SET namespace on module (for type resolution during codegen)
         module._current_namespace = namespace
+        
         if not hasattr(module, 'symbol_table'):
             raise RuntimeError("Module must have symbol_table for namespace support")
 
-        original_namespace = module.symbol_table.current_namespace
+        # SET namespace on symbol table (for symbol lookup)
         module.symbol_table.set_namespace(namespace)
 
         try:
             func_def.codegen(builder, module)
         finally:
+            # RESTORE ALL saved state
             func_def.name = original_name
-            module.symbol_table.set_namespace(original_namespace)
+            module._current_namespace = original_module_namespace
+            module.symbol_table.set_namespace(original_st_namespace)
     
     @staticmethod
     def resolve_custom_type(module: ir.Module, typename: str, current_namespace: str = "") -> Optional[ir.Type]:
@@ -2794,7 +2812,7 @@ class CoercionContext:
 
         return convert(a), convert(b)
 
-    def coerce_return_value(builder: ir.IRBuilder,value: ir.Value,expected: ir.Type) -> ir.Value:
+    def coerce_return_value(builder: ir.IRBuilder, value: ir.Value, expected: ir.Type) -> ir.Value:
         ctx = CoercionContext(builder)
         src = value.type
 
@@ -2822,6 +2840,39 @@ class CoercionContext:
                     result._flux_type_spec = value._flux_type_spec
                     result._flux_type_spec.bit_width = expected.width
                 return result
+            else:
+                # Same width - no conversion needed
+                return value
+
+        # Float to integer conversion
+        if isinstance(src, (ir.FloatType, ir.DoubleType)) and isinstance(expected, ir.IntType):
+            unsigned = CoercionContext.is_unsigned(value) if hasattr(value, '_flux_type_spec') else False
+            result = builder.fptoui(value, expected) if unsigned else builder.fptosi(value, expected)
+            if hasattr(value, '_flux_type_spec'):
+                result._flux_type_spec = value._flux_type_spec
+                result._flux_type_spec.bit_width = expected.width
+            return result
+
+        # Integer to float conversion
+        if isinstance(src, ir.IntType) and isinstance(expected, (ir.FloatType, ir.DoubleType)):
+            unsigned = CoercionContext.is_unsigned(value)
+            result = builder.uitofp(value, expected) if unsigned else builder.sitofp(value, expected)
+            if hasattr(value, '_flux_type_spec'):
+                result._flux_type_spec = value._flux_type_spec
+            return result
+
+        # Float to float conversion (e.g., float to double or double to float)
+        if isinstance(src, (ir.FloatType, ir.DoubleType)) and isinstance(expected, (ir.FloatType, ir.DoubleType)):
+            if src != expected:
+                # fpext for widening (float to double), fptrunc for narrowing (double to float)
+                if src.width < expected.width:
+                    result = builder.fpext(value, expected)
+                else:
+                    result = builder.fptrunc(value, expected)
+                if hasattr(value, '_flux_type_spec'):
+                    result._flux_type_spec = value._flux_type_spec
+                return result
+            return value
 
         # Pointer ABI cast
         if isinstance(src, ir.PointerType) and isinstance(expected, ir.PointerType):
@@ -2871,6 +2922,12 @@ class CoercionContext:
                 raise TypeError(
                     f"Invalid return type: can only convert between integer arrays, "
                     f"got {src} -> {expected}")
+
+        # No valid conversion exists
+        raise TypeError(
+            f"Type of #1 arg mismatch: {src} != {expected}\n"
+            f"Cannot convert return value of type {src} to expected type {expected}"
+        )
 
     # --------------------------------------------------
     # Pointer helpers
@@ -3203,8 +3260,7 @@ class ObjectTypeHandler:
             "this",
             SymbolKind.VARIABLE,
             llvm_value=func.args[0],
-            type_spec=this_type_spec
-        )
+            type_spec=this_type_spec)
         
         # Store other params
         for i, param in enumerate(func.args[1:], 1):
@@ -3989,6 +4045,11 @@ class AssignmentTypeHandler:
             # Convert value type to match pointee type if needed
             pointee_type = ptr.type.pointee
             val = AssignmentTypeHandler.convert_value_for_assignment(builder, val, pointee_type)
+            
+            # Bitcast pointer if value type doesn't match pointee type (legacy_ast.py compatibility)
+            if val.type != ptr.type.pointee:
+                ptr = builder.bitcast(ptr, ir.PointerType(val.type))
+            
             builder.store(val, ptr)
             return val
         else:
@@ -4368,22 +4429,58 @@ class StructTypeHandler:
     @staticmethod
     def pack_struct_literal(builder: 'ir.IRBuilder', module: 'ir.Module', struct_type: str,
                            field_values: dict, positional_values: list) -> 'ir.Value':
-        # Get struct vtable
+        # Get struct vtable - use namespace resolution to find the actual struct name
         if not hasattr(module, '_struct_vtables'):
             raise ValueError(f"Struct '{struct_type}' not defined")
         
-        vtable = module._struct_vtables.get(struct_type)
-        if not vtable:
-            raise ValueError(f"Struct '{struct_type}' not defined")
+        # Try to resolve the struct name using namespace resolution
+        current_namespace = getattr(module, '_current_namespace', '')
+        resolved_struct_name = struct_type
         
-        llvm_struct_type = module._struct_types[struct_type]
+        # First, try exact match
+        vtable = module._struct_vtables.get(struct_type)
+        
+        # If not found, try with current namespace
+        if not vtable and current_namespace:
+            mangled_name = TypeResolver.mangle_namespace_name(current_namespace, struct_type)
+            vtable = module._struct_vtables.get(mangled_name)
+            if vtable:
+                resolved_struct_name = mangled_name
+        
+        # If still not found, try parent namespaces
+        if not vtable and current_namespace:
+            parts = current_namespace.split('::')
+            while parts and not vtable:
+                parts.pop()
+                parent_ns = '::'.join(parts)
+                if parent_ns:
+                    mangled_name = TypeResolver.mangle_namespace_name(parent_ns, struct_type)
+                else:
+                    mangled_name = struct_type
+                vtable = module._struct_vtables.get(mangled_name)
+                if vtable:
+                    resolved_struct_name = mangled_name
+        
+        # If still not found, try using namespaces
+        if not vtable and hasattr(module, '_using_namespaces'):
+            for namespace in module._using_namespaces:
+                mangled_name = TypeResolver.mangle_namespace_name(namespace, struct_type)
+                vtable = module._struct_vtables.get(mangled_name)
+                if vtable:
+                    resolved_struct_name = mangled_name
+                    break
+        
+        if not vtable:
+            raise ValueError(f"Struct '{struct_type}' not defined (current namespace: {current_namespace})")
+        
+        llvm_struct_type = module._struct_types[resolved_struct_name]
         
         # Handle positional initialization
         if positional_values:
             # Convert positional to named based on field order
             if len(positional_values) > len(vtable.fields):
                 raise ValueError(
-                    f"Too many initializers for struct '{struct_type}': "
+                    f"Too many initializers for struct '{resolved_struct_name}': "
                     f"got {len(positional_values)}, expected {len(vtable.fields)}"
                 )
             
@@ -4425,7 +4522,7 @@ class StructTypeHandler:
                     None
                 )
                 if not field_info:
-                    raise ValueError(f"Field '{field_name}' not found in struct '{struct_type}'")
+                    raise ValueError(f"Field '{field_name}' not found in struct '{resolved_struct_name}'")
                 
                 _, bit_offset, bit_width, alignment = field_info
                 
@@ -4605,10 +4702,21 @@ class SizeOfTypeHandler:
             if hasattr(module, "_struct_vtables") and target.name in module._struct_vtables:
                 return module._struct_vtables[target.name].total_bits
 
-            # Preferred path: type system info
-            ts = module.symbol_table.get_type_spec(target.name)
-            if ts is not None:
-                llvm_type = TypeSystem.get_llvm_type(ts, module, include_array=True)
+            # Look up as a type (struct/union/enum/typedef) in symbol table
+            type_entry = module.symbol_table.lookup_type(target.name)
+            if type_entry is not None:
+                # If it has a type_spec, use that
+                if type_entry.type_spec is not None:
+                    llvm_type = TypeSystem.get_llvm_type(type_entry.type_spec, module, include_array=True)
+                    return SizeOfTypeHandler.bits_from_llvm_type(llvm_type, module)
+                # If it has an llvm_type directly, use that
+                if type_entry.llvm_type is not None:
+                    return SizeOfTypeHandler.bits_from_llvm_type(type_entry.llvm_type, module)
+
+            # Try looking up as a variable (for sizeof(variable_name))
+            var_entry = module.symbol_table.lookup_variable(target.name)
+            if var_entry is not None and var_entry.type_spec is not None:
+                llvm_type = TypeSystem.get_llvm_type(var_entry.type_spec, module, include_array=True)
                 return SizeOfTypeHandler.bits_from_llvm_type(llvm_type, module)
 
             # Fallback: derive from existing LLVM storage
@@ -4664,10 +4772,15 @@ class AlignOfTypeHandler:
         # alignof(TypeSystem)
         if isinstance(target, TypeSystem):
             return AlignOfTypeHandler.alignment_bytes_for_type_spec(target, module)
+            # Look up as a type (struct/union/enum/typedef) in symbol table
+            type_entry = module.symbol_table.lookup_type(target.name)
+            if type_entry is not None and type_entry.type_spec is not None:
+                return AlignOfTypeHandler.alignment_bytes_for_type_spec(type_entry.type_spec, module)
 
-        # alignof(identifier) using stored type info first
-        if isinstance(target, Identifier):
-            # If the identifier names a struct type, use vtable info if it exists
+            # Try looking up as a variable (for alignof(variable_name))
+            var_entry = module.symbol_table.lookup_variable(target.name)
+            if var_entry is not None and var_entry.type_spec is not None:
+                return AlignOfTypeHandler.alignment_bytes_for_type_spec(var_entry.type_spec, module)            # If the identifier names a struct type, use vtable info if it exists
             if hasattr(module, "_struct_vtables") and target.name in module._struct_vtables:
                 vt = module._struct_vtables[target.name]
                 if hasattr(vt, "alignment_bytes"):

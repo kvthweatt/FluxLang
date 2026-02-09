@@ -145,9 +145,9 @@ class TokenType(Enum):
     XOR_ASSIGN = auto()      # ^^=
     BITAND_ASSIGN = auto()   # `&=
     BITOR_ASSIGN = auto()    # `|=
-    BITNAND_ASSIGN = auto(), # `!&=
-    BITNOR_ASSIGN = auto(),  # `!|=
-    BITXOR_ASSIGN = auto(),  # `^^=
+    BITNAND_ASSIGN = auto()  # `!&=
+    BITNOR_ASSIGN = auto()   # `!|=
+    BITXOR_ASSIGN = auto()   # `^^=
     
     # Shift
     BITSHIFT_LEFT = auto()     # <<
@@ -190,6 +190,96 @@ class TokenType(Enum):
     # Special
     EOF = auto()
     NEWLINE = auto()
+
+
+# Quad-character tokens dictionary - Watch out!
+quadruple_binary_tokens = {
+    '`!&=': TokenType.BITNAND_ASSIGN,
+    '`!|=': TokenType.BITNOR_ASSIGN,
+    '`^^=': TokenType.BITXOR_ASSIGN
+}
+
+triple_binary_tokens = {
+    '`!&': TokenType.BITNAND_OP,
+    '`!|': TokenType.BITNOR_OP,
+    '`&=': TokenType.BITAND_ASSIGN,
+    '`|=': TokenType.BITOR_ASSIGN,
+    '`^^': TokenType.BITXOR_OP
+}
+
+# Triple-character tokens dictionary
+triple_char_tokens = {
+    '<<=': TokenType.BITSHIFT_LEFT_ASSIGN,
+    '>>=': TokenType.BITSHIFT_RIGHT_ASSIGN,
+    '^^=': TokenType.XOR_ASSIGN,
+    '{}*': TokenType.FUNCTION_POINTER,
+    '(@)': TokenType.ADDRESS_CAST,
+    '<:-': TokenType.LAMBDA_ARROW,
+} | triple_binary_tokens
+
+double_binary_tokens = {
+    '`&': TokenType.BITAND_OP,
+    '`|': TokenType.BITOR_OP
+}
+
+# Double-character tokens dictionary  
+double_char_tokens = {
+    '==': TokenType.EQUAL,
+    '!=': TokenType.NOT_EQUAL,
+    '<=': TokenType.LESS_EQUAL,
+    '>=': TokenType.GREATER_EQUAL,
+    '<<': TokenType.BITSHIFT_LEFT,
+    '>>': TokenType.BITSHIFT_RIGHT,
+    '++': TokenType.INCREMENT,
+    '--': TokenType.DECREMENT,
+    '+=': TokenType.PLUS_ASSIGN,
+    '-=': TokenType.MINUS_ASSIGN,
+    '*=': TokenType.MULTIPLY_ASSIGN,
+    '/=': TokenType.DIVIDE_ASSIGN,
+    '%=': TokenType.MODULO_ASSIGN,
+    '^=': TokenType.POWER_ASSIGN,
+    '&=': TokenType.AND_ASSIGN,
+    '|=': TokenType.OR_ASSIGN,
+    '!&': TokenType.NAND_OP,
+    '!|': TokenType.NOR_OP,
+    '^^': TokenType.XOR_OP,
+    '!!': TokenType.NO_MANGLE,
+    '??': TokenType.NULL_COALESCE,
+    '->': TokenType.RETURN_ARROW,
+    '<-': TokenType.CHAIN_ARROW,
+    '<~': TokenType.RECURSE_ARROW,
+    '..': TokenType.RANGE,
+    '::': TokenType.SCOPE
+} | double_binary_tokens
+
+# Single-character tokens dictionary
+single_char_tokens = {
+    '+': TokenType.PLUS,
+    '-': TokenType.MINUS,
+    '*': TokenType.MULTIPLY,
+    '/': TokenType.DIVIDE,
+    '%': TokenType.MODULO,
+    '^': TokenType.POWER,
+    '<': TokenType.LESS_THAN,
+    '>': TokenType.GREATER_THAN,
+    '&': TokenType.LOGICAL_AND,
+    '|': TokenType.LOGICAL_OR,
+    '!': TokenType.NOT,
+    '@': TokenType.ADDRESS_OF,
+    '=': TokenType.ASSIGN,
+    '?': TokenType.QUESTION,
+    ':': TokenType.COLON,
+    '(': TokenType.LEFT_PAREN,
+    ')': TokenType.RIGHT_PAREN,
+    '[': TokenType.LEFT_BRACKET,
+    ']': TokenType.RIGHT_BRACKET,
+    '{': TokenType.LEFT_BRACE,
+    '}': TokenType.RIGHT_BRACE,
+    ';': TokenType.SEMICOLON,
+    ',': TokenType.COMMA,
+    '.': TokenType.DOT,
+    '~': TokenType.TIE
+}
 
 @dataclass
 class Token:
@@ -286,12 +376,12 @@ class FluxLexer:
     def advance(self, count=1) -> None:
         if self.position < self.length and self.source[self.position] == '\n':
             self.line += 1
-            self.column = count
+            self.column = 1
         else:
             self.column += count
         self.position += count
     
-    def skip_whitespace(self) -> None:
+    def skip_whitespace(self) -> bool:
         while self.current_char() and self.current_char() in ' \t\r\n':
             self.advance()
     
@@ -584,8 +674,7 @@ class FluxLexer:
         
         while self.position < self.length:
             # Skip whitespace
-            if self.current_char() and self.current_char() in ' \t\r\n':
-                self.skip_whitespace()
+            if self.skip_whitespace():
                 continue
             
             start_pos = (self.line, self.column)
@@ -660,119 +749,39 @@ class FluxLexer:
                         self.column = saved_col
                 
                 continue
+            
+            # Cascading check for operators
+            lookahead = char
+            for i in range(1, 4):
+                next_char = self.peek_char(i)
+                if next_char:
+                    lookahead += next_char
+                else:
+                    break
 
-            # Quad-character tokens dictionary - Watch out!
-            quadruple_binary_tokens = {
-                '`!&=': TokenType.BITNAND_ASSIGN,
-                '`!|=': TokenType.BITNOR_ASSIGN,
-                '`^^=': TokenType.BITXOR_ASSIGN
-            }
-
-            triple_binary_tokens = {
-                '`!&': TokenType.BITNAND_OP,
-                '`!|': TokenType.BITNOR_OP,
-                '`&=': TokenType.BITAND_ASSIGN,
-                '`|=': TokenType.BITOR_ASSIGN,
-                '`^^': TokenType.BITXOR_OP
-            }
-            
-            # Triple-character tokens dictionary
-            triple_char_tokens = {
-                '<<=': TokenType.BITSHIFT_LEFT_ASSIGN,
-                '>>=': TokenType.BITSHIFT_RIGHT_ASSIGN,
-                '^^=': TokenType.XOR_ASSIGN,
-                '{}*': TokenType.FUNCTION_POINTER,
-                '(@)': TokenType.ADDRESS_CAST,
-                '<:-': TokenType.LAMBDA_ARROW,
-            } | triple_binary_tokens
-
-            double_binary_tokens = {
-                '`&': TokenType.BITAND_OP,
-                '`|': TokenType.BITOR_OP
-            }
-            
-            # Double-character tokens dictionary  
-            double_char_tokens = {
-                '==': TokenType.EQUAL,
-                '!=': TokenType.NOT_EQUAL,
-                '<=': TokenType.LESS_EQUAL,
-                '>=': TokenType.GREATER_EQUAL,
-                '<<': TokenType.BITSHIFT_LEFT,
-                '>>': TokenType.BITSHIFT_RIGHT,
-                '++': TokenType.INCREMENT,
-                '--': TokenType.DECREMENT,
-                '+=': TokenType.PLUS_ASSIGN,
-                '-=': TokenType.MINUS_ASSIGN,
-                '*=': TokenType.MULTIPLY_ASSIGN,
-                '/=': TokenType.DIVIDE_ASSIGN,
-                '%=': TokenType.MODULO_ASSIGN,
-                '^=': TokenType.POWER_ASSIGN,
-                '&=': TokenType.AND_ASSIGN,
-                '|=': TokenType.OR_ASSIGN,
-                '!&': TokenType.NAND_OP,
-                '!|': TokenType.NOR_OP,
-                '&=': TokenType.AND_ASSIGN,
-                '|=': TokenType.OR_ASSIGN,
-                '^^': TokenType.XOR_OP,
-                '!!': TokenType.NO_MANGLE,
-                '??': TokenType.NULL_COALESCE,
-                '->': TokenType.RETURN_ARROW,
-                '<-': TokenType.CHAIN_ARROW,
-                '<~': TokenType.RECURSE_ARROW,
-                '..': TokenType.RANGE,
-                '::': TokenType.SCOPE
-            } | double_binary_tokens
-            
-            # Single-character tokens dictionary
-            single_char_tokens = {
-                '+': TokenType.PLUS,
-                '-': TokenType.MINUS,
-                '*': TokenType.MULTIPLY,
-                '/': TokenType.DIVIDE,
-                '%': TokenType.MODULO,
-                '^': TokenType.POWER,
-                '<': TokenType.LESS_THAN,
-                '>': TokenType.GREATER_THAN,
-                '&': TokenType.LOGICAL_AND,
-                '|': TokenType.LOGICAL_OR,
-                '!': TokenType.NOT,
-                '@': TokenType.ADDRESS_OF,
-                '=': TokenType.ASSIGN,
-                '?': TokenType.QUESTION,
-                ':': TokenType.COLON,
-                '(': TokenType.LEFT_PAREN,
-                ')': TokenType.RIGHT_PAREN,
-                '[': TokenType.LEFT_BRACKET,
-                ']': TokenType.RIGHT_BRACKET,
-                '{': TokenType.LEFT_BRACE,
-                '}': TokenType.RIGHT_BRACE,
-                ';': TokenType.SEMICOLON,
-                ',': TokenType.COMMA,
-                '.': TokenType.DOT,
-                '~': TokenType.TIE
-            }
-            
-            # Cascading check - longest first
             # Check for 4-char tokens
-            quad_char = char + (self.peek_char() or '') + (self.peek_char(2) or '') + (self.peek_char(3) or '')
-            if quad_char in quadruple_binary_tokens:
-                tokens.append(Token(quadruple_binary_tokens[quad_char], quad_char, start_pos[0], start_pos[1]))
-                self.advance(count=3)
-                continue
+            if len(lookahead) >= 4:
+                quad_char = lookahead[:4]
+                if quad_char in quadruple_binary_tokens:
+                    tokens.append(Token(quadruple_binary_tokens[quad_char], quad_char, start_pos[0], start_pos[1]))
+                    self.advance(count=4)  # Fixed: was 3, should be 4
+                    continue
 
             # Check for 3-char tokens
-            triple_char = char + (self.peek_char() or '') + (self.peek_char(2) or '')
-            if triple_char in triple_char_tokens:
-                tokens.append(Token(triple_char_tokens[triple_char], triple_char, start_pos[0], start_pos[1]))
-                self.advance(count=3)
-                continue
+            if len(lookahead) >= 3:
+                triple_char = lookahead[:3]
+                if triple_char in triple_char_tokens:
+                    tokens.append(Token(triple_char_tokens[triple_char], triple_char, start_pos[0], start_pos[1]))
+                    self.advance(count=3)
+                    continue
             
             # Check for 2-char tokens  
-            double_char = char + (self.peek_char() or '')
-            if double_char in double_char_tokens:
-                tokens.append(Token(double_char_tokens[double_char], double_char, start_pos[0], start_pos[1]))
-                self.advance(count=2)
-                continue
+            if len(lookahead) >= 2:
+                double_char = lookahead[:2]
+                if double_char in double_char_tokens:
+                    tokens.append(Token(double_char_tokens[double_char], double_char, start_pos[0], start_pos[1]))
+                    self.advance(count=2)
+                    continue
             
             # Check for 1-char tokens
             if char in single_char_tokens:

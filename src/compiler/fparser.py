@@ -390,6 +390,12 @@ class FluxParser:
         return ExternBlock(declarations)
     
     def function_def(self) -> Union[FunctionDef, List[FunctionDef]]:
+        """
+        function_def -> ('const')? ('volatile')? 'def' ('!!')? (IDENTIFIER | STRING_LITERAL) '(' parameter_list? ')' '->' type_spec (';' | block ';')
+        
+        Now supports string literals as function names for mangled/decorated names:
+            def "??@YAPAX?_FOO":()->void{};
+        """
         is_const = False
         is_volatile = False
         no_mangle = False
@@ -403,6 +409,7 @@ class FluxParser:
             self.advance()
         
         self.consume(TokenType.DEF)
+        
         # Check if this is a function pointer declaration (def{}*)
         if self.expect(TokenType.FUNCTION_POINTER):
             self.advance()  # consume the {}* token
@@ -411,7 +418,17 @@ class FluxParser:
         if self.expect(TokenType.NO_MANGLE):
             no_mangle = True
             self.consume(TokenType.NO_MANGLE)
-        name = self.consume(TokenType.IDENTIFIER).value
+        
+        # Function name can be either an IDENTIFIER or a STRING_LITERAL
+        if self.expect(TokenType.STRING_LITERAL):
+            # String literal function name (e.g., for mangled names)
+            name = self.consume(TokenType.STRING_LITERAL).value
+            # Note: The string literal includes quotes, you may want to strip them
+            # name = name.strip('"')  # Uncomment if you want to remove quotes
+        elif self.expect(TokenType.IDENTIFIER):
+            name = self.consume(TokenType.IDENTIFIER).value
+        else:
+            self.error("Expected function name (identifier or string literal)")
         
         self.consume(TokenType.LEFT_PAREN)
         parameters = []
@@ -436,10 +453,13 @@ class FluxParser:
             while self.expect(TokenType.COMMA):
                 self.advance()  # consume comma
                 
-                # Each additional prototype has its own name
-                proto_name = self.consume(TokenType.IDENTIFIER).value
-                #if proto_name != name:
-                    #self.error(f"Multi-function prototype must use same name '{name}', got '{proto_name}'")
+                # Each additional prototype has its own name (can also be string literal)
+                if self.expect(TokenType.STRING_LITERAL):
+                    proto_name = self.consume(TokenType.STRING_LITERAL).value
+                elif self.expect(TokenType.IDENTIFIER):
+                    proto_name = self.consume(TokenType.IDENTIFIER).value
+                else:
+                    self.error("Expected function name (identifier or string literal)")
                 
                 self.consume(TokenType.LEFT_PAREN)
                 proto_parameters = []
@@ -1303,14 +1323,22 @@ class FluxParser:
             self.error("Expected type specifier")
     
     def is_variable_declaration(self) -> bool:
+        """
+        Check if the current position starts a variable declaration.
+        Uses the _lookahead context manager for cleaner position management.
+        """
         with self._lookahead():
+            # Skip const/volatile qualifiers
             if self.expect(TokenType.CONST):
                 self.advance()
             if self.expect(TokenType.VOLATILE):
                 self.advance()
+            
+            # Skip signedness
             if self.expect(TokenType.SIGNED, TokenType.UNSIGNED):
                 self.advance()
             
+            # Must have a base type
             if not self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.CHAR, 
                              TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
                              TokenType.STRUCT, TokenType.IDENTIFIER):
@@ -1318,6 +1346,7 @@ class FluxParser:
             
             self.advance()
             
+            # Handle optional bit-width/alignment specification {width:alignment}
             if self.expect(TokenType.LEFT_BRACE):
                 self.advance()
                 if self.expect(TokenType.SINT_LITERAL):
@@ -1333,9 +1362,11 @@ class FluxParser:
                 if self.expect(TokenType.RIGHT_BRACE):
                     self.advance()
             
+            # Handle array dimensions
             while self.expect(TokenType.LEFT_BRACKET):
                 self.advance()
                 if not self.expect(TokenType.RIGHT_BRACKET):
+                    # Skip through array size expression
                     bracket_depth = 1
                     while bracket_depth > 0 and not self.expect(TokenType.EOF):
                         if self.expect(TokenType.LEFT_BRACKET):
@@ -1348,21 +1379,24 @@ class FluxParser:
                 if self.expect(TokenType.RIGHT_BRACKET):
                     self.advance()
             
-            # Consume all pointer levels (**, ***, etc.)
+            # Consume all pointer levels (*, **, ***, etc.)
             while self.expect(TokenType.MULTIPLY):
                 self.advance()
             
+            # Handle type alias ('as' keyword)
             if self.expect(TokenType.AS):
                 self.advance()
                 if self.expect(TokenType.VOID):
                     return False
                 return self.expect(TokenType.IDENTIFIER)
             
+            # Must have an identifier for the variable name
             if not self.expect(TokenType.IDENTIFIER):
                 return False
             
             self.advance()
             
+            # Variable declaration should be followed by one of these tokens
             return self.expect(TokenType.ASSIGN, TokenType.SEMICOLON, 
                              TokenType.LEFT_PAREN, TokenType.LEFT_BRACE,
                              TokenType.COMMA, TokenType.LEFT_BRACKET)
@@ -2382,6 +2416,9 @@ class FluxParser:
                 self.consume(TokenType.RIGHT_PAREN)
                 if isinstance(expr, Identifier):
                     expr = FunctionCall(expr.name, args)
+                elif isinstance(expr, StringLiteral):
+                    # String literal function name (for targeting mangled names like "??0Widget@@QEAA@AEBV0@@Z")
+                    expr = FunctionCall(expr.value, args)
                 elif isinstance(expr, MemberAccess):
                     # Method call: obj.method() -> call obj_type.method with obj as first arg
                     method_name = f"{{obj_type}}.{expr.member}"

@@ -770,7 +770,7 @@ class BinaryOp(Expression):
             }
             op = op_map[self.operator]
 
-            if isinstance(lhs.type, ir.FloatType):
+            if isinstance(lhs.type, ir.FloatType) and isinstance(rhs.type, ir.FloatType):
                 return builder.fcmp_ordered(op, lhs, rhs)
 
             if isinstance(lhs.type, ir.PointerType) or isinstance(rhs.type, ir.PointerType):
@@ -5142,7 +5142,23 @@ class StructDef(ASTNode):
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
         """Generate LLVM IR for struct definition."""
+        # Initialize struct storage first
+        StructTypeHandler.initialize_struct_storage(module)
+        
+        # Pre-register an identified struct type to allow self-referential pointers
+        # This creates a named opaque struct that can be referenced before it's defined
+        opaque_struct = ir.global_context.get_identified_type(self.name)
+        # Don't set the body yet - this allows it to be used in pointer types
+        opaque_struct.names = []
+        module._struct_types[self.name] = opaque_struct
+        
+        # Now calculate vtable (this may reference the struct type via pointers)
         self.vtable = self.calculate_vtable(module)
+        
+        # Set the body of the struct now that we know all the field types
+        field_types = [self.vtable.field_types[field_name] for field_name, _, _, _ in self.vtable.fields]
+        opaque_struct.set_body(*field_types)
+        opaque_struct.names = [field_name for field_name, _, _, _ in self.vtable.fields]
         
         # Generate TLD global constant
         vtable_constant = self.vtable.to_llvm_constant(module)
@@ -5155,13 +5171,7 @@ class StructDef(ASTNode):
         vtable_global.linkage = 'internal'
         vtable_global.global_constant = True
         
-        # Create proper LLVM struct type with named fields
-        instance_type = StructTypeHandler.create_struct_type(self.name, self.vtable, module)
-        
-        # Store type information in module
-        StructTypeHandler.initialize_struct_storage(module)
-        
-        module._struct_types[self.name] = instance_type
+        # The struct type is already registered and now has its body set
         module._struct_vtables[self.name] = self.vtable
         
         # Register in symbol table
@@ -5171,7 +5181,7 @@ class StructDef(ASTNode):
                 self.name,
                 SymbolKind.STRUCT,
                 type_spec=None,  # Structs don't have a TypeSystem, they ARE a type
-                llvm_type=instance_type,
+                llvm_type=opaque_struct,
                 llvm_value=vtable_global
             )
         
@@ -5264,7 +5274,7 @@ class StructDef(ASTNode):
         for nested in self.nested_structs:
             nested.codegen(builder, module)
         
-        return instance_type
+        return opaque_struct
 
 @dataclass
 class StructFieldAccess(Expression):
@@ -5722,27 +5732,29 @@ class NamespaceDef(ASTNode):
                 traceback.print_exc()
                 raise
 
-        # Process functions using NamespaceTypeHandler
-        for func in self.functions:
-            NamespaceTypeHandler.process_namespace_function(
-                self.name, func, work_builder, module)
-
-        # Process structs using NamespaceTypeHandler
-        for struct in self.structs:
-            NamespaceTypeHandler.process_namespace_struct(self.name, struct, work_builder, module)
-        
-        # Process objects using NamespaceTypeHandler
-        for obj in self.objects:
-            NamespaceTypeHandler.process_namespace_object(self.name, obj, work_builder, module)
+        # Process extern blocks (ALWAYS global, no namespace mangling)
+        # Extern declarations are inherently global and should not be namespaced
+        for extern_block in self.extern_blocks:
+            extern_block.codegen(work_builder, module)
 
         # Process enums using NamespaceTypeHandler
         for enum in self.enums:
             NamespaceTypeHandler.process_namespace_enum(self.name, enum, work_builder, module)
 
-        # Process extern blocks (ALWAYS global, no namespace mangling)
-        # Extern declarations are inherently global and should not be namespaced
-        for extern_block in self.extern_blocks:
-            extern_block.codegen(work_builder, module)
+        # Process TYPE DEFINITIONS FIRST (before functions that might use them)
+        # Process structs using NamespaceTypeHandler
+        for struct in self.structs:
+            NamespaceTypeHandler.process_namespace_struct(self.name, struct, work_builder, module)
+
+        # Process objects using NamespaceTypeHandler
+        for obj in self.objects:
+            NamespaceTypeHandler.process_namespace_object(self.name, obj, work_builder, module)
+
+
+        # NOW process functions (which may reference the types defined above)
+        for func in self.functions:
+            NamespaceTypeHandler.process_namespace_function(
+                self.name, func, work_builder, module)
 
         # Finalize static init function using NamespaceTypeHandler
         NamespaceTypeHandler.finalize_static_init(module)
