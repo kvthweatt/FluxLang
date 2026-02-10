@@ -176,6 +176,10 @@ extern
     def !!zed() -> void;
 };
 ```
+String-literal based function name support to target any compiled library function:
+```
+def "??foo@"()->void;
+```
 
 ## **Namespaces:**
 

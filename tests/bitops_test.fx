@@ -3,10 +3,7 @@
 def main() -> int
 {
     int a,b = 5,2;
-
+    a * b;
     int c = a ^^ b;
-
-    print(a);
-
     return 0;
 };

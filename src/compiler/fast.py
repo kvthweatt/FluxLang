@@ -31,6 +31,9 @@ class Literal(ASTNode):
     value: Any
     type: DataType
 
+    def __repr__(self) -> str:
+        return str(self.value)
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         #print(f"[DEBUG Literal.codegen] value={self.value}, type={self.type}")
         if self.type in (DataType.SINT, DataType.UINT):
@@ -196,6 +199,9 @@ class Expression(ASTNode):
 @dataclass
 class Identifier(Expression):
     name: str
+
+    def __repr__(self) -> str:
+        return self.name
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         #print(f"[IDENTIFIER] Looking up '{self.name}'", file=sys.stderr)
@@ -650,11 +656,54 @@ class BinaryOp(Expression):
     operator: Operator
     right: Expression
 
+    def __repr__(self):
+        return f"{self.left} {self.operator} {self.right}"
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         ctx = CoercionContext(builder)
 
         lhs = self.left.codegen(builder, module)
         rhs = self.right.codegen(builder, module)
+
+        # --------------------------------------------------
+        # Check if this might be pointer arithmetic BEFORE auto-dereferencing
+        # --------------------------------------------------
+        lhs_is_ptr_to_ptr = (isinstance(lhs.type, ir.PointerType) and 
+                             isinstance(lhs.type.pointee, ir.PointerType))
+        rhs_is_ptr_to_ptr = (isinstance(rhs.type, ir.PointerType) and 
+                             isinstance(rhs.type.pointee, ir.PointerType))
+        
+        # --------------------------------------------------
+        # Auto-dereference: If either operand is a pointer to a scalar type
+        # (not array/struct), load it automatically for binary operations
+        # This handles cases where Identifier returns a pointer instead of a value
+        # BUT: Don't auto-dereference if this looks like pointer arithmetic
+        # --------------------------------------------------
+        might_be_ptr_arithmetic = (
+            self.operator in (Operator.ADD, Operator.SUB) and
+            (lhs_is_ptr_to_ptr or rhs_is_ptr_to_ptr or
+             (isinstance(lhs.type, ir.PointerType) and isinstance(rhs.type, ir.IntType)) or
+             (isinstance(rhs.type, ir.PointerType) and isinstance(lhs.type, ir.IntType)))
+        )
+        
+        if not might_be_ptr_arithmetic:
+            if isinstance(lhs.type, ir.PointerType):
+                pointee = lhs.type.pointee
+                # Only auto-load scalar types, not arrays or structs
+                if not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType)):
+                    lhs = builder.load(lhs, name="auto_deref_lhs")
+            
+            if isinstance(rhs.type, ir.PointerType):
+                pointee = rhs.type.pointee
+                # Only auto-load scalar types, not arrays or structs
+                if not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType)):
+                    rhs = builder.load(rhs, name="auto_deref_rhs")
+        else:
+            # For potential pointer arithmetic, only dereference pointer-to-pointer to get the actual pointer
+            if lhs_is_ptr_to_ptr and isinstance(lhs.type.pointee.pointee, ir.IntType):
+                lhs = builder.load(lhs, name="deref_ptr_for_arithmetic")
+            if rhs_is_ptr_to_ptr and isinstance(rhs.type.pointee.pointee, ir.IntType):
+                rhs = builder.load(rhs, name="deref_ptr_for_arithmetic")
 
         # --------------------------------------------------
         # Array concatenation
@@ -681,10 +730,18 @@ class BinaryOp(Expression):
                 offset = rhs
                 if self.operator is Operator.SUB:
                     offset = builder.sub(ir.Constant(rhs.type, 0), rhs)
-                return builder.gep(lhs, [offset])
+                result = builder.gep(lhs, [offset])
+                # Preserve Flux type metadata from the pointer operand
+                if hasattr(lhs, '_flux_type_spec'):
+                    result._flux_type_spec = lhs._flux_type_spec
+                return result
 
             if rhs_ptr and lhs_int and self.operator is Operator.ADD:
-                return builder.gep(rhs, [lhs])
+                result = builder.gep(rhs, [lhs])
+                # Preserve Flux type metadata from the pointer operand
+                if hasattr(rhs, '_flux_type_spec'):
+                    result._flux_type_spec = rhs._flux_type_spec
+                return result
 
             if lhs_ptr and rhs_ptr:
                 a = builder.ptrtoint(lhs, ir.IntType(64))
@@ -791,11 +848,8 @@ class BinaryOp(Expression):
         if self.operator in (Operator.BITAND, Operator.BITOR, Operator.BITXOR):
             lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=True)
             result = {
-                Operator.AND: builder.and_,
                 Operator.BITAND: builder.and_,
-                Operator.OR: builder.or_,
                 Operator.BITOR: builder.or_,
-                Operator.XOR: builder.xor,
                 Operator.BITXOR: builder.xor,
             }[self.operator](lhs, rhs)
             # Bitwise operations preserve signedness from operands
@@ -803,12 +857,13 @@ class BinaryOp(Expression):
             return TypeSystem.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
         if self.operator in (Operator.AND, Operator.OR, Operator.XOR):
-            lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=True)
+            # Normalize operand widths BEFORE operation (only if both are integers)
+            if isinstance(lhs.type, ir.IntType) and isinstance(rhs.type, ir.IntType):
+                if lhs.type.width != rhs.type.width:
+                    lhs, rhs = ctx.normalize_ints(lhs, rhs, unsigned=True, promote=True)
             result = {
                 Operator.AND: builder.and_,
-                Operator.BITAND: builder.and_,
                 Operator.OR: builder.or_,
-                Operator.BITOR: builder.or_,
                 Operator.XOR: builder.xor,
             }[self.operator](lhs, rhs)
             # Bitwise operations preserve signedness from operands
@@ -1007,6 +1062,9 @@ class UnaryOp(Expression):
 class CastExpression(Expression):
     target_type: TypeSystem
     expression: Expression
+
+    def __repr__(self) -> str:
+        return f"({self.target_type.custom_typename if self.target_type.custom_typename else self.target_type.base_type}){self.expression};"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate code for cast expressions, including zero-cost struct reinterpretation and void casting"""
@@ -2297,6 +2355,9 @@ class MethodCall(Expression):
 class ArrayAccess(Expression):
     array: Expression
     index: Expression
+
+    def __repr__(self) -> str:
+        return f"{self.array}[{self.index}]"
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Get the array (should be a pointer to array or global)
@@ -2806,6 +2867,9 @@ class VariableDeclaration(ASTNode):
     initial_value: Optional[Expression] = None
     is_global: bool = False
 
+    def __repr__(self) -> str:
+        return f"{self.name}"
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Resolve type (with automatic array size inference if needed)
         resolved_type_spec = VariableTypeHandler.infer_array_size(self.type_spec, self.initial_value, module)
@@ -3104,6 +3168,9 @@ class Statement(ASTNode):
 class ExpressionStatement(Statement):
     expression: Expression
 
+    def __repr__(self) -> str:
+        return f"{self.expression}"
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         return self.expression.codegen(builder, module)
 
@@ -3111,6 +3178,9 @@ class ExpressionStatement(Statement):
 class Assignment(Statement):
     target: Expression
     value: Expression
+
+    def __repr__(self) -> str:
+        return f"{self.target} = {self.value}"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         
@@ -3151,6 +3221,9 @@ class CompoundAssignment(Statement):
     op_token: Any  # TokenType enum for the compound operator  
     value: Expression
 
+    def __repr__(self) -> str:
+        return f"{self.target} {self.op_token} {self.value}"
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate code for compound assignments like +=, -=, *=, /=, %="""
         
@@ -3160,6 +3233,10 @@ class CompoundAssignment(Statement):
 @dataclass
 class Block(Statement):
     statements: List[Statement] = field(default_factory=list)
+
+    def __repr__(self) -> str:
+        if isinstance(self.statements, list):
+            return f"{'\n\t'.join([str(x) for x in self.statements])}"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         result = None
@@ -3337,6 +3414,9 @@ class IfStatement(Statement):
     then_block: Block
     elif_blocks: List[tuple] = field(default_factory=list)  # (condition, block) pairs
     else_block: Optional[Block] = None
+
+    def __repr__(self) -> str:
+        return f"if ({self.condition})\n{self.then_block}\n{self.elif_blocks}\n{self.else_block};"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Check if we're in global scope (conditional compilation)
@@ -3770,6 +3850,9 @@ class ForLoop(Statement):
     update: Optional[Statement]
     body: Block
 
+    def __repr__(self) -> str:
+        return f"for ({self.init};{self.condition};{self.update})\n{{\n{self.body}}}"
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Create basic blocks
         func = builder.block.function
@@ -3927,6 +4010,9 @@ class ForInLoop(Statement):
 @dataclass
 class ReturnStatement(Statement):
     value: Optional[Expression] = None
+
+    def __repr__(self) -> str:
+        return f"return {self.value};"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         if self.value is None:

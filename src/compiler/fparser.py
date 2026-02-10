@@ -394,7 +394,7 @@ class FluxParser:
         function_def -> ('const')? ('volatile')? 'def' ('!!')? (IDENTIFIER | STRING_LITERAL) '(' parameter_list? ')' '->' type_spec (';' | block ';')
         
         Now supports string literals as function names for mangled/decorated names:
-            def "??@YAPAX?_FOO":()->void{};
+            def "??@YAPAX?_FOO"()->void{};
         """
         is_const = False
         is_volatile = False
@@ -2134,12 +2134,15 @@ class FluxParser:
 
     def bitwise_or_expression(self) -> Expression:
         """
-        bitwise_or_expression -> bitwise_xor_expression ('|' bitwise_xor_expression)*
+        bitwise_or_expression -> bitwise_xor_expression (('`|' | '`!|') bitwise_xor_expression)*
         """
         expr = self.bitwise_xor_expression()
         
-        while self.expect(TokenType.BITOR_OP):
-            operator = Operator.BITOR
+        while self.expect(TokenType.BITOR_OP, TokenType.BITNOR_OP):
+            if self.current_token.type == TokenType.BITOR_OP:
+                operator = Operator.BITOR
+            else:  # BITNOR_OP
+                operator = Operator.BITNOR
             self.advance()
             right = self.bitwise_xor_expression()
             expr = BinaryOp(expr, operator, right)

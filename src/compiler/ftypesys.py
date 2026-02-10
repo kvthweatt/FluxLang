@@ -86,6 +86,9 @@ class Operator(Enum):
     FUNCTION_POINTER = "{}*"
     ADDRESS_CAST = "(@)"
 
+    def __str__(self) -> str:
+        return self.value
+
 
 class DataType(Enum):
     SINT = "int"
@@ -1281,6 +1284,19 @@ TypeSystem(base_type:     {self.base_type}\n\
         # No type alias found - return value as-is
         return llvm_value
 
+    def get_array_element_type_spec(array_val: ir.Value):
+        # Check if the array value has type metadata attached
+        if hasattr(array_val, '_flux_array_element_type_spec'):
+            return array_val._flux_array_element_type_spec
+        
+        # Check if it has a general type spec with array element info
+        if hasattr(array_val, '_flux_type_spec'):
+            type_spec = array_val._flux_type_spec
+            if hasattr(type_spec, 'array_element_type') and type_spec.array_element_type:
+                return type_spec.array_element_type
+        
+        return None
+
 
 @dataclass
 class NamespaceTypeHandler:
@@ -1952,7 +1968,7 @@ class ArrayTypeHandler:
 
     @staticmethod
     def preserve_array_element_type_metadata(loaded_val: ir.Value, array_val: ir.Value, module: ir.Module) -> ir.Value:
-        element_type_spec = get_array_element_type_spec(array_val)
+        element_type_spec = TypeSystem.get_array_element_type_spec(array_val)
         #print(f"[PRESERVE] element_type_spec={element_type_spec}", file=sys.stderr)
         #if element_type_spec:
             #print(f"[PRESERVE]   base_type={element_type_spec.base_type}", file=sys.stderr)
@@ -2608,7 +2624,7 @@ class LiteralTypeHandler:
     @staticmethod
     def preserve_array_element_type_metadata(loaded_val: ir.Value, array_val: ir.Value, module: ir.Module) -> ir.Value:
         # Try to get the element type spec from the array value's metadata
-        element_type_spec = get_array_element_type_spec(array_val)
+        element_type_spec = TypeSystem.get_array_element_type_spec(array_val)
         
         if element_type_spec:
             return TypeSystem.attach_type_metadata(loaded_val, type_spec=element_type_spec)
@@ -2970,29 +2986,28 @@ def infer_int_width(value: int, data_type: DataType) -> int:
         else:
             return 64
     else:  # DataType.UINT
-        # Unsigned: 0 to 2^32-1
-        if 0 <= value <= (1 << 32) - 1:
-            #print(f"[DEBUG infer_int_width UINT] Returning 32 for value={value}")
-            return 32
+        # Unsigned integers should never be negative in the source
+        # However, after normalize_int_value(), large unsigned values may be 
+        # represented as negative (two's complement). We need to account for this.
+        # 
+        # Values in [0, 2^32-1] are 32-bit unsigned
+        # Values in [-2^32, -1] are normalized 32-bit unsigned (two's complement)
+        # Values >= 2^32 or < -2^32 are 64-bit unsigned
+        if value >= 0:
+            # Positive value - normal unsigned range check
+            if value <= (1 << 32) - 1:
+                return 32
+            else:
+                return 64
         else:
-            #print(f"[DEBUG infer_int_width UINT] Returning 64 for value={value}")
-            return 64
-
-
-
-def get_array_element_type_spec(array_val: ir.Value):
-    # Check if the array value has type metadata attached
-    if hasattr(array_val, '_flux_array_element_type_spec'):
-        return array_val._flux_array_element_type_spec
-    
-    # Check if it has a general type spec with array element info
-    if hasattr(array_val, '_flux_type_spec'):
-        type_spec = array_val._flux_type_spec
-        if hasattr(type_spec, 'array_element_type') and type_spec.array_element_type:
-            return type_spec.array_element_type
-    
-    return None
-
+            # Negative value means it was normalized from large unsigned via two's complement
+            # Check if it fits in 32-bit two's complement range
+            if value >= -(1 << 32):
+                # This is a normalized 32-bit unsigned value
+                return 32
+            else:
+                # This requires 64-bit
+                return 64
 
 def is_unsigned(val: ir.Value) -> bool:
     if hasattr(val, '_flux_type_spec'):

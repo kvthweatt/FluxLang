@@ -7,8 +7,9 @@ def "??foo@"() -> void
 
 def main() -> int
 {
-    "??foo@"();
-    int x;
-    x += 1;
+    uint a = 5;
+    uint b = 2;
+    uint c = a `!| b;
+    print(c);
 	return 0;
 };
