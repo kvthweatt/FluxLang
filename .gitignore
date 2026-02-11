@@ -1,6 +1,4 @@
 # Byte-compiled / optimized / DLL files
-*.py[cod]
-*.pyc
 **/__pycache__
 **/*.pyc
 **/*.pyo
@@ -170,19 +168,19 @@ cython_debug/
 uv.lock
 
 # Flux-specific
-*.exe
-*.exe.asm
-*.obj
-*.lib
-*.asm
-*.map
-*.s
-*.id*
-*.o
-*.ll
-*.bc
+**/*.exe
+**/*.exe.asm
+**/*.obj
+**/*.lib
+**/*.asm
+**/*.map
+**/*.s
+**/*.id*
+**/*.o
+**/*.ll
+**/*.bc
 # For IDA disassembly leftover from analyzing binaries
-*.i64
+**/*.i64
 
 # Project-specific
 /prompts

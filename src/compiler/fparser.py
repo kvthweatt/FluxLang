@@ -172,7 +172,7 @@ class FluxParser:
                     statements.append(stmt)
             except ParseError as e:
                 error_msg = f"Parse error: {e}"
-                print(error_msg, file=sys.stderr)
+                print(error_msg, file=sys.stdout)
                 self.parse_errors.append(error_msg)
                 self.synchronize()
         return Program(self.symbol_table,statements=statements)
@@ -1254,7 +1254,7 @@ class FluxParser:
                 t.is_pointer = True
                 t.pointer_depth = (t.pointer_depth or 0) + pointer_depth
 
-            #print(f"[TYPE_SPEC DEBUG] Resolved alias: custom_typename={custom_typename}, is_array={t.is_array}, array_size={t.array_size}, is_pointer={t.is_pointer}, pointer_depth={t.pointer_depth}", file=sys.stderr)
+            #print(f"[TYPE_SPEC DEBUG] Resolved alias: custom_typename={custom_typename}, is_array={t.is_array}, array_size={t.array_size}, is_pointer={t.is_pointer}, pointer_depth={t.pointer_depth}", file=sys.stdout)
             return t
 
         # No alias: return what we parsed normally
@@ -1276,7 +1276,7 @@ class FluxParser:
             storage_class=storage_class
         )
 
-        print(f"[TYPE_SPEC DEBUG] Non-alias: custom_typename={custom_typename}, is_array={is_array}, array_size={array_size}, is_pointer={pointer_depth > 0}, pointer_depth={pointer_depth}", file=sys.stderr)
+        #print(f"[TYPE_SPEC DEBUG] Non-alias: custom_typename={custom_typename}, is_array={is_array}, array_size={array_size}, is_pointer={pointer_depth > 0}, pointer_depth={pointer_depth}", file=sys.stdout)
     
     def base_type(self) -> Union[DataType, List]:
         """

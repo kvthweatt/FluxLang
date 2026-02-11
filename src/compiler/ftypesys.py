@@ -339,19 +339,19 @@ class SymbolTable:
     def enter_scope(self):
         """Enter function/block scope"""
         self.scopes.append({})
-        #print(f"[SCOPE] enter_scope() called - now at level {self.scope_level}, total scopes: {len(self.scopes)}", file=sys.stderr)
-        #print(f"[SCOPE] Call stack:", file=sys.stderr)
+        #print(f"[SCOPE] enter_scope() called - now at level {self.scope_level}, total scopes: {len(self.scopes)}", file=sys.stdout)
+        #print(f"[SCOPE] Call stack:", file=sys.stdout)
         #for line in traceback.format_stack()[-4:-1]:
-            #print(f"  {line.strip()}", file=sys.stderr)
+            #print(f"  {line.strip()}", file=sys.stdout)
     
     def exit_scope(self):
         """Exit function/block scope"""
         if len(self.scopes) > 1:
             popped = self.scopes.pop()
-            #print(f"[SCOPE] exit_scope() called - now at level {self.scope_level}, total scopes: {len(self.scopes)}", file=sys.stderr)
-            #print(f"[SCOPE]   Popped scope had {len(popped)} entries: {list(popped.keys())}", file=sys.stderr)
+            #print(f"[SCOPE] exit_scope() called - now at level {self.scope_level}, total scopes: {len(self.scopes)}", file=sys.stdout)
+            #print(f"[SCOPE]   Popped scope had {len(popped)} entries: {list(popped.keys())}", file=sys.stdout)
         #else:
-        #    print(f"[SCOPE] exit_scope() called but already at global scope!", file=sys.stderr)
+        #    print(f"[SCOPE] exit_scope() called but already at global scope!", file=sys.stdout)
 
     def is_global_scope(self) -> bool:
         """Check if we're at global scope (scope_level == 0)"""
@@ -373,10 +373,10 @@ class SymbolTable:
         if not isinstance(name, str):
             raise TypeError(f"SymbolTable.define() requires name to be str, got {type(name)}: {name}")
 
-        #print(f"[SYMBOL_TABLE] define(name='{name}', kind={kind})", file=sys.stderr)
-        #print(f"[SYMBOL_TABLE]   scope_level: {self.scope_level}", file=sys.stderr)
-        #print(f"[SYMBOL_TABLE]   current_namespace: {self.current_namespace}", file=sys.stderr)
-        #print(f"[SYMBOL_TABLE]   scopes count: {len(self.scopes)}", file=sys.stderr)
+        #print(f"[SYMBOL_TABLE] define(name='{name}', kind={kind})", file=sys.stdout)
+        #print(f"[SYMBOL_TABLE]   scope_level: {self.scope_level}", file=sys.stdout)
+        #print(f"[SYMBOL_TABLE]   current_namespace: {self.current_namespace}", file=sys.stdout)
+        #print(f"[SYMBOL_TABLE]   scopes count: {len(self.scopes)}", file=sys.stdout)
         
         entry = SymbolEntry(
             kind=kind,
@@ -389,7 +389,7 @@ class SymbolTable:
         )
         
         self.scopes[-1][name] = entry
-        #print(f"[SYMBOL_TABLE]   Added '{name}' to scope {len(self.scopes)-1}", file=sys.stderr)
+        #print(f"[SYMBOL_TABLE]   Added '{name}' to scope {len(self.scopes)-1}", file=sys.stdout)
         
         # Only globals go into _global_symbols
         if self.scope_level == 0:
@@ -541,10 +541,10 @@ class SymbolTable:
     
     def lookup_any(self, name: str, current_namespace: str = None) -> Optional[SymbolEntry]:
         """Lookup with namespace resolution"""
-        #print(f"[SYMBOL_TABLE] lookup_any('{name}')", file=sys.stderr)
-        #print(f"[SYMBOL_TABLE]   current_namespace: {current_namespace or self.current_namespace}", file=sys.stderr)
-        #print(f"[SYMBOL_TABLE]   scope_level: {self.scope_level}", file=sys.stderr)
-        #print(f"[SYMBOL_TABLE]   scopes: {[list(s.keys()) for s in self.scopes]}", file=sys.stderr)
+        #print(f"[SYMBOL_TABLE] lookup_any('{name}')", file=sys.stdout)
+        #print(f"[SYMBOL_TABLE]   current_namespace: {current_namespace or self.current_namespace}", file=sys.stdout)
+        #print(f"[SYMBOL_TABLE]   scope_level: {self.scope_level}", file=sys.stdout)
+        #print(f"[SYMBOL_TABLE]   scopes: {[list(s.keys()) for s in self.scopes]}", file=sys.stdout)
         
         if current_namespace is None:
             current_namespace = self.current_namespace
@@ -552,15 +552,15 @@ class SymbolTable:
         # Check local scopes first (reverse order)
         for i, scope in enumerate(reversed(self.scopes)):
             if name in scope:
-                #print(f"[SYMBOL_TABLE]   Found '{name}' in scope {len(self.scopes)-1-i}", file=sys.stderr)
+                #print(f"[SYMBOL_TABLE]   Found '{name}' in scope {len(self.scopes)-1-i}", file=sys.stdout)
                 return scope[name]
         
         # Then global with namespace resolution
         result = self._resolve_with_namespaces(name, current_namespace)
         #if result:
-        #    print(f"[SYMBOL_TABLE]   Found '{name}' via namespace resolution", file=sys.stderr)
+        #    print(f"[SYMBOL_TABLE]   Found '{name}' via namespace resolution", file=sys.stdout)
         #else:
-        #    print(f"[SYMBOL_TABLE]   NOT FOUND: '{name}'", file=sys.stderr)
+        #    print(f"[SYMBOL_TABLE]   NOT FOUND: '{name}'", file=sys.stdout)
         return result
     
     def _lookup_with_kinds(self, name: str, kinds, current_namespace: str = None) -> Optional[SymbolEntry]:
@@ -766,8 +766,8 @@ class TypeResolver:
                 # result[1] should be the TypeSystem for this type alias
                 if result[1] is not None:
                     t = TypeSystem.get_llvm_type(result[1], module, include_array=True)
-                    if isinstance(t, ir.VoidType):
-                        print(f"[TYPE RESOLVE] WARNING: resolved {typename} to void", file=sys.stderr)
+                    #if isinstance(t, ir.VoidType):
+                    #    print(f"[TYPE RESOLVE] WARNING: resolved {typename} to void", file=sys.stdout)
                     return t
                 
                 # If no TypeSystem stored but it's marked as a type,
@@ -1034,7 +1034,9 @@ TypeSystem(base_type:     {self.base_type}\n\
            storage_class: {self.storage_class})\n\n"
     
     def to_new_type(self) -> BaseType:
-        """Convert TypeSystem to new Type system"""
+        # THIS IS BAD, WHY THE FUCK ARE WE DROPPING TYPESYSTEM
+        # NEVER EVER EVER
+        # THIS IS BAD BAD BAD BAD
         base = None
         
         # URGENT: PASS ALIGNMENT + ENDIANNESS
@@ -1969,11 +1971,11 @@ class ArrayTypeHandler:
     @staticmethod
     def preserve_array_element_type_metadata(loaded_val: ir.Value, array_val: ir.Value, module: ir.Module) -> ir.Value:
         element_type_spec = TypeSystem.get_array_element_type_spec(array_val)
-        #print(f"[PRESERVE] element_type_spec={element_type_spec}", file=sys.stderr)
+        #print(f"[PRESERVE] element_type_spec={element_type_spec}", file=sys.stdout)
         #if element_type_spec:
-            #print(f"[PRESERVE]   base_type={element_type_spec.base_type}", file=sys.stderr)
-            #print(f"[PRESERVE]   is_signed={element_type_spec.is_signed}", file=sys.stderr)
-            #print(f"[PRESERVE]   custom_typename={element_type_spec.custom_typename}", file=sys.stderr)
+            #print(f"[PRESERVE]   base_type={element_type_spec.base_type}", file=sys.stdout)
+            #print(f"[PRESERVE]   is_signed={element_type_spec.is_signed}", file=sys.stdout)
+            #print(f"[PRESERVE]   custom_typename={element_type_spec.custom_typename}", file=sys.stdout)
         
         if element_type_spec:
             return TypeSystem.attach_type_metadata(loaded_val, type_spec=element_type_spec)
@@ -2445,7 +2447,7 @@ class ArrayTypeHandler:
     def pack_array_to_integer(builder: ir.IRBuilder, module: ir.Module, 
                              array_lit, target_type: ir.IntType) -> ir.Value:
         """Pack array literal elements into a single integer (compile-time if possible)."""
-        print("[TYPESYS] In pack_array_to_integer()")
+        #print("[TYPESYS] In pack_array_to_integer()")
         packed_value = 0
         bit_offset = 0
         
@@ -2723,9 +2725,9 @@ class IdentifierTypeHandler:
     
     @staticmethod
     def should_return_pointer(llvm_value: ir.Value, type_spec=None) -> bool:
-        #print(f"[SHOULD_RETURN_PTR] llvm_value.type: {llvm_value.type}", file=sys.stderr)
+        #print(f"[SHOULD_RETURN_PTR] llvm_value.type: {llvm_value.type}", file=sys.stdout)
         #if type_spec:
-        #    print(f"[SHOULD_RETURN_PTR] type_spec: {type_spec}", file=sys.stderr)
+        #    print(f"[SHOULD_RETURN_PTR] type_spec: {type_spec}", file=sys.stdout)
         
         # For arrays, return the pointer directly (don't load)
         # For structs, return the pointer directly (don't load)
@@ -2740,10 +2742,10 @@ class IdentifierTypeHandler:
             ts = llvm_value._flux_type_spec
             if hasattr(ts, 'array_size') and ts.array_size is not None:
                 # This is an array variable - don't load it
-                #print(f"[SHOULD_RETURN_PTR] Returning True - has _flux_type_spec.array_size: {ts.array_size}", file=sys.stderr)
+                #print(f"[SHOULD_RETURN_PTR] Returning True - has _flux_type_spec.array_size: {ts.array_size}", file=sys.stdout)
                 return True
         
-        #print(f"[SHOULD_RETURN_PTR] Returning False - will load", file=sys.stderr)
+        #print(f"[SHOULD_RETURN_PTR] Returning False - will load", file=sys.stdout)
         return False
     
     @staticmethod
@@ -3239,10 +3241,10 @@ class ObjectTypeHandler:
             # The base name is just object_name.actual_method_name
             base_name = f"{object_part}.{method.name}"
             
-            #print(f"[REGISTER METHOD] Registering method overload:", file=sys.stderr)
-            #print(f"  Full name: {func_name}", file=sys.stderr)
-            #print(f"  Method name: {method.name}", file=sys.stderr)
-            #print(f"  Base name: {base_name}", file=sys.stderr)
+            #print(f"[REGISTER METHOD] Registering method overload:", file=sys.stdout)
+            #print(f"  Full name: {func_name}", file=sys.stdout)
+            #print(f"  Method name: {method.name}", file=sys.stdout)
+            #print(f"  Base name: {base_name}", file=sys.stdout)
             
             SymbolTable.register_function_overload(
                 module, base_name, func_name, method.parameters, method.return_type, func
@@ -3336,7 +3338,7 @@ class FunctionTypeHandler:
     @staticmethod
     def resolve_overload_by_types(module: ir.Module, base_name: str, 
                                   arg_vals: List[ir.Value]) -> Optional[ir.Function]:
-        #print(f"[OVERLOAD DEBUG] Resolving {base_name} with {len(arg_vals)} args", file=sys.stderr)
+        #print(f"[OVERLOAD DEBUG] Resolving {base_name} with {len(arg_vals)} args", file=sys.stdout)
         if not hasattr(module, '_function_overloads'):
             return None
         
@@ -3967,9 +3969,9 @@ class AssignmentTypeHandler:
         # This handles all the loading logic correctly through Identifier codegen
         array = array_expr.codegen(builder, module)
         
-        #print(f"[ARRAY ASSIGN DEBUG] INITIAL array.type: {array.type}", file=sys.stderr)
+        #print(f"[ARRAY ASSIGN DEBUG] INITIAL array.type: {array.type}", file=sys.stdout)
         #if hasattr(array, '_flux_type_spec'):
-        #    print(f"[ARRAY ASSIGN DEBUG] array has _flux_type_spec: {array._flux_type_spec}", file=sys.stderr)
+        #    print(f"[ARRAY ASSIGN DEBUG] array has _flux_type_spec: {array._flux_type_spec}", file=sys.stdout)
         
         if (isinstance(array.type, ir.PointerType) and 
             isinstance(array.type.pointee, ir.PointerType) and
@@ -3989,13 +3991,13 @@ class AssignmentTypeHandler:
             
             if should_load:
                 # This is T* stored as T** - load to get T*
-                #print(f"[LOAD DEBUG] BEFORE load: array.type = {array.type}", file=sys.stderr)
+                #print(f"[LOAD DEBUG] BEFORE load: array.type = {array.type}", file=sys.stdout)
                 array = builder.load(array, name="ptr_loaded_for_indexing")
-                #print(f"[LOAD DEBUG] AFTER load: array.type = {array.type}", file=sys.stderr)
+                #print(f"[LOAD DEBUG] AFTER load: array.type = {array.type}", file=sys.stdout)
         index = index_expr.codegen(builder, module)
         
-        #print(f"[ARRAY ASSIGN] array.type: {array.type}", file=sys.stderr)
-        #print(f"[ARRAY ASSIGN] val.type: {val.type}", file=sys.stderr)
+        #print(f"[ARRAY ASSIGN] array.type: {array.type}", file=sys.stdout)
+        #print(f"[ARRAY ASSIGN] val.type: {val.type}", file=sys.stdout)
         
         if isinstance(array.type, ir.PointerType) and isinstance(array.type.pointee, ir.ArrayType):
             # Calculate element pointer for pointer-to-array
@@ -4017,12 +4019,12 @@ class AssignmentTypeHandler:
             return val
         elif isinstance(array.type, ir.PointerType):
             # Handle plain pointer types (like byte*) - pointer arithmetic
-            #print(f"[PTR ASSIGN DEBUG] array.type: {array.type}", file=sys.stderr)
-            #print(f"[PTR ASSIGN DEBUG] array.type.pointee: {array.type.pointee}", file=sys.stderr)
+            #print(f"[PTR ASSIGN DEBUG] array.type: {array.type}", file=sys.stdout)
+            #print(f"[PTR ASSIGN DEBUG] array.type.pointee: {array.type.pointee}", file=sys.stdout)
             elem_ptr = builder.gep(array, [index], inbounds=True)
             
-            #print(f"[PTR ASSIGN] elem_ptr.type: {elem_ptr.type}", file=sys.stderr)
-            #print(f"[PTR ASSIGN] elem_ptr.type.pointee: {elem_ptr.type.pointee}", file=sys.stderr)
+            #print(f"[PTR ASSIGN] elem_ptr.type: {elem_ptr.type}", file=sys.stdout)
+            #print(f"[PTR ASSIGN] elem_ptr.type.pointee: {elem_ptr.type.pointee}", file=sys.stdout)
             
             # FIX: Handle StringLiteral assignment to byte pointer elements
             element_type = array.type.pointee
@@ -4033,22 +4035,22 @@ class AssignmentTypeHandler:
                 else:
                     val = ir.Constant(ir.IntType(8), 0)
             
-            #print(f"[PTR ASSIGN] val.type: {val.type}", file=sys.stderr)
-            #print(f"[PTR ASSIGN] element_type: {element_type}", file=sys.stderr)
-            #print(f"[PTR ASSIGN] isinstance(val.type, ir.PointerType): {isinstance(val.type, ir.PointerType)}", file=sys.stderr)
-            #print(f"[PTR ASSIGN] isinstance(element_type, ir.PointerType): {isinstance(element_type, ir.PointerType)}", file=sys.stderr)
+            #print(f"[PTR ASSIGN] val.type: {val.type}", file=sys.stdout)
+            #print(f"[PTR ASSIGN] element_type: {element_type}", file=sys.stdout)
+            #print(f"[PTR ASSIGN] isinstance(val.type, ir.PointerType): {isinstance(val.type, ir.PointerType)}", file=sys.stdout)
+            #print(f"[PTR ASSIGN] isinstance(element_type, ir.PointerType): {isinstance(element_type, ir.PointerType)}", file=sys.stdout)
             
             # Handle pointer type compatibility - if both are pointers, bitcast if needed
             if isinstance(val.type, ir.PointerType) and isinstance(element_type, ir.PointerType):
-                #print(f"[PTR ASSIGN] Both are pointers, checking equality", file=sys.stderr)
-                #print(f"[PTR ASSIGN] val.type == element_type: {val.type == element_type}", file=sys.stderr)
+                #print(f"[PTR ASSIGN] Both are pointers, checking equality", file=sys.stdout)
+                #print(f"[PTR ASSIGN] val.type == element_type: {val.type == element_type}", file=sys.stdout)
                 if val.type != element_type:
-                    #print(f"[PTR ASSIGN] Doing bitcast", file=sys.stderr)
+                    #print(f"[PTR ASSIGN] Doing bitcast", file=sys.stdout)
                     val = builder.bitcast(val, element_type, name="ptr_cast")
             
             # Note: val is already generated in the caller, so we just use it directly
             # No type conversion needed - LLVM handles compatible pointer types
-            #print(f"[PTR ASSIGN] About to store, val.type: {val.type}", file=sys.stderr)
+            #print(f"[PTR ASSIGN] About to store, val.type: {val.type}", file=sys.stdout)
             builder.store(val, elem_ptr)
             return val
         else:
