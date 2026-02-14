@@ -18,6 +18,12 @@ import os, sys
 
 from ftypesys import *
 
+
+class ComptimeError(Exception):
+    def __init__(self, msg):
+        super.__init__(msg)
+        
+
 # Base classes first
 @dataclass
 class ASTNode:
@@ -922,6 +928,11 @@ class BinaryOp(Expression):
             unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
             return TypeSystem.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
+        if self.operator is Operator.BITXNOR:
+            result = builder.not_(builder.xor(lhs, rhs))
+            unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
+            return TypeSystem.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
+
 
         raise ValueError(f"Unsupported operator: {self.operator}")
 
@@ -1016,6 +1027,12 @@ class UnaryOp(Expression):
                 if hasattr(builder,'volatile_vars') and self.operand.name in builder.volatile_vars:
                     st.volatile = True
             return new_val if not self.is_postfix else operand_val
+        elif self.operator == Operator.BITNOT:
+            # Bitwise NOT
+            if module.symbol_table.is_global_scope() and isinstance(operand_val, ir.Constant):
+                if isinstance(operand_val.type, ir.IntType):
+                    return ir.Constant(operand_val.type, ~operand_val.constant)
+            return builder.not_(operand_val)
         else:
             raise ValueError(f"Unsupported unary operator: {self.operator}")
     
@@ -1753,65 +1770,30 @@ class FunctionCall(Expression):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """
-        Generate code for function calls with full overload resolution support.
-        
-        Resolution order:
-        1. Check if this is a function pointer variable
-        2. Check direct name in module.globals
-        3. Check for overloaded functions in _function_overloads
-        4. Check symbol table for function definitions
-        5. Check namespace-qualified names via _using_namespaces
-        6. Check namespace-qualified overloads
-        7. Raise error if still not found
+        Generate code for function calls.
+        ALL RESOLUTION IS DONE BY TypeResolver.resolve_function - ONE PLACE ONLY.
         """
-        #print(f"[RESOLUTION START] Trying to resolve function '{self.name}'", file=sys.stdout)
-        
         # Step 1: Check if this is a function pointer variable
         if self._is_function_pointer_variable(builder, module):
             func_ptr_call = FunctionPointerCall(pointer=Identifier(self.name), arguments=self.arguments)
             return func_ptr_call.codegen(builder, module)
         
-        # Step 2: Try direct lookup
-        func = self._try_direct_lookup(module)
-        #if func:
-        #    print(f"[RESOLUTION] Found '{self.name}' via direct lookup", file=sys.stdout)
+        # Step 2: Generate argument values first (needed for overload resolution)
+        arg_vals = [arg.codegen(builder, module) for arg in self.arguments]
         
-        # Step 3: If not found, try overload resolution
+        # Step 3: Get current namespace
+        current_ns = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ""
+        
+        # Step 4: SINGLE RESOLUTION CALL - handles everything
+        func = TypeResolver.resolve_function(module, self.name, current_ns, arg_vals)
+        
+        # Step 5: Error if not found
         if func is None:
-            func = self._try_overload_resolution(builder, module, self.name)
-            #if func:
-            #    print(f"[RESOLUTION] Found '{self.name}' via overload resolution", file=sys.stdout)
-            #else:
-            #    print(f"[RESOLUTION] Overload resolution for '{self.name}' returned None", file=sys.stdout)
-        
-        # Step 4: If still not found, try symbol table resolution
-        if func is None:
-            #print(f"[SYMBOL TABLE] Trying TypeResolver.resolve_function for '{self.name}'", file=sys.stdout)
-            current_ns = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ""
-            resolved_name = TypeResolver.resolve_function(module, self.name, current_ns)
-            #print(f"[SYMBOL TABLE] TypeResolver returned: {resolved_name}", file=sys.stdout)
-            if resolved_name and resolved_name in module.globals:
-                func = module.globals[resolved_name]
-                if not isinstance(func, ir.Function):
-                    func = None
-            #if func:
-            #    print(f"[RESOLUTION] Found '{self.name}' via symbol table", file=sys.stdout)
-        
-        # Step 5: If still not found, try namespace-qualified names
-        if func is None and hasattr(module, '_using_namespaces'):
-            #print(f"[RESOLUTION] Trying namespace resolution for '{self.name}'", file=sys.stdout)
-            func = self._try_namespace_resolution(builder, module)
-            #if func:
-            #    print(f"[RESOLUTION] Found '{self.name}' via namespace resolution", file=sys.stdout)
-        
-        # Step 6: Error if still not found
-        if func is None:
-            #print(f"[RESOLUTION] All resolution steps failed for '{self.name}'", file=sys.stdout)
             self._raise_function_not_found_error(module)
         
-        #print(f"Generating function call for {self.name}")
-        # Generate the actual function call
-        return self._generate_call(builder, module, func)
+        # Step 6: Generate the actual function call
+        return self._generate_call(builder, module, func, arg_vals)
+
     
     def _is_function_pointer_variable(self, builder: ir.IRBuilder, module: ir.Module) -> bool:
         """
@@ -1844,118 +1826,6 @@ class FunctionCall(Expression):
 
         return False
 
-    def _try_direct_lookup(self, module: ir.Module) -> Optional[ir.Function]:
-        """
-        Try to find the function by direct name lookup.
-        
-        Returns:
-            Function object if found, None otherwise
-        """
-        #print(f"[DIRECT LOOKUP] Checking for '{self.name}' in module.globals", file=sys.stdout)
-        #print(f"[DIRECT LOOKUP] Total items in module.globals: {len(module.globals)}", file=sys.stdout)
-        
-        # Show all functions in globals
-        all_funcs = [name for name, obj in module.globals.items() if isinstance(obj, ir.Function)]
-        #print(f"[DIRECT LOOKUP] All functions in globals: {all_funcs[:20]}", file=sys.stdout)
-        
-        func = module.globals.get(self.name, None)
-        if func:
-            #print(f"[DIRECT LOOKUP] Found '{self.name}': {type(func)}", file=sys.stdout)
-            if isinstance(func, ir.Function):
-                return func
-        #else:
-        #    print(f"[DIRECT LOOKUP] '{self.name}' not in module.globals", file=sys.stdout)
-        return None
-    
-    def _try_overload_resolution(self, builder: ir.IRBuilder, module: ir.Module, 
-                                 base_name: str) -> Optional[ir.Function]:
-        """
-        Try to resolve the function through overload resolution.
-        
-        Args:
-            builder: LLVM IR builder
-            module: LLVM module
-            base_name: Base function name (unmangled)
-        Returns:
-            Function object if found, None otherwise
-        """
-        #print(f"[OVERLOAD] Checking for overloads of '{base_name}'", file=sys.stdout)
-        if not hasattr(module, '_function_overloads'):
-            #print(f"[OVERLOAD] No _function_overloads attribute on module", file=sys.stdout)
-            return None
-        # Check if this base_name has any overloads registered
-        if base_name not in module._function_overloads:
-            #print(f"[OVERLOAD] '{base_name}' not in _function_overloads", file=sys.stdout)
-            #print(f"[OVERLOAD] Available overloaded functions: {list(module._function_overloads.keys())}", file=sys.stdout)
-            return None
-        #print(f"[OVERLOAD] Found {len(module._function_overloads[base_name])} overload(s) for '{base_name}'", file=sys.stdout)
-        # Use _resolve_overload which internally uses FunctionTypeHandler
-        return self._resolve_overload(builder, module, base_name, 
-                                     module._function_overloads[base_name])
-    
-    def _try_namespace_resolution(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Function]:
-        """
-        Try to resolve the function through namespace-qualified names using SymbolTable.
-        
-        Returns:
-            Function object if found, None otherwise
-        """
-        #print(f"[NAMESPACE RESOLVE] Trying to resolve '{self.name}'", file=sys.stdout)
-        
-        # Get current namespace context from symbol table or module
-        if hasattr(module, 'symbol_table'):
-            current_namespace = module.symbol_table.current_namespace
-            #print(f"[NAMESPACE RESOLVE]   current_namespace='{current_namespace}' (from symbol_table)", file=sys.stdout)
-            
-            # Try to lookup the function in the symbol table
-            func_entry = module.symbol_table.lookup_function(self.name, current_namespace)
-            if func_entry:
-                #print(f"[NAMESPACE RESOLVE]   Found in symbol_table: {func_entry.mangled_name}", file=sys.stdout)
-                
-                # First, try to get it directly from llvm_value (fastest)
-                if func_entry.llvm_value and isinstance(func_entry.llvm_value, ir.Function):
-                    #print(f"[NAMESPACE RESOLVE]   Found function in symbol_table.llvm_value!", file=sys.stdout)
-                    return func_entry.llvm_value
-                
-                # Fallback: Try to get the function from module.globals
-                if func_entry.mangled_name in module.globals:
-                    candidate_func = module.globals[func_entry.mangled_name]
-                    if isinstance(candidate_func, ir.Function):
-                        #print(f"[NAMESPACE RESOLVE]   Found function in globals via mangled_name!", file=sys.stdout)
-                        return candidate_func
-                
-                # Last resort: try the unmangled name
-                if self.name in module.globals:
-                    candidate_func = module.globals[self.name]
-                    if isinstance(candidate_func, ir.Function):
-                        #print(f"[NAMESPACE RESOLVE]   Found function in globals via unmangled name!", file=sys.stdout)
-                        return candidate_func
-        else:
-            current_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
-            #print(f"[NAMESPACE RESOLVE]   current_namespace='{current_namespace}' (from module attr)", file=sys.stdout)
-        
-        # Fallback: use old TypeResolver method
-        #print(f"[NAMESPACE RESOLVE]   Trying TypeResolver.resolve_type", file=sys.stdout)
-        resolved_name = TypeResolver.resolve_type(module, self.name, current_namespace)
-        if resolved_name:
-            #print(f"[NAMESPACE RESOLVE]   resolved_name='{resolved_name}'", file=sys.stdout)
-            
-            if resolved_name in module.globals:
-                candidate_func = module.globals[resolved_name]
-                if isinstance(candidate_func, ir.Function):
-                    #print(f"[NAMESPACE RESOLVE]   Found function in globals!", file=sys.stdout)
-                    return candidate_func
-                
-                # Also check for overloaded versions of the resolved name
-                func = self._try_overload_resolution(builder, module, resolved_name)
-                #print("TRYING OVERLOAD RESOLUTION")
-                if func is not None:
-                    #print(f"[NAMESPACE RESOLVE]   Found via overload resolution!", file=sys.stdout)
-                    return func
-        
-        #print(f"[NAMESPACE RESOLVE]   NOT FOUND", file=sys.stdout)
-        return None
-    
     def _raise_function_not_found_error(self, module: ir.Module) -> None:
         """
         Raise an appropriate error when the function cannot be found.
@@ -1975,76 +1845,33 @@ class FunctionCall(Expression):
         # Function not found anywhere - raise a clear error
         raise NameError(f"Function '{self.name}' not found in module or any imported namespaces")
 
-    def _resolve_overload(self, builder: ir.IRBuilder, module: ir.Module, base_name: str, overloads: list) -> ir.Function:
-        """
-        Resolve function overload by matching argument count and types.
-        """
-        arg_count = len(self.arguments)
-        
-        # Filter by argument count first
-        candidates = [o for o in overloads if o['param_count'] == arg_count]
-        
-        if len(candidates) == 0:
-            return None
-        elif len(candidates) == 1:
-            # Only one candidate - use it
-            func = candidates[0]['function']
-            
-            # DEFENSIVE CHECK: If function is a string, look it up in module.globals
-            if isinstance(func, str):
-                print(f"[WARNING] Overload metadata contains string '{func}' instead of function object", file=sys.stdout)
-                print(f"[WARNING] This indicates a bug in overload registration", file=sys.stdout)
-                if func in module.globals:
-                    func = module.globals[func]
-                    if isinstance(func, ir.Function):
-                        return func
-                return None
-            
-            return func
-        else:
-            # Multiple candidates - generate argument values and use FunctionTypeHandler
-            arg_vals = [arg.codegen(builder, module) for arg in self.arguments]
-            
-            # Delegate to FunctionTypeHandler for type-based resolution
-            return FunctionTypeHandler.resolve_overload_by_types(module, base_name, arg_vals)
-
-    def _generate_call(self, builder: ir.IRBuilder, module: ir.Module, func: ir.Function) -> ir.Value:
+    def _generate_call(self, builder: ir.IRBuilder, module: ir.Module, func: ir.Function, arg_vals: List[ir.Value]) -> ir.Value:
         """
         Generate the actual function call with argument processing.
         Uses FunctionTypeHandler for argument type conversion.
         """
-        # Handle deferred type resolution
-        if isinstance(func, tuple) and func[0] == '__NEEDS_TYPE_RESOLUTION__':
-            _, base_name, candidates = func
-            # NOW generate argument values for type resolution
-            arg_vals = [arg.codegen(builder, module) for arg in self.arguments]
-            # Resolve using types
-            func = FunctionTypeHandler.resolve_overload_by_types(module, base_name, arg_vals)
-            if func is None:
-                raise ValueError(f"Could not resolve overload for {base_name} with argument types {[str(v.type) for v in arg_vals]}")
         # Check if this is a method call (has dot in name)
         is_method_call = '.' in self.name
         parameter_offset = 1 if is_method_call else 0  # Account for implicit 'this' parameter
         
-        # Generate code for arguments
-        arg_vals = []
-        for i, arg in enumerate(self.arguments):
+        # Process arguments with type conversion
+        processed_args = []
+        for i, (arg, arg_val) in enumerate(zip(self.arguments, arg_vals)):
             param_index = i + parameter_offset
             
             # Handle string literals specially
             if self._is_string_literal_for_pointer(arg, func, param_index):
                 arg_val = self._create_string_constant(builder, module, arg, i)
-            else:
-                arg_val = arg.codegen(builder, module)
             
             # Use FunctionTypeHandler for type checking and conversion
             if param_index < len(func.args):
                 expected_type = func.args[param_index].type
                 arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(builder, module, arg_val, expected_type, i)
             
-            arg_vals.append(arg_val)
-        #print(f"Generated call for {self.name}")
-        return builder.call(func, arg_vals)
+            processed_args.append(arg_val)
+        
+        return builder.call(func, processed_args)
+
 
     def _is_string_literal_for_pointer(self, arg: Expression, func: ir.Function, 
                                       param_index: int) -> bool:
@@ -2313,10 +2140,9 @@ class MethodCall(Expression):
             if method_func_name in module._function_overloads:
                 #print(f"[METHOD CALL]   Found in overloads table with {len(module._function_overloads[method_func_name])} overload(s)", file=sys.stdout)
                 # We need to resolve which overload matches our arguments
-                # Create a temporary FunctionCall to reuse its overload resolution
-                temp_call = FunctionCall(name=method_func_name, arguments=self.arguments)
-                func = temp_call._resolve_overload(builder, module, method_func_name,
-                                                   module._function_overloads[method_func_name])
+                # Generate argument values for overload resolution
+                arg_vals = [arg.codegen(builder, module) for arg in self.arguments]
+                func = TypeResolver.resolve_function(module, method_func_name, "", arg_vals)
             #    if func:
             #        print(f"[METHOD CALL] Resolved to: {func.name}", file=sys.stdout)
             #    else:
@@ -3052,8 +2878,7 @@ class VariableDeclaration(ASTNode):
             #print("[CONSTRUCTOR] ATTEMPTING OVERLOAD RESOLUTION", file=sys.stdout)
             # Step 2: Try overload resolution
             if hasattr(module, '_function_overloads') and func_call.name in module._function_overloads:
-                func = func_call._resolve_overload(builder, module, func_call.name, 
-                                                   module._function_overloads[func_call.name])
+                func = TypeResolver.resolve_function(module, func_call.name)
                 #if func:
                 #    print(f"[CONSTRUCTOR] Found via overload resolution: {func_call.name}", file=sys.stdout)
         
@@ -3077,8 +2902,7 @@ class VariableDeclaration(ASTNode):
                     #print(f"[CONSTRUCTOR]   Checking overloads for: {mangled_name}", file=sys.stdout)
                     if mangled_name in module._function_overloads:
                         #print(f"[CONSTRUCTOR]   FOUND in overloads!", file=sys.stdout)
-                        func = func_call._resolve_overload(builder, module, mangled_name,
-                                                           module._function_overloads[mangled_name])
+                        func = TypeResolver.resolve_function(module, mangled_name)
                         if func:
                             #print(f"[CONSTRUCTOR] Found via namespace overload resolution: {mangled_name}", file=sys.stdout)
                             break
@@ -4610,18 +4434,14 @@ class FunctionDef(ASTNode):
             
             # Extract base name for symbol table registration
             # The function name might be namespace-mangled like "standard__types__bswap16"
-            # We need to extract just "bswap16" for the symbol table (namespace is tracked separately)
-            # Check if we're in a namespace
+            # For namespace functions, we need to register under the FULL mangled name
+            # so that overload resolution works correctly within the namespace
             if hasattr(module, 'symbol_table') and module.symbol_table.current_namespace:
-                # Remove the namespace prefix from the name
-                namespace_prefix = module.symbol_table.current_namespace + "__"
-                if self.name.startswith(namespace_prefix):
-                    base_name = self.name[len(namespace_prefix):]
-                else:
-                    # No prefix, use as-is
-                    base_name = self.name
+                # We're in a namespace - use the FULL mangled function name as the base
+                # This ensures functions in namespace A can find overloads in namespace A
+                base_name = self.name
             else:
-                # Not in a namespace or no :: in name
+                # Not in a namespace - extract just the function name
                 base_name = self.name.split('::')[-1] if '::' in self.name else self.name
             
             # Register this as an overload using FunctionTypeHandler
@@ -4775,7 +4595,7 @@ class FunctionPointerDeclaration(Statement):
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate function pointer variable"""
         resolved_type_spec = None
-        ptr_type = self.fp_type.get_llvm_pointer_type(self, module)
+        ptr_type = FunctionPointerType.get_llvm_pointer_type(self.fp_type, module)
         
         # Store type information for later lookup
         # Type information will be stored in symbol table during define()
@@ -5847,6 +5667,7 @@ class NamespaceDef(ASTNode):
         
         # Restore original namespace context
         module._current_namespace = original_namespace
+        module.symbol_table.set_namespace(original_namespace)
 
         return None
 

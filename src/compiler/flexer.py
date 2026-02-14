@@ -139,6 +139,9 @@ class TokenType(Enum):
     BITNAND_OP = auto()     # `!&
     BITNOR_OP = auto()      # `!|
     BITXOR_OP = auto()      # `^^
+    BITXNOT = auto()        # `^^!
+    BITXNAND = auto()       # `^^!&
+    BITXNOR = auto()        # `^^!|
     # Assignment
     AND_ASSIGN = auto()      # &=
     OR_ASSIGN = auto()       # |=
@@ -148,6 +151,10 @@ class TokenType(Enum):
     BITNAND_ASSIGN = auto()  # `!&=
     BITNOR_ASSIGN = auto()   # `!|=
     BITXOR_ASSIGN = auto()   # `^^=
+    BITXNOT_ASSIGN = auto()  # `^^!=
+    BITXNAND_ASSIGN = auto() # `^^!&=
+    BITXNOR_ASSIGN = auto()  # `^^!|=
+
     
     # Shift
     BITSHIFT_LEFT = auto()     # <<
@@ -192,8 +199,22 @@ class TokenType(Enum):
     NEWLINE = auto()
 
 
+
+sextuple_binary_tokens = {
+    "`^^!&=": TokenType.BITXNAND_ASSIGN,
+    "`^^!|=": TokenType.BITXNOR_ASSIGN
+}
+
+quintuple_binary_tokens = {
+    "`^^!&": TokenType.BITXNAND,
+    "`^^!|": TokenType.BITXNOR,
+    "`^^!=": TokenType.BITXNOT_ASSIGN
+}
+
+
 # Quad-character tokens dictionary - Watch out!
 quadruple_binary_tokens = {
+    "`^^!": TokenType.BITXNOT,
     '`!&=': TokenType.BITNAND_ASSIGN,
     '`!|=': TokenType.BITNOR_ASSIGN,
     '`^^=': TokenType.BITXOR_ASSIGN
@@ -218,6 +239,7 @@ triple_char_tokens = {
 } | triple_binary_tokens
 
 double_binary_tokens = {
+    '`!': TokenType.BITNOT_OP,
     '`&': TokenType.BITAND_OP,
     '`|': TokenType.BITOR_OP
 }
@@ -752,19 +774,35 @@ class FluxLexer:
             
             # Cascading check for operators
             lookahead = char
-            for i in range(1, 4):
+            for i in range(1, 6):
                 next_char = self.peek_char(i)
                 if next_char:
                     lookahead += next_char
                 else:
                     break
 
+            # Check for 6-char tokens
+            if len(lookahead) >= 6:
+                six_char = lookahead[:6]
+                if six_char in sextuple_binary_tokens:
+                    tokens.append(Token(sextuple_binary_tokens[six_char], six_char, start_pos[0], start_pos[1]))
+                    self.advance(count=6)
+                    continue
+
+            # Check for 5-char tokens
+            if len(lookahead) >= 5:
+                pent_char = lookahead[:5]
+                if pent_char in quintuple_binary_tokens:
+                    tokens.append(Token(quintuple_binary_tokens[pent_char], pent_char, start_pos[0], start_pos[1]))
+                    self.advance(count=5)
+                    continue
+
             # Check for 4-char tokens
             if len(lookahead) >= 4:
                 quad_char = lookahead[:4]
                 if quad_char in quadruple_binary_tokens:
                     tokens.append(Token(quadruple_binary_tokens[quad_char], quad_char, start_pos[0], start_pos[1]))
-                    self.advance(count=4)  # Fixed: was 3, should be 4
+                    self.advance(count=4)
                     continue
 
             # Check for 3-char tokens

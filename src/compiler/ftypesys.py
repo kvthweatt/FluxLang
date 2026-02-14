@@ -55,6 +55,9 @@ class Operator(Enum):
     BITNAND = "`!&" #
     BITNOR = "`!|" #
     BITXOR = "`^^" #
+    BITXNOT = "`^^!" #
+    BITXNAND = "`^^!&" #
+    BITXNOR = "`^^!|" #
     # Assignment
     AND_ASSIGN = "&=" #
     OR_ASSIGN = "|=" #
@@ -64,6 +67,9 @@ class Operator(Enum):
     BITNAND_ASSIGN = "`!&=" #
     BITNOR_ASSIGN = "`!|=" #
     BITXOR_ASSIGN = "`^^=" #
+    BITXNOT_ASSIGN = "`^^!=" #
+    BITXNAND_ASSIGN = "`^^!&=" #
+    BITXNOR_ASSIGN = "`^^!|=" #
 
     # Shift
     BITSHIFT_LEFT = "<<"
@@ -594,7 +600,7 @@ class SymbolTable:
                 parts.pop()
                 parent_ns = '::'.join(parts)
                 mangled = TypeResolver.mangle_namespace_name(parent_ns, name) if parent_ns else name
-                if mangled in self._global_symbols:  # ← FIX: Move inside while loop!
+                if mangled in self._global_symbols:  # ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â FIX: Move inside while loop!
                     return self._global_symbols[mangled]
 
         # 4. Using namespaces
@@ -793,28 +799,207 @@ class TypeResolver:
         return TypeResolver.resolve_with_namespace(module, typename, current_namespace, TypeResolver.lookup_type)
     
     @staticmethod
-    def resolve_function(module: ir.Module, func_name: str, current_namespace: str = "") -> Optional[str]:
-        # 1. SYMBOL TABLE - HIGHEST PRIORITY
-        #print("IN RESOLVE_FUNCTION()")
+    def resolve_function(module: ir.Module, func_name: str, current_namespace: str = "", arg_vals: List[ir.Value] = None) -> Optional[ir.Function]:
+        """
+        THE SINGLE SOURCE OF TRUTH FOR ALL FUNCTION RESOLUTION.
+        Handles both regular functions and overloaded functions.
+        
+        Args:
+            module: LLVM module
+            func_name: Function name to resolve
+            current_namespace: Current namespace context
+            arg_vals: Optional list of argument values for overload resolution
+            
+        Returns:
+            ir.Function object if found, None otherwise
+        """
+        # Step 1: Try direct lookup in module.globals
+        if func_name in module.globals:
+            obj = module.globals[func_name]
+            if isinstance(obj, ir.Function):
+                return obj
+        
+        # Step 2: Check for overloaded functions
+        if hasattr(module, '_function_overloads') and func_name in module._function_overloads:
+            overloads = module._function_overloads[func_name]
+            
+            # If we have arg_vals, match the overload directly
+            if arg_vals is not None:
+                matching_count = None
+                for overload in overloads:
+                    if overload['param_count'] == len(arg_vals):
+                        # Save first matching count in case we don't find exact type match
+                        if matching_count is None:
+                            matching_count = overload['function']
+                        
+                        # Check if types match exactly
+                        func = overload['function']
+                        param_types = [p.type for p in func.args]
+                        arg_types = [arg.type for arg in arg_vals]
+                        
+                        if len(param_types) == len(arg_types):
+                            types_match = True
+                            for pt, at in zip(param_types, arg_types):
+                                if pt != at:
+                                    types_match = False
+                                    break
+                            
+                            if types_match:
+                                return func
+                
+                # Return first matching param count if we found one
+                if matching_count is not None:
+                    return matching_count
+            
+            # If no arg_vals or type resolution failed, check if there's only one overload
+            if len(overloads) == 1:
+                return overloads[0]['function']
+        
+        # Step 3: Try symbol table lookup
         if hasattr(module, 'symbol_table'):
-            # Use lookup_function which does full namespace resolution
             func_entry = module.symbol_table.lookup_function(func_name, current_namespace)
             
             if func_entry:
-                # Found in symbol table - now find it in module.globals
                 # Try mangled name first
                 if func_entry.mangled_name in module.globals:
-                    return func_entry.mangled_name
+                    obj = module.globals[func_entry.mangled_name]
+                    if isinstance(obj, ir.Function):
+                        return obj
                 
                 # Try unmangled name
                 if func_name in module.globals:
-                    return func_name
+                    obj = module.globals[func_name]
+                    if isinstance(obj, ir.Function):
+                        return obj
+                
+                # Check if it's an overloaded function with mangled name
+                if hasattr(module, '_function_overloads') and func_entry.mangled_name in module._function_overloads:
+                    overloads = module._function_overloads[func_entry.mangled_name]
+                    
+                    if arg_vals is not None:
+                        matching_count = None
+                        for overload in overloads:
+                            if overload['param_count'] == len(arg_vals):
+                                # Save first matching count in case we don't find exact type match
+                                if matching_count is None:
+                                    matching_count = overload['function']
+                                
+                                # Check if types match exactly
+                                func = overload['function']
+                                param_types = [p.type for p in func.args]
+                                arg_types = [arg.type for arg in arg_vals]
+                                
+                                if len(param_types) == len(arg_types):
+                                    types_match = True
+                                    for pt, at in zip(param_types, arg_types):
+                                        if pt != at:
+                                            types_match = False
+                                            break
+                                    
+                                    if types_match:
+                                        return func
+                        
+                        # Return first matching param count if we found one
+                        if matching_count is not None:
+                            return matching_count
+                    
+                    if len(overloads) == 1:
+                        return overloads[0]['function']
         
-        # 2. NAMESPACE RESOLUTION - fallback
+        # Step 4: Try namespace resolution
         result = TypeResolver.resolve_with_namespace(module, func_name, current_namespace, TypeResolver.lookup_global)
         
         if result is not None and isinstance(result, ir.Function):
-            return result.name
+            return result
+        
+        # Step 4a: Try current namespace for overloaded functions
+        if current_namespace and hasattr(module, '_function_overloads'):
+            qualified_name = TypeResolver.mangle_namespace_name(current_namespace, func_name)
+            
+            # Check direct lookup in current namespace
+            if qualified_name in module.globals:
+                obj = module.globals[qualified_name]
+                if isinstance(obj, ir.Function):
+                    return obj
+            
+            # Check overloads in current namespace
+            if qualified_name in module._function_overloads:
+                overloads = module._function_overloads[qualified_name]
+                
+                if arg_vals is not None:
+                    matching_count = None
+                    for overload in overloads:
+                        if overload['param_count'] == len(arg_vals):
+                            # Save first matching count in case we don't find exact type match
+                            if matching_count is None:
+                                matching_count = overload['function']
+                            
+                            # Check if types match exactly
+                            func = overload['function']
+                            param_types = [p.type for p in func.args]
+                            arg_types = [arg.type for arg in arg_vals]
+                            
+                            if len(param_types) == len(arg_types):
+                                types_match = True
+                                for pt, at in zip(param_types, arg_types):
+                                    if pt != at:
+                                        types_match = False
+                                        break
+                                
+                                if types_match:
+                                    return func
+                    
+                    # Return first matching param count if we found one
+                    if matching_count is not None:
+                        return matching_count
+                
+                if len(overloads) == 1:
+                    return overloads[0]['function']
+        
+        # Step 5: Try namespace-qualified overloads from using namespaces
+        if hasattr(module, '_using_namespaces'):
+            for ns in module._using_namespaces:
+                qualified_name = TypeResolver.mangle_namespace_name(ns, func_name)
+                
+                # Check direct lookup
+                if qualified_name in module.globals:
+                    obj = module.globals[qualified_name]
+                    if isinstance(obj, ir.Function):
+                        return obj
+                
+                # Check overloads
+                if hasattr(module, '_function_overloads') and qualified_name in module._function_overloads:
+                    overloads = module._function_overloads[qualified_name]
+                    
+                    if arg_vals is not None:
+                        matching_count = None
+                        for overload in overloads:
+                            if overload['param_count'] == len(arg_vals):
+                                # Save first matching count in case we don't find exact type match
+                                if matching_count is None:
+                                    matching_count = overload['function']
+                                
+                                # Check if types match exactly
+                                func = overload['function']
+                                param_types = [p.type for p in func.args]
+                                arg_types = [arg.type for arg in arg_vals]
+                                
+                                if len(param_types) == len(arg_types):
+                                    types_match = True
+                                    for pt, at in zip(param_types, arg_types):
+                                        if pt != at:
+                                            types_match = False
+                                            break
+                                    
+                                    if types_match:
+                                        return func
+                        
+                        # Return first matching param count if we found one
+                        if matching_count is not None:
+                            return matching_count
+                    
+                    if len(overloads) == 1:
+                        return overloads[0]['function']
         
         return None
     
@@ -1454,9 +1639,9 @@ class NamespaceTypeHandler:
     @staticmethod
     def process_nested_namespace(parent_namespace: str, nested_ns: 'NamespaceDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
         original_name = nested_ns.name
-        # Nested namespace gets parent path prepended
-        full_nested_name = f"{parent_namespace}::{nested_ns.name}"
-        nested_ns.name = f"{parent_namespace.replace('::', '__')}__{nested_ns.name}"
+        # Nested namespace gets parent path prepended - use __ format throughout
+        full_nested_name = f"{parent_namespace}__{nested_ns.name}"
+        nested_ns.name = full_nested_name
         
         # Set current namespace context on BOTH module and symbol_table
         original_namespace = getattr(module, '_current_namespace', '')
@@ -1466,15 +1651,15 @@ class NamespaceTypeHandler:
         if not hasattr(module, 'symbol_table'):
             raise RuntimeError("Module must have symbol_table for namespace support")
 
-        original_namespace = module.symbol_table.current_namespace
-        module.symbol_table.set_namespace(parent_namespace)
+        # Set the FULL nested namespace in symbol_table - use __ format
+        module.symbol_table.set_namespace(full_nested_name)
 
         # nested_ns is NamespaceDef
         try:
             nested_ns.codegen(builder, module)
         finally:
             nested_ns.name = original_name
-            module.symbol_table.set_namespace(original_namespace)
+            module.symbol_table.set_namespace(original_st_namespace)
     
     @staticmethod
     def process_namespace_function(namespace: str, func_def: 'FunctionDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
@@ -1522,14 +1707,14 @@ class FunctionPointerType:
     @staticmethod
     def get_llvm_type(func_ptr, module: ir.Module) -> ir.FunctionType:
         """Convert to LLVM function type"""
-        ret_type = func_ptr.return_type.get_llvm_type(module)
-        param_types = [param.get_llvm_type(module) for param in func_ptr.parameter_types]
+        ret_type = TypeSystem.get_llvm_type(func_ptr.return_type, module)
+        param_types = [TypeSystem.get_llvm_type(param, module) for param in func_ptr.parameter_types]
         return ir.FunctionType(ret_type, param_types)
 
     @staticmethod
     def get_llvm_pointer_type(func_ptr, module: ir.Module) -> ir.PointerType:
         """Get pointer to this function type"""
-        func_type = func_ptr.get_llvm_type(module)
+        func_type = FunctionPointerType.get_llvm_type(func_ptr, module)
         return ir.PointerType(func_type)
 
 class VariableTypeHandler:
@@ -1810,6 +1995,7 @@ class VariableTypeHandler:
                 Operator.BITAND: lambda l, r: l & r,
                 Operator.BITOR: lambda l, r: l | r,
                 Operator.BITXOR: lambda l, r: l ^ r,
+                Operator.BITXNOR: lambda l, r: ~(l ^ r),
                 Operator.NAND: lambda l, r: ~(l & r),
                 Operator.NOR: lambda l, r: ~(l | r),
                 Operator.BITNAND: lambda l, r: ~(l & r),
@@ -3334,182 +3520,7 @@ class FunctionTypeHandler:
             }
             param_metadata.append(metadata)
         return param_metadata
-    
-    @staticmethod
-    def resolve_overload_by_types(module: ir.Module, base_name: str, 
-                                  arg_vals: List[ir.Value]) -> Optional[ir.Function]:
-        #print(f"[OVERLOAD DEBUG] Resolving {base_name} with {len(arg_vals)} args", file=sys.stdout)
-        if not hasattr(module, '_function_overloads'):
-            return None
         
-        if base_name not in module._function_overloads:
-            return None
-        
-        overloads = module._function_overloads[base_name]
-        arg_count = len(arg_vals)
-        
-        # Filter by argument count first
-        candidates = [o for o in overloads if o['param_count'] == arg_count]
-        
-        if len(candidates) == 0:
-            return None
-        elif len(candidates) == 1:
-            # Only one candidate - use it
-            return candidates[0]['function']
-        else:
-            # Multiple candidates - need type matching
-            # STRATEGY: 
-            # 1. First pass: look for exact custom_typename matches (most specific)
-            # 2. Second pass: look for exact LLVM type matches
-            # No fallback to "compatible" matches - exact matches only
-            
-            # First pass: Prefer exact custom_typename matches
-            for candidate in candidates:
-                param_types = candidate['param_types']
-                if len(param_types) != len(arg_vals):
-                    continue
-                
-                # Check if ALL parameters have matching custom typenames AND LLVM types
-                all_match = True
-                for i, (param_type, arg_val) in enumerate(zip(param_types, arg_vals)):
-                    # Get the custom typename from the argument's metadata
-                    arg_custom_typename = getattr(arg_val, 'custom_typename', None)
-                    param_custom_typename = getattr(param_type, 'custom_typename', None)
-                    
-                    # Both must have custom typenames and they must match
-                    if not (param_custom_typename and arg_custom_typename and param_custom_typename == arg_custom_typename):
-                        all_match = False
-                        break
-                    
-                    # Also verify LLVM types match
-                    expected_llvm_type = TypeSystem.get_llvm_type(param_type, module, include_array=True)
-                    if arg_val.type != expected_llvm_type:
-                        all_match = False
-                        break
-                
-                if all_match:
-                    return candidate['function']
-            
-            # Second pass: Look for exact LLVM type matches (for cases without custom typenames)
-            for candidate in candidates:
-                param_types = candidate['param_types']
-                if len(param_types) != len(arg_vals):
-                    continue
-                
-                # Check if ALL parameters have exact LLVM type matches
-                exact_match = True
-                for i, (param_type, arg_val) in enumerate(zip(param_types, arg_vals)):
-                    expected_llvm_type = TypeSystem.get_llvm_type(param_type, module, include_array=True)
-                    if arg_val.type != expected_llvm_type:
-                        exact_match = False
-                        break
-                
-                if exact_match:
-                    return candidate['function']
-
-            # Third pass: Allow array-to-pointer decay ONLY
-            # e.g., [5 x i8]* -> i8*
-            for candidate in candidates:
-                param_types = candidate['param_types']
-                if len(param_types) != len(arg_vals):
-                    continue
-                
-                # Check if ALL parameters match with array decay allowed
-                all_match = True
-                for i, (param_type, arg_val) in enumerate(zip(param_types, arg_vals)):
-                    expected_llvm_type = TypeSystem.get_llvm_type(param_type, module, include_array=True)
-                    
-                    # Exact match is fine
-                    if arg_val.type == expected_llvm_type:
-                        continue
-                    
-                    # Allow array-to-pointer decay: [N x T]* can decay to T*
-                    if (isinstance(arg_val.type, ir.PointerType) and 
-                        isinstance(arg_val.type.pointee, ir.ArrayType) and
-                        isinstance(expected_llvm_type, ir.PointerType)):
-                        # Check if array element type matches pointer pointee type
-                        if arg_val.type.pointee.element == expected_llvm_type.pointee:
-                            continue  # Compatible via array decay
-                    
-                    # No match - this candidate doesn't work
-                    all_match = False
-                    break
-                
-                if all_match:
-                    return candidate['function']
-
-            # Fourth pass: Match by bit width and signedness for integer types
-            for candidate in candidates:
-                param_types = candidate['param_types']
-                if len(param_types) != len(arg_vals):
-                    continue
-                
-                # Check if ALL parameters match by width and signedness
-                all_match = True
-                for i, (param_type, arg_val) in enumerate(zip(param_types, arg_vals)):
-                    expected_llvm_type = TypeSystem.get_llvm_type(param_type, module, include_array=True)
-                    
-                    # For integer types, check bit width and signedness
-                    if isinstance(arg_val.type, ir.IntType) and isinstance(expected_llvm_type, ir.IntType):
-                        # Width must match
-                        if arg_val.type.width != expected_llvm_type.width:
-                            all_match = False
-                            break
-                        
-                        # Signedness must match
-                        arg_is_unsigned = is_unsigned(arg_val)
-                        param_is_unsigned = False
-                        
-                        # Determine parameter signedness by resolving type aliases
-                        if hasattr(param_type, 'custom_typename') and param_type.custom_typename:
-                            type_name = param_type.custom_typename
-                            resolved_type_spec = None
-                            
-                            # Use TypeResolver to resolve type through namespace system
-                            if hasattr(module, "_using_namespaces"):
-                                for ns in module._using_namespaces:
-                                    mangled_name = TypeResolver.mangle_namespace_name(ns, type_name)
-                                    if hasattr(module, '_type_alias_specs') and mangled_name in module._type_alias_specs:
-                                        resolved_type_spec = module._type_alias_specs[mangled_name]
-                                        break
-                            
-                            # Also try direct lookup for global types
-                            if not resolved_type_spec and hasattr(module, '_type_alias_specs'):
-                                if type_name in module._type_alias_specs:
-                                    resolved_type_spec = module._type_alias_specs[type_name]
-                            
-                            # If we resolved the type spec, use it
-                            if resolved_type_spec:
-                                if hasattr(resolved_type_spec, 'base_type') and resolved_type_spec.base_type == DataType.UINT:
-                                    param_is_unsigned = True
-                                elif hasattr(resolved_type_spec, 'is_signed'):
-                                    param_is_unsigned = not resolved_type_spec.is_signed
-                            elif hasattr(param_type, 'is_signed'):
-                                param_is_unsigned = not param_type.is_signed
-                        elif hasattr(param_type, 'base_type') and param_type.base_type == DataType.UINT:
-                            param_is_unsigned = True
-                        elif hasattr(param_type, 'is_signed'):
-                            param_is_unsigned = not param_type.is_signed
-                        
-                        # Signedness must match
-                        if arg_is_unsigned != param_is_unsigned:
-                            all_match = False
-                            break
-                        
-                        # Both width and signedness match
-                        continue
-                    
-                    # For non-integer types, must be exact match
-                    if arg_val.type != expected_llvm_type:
-                        all_match = False
-                        break
-                
-                if all_match:
-                    return candidate['function']
-            
-            # No exact match found
-            return None
-    
     @staticmethod
     def convert_argument_to_parameter_type(builder: ir.IRBuilder, module: ir.Module, 
                                           arg_val: ir.Value, expected_type: ir.Type, 
@@ -4097,6 +4108,7 @@ class AssignmentTypeHandler:
             TokenType.BITAND_ASSIGN: Operator.BITAND,
             TokenType.BITOR_ASSIGN: Operator.BITOR,
             TokenType.BITXOR_ASSIGN: Operator.BITXOR,
+            TokenType.BITXNOR_ASSIGN: Operator.BITXNOR,
             TokenType.BITNAND_ASSIGN: Operator.BITNAND,
             TokenType.BITNOR_ASSIGN: Operator.BITNOR,
             TokenType.BITSHIFT_LEFT_ASSIGN: Operator.BITSHIFT_LEFT,
@@ -4426,7 +4438,7 @@ class StructTypeHandler:
     def create_zeroed_instance(struct_type: 'ir.Type', vtable: 'StructVTable') -> 'ir.Constant':
         if isinstance(struct_type, ir.IntType):
             return ir.Constant(struct_type, 0)
-        elif isinstance(struct_type, ir.LiteralStructType):
+        elif isinstance(struct_type, (ir.LiteralStructType, ir.IdentifiedStructType)):
             # For proper struct types, initialize each field to zero
             zero_values = []
             for field_type in struct_type.elements:
@@ -4510,7 +4522,7 @@ class StructTypeHandler:
         instance = StructTypeHandler.create_zeroed_instance(llvm_struct_type, vtable)
         
         # Pack field values
-        if isinstance(llvm_struct_type, ir.LiteralStructType):
+        if isinstance(llvm_struct_type, (ir.LiteralStructType, ir.IdentifiedStructType)):
             # For proper struct types, build the constant directly with all field values
             field_constants = []
             for i, (field_name, _, _, _) in enumerate(vtable.fields):
@@ -4527,7 +4539,7 @@ class StructTypeHandler:
                         raise ValueError(f"Struct literal field '{field_name}' must be a constant expression")
                 else:
                     # Use the zero value we created
-                    field_constants.append(instance.constant_value[i])
+                    field_constants.append(instance.constant[i])
             
             # Create the final struct constant
             instance = ir.Constant(llvm_struct_type, field_constants)

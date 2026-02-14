@@ -76,14 +76,14 @@ class FluxParser:
         preprocessed_source = preprocessor.process()
 
         # Step 2: Lex
-        print(f"[INFO] [lexer] ► Lexical analysis")
+        print(f"[INFO] [lexer] ÃƒÂ¢Ã¢â‚¬â€œÃ‚Âº Lexical analysis")
         lexer = FluxLexer(preprocessed_source)
         tokens = lexer.tokenize()
 
         # Step 3: Create parser
-        print(f"[INFO] [parser] ► Parsing")
+        print(f"[INFO] [parser] ÃƒÂ¢Ã¢â‚¬â€œÃ‚Âº Parsing")
         parser = self(tokens)
-        print(f"[INFO] [parser] ► AST generated.")
+        print(f"[INFO] [parser] ÃƒÂ¢Ã¢â‚¬â€œÃ‚Âº AST generated.")
 
         # Expose final macro set to parser/codegen if needed
         parser._preprocessor_macros = dict(preprocessor.macros)
@@ -1973,7 +1973,7 @@ class FluxParser:
                 return Assignment(expr, value)
         elif self.expect(TokenType.PLUS_ASSIGN, TokenType.MINUS_ASSIGN, TokenType.MULTIPLY_ASSIGN, 
                          TokenType.DIVIDE_ASSIGN, TokenType.MODULO_ASSIGN, TokenType.POWER_ASSIGN,
-                         TokenType.XOR_ASSIGN, TokenType.BITXOR_ASSIGN, TokenType.BITSHIFT_LEFT_ASSIGN, TokenType.BITSHIFT_RIGHT_ASSIGN,
+                         TokenType.XOR_ASSIGN, TokenType.BITXOR_ASSIGN, TokenType.BITXNOR_ASSIGN, TokenType.BITSHIFT_LEFT_ASSIGN, TokenType.BITSHIFT_RIGHT_ASSIGN,
                          TokenType.BITAND_ASSIGN, TokenType.BITOR_ASSIGN, TokenType.BITNAND_ASSIGN, TokenType.BITNOR_ASSIGN):
             # Handle compound assignments
             op_token = self.current_token.type
@@ -2026,14 +2026,14 @@ class FluxParser:
     
     def logical_and_expression(self) -> Expression:
         """
-        logical_and_expression -> bitwise_or_expression ('and' bitwise_or_expression)*
+        logical_and_expression -> logical_xor_expression ('and' logical_xor_expression)*
         """
-        expr = self.bitwise_or_expression()
+        expr = self.logical_xor_expression()
         
         while self.expect(TokenType.LOGICAL_AND, TokenType.AND):
             operator = Operator.AND
             self.advance()
-            right = self.bitwise_or_expression()
+            right = self.logical_xor_expression()
             expr = BinaryOp(expr, operator, right)
         
         return expr
@@ -2151,12 +2151,15 @@ class FluxParser:
 
     def bitwise_xor_expression(self) -> Expression:
         """
-        bitwise_xor_expression -> bitwise_and_expression ('^' bitwise_and_expression)*
+        bitwise_xor_expression -> bitwise_and_expression (('`^^' | '`^^!|') bitwise_and_expression)*
         """
         expr = self.bitwise_and_expression()
         
-        while self.expect(TokenType.XOR, TokenType.XOR_OP):
-            operator = Operator.XOR
+        while self.expect(TokenType.BITXOR_OP, TokenType.BITXNOR):
+            if self.current_token.type == TokenType.BITXOR_OP:
+                operator = Operator.BITXOR
+            else:  # BITXNOR
+                operator = Operator.BITXNOR
             self.advance()
             right = self.bitwise_and_expression()
             expr = BinaryOp(expr, operator, right)
@@ -2313,7 +2316,7 @@ class FluxParser:
     
     def unary_expression(self) -> Expression:
         """
-        unary_expression -> ('is' 'not' | '-' | '+' | '*' | '@' | '++' | '--') unary_expression
+        unary_expression -> ('is' 'not' | '-' | '+' | '*' | '@' | '++' | '--' | '`!' | '`^^!' | '`^^!&' | '`^^!|') unary_expression
                          | postfix_expression
         """
         if self.expect(TokenType.IS):
@@ -2328,6 +2331,21 @@ class FluxParser:
             return UnaryOp(operator, operand)
         elif self.expect(TokenType.BITNOT_OP):
             operator = Operator.BITNOT
+            self.advance()
+            operand = self.unary_expression()
+            return UnaryOp(operator, operand)
+        elif self.expect(TokenType.BITXNOT):
+            operator = Operator.BITXNOT
+            self.advance()
+            operand = self.unary_expression()
+            return UnaryOp(operator, operand)
+        elif self.expect(TokenType.BITXNAND):
+            operator = Operator.BITXNAND
+            self.advance()
+            operand = self.unary_expression()
+            return UnaryOp(operator, operand)
+        elif self.expect(TokenType.BITXNOR):
+            operator = Operator.BITXNOR
             self.advance()
             operand = self.unary_expression()
             return UnaryOp(operator, operand)
