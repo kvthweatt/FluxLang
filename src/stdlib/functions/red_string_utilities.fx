@@ -52,6 +52,51 @@ namespace standard
             return dest;
         };
 
+        def i16str(i16 value, byte* buffer) -> i16
+        {
+            if (value == (i16)0)
+            {
+                buffer[0] = (byte)48;
+                buffer[1] = (byte)0;
+                return (i16)1;
+            };
+
+            i16 is_negative = (i16)0;
+            if (value < (i16)0)
+            {
+                is_negative = (i16)1;
+                value = -value;
+            };
+
+            i16 pos = (i16)0;
+            byte[8] temp;
+
+            while (value > (i16)0)
+            {
+                temp[pos] = (byte)((value % (i16)10) + (i16)48);
+                value = value / (i16)10;
+                pos++;
+            };
+
+            i16 write_pos = (i16)0;
+            if (is_negative == (i16)1)
+            {
+                buffer[0] = (byte)45;
+                write_pos = (i16)1;
+            };
+
+            i16 i = pos - (i16)1;
+            while (i >= (i16)0)
+            {
+                buffer[write_pos] = temp[i];
+                write_pos++;
+                i--;
+            };
+
+            buffer[write_pos] = (byte)0;
+            return write_pos;
+        };
+
         def i32str(i32 value, byte* buffer) -> i32
         {
             if (value == 0)
@@ -145,6 +190,38 @@ namespace standard
             };
             
             buffer[write_pos] = (byte)0; // null terminator
+            return write_pos;
+        };
+
+        def u16str(u16 value, byte* buffer) -> u16
+        {
+            if (value == (u16)0)
+            {
+                buffer[0] = (byte)48;
+                buffer[1] = (byte)0;
+                return (u16)1;
+            };
+
+            u16 pos = (u16)0;
+            byte[8] temp;
+
+            while (value > (u16)0)
+            {
+                temp[pos] = (byte)((value % (u16)10) + (u16)48);
+                value = value / (u16)10;
+                pos++;
+            };
+
+            u16 write_pos = (u16)0;
+            u16 i = pos;
+            while (i > (u16)0)
+            {
+                i--;
+                buffer[write_pos] = temp[i];
+                write_pos++;
+            };
+
+            buffer[write_pos] = (byte)0;
             return write_pos;
         };
 

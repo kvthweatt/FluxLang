@@ -420,6 +420,20 @@ namespace standard
                 print(buf);
                 return;
             };
+            def print(i16 x) -> void
+            {
+                byte[21] buf;
+                i16str(x,buf);
+                print(buf);
+                return;
+            };
+            def print(u16 x) -> void
+            {
+                byte[21] buf;
+                u16str(x,buf);
+                print(buf);
+                return;
+            };
             def print(i32 x) -> void
             {
                 byte[21] buf;
