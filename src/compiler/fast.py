@@ -2776,8 +2776,16 @@ class VariableDeclaration(ASTNode):
         """Generate code for local variable."""
         alloca = builder.alloca(llvm_type, name=self.name)
         
-        # Type information is now stored in symbol table during define()
-
+        # Register in scope BEFORE initialization so endianness checking works
+        #print(f"[LOCAL VAR] Registering local variable '{self.name}' in scope level {module.symbol_table.scope_level}", file=sys.stdout)
+        #print(f"[LOCAL VAR]   Scopes count: {len(module.symbol_table.scopes)}", file=sys.stdout)
+        module.symbol_table.define(self.name, SymbolKind.VARIABLE, type_spec=resolved_type_spec, llvm_value=alloca)
+        #print(f"[LOCAL VAR]   Variable '{self.name}' registered successfully", file=sys.stdout)
+        if resolved_type_spec.is_volatile:
+            if not hasattr(builder, 'volatile_vars'):
+                builder.volatile_vars = set()
+            builder.volatile_vars.add(self.name)
+            
         # Handle noinit keyword - skip initialization entirely
         if isinstance(self.initial_value, NoInit):
             # Mark variable as explicitly uninitialized for tracking

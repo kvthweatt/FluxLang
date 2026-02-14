@@ -600,7 +600,7 @@ class SymbolTable:
                 parts.pop()
                 parent_ns = '::'.join(parts)
                 mangled = TypeResolver.mangle_namespace_name(parent_ns, name) if parent_ns else name
-                if mangled in self._global_symbols:  # ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â FIX: Move inside while loop!
+                if mangled in self._global_symbols:
                     return self._global_symbols[mangled]
 
         # 4. Using namespaces
@@ -839,10 +839,24 @@ class TypeResolver:
                         
                         if len(param_types) == len(arg_types):
                             types_match = True
-                            for pt, at in zip(param_types, arg_types):
+                            for i, (pt, at) in enumerate(zip(param_types, arg_types)):
                                 if pt != at:
                                     types_match = False
                                     break
+                                
+                                # Check signedness for integer types if available
+                                if isinstance(pt, ir.IntType) and isinstance(at, ir.IntType):
+                                    # Get parameter signedness from overload info
+                                    param_spec = overload['param_types'][i] if i < len(overload['param_types']) else None
+                                    # Get argument signedness from _flux_type_spec
+                                    arg_spec = getattr(arg_vals[i], '_flux_type_spec', None)
+                                    
+                                    if param_spec and arg_spec:
+                                        # Both have signedness info - check if they match
+                                        if hasattr(param_spec, 'is_signed') and hasattr(arg_spec, 'is_signed'):
+                                            if param_spec.is_signed != arg_spec.is_signed:
+                                                types_match = False
+                                                break
                             
                             if types_match:
                                 return func
@@ -891,10 +905,24 @@ class TypeResolver:
                                 
                                 if len(param_types) == len(arg_types):
                                     types_match = True
-                                    for pt, at in zip(param_types, arg_types):
+                                    for i, (pt, at) in enumerate(zip(param_types, arg_types)):
                                         if pt != at:
                                             types_match = False
                                             break
+                                        
+                                        # Check signedness for integer types if available
+                                        if isinstance(pt, ir.IntType) and isinstance(at, ir.IntType):
+                                            # Get parameter signedness from overload info
+                                            param_spec = overload['param_types'][i] if i < len(overload['param_types']) else None
+                                            # Get argument signedness from _flux_type_spec
+                                            arg_spec = getattr(arg_vals[i], '_flux_type_spec', None)
+                                            
+                                            if param_spec and arg_spec:
+                                                # Both have signedness info - check if they match
+                                                if hasattr(param_spec, 'is_signed') and hasattr(arg_spec, 'is_signed'):
+                                                    if param_spec.is_signed != arg_spec.is_signed:
+                                                        types_match = False
+                                                        break
                                     
                                     if types_match:
                                         return func
@@ -941,10 +969,24 @@ class TypeResolver:
                             
                             if len(param_types) == len(arg_types):
                                 types_match = True
-                                for pt, at in zip(param_types, arg_types):
+                                for i, (pt, at) in enumerate(zip(param_types, arg_types)):
                                     if pt != at:
                                         types_match = False
                                         break
+                                    
+                                    # Check signedness for integer types if available
+                                    if isinstance(pt, ir.IntType) and isinstance(at, ir.IntType):
+                                        # Get parameter signedness from overload info
+                                        param_spec = overload['param_types'][i] if i < len(overload['param_types']) else None
+                                        # Get argument signedness from _flux_type_spec
+                                        arg_spec = getattr(arg_vals[i], '_flux_type_spec', None)
+                                        
+                                        if param_spec and arg_spec:
+                                            # Both have signedness info - check if they match
+                                            if hasattr(param_spec, 'is_signed') and hasattr(arg_spec, 'is_signed'):
+                                                if param_spec.is_signed != arg_spec.is_signed:
+                                                    types_match = False
+                                                    break
                                 
                                 if types_match:
                                     return func
@@ -986,10 +1028,24 @@ class TypeResolver:
                                 
                                 if len(param_types) == len(arg_types):
                                     types_match = True
-                                    for pt, at in zip(param_types, arg_types):
+                                    for i, (pt, at) in enumerate(zip(param_types, arg_types)):
                                         if pt != at:
                                             types_match = False
                                             break
+                                        
+                                        # Check signedness for integer types if available
+                                        if isinstance(pt, ir.IntType) and isinstance(at, ir.IntType):
+                                            # Get parameter signedness from overload info
+                                            param_spec = overload['param_types'][i] if i < len(overload['param_types']) else None
+                                            # Get argument signedness from _flux_type_spec
+                                            arg_spec = getattr(arg_vals[i], '_flux_type_spec', None)
+                                            
+                                            if param_spec and arg_spec:
+                                                # Both have signedness info - check if they match
+                                                if hasattr(param_spec, 'is_signed') and hasattr(arg_spec, 'is_signed'):
+                                                    if param_spec.is_signed != arg_spec.is_signed:
+                                                        types_match = False
+                                                        break
                                     
                                     if types_match:
                                         return func
@@ -3673,7 +3729,7 @@ class EndianSwapHandler:
 
     A swap is needed when source_endian != target_endian and the value
     is an integer type wide enough to have a meaningful byte order
-    (i.e. at least 16 bits — bswap on i8 is a no-op and LLVM rejects it).
+    (i.e. at least 16 bits â€” bswap on i8 is a no-op and LLVM rejects it).
 
     The swap is always performed on the source value BEFORE it is stored,
     so arithmetic can be done freely in native byte order and the boundary
@@ -3715,13 +3771,13 @@ class EndianSwapHandler:
         """
         Emit an llvm.bswap intrinsic call for the given integer value.
         Returns the byte-swapped value. Only valid for i16, i32, i64 (and
-        other even-byte-width integer types — LLVM requires width % 16 == 0).
+        other even-byte-width integer types â€” LLVM requires width % 16 == 0).
         """
         if not isinstance(val.type, ir.IntType):
             return val  # Can't bswap non-integers; caller should guard this
 
         width = val.type.width
-        if width < 16 or width % 8 != 0:
+        if width < 16 or width % 16 != 0:
             return val  # bswap on i8 or odd widths is meaningless
 
         intrinsic_name = f"llvm.bswap.i{width}"
@@ -3746,22 +3802,25 @@ class EndianSwapHandler:
             return val  # Only integer types >= 16 bits can have meaningful endianness
 
         src_endian = EndianSwapHandler.get_endianness(getattr(val, '_flux_type_spec', None))
+        print(f"[ENDIAN DEBUG] src_endian from val._flux_type_spec: {src_endian}", file=__import__('sys').stderr)
         tgt_endian = EndianSwapHandler.get_target_endianness(target_ptr, module)
+        print(f"[ENDIAN DEBUG] tgt_endian from target_ptr: {tgt_endian}", file=__import__('sys').stderr)
 
         if src_endian is None or tgt_endian is None:
-            return val  # Can't determine endianness — don't swap
+            print(f"[ENDIAN DEBUG] After checks - src: {src_endian}, tgt: {tgt_endian}", file=__import__('sys').stderr)
+            return val  # Can't determine endianness â€” don't swap
 
         if src_endian == tgt_endian:
-            return val  # Same endianness — no swap needed
+            return val  # Same endianness â€” no swap needed
 
-        # Endianness mismatch — emit bswap
+        # Endianness mismatch â€” emit bswap
         swapped = EndianSwapHandler.emit_bswap(builder, module, val)
 
         # Propagate type metadata but flip the endianness to match target
         src_spec = getattr(val, '_flux_type_spec', None)
         if src_spec is not None:
             import copy
-            new_spec = copy.copy(src_spec)
+            new_spec = copy.deepcopy(src_spec)
             new_spec.endianness = tgt_endian
             swapped._flux_type_spec = new_spec
 

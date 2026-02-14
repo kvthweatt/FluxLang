@@ -6,8 +6,9 @@ def main() -> int
 	unsigned data{16::0} as le16;
 
 	be16 x = 0x00AAu;
+	le16 y;
 
-	le16 y = x;
+	y = x;
 
 	print(y);
 	return 0;
