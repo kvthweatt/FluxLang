@@ -2775,6 +2775,9 @@ class VariableDeclaration(ASTNode):
                       llvm_type: ir.Type, resolved_type_spec: TypeSystem) -> ir.Value:
         """Generate code for local variable."""
         alloca = builder.alloca(llvm_type, name=self.name)
+
+        if resolved_type_spec:
+            alloca._flux_type_spec = resolved_type_spec
         
         # Register in scope BEFORE initialization so endianness checking works
         #print(f"[LOCAL VAR] Registering local variable '{self.name}' in scope level {module.symbol_table.scope_level}", file=sys.stdout)
@@ -2785,7 +2788,7 @@ class VariableDeclaration(ASTNode):
             if not hasattr(builder, 'volatile_vars'):
                 builder.volatile_vars = set()
             builder.volatile_vars.add(self.name)
-            
+
         # Handle noinit keyword - skip initialization entirely
         if isinstance(self.initial_value, NoInit):
             # Mark variable as explicitly uninitialized for tracking
