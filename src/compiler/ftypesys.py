@@ -799,17 +799,139 @@ class TypeResolver:
         return TypeResolver.resolve_with_namespace(module, typename, current_namespace, TypeResolver.lookup_type)
     
     @staticmethod
+    def _arg_is_unsigned(arg_val: ir.Value) -> Optional[bool]:
+        """
+        Return True if arg_val is known-unsigned, False if known-signed, None if unknown.
+        Inspects _flux_type_spec metadata attached by the codegen layer.
+        """
+        spec = getattr(arg_val, '_flux_type_spec', None)
+        if spec is None:
+            return None
+        # TypeSystem object
+        if hasattr(spec, 'is_signed'):
+            return not spec.is_signed
+        if hasattr(spec, 'base_type'):
+            if spec.base_type == DataType.UINT:
+                return True
+            if spec.base_type == DataType.SINT:
+                return False
+        # Bare DataType enum
+        if spec == DataType.UINT:
+            return True
+        if spec == DataType.SINT:
+            return False
+        return None
+
+    @staticmethod
+    def _overload_param_is_unsigned(func: ir.Function, param_index: int) -> Optional[bool]:
+        """
+        Return True if parameter param_index of func expects an unsigned value,
+        False if signed, None if indeterminate.
+        Derived from the mangled function name, which encodes 'ubitsN' / 'sbitsN'
+        per the Flux mangling scheme.
+        """
+        # Collect the per-parameter type tokens from the mangled name.
+        # Mangled names look like:
+        #   ns__fn__2__data_sbits64__data_ubits32__ret_int
+        # We split on '__data_' to isolate each parameter segment.
+        name = func.name
+        parts = name.split('__data_')
+        # parts[0] is the prefix up to the first param; parts[1..N] are param segments.
+        if param_index + 1 >= len(parts):
+            return None
+        segment = parts[param_index + 1].lower()
+        if segment.startswith('ubits') or segment.startswith('uint'):
+            return True
+        if segment.startswith('sbits') or segment.startswith('sint') or segment.startswith('int'):
+            return False
+        return None
+
+    @staticmethod
+    def _select_best_overload(overloads: list, arg_vals: List[ir.Value]) -> Optional[ir.Function]:
+        """
+        Choose the best overload from a list for the given argument values.
+
+        Matching is done in three passes, returning the first winner found:
+
+          Pass 1 (sign-aware)    – LLVM types match AND every argument whose
+                                   signedness is known matches the parameter's
+                                   expected signedness from the mangled name.
+          Pass 2 (type-only)     – LLVM types match, signedness ignored.
+                                   Preserves original behaviour when no sign
+                                   metadata is present.
+          Pass 3 (count-only)    – Parameter count matches but LLVM types do
+                                   not.  Preserves original `matching_count`
+                                   fallback so that args requiring coercion at
+                                   the call site (e.g. [N x i8]* string
+                                   literals passed to i8* params) still
+                                   resolve correctly.  _generate_call's
+                                   FunctionTypeHandler handles the conversion.
+        """
+        n = len(arg_vals)
+        arg_types = [a.type for a in arg_vals]
+
+        type_only_fallback  = None  # pass 2: first LLVM-type match
+        count_only_fallback = None  # pass 3: first param-count match
+
+        for overload in overloads:
+            if overload['param_count'] != n:
+                continue
+
+            func = overload['function']
+            param_types = [p.type for p in func.args]
+
+            # Always record the first param-count match as the last-resort fallback
+            if count_only_fallback is None:
+                count_only_fallback = func
+
+            # --- LLVM type check ---
+            if param_types != arg_types:
+                continue  # Types don't match; still useful as count_only_fallback
+
+            # Save first type-match as pass-2 fallback
+            if type_only_fallback is None:
+                type_only_fallback = func
+
+            # --- Signedness check (pass 1) ---
+            signs_match = True
+            for i, arg_val in enumerate(arg_vals):
+                arg_unsigned = TypeResolver._arg_is_unsigned(arg_val)
+                if arg_unsigned is None:
+                    # No metadata for this argument – treat as a wildcard
+                    continue
+                param_unsigned = TypeResolver._overload_param_is_unsigned(func, i)
+                if param_unsigned is None:
+                    # Can't read sign from mangled name – treat as a wildcard
+                    continue
+                if arg_unsigned != param_unsigned:
+                    signs_match = False
+                    break
+
+            if signs_match:
+                return func  # Best possible match; stop searching
+
+        # Return best available fallback
+        return type_only_fallback or count_only_fallback
+
+    @staticmethod
     def resolve_function(module: ir.Module, func_name: str, current_namespace: str = "", arg_vals: List[ir.Value] = None) -> Optional[ir.Function]:
         """
         THE SINGLE SOURCE OF TRUTH FOR ALL FUNCTION RESOLUTION.
         Handles both regular functions and overloaded functions.
-        
+
+        Overload selection is signedness-aware: when multiple overloads share
+        the same LLVM parameter types (e.g. sbits64 vs ubits64 both lower to
+        i64), the _flux_type_spec metadata attached to each argument value is
+        used to prefer the overload whose mangled name encodes the matching
+        signedness.  If no sign metadata is available the first LLVM-type match
+        is used, preserving the original behaviour.
+
         Args:
             module: LLVM module
             func_name: Function name to resolve
             current_namespace: Current namespace context
             arg_vals: Optional list of argument values for overload resolution
-            
+
         Returns:
             ir.Function object if found, None otherwise
         """
@@ -818,189 +940,100 @@ class TypeResolver:
             obj = module.globals[func_name]
             if isinstance(obj, ir.Function):
                 return obj
-        
+
         # Step 2: Check for overloaded functions
         if hasattr(module, '_function_overloads') and func_name in module._function_overloads:
             overloads = module._function_overloads[func_name]
-            
-            # If we have arg_vals, match the overload directly
+
             if arg_vals is not None:
-                matching_count = None
-                for overload in overloads:
-                    if overload['param_count'] == len(arg_vals):
-                        # Save first matching count in case we don't find exact type match
-                        if matching_count is None:
-                            matching_count = overload['function']
-                        
-                        # Check if types match exactly
-                        func = overload['function']
-                        param_types = [p.type for p in func.args]
-                        arg_types = [arg.type for arg in arg_vals]
-                        
-                        if len(param_types) == len(arg_types):
-                            types_match = True
-                            for pt, at in zip(param_types, arg_types):
-                                if pt != at:
-                                    types_match = False
-                                    break
-                            
-                            if types_match:
-                                return func
-                
-                # Return first matching param count if we found one
-                if matching_count is not None:
-                    return matching_count
-            
-            # If no arg_vals or type resolution failed, check if there's only one overload
+                result = TypeResolver._select_best_overload(overloads, arg_vals)
+                if result is not None:
+                    return result
+
+            # No arg_vals, or nothing matched – fall back to sole overload
             if len(overloads) == 1:
                 return overloads[0]['function']
-        
+
         # Step 3: Try symbol table lookup
         if hasattr(module, 'symbol_table'):
             func_entry = module.symbol_table.lookup_function(func_name, current_namespace)
-            
+
             if func_entry:
                 # Try mangled name first
                 if func_entry.mangled_name in module.globals:
                     obj = module.globals[func_entry.mangled_name]
                     if isinstance(obj, ir.Function):
                         return obj
-                
+
                 # Try unmangled name
                 if func_name in module.globals:
                     obj = module.globals[func_name]
                     if isinstance(obj, ir.Function):
                         return obj
-                
+
                 # Check if it's an overloaded function with mangled name
                 if hasattr(module, '_function_overloads') and func_entry.mangled_name in module._function_overloads:
                     overloads = module._function_overloads[func_entry.mangled_name]
-                    
+
                     if arg_vals is not None:
-                        matching_count = None
-                        for overload in overloads:
-                            if overload['param_count'] == len(arg_vals):
-                                # Save first matching count in case we don't find exact type match
-                                if matching_count is None:
-                                    matching_count = overload['function']
-                                
-                                # Check if types match exactly
-                                func = overload['function']
-                                param_types = [p.type for p in func.args]
-                                arg_types = [arg.type for arg in arg_vals]
-                                
-                                if len(param_types) == len(arg_types):
-                                    types_match = True
-                                    for pt, at in zip(param_types, arg_types):
-                                        if pt != at:
-                                            types_match = False
-                                            break
-                                    
-                                    if types_match:
-                                        return func
-                        
-                        # Return first matching param count if we found one
-                        if matching_count is not None:
-                            return matching_count
-                    
+                        result = TypeResolver._select_best_overload(overloads, arg_vals)
+                        if result is not None:
+                            return result
+
                     if len(overloads) == 1:
                         return overloads[0]['function']
-        
+
         # Step 4: Try namespace resolution
         result = TypeResolver.resolve_with_namespace(module, func_name, current_namespace, TypeResolver.lookup_global)
-        
+
         if result is not None and isinstance(result, ir.Function):
             return result
-        
+
         # Step 4a: Try current namespace for overloaded functions
         if current_namespace and hasattr(module, '_function_overloads'):
             qualified_name = TypeResolver.mangle_namespace_name(current_namespace, func_name)
-            
+
             # Check direct lookup in current namespace
             if qualified_name in module.globals:
                 obj = module.globals[qualified_name]
                 if isinstance(obj, ir.Function):
                     return obj
-            
+
             # Check overloads in current namespace
             if qualified_name in module._function_overloads:
                 overloads = module._function_overloads[qualified_name]
-                
+
                 if arg_vals is not None:
-                    matching_count = None
-                    for overload in overloads:
-                        if overload['param_count'] == len(arg_vals):
-                            # Save first matching count in case we don't find exact type match
-                            if matching_count is None:
-                                matching_count = overload['function']
-                            
-                            # Check if types match exactly
-                            func = overload['function']
-                            param_types = [p.type for p in func.args]
-                            arg_types = [arg.type for arg in arg_vals]
-                            
-                            if len(param_types) == len(arg_types):
-                                types_match = True
-                                for pt, at in zip(param_types, arg_types):
-                                    if pt != at:
-                                        types_match = False
-                                        break
-                                
-                                if types_match:
-                                    return func
-                    
-                    # Return first matching param count if we found one
-                    if matching_count is not None:
-                        return matching_count
-                
+                    result = TypeResolver._select_best_overload(overloads, arg_vals)
+                    if result is not None:
+                        return result
+
                 if len(overloads) == 1:
                     return overloads[0]['function']
-        
+
         # Step 5: Try namespace-qualified overloads from using namespaces
         if hasattr(module, '_using_namespaces'):
             for ns in module._using_namespaces:
                 qualified_name = TypeResolver.mangle_namespace_name(ns, func_name)
-                
+
                 # Check direct lookup
                 if qualified_name in module.globals:
                     obj = module.globals[qualified_name]
                     if isinstance(obj, ir.Function):
                         return obj
-                
+
                 # Check overloads
                 if hasattr(module, '_function_overloads') and qualified_name in module._function_overloads:
                     overloads = module._function_overloads[qualified_name]
-                    
+
                     if arg_vals is not None:
-                        matching_count = None
-                        for overload in overloads:
-                            if overload['param_count'] == len(arg_vals):
-                                # Save first matching count in case we don't find exact type match
-                                if matching_count is None:
-                                    matching_count = overload['function']
-                                
-                                # Check if types match exactly
-                                func = overload['function']
-                                param_types = [p.type for p in func.args]
-                                arg_types = [arg.type for arg in arg_vals]
-                                
-                                if len(param_types) == len(arg_types):
-                                    types_match = True
-                                    for pt, at in zip(param_types, arg_types):
-                                        if pt != at:
-                                            types_match = False
-                                            break
-                                    
-                                    if types_match:
-                                        return func
-                        
-                        # Return first matching param count if we found one
-                        if matching_count is not None:
-                            return matching_count
-                    
+                        result = TypeResolver._select_best_overload(overloads, arg_vals)
+                        if result is not None:
+                            return result
+
                     if len(overloads) == 1:
                         return overloads[0]['function']
-        
+
         return None
     
     @staticmethod

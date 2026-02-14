@@ -1766,29 +1766,27 @@ union, unsigned, void, volatile, while, xor
 ```
 ADD = "+"
 SUB = "-"
+INCREMENT = "++"
+DECREMENT = "--"
 MUL = "*"
 DIV = "/"
 MOD = "%"
+NOT = "!"
 POWER = "^"
-XOR = "^^"
-OR = "|"
+# Logical
 AND = "&"
-NOR = "!|"
+OR = "|"
 NAND = "!&"
-
-INCREMENT = "++"
-DECREMENT = "--"
-
+NOR = "!|"
+XOR = "^^"
+# Comparison
 EQUAL = "=="
 NOT_EQUAL = "!="
 LESS_THAN = "<"
 LESS_EQUAL = "<="
 GREATER_THAN = ">"
 GREATER_EQUAL = ">="
-
-BITSHIFT_LEFT = "<<"
-BITSHIFT_RIGHT = ">>"
-
+# Assignment
 ASSIGN = "="
 PLUS_ASSIGN = "+="
 MINUS_ASSIGN = "-="
@@ -1796,17 +1794,50 @@ MULTIPLY_ASSIGN = "*="
 DIVIDE_ASSIGN = "/="
 MODULO_ASSIGN = "%="
 POWER_ASSIGN = "^="
+# Bitwise operators
+# Logical
+BITNOT = "`!"
+BITAND = "`&"
+BITOR = "`|"
+BITNAND = "`!&"
+BITNOR = "`!|"
+BITXOR = "`^^"
+BITXNOT = "`^^!"
+BITXNAND = "`^^!&"
+BITXNOR = "`^^!|"
+# Assignment
+AND_ASSIGN = "&="
+OR_ASSIGN = "|="
 XOR_ASSIGN = "^^="
+BITAND_ASSIGN = "`&="
+BITOR_ASSIGN = "`|="
+BITNAND_ASSIGN = "`!&="
+BITNOR_ASSIGN = "`!|="
+BITXOR_ASSIGN = "`^^="
+BITXNOT_ASSIGN = "`^^!="
+BITXNAND_ASSIGN = "`^^!&="
+BITXNOR_ASSIGN = "`^^!|="
+
+# Shift
+BITSHIFT_LEFT = "<<"
+BITSHIFT_RIGHT = ">>"
 BITSHIFT_LEFT_ASSIGN = "<<="
 BITSHIFT_RIGHT_ASSIGN = ">>="
 
-ADDRESS_CAST = "(@)"
 ADDRESS_OF = "@"
 RANGE = ".."
 SCOPE = "::"
-TERNARY = "?:"
+QUESTION = "?"
+COLON = ":"
+TIE = "~"
+LAMBDA_ARROW = "<:-"
+RETURN_ARROW = "->"
+CHAIN_ARROW = "<-"
+RECURSE_ARROW = "<~"
 NULL_COALESCE = "??"
 NO_MANGLE = "!!"
+FUNCTION_POINTER = "{}*"
+ADDRESS_CAST = "(@)"
 ```
 
 ---

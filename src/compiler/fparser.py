@@ -76,14 +76,14 @@ class FluxParser:
         preprocessed_source = preprocessor.process()
 
         # Step 2: Lex
-        print(f"[INFO] [lexer] ÃƒÂ¢Ã¢â‚¬â€œÃ‚Âº Lexical analysis")
+        print(f"[INFO] [lexer] ► Lexical analysis")
         lexer = FluxLexer(preprocessed_source)
         tokens = lexer.tokenize()
 
         # Step 3: Create parser
-        print(f"[INFO] [parser] ÃƒÂ¢Ã¢â‚¬â€œÃ‚Âº Parsing")
+        print(f"[INFO] [parser] ► Parsing")
         parser = self(tokens)
-        print(f"[INFO] [parser] ÃƒÂ¢Ã¢â‚¬â€œÃ‚Âº AST generated.")
+        print(f"[INFO] [parser] ► AST generated.")
 
         # Expose final macro set to parser/codegen if needed
         parser._preprocessor_macros = dict(preprocessor.macros)
@@ -92,17 +92,6 @@ class FluxParser:
 
     @contextmanager
     def _lookahead(self):
-        """
-        Context manager for lookahead operations.
-        Automatically saves and restores parser position.
-        
-        Usage:
-            with self._lookahead():
-                # Perform lookahead checks
-                if self.expect(...):
-                    return True
-            # Position automatically restored here
-        """
         saved_pos = self.position
         saved_token = self.current_token
         try:

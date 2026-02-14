@@ -14,7 +14,7 @@ def main() -> int
 {
 	myStru newStru = {0,1,2};
 
-    if (newStru.y is true and sizeof(newStru) == 96 and sizeof(bits) == 8)
+    if (newStru.y is 1 and sizeof(newStru) == 96 and sizeof(bits) == 8)
     {
         print("Structs working!\n\0");
         print("Size of newStru: \0");
