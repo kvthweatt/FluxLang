@@ -1246,7 +1246,7 @@ class TypeSystem:
     is_volatile: bool = False
     bit_width: Optional[int] = None
     alignment: Optional[int] = None
-    endianness: Optional[int] = 0
+    endianness: Optional[int] = 1
     is_array: bool = False
     array_size: Optional[Union[int, Any]] = None  # Can be int literal or Expression (evaluated at runtime if needed)
     array_dimensions: Optional[List[Optional[Union[int, Any]]]] = None  # Same for multi-dimensional arrays
@@ -3743,10 +3743,10 @@ class EndianSwapHandler:
         Returns 0 (little), 1 (big), or None if unknown.
         """
         if type_spec is None:
-            return None
+            return 1
         if hasattr(type_spec, 'endianness') and type_spec.endianness is not None:
             return int(type_spec.endianness)
-        return None
+        return 1
 
     @staticmethod
     def get_target_endianness(ptr: ir.Value, module: ir.Module) -> Optional[int]:
@@ -3764,7 +3764,7 @@ class EndianSwapHandler:
             if ts is not None:
                 return EndianSwapHandler.get_endianness(ts)
 
-        return None
+        return 1
 
     @staticmethod
     def emit_bswap(builder: ir.IRBuilder, module: ir.Module, val: ir.Value) -> ir.Value:
@@ -5007,6 +5007,57 @@ class AlignOfTypeHandler:
         # Some callsites may accidentally pass a decl node; support it without importing AST classes.
         if hasattr(target, "type_spec") and isinstance(getattr(target, "type_spec"), TypeSystem):
             return AlignOfTypeHandler.alignment_bytes_for_type_spec(target.type_spec, module)
+
+        return None
+
+
+class EndianOfTypeHandler:
+    """
+    Type-only handling for endianof().
+    Returns endianness (0=little, 1=big) or None if unknown.
+    """
+    @staticmethod
+    def endianof_for_target(target, builder, module) -> Optional[int]:
+        """
+        Resolve endianof(target) using type information only.
+        Returns 0 (little-endian), 1 (big-endian), or None if unknown.
+        """
+        from fast import Identifier
+
+        # endianof(TypeSystem)
+        if isinstance(target, TypeSystem):
+            return EndianSwapHandler.get_endianness(target)
+
+        # endianof(identifier)
+        if isinstance(target, Identifier):
+            # Look up as a type (struct/union/enum/typedef) in symbol table
+            type_entry = module.symbol_table.lookup_type(target.name)
+            if type_entry is not None and type_entry.type_spec is not None:
+                return EndianSwapHandler.get_endianness(type_entry.type_spec)
+
+            # Try looking up as a variable (for endianof(variable_name))
+            var_entry = module.symbol_table.lookup_variable(target.name)
+            if var_entry is not None and var_entry.type_spec is not None:
+                return EndianSwapHandler.get_endianness(var_entry.type_spec)
+
+            # Fallback: derive from existing LLVM storage (scope/globals)
+            if module.symbol_table.get_llvm_value(target.name) is not None:
+                ptr = module.symbol_table.get_llvm_value(target.name)
+                spec = getattr(ptr, '_flux_type_spec', None)
+                if spec is not None:
+                    return EndianSwapHandler.get_endianness(spec)
+
+            if target.name in module.globals:
+                gvar = module.globals[target.name]
+                spec = getattr(gvar, '_flux_type_spec', None)
+                if spec is not None:
+                    return EndianSwapHandler.get_endianness(spec)
+
+            return None
+
+        # Some callsites may accidentally pass a decl node; support it without importing AST classes.
+        if hasattr(target, "type_spec") and isinstance(getattr(target, "type_spec"), TypeSystem):
+            return EndianSwapHandler.get_endianness(target.type_spec)
 
         return None
 

@@ -2629,6 +2629,8 @@ class FluxParser:
             return self.sizeof_expression()
         elif self.expect(TokenType.ALIGNOF):
             return self.alignof_expression()
+        elif self.expect(TokenType.ENDIANOF):
+            return self.endianof_expression()
         else:
             self.error(f"Unexpected token: {self.current_token.type.name if self.current_token else 'EOF'}")
 
@@ -2718,6 +2720,28 @@ class FluxParser:
                 target = self.type_spec()
                 self.consume(TokenType.RIGHT_PAREN)
                 return SizeOf(target)
+
+    def endianof_expression(self) -> EndianOf:
+        self.consume(TokenType.ENDIANOF)
+        self.consume(TokenType.LEFT_PAREN, "Expected '(' after endianof")
+
+        saved_pos = self.position
+
+        if self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.CHAR,
+                      TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID,
+                      TokenType.CONST, TokenType.VOLATILE, TokenType.SIGNED, TokenType.UNSIGNED,
+                      TokenType.IDENTIFIER):
+            print("EndianOf encountered")
+            try:
+                target = self.type_spec()
+                self.consume(TokenType.RIGHT_PAREN, "Expected ')' after expression in endianof")
+                return EndianOf(target)
+            except ParseError:
+                self.position = saved_pos
+                self.current_token = self.tokens[self.position]
+                target = self.expression()
+                self.consume(TokenType.RIGHT_PAREN)
+                return EndianOf(target)
 
     def array_literal(self) -> Expression:
         """

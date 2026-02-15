@@ -2655,11 +2655,37 @@ class SizeOf(Expression):
 
         # Fallback: evaluate expression to discover LLVM type
         value = self.target.codegen(builder, module)
-        bits2 = SizeOfTypeHandler.bits_from_llvm_type(value.type, module)
-        if bits2 is None:
+        bits = SizeOfTypeHandler.bits_from_llvm_type(value.type, module)
+        if bits is None:
             raise ValueError(f"Cannot determine size of type: {value.type}")
 
-        return ir.Constant(ir.IntType(32), bits2)
+        return ir.Constant(ir.IntType(32), bits)
+
+
+@dataclass
+class EndianOf(Expression):
+    target: Union[TypeSystem, Expression]
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Generate LLVM IR that returns endianness (0=little, 1=big)"""
+        from ftypesys import EndianOfTypeHandler
+
+        endian = EndianOfTypeHandler.endianof_for_target(self.target, builder, module)
+        if endian is not None:
+            return ir.Constant(ir.IntType(32), endian)
+
+        # Fallback: evaluate expression to discover type
+        value = self.target.codegen(builder, module)
+        spec = getattr(value, '_flux_type_spec', None)
+        if spec is not None:
+            from ftypesys import EndianSwapHandler
+            endian = EndianSwapHandler.get_endianness(spec)
+            if endian is not None:
+                return ir.Constant(ir.IntType(32), endian)
+
+        # Default to little-endian (0) if unknown
+        return ir.Constant(ir.IntType(32), 0)
+
 
 @dataclass
 class NoInit(Expression):
