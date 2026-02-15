@@ -237,9 +237,12 @@ Flux is in active development. The language specification is complete, but imple
 
 ## Learning Resources
 
-- **Intro to Programming with Flux** - Start here if new to programming
-- **Reduced Specification** - Core language features
-- **Full Specification** - Complete language reference
+- **[Language Specification](docs/Specs/lang_spec_full.md)** - Complete language reference  
+- **[Getting Started Guide](docs/learn_flux_intro.md)** - Tutorial for new users  
+- **[Examples](examples/)** - Real-world Flux programs  
+- **[Windows Setup Guide](docs/SetupGuides/windows_setup_guide.md)**  
+- **[Linux Setup Guide](docs/SetupGuides/linux_setup_guide.md)**  
+
 
 ## Example: Complete Program
 
@@ -267,14 +270,6 @@ def main() -> int {
 ```
 
 **Note:** Flux is a systems programming language that assumes you understand memory management and low-level programming concepts. If you're new to systems programming, work through the tutorial documentation carefully.
-
-## 📚 **Learn More**
-
-- **[Language Specification](docs/Specs/lang_spec_full.md)** - Complete language reference
-- **[Getting Started Guide](docs/learn_flux_intro.md)** - Tutorial for new users  
-- **[Examples](examples/)** - Real-world Flux programs
-- **[Windows Setup Guide](docs/SetupGuides/windows_setup_guide.md)**
-- **[Linux Setup Guide](docs/SetupGuides/linux_setup_guide.md)**
 
 ## 🤝 **Contributing**
 
