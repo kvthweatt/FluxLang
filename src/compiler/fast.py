@@ -5636,6 +5636,18 @@ class NamespaceDef(ASTNode):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
         """Generate LLVM IR for a namespace definition."""
+        # Check if this namespace or any parent namespace is excluded via !using
+        if hasattr(module, '_excluded_namespaces'):
+            # Check exact match first
+            if self.name in module._excluded_namespaces:
+                #print(f"[NAMESPACE] Skipping excluded namespace: {self.name}", file=sys.stdout)
+                return
+            # Check if any parent namespace is excluded (e.g., if standard__io is excluded, skip standard__io__console)
+            for excluded_ns in module._excluded_namespaces:
+                if self.name.startswith(excluded_ns + "__"):
+                    #print(f"[NAMESPACE] Skipping namespace {self.name} (parent {excluded_ns} is excluded)", file=sys.stdout)
+                    return
+        
         #print(f"[NAMESPACE] Processing namespace: {self.name}", file=sys.stdout)
         #print(f"[NAMESPACE]   Functions: {len(self.functions)}", file=sys.stdout)
         #print(f"[NAMESPACE]   Nested namespaces: {len(self.nested_namespaces)}", file=sys.stdout)
@@ -5738,14 +5750,11 @@ class NotUsingStatement(Statement):
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
         """Unusing statements are compile-time directives - no runtime code generated"""
-        if not hasattr(module, '_using_namespaces'):
-            module._using_namespaces = []
+        if not hasattr(module, '_excluded_namespaces'):
+            module._excluded_namespaces = set()
         self.namespace_path = self.namespace_path.replace("::","__")
-        try:
-            module._using_namespaces.remove(self.namespace_path)
-        except:
-            raise ComptimeError(f"{self.namespace_path} doesn't exist.")
-        #print(f"[UNUSING] Unregistered namespace: {self.namespace_path}", file=sys.stdout)
+        module._excluded_namespaces.add(self.namespace_path)
+        #print(f"[UNUSING] Excluding namespace from compilation: {self.namespace_path}", file=sys.stdout)
 
 
 # Function definition statement
@@ -5793,6 +5802,11 @@ class NamespaceDefStatement(Statement):
     namespace_def: NamespaceDef
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Value]:
+        # Check if this namespace is excluded via !using
+        if hasattr(module, '_excluded_namespaces') and self.namespace_def.name in module._excluded_namespaces:
+            #print(f"[CODEGEN] Skipping excluded namespace: {self.namespace_def.name}", file=sys.stdout)
+            return None
+        
         self.namespace_def.codegen(builder, module)
         return None
 
@@ -5850,7 +5864,7 @@ class Program(ASTNode):
         # Pass 3: Process all other statements
         print("[AST] Pass 4: Processing all other statements...")
         for stmt in self.statements:
-            if not isinstance(stmt, UsingStatement) and not isinstance(stmt, ExternBlock):
+            if not isinstance(stmt, UsingStatement) and not isinstance(stmt, ExternBlock) and not isinstance(stmt, NotUsingStatement):
                 stmt.codegen(builder, module)
         
         return module
