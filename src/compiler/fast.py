@@ -21,7 +21,7 @@ from ftypesys import *
 
 class ComptimeError(Exception):
     def __init__(self, msg):
-        super.__init__(msg)
+        super().__init__(msg)
         
 
 # Base classes first
@@ -1870,7 +1870,15 @@ class FunctionCall(Expression):
             
             processed_args.append(arg_val)
         
-        return builder.call(func, processed_args)
+        call_instr = builder.call(func, processed_args)
+        
+        # Enable tail call optimization ONLY for direct recursive calls
+        # This allows the compiler to optimize recursive functions without affecting other calls
+        current_func = builder.function
+        if current_func is not None and func.name == current_func.name:
+            call_instr.tail = "tail"
+        
+        return call_instr
 
 
     def _is_string_literal_for_pointer(self, arg: Expression, func: ir.Function, 
@@ -5722,6 +5730,24 @@ class UsingStatement(Statement):
         module._using_namespaces.append(self.namespace_path)
         #print(f"[USING] Registered namespace: {self.namespace_path}", file=sys.stdout)
 
+
+# Unusing statement (removes from using namespaces)
+@dataclass
+class NotUsingStatement(Statement):
+    namespace_path: str  # e.g., "standard::io::file"
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
+        """Unusing statements are compile-time directives - no runtime code generated"""
+        if not hasattr(module, '_using_namespaces'):
+            module._using_namespaces = []
+        self.namespace_path = self.namespace_path.replace("::","__")
+        try:
+            module._using_namespaces.remove(self.namespace_path)
+        except:
+            raise ComptimeError(f"{self.namespace_path} doesn't exist.")
+        #print(f"[UNUSING] Unregistered namespace: {self.namespace_path}", file=sys.stdout)
+
+
 # Function definition statement
 @dataclass
 class FunctionDefStatement(Statement):
@@ -5816,8 +5842,13 @@ class Program(ASTNode):
             if isinstance(stmt, UsingStatement):
                 stmt.codegen(builder, module)
 
+        print("[AST] Pass 3: Processing not using statements...")
+        for stmt in self.statements:
+            if isinstance(stmt, NotUsingStatement):
+                stmt.codegen(builder, module)
+
         # Pass 3: Process all other statements
-        print("[AST] Pass 3: Processing all other statements...")
+        print("[AST] Pass 4: Processing all other statements...")
         for stmt in self.statements:
             if not isinstance(stmt, UsingStatement) and not isinstance(stmt, ExternBlock):
                 stmt.codegen(builder, module)

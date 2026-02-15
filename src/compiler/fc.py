@@ -499,6 +499,7 @@ class FluxCompiler:
                     f"C:\\Program Files\\LLVM\\bin\\{config['linker']}.exe",
                     "/entry:" + config.get('entrypoint', 'main'),                 # TODO -> f"/entry:{entrypoint}"
                                                    # Custom entrypoint support, default main if unspecified
+                    "/stack:33554432",
                     "/nodefaultlib" if int(config['no_default_libraries']) == 1 else "",
                     "/subsystem:" + config['subsystem'],
                     "/opt:ref" if int(config['remove_unused_funcs']) == 1 else "",                    # Remove unused functions/data

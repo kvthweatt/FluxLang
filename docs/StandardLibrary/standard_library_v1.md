@@ -22,8 +22,12 @@ Date: February 2026
 5. [String Utilities](#string-utilities)
    - [red_string_utilities.fx](#red_string_utilitiesfx)
    - [string_object_raw.fx](#string_object_rawfx)
-6. [Import Guidelines](#import-guidelines)
-7. [Platform Support](#platform-support)
+6. [Collections Library](#collections-library)
+   - [redcollections.fx](#redcollectionsfx)
+7. [Vectors Library](#vectors-library)
+   - [redvectors.fx](#redvectorsfx)
+8. [Import Guidelines](#import-guidelines)
+9. [Platform Support](#platform-support)
 
 ---
 
@@ -45,19 +49,19 @@ The Flux Standard Library provides a comprehensive set of tools and utilities fo
 
 ```
 stdlib/
-  ├── standard.fx              # Main entry point
-  ├── redstandard.fx           # Reduced specification standard library
-  ├── redtypes.fx              # Type definitions and utilities
-  ├── redio.fx                 # Input/output operations
-  ├── redmath.fx               # Mathematical functions
-  ├── runtime/
-  │   ├── ffifio.fx            # FFI-based file I/O (C runtime)
-  │   ├── redmemory.fx         # Memory management (FFI)
-  │   └── redruntime.fx        # Runtime initialization
-  ├── functions/
-  │   └── red_string_utilities.fx  # String manipulation functions
-  └── builtins/
-      └── string_object_raw.fx     # String object implementation
+  â”œâ”€â”€ standard.fx              # Main entry point
+  â”œâ”€â”€ redstandard.fx           # Reduced specification standard library
+  â”œâ”€â”€ redtypes.fx              # Type definitions and utilities
+  â”œâ”€â”€ redio.fx                 # Input/output operations
+  â”œâ”€â”€ redmath.fx               # Mathematical functions
+  â”œâ”€â”€ runtime/
+  â”‚   â”œâ”€â”€ ffifio.fx            # FFI-based file I/O (C runtime)
+  â”‚   â”œâ”€â”€ redmemory.fx         # Memory management (FFI)
+  â”‚   â””â”€â”€ redruntime.fx        # Runtime initialization
+  â”œâ”€â”€ functions/
+  â”‚   â””â”€â”€ red_string_utilities.fx  # String manipulation functions
+  â””â”€â”€ builtins/
+      â””â”€â”€ string_object_raw.fx     # String object implementation
 ```
 
 ---
@@ -481,7 +485,7 @@ All functions are overloaded for types: `i8`, `i16`, `i32`, `i64`, `float`
 ##### Absolute Value
 
 ```flux
-def abs(T x) -> T  // T ∈ {i8, i16, i32, i64, float}
+def abs(T x) -> T  // T {i8, i16, i32, i64, float}
 ```
 
 Returns the absolute value of `x`.
@@ -528,7 +532,7 @@ float precise = sqrt(2.0); // Returns ~1.414
 ##### Factorial
 
 ```flux
-def factorial(T n) -> T  // T ∈ {i8, i16, i32, i64}
+def factorial(T n) -> T  // T  {i8, i16, i32, i64}
 ```
 
 Computes `n!` iteratively.
@@ -538,7 +542,7 @@ Computes `n!` iteratively.
 ##### Greatest Common Divisor (GCD)
 
 ```flux
-def gcd(T a, T b) -> T  // T ∈ {i8, i16, i32, i64}
+def gcd(T a, T b) -> T  // T  {i8, i16, i32, i64}
 ```
 
 Computes GCD using Euclidean algorithm.
@@ -546,7 +550,7 @@ Computes GCD using Euclidean algorithm.
 ##### Least Common Multiple (LCM)
 
 ```flux
-def lcm(T a, T b) -> T  // T ∈ {i8, i16, i32, i64}
+def lcm(T a, T b) -> T  // T  {i8, i16, i32, i64}
 ```
 
 Computes LCM using the formula: `lcm(a,b) = |a*b| / gcd(a,b)`.
@@ -554,7 +558,7 @@ Computes LCM using the formula: `lcm(a,b) = |a*b| / gcd(a,b)`.
 ##### Power Function
 
 ```flux
-def pow(T base, T exp) -> T  // T ∈ {i8, i16, i32, i64, float}
+def pow(T base, T exp) -> T  // T  {i8, i16, i32, i64, float}
 ```
 
 Computes `base^exp`.
@@ -593,10 +597,10 @@ Logarithm functions using series approximations.
 ##### Linear Interpolation
 
 ```flux
-def lerp(T a, T b, float t) -> T  // T ∈ {i8, i16, i32, i64, float}
+def lerp(T a, T b, float t) -> T  // T  {i8, i16, i32, i64, float}
 ```
 
-Linearly interpolates between `a` and `b` by factor `t` (where `t` ∈ [0, 1]).
+Linearly interpolates between `a` and `b` by factor `t` (where `t`  [0, 1]).
 
 **Example**:
 ```flux
@@ -606,7 +610,7 @@ float mid = lerp(0.0, 100.0, 0.5);  // Returns 50.0
 ##### Sign Function
 
 ```flux
-def sign(T x) -> T  // T ∈ {i8, i16, i32, i64, float}
+def sign(T x) -> T  // T  {i8, i16, i32, i64, float}
 ```
 
 Returns:
@@ -617,7 +621,7 @@ Returns:
 ##### Population Count (Hamming Weight)
 
 ```flux
-def popcount(T x) -> T  // T ∈ {i8, i16, i32, i64, byte, u16, u32, u64}
+def popcount(T x) -> T  // T  {i8, i16, i32, i64, byte, u16, u32, u64}
 ```
 
 Counts the number of set bits (1s) in the binary representation.
@@ -630,7 +634,7 @@ i32 count = popcount(0b11010110);  // Returns 5
 ##### Bit Reversal
 
 ```flux
-def reverse_bits(T x) -> T  // T ∈ {byte, i8, i16, i32, i64}
+def reverse_bits(T x) -> T  // T  {byte, i8, i16, i32, i64}
 ```
 
 Reverses the bits in the value.
@@ -1242,6 +1246,809 @@ def main() -> int
 
 ---
 
+## Collections Library
+
+### redcollections.fx
+
+**Purpose**: Comprehensive data structure implementations for Flux
+
+**Location**: `stdlib/redcollections.fx`
+
+**Namespace**: `standard::collections`
+
+**Dependencies**:
+- `redtypes.fx` - Type definitions
+- `redmemory.fx` - Memory management (malloc, free, realloc)
+
+**Description**:  
+The collections library provides essential data structures for efficient data management in Flux applications. All collections are generic (using `void*` payloads) and manage their own memory allocation.
+
+#### Dynamic Array (Array)
+
+**Purpose**: Resizable array with O(1) amortized push/pop operations
+
+**Definition**:
+```flux
+object Array
+{
+    void** items;
+    size_t size;
+    size_t capacity;
+};
+```
+
+**Constructors**:
+```flux
+Array()                      // Default capacity: 16
+Array(size_t initial_capacity)  // Custom capacity
+```
+
+**Core Methods**:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_size()` | `size_t` | Get current number of elements |
+| `get_capacity()` | `size_t` | Get current allocated capacity |
+| `is_empty()` | `bool` | Check if array is empty |
+| `push(void* item)` | `bool` | Add item to end (auto-resize) |
+| `pop()` | `void*` | Remove and return last item |
+| `get(size_t index)` | `void*` | Get item at index |
+| `set(size_t index, void* item)` | `bool` | Set item at index |
+| `clear()` | `void` | Remove all items (keeps capacity) |
+| `remove_at(size_t index)` | `bool` | Remove item at index (shift left) |
+| `insert_at(size_t index, void* item)` | `bool` | Insert item at index (shift right) |
+
+**Example**:
+```flux
+#import "redcollections.fx";
+
+Array myArray(32);  // Start with capacity 32
+myArray.push((void*)42);
+myArray.push((void*)100);
+
+void* value = myArray.get(0);  // Returns (void*)42
+size_t count = myArray.get_size();  // Returns 2
+
+myArray.pop();  // Remove last element
+```
+
+**Notes**:
+- Automatically doubles capacity when full
+- Returns `false` on allocation failure
+- Does NOT manage payload memory - caller must free payloads
+
+---
+
+#### Doubly Linked List (LinkedList)
+
+**Purpose**: Dynamic list with O(1) insertion/deletion at both ends
+
+**Definition**:
+```flux
+struct LinkedListNode
+{
+    void* payload;
+    LinkedListNode* next;
+    LinkedListNode* prev;
+};
+
+object LinkedList
+{
+    LinkedListNode* head;
+    LinkedListNode* tail;
+    size_t size;
+};
+```
+
+**Constructor**:
+```flux
+LinkedList()  // Creates empty list
+```
+
+**Core Methods**:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_size()` | `size_t` | Get number of nodes |
+| `is_empty()` | `bool` | Check if list is empty |
+| `push_front(void* item)` | `bool` | Add item to front |
+| `push_back(void* item)` | `bool` | Add item to back |
+| `pop_front()` | `void*` | Remove and return first item |
+| `pop_back()` | `void*` | Remove and return last item |
+| `peek_front()` | `void*` | Get first item without removing |
+| `peek_back()` | `void*` | Get last item without removing |
+| `get(size_t index)` | `void*` | Get item at index (O(n)) |
+| `remove_at(size_t index)` | `bool` | Remove item at index |
+| `clear()` | `void` | Remove all nodes |
+
+**Example**:
+```flux
+LinkedList list;
+
+list.push_back((void*)1);
+list.push_front((void*)2);
+list.push_back((void*)3);
+
+void* first = list.pop_front();  // Returns (void*)2
+void* last = list.peek_back();   // Returns (void*)3 (doesn't remove)
+```
+
+---
+
+#### Stack
+
+**Purpose**: LIFO (Last-In-First-Out) data structure
+
+**Definition**:
+```flux
+object Stack
+{
+    LinkedList list;
+};
+```
+
+**Constructor**:
+```flux
+Stack()  // Creates empty stack
+```
+
+**Methods**:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_size()` | `size_t` | Get number of items |
+| `is_empty()` | `bool` | Check if stack is empty |
+| `push(void* item)` | `bool` | Push item onto stack |
+| `pop()` | `void*` | Pop and return top item |
+| `peek()` | `void*` | Get top item without removing |
+| `clear()` | `void` | Remove all items |
+
+**Example**:
+```flux
+Stack stack;
+
+stack.push((void*)10);
+stack.push((void*)20);
+stack.push((void*)30);
+
+void* top = stack.peek();  // Returns (void*)30
+void* val = stack.pop();   // Returns (void*)30
+```
+
+---
+
+#### Queue
+
+**Purpose**: FIFO (First-In-First-Out) data structure
+
+**Definition**:
+```flux
+object Queue
+{
+    LinkedList list;
+};
+```
+
+**Constructor**:
+```flux
+Queue()  // Creates empty queue
+```
+
+**Methods**:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_size()` | `size_t` | Get number of items |
+| `is_empty()` | `bool` | Check if queue is empty |
+| `enqueue(void* item)` | `bool` | Add item to back of queue |
+| `dequeue()` | `void*` | Remove and return front item |
+| `peek()` | `void*` | Get front item without removing |
+| `clear()` | `void` | Remove all items |
+
+**Example**:
+```flux
+Queue queue;
+
+queue.enqueue((void*)1);
+queue.enqueue((void*)2);
+queue.enqueue((void*)3);
+
+void* first = queue.dequeue();  // Returns (void*)1
+void* next = queue.peek();      // Returns (void*)2
+```
+
+---
+
+#### Hash Map (HashMap)
+
+**Purpose**: Key-value store with O(1) average lookup/insert
+
+**Definition**:
+```flux
+struct HashMapEntry
+{
+    i64 key;
+    void* value;
+    HashMapEntry* next;
+};
+
+object HashMap
+{
+    HashMapEntry** buckets;
+    size_t bucket_count;
+    size_t size;
+};
+```
+
+**Constructor**:
+```flux
+HashMap()                // Default: 16 buckets
+HashMap(size_t buckets)  // Custom bucket count
+```
+
+**Core Methods**:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_size()` | `size_t` | Get number of key-value pairs |
+| `is_empty()` | `bool` | Check if map is empty |
+| `hash(i64 key)` | `size_t` | Hash function for keys |
+| `put(i64 key, void* value)` | `bool` | Insert or update key-value pair |
+| `get(i64 key)` | `void*` | Get value by key (NULL if not found) |
+| `contains(i64 key)` | `bool` | Check if key exists |
+| `remove(i64 key)` | `bool` | Remove key-value pair |
+| `clear()` | `void` | Remove all entries |
+
+**Example**:
+```flux
+HashMap map(32);  // 32 buckets
+
+map.put(100, (void*)0x1000);
+map.put(200, (void*)0x2000);
+
+if (map.contains(100))
+{
+    void* value = map.get(100);  // Returns (void*)0x1000
+};
+
+map.remove(200);
+```
+
+**Notes**:
+- Uses chaining for collision resolution
+- Fixed bucket count (no auto-rehashing)
+- Hash function: `key % bucket_count`
+
+---
+
+#### Binary Search Tree (BinarySearchTree)
+
+**Purpose**: Sorted tree structure with O(log n) average operations
+
+**Definition**:
+```flux
+struct BinaryTreeNode
+{
+    void* payload;
+    i64 key;
+    BinaryTreeNode* left;
+    BinaryTreeNode* right;
+    BinaryTreeNode* parent;
+};
+
+object BinarySearchTree
+{
+    BinaryTreeNode* root;
+    size_t size;
+};
+```
+
+**Constructor**:
+```flux
+BinarySearchTree()  // Creates empty tree
+```
+
+**Core Methods**:
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_size()` | `size_t` | Get number of nodes |
+| `is_empty()` | `bool` | Check if tree is empty |
+| `insert(i64 key, void* item)` | `bool` | Insert node (updates if key exists) |
+| `find(i64 key)` | `void*` | Find payload by key |
+| `contains(i64 key)` | `bool` | Check if key exists |
+| `remove(i64 key)` | `bool` | Remove node by key |
+| `clear()` | `void` | Remove all nodes |
+
+**Example**:
+```flux
+BinarySearchTree bst;
+
+bst.insert(50, (void*)0x50);
+bst.insert(30, (void*)0x30);
+bst.insert(70, (void*)0x70);
+bst.insert(20, (void*)0x20);
+bst.insert(40, (void*)0x40);
+
+void* val = bst.find(30);  // Returns (void*)0x30
+
+bst.remove(30);
+bool exists = bst.contains(30);  // false
+```
+
+**Notes**:
+- Maintains sorted order by key
+- No self-balancing (can degrade to O(n) with sorted input)
+- Handles three deletion cases: no children, one child, two children
+
+---
+
+### Collections Best Practices
+
+1. **Memory Management**:
+   ```flux
+   Array arr;
+   void* data = malloc(100);
+   arr.push(data);
+   // Later, remember to free payloads before clearing
+   free(arr.get(0));
+   arr.clear();
+   ```
+
+2. **Type Safety with Casting**:
+   ```flux
+   struct MyData { i32 value; };
+   
+   MyData* data = (MyData*)malloc(sizeof(MyData));
+   data.value = 42;
+   
+   arr.push((void*)data);
+   
+   MyData* retrieved = (MyData*)arr.get(0);
+   i32 val = retrieved.value;  // 42
+   ```
+
+3. **Check Return Values**:
+   ```flux
+   if (!arr.push(item))
+   {
+       print("Allocation failed!\0");
+       return -1;
+   };
+   ```
+
+4. **Iterator Pattern** (for LinkedList):
+   ```flux
+   LinkedListNode* node = list.head;
+   while (node != (LinkedListNode*)0)
+   {
+       // Process node.payload
+       node = node.next;
+   };
+   ```
+
+---
+
+## Vectors Library
+
+### redvectors.fx
+
+**Purpose**: 3D and 4D vector mathematics for graphics, physics, and spatial calculations
+
+**Location**: `stdlib/redvectors.fx`
+
+**Namespace**: `standard::vectors`
+
+**Dependencies**:
+- `redtypes.fx` - Type definitions
+- `redmath.fx` - Math functions (sin, cos, sqrt, etc.)
+
+**Description**:  
+The vectors library provides comprehensive 3D and 4D vector operations commonly used in graphics programming, game development, physics simulations, and geometric calculations.
+
+#### Vector Structures
+
+**Vec3** - 3D Vector:
+```flux
+struct Vec3
+{
+    float x, y, z;
+};
+```
+
+**Vec4** - 4D Vector:
+```flux
+struct Vec4
+{
+    float x, y, z, w;
+};
+```
+
+---
+
+#### Vec3 Constructors
+
+```flux
+def vec3(float x, float y, float z) -> Vec3
+def vec3_zero() -> Vec3           // (0, 0, 0)
+def vec3_one() -> Vec3            // (1, 1, 1)
+def vec3_up() -> Vec3             // (0, 1, 0)
+def vec3_down() -> Vec3           // (0, -1, 0)
+def vec3_left() -> Vec3           // (-1, 0, 0)
+def vec3_right() -> Vec3          // (1, 0, 0)
+def vec3_forward() -> Vec3        // (0, 0, 1)
+def vec3_back() -> Vec3           // (0, 0, -1)
+```
+
+**Example**:
+```flux
+Vec3 position = vec3(10.0, 20.0, 30.0);
+Vec3 up = vec3_up();
+Vec3 origin = vec3_zero();
+```
+
+---
+
+#### Vec4 Constructors
+
+```flux
+def vec4(float x, float y, float z, float w) -> Vec4
+def vec4_zero() -> Vec4                  // (0, 0, 0, 0)
+def vec4_one() -> Vec4                   // (1, 1, 1, 1)
+def vec4_from_vec3(Vec3 v, float w) -> Vec4  // Extend Vec3 to Vec4
+```
+
+**Example**:
+```flux
+Vec4 quaternion = vec4(0.0, 0.0, 0.0, 1.0);
+Vec3 pos = vec3(1.0, 2.0, 3.0);
+Vec4 homogeneous = vec4_from_vec3(pos, 1.0);
+```
+
+---
+
+#### Arithmetic Operations
+
+**Vec3 Operations**:
+```flux
+def vec3_add(Vec3 a, Vec3 b) -> Vec3           // Component-wise addition
+def vec3_sub(Vec3 a, Vec3 b) -> Vec3           // Component-wise subtraction
+def vec3_mul(Vec3 v, float scalar) -> Vec3     // Scalar multiplication
+def vec3_div(Vec3 v, float scalar) -> Vec3     // Scalar division
+def vec3_negate(Vec3 v) -> Vec3                // Negate all components
+def vec3_scale(Vec3 a, Vec3 b) -> Vec3         // Component-wise multiplication
+```
+
+**Vec4 Operations**:
+```flux
+def vec4_add(Vec4 a, Vec4 b) -> Vec4
+def vec4_sub(Vec4 a, Vec4 b) -> Vec4
+def vec4_mul(Vec4 v, float scalar) -> Vec4
+def vec4_div(Vec4 v, float scalar) -> Vec4
+def vec4_negate(Vec4 v) -> Vec4
+def vec4_scale(Vec4 a, Vec4 b) -> Vec4
+```
+
+**Example**:
+```flux
+Vec3 a = vec3(1.0, 2.0, 3.0);
+Vec3 b = vec3(4.0, 5.0, 6.0);
+
+Vec3 sum = vec3_add(a, b);        // (5, 7, 9)
+Vec3 scaled = vec3_mul(a, 2.0);   // (2, 4, 6)
+Vec3 product = vec3_scale(a, b);  // (4, 10, 18)
+```
+
+---
+
+#### Dot and Cross Products
+
+**Dot Product**:
+```flux
+def vec3_dot(Vec3 a, Vec3 b) -> float
+def vec4_dot(Vec4 a, Vec4 b) -> float
+```
+
+Returns scalar result: `a.x*b.x + a.y*b.y + a.z*b.z [+ a.w*b.w]`
+
+**Cross Product** (Vec3 only):
+```flux
+def vec3_cross(Vec3 a, Vec3 b) -> Vec3
+```
+
+Returns perpendicular vector following right-hand rule.
+
+**Example**:
+```flux
+Vec3 a = vec3(1.0, 0.0, 0.0);
+Vec3 b = vec3(0.0, 1.0, 0.0);
+
+float dot = vec3_dot(a, b);     // 0.0 (perpendicular)
+Vec3 cross = vec3_cross(a, b);  // (0, 0, 1) - points along Z-axis
+```
+
+---
+
+#### Length and Normalization
+
+**Vec3**:
+```flux
+def vec3_length_squared(Vec3 v) -> float    // Faster, no sqrt
+def vec3_length(Vec3 v) -> float            // Magnitude
+def vec3_normalize(Vec3 v) -> Vec3          // Unit vector
+def vec3_distance(Vec3 a, Vec3 b) -> float
+def vec3_distance_squared(Vec3 a, Vec3 b) -> float
+```
+
+**Vec4**:
+```flux
+def vec4_length_squared(Vec4 v) -> float
+def vec4_length(Vec4 v) -> float
+def vec4_normalize(Vec4 v) -> Vec4
+def vec4_distance(Vec4 a, Vec4 b) -> float
+def vec4_distance_squared(Vec4 a, Vec4 b) -> float
+```
+
+**Example**:
+```flux
+Vec3 v = vec3(3.0, 4.0, 0.0);
+float len = vec3_length(v);           // 5.0
+Vec3 normalized = vec3_normalize(v);  // (0.6, 0.8, 0.0)
+
+Vec3 p1 = vec3(0.0, 0.0, 0.0);
+Vec3 p2 = vec3(3.0, 4.0, 0.0);
+float dist = vec3_distance(p1, p2);   // 5.0
+```
+
+---
+
+#### Interpolation
+
+**Linear Interpolation (Lerp)**:
+```flux
+def vec3_lerp(Vec3 a, Vec3 b, float t) -> Vec3
+def vec4_lerp(Vec4 a, Vec4 b, float t) -> Vec4
+```
+
+**Spherical Linear Interpolation (Slerp)**:
+```flux
+def vec3_slerp(Vec3 a, Vec3 b, float t) -> Vec3
+def vec4_slerp(Vec4 a, Vec4 b, float t) -> Vec4
+```
+
+**Example**:
+```flux
+Vec3 start = vec3(0.0, 0.0, 0.0);
+Vec3 end = vec3(10.0, 10.0, 10.0);
+
+Vec3 halfway = vec3_lerp(start, end, 0.5);  // (5, 5, 5)
+
+// For normalized vectors, slerp maintains constant speed
+Vec3 dir1 = vec3_normalize(vec3(1.0, 0.0, 0.0));
+Vec3 dir2 = vec3_normalize(vec3(0.0, 1.0, 0.0));
+Vec3 interpolated = vec3_slerp(dir1, dir2, 0.5);
+```
+
+---
+
+#### Projection and Reflection
+
+**Vec3**:
+```flux
+def vec3_project(Vec3 v, Vec3 onto) -> Vec3    // Project v onto 'onto'
+def vec3_reject(Vec3 v, Vec3 from) -> Vec3     // Perpendicular component
+def vec3_reflect(Vec3 v, Vec3 normal) -> Vec3  // Reflect across normal
+```
+
+**Vec4**:
+```flux
+def vec4_project(Vec4 v, Vec4 onto) -> Vec4
+def vec4_reject(Vec4 v, Vec4 from) -> Vec4
+def vec4_reflect(Vec4 v, Vec4 normal) -> Vec4
+```
+
+**Example**:
+```flux
+Vec3 velocity = vec3(5.0, -5.0, 0.0);
+Vec3 normal = vec3(0.0, 1.0, 0.0);
+
+// Reflect velocity off horizontal surface
+Vec3 reflected = vec3_reflect(velocity, normal);  // (5, 5, 0)
+
+// Project velocity onto ground plane
+Vec3 ground_vel = vec3_reject(velocity, normal);  // (5, 0, 0)
+```
+
+---
+
+#### Angle Calculations
+
+```flux
+def vec3_angle(Vec3 a, Vec3 b) -> float  // Angle in radians
+def vec4_angle(Vec4 a, Vec4 b) -> float
+```
+
+Returns angle between vectors in range [0, π].
+
+**Example**:
+```flux
+Vec3 a = vec3(1.0, 0.0, 0.0);
+Vec3 b = vec3(0.0, 1.0, 0.0);
+
+float angle = vec3_angle(a, b);  // π/2 (90 degrees)
+```
+
+---
+
+#### Min/Max/Clamp
+
+**Vec3**:
+```flux
+def vec3_min(Vec3 a, Vec3 b) -> Vec3
+def vec3_max(Vec3 a, Vec3 b) -> Vec3
+def vec3_clamp(Vec3 v, Vec3 min_v, Vec3 max_v) -> Vec3
+```
+
+**Vec4**:
+```flux
+def vec4_min(Vec4 a, Vec4 b) -> Vec4
+def vec4_max(Vec4 a, Vec4 b) -> Vec4
+def vec4_clamp(Vec4 v, Vec4 min_v, Vec4 max_v) -> Vec4
+```
+
+**Example**:
+```flux
+Vec3 a = vec3(1.0, 5.0, 3.0);
+Vec3 b = vec3(2.0, 4.0, 6.0);
+
+Vec3 minimum = vec3_min(a, b);  // (1, 4, 3)
+Vec3 maximum = vec3_max(a, b);  // (2, 5, 6)
+
+Vec3 bounds_min = vec3_zero();
+Vec3 bounds_max = vec3_one();
+Vec3 clamped = vec3_clamp(a, bounds_min, bounds_max);  // (1, 1, 1)
+```
+
+---
+
+#### Component Access
+
+**Vec3 Getters/Setters**:
+```flux
+def vec3_get_x(Vec3 v) -> float
+def vec3_get_y(Vec3 v) -> float
+def vec3_get_z(Vec3 v) -> float
+
+def vec3_set_x(Vec3* v, float x) -> void
+def vec3_set_y(Vec3* v, float y) -> void
+def vec3_set_z(Vec3* v, float z) -> void
+```
+
+**Vec4 Getters/Setters**:
+```flux
+def vec4_get_x(Vec4 v) -> float
+def vec4_get_y(Vec4 v) -> float
+def vec4_get_z(Vec4 v) -> float
+def vec4_get_w(Vec4 v) -> float
+
+def vec4_set_x(Vec4* v, float x) -> void
+def vec4_set_y(Vec4* v, float y) -> void
+def vec4_set_z(Vec4* v, float z) -> void
+def vec4_set_w(Vec4* v, float w) -> void
+```
+
+---
+
+#### Rotation (Vec3)
+
+```flux
+def vec3_rotate_x(Vec3 v, float angle) -> Vec3  // Rotate around X-axis
+def vec3_rotate_y(Vec3 v, float angle) -> Vec3  // Rotate around Y-axis
+def vec3_rotate_z(Vec3 v, float angle) -> Vec3  // Rotate around Z-axis
+```
+
+Angles in radians. Uses rotation matrices.
+
+**Example**:
+```flux
+Vec3 v = vec3(1.0, 0.0, 0.0);
+
+// Rotate 90 degrees (π/2 radians) around Z-axis
+float angle = 1.57079632679;  // π/2
+Vec3 rotated = vec3_rotate_z(v, angle);  // Approximately (0, 1, 0)
+```
+
+---
+
+#### Advanced Operations
+
+**Barycentric Coordinates**:
+```flux
+def vec3_barycentric(Vec3 a, Vec3 b, Vec3 c, float u, float v) -> Vec3
+```
+
+Compute point in triangle using barycentric coordinates.
+
+**Triple Product**:
+```flux
+def vec3_triple_product(Vec3 a, Vec3 b, Vec3 c) -> float
+```
+
+Returns `a · (b × c)` - volume of parallelepiped.
+
+**Absolute Value**:
+```flux
+def vec3_abs(Vec3 v) -> Vec3
+def vec4_abs(Vec4 v) -> Vec4
+```
+
+**Example**:
+```flux
+Vec3 a = vec3(0.0, 0.0, 0.0);
+Vec3 b = vec3(1.0, 0.0, 0.0);
+Vec3 c = vec3(0.0, 1.0, 0.0);
+
+// Get point at center of triangle
+Vec3 center = vec3_barycentric(a, b, c, 0.33, 0.33);
+
+// Calculate volume
+float volume = vec3_triple_product(a, b, c);
+```
+
+---
+
+### Vectors Best Practices
+
+1. **Normalize Before Dot Product for Angles**:
+   ```flux
+   Vec3 a_norm = vec3_normalize(a);
+   Vec3 b_norm = vec3_normalize(b);
+   float dot = vec3_dot(a_norm, b_norm);  // Result in range [-1, 1]
+   ```
+
+2. **Use Squared Distance for Comparisons**:
+   ```flux
+   // Faster - avoids sqrt
+   float dist_sq = vec3_distance_squared(p1, p2);
+   if (dist_sq < threshold * threshold)
+   {
+       // Points are close
+   };
+   ```
+
+3. **Check for Zero Vectors**:
+   ```flux
+   Vec3 v = get_direction();
+   float len_sq = vec3_length_squared(v);
+   if (len_sq > 0.000001)  // Not zero
+   {
+       v = vec3_normalize(v);
+   };
+   ```
+
+4. **Physics Example** - Bounce:
+   ```flux
+   Vec3 velocity = vec3(10.0, -5.0, 0.0);
+   Vec3 normal = vec3(0.0, 1.0, 0.0);
+   
+   // Bounce with 80% energy retention
+   Vec3 reflected = vec3_reflect(velocity, normal);
+   Vec3 new_velocity = vec3_mul(reflected, 0.8);
+   ```
+
+5. **Graphics Example** - Camera:
+   ```flux
+   Vec3 camera_pos = vec3(0.0, 5.0, -10.0);
+   Vec3 target_pos = vec3(0.0, 0.0, 0.0);
+   
+   Vec3 forward = vec3_normalize(vec3_sub(target_pos, camera_pos));
+   Vec3 world_up = vec3_up();
+   Vec3 right = vec3_normalize(vec3_cross(forward, world_up));
+   Vec3 up = vec3_cross(right, forward);
+   ```
+
+---
+
 ## Import Guidelines
 
 ### Basic Import
@@ -1277,6 +2084,12 @@ For more control, import specific modules:
 
 // String utilities
 #import "red_string_utilities.fx";
+
+// Collections
+#import "redcollections.fx";
+
+// Vectors
+#import "redvectors.fx";
 ```
 
 ### Namespace Usage
@@ -1292,6 +2105,16 @@ int result = standard::math::abs(-42);
 // Using directive
 using standard::math;
 int result = abs(-42);
+
+// Collections
+#import "redcollections.fx";
+using standard::collections;
+Array myArray;
+
+// Vectors
+#import "redvectors.fx";
+using standard::vectors;
+Vec3 position = vec3(1.0, 2.0, 3.0);
 ```
 
 ### Conditional Compilation
@@ -1390,7 +2213,7 @@ switch (CURRENT_OS)
 - Direct syscall interface for I/O operations
 - No C runtime dependency for core operations
 - File descriptor-based file I/O
-- Entry point: `_start()` → `FRTStartup()`
+- Entry point: `_start()` â†’ `FRTStartup()`
 
 #### macOS
 
@@ -1520,6 +2343,8 @@ The compiler does not null terminate your strings.
 - Core I/O, math, and string utilities
 - FFI integration with C runtime
 - Bootstrap-ready implementation
+- Collections library (Array, LinkedList, Stack, Queue, HashMap, BinarySearchTree)
+- Vectors library (3D/4D vector mathematics)
 
 ---
 

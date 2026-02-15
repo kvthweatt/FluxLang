@@ -371,6 +371,13 @@ class SymbolTable:
     def add_using_namespace(self, namespace: str):
         if namespace not in self.using_namespaces:
             self.using_namespaces.append(namespace)
+
+    @staticmethod
+    def remove_using_namespace(module: 'ir.Module', namespace: str):
+        """Remove a namespace from the module's using_namespaces list"""
+        if hasattr(module, '_using_namespaces'):
+            if namespace in module._using_namespaces:
+                module._using_namespaces.remove(namespace)
     
     def define(self, name: str, kind: SymbolKind, type_spec=None, 
                llvm_type=None, llvm_value=None, **metadata):
@@ -3802,16 +3809,16 @@ class EndianSwapHandler:
             return val  # Only integer types >= 16 bits can have meaningful endianness
 
         src_endian = EndianSwapHandler.get_endianness(getattr(val, '_flux_type_spec', None))
-        print(f"[ENDIAN DEBUG] src_endian from val._flux_type_spec: {src_endian}", file=__import__('sys').stderr)
+        #print(f"[ENDIAN DEBUG] src_endian from val._flux_type_spec: {src_endian}", file=__import__('sys').stderr)
         tgt_endian = EndianSwapHandler.get_target_endianness(target_ptr, module)
-        print(f"[ENDIAN DEBUG] tgt_endian from target_ptr: {tgt_endian}", file=__import__('sys').stderr)
+        #print(f"[ENDIAN DEBUG] tgt_endian from target_ptr: {tgt_endian}", file=__import__('sys').stderr)
 
         if src_endian is None or tgt_endian is None:
-            print(f"[ENDIAN DEBUG] After checks - src: {src_endian}, tgt: {tgt_endian}", file=__import__('sys').stderr)
-            return val  # Can't determine endianness â€” don't swap
+            #print(f"[ENDIAN DEBUG] After checks - src: {src_endian}, tgt: {tgt_endian}", file=__import__('sys').stderr)
+            return val  # Can't determine endianness
 
         if src_endian == tgt_endian:
-            return val  # Same endianness â€” no swap needed
+            return val  # Same endianness
 
         # Endianness mismatch â€” emit bswap
         swapped = EndianSwapHandler.emit_bswap(builder, module, val)

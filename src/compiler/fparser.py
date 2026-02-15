@@ -243,6 +243,11 @@ class FluxParser:
         # No storage class or qualifiers - check for other statement types
         if self.expect(TokenType.USING):
             return self.using_statement()
+        elif self.expect(TokenType.NOT):
+            self.advance()
+            if self.expect(TokenType.USING):
+                self.advance()
+                return self.not_using_statement()
         elif self.expect(TokenType.EXTERN):
             return self.extern_statement()
         elif self.expect(TokenType.DEF):
@@ -319,13 +324,26 @@ class FluxParser:
         while self.expect(TokenType.SCOPE):  # ::
             self.advance()
             namespace_path += "__" + self.consume(TokenType.IDENTIFIER).value
-
-        #print("PARSER: USING_STATEMENT()",namespace_path)
         
         # For now, handle only single namespace per statement
         # TODO: Add support for comma-separated namespaces
         self.consume(TokenType.SEMICOLON)
         return UsingStatement(namespace_path)
+
+    def not_using_statement(self) -> NotUsingStatement:
+        """
+        not_using_statement -> '!' 'using' namespace_path (',' namespace_path)* ';'
+        namespace_path -> IDENTIFIER ('::' IDENTIFIER)*
+        """
+        # Parse namespace path (e.g., "standard::io::file")
+        namespace_path = self.consume(TokenType.IDENTIFIER).value
+        while self.expect(TokenType.SCOPE):  # ::
+            self.advance()
+            namespace_path += "__" + self.consume(TokenType.IDENTIFIER).value
+        
+        # For now, handle only single namespace per statement
+        self.consume(TokenType.SEMICOLON)
+        return NotUsingStatement(namespace_path)
     
     def extern_statement(self) -> ExternBlock:
         """

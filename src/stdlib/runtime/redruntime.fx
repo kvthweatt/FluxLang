@@ -33,13 +33,14 @@
 #endif;
 
 // Import raw functions & builtins
-//#import "file_object_raw.fx";
+#import "string_object_raw.fx";
+#import "file_object_raw.fx";
 //#import "socket_object_raw.fx";
 //
 // ---------------------------
 //
 // Import runtime helpers
-//#import "ffifio.fx";                 // FFI-based File Input/Output (CRT)
+#import "ffifio.fx";                 // FFI-based File Input/Output (CRT)
 //
 // ---------------------------
 //
