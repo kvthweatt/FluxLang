@@ -1409,16 +1409,16 @@ object D {
         print("foo() from object D");
         return;
     };
-	
-	def foo(bool) -> int {
-	    print("foo(bool) from object D");
-		return 0;
-	};
+    
+    def foo(bool) -> int {
+        print("foo(bool) from object D");
+        return 0;
+    };
 };
 
 object C : D[!foo()->void, !foo(bool)->int] (
     // Prevents gaining overloaded foo() and foo(bool)
-	
+    
     def __init() -> this {
         return this;
     };
@@ -1426,10 +1426,10 @@ object C : D[!foo()->void, !foo(bool)->int] (
     def __exit() -> void {
         return void;
     };
-	
-	def foo() -> int {
-		print("foo() from C");
-	};
+    
+    def foo() -> int {
+        print("foo() from C");
+    };
 };
 
 object B : C {
@@ -1452,3 +1452,1622 @@ def main() -> int {
 ```
 Result:  
 `foo() from object C`
+
+---
+
+## 8 - Functions in Depth
+
+We've been using functions throughout this guide - `main()`, `print()`, and methods inside objects. Now it's time to understand them fully. Functions are reusable blocks of code that perform specific tasks. Think of them as recipes: you define the steps once, then you can follow that recipe whenever you need it.
+
+#### f8.1 Defining Your First Function
+
+Let's start simple. A function needs:
+1. A name (what it's called)
+2. Parameters (what data it needs)
+3. A return type (what data it gives back)
+4. A body (the code it runs)
+
+```
+def add_nums(int x, int y) -> int
+{
+    return x + y;
+};
+```
+
+This function is named `add_nums`. It takes two integers (`x` and `y`), adds them together, and returns the result.
+
+Let's use it:
+```
+#import "standard.fx";
+
+def add_nums(int x, int y) -> int
+{
+    return x + y;
+};
+
+def main() -> int
+{
+    int result = add_nums(5, 3);
+    print("5 + 3 = \0");
+    print(result);
+    print("\n\0");
+    return 0;
+};
+```
+Result:
+```
+5 + 3 = 8
+```
+
+#### f8.2 Parameters and Arguments
+
+**Parameters** are the variables you define in the function signature. **Arguments** are the actual values you pass when calling the function.
+
+```
+def greet(int age) -> void  // 'age' is a parameter
+{
+    print("You are \0");
+    print(age);
+    print(" years old!\n\0");
+    return;
+};
+
+def main() -> int
+{
+    greet(25);  // 25 is an argument
+    greet(30);  // 30 is an argument
+    return 0;
+};
+```
+Result:
+```
+You are 25 years old!
+You are 30 years old!
+```
+
+Functions can have multiple parameters:
+```
+def introduce(int age, int height) -> void
+{
+    print("Age: \0");
+    print(age);
+    print(", Height: \0");
+    print(height);
+    print(" cm\n\0");
+    return;
+};
+
+def main() -> int
+{
+    introduce(25, 175);
+    introduce(30, 182);
+    return 0;
+};
+```
+
+#### f8.3 Return Values
+
+The `return` statement does two things:
+1. Exits the function immediately
+2. Sends a value back to whoever called the function
+
+```
+def multiply(int a, int b) -> int
+{
+    int result = a * b;
+    return result;
+};
+
+def main() -> int
+{
+    int answer = multiply(7, 6);
+    print("7 * 6 = \0");
+    print(answer);
+    print("\n\0");
+    return 0;
+};
+```
+
+You can return early from a function:
+```
+def divide(int a, int b) -> int
+{
+    if (b == 0)
+    {
+        print("Error: Cannot divide by zero!\n\0");
+        return 0;  // Exit early with a safe value
+    };
+    return a / b;
+};
+
+def main() -> int
+{
+    print(divide(10, 2));  // Prints 5
+    print("\n\0");
+    print(divide(10, 0));  // Prints error, returns 0
+    print("\n\0");
+    return 0;
+};
+```
+
+#### f8.4 Void Functions
+
+Sometimes a function doesn't need to return anything - it just performs an action. We use `void` as the return type:
+
+```
+def print_border() -> void
+{
+    print("====================\n\0");
+    return;
+};
+
+def main() -> int
+{
+    print_border();
+    print("Welcome to Flux!\n\0");
+    print_border();
+    return 0;
+};
+```
+Result:
+```
+====================
+Welcome to Flux!
+====================
+```
+
+#### f8.5 Scope - Where Variables Live
+
+Variables have a **scope** - they only exist in certain parts of your code. Think of scope like rooms in a house: what's in one room isn't automatically available in another.
+
+```
+int globalVar = 100;  // This exists everywhere
+
+def some_func() -> void
+{
+    int localVar = 50;  // This only exists inside some_func
+    print("Inside function: \0");
+    print(localVar);
+    print("\n\0");
+    print("Global var: \0");
+    print(globalVar);
+    print("\n\0");
+    return;
+};
+
+def main() -> int
+{
+    print("In main, global var: \0");
+    print(globalVar);
+    print("\n\0");
+    
+    some_func();
+    
+    // print(localVar);  // ERROR! localVar doesn't exist here
+    
+    return 0;
+};
+```
+
+Variables defined inside a function are **local** to that function. Variables defined outside all functions are **global** and can be accessed anywhere.
+
+#### f8.6 Function Overloading
+
+Flux lets you create multiple functions with the same name, as long as they have different parameters:
+
+```
+def calculate(int x) -> int
+{
+    return x * 2;
+};
+
+def calculate(int x, int y) -> int
+{
+    return x * y;
+};
+
+def main() -> int
+{
+    print(calculate(5));      // Uses first version: 5 * 2 = 10
+    print("\n\0");
+    print(calculate(5, 3));   // Uses second version: 5 * 3 = 15
+    print("\n\0");
+    return 0;
+};
+```
+
+The name, paramters, and return type form a function's `signature`. If the signatures are different, you're all set!  
+The compiler picks the right function based on what - and how many - arguments you provide, and what the function call is returning to.
+
+#### f8.7 Practical Examples
+
+Let's make a simple calculator:
+```
+#import "standard.fx";
+
+def add(int a, int b) -> int
+{
+    return a + b;
+};
+
+def subtract(int a, int b) -> int
+{
+    return a - b;
+};
+
+def multiply(int a, int b) -> int
+{
+    return a * b;
+};
+
+def divide(int a, int b) -> int
+{
+    if (b == 0)
+    {
+        print("Error: Division by zero!\n\0");
+        return 0;
+    };
+    return a / b;
+};
+
+def main() -> int
+{
+    int x = 20;
+    int y = 4;
+    
+    print("x = \0");
+    print(x);
+    print(", y = \0");
+    print(y);
+    print("\n\0");
+    
+    print("x + y = \0");
+    print(add(x, y));
+    print("\n\0");
+    
+    print("x - y = \0");
+    print(subtract(x, y));
+    print("\n\0");
+    
+    print("x * y = \0");
+    print(multiply(x, y));
+    print("\n\0");
+    
+    print("x / y = \0");
+    print(divide(x, y));
+    print("\n\0");
+    
+    return 0;
+};
+```
+Result:
+```
+x = 20, y = 4
+x + y = 24
+x - y = 16
+x * y = 80
+x / y = 5
+```
+
+Here's a function that checks if a number is even:
+```
+def isEven(int num) -> bool
+{
+    if (num % 2 == 0)
+    {
+        return true;
+    };
+    return false;
+};
+
+def main() -> int
+{
+    for (int i = 0; i < 10; i++)
+    {
+        if (isEven(i))
+        {
+            print(i);
+            print(" is even\n\0");
+        }
+        else
+        {
+            print(i);
+            print(" is odd\n\0");
+        };
+    };
+    return 0;
+};
+```
+
+#### f8.8 Building with Functions
+
+Functions help you break down complex problems into smaller, manageable pieces. Each function should do one thing well.
+
+```
+def celsius_to_fahrenheit(float celsius) -> float
+{
+    return (celsius * 9.0 / 5.0) + 32.0;
+};
+
+def fahrenheit_to_celsius(float fahrenheit) -> float
+{
+    return (fahrenheit - 32.0) * 5.0 / 9.0;
+};
+
+def main() -> int
+{
+    float temp_c = 25.0;
+    float temp_f = celsius_to_fahrenheit(temp_c);
+    
+    print("25°C = \0");
+    print(temp_f);
+    print("°F\n\0");
+    
+    float back_to_c = fahrenheit_to_celsius(temp_f);
+    print("Converting back: \0");
+    print(back_to_c);
+    print("°C\n\0");
+    
+    return 0;
+};
+```
+
+Functions make your code:
+- **Reusable** - write once, use many times
+- **Readable** - good function names explain what the code does
+- **Testable** - you can test each function separately
+- **Maintainable** - fix or improve one function without breaking others
+
+---
+
+## 9 - Working with Strings
+
+Strings are how we work with text in programs. In Flux, strings are arrays of characters. We've used strings with `print()` throughout this guide, but now let's understand them properly.
+
+#### f9.1 What is a String?
+
+A string is a sequence of characters. Remember from Section 1 that characters are just numbers (ASCII values). A string is an array of these numbers:
+
+```
+char[] myString = "Hello\0";
+```
+
+The `\0` at the end is the **null terminator** - it tells the computer where the string ends. In Flux, string literals need a null terminator `\0`. The Flux compiler will not null terminate your strings for you. For null-terminated strings by default, using the `standard::strings` object. It must be initialized with a null-terminated string.
+
+#### f9.2 String Basics
+
+```
+#import "standard.fx";
+
+def main() -> int
+{
+    char[] greeting = "Hello, World!\0";
+    print(greeting);
+    print("\n\0");
+    
+    char[] name = "Alice\0";
+    print("My name is \0");
+    print(name);
+    print("\n\0");
+    
+    return 0;
+};
+```
+Result:
+```
+Hello, World!
+My name is Alice
+```
+
+#### f9.3 Accessing Individual Characters
+
+Since strings are arrays, you can access individual characters:
+
+```
+def main() -> int
+{
+    char[] word = "Flux\0";
+    
+    print("First character: \0");
+    print(word[0]);  // 'F' = 70 in ASCII
+    print("\n\0");
+    
+    print("Second character: \0");
+    print(word[1]);  // 'l' = 108 in ASCII
+    print("\n\0");
+    
+    return 0;
+};
+```
+
+Remember, characters are just numbers. If you want to see the number, cast your char to an integer like so:  
+`print((int)some_char);`
+
+#### f9.4 String Length
+
+To find how long a string is, we count characters until we hit the null terminator:
+
+```
+def strlen(char[] str) -> int
+{
+    int length = 0;
+    for (int i = 0; i < 1000; i++)  // Safety limit
+    {
+        if (str[i] == 0)  // Found null terminator
+        {
+            return length;
+        };
+        length++;
+    };
+    return length;
+};
+
+def main() -> int
+{
+    char[] text = "Programming!\0";
+    int len = strlen(text);
+    
+    print("Length: \0");
+    print(len);
+    print("\n\0");
+    
+    return 0;
+};
+```
+
+#### f9.5 Comparing Strings
+
+To check if two strings are equal, you need to compare each character:
+
+```
+def compare_string_chars(char[] str1, char[] str2) -> bool
+{
+    int i = 0;
+    for (i = 0; i < 1000; i++)
+    {
+        if (str1[i] != str2[i])
+        {
+            return false;  // Found a difference
+        };
+        
+        if (str1[i] == 0)  // Both reached end at same time
+        {
+            return true;
+        };
+    };
+    return false;
+};
+
+def main() -> int
+{
+    char[] word1 = "cat\0";
+    char[] word2 = "cat\0";
+    char[] word3 = "dog\0";
+    
+    if (compare_string_chars(word1, word2))
+    {
+        print("word1 and word2 are the same\n\0");
+    };
+    
+    if (!compare_string_chars(word1, word3))
+    {
+        print("word1 and word3 are different\n\0");
+    };
+    
+    return 0;
+};
+```
+
+#### f9.6 Copying Strings
+
+You can't just assign one string to another - you need to copy character by character:
+
+```
+def copyString(char[] dest, char[] src) -> void
+{
+    int i = 0;
+    for (i = 0; i < 1000; i++)
+    {
+        dest[i] = src[i];
+        if (src[i] == 0)  // Copied null terminator, we're done
+        {
+            return;
+        };
+    };
+    return;
+};
+
+def main() -> int
+{
+    char[] original = "Hello!\0";
+    char[100] copy;  // Make sure it's big enough
+    
+    copyString(copy, original);
+    
+    print("Original: \0");
+    print(original);
+    print("\n\0");
+    
+    print("Copy: \0");
+    print(copy);
+    print("\n\0");
+    
+    return 0;
+};
+```
+
+#### f9.7 Building Strings
+
+You can build strings by setting characters one at a time:
+
+```
+def main() -> int
+{
+    char[10] buffer;
+    
+    buffer[0] = 72;   // 'H'
+    buffer[1] = 105;  // 'i'
+    buffer[2] = 33;   // '!'
+    buffer[3] = 0;    // Null terminator
+    buffer[4] = 0;    // Second null
+    
+    print(buffer);
+    print("\n\0");
+    
+    return 0;
+};
+```
+
+#### f9.8 Practical String Example
+
+Let's make a function that counts how many times a character appears in a string:
+
+```
+def count_chars(char[] str, char target) -> int
+{
+    int count = 0;
+    for (int i = 0; i < 1000; i++)
+    {
+        if (str[i] == 0)  // End of string
+        {
+            return count;
+        };
+        
+        if (str[i] == target)
+        {
+            count++;
+        };
+    };
+    return count;
+};
+
+def main() -> int
+{
+    char[] sentence = "the quick brown fox\0";
+    
+    print("Counting 'o' in: \0");
+    print(sentence);
+    print("\n\0");
+    
+    int o = count_chars(sentence, 111);  // 111 is ASCII for 'o'
+    print("Found \0");
+    print(o);
+    print(" letter 'o's\n\0");
+    
+    return 0;
+};
+```
+Result:
+```
+Counting 'o' in: the quick brown fox
+Found 2 letter 'o'
+```
+
+Strings are fundamental to most programs - user input, file names, messages, etc. Understanding how they work as character arrays is important for working with text effectively.
+
+---
+
+## 10 - Enums and Unions
+
+#### f10.1 Enumerated Lists (Enums)
+
+Sometimes you need to represent a set of named constants. For example, days of the week, colors, or states. Enums make this clean and readable.
+
+Without enums, you might do this:
+```
+int MONDAY = 0;
+int TUESDAY = 1;
+int WEDNESDAY = 2;
+// ... this gets tedious
+```
+
+With enums:
+```
+enum DayOfWeek
+{
+    MONDAY,
+    TUESDAY,
+    WEDNESDAY,
+    THURSDAY,
+    FRIDAY,
+    SATURDAY,
+    SUNDAY
+};
+```
+
+Enums automatically assign values starting from 0:
+```
+#import "standard.fx";
+
+enum TrafficLight
+{
+    RED,      // 0
+    YELLOW,   // 1
+    GREEN     // 2
+};
+
+def main() -> int
+{
+    TrafficLight light;
+    light = TrafficLight.RED;
+    
+    if (light == TrafficLight.RED)
+    {
+        print("Stop!\n\0");
+    };
+    
+    light = TrafficLight.GREEN;
+    
+    if (light == TrafficLight.GREEN)
+    {
+        print("Go!\n\0");
+    };
+    
+    return 0;
+};
+```
+Result:
+```
+Stop!
+Go!
+```
+
+#### f10.2 Using Enums in Practice
+
+Enums make your code more readable. Compare these two versions:
+
+**Without enum:**
+```
+def process_status(int status) -> void
+{
+    if (status == 0)
+    {
+        print("Pending\n\0");
+    }
+    else if (status == 1)
+    {
+        print("Processing\n\0");
+    }
+    else if (status == 2)
+    {
+        print("Complete\n\0");
+    };
+    return;
+};
+```
+
+**With enum:**
+```
+enum Status
+{
+    PENDING,
+    PROCESSING,
+    COMPLETE
+};
+
+def process_status(Status status) -> void
+{
+    if (status == Status.PENDING)
+    {
+        print("Pending\n\0");
+    }
+    else if (status == Status.PROCESSING)
+    {
+        print("Processing\n\0");
+    }
+    else if (status == Status.COMPLETE)
+    {
+        print("Complete\n\0");
+    };
+    return;
+};
+```
+
+The second version is much clearer about what the values mean.
+
+#### f10.3 Enum in Switch Statements
+
+Enums work great with switch statements:
+
+```
+enum Direction
+{
+    NORTH,
+    SOUTH,
+    EAST,
+    WEST
+};
+
+def move(Direction dir) -> void
+{
+    switch (dir)
+    {
+        case Direction.NORTH:
+        {
+            print("Moving North\n\0");
+        };
+        case Direction.SOUTH:
+        {
+            print("Moving South\n\0");
+        };
+        case Direction.EAST:
+        {
+            print("Moving East\n\0");
+        };
+        case Direction.WEST:
+        {
+            print("Moving West\n\0");
+        };
+    };
+    return;
+};
+
+def main() -> int
+{
+    Direction heading = Direction.NORTH;
+    move(heading);
+    
+    heading = Direction.WEST;
+    move(heading);
+    
+    return 0;
+};
+```
+
+#### f10.4 Unions - One Value at a Time
+
+A **union** is like a struct, but it can only hold ONE of its members at a time. Think of it like a box that can hold different things, but only one thing at once.
+
+```
+union NumberHolder
+{
+    int as_int;
+    float as_float;
+};
+```
+
+This creates a union that can store EITHER an int OR a float, but not both simultaneously:
+
+```
+def main() -> int
+{
+    NumberHolder value;
+    
+    value.as_int = 42;
+    print("As integer: \0");
+    print(value.as_int);
+    print("\n\0");
+    
+    // Now we change which member is active
+    value.as_float = 3.14;
+    print("As float: \0");
+    print(value.as_float); // Printing a float by default goes 5 decimal places to the right
+    print("\n\0");
+    
+    // WARNING: as_int is now undefined! Don't use it!
+    
+    return 0;
+};
+```
+
+#### f10.5 Why Use Unions?
+
+Unions save memory when you only need one type of data at a time:
+
+```
+union Data
+{
+    int error_code;
+    float measurement;
+    bool success;
+};
+
+def process_result(bool is_error, Data result) -> void
+{
+    if (is_error)
+    {
+        print("Error code: \0");
+        print(result.error_code);
+        print("\n\0");
+    }
+    else
+    {
+        print("Measurement: \0");
+        print(result.measurement);
+        print("\n\0");
+    };
+    return;
+};
+
+def main() -> int
+{
+    Data result1;
+    result1.error_code = 404;
+    process_result(true, result1);
+    
+    Data result2;
+    result2.measurement = 98.6;
+    process_result(false, result2);
+    
+    return 0;
+};
+```
+
+#### f10.6 Important Union Rules
+
+1. **Only one member is valid at a time** - accessing the wrong member gives undefined behavior
+2. **You must remember which member is active** - the union doesn't track this for you
+3. **All members share the same memory** - the union's size is the size of its largest member
+
+Example of what NOT to do:
+```
+union BadExample
+{
+    int x;
+    float y;
+};
+
+def main() -> int
+{
+    BadExample bad;
+    bad.x = 100;
+    
+    // WRONG! y is not the active member!
+    print(bad.y);  // This is undefined behavior!
+    
+    return 0;
+};
+```
+
+#### f10.7 Practical Enum and Union Example
+
+Here's a simple state machine using enums and a union:
+
+```
+enum State
+{
+    IDLE,
+    RUNNING,
+    ERROR
+};
+
+union StateData
+{
+    int idle_count;
+    float run_speed;
+    int error_code;
+};
+
+def main() -> int
+{
+    State current = State.IDLE;
+    StateData data;
+    
+    // In IDLE state
+    data.idle_count = 0;
+    print("State: IDLE, Count: \0");
+    print(data.idle_count);
+    print("\n\0");
+    
+    // Transition to RUNNING
+    current = State.RUNNING;
+    data.run_speed = 5.5;
+    print("State: RUNNING, Speed: \0");
+    print(data.run_speed);
+    print("\n\0");
+    
+    // Transition to ERROR
+    current = State.ERROR;
+    data.error_code = 123;
+    print("State: ERROR, Code: \0");
+    print(data.error_code);
+    print("\n\0");
+    
+    return 0;
+};
+```
+
+Enums help organize related constants, and unions help save memory when you need different types at different times.
+
+---
+
+## 11 - Structs
+
+Structs are one of the most important features in Flux for organizing data. While objects have behavior (functions), structs are pure data containers. Think of a struct as a custom data type you create.
+
+#### f11.1 Why Do We Need Structs?
+
+Imagine you're making a program to track books. Each book has:
+- A title
+- An author
+- A page count
+- A price
+
+You could use separate variables:
+```
+char[] book1_title = "1984\0";
+char[] book1_author = "George Orwell\0";
+int book1_pages = 328;
+float book1_price = 15.99;
+
+char[] book2_title = "Dune\0";
+char[] book2_author = "Frank Herbert\0";
+int book2_pages = 688;
+float book2_price = 19.99;
+```
+
+This gets messy fast! Instead, we use a struct:
+
+```
+struct Book
+{
+    char[100] title;
+    char[100] author;
+    int pages;
+    float price;
+};
+```
+
+Now `Book` is a type, just like `int` or `float`.
+
+#### f11.2 Creating and Using Structs
+
+```
+#import "standard.fx";
+
+struct Point
+{
+    int x;
+    int y;
+};
+
+def main() -> int
+{
+    Point p1;
+    p1.x = 10;
+    p1.y = 20;
+    
+    print("Point: (\0");
+    print(p1.x);
+    print(", \0");
+    print(p1.y);
+    print(")\n\0");
+    
+    return 0;
+};
+```
+Result:
+```
+Point: (10, 20)
+```
+
+You access struct members with the dot `.` operator.
+
+#### f11.3 Initializing Structs
+
+You can set values when you create a struct:
+
+```
+struct Rectangle
+{
+    int width;
+    int height;
+};
+
+def main() -> int
+{
+    Rectangle rect {width = 50, height = 30};
+    
+    print("Rectangle: \0");
+    print(rect.width);
+    print(" x \0");
+    print(rect.height);
+    print("\n\0");
+    
+    return 0;
+};
+```
+
+#### f11.4 Structs with Arrays
+
+Structs can contain arrays:
+
+```
+struct Student
+{
+    char[50] name;
+    int grades[5];
+    int num_grades;
+};
+
+def main() -> int
+{
+    Student alice;
+    alice.name[0] = 65;  // 'A'
+    alice.name[1] = 108; // 'l'
+    alice.name[2] = 105; // 'i'
+    alice.name[3] = 99;  // 'c'
+    alice.name[4] = 101; // 'e'
+    alice.name[5] = 0;
+    
+    alice.grades[0] = 85;
+    alice.grades[1] = 92;
+    alice.grades[2] = 78;
+    alice.grades[3] = 95;
+    alice.grades[4] = 88;
+    alice.num_grades = 5;
+    
+    print("Student: \0");
+    print(alice.name);
+    print("\nGrades: \0");
+    
+    for (int i = 0; i < alice.num_grades; i++)
+    {
+        print(alice.grades[i]);
+        print(" \0");
+    };
+    print("\n\0");
+    
+    return 0;
+};
+```
+
+#### f11.5 Arrays of Structs
+
+You can create arrays of structs:
+
+```
+struct Temperature
+{
+    int day;
+    float celsius;
+};
+
+def main() -> int
+{
+    Temperature week[7];
+    
+    week[0] = {day = 1, celsius = 20.5};
+    week[1] = {day = 2, celsius = 22.0};
+    week[2] = {day = 3, celsius = 19.5};
+    
+    print("Day \0");
+    print(week[0].day);
+    print(": \0");
+    print(week[0].celsius);
+    print("°C\n\0");
+    
+    print("Day \0");
+    print(week[1].day);
+    print(": \0");
+    print(week[1].celsius);
+    print("°C\n\0");
+    
+    return 0;
+};
+```
+
+#### f11.6 Passing Structs to Functions
+
+Structs can be passed to functions:
+
+```
+struct Circle
+{
+    float radius;
+};
+
+def calc_area(Circle c) -> float
+{
+    float pi = 3.14159;
+    return pi * c.radius * c.radius;
+};
+
+def main() -> int
+{
+    Circle myCircle {radius = 5.0};
+    
+    float area = calc_area(myCircle);
+    
+    print("Circle with radius \0");
+    print(myCircle.radius);
+    print(" has area \0");
+    print(area);
+    print("\n\0");
+    
+    return 0;
+};
+```
+
+#### f11.7 Nested Structs
+
+Structs can contain other structs:
+
+```
+struct Date
+{
+    int day;
+    int month;
+    int year;
+};
+
+struct Event
+{
+    char[100] name;
+    Date date;
+};
+
+def main() -> int
+{
+    Event birthday;
+    birthday.name[0] = 66;  // 'B'
+    birthday.name[1] = 100; // 'd'
+    birthday.name[2] = 97;  // 'a'
+    birthday.name[3] = 121; // 'y'
+    birthday.name[4] = 0;
+    
+    birthday.date.day = 15;
+    birthday.date.month = 7;
+    birthday.date.year = 2024;
+    
+    print("Event: \0");
+    print(birthday.name);
+    print("\nDate: \0");
+    print(birthday.date.day);
+    print("/\0");
+    print(birthday.date.month);
+    print("/\0");
+    print(birthday.date.year);
+    print("\n\0");
+    
+    return 0;
+};
+```
+
+#### f11.8 Structs vs Objects - Key Differences
+
+Remember these important differences:
+
+**Structs:**
+- Data only, no functions
+- Cannot have methods like `__init()` or `__exit()`
+- Non-executable
+- Used for organizing related data
+- Tightly packed in memory
+
+**Objects:**
+- Have both data AND functions (methods)
+- Have constructors and destructors
+- Executable
+- Used for things with behavior
+- Can contain structs
+
+```
+// This is LEGAL
+object Container
+{
+    struct Data
+    {
+        int value;
+    };
+    
+    Data myData;
+};
+
+// This is ILLEGAL - structs cannot contain objects!
+struct BadExample
+{
+    object SomeObject;  // COMPILE ERROR!
+};
+```
+
+#### f11.9 Practical Struct Example
+
+Let's create a simple inventory system:
+
+```
+struct Item
+{
+    char[50] name;
+    int quantity;
+    float price;
+};
+
+def printItem(Item item) -> void
+{
+    print("Item: \0");
+    print(item.name);
+    print("\n  Quantity: \0");
+    print(item.quantity);
+    print("\n  Price: $\0");
+    print(item.price);
+    print();
+    return;
+};
+
+def totalValue(Item item) -> float
+{
+    return (float)item.quantity * item.price;
+};
+
+def main() -> int
+{
+    Item inventory[3];
+    
+    // First item
+    inventory[0].name[0] = 65; // 'A'
+    inventory[0].name[1] = 112; // 'p'
+    inventory[0].name[2] = 112; // 'p'
+    inventory[0].name[3] = 108; // 'l'
+    inventory[0].name[4] = 101; // 'e'
+    inventory[0].name[5] = 0;   // null-terminate
+    inventory[0].quantity = 50;
+    inventory[0].price = 1.25;
+    
+    printItem(inventory[0]);
+    print("Total value: $\0");
+    print(totalValue(inventory[0]));
+    print("\n\0");
+    
+    return 0;
+};
+```
+
+Structs are essential for organizing complex data. They let you group related information together and treat it as a single unit.
+
+---
+
+## 12 - Putting It All Together
+
+Congratulations! You've learned the fundamentals of programming with Flux. Let's review what you know and see how it all fits together.
+
+#### f12.1 What You've Learned
+
+**Core Concepts:**
+- How computers store and interpret data (bits, bytes, memory)
+- Variables and data types (`int`, `float`, `char`, `bool`)
+- Operators for math, logic, and comparison
+- Control flow (if/else, loops, switch)
+- Arrays for storing collections of data
+- Functions for organizing reusable code
+- Strings for working with text
+- Enums for named constants
+- Unions for storing one of several types
+- Structs for organizing related data
+- Objects for combining data with behavior
+
+**Programming Skills:**
+- Breaking problems into smaller pieces
+- Organizing code with functions
+- Managing data with structs and objects
+- Understanding scope and variable lifetime
+- Reading and fixing compilation errors
+
+#### f12.2 A Complete Example Program
+
+Let's write a program that uses many of these concepts together:
+
+```
+#import "standard.fx";
+
+// Enum for game states
+enum GameState
+{
+    MENU,
+    PLAYING,
+    GAME_OVER
+};
+
+// Struct for player data
+struct Player
+{
+    char[50] name;
+    int score;
+    int lives;
+};
+
+// Initialize a player
+def createPlayer(char[] playerName) -> Player
+{
+    Player p;
+    
+    // Copy name
+    for (int i = 0; i < 50; i++)
+    {
+        p.name[i] = playerName[i];
+        if (playerName[i] == 0)
+        {
+            break;
+        };
+    };
+    
+    p.score = 0;
+    p.lives = 3;
+    
+    return p;
+};
+
+// Print player info
+def showPlayer(Player p) -> void
+{
+    print("Player: \0");
+    print(p.name);
+    print("\nScore: \0");
+    print(p.score);
+    print("\nLives: \0");
+    print(p.lives);
+    print();
+    return;
+};
+
+// Add points to player
+def addScore(Player* p, int points) -> void
+{
+    p.score = p.score + points;
+    return;
+};
+
+// Remove a life
+def loseLife(Player* p) -> bool
+{
+    if (p.lives > 0)
+    {
+        p.lives--;
+        return true;  // Still alive
+    };
+    return false;  // Game over
+};
+
+def main() -> int
+{
+    GameState state = GameState.MENU;
+    
+    print("=== Simple Game Demo ===\n\n\0");
+    
+    // Create player
+    char[] playerName = "Hero\0";
+    Player player = createPlayer(playerName);
+    
+    print("Starting game...\n\0");
+    state = GameState.PLAYING;
+    
+    showPlayer(player);
+    print(); // Empty prints newline
+    
+    // Game loop simulation
+    for (int turn = 1; turn <= 5; turn++)
+    {
+        print("--- Turn \0");
+        print(turn);
+        print(" ---\n\0");
+        
+        // Add some points
+        addScore(@player, turn * 10);
+        print("Gained \0");
+        print(turn * 10);
+        print(" points!\n\0");
+        
+        // Random life loss
+        if (turn % 2 == 0)
+        {
+            print("Hit by enemy!\n\0");
+            bool alive = loseLife(@player);
+            
+            if (!alive)
+            {
+                print("\n*** GAME OVER ***\n\0");
+                state = GameState.GAME_OVER;
+                break;
+            };
+        };
+        
+        showPlayer(player);
+        print("\n\0");
+    };
+    
+    // Final results
+    if (state == GameState.PLAYING)
+    {
+        print("*** YOU WIN! ***\n\0");
+    };
+    
+    print("\nFinal \0");
+    showPlayer(player);
+    
+    return 0;
+};
+```
+
+This program demonstrates:
+- Enums for game states
+- Structs for organizing player data
+- Functions for different actions
+- Pointers to modify data in-place
+- Arrays (strings) for player names
+- Loops and conditionals for game logic
+- Boolean returns for game state
+
+#### f12.3 Reading Compiler Errors
+
+When something goes wrong, the compiler tells you. Learning to read these messages is crucial:
+
+**Common Error Types:**
+
+1. **Syntax Errors** - You wrote something the compiler doesn't understand
+```
+Expected ';' after statement
+Expected ')' after expression
+```
+
+2. **Type Errors** - You tried to use the wrong type
+```
+Cannot assign float to int variable
+Type mismatch in function call
+```
+
+3. **Name Errors** - You used a name that doesn't exist
+```
+'myVar' was not declared in this scope
+Unknown function 'foo'
+```
+
+**How to Fix Errors:**
+1. Read the error message carefully
+2. Look at the line number it mentions
+3. Check the lines just before and after too
+4. Fix one error at a time (earlier errors can cause later ones)
+5. Recompile and see if it helped
+
+#### f12.4 Debugging Tips
+
+When your program compiles but doesn't work right:
+
+1. **Use print statements** to see what's happening:
+```
+def myFunction(int x) -> int
+{
+    print("myFunction called with x = \0");
+    print(x);
+    print("\n\0");
+    
+    int result = x * 2;
+    
+    print("Returning: \0");
+    print(result);
+    print("\n\0");
+    
+    return result;
+};
+```
+
+2. **Check your assumptions** - print variable values:
+```
+print("Before loop: i = \0");
+print(i);
+print("\n\0");
+
+for (i = 0; i < 10; i++)
+{
+    // ...
+};
+
+print("After loop: i = \0");
+print(i);
+print("\n\0");
+```
+
+3. **Simplify** - comment out code until it works, then add back piece by piece
+
+4. **Test small pieces** - write functions that do one thing and test them separately
+
+#### f12.5 Good Programming Practices
+
+As you continue learning:
+
+**1. Use meaningful names:**
+```
+// Bad
+int x = 5;
+def f(int a) -> int { return a * 2; };
+
+// Good
+int playerSpeed = 5;
+def doubleValue(int value) -> int { return value * 2; };
+```
+
+**2. Write comments:**
+```
+// Calculate average of array
+def average(int[] numbers, int count) -> float
+{
+    int sum = 0;
+    
+    // Add up all numbers
+    for (int i = 0; i < count; i++)
+    {
+        sum = sum + numbers[i];
+    };
+    
+    // Divide by count to get average
+    return (float)sum / (float)count;
+};
+```
+
+**3. Keep functions focused:**
+```
+// Each function should do ONE thing well
+def readInput() -> int { /// ... /// };
+def validateInput(int value) -> bool { /// ... /// };
+def processInput(int value) -> void { /// ... /// };
+
+// Not one giant function that does everything
+```
+
+#### f12.6 Next Steps
+
+You now have a solid foundation in programming! Here's what to explore next:
+
+**Practice Projects:**
+1. Simple calculator with multiple operations
+2. Text-based adventure game
+3. Temperature converter
+4. Todo list manager
+5. Number guessing game
+
+**Advanced Topics** (in the Adept document):
+- The `data` type system for bit-level control
+- Templates for generic code
+- Namespaces for organization
+- Advanced memory management
+- Working with files
+- Network programming basics
+- Hardware interfacing
+
+**Keep Learning:**
+- Read other people's code
+- Try to solve problems in multiple ways
+- Don't be afraid to experiment
+- Break things and fix them - that's how you learn
+- Join the Flux community and ask questions
+
+#### f12.7 Final Thoughts
+
+Programming is a skill that improves with practice. The concepts you've learned here - variables, functions, structs, objects - are universal. They appear in almost every programming language, just with different syntax.
+
+You're now ready to:
+- Write complete programs
+- Organize code into reusable pieces
+- Manage data with structs and objects
+- Solve problems by breaking them down
+- Read and understand error messages
+- Debug when things go wrong
+
+Keep coding, keep learning, and most importantly - have fun building things!
+
+The journey from beginner to adept programmer is all about practice. Write code every day, even if it's just a small function or a simple program. Every line of code teaches you something.
+
+Welcome to the world of programming. The only limit is your imagination.
+
+---
+
+**Ready for more?** Check out the Flux Adept documentation to dive deeper into advanced features, optimization, and real-world systems programming.

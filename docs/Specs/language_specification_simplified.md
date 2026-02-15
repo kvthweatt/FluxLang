@@ -73,7 +73,7 @@ def main() -> int
 
     if (z is 5)
     {
-        print("Success!\0\0");
+        print("Success!\0");
     };
     return 0;
 };
@@ -92,7 +92,7 @@ def main() -> int
 
     if (z is 5)
     {
-        print("Success!\0\0");
+        print("Success!\0");
     };
     return 0;
 };
@@ -1029,7 +1029,7 @@ def traverse_as_bytes(int* ptr, int count) -> void
     
     for (int i = 0; i < count * sizeof(int); i++)
     {
-        print(f"Byte {i}: 0x{*(bp + i):02X}\0\0");
+        print(f"Byte {i}: 0x{*(bp + i):02X}\0");
     };
 };
 
@@ -1166,7 +1166,7 @@ if (a < (i32)b)  // true: -10 < 20
 
 if ((u32)a < b)  // false: 4294967286 > 20
 {
-    print("Unsigned comparison\0\0");
+    print("Unsigned comparison\0");
 };
 ```
 
@@ -1186,25 +1186,25 @@ def classify_value(int x, int y) -> void
             {
                 case (0)
                 {
-                    print("Both zero\0\0");
+                    print("Both zero\0");
                 }
                 case (1)
                 {
-                    print("X zero, Y one\0\0");
+                    print("X zero, Y one\0");
                 }
                 default
                 {
-                    print("X zero, Y other\0\0");
+                    print("X zero, Y other\0");
                 };
             };
         }
         case (1)
         {
-            print("X is one\0\0");
+            print("X is one\0");
         }
         default
         {
-            print("X is other\0\0");
+            print("X is other\0");
         };
     };
 };
@@ -1234,7 +1234,7 @@ def risky_operation(int mode) -> void
     }
     elif (mode == 2)
     {
-        throw(ErrorB("Something failed\0\0"));
+        throw(ErrorB("Something failed\0"));
     }
     else
     {
@@ -1250,19 +1250,19 @@ def main() -> int
     }
     catch (ErrorA e)
     {
-        print(f"ErrorA caught: code {e.code}\0\0");
+        print(f"ErrorA caught: code {e.code}\0");
     }
     catch (ErrorB e)
     {
-        print(f"ErrorB caught: {e.message}\0\0");
+        print(f"ErrorB caught: {e.message}\0");
     }
     catch (string s)
     {
-        print(f"String error: {s}\0\0");
+        print(f"String error: {s}\0");
     }
     catch (auto x)
     {
-        print("Unknown error type\0\0");
+        print("Unknown error type\0");
     };
     
     return 0;
@@ -1279,7 +1279,7 @@ def find_in_matrix(int[][] matrix, int target) -> bool
         {
             if (matrix[i][j] == target)
             {
-                print(f"Found at [{i}][{j}]\0\0");
+                print(f"Found at [{i}][{j}]\0");
                 return true;  // Break out of both loops
             };
             
@@ -1351,12 +1351,12 @@ object EventSystem
 // Handler functions
 def on_error(int code) -> void
 {
-    print(f"Error: {code}\0\0");
+    print(f"Error: {code}\0");
 };
 
 def on_warning(int code) -> void
 {
-    print(f"Warning: {code}\0\0");
+    print(f"Warning: {code}\0");
 };
 
 // Usage
@@ -1592,7 +1592,7 @@ def parse_ip_header(bytes* packet) -> IPHeader
 def format_ip(be32 addr) -> string
 {
     bytes* bp = (bytes*)@addr;
-    return f"{bp[0]}.{bp[1]}.{bp[2]}.{bp[3]}\0\0";
+    return f"{bp[0]}.{bp[1]}.{bp[2]}.{bp[3]}\0";
 };
 
 // Usage
@@ -1733,7 +1733,7 @@ def get_nullable() -> int*
 // Auto infers from right-hand side
 auto x = 42;           // int
 auto y = 3.14;         // float
-auto z = "hello\0\0";  // unsigned data{8}[]
+auto z = "hello\0";  // unsigned data{8}[]
 auto w = @x;           // int*
 
 // Auto with complex types
