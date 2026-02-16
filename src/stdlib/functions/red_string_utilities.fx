@@ -3,9 +3,6 @@
 
 #ifndef FLUX_STANDARD_STRINGS
 #def FLUX_STANDARD_STRINGS 1;
-#endif
-
-#ifdef FLUX_STANDARD_STRINGS
 
 namespace standard
 {
@@ -1317,9 +1314,5 @@ def !!strstr(byte* haystack, byte* needle) -> byte*
     
     return (byte*)0;
 };
-
-
-#import "string_object_raw.fx";
-#endif;
 
 #endif;

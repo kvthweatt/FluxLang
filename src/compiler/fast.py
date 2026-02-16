@@ -582,6 +582,9 @@ class StringLiteral(Expression):
     """
     value: str
     storage_class: Optional[StorageClass] = None
+
+    def __repr__(self) -> str:
+        return f"\"{self.value.replace('\n','\\n').replace('\0','\\0')}\""
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         string_bytes = self.value.encode('ascii')
@@ -941,6 +944,9 @@ class UnaryOp(Expression):
     operator: Operator
     operand: Expression
     is_postfix: bool = False
+
+    def __repr__(self) -> str:
+        return f"{self.operator}{self.operand}" if self.is_postfix is False else f"{self.operand}{self.operator}"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Handle special case: ++@x or --@x (increment/decrement address of)
@@ -2091,6 +2097,10 @@ class MethodCall(Expression):
     object: Expression
     method_name: str
     arguments: List[Expression] = field(default_factory=list)
+
+    def __repr__(self) -> str:
+        s = ', '.join([str(x) for x in self.arguments])
+        return f"{self.object}.{self.method_name}({s})"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # For method calls, we need the pointer to the object, not the loaded value

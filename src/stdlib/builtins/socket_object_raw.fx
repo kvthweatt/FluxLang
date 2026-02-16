@@ -37,8 +37,7 @@ namespace standard
             //type:            socket_type enum
             //error_state:     socket_error enum
             bool is_server, connected;
-            sockaddr_in local_addr;
-            sockaddr_in remote_addr;
+            sockaddr_in local_addr,remote_addr;
 
             // ===== PROTOTYPES =====
             def is_open() -> bool,
