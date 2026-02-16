@@ -1386,10 +1386,14 @@ class ArrayComprehension(Expression):
     iterable: Expression  # What to iterate over (e.g., range expression or ArrayLiteral)
     condition: Optional[Expression] = None  # Optional filter condition
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        """Generate code for array comprehension [expr for var in iterable]"""
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module, expected_size: Optional[int] = None) -> ir.Value:
+        """Generate code for array comprehension [expr for var in iterable]
+        
+        Args:
+            expected_size: Optional expected array size from the variable declaration
+        """
         # Resolve element type using type handler
-        element_type = ArrayTypeHandler.resolve_comprehension_element_type(self.variable_type, module)
+        element_type = LiteralTypeHandler.resolve_comprehension_element_type(self.variable_type, module)
         
         # Handle ArrayLiteral as iterable
         if isinstance(self.iterable, ArrayLiteral):
@@ -1406,7 +1410,7 @@ class ArrayComprehension(Expression):
                 elem_val = elem_expr.codegen(builder, module)
                 
                 # Cast to element_type if needed
-                elem_val = ArrayTypeHandler.cast_to_target_int_type(builder, elem_val, element_type)
+                elem_val = LiteralTypeHandler.cast_to_target_int_type(builder, elem_val, element_type)
                 
                 elem_ptr = builder.gep(iterable_array_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), i)])
                 builder.store(elem_val, elem_ptr)
@@ -1443,7 +1447,7 @@ class ArrayComprehension(Expression):
             expr_val = self.expression.codegen(builder, module)
             
             # Cast result to element_type if needed
-            expr_val = ArrayTypeHandler.cast_to_target_int_type(builder, expr_val, element_type)
+            expr_val = LiteralTypeHandler.cast_to_target_int_type(builder, expr_val, element_type)
             
             # Store result
             result_elem_ptr = builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), current_index])
@@ -1458,7 +1462,7 @@ class ArrayComprehension(Expression):
             builder.position_at_start(loop_end)
             return array_ptr
         
-        # Handle RangeExpression (existing code)
+        # Handle RangeExpression
         elif isinstance(self.iterable, RangeExpression):
             _ = self.iterable.codegen(builder, module, element_type)
             
@@ -1466,14 +1470,32 @@ class ArrayComprehension(Expression):
             end_val = self.iterable.end.codegen(builder, module)
             
             # Cast range bounds to element_type
-            start_val_sized = ArrayTypeHandler.cast_to_target_int_type(builder, start_val, element_type)
-            end_val_sized = ArrayTypeHandler.cast_to_target_int_type(builder, end_val, element_type)
+            start_val_sized = LiteralTypeHandler.cast_to_target_int_type(builder, start_val, element_type)
+            end_val_sized = LiteralTypeHandler.cast_to_target_int_type(builder, end_val, element_type)
                 
+            # Calculate array size from range bounds
             size_val = builder.sub(end_val_sized, start_val_sized, name="range_size")
             
-            max_size = 100
-            array_type = ir.ArrayType(element_type, max_size)
-            array_ptr = builder.alloca(array_type, name="comprehension_array")
+            # Check if start and end are compile-time constants
+            if isinstance(self.iterable.start, Literal) and isinstance(self.iterable.end, Literal):
+                # Compile-time constant range - calculate exact size (inclusive range: start to end-1)
+                # For range 1..10, we want elements [1,2,3,4,5,6,7,8,9] which is 9 elements
+                # But the loop condition is < end_val, so 1..10 iterates while var < 10, giving us [1..9]
+                # Wait, let me check the actual range semantics...
+                # The range 1..10 should give us values where start <= value < end
+                # So 1..10 gives [1, 2, 3, 4, 5, 6, 7, 8, 9] = 9 elements
+                # But the user says it should be 10 elements, so the range must be inclusive on both ends
+                # Therefore: 1..10 should give [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] = 10 elements
+                actual_size = int(self.iterable.end.value) - int(self.iterable.start.value) + 1
+                array_type = ir.ArrayType(element_type, actual_size)
+                array_ptr = builder.alloca(array_type, name="comprehension_array")
+            elif expected_size is not None:
+                # Runtime range but we have an expected size from the variable declaration
+                array_type = ir.ArrayType(element_type, expected_size)
+                array_ptr = builder.alloca(array_type, name="comprehension_array")
+            else:
+                # Runtime range with no expected size - cannot determine array size
+                raise NotImplementedError("Array comprehensions with runtime-determined ranges require an explicit array size (e.g., int[10] x = [...])")
             
             index_ptr = builder.alloca(ir.IntType(32), name="comp_index")
             builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
@@ -1482,8 +1504,8 @@ class ArrayComprehension(Expression):
             module.symbol_table.define(self.variable, SymbolKind.VARIABLE, llvm_value=var_ptr)
             
             # Cast start_val and end_val if needed
-            start_val = ArrayTypeHandler.cast_to_target_int_type(builder, start_val, element_type)
-            end_val = ArrayTypeHandler.cast_to_target_int_type(builder, end_val, element_type)
+            start_val = LiteralTypeHandler.cast_to_target_int_type(builder, start_val, element_type)
+            end_val = LiteralTypeHandler.cast_to_target_int_type(builder, end_val, element_type)
             
             func = builder.block.function
             loop_cond = func.append_basic_block('comp_loop_cond')
@@ -1495,14 +1517,14 @@ class ArrayComprehension(Expression):
             
             builder.position_at_start(loop_cond)
             current_var = builder.load(var_ptr, name="current_var")
-            cond = builder.icmp_signed('<', current_var, end_val, name="loop_cond")
+            cond = builder.icmp_signed('<=', current_var, end_val, name="loop_cond")
             builder.cbranch(cond, loop_body, loop_end)
             
             builder.position_at_start(loop_body)
             
             expr_val = self.expression.codegen(builder, module)
             
-            expr_val = ArrayTypeHandler.cast_to_target_int_type(builder, expr_val, element_type)
+            expr_val = LiteralTypeHandler.cast_to_target_int_type(builder, expr_val, element_type)
             
             current_index = builder.load(index_ptr, name="current_index")
             array_elem_ptr = builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), current_index], inbounds=True)
@@ -2876,7 +2898,7 @@ class VariableDeclaration(ASTNode):
             # Do NOT initialize the alloca - it will contain undefined value
         # Initialize variable if value is provided (and it's not noinit)
         elif self.initial_value:
-            self._initialize_local(builder, module, alloca, llvm_type)
+            self._initialize_local(builder, module, alloca, llvm_type, resolved_type_spec)
         # If no initial_value at all, Flux currently zero-initializes
         # This maintains backward compatibility with existing behavior
         
@@ -2893,7 +2915,7 @@ class VariableDeclaration(ASTNode):
         return alloca
     
     def _initialize_local(self, builder: ir.IRBuilder, module: ir.Module, 
-                         alloca: ir.Value, llvm_type: ir.Type) -> None:
+                         alloca: ir.Value, llvm_type: ir.Type, resolved_type_spec: TypeSystem) -> None:
         """Initialize local variable with initial value."""
         # Handle array instance initialization
         if isinstance(self.initial_value, ArrayLiteral):
@@ -2907,7 +2929,12 @@ class VariableDeclaration(ASTNode):
             return
 
         if isinstance(self.initial_value, ArrayComprehension):
-            comp_result = self.initial_value.codegen(builder, module)
+            # Extract expected size from the type_spec if it's an array type
+            expected_size = None
+            if resolved_type_spec and resolved_type_spec.array_size is not None:
+                expected_size = resolved_type_spec.array_size
+            
+            comp_result = self.initial_value.codegen(builder, module, expected_size=expected_size)
             # comp_result is [5 x i32]*, alloca is [5 x i32]*
             # Load from comp_result and store into alloca
             loaded_array = builder.load(comp_result, name="comp_array_load")
@@ -3962,8 +3989,7 @@ class ForInLoop(Statement):
             # Body block - get current element
             builder.position_at_start(body_block)
             elem_ptr = builder.gep(collection, 
-                                 [ir.Constant(ir.IntType(32), 0)], 
-                                 [current_idx], 
+                                 [ir.Constant(ir.IntType(32), 0), current_idx], 
                                  name='elem.ptr')
             elem_val = builder.load(elem_ptr, name='elem')
             

@@ -2235,7 +2235,7 @@ class ArrayTypeHandler:
             return TypeSystem.attach_type_metadata(loaded_val, type_spec=element_type_spec)
         
         return TypeSystem.attach_type_metadata_from_llvm_type(loaded_val, loaded_val.type, module)
-    
+
     @staticmethod
     def _zero() -> ir.Constant:
         """Return i32 zero constant."""
@@ -2934,15 +2934,6 @@ class LiteralTypeHandler:
             return TypeSystem.get_llvm_type(variable_type, module)
         else:
             return ir.IntType(32)
-
-        val = int(literal_value, 0) if isinstance(literal_value, str) else int(literal_value)
-        
-        # For unsigned types with values >= 2^63, ensure proper handling
-        if literal_type == DataType.UINT and width == 64 and val >= (1 << 63):
-            # Convert to signed equivalent for LLVM (two's complement)
-            # LLVM stores 0xFFFFFFFFFFFFFFFF as -1 internally
-            return val if val < (1 << 63) else val - (1 << 64)
-        
         return val
     
     @staticmethod
