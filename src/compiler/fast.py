@@ -2564,8 +2564,35 @@ class AddressOf(Expression):
         
         # Handle array access
         if isinstance(self.expression, ArrayAccess):
-            array = self.expression.array.codegen(builder, module)
+            # We need the pointer to the array, not the loaded value
+            # Special handling to avoid loading when we need address
+            if isinstance(self.expression.array, Identifier):
+                var_name = self.expression.array.name
+                # Get the pointer without loading
+                if not module.symbol_table.is_global_scope() and module.symbol_table.get_llvm_value(var_name) is not None:
+                    array_ptr = module.symbol_table.get_llvm_value(var_name)
+                elif var_name in module.globals:
+                    array_ptr = module.globals[var_name]
+                else:
+                    raise NameError(f"Unknown array identifier: {var_name}")
+            else:
+                # For more complex expressions, call codegen
+                array_ptr = self.expression.array.codegen(builder, module)
             index = self.expression.index.codegen(builder, module)
+
+            # Handle function parameters (pointers to arrays stored as pointer-to-pointer)
+            if isinstance(array_ptr.type, ir.PointerType) and isinstance(array_ptr.type.pointee, ir.PointerType):
+                # Load the pointer value (not the array element)
+                array_ptr = builder.load(array_ptr, name="array_param_ptr")
+            
+            if isinstance(array_ptr.type, ir.PointerType):
+                if isinstance(array_ptr.type.pointee, ir.ArrayType):
+                    # Local/global array - need two indices
+                    zero = ir.Constant(ir.IntType(32), 0)
+                    return builder.gep(array_ptr, [zero, index], inbounds=True)
+                else:
+                    # Pointer type - single index
+                    return builder.gep(array_ptr, [index], inbounds=True)
             
             if isinstance(array.type, ir.PointerType):
                 zero = ir.Constant(ir.IntType(32), 0)
