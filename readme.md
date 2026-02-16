@@ -288,10 +288,8 @@ Flux is in active development. The language specification is complete, but imple
 
 ## Example: Complete Program
 
-```flux
-import "standard.fx";
-
-using standard::io;
+```
+#import "standard.fx";
 
 struct Packet
 {
@@ -302,12 +300,15 @@ struct Packet
 
 def main() -> int
 {
-    byte[] data = [0x01, 0x00, 0x20, 0x5F, 0x12, 0x34, 0x56];
-    Packet pkt = (Packet)data;
+    byte[] bytes = [0x01, 0x00, 0x20, 0x5F, 0x12, 0x34, 0x56];
+    Packet pkt = (Packet)bytes;
     
-    print(f"Type: {pkt.type}");
-    print(f"Length: {pkt.length}");
-    print(f"Time: {pkt.timestamp}");
+    print("Type: \0");
+    print(pkt.type); print();
+    print("Length: \0");
+    print(pkt.length); print();
+    print("Time: \0");
+    print(pkt.timestamp); print();
     
     return 0;
 };
