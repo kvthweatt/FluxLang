@@ -186,7 +186,7 @@ def foo(~int c) -> void
 def make() -> int {
     ~int x = 42; // Mark with "tie" operator ~ (tied int)
 
-    foo(~x);     // Pass with tie, foo expects a tied int
+    foo(~x);     // Untie from main, tie to foo
 
     print(x);    // Use-After-Untie error.
 
