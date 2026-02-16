@@ -1519,7 +1519,7 @@ class FluxParser:
             # Variable declaration should be followed by one of these tokens
             return self.expect(TokenType.ASSIGN, TokenType.SEMICOLON, 
                              TokenType.LEFT_PAREN, TokenType.LEFT_BRACE,
-                             TokenType.COMMA, TokenType.LEFT_BRACKET)
+                             TokenType.COMMA, TokenType.LEFT_BRACKET, TokenType.FROM)
 
     def variable_declaration_statement(self) -> Union[Statement, List[Statement]]:
         """
@@ -1576,8 +1576,19 @@ class FluxParser:
             names = [name]
             initializers = []
             
-            # Check if first variable has an initializer
-            if self.expect(TokenType.ASSIGN):
+            # Check if first variable has an initializer or FROM keyword
+            if self.expect(TokenType.FROM):
+                # Syntactic sugar: Type name from source; => Type name = Type from source;
+                self.advance()
+                source_expr = self.expression()
+                # Create StructRecast with the type from type_spec
+                if type_spec.custom_typename:
+                    from fast import StructRecast, Identifier
+                    recast = StructRecast(type_spec.custom_typename, source_expr)
+                    initializers.append(recast)
+                else:
+                    self.error("FROM syntax requires a custom type (struct)")
+            elif self.expect(TokenType.ASSIGN):
                 self.advance()
                 initializers.append(self.expression())
             else:
