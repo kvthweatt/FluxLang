@@ -203,37 +203,37 @@ namespace standard
             int i = 0;
             while (i < 8)
             {
-                addr.sin_zero[i] = 0;
+                addr.sin_zero[i] = '\0';
                 i = i + 1;
             };
         };
         
         // Initialize sockaddr_in with string IP (dotted decimal)
-def init_sockaddr_str(sockaddr_in* addr, byte* ip_str, u16 port) -> void
-{
-    addr.sin_family = (u16)AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr = htonl(inet_addr(ip_str));
-    
-    print("After init_sockaddr_str:\n\0");
-    print("  sin_family = \0");
-    print((int)addr.sin_family);
-    print("\n\0");
-    print("  sin_port = \0");
-    print((int)addr.sin_port);
-    print("\n\0");
-    print("  sin_addr = \0");
-    print((int)addr.sin_addr);
-    print("\n\0");
-    
-    // Zero out padding
-    int i = 0;
-    while (i < 8)
-    {
-        addr.sin_zero[i] = (byte)0;
-        i = i + 1;
-    };
-};
+        def init_sockaddr_str(sockaddr_in* addr, byte* ip_str, u16 port) -> void
+        {
+            addr.sin_family = (u16)AF_INET;
+            addr.sin_port = htons(port);
+            addr.sin_addr = htonl(inet_addr(ip_str));
+            
+            print("After init_sockaddr_str:\n\0");
+            print("  sin_family = \0");
+            print((int)addr.sin_family);
+            print("\n\0");
+            print("  sin_port = \0");
+            print((int)addr.sin_port);
+            print("\n\0");
+            print("  sin_addr = \0");
+            print((int)addr.sin_addr);
+            print("\n\0");
+            
+            // Zero out padding
+            int i = 0;
+            while (i < 8)
+            {
+                addr.sin_zero[i] = (byte)0;
+                i = i + 1;
+            };
+        };
 
         // Set socket to non-blocking mode (Windows version using ioctlsocket)
         def set_nonblocking(int sockfd) -> int

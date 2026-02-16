@@ -1081,7 +1081,7 @@ class CastExpression(Expression):
     expression: Expression
 
     def __repr__(self) -> str:
-        return f"({self.target_type.custom_typename if self.target_type.custom_typename else self.target_type.base_type}){self.expression};"
+        return f"({self.target_type.custom_typename if self.target_type.custom_typename else self.target_type.base_type}){self.expression}"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Generate code for cast expressions, including zero-cost struct reinterpretation and void casting"""
@@ -1943,6 +1943,9 @@ class FunctionCall(Expression):
 class MemberAccess(Expression):
     object: Expression
     member: str
+
+    def __repr__(self) -> str:
+        return f"{self.object.name}.{self.member}"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Handle enum member access FIRST (before trying to codegen the identifier)
@@ -3053,7 +3056,7 @@ class Assignment(Statement):
     value: Expression
 
     def __repr__(self) -> str:
-        return f"{self.target} = {self.value}"
+        return f"{self.target} = {self.value};"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         
@@ -3289,7 +3292,13 @@ class IfStatement(Statement):
     else_block: Optional[Block] = None
 
     def __repr__(self) -> str:
-        return f"if ({self.condition})\n{self.then_block}\n{self.elif_blocks}\n{self.else_block};"
+        base_str = f"if ({self.condition})\n{{\n\t{self.then_block}\n}}"
+        if self.elif_blocks is not None:
+            for b in self.elif_blocks:
+                base_str += f"\nelif\n{{\n\t{self.elif_blocks}\n}}"
+        if self.else_block is not None:
+            base_str += f"\nelse\n{{\n\t{self.else_block}\n}}"
+        return base_str + ";\n"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Check if we're in global scope (conditional compilation)
@@ -3655,6 +3664,9 @@ class NullCoalesce(Expression):
 class WhileLoop(Statement):
     condition: Expression
     body: Block
+
+    def __repr__(self) -> str:
+        return f"while ({self.condition})\n{{\n\t{self.body}\n}};"
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         func = builder.block.function

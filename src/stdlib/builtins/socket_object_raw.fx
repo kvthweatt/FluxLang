@@ -85,9 +85,6 @@ namespace standard
                 this.is_server = false;
                 this.connected = false;
                 this.error_state = socket_error.OK;
-                
-
-                
                 return this;
             };
 
@@ -192,7 +189,7 @@ namespace standard
                 };
                 
                 sockaddr_in client_addr;
-                int client_fd = tcp_server_accept(this.fd, client_addr);
+                int client_fd = tcp_server_accept(this.fd, @client_addr);
                 
                 if (client_fd < 0)
                 {
@@ -207,7 +204,7 @@ namespace standard
                 client.fd = client_fd;
                 client.connected = true;
                 client.is_server = false;
-                client.remote_addr = *client_addr;
+                client.remote_addr = client_addr;
                 client.error_state = socket_error.OK;
                 
                 return client;

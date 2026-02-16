@@ -110,6 +110,8 @@ class DataType(Enum):
     VOID = "void"
     THIS = "this"
 
+    def __str__(self) -> str:
+        return self.value
 
 class StorageClass(Enum):
     AUTO = "auto"
@@ -3665,6 +3667,13 @@ class FunctionTypeHandler:
                         if converted_val.type == expected_type:
                             return converted_val
         
+        # If we couldn't convert and types don't match, raise an error
+        if arg_val.type != expected_type:
+            raise TypeError(
+                f"Type of #{arg_index + 1} arg mismatch: {arg_val.type} != {expected_type}\n"
+                f"Cannot convert argument type {arg_val.type} to expected parameter type {expected_type}"
+            )
+        
         return arg_val
 
 def emit_memcpy(builder: ir.IRBuilder, module: ir.Module, dst_ptr: ir.Value, src_ptr: ir.Value, bytes: int) -> None:
@@ -3736,7 +3745,7 @@ class EndianSwapHandler:
 
     A swap is needed when source_endian != target_endian and the value
     is an integer type wide enough to have a meaningful byte order
-    (i.e. at least 16 bits â€” bswap on i8 is a no-op and LLVM rejects it).
+    (i.e. at least 16 bits Ã¢â‚¬â€ bswap on i8 is a no-op and LLVM rejects it).
 
     The swap is always performed on the source value BEFORE it is stored,
     so arithmetic can be done freely in native byte order and the boundary
@@ -3778,7 +3787,7 @@ class EndianSwapHandler:
         """
         Emit an llvm.bswap intrinsic call for the given integer value.
         Returns the byte-swapped value. Only valid for i16, i32, i64 (and
-        other even-byte-width integer types â€” LLVM requires width % 16 == 0).
+        other even-byte-width integer types Ã¢â‚¬â€ LLVM requires width % 16 == 0).
         """
         if not isinstance(val.type, ir.IntType):
             return val  # Can't bswap non-integers; caller should guard this
@@ -3820,7 +3829,7 @@ class EndianSwapHandler:
         if src_endian == tgt_endian:
             return val  # Same endianness
 
-        # Endianness mismatch â€” emit bswap
+        # Endianness mismatch Ã¢â‚¬â€ emit bswap
         swapped = EndianSwapHandler.emit_bswap(builder, module, val)
 
         # Propagate type metadata but flip the endianness to match target
