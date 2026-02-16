@@ -11,27 +11,19 @@
 extern
 {
     // Memory allocation
-    def !!malloc(size_t) -> void*,
-          memcpy(void*, void*, size_t) -> void*,
-          free(void*) -> void,
-          calloc(size_t, size_t) -> void*,
-          realloc(void*, size_t) -> void*,
-          memcpy(void*, void*, size_t) -> void*,
-          memmove(void*, void*, size_t) -> void*,
-          memset(void*, int, size_t) -> void*,
-          memcmp(void*, void*, size_t) -> int,
-          strlen(const char*) -> size_t,
-          strcpy(char*, const char*) -> char,
-          strncpy(char*, const char*, size_t) -> char,
-          strcat(char*, const char*) -> char,
-          strncat(char*, const char*, size_t) -> char,
-          strcmp(const char*, const char*) -> int,
-          strncmp(const char*, const char*, size_t) -> int,
-          strchr(const char*, int) -> char,
-          strstr(const char*, const char*) -> char*,
-          abort() -> void,
-          exit(int) -> void,
-          atexit(void*) -> int;
+    def !!
+        malloc(size_t) -> void*,
+        memcpy(void*, void*, size_t) -> void*,
+        free(void*) -> void,
+        calloc(size_t, size_t) -> void*,
+        realloc(void*, size_t) -> void*,
+        memcpy(void*, void*, size_t) -> void*,
+        memmove(void*, void*, size_t) -> void*,
+        memset(void*, int, size_t) -> void*,
+        memcmp(void*, void*, size_t) -> int,
+        abort() -> void,
+        exit(int) -> void,
+        atexit(void*) -> int;
 };
 
 #ifndef FLUX_STANDARD_MEMORY_MANAGEMENT

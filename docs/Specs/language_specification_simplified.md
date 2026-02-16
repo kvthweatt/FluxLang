@@ -176,6 +176,26 @@ extern
     def !!zed() -> void;
 };
 ```
+Or multiple prototypes at once:
+```
+extern
+{
+    // Memory allocation
+    def !!
+        malloc(size_t) -> void*,
+        memcpy(void*, void*, size_t) -> void*,
+        free(void*) -> void,
+        calloc(size_t, size_t) -> void*,
+        realloc(void*, size_t) -> void*,
+        memcpy(void*, void*, size_t) -> void*,
+        memmove(void*, void*, size_t) -> void*,
+        memset(void*, int, size_t) -> void*,
+        memcmp(void*, void*, size_t) -> int,
+        abort() -> void,
+        exit(int) -> void,
+        atexit(void*) -> int;
+};
+```
 String-literal based function name support to target any compiled library function:
 ```
 def "??foo@"()->void;
@@ -531,7 +551,7 @@ else
 You can also do `if` expressions:
 ```
 int x = 0;
-int y = x if (x > 5) else 3;
+int y = x if (x > 5) else noinit;
 ```
 
 ## **The `data` keyword:**
