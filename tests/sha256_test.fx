@@ -85,8 +85,10 @@ namespace crypto
             ctx.state[6] = 0x1F83D9ABu;
             ctx.state[7] = 0x5BE0CD19u;
             
-            ctx.bitlen = 0u;
+            ctx.bitlen = (u64)0;
             ctx.buflen = 0;
+            
+            print("SHA256 initialized\n\0");
         };
         
         // Process a single 512-bit block
@@ -96,14 +98,34 @@ namespace crypto
             u32 a, b, c, d, e, f, g, h, t1, t2;
             u32 i;
             
+            ///
+            print("sha256_transform called\n\0");
+            print("First 16 bytes of data: \0");
+            for (i = 0; i < 16; i++)
+            {
+                print(datax[i]);
+            };
+            print("\n\0");
+            ///
+            
             // Prepare message schedule
             for (i = 0; i < 16; i++)
             {
-                W[i] = ((u32)datax[i * 4] << 24) |
-                       ((u32)datax[i * 4 + 1] << 16) |
-                       ((u32)datax[i * 4 + 2] << 8) |
-                       ((u32)datax[i * 4 + 3]);
+                W[i] = (((u32)datax[i * 4] & 0xFF) << 24) |
+                       (((u32)datax[i * 4 + 1] & 0xFF) << 16) |
+                       (((u32)datax[i * 4 + 2] & 0xFF) << 8) |
+                       ((u32)datax[i * 4 + 3] & 0xFF);
             };
+            
+            ///
+            print("W[0] = \0");
+            print((int)W[0]);
+            print("\n\0");
+            
+            print("W[3] (should contain 'ng S'): \0");
+            print((int)W[3]);
+            print("\n\0");
+            ///
             
             for (i = 16; i < 64; i++)
             {
@@ -144,6 +166,12 @@ namespace crypto
             ctx.state[5] += f;
             ctx.state[6] += g;
             ctx.state[7] += h;
+            
+            ///
+            print("After transform, state[0] = \0");
+            print((int)ctx.state[0]);
+            print("\n\0");
+            ///
         };
         
         // Update SHA-256 with data
@@ -151,24 +179,86 @@ namespace crypto
         {
             u64 i;
             
+            ///
+            print("sha256_update called with len: \0");
+            print((int)len);
+            print("\n\0");
+            
+            print("Initial buflen: \0");
+            print((int)ctx.buflen);
+            print("\n\0");
+            
+            print("First 5 bytes: \0");
+            if (len > 0)
+            {
+                print(datax[0]);
+            };
+            if (len > 1)
+            {
+                print(datax[1]);
+            };
+            if (len > 2)
+            {
+                print(datax[2]);
+            };
+            if (len > 3)
+            {
+                print(datax[3]);
+            };
+            if (len > 4)
+            {
+                print(datax[4]);
+            };
+            print("\n\0");
+            ///
+            
             for (i = 0; i < len; i++)
             {
+                ///
+                print("Loop iteration i=\0");
+                print((int)i);
+                print(", storing byte: \0");
+                print(datax[i]);
+                print(", buflen before: \0");
+                print((int)ctx.buflen);
+                ///
+                
                 ctx.buffer[ctx.buflen] = datax[i];
-                ctx.buflen++;
+                ctx.buflen = ctx.buflen + 1;
+                
+                ///
+                print(", buflen after: \0");
+                print((int)ctx.buflen);
+                print("\n\0");
+                ///
                 
                 if (ctx.buflen == 64)
                 {
+                    //print("Transforming block\n\0");
                     sha256_transform(ctx, ctx.buffer);
                     ctx.bitlen += 512;
                     ctx.buflen = 0;
                 };
             };
+            ///
+            print("After update, buflen: \0");
+            print((int)ctx.buflen);
+            print("\n\0");
+            ///
         };
 
         def sha256_final(SHA256_CTX* ctx, byte* hash) -> void
         {
             u32 i = ctx.buflen;
             
+            ///
+            print("sha256_final called, buflen: \0");
+            print((int)ctx.buflen);
+            print(", bitlen before: \0");
+            print((int)ctx.bitlen);
+            print("\n\0");
+            ///
+
             // Pad with 0x80
             ctx.buffer[i] = (byte)0x80;
             i++;
@@ -198,6 +288,13 @@ namespace crypto
             
             // Append length in bits as 64-bit big-endian
             ctx.bitlen += ctx.buflen * 8;
+            
+            ///
+            print("bitlen after adding buflen*8: \0");
+            print((int)ctx.bitlen);
+            print("\n\0");
+            ///
+
             ctx.buffer[63] = (byte)(ctx.bitlen);
             ctx.buffer[62] = (byte)(ctx.bitlen >> 8);
             ctx.buffer[61] = (byte)(ctx.bitlen >> 16);
@@ -206,6 +303,26 @@ namespace crypto
             ctx.buffer[58] = (byte)(ctx.bitlen >> 40);
             ctx.buffer[57] = (byte)(ctx.bitlen >> 48);
             ctx.buffer[56] = (byte)(ctx.bitlen >> 56);
+            
+            ///
+            print("Length bytes: \0");
+            print((int)ctx.buffer[56]);
+            print(" \0");
+            print((int)ctx.buffer[57]);
+            print(" \0");
+            print((int)ctx.buffer[58]);
+            print(" \0");
+            print((int)ctx.buffer[59]);
+            print(" \0");
+            print((int)ctx.buffer[60]);
+            print(" \0");
+            print((int)ctx.buffer[61]);
+            print(" \0");
+            print((int)ctx.buffer[62]);
+            print(" \0");
+            print((int)ctx.buffer[63]);
+            print("\n\0");
+            ///
             
             sha256_transform(ctx, ctx.buffer);
             
@@ -234,27 +351,54 @@ def main()->int
     sha256_init(@ctx);
 
     print("==== SHA256 TEST ====\n\0");
-    noopstr msg = "Testing SHA256!\0";
+    byte* msg = "Testing SHA256!\0";
+    
+    // Calculate length manually or use strlen
+    int msg_len = strlen(msg);
+    
+    print("Message: \0");
+    print(msg);
+    print("\n\0");
+    print("Length: \0");
+    print(msg_len);
+    print("\n\0");
 
     byte[32] hash;
-    sha256_update(@ctx, @msg, (u64)strlen(msg));
+    sha256_update(@ctx, msg, (u64)msg_len);
     sha256_final(@ctx, @hash);
 
-    print(ctx.state[0]);
-    print();
-    print(ctx.state[1]);
-    print();
-    print(ctx.state[2]);
-    print();
-    print(ctx.state[3]);
-    print();
-    print(ctx.state[4]);
-    print();
-    print(ctx.state[5]);
-    print();
-    print(ctx.state[6]);
-    print();
-    print(ctx.state[7]);
+    print("Hash: \0");
+    
+    // Print hash in hex
+    int i = 0;
+    while (i < 32)
+    {
+        byte b = hash[i];
+        // Print high nibble
+        byte high = (b >> 4) & 0x0F;
+        if (high < 10)
+        {
+            print((byte)('0' + high));
+        }
+        else
+        {
+            print((byte)('a' + (high - 10)));
+        };
+        
+        // Print low nibble
+        byte low = b & 0x0F;
+        if (low < 10)
+        {
+            print((byte)('0' + low));
+        }
+        else
+        {
+            print((byte)('a' + (low - 10)));
+        };
+        
+        i++;
+    };
+    print("\n\0");
 
     return 0;
 };
