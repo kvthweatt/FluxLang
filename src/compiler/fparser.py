@@ -2592,6 +2592,18 @@ class FluxParser:
                     expr = StructRecast(target_type.custom_typename, expr)
                 else:
                     expr = CastExpression(target_type, expr)
+            elif self.expect(TokenType.FROM):
+                # FROM restructuring: StructType from source_expr
+                # This creates a StructRecast where expr (the identifier) is the target type
+                self.advance()
+                source_expr = self.postfix_expression()
+                
+                # expr should be an Identifier representing the target struct type
+                if isinstance(expr, Identifier):
+                    target_typename = expr.name
+                    expr = StructRecast(target_typename, source_expr)
+                else:
+                    self.error("Expected struct type name before 'from' keyword")
             elif self.expect(TokenType.IF):
                 # If expression: value if (condition) [else alternative]
                 self.advance()

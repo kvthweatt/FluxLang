@@ -3737,7 +3737,7 @@ class EndianSwapHandler:
 
     A swap is needed when source_endian != target_endian and the value
     is an integer type wide enough to have a meaningful byte order
-    (i.e. at least 16 bits ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â bswap on i8 is a no-op and LLVM rejects it).
+    (i.e. at least 16 bits ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â bswap on i8 is a no-op and LLVM rejects it).
 
     The swap is always performed on the source value BEFORE it is stored,
     so arithmetic can be done freely in native byte order and the boundary
@@ -3779,7 +3779,7 @@ class EndianSwapHandler:
         """
         Emit an llvm.bswap intrinsic call for the given integer value.
         Returns the byte-swapped value. Only valid for i16, i32, i64 (and
-        other even-byte-width integer types ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â LLVM requires width % 16 == 0).
+        other even-byte-width integer types ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â LLVM requires width % 16 == 0).
         """
         if not isinstance(val.type, ir.IntType):
             return val  # Can't bswap non-integers; caller should guard this
@@ -3821,7 +3821,7 @@ class EndianSwapHandler:
         if src_endian == tgt_endian:
             return val  # Same endianness
 
-        # Endianness mismatch ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â emit bswap
+        # Endianness mismatch ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â emit bswap
         swapped = EndianSwapHandler.emit_bswap(builder, module, val)
 
         # Propagate type metadata but flip the endianness to match target
@@ -4466,9 +4466,14 @@ class StructTypeHandler:
         field_types = {}
         current_offset = 0
         max_alignment = 1
+        has_data_types = False  # Track if struct uses data{} types
         
         for member in members:
             member_type = member.type_spec
+            
+            # Check if this is a packed data{} type
+            if member_type.bit_width is not None:
+                has_data_types = True
             
             # Get the LLVM type for this field - use get_llvm_type with include_array to handle arrays
             llvm_field_type = TypeSystem.get_llvm_type(member_type, module, include_array=True)
@@ -4509,7 +4514,8 @@ class StructTypeHandler:
                 bit_width = get_builtin_bit_width(member_type.base_type)
                 alignment = bit_width
             
-            if alignment > 1:
+            # Only apply alignment padding for non-packed structs
+            if alignment > 1 and not has_data_types:
                 misalignment = current_offset % alignment
                 if misalignment != 0:
                     current_offset += alignment - misalignment
@@ -4522,7 +4528,8 @@ class StructTypeHandler:
         
         total_bits = current_offset
         
-        if max_alignment > 1:
+        # Only add trailing padding for regular structs, NOT for packed data{} structs
+        if max_alignment > 1 and not has_data_types:
             misalignment = total_bits % max_alignment
             if misalignment != 0:
                 total_bits += max_alignment - misalignment
@@ -4827,24 +4834,75 @@ class StructTypeHandler:
         
         llvm_target_type = module._struct_types[target_type]
         
+        # If source is a pointer to an array, load it first
+        actual_source = source_value
+        if isinstance(source_value.type, ir.PointerType):
+            pointee = source_value.type.pointee
+            if isinstance(pointee, ir.ArrayType):
+                actual_source = builder.load(source_value, name="array_load")
+            else:
+                actual_source = source_value
+        
         # Compile-time size check if source size is known
-        if hasattr(source_value.type, 'count'):
+        if hasattr(actual_source.type, 'count'):
             # Array type - check size at compile time
-            source_bytes = source_value.type.count
+            source_bytes = actual_source.type.count
             if source_bytes != target_vtable.total_bytes:
                 raise ValueError(
                     f"Size mismatch in cast to {target_type}: "
                     f"source is {source_bytes} bytes, target requires {target_vtable.total_bytes} bytes"
                 )
         
-        # Perform zero-cost bitcast
-        if isinstance(source_value.type, ir.PointerType):
+        # Handle array-to-struct conversion: extract bytes and build struct fields
+        if isinstance(actual_source.type, ir.ArrayType) and isinstance(actual_source.type.element, ir.IntType) and actual_source.type.element.width == 8:
+            # Source is a byte array - build struct by extracting bytes in order
+            field_values = []
+            byte_index = 0
+            
+            for field_name, bit_offset, bit_width, alignment in target_vtable.fields:
+                field_type = target_vtable.field_types[field_name]
+                
+                # Calculate how many bytes this field needs
+                field_bytes = bit_width // 8
+                
+                # Extract bytes for this field
+                field_value = ir.Constant(ir.IntType(bit_width), 0)
+                for i in range(field_bytes):
+                    # Extract byte from array in order
+                    byte_val = builder.extract_value(actual_source, byte_index + i, name=f"byte_{byte_index + i}")
+                    byte_ext = builder.zext(byte_val, ir.IntType(bit_width))
+                    # Pack bytes: first byte to high bits, last byte to low bits (big-endian)
+                    shift_amount = (field_bytes - 1 - i) * 8
+                    byte_shifted = builder.shl(byte_ext, ir.Constant(ir.IntType(bit_width), shift_amount))
+                    field_value = builder.or_(field_value, byte_shifted)
+                
+                # Convert to proper field type if needed (e.g., float)
+                if isinstance(field_type, ir.FloatType) and isinstance(field_value.type, ir.IntType):
+                    field_value = builder.bitcast(field_value, field_type)
+                elif isinstance(field_type, ir.IntType) and field_value.type.width != field_type.width:
+                    if field_value.type.width > field_type.width:
+                        field_value = builder.trunc(field_value, field_type)
+                    else:
+                        field_value = builder.zext(field_value, field_type)
+                
+                field_values.append(field_value)
+                byte_index += field_bytes
+            
+            # Build the struct from field values
+            result = ir.Constant(llvm_target_type, ir.Undefined)
+            for i, field_value in enumerate(field_values):
+                result = builder.insert_value(result, field_value, i)
+            
+            return result
+        
+        # Fallback: Perform zero-cost bitcast for other cases
+        if isinstance(actual_source.type, ir.PointerType):
             # Cast pointer, then load
-            casted_ptr = builder.bitcast(source_value, llvm_target_type.as_pointer())
+            casted_ptr = builder.bitcast(actual_source, llvm_target_type.as_pointer())
             result = builder.load(casted_ptr)
         else:
             # Direct bitcast (reinterpret bits)
-            result = builder.bitcast(source_value, llvm_target_type)
+            result = builder.bitcast(actual_source, llvm_target_type)
         
         return result
 

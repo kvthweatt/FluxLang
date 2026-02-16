@@ -5600,10 +5600,15 @@ class StructFieldAccess(Expression):
             field_type = ir.IntType(bit_width)
 
             result = ir.Constant(field_type, 0)
+            
+            # Extract bytes in big-endian order (network byte order)
+            # First byte goes to high bits, last byte goes to low bits
             for i in range(field_bytes):
                 byte_val = builder.extract_value(instance, byte_offset + i)
                 byte_ext = builder.zext(byte_val, field_type)
-                byte_shifted = builder.shl(byte_ext, ir.Constant(field_type, i * 8))
+                # Shift: first byte (i=0) to highest position, last byte (i=field_bytes-1) to lowest
+                shift_amount = (field_bytes - 1 - i) * 8
+                byte_shifted = builder.shl(byte_ext, ir.Constant(field_type, shift_amount))
                 result = builder.or_(result, byte_shifted)
 
             # Optional typed reinterpret (if your vtable carries it)
