@@ -98,7 +98,7 @@ def main() -> int
         };
         
         // Null-terminate the received data
-        recv_buffer[bytes_received] = 0;
+        recv_buffer[bytes_received] = '\0';
         
         print("Received echo (\0");
         print(bytes_received);

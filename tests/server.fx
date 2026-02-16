@@ -29,7 +29,7 @@ def main() -> int
     };
     
     // Bind to port 8080
-    if (!server_socket.bind(8080))
+    if (!server_socket.bind((i16)8080))
     {
         print("Failed to bind to port 8080\n\0");
         server_socket.close();
@@ -82,7 +82,7 @@ def main() -> int
         };
         
         // Null-terminate the received data
-        buffer[bytes_received] = 0;
+        buffer[bytes_received] = '\0';
         
         print("Received (\0");
         print(bytes_received);

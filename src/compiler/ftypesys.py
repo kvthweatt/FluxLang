@@ -3745,7 +3745,7 @@ class EndianSwapHandler:
 
     A swap is needed when source_endian != target_endian and the value
     is an integer type wide enough to have a meaningful byte order
-    (i.e. at least 16 bits Ã¢â‚¬â€ bswap on i8 is a no-op and LLVM rejects it).
+    (i.e. at least 16 bits ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â bswap on i8 is a no-op and LLVM rejects it).
 
     The swap is always performed on the source value BEFORE it is stored,
     so arithmetic can be done freely in native byte order and the boundary
@@ -3787,7 +3787,7 @@ class EndianSwapHandler:
         """
         Emit an llvm.bswap intrinsic call for the given integer value.
         Returns the byte-swapped value. Only valid for i16, i32, i64 (and
-        other even-byte-width integer types Ã¢â‚¬â€ LLVM requires width % 16 == 0).
+        other even-byte-width integer types ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â LLVM requires width % 16 == 0).
         """
         if not isinstance(val.type, ir.IntType):
             return val  # Can't bswap non-integers; caller should guard this
@@ -3829,7 +3829,7 @@ class EndianSwapHandler:
         if src_endian == tgt_endian:
             return val  # Same endianness
 
-        # Endianness mismatch Ã¢â‚¬â€ emit bswap
+        # Endianness mismatch ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â emit bswap
         swapped = EndianSwapHandler.emit_bswap(builder, module, val)
 
         # Propagate type metadata but flip the endianness to match target
@@ -4201,53 +4201,63 @@ class AssignmentTypeHandler:
             zero = ir.Constant(ir.IntType(1), 0)
             elem_ptr = builder.gep(array, [zero, index], inbounds=True)
             
-            # FIX: Handle StringLiteral assignment to byte array elements
+            # Determine element type
             element_type = array.type.pointee.element
+            
+            # FIX: Handle StringLiteral assignment to byte array elements
             if isinstance(value_expr, StringLiteral) and isinstance(element_type, ir.IntType) and element_type.width == 8:
-                # Extract first character from string literal
+                # Extract first character from string literal for byte elements
                 if len(value_expr.value) > 0:
                     val = ir.Constant(ir.IntType(8), ord(value_expr.value[0]))
                 else:
                     val = ir.Constant(ir.IntType(8), 0)
-            else:
-                # No conversion - LLVM handles compatible pointer types
-                pass
+            # FIX: Handle string literal (pointer to array) assignment to byte* array element
+            elif (isinstance(val.type, ir.PointerType) and 
+                  isinstance(val.type.pointee, ir.ArrayType) and
+                  isinstance(element_type, ir.PointerType) and
+                  isinstance(element_type.pointee, ir.IntType) and
+                  element_type.pointee.width == 8):
+                # Convert [N x i8]* to i8* using GEP for byte* array elements
+                zero_idx = ir.Constant(ir.IntType(32), 0)
+                val = builder.gep(val, [zero_idx, zero_idx], inbounds=True, name="str_to_ptr")
+            
             builder.store(val, elem_ptr)
             return val
         elif isinstance(array.type, ir.PointerType):
             # Handle plain pointer types (like byte*) - pointer arithmetic
-            #print(f"[PTR ASSIGN DEBUG] array.type: {array.type}", file=sys.stdout)
-            #print(f"[PTR ASSIGN DEBUG] array.type.pointee: {array.type.pointee}", file=sys.stdout)
             elem_ptr = builder.gep(array, [index], inbounds=True)
             
-            #print(f"[PTR ASSIGN] elem_ptr.type: {elem_ptr.type}", file=sys.stdout)
-            #print(f"[PTR ASSIGN] elem_ptr.type.pointee: {elem_ptr.type.pointee}", file=sys.stdout)
-            
-            # FIX: Handle StringLiteral assignment to byte pointer elements
+            # Determine the element type we're storing into
             element_type = array.type.pointee
-            if isinstance(value_expr, StringLiteral) and isinstance(element_type, ir.IntType) and element_type.width == 8:
+            
+            # FIX: Handle string literal (pointer to array) assignment to byte* element
+            # Check if val is a pointer to an array being assigned to a byte* element
+            if (isinstance(val.type, ir.PointerType) and 
+                isinstance(val.type.pointee, ir.ArrayType) and
+                isinstance(element_type, ir.PointerType) and
+                isinstance(element_type.pointee, ir.IntType) and
+                element_type.pointee.width == 8):
+                # Convert [N x i8]* to i8* using GEP
+                zero = ir.Constant(ir.IntType(32), 0)
+                val = builder.gep(val, [zero, zero], inbounds=True, name="str_to_ptr")
+            # Handle StringLiteral being assigned to byte element (extract first char)
+            elif (isinstance(value_expr, StringLiteral) and 
+                  isinstance(element_type, ir.IntType) and 
+                  element_type.width == 8):
+                print(f"[STRING ASSIGN] Extracting first char from string literal", file=sys.stdout)
                 # Extract first character from string literal
                 if len(value_expr.value) > 0:
                     val = ir.Constant(ir.IntType(8), ord(value_expr.value[0]))
                 else:
                     val = ir.Constant(ir.IntType(8), 0)
             
-            #print(f"[PTR ASSIGN] val.type: {val.type}", file=sys.stdout)
-            #print(f"[PTR ASSIGN] element_type: {element_type}", file=sys.stdout)
-            #print(f"[PTR ASSIGN] isinstance(val.type, ir.PointerType): {isinstance(val.type, ir.PointerType)}", file=sys.stdout)
-            #print(f"[PTR ASSIGN] isinstance(element_type, ir.PointerType): {isinstance(element_type, ir.PointerType)}", file=sys.stdout)
-            
             # Handle pointer type compatibility - if both are pointers, bitcast if needed
             if isinstance(val.type, ir.PointerType) and isinstance(element_type, ir.PointerType):
-                #print(f"[PTR ASSIGN] Both are pointers, checking equality", file=sys.stdout)
-                #print(f"[PTR ASSIGN] val.type == element_type: {val.type == element_type}", file=sys.stdout)
                 if val.type != element_type:
-                    #print(f"[PTR ASSIGN] Doing bitcast", file=sys.stdout)
                     val = builder.bitcast(val, element_type, name="ptr_cast")
             
             # Note: val is already generated in the caller, so we just use it directly
             # No type conversion needed - LLVM handles compatible pointer types
-            #print(f"[PTR ASSIGN] About to store, val.type: {val.type}", file=sys.stdout)
             builder.store(val, elem_ptr)
             return val
         else:
