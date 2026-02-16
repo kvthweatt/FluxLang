@@ -23,7 +23,7 @@ from typing import Set, Dict, Optional, List
 from dataclasses import dataclass
 from enum import Enum
 import sys
-from flogger import FluxLogger, FluxLoggerConfig, LogLevel
+# from flogger import FluxLogger, FluxLoggerConfig, LogLevel
 from flexer import FluxLexer
 from fpreprocess import *
 
@@ -648,18 +648,31 @@ class FluxParser:
         
         return Parameter(name, type_spec)
 
-    def enum_def(self) -> EnumDefStatement:
+    def enum_def(self) -> Union[EnumDefStatement, List[EnumDefStatement]]:
         """
-        enum_def -> 'enum' IDENTIFIER (';' | '{' enum_item (',' enum_item)* '}' ';')
+        enum_def -> 'enum' IDENTIFIER (',' IDENTIFIER)* (';' | '{' enum_item (',' enum_item)* '}' ';')
         enum_item -> IDENTIFIER ('=' INTEGER)?
         """
         self.consume(TokenType.ENUM)
         name = self.consume(TokenType.IDENTIFIER, f"Expected: enumurated list name after enum keyword at Line {self.current_token.line:,.0f}:{self.current_token.column} in build\\tmp.fx").value
         
-        # Handle forward declaration
+        # Check for comma-separated prototypes
+        names = [name]
+        while self.expect(TokenType.COMMA):
+            self.advance()
+            names.append(self.consume(TokenType.IDENTIFIER).value)
+        
+        # Handle forward declaration (prototype)
         if self.expect(TokenType.SEMICOLON):
             self.advance()
+            # Return multiple prototypes if comma-separated
+            if len(names) > 1:
+                return [EnumDefStatement(EnumDef(n, {})) for n in names]
             return EnumDefStatement(EnumDef(name, {}))
+        
+        # Full definition - only allowed for single name
+        if len(names) > 1:
+            self.error("Comma-separated names are only allowed for prototypes (forward declarations)")
         
         self.consume(TokenType.LEFT_BRACE)
         
@@ -736,21 +749,34 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
         return UnionMember(name, type_spec, initial_value)
     
-    def struct_def(self) -> StructDef:
+    def struct_def(self) -> Union[StructDef, List[StructDef]]:
         """
-        struct_def -> 'struct' IDENTIFIER'{' struct_member* '}'
+        struct_def -> 'struct' IDENTIFIER (',' IDENTIFIER)* (';' | '{' struct_member* '}')
         """
         self.consume(TokenType.STRUCT)
         name = self.consume(TokenType.IDENTIFIER).value
+        
+        # Check for comma-separated prototypes
+        names = [name]
+        while self.expect(TokenType.COMMA):
+            self.advance()
+            names.append(self.consume(TokenType.IDENTIFIER).value)
         
         base_structs = []
         members = []
         nested_structs = []
 
-        # Handle forward declarations
+        # Handle forward declarations (prototypes)
         if self.expect(TokenType.SEMICOLON):
             self.advance()
+            # Return multiple prototypes if comma-separated
+            if len(names) > 1:
+                return [StructDef(n, [], [], []) for n in names]
             return StructDef(name, members, base_structs, nested_structs)
+
+        # Full definition - only allowed for single name
+        if len(names) > 1:
+            self.error("Comma-separated names are only allowed for prototypes (forward declarations)")
 
         self.consume(TokenType.LEFT_BRACE)
         
@@ -760,8 +786,12 @@ class FluxParser:
                 self.consume(TokenType.LEFT_BRACE)
                 while not self.expect(TokenType.RIGHT_BRACE):
                     if self.expect(TokenType.STRUCT):
-                        nested_struct = self.struct_def()
-                        nested_structs.append(nested_struct)
+                        nested_struct_result = self.struct_def()
+                        # Handle both single struct and list of structs
+                        if isinstance(nested_struct_result, list):
+                            nested_structs.extend(nested_struct_result)
+                        else:
+                            nested_structs.append(nested_struct_result)
                         self.consume(TokenType.SEMICOLON)
                     else:
                         member = self.struct_member()
@@ -779,8 +809,12 @@ class FluxParser:
                 self.consume(TokenType.LEFT_BRACE)
                 while not self.expect(TokenType.RIGHT_BRACE):
                     if self.expect(TokenType.STRUCT):
-                        nested_struct = self.struct_def()
-                        nested_structs.append(nested_struct)
+                        nested_struct_result = self.struct_def()
+                        # Handle both single struct and list of structs
+                        if isinstance(nested_struct_result, list):
+                            nested_structs.extend(nested_struct_result)
+                        else:
+                            nested_structs.append(nested_struct_result)
                         self.consume(TokenType.SEMICOLON)
                     else:
                         member = self.struct_member()
@@ -795,8 +829,12 @@ class FluxParser:
                 self.consume(TokenType.SEMICOLON)
             elif self.expect(TokenType.STRUCT):
                 # Handle nested struct
-                nested_struct = self.struct_def()
-                nested_structs.append(nested_struct)
+                nested_struct_result = self.struct_def()
+                # Handle both single struct and list of structs
+                if isinstance(nested_struct_result, list):
+                    nested_structs.extend(nested_struct_result)
+                else:
+                    nested_structs.append(nested_struct_result)
                 # Allow both with and without semicolon for nested structs
                 self.expect(TokenType.SEMICOLON)
             else:
@@ -854,14 +892,19 @@ class FluxParser:
             return StructMember(members[0], type_spec, member_initial_value)
 
     
-    def object_def(self) -> ObjectDef:
+    def object_def(self) -> Union[ObjectDef, List[ObjectDef]]:
         """
-        object_def -> 'object' IDENTIFIER '{' object_body '}'
+        object_def -> 'object' IDENTIFIER (',' IDENTIFIER)* (';' | '{' object_body '}')
         object_body -> (object_member | access_specifier)*
         """
         self.consume(TokenType.OBJECT)
         name = self.consume(TokenType.IDENTIFIER).value
 
+        # Check for comma-separated prototypes
+        names = [name]
+        while self.expect(TokenType.COMMA):
+            self.advance()
+            names.append(self.consume(TokenType.IDENTIFIER).value)
         
         # Parse inheritance -- TODO, impelment after we have v1 Flux base
         #base_objects = []
@@ -877,10 +920,18 @@ class FluxParser:
         nested_objects = []
         nested_structs = []
 
+        # Handle forward declarations (prototypes)
         if self.expect(TokenType.SEMICOLON):
             is_prototype = True
             self.advance()
+            # Return multiple prototypes if comma-separated
+            if len(names) > 1:
+                return [ObjectDef(n, [], [], [], []) for n in names]
             return ObjectDef(name, methods, members, nested_objects, nested_structs)
+
+        # Full definition - only allowed for single name
+        if len(names) > 1:
+            self.error("Comma-separated names are only allowed for prototypes (forward declarations)")
 
         self.consume(TokenType.LEFT_BRACE)
         
@@ -901,14 +952,26 @@ class FluxParser:
                             method.is_private = is_private
                             methods.append(method)
                     elif self.expect(TokenType.OBJECT):
-                        nested_obj = self.object_def()
-                        nested_obj.is_private = is_private
-                        nested_objects.append(nested_obj)
+                        nested_obj_result = self.object_def()
+                        # Handle both single object and list of objects
+                        if isinstance(nested_obj_result, list):
+                            for obj in nested_obj_result:
+                                obj.is_private = is_private
+                                nested_objects.append(obj)
+                        else:
+                            nested_obj_result.is_private = is_private
+                            nested_objects.append(nested_obj_result)
                         self.consume(TokenType.SEMICOLON)
                     elif self.expect(TokenType.STRUCT):
-                        nested_struct = self.struct_def()
-                        nested_struct.is_private = is_private
-                        nested_structs.append(nested_struct)
+                        nested_struct_result = self.struct_def()
+                        # Handle both single struct and list of structs
+                        if isinstance(nested_struct_result, list):
+                            for struct in nested_struct_result:
+                                struct.is_private = is_private
+                                nested_structs.append(struct)
+                        else:
+                            nested_struct_result.is_private = is_private
+                            nested_structs.append(nested_struct_result)
                         self.consume(TokenType.SEMICOLON)
                     else:
                         # Field declaration
@@ -933,12 +996,20 @@ class FluxParser:
                     else:
                         methods.append(method)
                 elif self.expect(TokenType.OBJECT):
-                    nested_obj = self.object_def()
-                    nested_objects.append(nested_obj)
+                    nested_obj_result = self.object_def()
+                    # Handle both single object and list of objects
+                    if isinstance(nested_obj_result, list):
+                        nested_objects.extend(nested_obj_result)
+                    else:
+                        nested_objects.append(nested_obj_result)
                     self.consume(TokenType.SEMICOLON)
                 elif self.expect(TokenType.STRUCT):
-                    nested_struct = self.struct_def()
-                    nested_structs.append(nested_struct)
+                    nested_struct_result = self.struct_def()
+                    # Handle both single struct and list of structs
+                    if isinstance(nested_struct_result, list):
+                        nested_structs.extend(nested_struct_result)
+                    else:
+                        nested_structs.append(nested_struct_result)
                     self.consume(TokenType.SEMICOLON)
                 else:
                     # Field declaration
@@ -1017,23 +1088,46 @@ class FluxParser:
                     # ALSO register the simple name for lookups within the namespace
                     self.symbol_table.define(func.name, SymbolKind.FUNCTION)
             elif self.expect(TokenType.STRUCT):
-                struct = self.struct_def()
-                structs.append(struct)
-                # ADDED: Register struct type in symbol table
-                qualified_name = f"{current_namespace}__{struct.name}"
-                self.symbol_table.define(qualified_name, SymbolKind.TYPE)
-                self.symbol_table.define(struct.name, SymbolKind.TYPE)
+                struct_result = self.struct_def()
+                # Handle both single struct and list of structs (comma-separated prototypes)
+                if isinstance(struct_result, list):
+                    for struct in struct_result:
+                        structs.append(struct)
+                        # ADDED: Register struct type in symbol table
+                        qualified_name = f"{current_namespace}__{struct.name}"
+                        self.symbol_table.define(qualified_name, SymbolKind.TYPE)
+                        self.symbol_table.define(struct.name, SymbolKind.TYPE)
+                else:
+                    structs.append(struct_result)
+                    # ADDED: Register struct type in symbol table
+                    qualified_name = f"{current_namespace}__{struct_result.name}"
+                    self.symbol_table.define(qualified_name, SymbolKind.TYPE)
+                    self.symbol_table.define(struct_result.name, SymbolKind.TYPE)
             elif self.expect(TokenType.OBJECT):
-                obj = self.object_def()
-                objects.append(obj)
+                obj_result = self.object_def()
+                # Handle both single object and list of objects (comma-separated prototypes)
+                if isinstance(obj_result, list):
+                    objects.extend(obj_result)
+                else:
+                    objects.append(obj_result)
             elif self.expect(TokenType.ENUM):
-                enum_stmt = self.enum_def()
-                enum = enum_stmt.enum_def  # Unwrap to get the EnumDef
-                enums.append(enum)
-                # ADDED: Register enum type in symbol table
-                qualified_name = f"{current_namespace}__{enum.name}"
-                self.symbol_table.define(qualified_name, SymbolKind.TYPE)
-                self.symbol_table.define(enum.name, SymbolKind.TYPE)
+                enum_result = self.enum_def()
+                # Handle both single enum and list of enums (comma-separated prototypes)
+                if isinstance(enum_result, list):
+                    for enum_stmt in enum_result:
+                        enum = enum_stmt.enum_def  # Unwrap to get the EnumDef
+                        enums.append(enum)
+                        # ADDED: Register enum type in symbol table
+                        qualified_name = f"{current_namespace}__{enum.name}"
+                        self.symbol_table.define(qualified_name, SymbolKind.TYPE)
+                        self.symbol_table.define(enum.name, SymbolKind.TYPE)
+                else:
+                    enum = enum_result.enum_def  # Unwrap to get the EnumDef
+                    enums.append(enum)
+                    # ADDED: Register enum type in symbol table
+                    qualified_name = f"{current_namespace}__{enum.name}"
+                    self.symbol_table.define(qualified_name, SymbolKind.TYPE)
+                    self.symbol_table.define(enum.name, SymbolKind.TYPE)
             elif self.expect(TokenType.EXTERN):
                 extern = self.extern_statement()
                 extern_blocks.append(extern)
@@ -1467,38 +1561,38 @@ class FluxParser:
                 return var_decl
             
             names = [name]
+            initializers = []
+            
+            # Check if first variable has an initializer
+            if self.expect(TokenType.ASSIGN):
+                self.advance()
+                initializers.append(self.expression())
+            else:
+                initializers.append(None)
+            
+            # Parse additional comma-separated variables with optional initializers
+            # Supports both: int x,y,z = 1,2,3; and int x = 1, y = 2, z = 3;
             while self.expect(TokenType.COMMA):
                 self.advance()
                 var_name = self.consume(TokenType.IDENTIFIER).value
                 self.symbol_table.define(var_name, SymbolKind.VARIABLE, type_spec)
                 names.append(var_name)
-            
-            # Parse initializers if present
-            initializers = []
-            if self.expect(TokenType.ASSIGN):
-                self.advance()
-                # Parse first initializer
-                init_expr = self.expression()
-                initializers.append(init_expr)
                 
-                # Parse additional initializers if multiple variables
-                while self.expect(TokenType.COMMA) and len(initializers) < len(names):
+                # Check if this variable has its own initializer
+                if self.expect(TokenType.ASSIGN):
                     self.advance()
-                    init_expr = self.expression()
-                    initializers.append(init_expr)
+                    initializers.append(self.expression())
+                else:
+                    initializers.append(None)
             
             # If we have multiple variables, create multiple declarations
             if len(names) > 1:
-                # Check if we have the right number of initializers
-                if initializers and len(initializers) != len(names):
-                    self.error(f"Number of initializers ({len(initializers)}) does not match number of variables ({len(names)})")
-                
                 # Create a declaration for each variable
                 declarations = []
                 for i, var_name in enumerate(names):
                     init_val = initializers[i] if i < len(initializers) else None
                     
-                    if isinstance(init_val, StructLiteral) and init_val.struct_type is None:
+                    if init_val and isinstance(init_val, StructLiteral) and init_val.struct_type is None:
                         if type_spec.custom_typename:
                             init_val.struct_type = type_spec.custom_typename
                     
@@ -1512,7 +1606,7 @@ class FluxParser:
                 # Single variable declaration
                 initial_value = initializers[0] if initializers else None
                 
-                if isinstance(initial_value, StructLiteral) and initial_value.struct_type is None:
+                if initial_value and isinstance(initial_value, StructLiteral) and initial_value.struct_type is None:
                     if type_spec.custom_typename:
                         initial_value.struct_type = type_spec.custom_typename
                 

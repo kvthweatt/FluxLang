@@ -1,11 +1,6 @@
 #import "standard.fx";
 
-enum mye;
-
-enum mye
-{
-     x
-};
+enum mye1, mye2, mye3;
 
 def main() -> int
 {

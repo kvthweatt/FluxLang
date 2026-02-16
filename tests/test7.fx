@@ -1,11 +1,6 @@
 #import "standard.fx";
 
-struct mys;
-
-struct mys
-{
-    int x;
-};
+struct mys1, mys2, mys3;
 
 def main() -> int
 {

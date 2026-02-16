@@ -1,8 +1,9 @@
 #import "standard.fx";
 
-object myo1, myo2, myo3;
+int x = 1, y = 2, z = 3;
 
 def main() -> int
 {
+	print(y);
 	return 0;
 };

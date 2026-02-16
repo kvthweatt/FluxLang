@@ -32,8 +32,7 @@ namespace standard
     {
         // ============ JSON VALUE TYPES ============
 
-        struct JSONArray;
-        struct JSONValue;
+        struct JSONArray, JSONValue;
         struct JSObjectPair;
         struct JSONObject;
         struct JSONParser;
