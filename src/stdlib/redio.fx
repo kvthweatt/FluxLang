@@ -398,6 +398,8 @@ namespace standard
                 print(i32 x) -> void,
                 print(uint x) -> void,
                 print(u32 x) -> void,
+                print_hex_byte(byte) -> void,
+                print_hex_u32(u32) -> void,
                 print(i64 x) -> void,
                 print(u64 x) -> void,
                 print(float x) -> void,
@@ -446,6 +448,43 @@ namespace standard
                 byte[21] buf;
                 u32str(x,buf);
                 print(buf);
+                return;
+            };
+            def print_hex_byte(byte b) -> void
+            {
+                byte high = (b >> 4) & 0x0F;
+                if (high < 10)
+                {
+                    print((byte)('0' + high));
+                }
+                else
+                {
+                    print((byte)('a' + (high - 10)));
+                };
+                
+                byte low = b & 0x0F;
+                if (low < 10)
+                {
+                    print((byte)('0' + low));
+                }
+                else
+                {
+                    print((byte)('a' + (low - 10)));
+                };
+                return;
+            };
+            def print_hex(u32 value) -> void
+            {
+                // Print as 8 hex digits
+                byte b;
+                b = (byte)((value >> 24) & 0xFF);
+                print_hex_byte(b);
+                b = (byte)((value >> 16) & 0xFF);
+                print_hex_byte(b);
+                b = (byte)((value >> 8) & 0xFF);
+                print_hex_byte(b);
+                b = (byte)(value & 0xFF);
+                print_hex_byte(b);
                 return;
             };
             def print(i64 x) -> void
