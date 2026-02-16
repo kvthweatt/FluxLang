@@ -1,4 +1,4 @@
-// redmemman.fx - Memory Management Library
+// redmemory.fx - Memory Management Library
 
 #ifndef FLUX_STANDARD
 #def FLUX_STANDARD 1;
