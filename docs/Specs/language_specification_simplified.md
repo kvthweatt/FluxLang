@@ -528,6 +528,12 @@ else
 };
 ```
 
+You can also do `if` expressions:
+```
+int x = 0;
+int y = x if (x > 5) else 3;
+```
+
 ## **The `data` keyword:**
 
 Data is a variable bit width, primitive binary data type. Anything can cast to it, and it can cast to any primitive like char, int, float.  
@@ -1763,7 +1769,7 @@ auto {a, b} = p{first, second};  // a=10, b=20
 # Keyword list:
 ```
 alignof, and, as, asm, assert, auto, break, bool, case, catch, const, continue, data, def, default,
-do, elif, else, enum, false, float, for, global, heap, if, in, is, int, local, namespace, new, not, object, or,
+do, elif, else, enum, false, float, for, global, heap, if, in, is, int, local, namespace, new, noinit, not, object, or,
 private, public, register, return, signed, sizeof, stack, struct, switch, this, throw, true, try, typeof, uint,
 union, unsigned, void, volatile, while, xor
 ```
