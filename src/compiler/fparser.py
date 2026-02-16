@@ -650,12 +650,17 @@ class FluxParser:
 
     def enum_def(self) -> EnumDefStatement:
         """
-        enum_def -> 'enum' IDENTIFIER '{' enum_item (',' enum_item)* '}' ';'
+        enum_def -> 'enum' IDENTIFIER (';' | '{' enum_item (',' enum_item)* '}' ';')
         enum_item -> IDENTIFIER ('=' INTEGER)?
         """
         self.consume(TokenType.ENUM)
         name = self.consume(TokenType.IDENTIFIER, f"Expected: enumurated list name after enum keyword at Line {self.current_token.line:,.0f}:{self.current_token.column} in build\\tmp.fx").value
-        self.symbol_table.define(name, SymbolKind.TYPE)
+        
+        # Handle forward declaration
+        if self.expect(TokenType.SEMICOLON):
+            self.advance()
+            return EnumDefStatement(EnumDef(name, {}))
+        
         self.consume(TokenType.LEFT_BRACE)
         
         values = {}
@@ -1022,7 +1027,8 @@ class FluxParser:
                 obj = self.object_def()
                 objects.append(obj)
             elif self.expect(TokenType.ENUM):
-                enum = self.enum_def()
+                enum_stmt = self.enum_def()
+                enum = enum_stmt.enum_def  # Unwrap to get the EnumDef
                 enums.append(enum)
                 # ADDED: Register enum type in symbol table
                 qualified_name = f"{current_namespace}__{enum.name}"

@@ -4895,7 +4895,32 @@ class EnumDef(ASTNode):
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
         if not hasattr(module, '_enum_types'):
             module._enum_types = {}
+        
+        # Check if enum already exists (for forward declarations)
+        if self.name in module._enum_types:
+            existing_values = module._enum_types[self.name]
+            # If this is a forward declaration (no values) and enum exists, just return
+            if not self.values:
+                return
+            # If existing enum has values and this has values, that's an error
+            if existing_values:
+                raise ValueError(f"Enum '{self.name}' already defined")
+            # Existing was forward declaration, this is full definition - continue below
+        
         module._enum_types[self.name] = self.values
+        
+        # If this is a forward declaration (no values), just register the type and return
+        if not self.values:
+            # Register enum in symbol table
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.define(
+                    self.name,
+                    SymbolKind.ENUM,
+                    type_spec=None,
+                    llvm_type=ir.IntType(32),
+                    llvm_value=None
+                )
+            return
         
         # Register enum in symbol table
         if hasattr(module, 'symbol_table'):
@@ -5250,12 +5275,29 @@ class StructDef(ASTNode):
         # Initialize struct storage first
         StructTypeHandler.initialize_struct_storage(module)
         
-        # Pre-register an identified struct type to allow self-referential pointers
-        # This creates a named opaque struct that can be referenced before it's defined
-        opaque_struct = ir.global_context.get_identified_type(self.name)
-        # Don't set the body yet - this allows it to be used in pointer types
-        opaque_struct.names = []
-        module._struct_types[self.name] = opaque_struct
+        # Check if struct already exists (for forward declarations)
+        if self.name in module._struct_types:
+            existing_struct = module._struct_types[self.name]
+            # If this is a forward declaration (no members) and struct exists, just return it
+            if not self.members:
+                return existing_struct
+            # If existing struct has no body and this has members, we'll set the body below
+            # If both have bodies, that's an error
+            if existing_struct.elements:
+                raise ValueError(f"Struct '{self.name}' already defined")
+            # Use existing opaque struct
+            opaque_struct = existing_struct
+        else:
+            # Pre-register an identified struct type to allow self-referential pointers
+            # This creates a named opaque struct that can be referenced before it's defined
+            opaque_struct = ir.global_context.get_identified_type(self.name)
+            # Don't set the body yet - this allows it to be used in pointer types
+            opaque_struct.names = []
+            module._struct_types[self.name] = opaque_struct
+        
+        # If this is a forward declaration (no members), just register the opaque type and return
+        if not self.members:
+            return opaque_struct
         
         # Now calculate vtable (this may reference the struct type via pointers)
         self.vtable = self.calculate_vtable(module)
@@ -5661,6 +5703,35 @@ class ObjectDef(ASTNode):
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
         # Initialize object storage
         ObjectTypeHandler.initialize_object_storage(module)
+        
+        # Check if object already exists (for forward declarations)
+        if hasattr(module, '_struct_types') and self.name in module._struct_types:
+            existing_type = module._struct_types[self.name]
+            # If this is a forward declaration (no members/methods) and object exists, just return it
+            if not self.members and not self.methods:
+                return existing_type
+            # If existing object has body and this has body, that's an error
+            if existing_type.elements:
+                raise ValueError(f"Object '{self.name}' already defined")
+            # Existing was forward declaration, this is full definition - continue below
+        
+        # If this is a forward declaration (no members/methods), create opaque type and return
+        if not self.members and not self.methods:
+            opaque_struct = ir.global_context.get_identified_type(self.name)
+            opaque_struct.names = []
+            if not hasattr(module, '_struct_types'):
+                module._struct_types = {}
+            module._struct_types[self.name] = opaque_struct
+            # Register in symbol table
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.define(
+                    self.name,
+                    SymbolKind.STRUCT,
+                    type_spec=None,
+                    llvm_type=opaque_struct,
+                    llvm_value=None
+                )
+            return opaque_struct
         
         # Create member types
         member_types, member_names = ObjectTypeHandler.create_member_types(self.members, module)

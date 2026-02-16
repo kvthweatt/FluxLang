@@ -2,7 +2,7 @@
 // Connects to server at 127.0.0.1:8080 and sends messages
 
 #import "standard.fx";
-
+#import "socket_object_raw.fx";
 using standard::strings;
 
 def main() -> int
