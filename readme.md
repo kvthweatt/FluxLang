@@ -177,10 +177,20 @@ int* py  = (@)pxk;  // Address as pointer, pointer will be 64 bits and can accep
 Flux treats all data the same. It's all just numbers.
 
 **Ownership (Optional):**
-```flux
+```
+def foo(~int c) -> void
+{
+    // do something with c
+};
+
 def make() -> int {
-    int ~x = 42; // Mark with "tie" operator ~
-    return ~x;   // Explicit transfer
+    ~int x = 42; // Mark with "tie" operator ~ (tied int)
+
+    foo(~x);     // Pass with tie, foo expects a tied int
+
+    print(x);    // Use-After-Untie error.
+
+    return 0;
 };
 ```
 
@@ -269,7 +279,7 @@ Flux is in active development. The language specification is complete, but imple
 - **[Examples](examples/)** - Real-world Flux programs  
 - **[Windows Setup Guide](docs/SetupGuides/windows_setup_guide.md)**  
 - **[Linux Setup Guide](docs/SetupGuides/linux_setup_guide.md)** 
- 
+
 
 ## Star History
 
