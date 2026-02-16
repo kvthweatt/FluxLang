@@ -188,7 +188,7 @@ def make() -> int {
 
     foo(~x);     // Untie from main, tie to foo
 
-    print(x);    // Use-After-Untie error.
+    print(x);    // Compile-time Use-After-Untie error.
 
     return 0;
 };
