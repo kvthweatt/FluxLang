@@ -18,7 +18,7 @@ Flux is a compiled systems language that combines C-like performance with Python
 
 ## Core Features
 
-### Very simple preprocessor
+### A very simple preprocessor
 ```
 #import "standard.fx";
 
@@ -40,7 +40,7 @@ Macro definitions must have a value, 0 included. Example:
 #ifndef MY_MACRO     // False
 ```
 
-### Bit-Precise Data Types
+### Bit-precise data types:
 
 Define types with exact bit widths and alignment:
 
@@ -50,7 +50,7 @@ unsigned data{13:16} as custom;    // 13 bits, 16-bit aligned
 unsigned data{32} as u32;          // Standard 32-bit unsigned
 ```
 
-### Bit-Level Field Access
+### Bit-level field access
 
 Extract individual bits from bytes as named fields:
 
@@ -68,7 +68,7 @@ Flags f = (Flags)status;
 if (f.enabled && !f.error) { /* ... */ };
 ```
 
-### Compile-Time Execution
+### Compile-time execution (coming with bootstrap v1)
 
 Run actual Flux code during compilation:
 
@@ -184,6 +184,33 @@ def make() -> int {
 };
 ```
 
+Endianness is part of the type
+Network protocols use big-endian. Every other language makes you manually convert with `htons()`, `ntohs()`, `htonl()`, `ntohl()`.
+In Flux, endianness is part of the type:
+```
+unsigned data{16::1} as big_endian;    // ::1 = big-endian
+unsigned data{16::0} as little_endian; // ::0 = little-endian
+
+big_endian network_value = 0x1234;
+little_endian host_value = network_value;  // Automatic byte swap
+```
+Cross an endianness boundary, get automatic conversion. Stay within the same endianness, no conversion. The type system knows, so you don't have to manage it manually.  
+**Build complex bit patterns by listing values.**  
+Need to pack several values into a single integer? Most languages make you calculate bit positions and shifts:  
+`(a << 24) | (b << 16) | (c << 8) | d`  
+Flux lets you list the values in order:  
+```
+unsigned data{4} version = 4;
+unsigned data{4} ihl = 5;
+unsigned data{8} tos = 0;
+unsigned data{16} length = 60;
+
+unsigned data{32} packed = [version, ihl, tos, length];
+```
+The compiler knows each field's bit width, so it knows how to pack them. You don't calculate positions - you just list what you want, in order.  
+This is compositional bit manipulation. Instead of doing arithmetic on bits, you compose values and let the type system handle the packing.  
+You can still do it the old way and manually move bits around if you like.
+
 ## Design Philosophy
 
 Flux follows a "high-trust" model:
@@ -251,13 +278,15 @@ import "standard.fx";
 
 using standard::io;
 
-struct Packet {
+struct Packet
+{
     unsigned data{8} type;
     unsigned data{16} length;
     unsigned data{32} timestamp;
 };
 
-def main() -> int {
+def main() -> int
+{
     byte[] data = [0x01, 0x00, 0x20, 0x5F, 0x12, 0x34, 0x56];
     Packet pkt = (Packet)data;
     
@@ -276,7 +305,7 @@ def main() -> int {
 Flux is actively developed and approaching self-hosting. We're building the future of systems programming.
 
 **Current Status:** 100% of reduced specification complete, working compiler, real programs running.  
-Bug fixing and refactoring are currently the names of the games. There are still some small issues here and there.
+Bug fixing and refactoring are currently the names of the games. There are still some small issues here and there, as well as minor missing functionality. More features may end up being added before the bootstrap.
 
 ## ⚖️ **License**
 

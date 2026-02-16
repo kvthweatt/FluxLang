@@ -679,6 +679,12 @@ signed   data{64} as  i64;
 unsigned data{64} as ui64;
 ```
 
+## **Namespace elimination with `!using` or `not using`:**
+```
+!using standard::io::file;
+!using some::specific::namespace;
+```
+
 ---
 
 ## **The `sizeof`, `typeof`, and `alignof` keywords:**

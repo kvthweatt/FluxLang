@@ -1,5 +1,8 @@
 #import "standard.fx";
 
+def foo() -> void {};
+def bar() -> void {};
+
 def main() -> int
 {
     uint x, y = 10, 0;
@@ -27,7 +30,8 @@ def main() -> int
     {
         print("Success, y unchanged, py points to x.\n\0");
         print((uint)*py);
+        return 0;
     };
 
-	return 0;
+	return 1;
 };

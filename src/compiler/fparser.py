@@ -2479,6 +2479,22 @@ class FluxParser:
                     expr = StructRecast(target_type.custom_typename, expr)
                 else:
                     expr = CastExpression(target_type, expr)
+            elif self.expect(TokenType.IF):
+                # If expression: value if (condition) [else alternative]
+                self.advance()
+                self.consume(TokenType.LEFT_PAREN, "Expected '(' after 'if' in if-expression")
+                condition = self.expression()
+                self.consume(TokenType.RIGHT_PAREN, "Expected ')' after condition in if-expression")
+                
+                # Check for else clause
+                else_expr = None
+                if self.expect(TokenType.ELSE):
+                    self.advance()
+                    # Parse the else expression as a postfix expression
+                    # This handles: else z, else noinit, else (noinit if (...)), etc.
+                    else_expr = self.postfix_expression()
+                
+                expr = IfExpression(expr, condition, else_expr)
             else:
                 break
         

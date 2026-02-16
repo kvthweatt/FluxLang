@@ -59,7 +59,7 @@ def count_words(byte* buffer, int size) -> int
 
 def main() -> int
 {
-    noopstr filename = "build\\tmp.fx\0";
+    noopstr filename = "..\\..\\examples\\filestats.fx\0";
     
     print("=== File Analyzer ===\n\0");
     print("Analyzing file: \0");

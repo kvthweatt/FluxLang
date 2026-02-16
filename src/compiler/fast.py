@@ -1768,6 +1768,10 @@ class FunctionCall(Expression):
     # Class-level counter for globally unique string literals
     _string_counter = 0
 
+    def __repr__(self) -> str:
+        s = ", ".join([str(x) for x in self.arguments])
+        return f"{self.name}({s})"
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """
         Generate code for function calls.
@@ -3387,6 +3391,101 @@ class IfStatement(Statement):
         return None
 
 @dataclass
+class IfExpression(Expression):
+    """
+    If expression: value if (condition) [else alternative]
+    
+    Examples:
+        int x = y if (y > 5);                    // x = y if y > 5, else x = 0 (default)
+        int x = y if (y > 5) else z;             // x = y if y > 5, else x = z
+        int x = y if (y > 5) else noinit;        // x = y if y > 5, else uninitialized
+        int x = y if (y > 5) else noinit if (y < 5);  // Chained if-expressions
+    """
+    value_expr: Expression
+    condition: Expression
+    else_expr: Optional[Expression] = None  # Can be another IfExpression for chaining
+    
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """
+        Generate code for if expression.
+        
+        Creates:
+        1. Evaluate condition
+        2. Branch to value_block or else_block
+        3. Evaluate value_expr in value_block
+        4. Evaluate else_expr in else_block (or return zero if no else)
+        5. Use phi node to merge results
+        """
+        # Evaluate condition
+        cond_val = self.condition.codegen(builder, module)
+        
+        # Convert to i1 if needed
+        if isinstance(cond_val.type, ir.IntType) and cond_val.type.width != 1:
+            cond_val = builder.icmp_signed('!=', cond_val, ir.Constant(cond_val.type, 0))
+        
+        # Create blocks
+        func = builder.block.function
+        value_block = func.append_basic_block('ifexpr_value')
+        else_block = func.append_basic_block('ifexpr_else')
+        merge_block = func.append_basic_block('ifexpr_merge')
+        
+        # Branch based on condition
+        builder.cbranch(cond_val, value_block, else_block)
+        
+        # Generate value branch (when condition is true)
+        builder.position_at_start(value_block)
+        value_val = self.value_expr.codegen(builder, module)
+        value_end_block = builder.block
+        builder.branch(merge_block)
+        
+        # Generate else branch (when condition is false)
+        builder.position_at_start(else_block)
+        if self.else_expr is not None:
+            # Handle noinit specially
+            if isinstance(self.else_expr, NoInit):
+                # For noinit, we need to return an undef value of the same type as value_val
+                else_val = ir.Constant(value_val.type, ir.Undefined)
+            else:
+                else_val = self.else_expr.codegen(builder, module)
+        else:
+            # No else clause - default to zero (everything is zero-initialized by default)
+            else_val = ir.Constant(value_val.type, 0)
+        
+        else_end_block = builder.block
+        builder.branch(merge_block)
+        
+        # Merge results with phi node
+        builder.position_at_start(merge_block)
+        
+        # Type compatibility check
+        if value_val.type != else_val.type:
+            # Try to convert types
+            if isinstance(value_val.type, ir.IntType) and isinstance(else_val.type, ir.IntType):
+                # Integer type mismatch - extend to larger type
+                if value_val.type.width < else_val.type.width:
+                    builder.position_at_end(value_end_block)
+                    value_val = builder.sext(value_val, else_val.type)
+                    builder.branch(merge_block)
+                    builder.position_at_start(merge_block)
+                elif else_val.type.width < value_val.type.width:
+                    builder.position_at_end(else_end_block)
+                    else_val = builder.sext(else_val, value_val.type)
+                    builder.branch(merge_block)
+                    builder.position_at_start(merge_block)
+            else:
+                raise TypeError(
+                    f"If expression branches have incompatible types: "
+                    f"{value_val.type} vs {else_val.type}"
+                )
+        
+        # Create phi node to select result
+        phi = builder.phi(value_val.type, name='ifexpr_result')
+        phi.add_incoming(value_val, value_end_block)
+        phi.add_incoming(else_val, else_end_block)
+        
+        return phi
+
+@dataclass
 class TernaryOp(Expression):
     """
     Ternary conditional operator: condition ? true_expr : false_expr
@@ -4248,6 +4347,12 @@ class AssertStatement(Statement):
 class Parameter:
     name: Optional[str] # Can be none for unnamed prototype parameters
     type_spec: TypeSystem
+
+    def __repr__(self) -> str:
+        if self.type_spec.custom_typename is not None:
+            return f"{self.type_spec.custom_typename} {name}"
+        else:
+            return f"{self.type_spec.base_type} {name}"
     
     def __post_init__(self):
         # Store the original type name for debugging/metadata
