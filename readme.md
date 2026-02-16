@@ -268,7 +268,12 @@ Flux is in active development. The language specification is complete, but imple
 - **[Getting Started Guide](docs/learn_flux_intro.md)** - Tutorial for new users  
 - **[Examples](examples/)** - Real-world Flux programs  
 - **[Windows Setup Guide](docs/SetupGuides/windows_setup_guide.md)**  
-- **[Linux Setup Guide](docs/SetupGuides/linux_setup_guide.md)**  
+- **[Linux Setup Guide](docs/SetupGuides/linux_setup_guide.md)** 
+ 
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=kvthweatt/FluxLang&type=date&legend=top-left)](https://www.star-history.com/#kvthweatt/FluxLang&type=date&legend=top-left)
 
 
 ## Example: Complete Program

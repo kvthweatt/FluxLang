@@ -1190,11 +1190,12 @@ class FluxParser:
     
     def type_spec(self) -> TypeSystem:
         """
-        type_spec -> ('global'|'local'|'heap'|'stack'|'register')? ('const')? ('volatile')? ('signed'|'unsigned')? base_type alignment? array_spec? pointer_spec?
+        type_spec -> ('global'|'local'|'heap'|'stack'|'register')? ('const')? ('volatile')? ('signed'|'unsigned')? ('~')? base_type alignment? array_spec? pointer_spec?
         array_spec -> ('[' expression? ']')+
 
         NOTE: Storage class can come FIRST, before qualifiers
         """
+        is_tied = False
         is_const = False
         is_volatile = False
         is_signed = True
@@ -1235,6 +1236,11 @@ class FluxParser:
         elif self.expect(TokenType.UNSIGNED):
             is_signed = False
             signedness_explicit = True
+            self.advance()
+
+        # Parse TIE operator (before base type)
+        if self.expect(TokenType.TIE):
+            is_tied = True
             self.advance()
 
         # Base type parsing
@@ -1320,6 +1326,7 @@ class FluxParser:
                 is_signed=resolved_spec.is_signed,
                 is_const=resolved_spec.is_const,
                 is_volatile=resolved_spec.is_volatile,
+                is_tied=resolved_spec.is_tied,
                 bit_width=resolved_spec.bit_width,
                 alignment=resolved_spec.alignment,
                 endianness=resolved_spec.endianness,
@@ -1334,6 +1341,8 @@ class FluxParser:
             )
 
             # Apply use-site qualifiers (override / add)
+            if is_tied:
+                t.is_tied = True
             if is_const:
                 t.is_const = True
             if is_volatile:
@@ -1370,6 +1379,7 @@ class FluxParser:
             is_signed=is_signed,
             is_const=is_const,
             is_volatile=is_volatile,
+            is_tied=is_tied,
             bit_width=bit_width,
             alignment=alignment,
             endianness=endianness,
@@ -1443,6 +1453,9 @@ class FluxParser:
             
             # Skip signedness
             if self.expect(TokenType.SIGNED, TokenType.UNSIGNED):
+                self.advance()
+
+            if self.expect(TokenType.TIE):
                 self.advance()
             
             # Must have a base type

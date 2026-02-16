@@ -1253,6 +1253,7 @@ class TypeSystem:
     is_signed: bool = True
     is_const: bool = False
     is_volatile: bool = False
+    is_tied: bool = False
     bit_width: Optional[int] = None
     alignment: Optional[int] = None
     endianness: Optional[int] = 1
