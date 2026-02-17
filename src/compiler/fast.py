@@ -6149,6 +6149,16 @@ class Program(ASTNode):
                 stub_builder = ir.IRBuilder(stub_block)
                 stub_builder.ret(ir.Constant(ir.IntType(32), 0))
         
+        # Emit a stub main(argc, argv) if the user only defined main()
+        # so the linker has an args entry point to satisfy FRTStartup's call
+        main_args_name = "main__2__int__data_ptr2_ubits8__ret_int"
+        if main_args_name in module.globals:
+            main_args_func = module.globals[main_args_name]
+            if isinstance(main_args_func, ir.Function) and main_args_func.is_declaration:
+                stub_block = main_args_func.append_basic_block("entry")
+                stub_builder = ir.IRBuilder(stub_block)
+                stub_builder.ret(ir.Constant(ir.IntType(32), 0))
+        
         return module
 
 # Example usage
