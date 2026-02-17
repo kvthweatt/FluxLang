@@ -1620,20 +1620,33 @@ class FluxParser:
             else:
                 initializers.append(None)
             
-            # Parse additional comma-separated variables with optional initializers
-            # Supports both: int x,y,z = 1,2,3; and int x = 1, y = 2, z = 3;
-            while self.expect(TokenType.COMMA):
-                self.advance()
-                var_name = self.consume(TokenType.IDENTIFIER).value
-                self.symbol_table.define(var_name, SymbolKind.VARIABLE, type_spec)
-                names.append(var_name)
-                
-                # Check if this variable has its own initializer
+            if self.expect(TokenType.COMMA) and initializers[0] is None:
+                # Mode: int x,y,z = 1,2,3; — collect all names first, then all initializers
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    var_name = self.consume(TokenType.IDENTIFIER).value
+                    self.symbol_table.define(var_name, SymbolKind.VARIABLE, type_spec)
+                    names.append(var_name)
                 if self.expect(TokenType.ASSIGN):
                     self.advance()
-                    initializers.append(self.expression())
-                else:
-                    initializers.append(None)
+                    for _ in names:
+                        initializers.append(self.expression())
+                        if self.expect(TokenType.COMMA):
+                            self.advance()
+                        else:
+                            break
+            elif self.expect(TokenType.COMMA):
+                # Mode: int x = 1, y = 2, z = 3; — each name has its own initializer
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    var_name = self.consume(TokenType.IDENTIFIER).value
+                    self.symbol_table.define(var_name, SymbolKind.VARIABLE, type_spec)
+                    names.append(var_name)
+                    if self.expect(TokenType.ASSIGN):
+                        self.advance()
+                        initializers.append(self.expression())
+                    else:
+                        initializers.append(None)
             
             # If we have multiple variables, create multiple declarations
             if len(names) > 1:
