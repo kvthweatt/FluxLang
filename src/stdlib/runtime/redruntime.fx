@@ -56,7 +56,7 @@ extern
 
 
 // >Mains
-def !!main() -> int;
+def main() -> int;
 def main(int, byte**) -> int;
 // /Mains
 

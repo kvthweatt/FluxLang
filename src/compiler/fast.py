@@ -2880,7 +2880,26 @@ class VariableDeclaration(ASTNode):
     def _codegen_local(self, builder: ir.IRBuilder, module: ir.Module, 
                       llvm_type: ir.Type, resolved_type_spec: TypeSystem) -> ir.Value:
         """Generate code for local variable."""
-        alloca = builder.alloca(llvm_type, name=self.name)
+        # Check for VLA: type_spec says is_array with a runtime expression dimension,
+        # so get_llvm_type returned PointerType(element) instead of ArrayType.
+        # Use alloca with a dynamic count so the result is element* not element**.
+        if (isinstance(llvm_type, ir.PointerType) and
+                resolved_type_spec is not None and
+                resolved_type_spec.is_array):
+            dim_expr = None
+            if resolved_type_spec.array_dimensions:
+                dim_expr = resolved_type_spec.array_dimensions[0]
+            elif resolved_type_spec.array_size is not None:
+                dim_expr = resolved_type_spec.array_size
+            if dim_expr is not None and not isinstance(dim_expr, int) and not (hasattr(dim_expr, 'value') and isinstance(dim_expr.value, int)):
+                # Runtime expression: codegen the size and alloca count elements
+                count_val = dim_expr.codegen(builder, module)
+                element_type = llvm_type.pointee
+                alloca = builder.alloca(element_type, size=count_val, name=self.name)
+            else:
+                alloca = builder.alloca(llvm_type, name=self.name)
+        else:
+            alloca = builder.alloca(llvm_type, name=self.name)
 
         if resolved_type_spec:
             alloca._flux_type_spec = resolved_type_spec
@@ -6139,25 +6158,40 @@ class Program(ASTNode):
             if not isinstance(stmt, UsingStatement) and not isinstance(stmt, ExternBlock) and not isinstance(stmt, NotUsingStatement):
                 stmt.codegen(builder, module)
         
-        # Emit a stub main() if the user only defined main(argc, argv)
-        # so the linker has a no-arg entry point to satisfy FRTStartup's call
-        if "main" in module.globals:
-            main_func = module.globals["main"]
-            if isinstance(main_func, ir.Function) and main_func.is_declaration:
-                # main() was prototyped but never defined — emit empty stub
-                stub_block = main_func.append_basic_block("entry")
-                stub_builder = ir.IRBuilder(stub_block)
-                stub_builder.ret(ir.Constant(ir.IntType(32), 0))
-        
-        # Emit a stub main(argc, argv) if the user only defined main()
-        # so the linker has an args entry point to satisfy FRTStartup's call
         main_args_name = "main__2__int__data_ptr2_ubits8__ret_int"
-        if main_args_name in module.globals:
-            main_args_func = module.globals[main_args_name]
-            if isinstance(main_args_func, ir.Function) and main_args_func.is_declaration:
-                stub_block = main_args_func.append_basic_block("entry")
-                stub_builder = ir.IRBuilder(stub_block)
-                stub_builder.ret(ir.Constant(ir.IntType(32), 0))
+        main_no_args_name = "main__0__ret_int"
+
+        main_func      = module.globals.get(main_no_args_name)
+        main_args_func = module.globals.get(main_args_name)
+
+        # Emit a stub main() if the user only defined main(argc, argv).
+        # The stub calls main(argc, argv) with argc=0 and argv=null so that
+        # FRTStartup's no-arg path still reaches the user's real entry point.
+        if (main_func is not None and
+                isinstance(main_func, ir.Function) and
+                main_func.is_declaration and
+                main_args_func is not None and
+                isinstance(main_args_func, ir.Function)):
+            stub_block = main_func.append_basic_block("entry")
+            stub_builder = ir.IRBuilder(stub_block)
+            argc_val = ir.Constant(ir.IntType(32), 0)
+            argv_type = ir.PointerType(ir.PointerType(ir.IntType(8)))
+            argv_val = ir.Constant(argv_type, None)
+            ret_val = stub_builder.call(main_args_func, [argc_val, argv_val])
+            stub_builder.ret(ret_val)
+
+        # Emit a stub main(argc, argv) if the user only defined main().
+        # The stub ignores its arguments and calls the no-arg main() directly,
+        # returning its result, so FRTStartup's args path still works.
+        if (main_args_func is not None and
+                isinstance(main_args_func, ir.Function) and
+                main_args_func.is_declaration and
+                main_func is not None and
+                isinstance(main_func, ir.Function)):
+            stub_block = main_args_func.append_basic_block("entry")
+            stub_builder = ir.IRBuilder(stub_block)
+            ret_val = stub_builder.call(main_func, [])
+            stub_builder.ret(ret_val)
         
         return module
 
