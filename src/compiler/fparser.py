@@ -76,14 +76,14 @@ class FluxParser:
         preprocessed_source = preprocessor.process()
 
         # Step 2: Lex
-        print(f"[INFO] [lexer] â–º Lexical analysis")
+        print(f"[INFO] [lexer] ► Lexical analysis")
         lexer = FluxLexer(preprocessed_source)
         tokens = lexer.tokenize()
 
         # Step 3: Create parser
-        print(f"[INFO] [parser] â–º Parsing")
+        print(f"[INFO] [parser] ► Parsing")
         parser = self(tokens)
-        print(f"[INFO] [parser] â–º AST generated.")
+        print(f"[INFO] [parser] ► AST generated.")
 
         # Expose final macro set to parser/codegen if needed
         parser._preprocessor_macros = dict(preprocessor.macros)
@@ -592,7 +592,7 @@ class FluxParser:
         self.consume(TokenType.RETURN_ARROW)
         return_type = self.type_spec()
         
-        print("GOT FUNCTION POINTER")
+        #print("GOT FUNCTION POINTER")
         self.consume(TokenType.SEMICOLON)
         
         return FunctionPointerType(return_type, parameter_types)
