@@ -6,5 +6,8 @@ def main(int argc, byte** argv) -> int
     print("\n\0");
     print(argv[2]);
     print("\n\0");
+
+
+    system("pause\0");
     return 0;
 };

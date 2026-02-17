@@ -1468,6 +1468,9 @@ TypeSystem(base_type:     {self.base_type}\n\
                     # Only handle compile-time constant dimensions
                     if isinstance(dim, int):
                         current_type = ir.ArrayType(current_type, dim)
+                    elif hasattr(dim, 'value') and isinstance(dim.value, int):
+                        # Literal AST node wrapping a plain integer - treat as compile-time constant
+                        current_type = ir.ArrayType(current_type, dim.value)
                     else:
                         # Runtime size - return pointer to element type
                         # The actual allocation will be handled in _codegen_local
@@ -1482,6 +1485,9 @@ TypeSystem(base_type:     {self.base_type}\n\
                     # Return array of element_type
                     # For noopstr[3], this returns [3 x i8*]
                     return ir.ArrayType(element_type, type_spec.array_size)
+                elif hasattr(type_spec.array_size, 'value') and isinstance(type_spec.array_size.value, int):
+                    # Literal AST node wrapping a plain integer - treat as compile-time constant
+                    return ir.ArrayType(element_type, type_spec.array_size.value)
                 else:
                     # Runtime size - return pointer to element type
                     # The actual allocation will be handled in _codegen_local
@@ -3738,7 +3744,7 @@ class EndianSwapHandler:
 
     A swap is needed when source_endian != target_endian and the value
     is an integer type wide enough to have a meaningful byte order
-    (i.e. at least 16 bits ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â bswap on i8 is a no-op and LLVM rejects it).
+    (i.e. at least 16 bits ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â bswap on i8 is a no-op and LLVM rejects it).
 
     The swap is always performed on the source value BEFORE it is stored,
     so arithmetic can be done freely in native byte order and the boundary
@@ -3780,7 +3786,7 @@ class EndianSwapHandler:
         """
         Emit an llvm.bswap intrinsic call for the given integer value.
         Returns the byte-swapped value. Only valid for i16, i32, i64 (and
-        other even-byte-width integer types ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â LLVM requires width % 16 == 0).
+        other even-byte-width integer types ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â LLVM requires width % 16 == 0).
         """
         if not isinstance(val.type, ir.IntType):
             return val  # Can't bswap non-integers; caller should guard this
@@ -3822,7 +3828,7 @@ class EndianSwapHandler:
         if src_endian == tgt_endian:
             return val  # Same endianness
 
-        # Endianness mismatch ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â emit bswap
+        # Endianness mismatch ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â emit bswap
         swapped = EndianSwapHandler.emit_bswap(builder, module, val)
 
         # Propagate type metadata but flip the endianness to match target

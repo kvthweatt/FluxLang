@@ -7,8 +7,19 @@
 #def FLUX_STANDARD_SYSTEM 1;
 #endif;
 
+///
+global const int OS_UNKNOWN = 0;
+global const int OS_WINDOWS = 1;
+global const int OS_LINUX = 2;
+global const int OS_MACOS = 3;
+///
 #ifdef __WINDOWS__
 #def CURRENT_OS 1;
+extern
+{
+    def !!
+        system(byte*) -> int;
+};
 #endif;
 
 #ifdef __LINUX__
@@ -18,17 +29,13 @@
 #ifdef __MACOS__
 #def CURRENT_OS 3;
 #endif;
-///
-global const int OS_UNKNOWN = 0;
-global const int OS_WINDOWS = 1;
-global const int OS_LINUX = 2;
-global const int OS_MACOS = 3;
-///
+
 namespace standard
 {
     namespace system
     {
+        namespace Windows
+        {
+        };
     };
 };
-
-using standard::system;

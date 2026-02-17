@@ -1289,13 +1289,8 @@ class FluxParser:
         while self.expect(TokenType.LEFT_BRACKET):
             self.advance()
             if not self.expect(TokenType.RIGHT_BRACKET):
-                if self.expect(TokenType.SINT_LITERAL):
-                    array_size = int(self.current_token.value)
-                    array_dims.append(array_size)
-                    self.advance()
-                else:
-                    expr = self.expression()
-                    array_dims.append(expr)
+                expr = self.expression()
+                array_dims.append(expr)
             else:
                 array_dims.append(None)
             self.consume(TokenType.RIGHT_BRACKET)
