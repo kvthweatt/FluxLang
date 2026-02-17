@@ -37,8 +37,8 @@ global i64 WIN_STDOUT_HANDLE;
 #endif;
 
 // Import raw functions & builtins
-#import "string_object_raw.fx";
-#import "file_object_raw.fx";
+//#import "string_object_raw.fx";
+//#import "file_object_raw.fx";
 //#import "socket_object_raw.fx";
 //
 // ---------------------------
@@ -51,13 +51,24 @@ global i64 WIN_STDOUT_HANDLE;
 
 extern
 {
+#ifdef __WINDOWS__
     def !!
         GetStdHandle(int nStdHandle) -> i64,
         GetCommandLineW() -> wchar*,
-        LocalFree(void* x) -> void*,
+        LocalFree(void* x) -> void*;
+#endif;
+#ifdef __LINUX__
+    def !!
         exit(int code) -> void,
         abort() -> void;
+#endif;
+#ifdef __MACOS__
+    def !!
+        exit(int code) -> void,
+        abort() -> void;
+#endif;
 };
+
 
 
 // >Mains
@@ -78,7 +89,8 @@ def !!_start() -> int;
 
 def !!_start() -> int
 {
-    return FRTStartup();
+    exit(FRTStartup());
+    return;
 };
 #endif; // Linux
 
@@ -230,7 +242,7 @@ def !!FRTStartup() -> int
         default
         {
             #ifdef __LINUX__
-            exit(0);
+            abort();
             #endif;
             return return_code;
         };
@@ -243,10 +255,7 @@ def !!FRTStartup() -> int
             print("SEGFAULT\n\0");
         };
     };
-    #ifdef __LINUX__
-    exit(return_code);  // Should pass return_code
-    #endif;
-    return return_code; // Unreached
+    return return_code;
 };
 #endif;
 ///

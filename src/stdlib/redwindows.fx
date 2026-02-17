@@ -32,19 +32,21 @@ namespace standard
                                  DWORD,
                                  WORD,
                                  BYTE,
-                                 LONG,
-                                 LONG_PTR,
+                                 LONG;
+
+            // Pointer-sized types - must be 64-bit on x64
+            unsigned data{64} as LONG_PTR,
                                  UINT_PTR,
                                  WPARAM,
                                  LPARAM,
                                  LRESULT;
 
             // String types
-            noopstr as LPCSTR,    // Pointer to const string
-                       LPSTR;     // Pointer to string
+            byte* as LPCSTR,      // Pointer to const string
+                    LPSTR;        // Pointer to string
 
-            // Window procedure callback type
-            LRESULT{}* as WNDPROC;
+            // Window procedure callback type (opaque function pointer - same size as void*)
+            u64* as WNDPROC;
 
             // ============================================================================
             // WIN32 STRUCTURES
@@ -90,12 +92,14 @@ namespace standard
             // PAINTSTRUCT for WM_PAINT
             struct PAINTSTRUCT
             {
-                HDC hdc;
-                bool fErase;
-                RECT rcPaint;
-                bool fRestore,fIncUpdate;
-                BYTE[32] rgbReserved;
-            };
+                HDC hdc;              // 8 bytes, offset 0
+                LONG fErase;          // 4 bytes, offset 8
+                LONG _pad;            // 4 bytes padding, offset 12 -> RECT at 16
+                RECT rcPaint;         // 16 bytes, offset 16
+                LONG fRestore;        // 4 bytes, offset 32
+                LONG fIncUpdate;      // 4 bytes, offset 36
+                BYTE[32] rgbReserved; // 32 bytes, offset 40
+            };            // total = 72 bytes
 
             // PIXELFORMATDESCRIPTOR for OpenGL
             struct PIXELFORMATDESCRIPTOR
@@ -190,6 +194,7 @@ namespace standard
                         WM_SIZE = 0x0005,
                         WM_ACTIVATE = 0x0006,
                         WM_PAINT = 0x000F,
+                        WM_ERASEBKGND = 0x0014,
                         WM_CLOSE = 0x0010,
                         WM_QUIT = 0x0012,
                         WM_KEYDOWN = 0x0100,
@@ -229,6 +234,24 @@ namespace standard
             global BYTE PFD_TYPE_RGBA = 0,
                         PFD_MAIN_PLANE = 0;
 
+            // Pen styles (CreatePen)
+            global int PS_SOLID = 0,
+                       PS_DASH = 1,
+                       PS_DOT = 2,
+                       PS_DASHDOT = 3,
+                       PS_DASHDOTDOT = 4,
+                       PS_NULL = 5;
+
+            // Background modes (SetBkMode)
+            global int TRANSPARENT = 1,
+                       OPAQUE = 2;
+
+            // RGB color helper - packs R,G,B into a COLORREF (0x00BBGGRR)
+            def RGB(byte r, byte g, byte b) -> DWORD
+            {
+                return (DWORD)r | ((DWORD)g << 8) | ((DWORD)b << 16);
+            };
+
             // ============================================================================
             // WIN32 FUNCTION DECLARATIONS (EXTERN)
             // ============================================================================
@@ -254,6 +277,10 @@ namespace standard
                     SetWindowTextA(HWND, LPCSTR) -> bool,
                     GetWindowTextA(HWND, LPSTR, int) -> int,
                     SetWindowPos(HWND, HWND, int, int, int, int, UINT) -> bool,
+                    SetForegroundWindow(HWND) -> bool,
+                    BringWindowToTop(HWND) -> bool,
+                    SetFocus(HWND) -> HWND,
+                    InvalidateRect(HWND, RECT*, bool) -> bool,
                     GetClientRect(HWND, RECT*) -> bool,
                     GetWindowRect(HWND, RECT*) -> bool,
                 
@@ -272,7 +299,33 @@ namespace standard
                     EndPaint(HWND, PAINTSTRUCT*) -> bool,
                     GetDC(HWND) -> HDC,
                     ReleaseDC(HWND, HDC) -> int,
-                
+
+                // GDI drawing
+                    MoveToEx(HDC, int, int, POINT*) -> bool,
+                    LineTo(HDC, int, int) -> bool,
+                    Ellipse(HDC, int, int, int, int) -> bool,
+                    Rectangle(HDC, int, int, int, int) -> bool,
+                    FillRect(HDC, RECT*, HBRUSH) -> int,
+                    SetPixel(HDC, int, int, DWORD) -> DWORD,
+                    Arc(HDC, int, int, int, int, int, int, int, int) -> bool,
+                    Polyline(HDC, POINT*, int) -> bool,
+                    Polygon(HDC, POINT*, int) -> bool,
+
+                // GDI pen and brush
+                    CreatePen(int, int, DWORD) -> HDC,
+                    CreateSolidBrush(DWORD) -> HBRUSH,
+                    SelectObject(HDC, HDC) -> HDC,
+                    DeleteObject(HDC) -> bool,
+
+                // GDI color and mode
+                    SetBkMode(HDC, int) -> int,
+                    SetBkColor(HDC, DWORD) -> DWORD,
+                    SetTextColor(HDC, DWORD) -> DWORD,
+                    TextOutA(HDC, int, int, LPCSTR, int) -> bool,
+
+                // Console window access
+                    GetConsoleWindow() -> HWND,
+
                 // Stock Objects
                     GetStockObject(int) -> HBRUSH,
                 
@@ -307,6 +360,15 @@ namespace standard
                     PostQuitMessage(0);
                     return 0;
                 };
+
+                if (msg == WM_PAINT)
+                {
+                    PAINTSTRUCT ps;
+                    BeginPaint(hwnd, @ps);
+                    EndPaint(hwnd, @ps);
+                    return 0;
+                };
+
                 
                 return DefWindowProcA(hwnd, msg, wParam, lParam);
             };
@@ -350,11 +412,11 @@ namespace standard
                     this.class_name[7] = 'd';
                     this.class_name[8] = 'o';
                     this.class_name[9] = 'w';
-                    this.class_name[10] = 0;
+                    this.class_name[10] = '\0';
                     
                     // Set up window class
                     WNDCLASSEXA wc;
-                    wc.cbSize = (UINT)sizeof(WNDCLASSEXA);
+                    wc.cbSize = (UINT)(sizeof(WNDCLASSEXA) / 8); // sizeof returns bits, cbSize needs bytes
                     wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
                     wc.lpfnWndProc = (WNDPROC)@DefaultWindowProc;
                     wc.cbClsExtra = 0;
@@ -364,7 +426,7 @@ namespace standard
                     wc.hCursor = LoadCursorA((HINSTANCE)0, (LPCSTR)32512); // IDC_ARROW
                     wc.hbrBackground = GetStockObject(BLACK_BRUSH);
                     wc.lpszMenuName = (LPCSTR)0;
-                    wc.lpszClassName = (LPCSTR)@this.class_name[0];
+                    wc.lpszClassName = (LPCSTR)this.class_name;
                     wc.hIconSm = (HICON)0;
                     
                     // Register window class
@@ -373,7 +435,7 @@ namespace standard
                     // Create window
                     this.handle = CreateWindowExA(
                         WS_EX_APPWINDOW,
-                        (LPCSTR)@this.class_name[0],
+                        (LPCSTR)this.class_name,
                         (LPCSTR)title,
                         WS_OVERLAPPEDWINDOW | WS_VISIBLE,
                         x, y, w, h,
@@ -407,7 +469,7 @@ namespace standard
                         DestroyWindow(this.handle);
                     };
                     
-                    UnregisterClassA((LPCSTR)@this.class_name[0], this.instance);
+                    UnregisterClassA((LPCSTR)this.class_name, this.instance);
                     return;
                 };
                 
@@ -457,7 +519,7 @@ namespace standard
                 def setup_opengl() -> HGLRC
                 {
                     PIXELFORMATDESCRIPTOR pfd;
-                    pfd.nSize = (WORD)sizeof(PIXELFORMATDESCRIPTOR);
+                    pfd.nSize = (WORD)(sizeof(PIXELFORMATDESCRIPTOR) / 8); // sizeof returns bits, nSize needs bytes
                     pfd.nVersion = 1;
                     pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
                     pfd.iPixelType = PFD_TYPE_RGBA;
@@ -480,6 +542,113 @@ namespace standard
                 {
                     SwapBuffers(this.device_context);
                     return;
+                };
+            };
+            // ============================================================================
+            // CANVAS - GDI drawing surface over the console window
+            // ============================================================================
+
+            object Canvas
+            {
+                HWND  hwnd;
+                HDC   hdc;
+                RECT  bounds;
+                HDC   active_pen;
+
+                // Attach to the console window and grab its DC
+                def __init() -> this
+                {
+                    this.hwnd = GetConsoleWindow();
+                    this.hdc  = GetDC(this.hwnd);
+                    GetClientRect(this.hwnd, this.bounds);
+                    this.active_pen = (HDC)0;
+                    return this;
+                };
+
+                // Release DC when done
+                def __exit() -> void
+                {
+                    if (this.active_pen != (HDC)0)
+                    {
+                        DeleteObject(this.active_pen);
+                    };
+                    ReleaseDC(this.hwnd, this.hdc);
+                    return;
+                };
+
+                // Clear the canvas with a solid color
+                def clear(DWORD color) -> void
+                {
+                    HBRUSH brush = CreateSolidBrush(color);
+                    FillRect(this.hdc, this.bounds, brush);
+                    DeleteObject(brush);
+                    return;
+                };
+
+                // Set the active pen color and width
+                def set_pen(DWORD color, int width) -> void
+                {
+                    if (this.active_pen != (HDC)0)
+                    {
+                        DeleteObject(this.active_pen);
+                    };
+                    this.active_pen = CreatePen(PS_SOLID, width, color);
+                    SelectObject(this.hdc, this.active_pen);
+                    return;
+                };
+
+                // Draw a line between two points
+                def line(int x1, int y1, int x2, int y2) -> void
+                {
+                    MoveToEx(this.hdc, x1, y1, (POINT*)0);
+                    LineTo(this.hdc, x2, y2);
+                    return;
+                };
+
+                // Draw a circle by bounding box center+radius
+                def circle(int cx, int cy, int r) -> void
+                {
+                    Ellipse(this.hdc, cx - r, cy - r, cx + r, cy + r);
+                    return;
+                };
+
+                // Draw an ellipse by bounding box
+                def ellipse(int x1, int y1, int x2, int y2) -> void
+                {
+                    Ellipse(this.hdc, x1, y1, x2, y2);
+                    return;
+                };
+
+                // Draw a rectangle
+                def rect(int x1, int y1, int x2, int y2) -> void
+                {
+                    Rectangle(this.hdc, x1, y1, x2, y2);
+                    return;
+                };
+
+                // Set a single pixel
+                def pixel(int x, int y, DWORD color) -> void
+                {
+                    SetPixel(this.hdc, x, y, color);
+                    return;
+                };
+
+                // Refresh bounds (call if console is resized)
+                def refresh_bounds() -> void
+                {
+                    GetClientRect(this.hwnd, this.bounds);
+                    return;
+                };
+
+                // Width and height helpers
+                def width() -> int
+                {
+                    return this.bounds.right - this.bounds.left;
+                };
+
+                def height() -> int
+                {
+                    return this.bounds.bottom - this.bounds.top;
                 };
             };
         };

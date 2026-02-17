@@ -527,13 +527,13 @@ class FluxCompiler:
                     #'libvcruntime.lib',
                     "kernel32.lib",
                     "ucrt.lib",
-                    "api-ms-win-core-shell-l1-1-0.lib",
+                    "opengl32.lib",
                     "Ws2_32.lib",
                     "shell32.lib",
                     #"libcmt.lib",
                     "msvcrt.lib",   # Optional, link with C runtime
-                    # "user32.lib",  # Uncomment only if GUI functions are used
-                    # "gdi32.lib",   # Uncomment only if drawing functions are used
+                    "user32.lib",  # Uncomment only if GUI functions are used
+                    "gdi32.lib",   # Uncomment only if drawing functions are used
                     f"/out:build\\{output_dir}\\{output_bin}"
                 ]
                 self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
@@ -571,6 +571,9 @@ class FluxCompiler:
                                 # Link only necessary libraries:
                                 "-lkernel32 "  # Windows kernel functions (CreateFile, ReadFile, etc.)
                                 "-lucrt "  # Modern C runtime (strlen, fopen, etc.)
+                                "-luser32 "
+                                "-lgdi32 "
+                                "-lopengl32 "
                                 "-llegacy_stdio_definitions "  # For stdio functions in UCRT
                                 # Alternatively for older MSVCRT:
                                 # "-lmsvcrt "  # Old C runtime (smaller but may have issues)

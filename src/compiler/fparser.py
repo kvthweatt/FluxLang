@@ -593,7 +593,6 @@ class FluxParser:
         return_type = self.type_spec()
         
         #print("GOT FUNCTION POINTER")
-        self.consume(TokenType.SEMICOLON)
         
         return FunctionPointerType(return_type, parameter_types)
 
@@ -621,6 +620,7 @@ class FluxParser:
             
             initializer = AddressOf(Identifier(func_name))
         
+        self.consume(TokenType.SEMICOLON)
         return FunctionPointerDeclaration(name, fp_type, initializer)
 
     def parameter_list(self) -> List[Parameter]:

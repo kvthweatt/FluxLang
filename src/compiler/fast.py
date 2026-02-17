@@ -2468,6 +2468,9 @@ class PointerDeref(Expression):
 class AddressOf(Expression):
     expression: Expression
 
+    def __repr__(self) -> str:
+        return f"@{self.expression}"
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Handle address of literal (integers, bools, floats, and void for now).
         # @4 @true @3.14 @void
@@ -5992,10 +5995,6 @@ class NamespaceDef(ASTNode):
         else:
             work_builder = builder
 
-        # Process extern blocks (ALWAYS global, no namespace mangling)
-        # Extern declarations are inherently global and should not be namespaced
-        for extern_block in self.extern_blocks:
-            extern_block.codegen(work_builder, module)
         # Process nested namespaces FIRST (they may contain types we need)
         for nested_ns in self.nested_namespaces:
             NamespaceTypeHandler.process_nested_namespace(self.name, nested_ns, work_builder, module)
@@ -6010,29 +6009,27 @@ class NamespaceDef(ASTNode):
                 traceback.print_exc()
                 raise
 
-        # Process extern blocks (ALWAYS global, no namespace mangling)
-        # Extern declarations are inherently global and should not be namespaced
-        for extern_block in self.extern_blocks:
-            extern_block.codegen(work_builder, module)
-
         # Process enums using NamespaceTypeHandler
         for enum in self.enums:
             NamespaceTypeHandler.process_namespace_enum(self.name, enum, work_builder, module)
 
-        # Process TYPE DEFINITIONS FIRST (before functions that might use them)
-        # Process structs using NamespaceTypeHandler
+        # Process structs first so types exist for extern parameter resolution
         for struct in self.structs:
             NamespaceTypeHandler.process_namespace_struct(self.name, struct, work_builder, module)
 
-        # Process objects using NamespaceTypeHandler
-        for obj in self.objects:
-            NamespaceTypeHandler.process_namespace_object(self.name, obj, work_builder, module)
+        # Process extern blocks after structs but before objects/functions that call them
+        for extern_block in self.extern_blocks:
+            extern_block.codegen(work_builder, module)
 
-
-        # NOW process functions (which may reference the types defined above)
+        # Process functions (which may reference types and externs defined above)
         for func in self.functions:
             NamespaceTypeHandler.process_namespace_function(
                 self.name, func, work_builder, module)
+
+        # Process objects after externs so method bodies can call extern functions
+        for obj in self.objects:
+            NamespaceTypeHandler.process_namespace_object(self.name, obj, work_builder, module)
+
 
         # Finalize static init function using NamespaceTypeHandler
         NamespaceTypeHandler.finalize_static_init(module)
