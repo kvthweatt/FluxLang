@@ -527,8 +527,9 @@ class FluxCompiler:
                     #'libvcruntime.lib',
                     "kernel32.lib",
                     "ucrt.lib",
-                    "shell32.lib",
+                    "api-ms-win-core-shell-l1-1-0.lib",
                     "Ws2_32.lib",
+                    "shell32.lib",
                     #"libcmt.lib",
                     "msvcrt.lib",   # Optional, link with C runtime
                     # "user32.lib",  # Uncomment only if GUI functions are used

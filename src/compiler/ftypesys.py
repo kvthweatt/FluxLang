@@ -433,7 +433,7 @@ class SymbolTable:
     def mangle_function_name(base_name: str, parameters: List, return_type_spec, 
                             no_mangle: bool = False) -> str:
         #print("MANGLE_FUNCTION_NAME BEFORE IF CHECK OR BASE_NAME == 'main'")
-        if no_mangle or base_name == "main":
+        if no_mangle:
             return base_name
         #print("MANGLE_FUNCTION_NAME AFTER IF CHECK OR BASE_NAME == 'main'")
         

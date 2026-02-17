@@ -2237,11 +2237,17 @@ class ArrayAccess(Expression):
         array_val = self.array.codegen(builder, module)
         
         # This happens with scalar pointer variables like `noopstr src` (byte*)
-        # which are stored as i8** but need to be loaded to i8* for array indexing
-        if (isinstance(array_val.type, ir.PointerType) and 
+        # which are stored as i8** but need to be loaded to i8* for array indexing.
+        # We must only fire for depth-1 pointers (e.g. byte* loaded as i8**) and
+        # not for depth-2+ pointers (e.g. wchar** loaded as i16**), otherwise
+        # chained subscripts like argvW[i][j] will over-load and produce a scalar.
+        _ts = getattr(array_val, '_flux_type_spec', None)
+        _depth = getattr(_ts, 'pointer_depth', 1) if _ts else 1
+        if (_depth <= 1 and
+            isinstance(array_val.type, ir.PointerType) and 
             isinstance(array_val.type.pointee, ir.PointerType) and
             not isinstance(array_val.type.pointee.pointee, ir.ArrayType)):
-            # This is T** where T is NOT an array - load to get T*
+            # This is T** where T is a non-array scalar pointer - load to get T*
             array_val = builder.load(array_val, name="ptr_loaded_for_access")
         
         # Check if this is a range expression (array slicing)
@@ -4645,9 +4651,19 @@ class FunctionDef(ASTNode):
                 if self.is_prototype:
                     # This is just another prototype/declaration - that's fine, use the existing one
                     func = existing_func
-                elif existing_func.is_declaration:
+                elif existing_func.is_declaration and len(existing_func.args) == len(self.parameters):
                     # This is providing the body for a previously declared function - that's fine
                     func = existing_func
+                elif existing_func.is_declaration and len(existing_func.args) != len(self.parameters):
+                    # Different overload sharing a mangled name (e.g. main() vs main(argc, argv))
+                    # Create a new function with a disambiguated name and register it as an overload
+                    disambig_name = f"{mangled_name}__{len(self.parameters)}args"
+                    if disambig_name in module.globals:
+                        func = module.globals[disambig_name]
+                    else:
+                        func = ir.Function(module, func_type, disambig_name)
+                    base_name = self.name.split('::')[-1] if '::' in self.name else self.name
+                    SymbolTable.register_function_overload(module, base_name, disambig_name, self.parameters, self.return_type, func)
                 else:
                     # Both existing and new are definitions - that's an error
                     raise ValueError(f"Function '{self.name}' with signature '{mangled_name}' redefined")
@@ -6122,6 +6138,16 @@ class Program(ASTNode):
         for stmt in self.statements:
             if not isinstance(stmt, UsingStatement) and not isinstance(stmt, ExternBlock) and not isinstance(stmt, NotUsingStatement):
                 stmt.codegen(builder, module)
+        
+        # Emit a stub main() if the user only defined main(argc, argv)
+        # so the linker has a no-arg entry point to satisfy FRTStartup's call
+        if "main" in module.globals:
+            main_func = module.globals["main"]
+            if isinstance(main_func, ir.Function) and main_func.is_declaration:
+                # main() was prototyped but never defined — emit empty stub
+                stub_block = main_func.append_basic_block("entry")
+                stub_builder = ir.IRBuilder(stub_block)
+                stub_builder.ret(ir.Constant(ir.IntType(32), 0))
         
         return module
 
