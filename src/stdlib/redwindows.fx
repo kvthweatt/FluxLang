@@ -433,17 +433,15 @@ namespace standard
                     RegisterClassExA(@wc);
                     
                     // Create window
-                    this.handle = CreateWindowExA(
-                        WS_EX_APPWINDOW,
-                        (LPCSTR)this.class_name,
-                        (LPCSTR)title,
-                        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-                        x, y, w, h,
-                        (HWND)0,
-                        (HMENU)0,
-                        this.instance,
-                        (void*)0
-                    );
+                    this.handle = CreateWindowExA(WS_EX_APPWINDOW,
+                                                  (LPCSTR)this.class_name,
+                                                  (LPCSTR)title,
+                                                  WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                                                  x, y, w, h,
+                                                  (HWND)0,
+                                                  (HMENU)0,
+                                                  this.instance,
+                                                  (void*)0);
                     
                     // Get device context
                     this.device_context = GetDC(this.handle);
@@ -555,12 +553,12 @@ namespace standard
                 RECT  bounds;
                 HDC   active_pen;
 
-                // Attach to the console window and grab its DC
-                def __init() -> this
+                // Attach to a Window's HDC for drawing
+                def __init(HWND hwnd, HDC hdc) -> this
                 {
-                    this.hwnd = GetConsoleWindow();
-                    this.hdc  = GetDC(this.hwnd);
-                    GetClientRect(this.hwnd, this.bounds);
+                    this.hwnd = hwnd;
+                    this.hdc  = hdc;
+                    GetClientRect(this.hwnd, @this.bounds);
                     this.active_pen = (HDC)0;
                     return this;
                 };
@@ -572,7 +570,6 @@ namespace standard
                     {
                         DeleteObject(this.active_pen);
                     };
-                    ReleaseDC(this.hwnd, this.hdc);
                     return;
                 };
 
@@ -636,7 +633,7 @@ namespace standard
                 // Refresh bounds (call if console is resized)
                 def refresh_bounds() -> void
                 {
-                    GetClientRect(this.hwnd, this.bounds);
+                    GetClientRect(this.hwnd, @this.bounds);
                     return;
                 };
 

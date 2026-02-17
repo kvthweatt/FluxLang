@@ -21,19 +21,19 @@
 - do ✅
 - elif ✅
 - else ✅
-- lext ❌ Deferred for bootsrap
 - extern ✅
 - false ✅
 - float ✅
 - for ✅
 - from ⚠️ Incomplete, implementation unfinished
 - global ✅
+- heap ✅
 - if ✅
 - import ✅
-- heap ✅
 - in ✅
 - int ✅
 - is ✅
+- lext ❌ Deferred for bootsrap
 - local ⚠️ Incomplete, implementation unfinished
 - namespace ✅
 - not ✅

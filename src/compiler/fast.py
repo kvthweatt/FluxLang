@@ -695,7 +695,18 @@ class BinaryOp(Expression):
              (isinstance(rhs.type, ir.PointerType) and isinstance(lhs.type, ir.IntType)))
         )
         
-        if not might_be_ptr_arithmetic:
+        is_comparison = self.operator in (Operator.EQUAL, Operator.NOT_EQUAL, Operator.LESS_THAN, Operator.GREATER_THAN, Operator.LESS_EQUAL, Operator.GREATER_EQUAL)
+        rhs_is_int_zero = isinstance(rhs, ir.Constant) and isinstance(rhs.type, ir.IntType) and rhs.constant == 0
+        lhs_is_int_zero = isinstance(lhs, ir.Constant) and isinstance(lhs.type, ir.IntType) and lhs.constant == 0
+        lhs_is_ptr = isinstance(lhs.type, ir.PointerType)
+        rhs_is_ptr = isinstance(rhs.type, ir.PointerType)
+
+        # Null pointer comparison: ptr == 0 or ptr != 0 â€” convert int 0 to null ptr, skip auto-deref
+        if is_comparison and lhs_is_ptr and rhs_is_int_zero:
+            rhs = ir.Constant(lhs.type, None)
+        elif is_comparison and rhs_is_ptr and lhs_is_int_zero:
+            lhs = ir.Constant(rhs.type, None)
+        elif not might_be_ptr_arithmetic:
             if isinstance(lhs.type, ir.PointerType):
                 pointee = lhs.type.pointee
                 # Only auto-load scalar types, not arrays or structs
@@ -1979,7 +1990,8 @@ class MemberAccess(Expression):
     member: str
 
     def __repr__(self) -> str:
-        return f"{self.object.name}.{self.member}"
+        obj_repr = self.object.name if isinstance(self.object, Identifier) else repr(self.object)
+        return f"{obj_repr}.{self.member}"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Handle enum member access FIRST (before trying to codegen the identifier)
@@ -2594,26 +2606,7 @@ class AddressOf(Expression):
         
         # Handle member access BEFORE calling codegen to avoid loading the value
         if isinstance(self.expression, MemberAccess):
-            obj = self.expression.object.codegen(builder, module)
-            member_name = self.expression.member
-            
-            if isinstance(obj.type, ir.PointerType) and isinstance(obj.type.pointee, ir.LiteralStructType):
-                struct_type = obj.type.pointee
-                
-                if hasattr(struct_type, 'names'):
-                    try:
-                        idx = struct_type.names.index(member_name)
-                        
-                        # Return pointer to member WITHOUT loading
-                        member_ptr = builder.gep(
-                            obj,
-                            [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), idx)],
-                            inbounds=True,
-                            name=f"ptr_to_{member_name}"
-                        )
-                        return member_ptr
-                    except ValueError:
-                        raise ValueError(f"Member '{member_name}' not found in struct")
+            return self.expression._get_member_ptr(builder, module)
         
         # Handle array access
         if isinstance(self.expression, ArrayAccess):
@@ -2905,6 +2898,24 @@ class VariableDeclaration(ASTNode):
     def _codegen_local(self, builder: ir.IRBuilder, module: ir.Module, 
                       llvm_type: ir.Type, resolved_type_spec: TypeSystem) -> ir.Value:
         """Generate code for local variable."""
+        # If this is a constructor call and llvm_type resolved to i8* (void pointer),
+        # the type was polluted by a local variable named the same as the object type.
+        # Recover the correct struct type from the constructor's this parameter.
+        if (isinstance(self.initial_value, FunctionCall) and
+                self.initial_value.name.endswith('.__init') and
+                isinstance(llvm_type, ir.PointerType) and
+                isinstance(llvm_type.pointee, ir.IntType) and
+                llvm_type.pointee.width == 8):
+            func = TypeResolver.resolve_function(module, self.initial_value.name)
+            if func is None and hasattr(module, '_using_namespaces'):
+                for namespace in module._using_namespaces:
+                    mangled = f"{namespace}__{self.initial_value.name}"
+                    func = TypeResolver.resolve_function(module, mangled)
+                    if func:
+                        break
+            if func and func.args and isinstance(func.args[0].type, ir.PointerType):
+                llvm_type = func.args[0].type.pointee
+
         # Check for VLA: type_spec says is_array with a runtime expression dimension,
         # so get_llvm_type returned PointerType(element) instead of ArrayType.
         # Use alloca with a dynamic count so the result is element* not element**.

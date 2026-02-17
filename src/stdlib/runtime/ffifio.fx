@@ -21,6 +21,8 @@ namespace standard
                     fclose(void*) -> int,
                     fread(void*, int, int, void*) -> int,
                     fwrite(void*, int, int, void*) -> int,
+                    fgets(byte*, int, void*) -> void*,
+                    sscanf(byte*, byte*, void*, void*, void*) -> int,
                     fseek(void*, int, int) -> int,
                     ftell(void*) -> int,
                     rewind(void*) -> void,
@@ -140,9 +142,5 @@ namespace standard
         };
     };
 };
-
-using standard::io::file;
-
-//#import "file_object_raw.fx";
 
 #endif;

@@ -482,7 +482,6 @@ class FluxParser:
                                             Block([]), is_const, is_volatile, True, no_mangle))
             
             self.consume(TokenType.SEMICOLON)
-            self.symbol_table.exit_scope()
             
             # Return the list of prototypes
             return prototypes
@@ -1528,6 +1527,10 @@ class FluxParser:
         return decl
     
     def variable_declaration(self) -> Union[VariableDeclaration, TypeDeclaration, List[VariableDeclaration]]:
+        # Capture the raw identifier used as a type name before alias resolution wipes custom_typename
+        raw_type_identifier = None
+        if self.expect(TokenType.IDENTIFIER):
+            raw_type_identifier = self.current_token.value
         type_spec = self.type_spec()
         
         if self.expect(TokenType.AS):
@@ -1585,6 +1588,8 @@ class FluxParser:
                 
                 if type_spec.custom_typename:
                     constructor_name = f"{type_spec.custom_typename}.__init"
+                elif raw_type_identifier is not None:
+                    constructor_name = f"{raw_type_identifier}.__init"
                 else:
                     constructor_name = type_spec.base_type.value + "__init"
                 

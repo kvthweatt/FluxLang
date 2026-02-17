@@ -30,7 +30,7 @@ namespace standard
 
                 def is_open()->bool,
                     close()->bool,
-                    size()->int,
+                    get_size()->int,
                     read_all()->string,
                     write(byte*)->int,
                     write_bytes(byte*,int)->int,
@@ -40,8 +40,9 @@ namespace standard
 
                 def __init(byte* path, byte* mode) -> this
                 {
+                    print("object instance init()\n\0");
                     this.handle = fopen(path, mode);
-                    this.size = this.size();
+                    this.size = this.get_size();
                     if (this.is_open()) { this.error_state = 0; }
                     else { this.error_state = 1; };
                     return this;
@@ -71,7 +72,7 @@ namespace standard
                 };
 
                 // Returns file size without changing current position
-                def size() -> int
+                def get_size() -> int
                 {
                     if (this.handle == 0)
                     {
@@ -93,7 +94,7 @@ namespace standard
                     // If you want it to always start from beginning:
                     // rewind(this.handle);
 
-                    int s = this.size();
+                    int s = this.get_size();
                     if (s <= 0)
                     {
                         string empty1("\0");
@@ -175,7 +176,5 @@ namespace standard
         };
     };
 };
-
-using standard::files;
 
 #endif;

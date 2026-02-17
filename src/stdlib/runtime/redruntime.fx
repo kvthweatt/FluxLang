@@ -36,17 +36,17 @@ global i64 WIN_STDOUT_HANDLE;
 #import "redio.fx";
 #endif;
 
-// Import raw functions & builtins
-//#import "string_object_raw.fx";
-//#import "file_object_raw.fx";
-//#import "socket_object_raw.fx";
-//
 // ---------------------------
 //
 // Import runtime helpers
 #import "ffifio.fx";                 // FFI-based File Input/Output (CRT)
 //
 // ---------------------------
+//
+// Import raw functions & builtins
+#import "string_object_raw.fx";
+#import "file_object_raw.fx";
+//#import "socket_object_raw.fx";
 //
 
 extern
