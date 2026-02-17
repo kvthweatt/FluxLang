@@ -76,14 +76,14 @@ class FluxParser:
         preprocessed_source = preprocessor.process()
 
         # Step 2: Lex
-        print(f"[INFO] [lexer] ► Lexical analysis")
+        print(f"[INFO] [lexer] â–º Lexical analysis")
         lexer = FluxLexer(preprocessed_source)
         tokens = lexer.tokenize()
 
         # Step 3: Create parser
-        print(f"[INFO] [parser] ► Parsing")
+        print(f"[INFO] [parser] â–º Parsing")
         parser = self(tokens)
-        print(f"[INFO] [parser] ► AST generated.")
+        print(f"[INFO] [parser] â–º AST generated.")
 
         # Expose final macro set to parser/codegen if needed
         parser._preprocessor_macros = dict(preprocessor.macros)
@@ -592,7 +592,8 @@ class FluxParser:
         self.consume(TokenType.RETURN_ARROW)
         return_type = self.type_spec()
         
-        #print("GOT FUNCTION POINTER")
+        print("GOT FUNCTION POINTER")
+        self.consume(TokenType.SEMICOLON)
         
         return FunctionPointerType(return_type, parameter_types)
 
@@ -1071,22 +1072,28 @@ class FluxParser:
                     variables.append(var_decl)
                 self.consume(TokenType.SEMICOLON)
             elif self.expect(TokenType.DEF):
-                func = self.function_def()
-                if isinstance(func, list):
-                    for f in func:
-                        functions.append(f)
+                if self.peek().type == TokenType.FUNCTION_POINTER:
+                    self.advance() #def
+                    self.advance() #{}*
+                    func_ptr = self.function_pointer_declaration()
+                    variables.append(func_ptr)
+                else:
+                    func = self.function_def()
+                    if isinstance(func, list):
+                        for f in func:
+                            functions.append(f)
+                            # CHANGED: Register with full namespace-qualified name
+                            qualified_name = f"{current_namespace}__{f.name}"
+                            self.symbol_table.define(qualified_name, SymbolKind.FUNCTION)
+                            # ALSO register the simple name for lookups within the namespace
+                            self.symbol_table.define(f.name, SymbolKind.FUNCTION)
+                    else:
+                        functions.append(func)
                         # CHANGED: Register with full namespace-qualified name
-                        qualified_name = f"{current_namespace}__{f.name}"
+                        qualified_name = f"{current_namespace}__{func.name}"
                         self.symbol_table.define(qualified_name, SymbolKind.FUNCTION)
                         # ALSO register the simple name for lookups within the namespace
-                        self.symbol_table.define(f.name, SymbolKind.FUNCTION)
-                else:
-                    functions.append(func)
-                    # CHANGED: Register with full namespace-qualified name
-                    qualified_name = f"{current_namespace}__{func.name}"
-                    self.symbol_table.define(qualified_name, SymbolKind.FUNCTION)
-                    # ALSO register the simple name for lookups within the namespace
-                    self.symbol_table.define(func.name, SymbolKind.FUNCTION)
+                        self.symbol_table.define(func.name, SymbolKind.FUNCTION)
             elif self.expect(TokenType.STRUCT):
                 struct_result = self.struct_def()
                 # Handle both single struct and list of structs (comma-separated prototypes)
@@ -1246,11 +1253,6 @@ class FluxParser:
         # Base type parsing
         base_type_result = self.base_type()
         custom_typename = None
-
-        # Handle function pointer types
-        if self.expect(TokenType.FUNCTION_POINTER):
-            self.advance()
-            return self.function_pointer_type()
 
         # Handle custom type names
         if isinstance(base_type_result, list):
@@ -1549,6 +1551,30 @@ class FluxParser:
                         initial_value.struct_type = type_spec.custom_typename
                     else:
                         self.error("Struct literal initialization requires a custom type")
+
+            # Check for comma-separated type alias declarations
+            if self.expect(TokenType.COMMA):
+                declarations = [TypeDeclaration(type_name, type_spec, initial_value)]
+                
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    alias_name = self.consume(TokenType.IDENTIFIER).value
+                    self.symbol_table.define(alias_name, SymbolKind.TYPE, type_spec)
+                    
+                    alias_value = None
+                    if self.expect(TokenType.ASSIGN):
+                        self.advance()
+                        alias_value = self.expression()
+                        
+                        if isinstance(alias_value, StructLiteral) and alias_value.struct_type is None:
+                            if type_spec.custom_typename:
+                                alias_value.struct_type = type_spec.custom_typename
+                            else:
+                                self.error("Struct literal initialization requires a custom type")
+                    
+                    declarations.append(TypeDeclaration(alias_name, type_spec, alias_value))
+                
+                return declarations
             
             return TypeDeclaration(type_name, type_spec, initial_value)
         else:

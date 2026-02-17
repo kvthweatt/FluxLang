@@ -109,6 +109,7 @@ class DataType(Enum):
     OBJECT = "object"
     VOID = "void"
     THIS = "this"
+    FUNC_PTR = "def{}*"
 
     def __str__(self) -> str:
         return self.value
