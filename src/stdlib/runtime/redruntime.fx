@@ -18,6 +18,10 @@
 #import "redtypes.fx";
 #endif;
 
+#ifdef __WINDOWS__
+global i64 WIN_STDOUT_HANDLE;
+#endif;
+
 #ifndef FLUX_STANDARD_MEMORY
 #import "redmemory.fx";             // FFI-based Memory Operations (CRT)
 #endif;
@@ -48,6 +52,7 @@
 extern
 {
     def !!
+        GetStdHandle(int nStdHandle) -> i64,
         GetCommandLineW() -> wchar*,
         LocalFree(void* x) -> void*,
         exit(int code) -> void,
@@ -86,6 +91,10 @@ def !!FRTStartup() -> int
         #ifdef __WINDOWS__
         case (1)
         {
+            // Initialize stdout handle for win_print
+            WIN_STDOUT_HANDLE = GetStdHandle(-11);
+            //print("STDOUT: \0"); print(WIN_STDOUT_HANDLE); print();
+
             // Parse command line manually from GetCommandLineW
             wchar* cmdLine = GetCommandLineW();
 

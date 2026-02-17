@@ -1448,7 +1448,11 @@ TypeSystem(base_type:     {self.base_type}\n\
 
         if type_spec.is_pointer:
             if type_spec.base_type == DataType.VOID or type_spec.base_type == DataType.STRUCT:
-                element_type = ir.PointerType(ir.IntType(8))
+                # Start from i8 and apply pointer_depth wraps so void* = i8*, void** = i8**, etc.
+                depth = type_spec.pointer_depth if hasattr(type_spec, "pointer_depth") and type_spec.pointer_depth else 1
+                element_type = ir.IntType(8)
+                for _ in range(depth):
+                    element_type = ir.PointerType(element_type)
             else:
                 # Apply pointer depth to get element type
                 # For noopstr (byte*), pointer_depth=1, so element_type = i8*
@@ -3744,7 +3748,7 @@ class EndianSwapHandler:
 
     A swap is needed when source_endian != target_endian and the value
     is an integer type wide enough to have a meaningful byte order
-    (i.e. at least 16 bits ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â bswap on i8 is a no-op and LLVM rejects it).
+    (i.e. at least 16 bits ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â bswap on i8 is a no-op and LLVM rejects it).
 
     The swap is always performed on the source value BEFORE it is stored,
     so arithmetic can be done freely in native byte order and the boundary
@@ -3786,7 +3790,7 @@ class EndianSwapHandler:
         """
         Emit an llvm.bswap intrinsic call for the given integer value.
         Returns the byte-swapped value. Only valid for i16, i32, i64 (and
-        other even-byte-width integer types ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â LLVM requires width % 16 == 0).
+        other even-byte-width integer types ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â LLVM requires width % 16 == 0).
         """
         if not isinstance(val.type, ir.IntType):
             return val  # Can't bswap non-integers; caller should guard this
@@ -3828,7 +3832,7 @@ class EndianSwapHandler:
         if src_endian == tgt_endian:
             return val  # Same endianness
 
-        # Endianness mismatch ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â emit bswap
+        # Endianness mismatch ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â emit bswap
         swapped = EndianSwapHandler.emit_bswap(builder, module, val)
 
         # Propagate type metadata but flip the endianness to match target
@@ -4220,6 +4224,14 @@ class AssignmentTypeHandler:
                 zero_idx = ir.Constant(ir.IntType(32), 0)
                 val = builder.gep(val, [zero_idx, zero_idx], inbounds=True, name="str_to_ptr")
             
+            # Handle type mismatch: if val is a pointer but element_type is not (or vice versa),
+            # bitcast elem_ptr so the store is valid.
+            if isinstance(val.type, ir.PointerType) and not isinstance(element_type, ir.PointerType):
+                elem_ptr = builder.bitcast(elem_ptr, ir.PointerType(val.type), name="void_arr_elem_ptr")
+            elif isinstance(val.type, ir.PointerType) and isinstance(element_type, ir.PointerType):
+                if val.type != element_type:
+                    val = builder.bitcast(val, element_type, name="ptr_cast")
+            
             builder.store(val, elem_ptr)
             return val
         elif isinstance(array.type, ir.PointerType):
@@ -4254,6 +4266,12 @@ class AssignmentTypeHandler:
             if isinstance(val.type, ir.PointerType) and isinstance(element_type, ir.PointerType):
                 if val.type != element_type:
                     val = builder.bitcast(val, element_type, name="ptr_cast")
+            
+            # Handle void** case: array was over-loaded from T** to T*, so element_type
+            # ended up as T (e.g. i8) but val is actually a pointer (e.g. i8*).
+            # Bitcast elem_ptr to val.type* so the store matches.
+            if isinstance(val.type, ir.PointerType) and not isinstance(element_type, ir.PointerType):
+                elem_ptr = builder.bitcast(elem_ptr, ir.PointerType(val.type), name="void_arr_elem_ptr")
             
             # Note: val is already generated in the caller, so we just use it directly
             # No type conversion needed - LLVM handles compatible pointer types

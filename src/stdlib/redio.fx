@@ -149,14 +149,8 @@ namespace standard
             {
                 volatile asm
                 {
-                    // HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE = -11)
-                    movq $$-11, %rcx
-                    subq $$32, %rsp
-                    call GetStdHandle
-                    addq $$32, %rsp
-
-                    // BOOL ok = WriteFile(h, msg, x, NULL, NULL)
-                    movq %rax, %rcx         // RCX = handle (from GetStdHandle)
+                    // BOOL ok = WriteFile(WIN_STDOUT_HANDLE, msg, x, NULL, NULL)
+                    movq $2, %rcx           // RCX = WIN_STDOUT_HANDLE (operand 2)
                     movq $0, %rdx           // RDX = lpBuffer (operand 0 = msg)
                     movl $1, %r8d           // R8D = nNumberOfBytesToWrite (operand 1 = x, DWORD)
                     xorq %r9, %r9           // R9 = lpNumberOfBytesWritten = NULL
@@ -164,7 +158,7 @@ namespace standard
                     movq %r9, 32(%rsp)      // *(rsp+32) = lpOverlapped = NULL
                     call WriteFile
                     addq $$40, %rsp
-                } : : "r"(msg), "r"(x) : "rax","rcx","rdx","r8","r9","r10","r11","memory";
+                } : : "r"(msg), "r"(x), "r"(WIN_STDOUT_HANDLE) : "rax","rcx","rdx","r8","r9","r10","r11","memory";
                 return;
             };
 

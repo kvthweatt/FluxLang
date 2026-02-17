@@ -1009,6 +1009,9 @@ class UnaryOp(Expression):
                 st = builder.store(new_val, ptr)
                 if hasattr(builder,'volatile_vars') and self.operand.name in builder.volatile_vars:
                     st.volatile = True
+            elif isinstance(self.operand, MemberAccess):
+                ptr = self.operand._get_member_ptr(builder, module)
+                builder.store(new_val, ptr)
             return new_val if not self.is_postfix else operand_val
         elif self.operator == Operator.DECREMENT:
             # Handle both prefix and postfix decrement
@@ -1032,6 +1035,9 @@ class UnaryOp(Expression):
                 st = builder.store(new_val, ptr)
                 if hasattr(builder,'volatile_vars') and self.operand.name in builder.volatile_vars:
                     st.volatile = True
+            elif isinstance(self.operand, MemberAccess):
+                ptr = self.operand._get_member_ptr(builder, module)
+                builder.store(new_val, ptr)
             return new_val if not self.is_postfix else operand_val
         elif self.operator == Operator.BITNOT:
             # Bitwise NOT
@@ -2066,6 +2072,22 @@ class MemberAccess(Expression):
         
         raise ValueError(f"Member access on unsupported type: {obj_val.type}")
     
+    def _get_member_ptr(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Return the GEP pointer to the member without loading it. Used by ++ and --."""
+        obj_val = self.object.codegen(builder, module)
+        if (isinstance(self.object, Identifier) and self.object.name == "this" and
+                MemberAccessTypeHandler.is_this_double_pointer(obj_val)):
+            obj_val = builder.load(obj_val, name="this_ptr")
+        if isinstance(obj_val.type, ir.PointerType) and MemberAccessTypeHandler.is_struct_pointer(obj_val.type):
+            struct_type = obj_val.type.pointee
+            member_index = MemberAccessTypeHandler.get_member_index(struct_type, self.member)
+            return builder.gep(
+                obj_val,
+                [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), member_index)],
+                inbounds=True
+            )
+        raise ValueError(f"Cannot get member pointer for: {obj_val.type}")
+
     def _handle_union_member_access(self, builder: ir.IRBuilder, module: ir.Module, union_ptr: ir.Value, union_name: str) -> ir.Value:
         """Handle union member access by casting the union to the appropriate member type"""
         # Get union member information
@@ -5830,14 +5852,16 @@ class ObjectDef(ASTNode):
                 self.name, method.name, method, struct_type, module)
             func = ObjectTypeHandler.predeclare_method(func_type, func_name, method, module)
 
-            method_funcs[method.name] = func
+            method_funcs[func_name] = func
 
         # --- PASS 2: Emit method bodies (skip prototypes) ---
         for method in self.methods:
             if isinstance(method, FunctionDef) and method.is_prototype:
                 continue
 
-            func = method_funcs.get(method.name)
+            _, func_name = ObjectTypeHandler.create_method_signature(
+                self.name, method.name, method, struct_type, module)
+            func = method_funcs.get(func_name)
             if func is None:
                 raise RuntimeError(f"Internal error: missing function for method {method.name}")
         
