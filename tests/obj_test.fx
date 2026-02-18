@@ -1,46 +1,23 @@
 #import "standard.fx";
 
-object myObj
+object test
 {
-	int x;
+    def __init() -> this
+    {
+        return this;
+    };
 
-	def __init() -> this
-	{
-        print("Hello from myObj.__init()!\n\0");
-        this.x = 5;
-		return this;
-	};
+    def __exit() -> void { (void)this; };
 
-	def __exit() -> void
-	{
-        print("Killing myObj instance...\n\0");
-        (void)(@)*(void*)@(*this); // Failed runtime free
-		return;
-	};
-
-	def get() -> int
-	{
-        print("Getting this.x\n\0");
-        int y = this.x;
-        print("Got this.x!\n\0");
-		return y;
-	};
+    def pv() -> void { print("TEST\n\0"); };
 };
 
 def main() -> int
 {
-	myObj newObj();
+    test t();
 
-	int y = newObj.get();
+    t.__exit();
 
-	newObj.__exit();
-
-	if (y == 5) // Should fail but does not.
-	{
-		print("Success!\n\0");
-        newObj.__exit();
-	};
-    //(void)newObj;
-
-	return 0;
+    t.pv();
+    return 0;
 };

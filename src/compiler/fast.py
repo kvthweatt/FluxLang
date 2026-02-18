@@ -2263,7 +2263,35 @@ class MethodCall(Expression):
 
             args.append(arg_val)
 
-        return builder.call(func, args)
+        result = builder.call(func, args)
+
+        if self.method_name == '__exit':
+            # Zero the object's memory at runtime so any subsequent access through any
+            # pointer to this object crashes naturally - the object is truly destroyed.
+            i8_ptr_type = ir.PointerType(ir.IntType(8))
+            raw_ptr = builder.bitcast(this_ptr, i8_ptr_type, name="exit_raw_ptr")
+            struct_ty = this_ptr.type.pointee
+            byte_size = SizeOfTypeHandler.bits_from_llvm_type(struct_ty, module)
+            if byte_size is None:
+                byte_size = 8
+            else:
+                byte_size = max(1, byte_size // 8)
+            size_val = ir.Constant(ir.IntType(64), byte_size)
+            memset_fn = module.globals.get('llvm.memset.p0i8.i64')
+            if memset_fn is None:
+                memset_type = ir.FunctionType(
+                    ir.VoidType(),
+                    [i8_ptr_type, ir.IntType(8), ir.IntType(64), ir.IntType(1)]
+                )
+                memset_fn = ir.Function(module, memset_type, 'llvm.memset.p0i8.i64')
+            builder.call(memset_fn, [
+                raw_ptr,
+                ir.Constant(ir.IntType(8), 0),
+                size_val,
+                ir.Constant(ir.IntType(1), 0)
+            ])
+
+        return result
 
 @dataclass
 class ArrayAccess(Expression):
