@@ -101,37 +101,6 @@ namespace standard
                 BYTE[32] rgbReserved; // 32 bytes, offset 40
             };            // total = 72 bytes
 
-            // PIXELFORMATDESCRIPTOR for OpenGL
-            struct PIXELFORMATDESCRIPTOR
-            {
-                WORD nSize,
-                     nVersion;
-                DWORD dwFlags;
-                BYTE iPixelType,
-                     cColorBits,
-                     cRedBits,
-                     cRedShift,
-                     cGreenBits,
-                     cGreenShift,
-                     cBlueBits,
-                     cBlueShift,
-                     cAlphaBits,
-                     cAlphaShift,
-                     cAccumBits,
-                     cAccumRedBits,
-                     cAccumGreenBits,
-                     cAccumBlueBits,
-                     cAccumAlphaBits,
-                     cDepthBits,
-                     cStencilBits,
-                     cAuxBuffers,
-                     iLayerType,
-                     bReserved;
-                DWORD dwLayerMask,
-                      dwVisibleMask,
-                      dwDamageMask;
-            };
-
             // ============================================================================
             // WIN32 CONSTANTS
             // ============================================================================
@@ -228,13 +197,6 @@ namespace standard
                        VK_UP     = 0x26,
                        VK_RIGHT  = 0x27,
                        VK_DOWN   = 0x28;
-
-            // Pixel Format Descriptor flags
-            global DWORD PFD_DRAW_TO_WINDOW = 0x00000004,
-                         PFD_SUPPORT_OPENGL = 0x00000020,
-                         PFD_DOUBLEBUFFER   = 0x00000001;
-            global BYTE PFD_TYPE_RGBA  = 0,
-                        PFD_MAIN_PLANE = 0;
 
             // Pen styles (CreatePen)
             global int PS_SOLID      = 0,
@@ -333,15 +295,7 @@ namespace standard
                 
                 // Cursor and Icon
                     LoadCursorA(HINSTANCE, LPCSTR) -> HCURSOR,
-                    LoadIconA(HINSTANCE, LPCSTR) -> HICON,
-                
-                // OpenGL Context functions
-                    ChoosePixelFormat(HDC, PIXELFORMATDESCRIPTOR*) -> int,
-                    SetPixelFormat(HDC, int, PIXELFORMATDESCRIPTOR*) -> bool,
-                    wglCreateContext(HDC) -> HGLRC,
-                    wglMakeCurrent(HDC, HGLRC) -> bool,
-                    wglDeleteContext(HGLRC) -> bool,
-                    SwapBuffers(HDC) -> bool;
+                    LoadIconA(HINSTANCE, LPCSTR) -> HICON;
             };
 
             // ============================================================================
@@ -448,7 +402,7 @@ namespace standard
                                                   (HWND)0,
                                                   (HMENU)0,
                                                   this.instance,
-                                                  (void*)0);
+                                                  STDLIB_GVP);
                     
                     // Get device context
                     this.device_context = GetDC(this.handle);
@@ -520,34 +474,6 @@ namespace standard
                     return true;
                 };
                 
-                // Setup OpenGL context
-                def setup_opengl() -> HGLRC
-                {
-                    PIXELFORMATDESCRIPTOR pfd;
-                    pfd.nSize = (WORD)(sizeof(PIXELFORMATDESCRIPTOR) / 8); // sizeof returns bits, nSize needs bytes
-                    pfd.nVersion = 1;
-                    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
-                    pfd.iPixelType = PFD_TYPE_RGBA;
-                    pfd.cColorBits = 32;
-                    pfd.cDepthBits = 24;
-                    pfd.cStencilBits = 8;
-                    pfd.iLayerType = PFD_MAIN_PLANE;
-                    
-                    int pixel_format = ChoosePixelFormat(this.device_context, @pfd);
-                    SetPixelFormat(this.device_context, pixel_format, @pfd);
-                    
-                    HGLRC gl_context = wglCreateContext(this.device_context);
-                    wglMakeCurrent(this.device_context, gl_context);
-                    
-                    return gl_context;
-                };
-                
-                // Swap buffers (for OpenGL double buffering)
-                def swap_buffers() -> void
-                {
-                    SwapBuffers(this.device_context);
-                    return;
-                };
             };
             // ============================================================================
             // CANVAS - GDI drawing surface over the console window

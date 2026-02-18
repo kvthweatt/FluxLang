@@ -1,6 +1,6 @@
 #import "standard.fx";
 #import "redmath.fx";
-#import "redwindows.fx";
+#import "redopengl.fx";
 
 using standard::system::windows;
 using standard::math;
@@ -214,7 +214,7 @@ Usage: wireframe <file>.obj\n\0");
 
     //dc_enum dce;
 
-    DWORD[4] draw_colors = [RGB(0, 0, 0),   // Black
+    DWORD[4] draw_colors = [RGB(  0, 0, 0), // Black
                             RGB(255, 0, 0), // Red
                             RGB(0, 255, 0), // Green
                             RGB(0, 0, 255)  // Blue

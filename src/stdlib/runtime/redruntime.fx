@@ -1,3 +1,5 @@
+global void* STDLIB_GVP = (void*)@0;
+
 #ifndef FLUX_STANDARD
 #def FLUX_STANDARD 1;
 #endif;
