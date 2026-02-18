@@ -36,27 +36,3 @@ def myFunc<T>() -> void;
 
 operator<T>(T L, T R)[==] -> T;
 ```
-
----
-
-## Traits
-Traits are contracts imposed on objects dictating they __must__ implement the defined prototypes.
-```
-trait Drawable
-{
-	def draw() -> void;
-};
-
-
-// Implementation
-Drawable object myObj
-{
-	def draw() -> void
-	{
-		// Implementation code, if the block is empty the compiler throws an error.
-		return void;
-	};
-
-	// ... other methods ...
-};
-```
