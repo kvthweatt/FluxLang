@@ -12,12 +12,8 @@ namespace standard
 {
     namespace strings
     {
-        object string
+        trait BaseOOPStringTraits
         {
-            noopstr value;
-            int length;
-
-            // ===== PROTOTYPES =====
             def val() -> byte*,
                 len() -> int,
                 set(byte*) -> bool,
@@ -33,12 +29,12 @@ namespace standard
                 contains(byte*) -> bool,
                 startswith(byte*) -> bool,
                 endswith(byte*) -> bool,
-                indexof(byte*) -> int,
-                lastindexof(byte*) -> int,
+                //indexof(byte*) -> int,
+                //lastindexof(byte*) -> int,
                 indexof_char(char) -> int,
-                lastindexof_char(char) -> int,
-                count_occurrences(byte*) -> int,
-                count_spaces() -> int, // count_occurances(" \0")
+                //lastindexof_char(char) -> int,
+                //count_occurrences(byte*) -> int,
+                //count_spaces() -> int, // count_occurances(" \0")
                 
                 // Character access
                 charat(int) -> char,
@@ -81,8 +77,8 @@ namespace standard
                 isalpha() -> bool,
                 isdigit() -> bool,
                 isalnum() -> bool,
-                isupper() -> bool,
-                islower() -> bool,
+                //isupper() -> bool,
+                //islower() -> bool,
                 
                 // Conversion
                 toint() -> int,
@@ -103,6 +99,12 @@ namespace standard
                 hash() -> int,
                 printval() -> void,
                 println() -> void;
+        };
+        
+        BaseOOPStringTraits object string
+        {
+            noopstr value;
+            int length;
 
             // ===== CONSTRUCTOR & DESTRUCTOR =====
             def __init(byte* x) -> this
@@ -324,7 +326,6 @@ namespace standard
                 return replace_first(this.value, find, replace);
             };
 
-
             def replace_all(byte* find, byte* replace) -> byte*
             {
                 // Replace all occurrences
@@ -360,7 +361,6 @@ namespace standard
 
                 return result;
             };
-
 
             def replace_char(char oldch, char newch) -> bool
             {

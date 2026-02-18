@@ -7,15 +7,6 @@ using standard::system::windows;
 using standard::math;
 
 // ============================================================================
-// C runtime FFI
-// ============================================================================
-extern
-{
-    def !!
-        Sleep(u32) -> void;
-};
-
-// ============================================================================
 // TYPES
 // ============================================================================
 
@@ -221,13 +212,13 @@ def main(int argc, byte** argv) -> int
 {
     const int WIN_WIDTH  = 1280,
               WIN_HEIGHT = 720,
-              LINE_WIDTH = 2,
+              LINE_WIDTH = 1,
               SLEEP_MS   = 5,
               NUM_SHAPES = 4;
 
     const float CAM_FOV  = 600.0,
                 CAM_DIST = 3.0,
-                PAN_SPEED = 0.006;
+                PAN_SPEED = 0.01;
 
     Shape[4] shapes;
 
@@ -254,7 +245,7 @@ def main(int argc, byte** argv) -> int
                        RGB(255, 210,  50)
                       ];
 
-    DWORD bg_color = RGB(8, 8, 18);
+    DWORD bg_color = RGB(25, 25, 25);
 
     Window win("Flux 3D Panorama\0", WIN_WIDTH, WIN_HEIGHT, CW_USEDEFAULT, CW_USEDEFAULT);
     SetForegroundWindow(win.handle);

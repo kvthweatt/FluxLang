@@ -51,6 +51,10 @@ global i64 WIN_STDOUT_HANDLE;
 //#import "socket_object_raw.fx";
 //
 
+#ifndef FLUX_STANDARD_COLLECTIONS
+//#import "redcollections.fx";
+#endif;
+
 extern
 {
 #ifdef __WINDOWS__
@@ -62,12 +66,14 @@ extern
 #ifdef __LINUX__
     def !!
         exit(int code) -> void,
-        abort() -> void;
+        abort() -> void,
+        atexit(void*) -> int;
 #endif;
 #ifdef __MACOS__
     def !!
         exit(int code) -> void,
-        abort() -> void;
+        abort() -> void,
+        atexit(void*) -> int;
 #endif;
 };
 

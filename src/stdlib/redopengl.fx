@@ -126,7 +126,7 @@ unsigned data{16} as GLushort;   // Unsigned 16-bit
 signed   data{32} as GLint;      // Signed 32-bit
 unsigned data{32} as GLuint;     // Unsigned 32-bit (handles: textures, VBOs, VAOs, shaders, programs)
 signed   data{32} as GLsizei;    // Size parameter (non-negative)
-u64              as GLfloat;     // 32-bit float (mapped via u64 placeholder like redtypes.fx)
+float            as GLfloat;     // 32-bit float (mapped via u64 placeholder like redtypes.fx)
 u64              as GLdouble;    // 64-bit double
 u64              as GLclampf;    // float clamped [0,1]
 

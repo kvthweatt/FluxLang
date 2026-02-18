@@ -18,6 +18,7 @@ global const int OS_MACOS = 3;
 extern
 {
     def !!
+        Sleep(u32) -> void,
         system(byte*) -> int;
 };
 #endif;

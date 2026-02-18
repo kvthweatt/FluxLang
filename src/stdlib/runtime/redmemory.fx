@@ -20,19 +20,17 @@ extern
         memcpy(void*, void*, size_t) -> void*,
         memmove(void*, void*, size_t) -> void*,
         memset(void*, int, size_t) -> void*,
-        memcmp(void*, void*, size_t) -> int,
-        abort() -> void,
-        exit(int) -> void,
-        atexit(void*) -> int;
+        memcmp(void*, void*, size_t) -> int;
 };
 
-#ifndef FLUX_STANDARD_MEMORY_MANAGEMENT
-#def FLUX_STANDARD_MEMORY_MANAGEMENT 1;
-///
+#ifndef FLUX_STANDARD_MEMORY
+#def FLUX_STANDARD_MEMORY 1;
+
 namespace standard
 {
     namespace memory
     {
+///
         // ===== MEMORY BLOCK HEADER =====
         struct MemoryBlockHeader
         {
@@ -470,7 +468,7 @@ namespace standard
                 return this.total_allocated;
             };
         };
-        
+
         // ===== MEMORY UTILITIES =====
         
         def mem_zero(void* ptr, size_t size) -> void
@@ -710,9 +708,48 @@ namespace standard
                 buffer[i] = (byte)0;
             };
         };
+
+        def memcpy(void* dst, void* src, size_t n) -> void*
+        {
+            byte* d = (byte*)dst;
+            byte* s = (byte*)src;
+            size_t i = (size_t)0;
+            while (i < n)
+            {
+                d[i] = s[i];
+                i++;
+            };
+            return dst;
+        };
+
+        def memmove(void* dst, void* src, size_t n) -> void*
+        {
+            byte* d = (byte*)dst;
+            byte* s = (byte*)src;
+            size_t i = (size_t)0;
+            if (d < s)
+            {
+                while (i < n)
+                {
+                    d[i] = s[i];
+                    i++;
+                };
+            }
+            else
+            {
+                i = n;
+                while (i > (size_t)0)
+                {
+                    i--;
+                    d[i] = s[i];
+                };
+            };
+            return dst;
+        };
+///
     };
 };
-///
-using standard::memory;
+
+//using standard::memory;
 
 #endif;
