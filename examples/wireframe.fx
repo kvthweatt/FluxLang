@@ -139,6 +139,17 @@ def main(int argc, byte** argv) -> int
     Mesh mesh;
     bool loaded;
 
+    const int LINE_WIDTH = 2,     // Pixels
+              SLEEP_MS   = 5,
+              WIN_WIDTH  = 1280,
+              WIN_HEIGHT = 1024,
+              RED =   0,
+              GREEN = 0,
+              BLUE =  255;
+
+    const float CAM_FOV  = 360.0,
+                CAM_Z    = 2.5;     // Distance from origin
+
     if (argc == 2)
     {
         loaded = load_obj(@argv[1], @mesh);
@@ -149,17 +160,17 @@ def main(int argc, byte** argv) -> int
 Usage: wireframe <file>.obj\n\0");
         loaded = false;
     };
-    Window win("Flux 3D Wireframe\0", 900, 700, CW_USEDEFAULT, CW_USEDEFAULT);
+    Window win("Flux 3D Wireframe\0", WIN_WIDTH, WIN_HEIGHT, CW_USEDEFAULT, CW_USEDEFAULT);
     SetForegroundWindow(win.handle);
 
     if (!loaded)
     {
         print("Falling back to spinning cube ...\n\0");
         // Fallback: spinning cube
-        mesh.verts      = (Vec3*)malloc((u64)8  * 12);
-        mesh.faces      = (Face*)malloc((u64)12 * 12);
         mesh.vert_count = 8;
         mesh.face_count = 12;
+        mesh.verts      = (Vec3*)malloc((u64)8  * 12);
+        mesh.faces      = (Face*)malloc((u64)12 * 12);
 
         mesh.verts[0].x = -1.0; mesh.verts[0].y = -1.0; mesh.verts[0].z = -1.0;
         mesh.verts[1].x =  1.0; mesh.verts[1].y = -1.0; mesh.verts[1].z = -1.0;
@@ -188,13 +199,29 @@ Usage: wireframe <file>.obj\n\0");
 
     float angle_x = 0.0;
     float angle_y = 0.0;
-    float fov     = 400.0;
-    float cam_z   = 4.0;
-    int   cx      = 450;
-    int   cy      = 350;
+    float fov     = CAM_FOV;
+    float cam_z   = CAM_Z;
+    int   cx      = WIN_WIDTH / 2;
+    int   cy      = WIN_HEIGHT / 2;
 
-    DWORD green = RGB(0, 255, 0);
-    DWORD black = RGB(0, 0, 0);
+    enum dc_enum
+    {
+        BLACK,
+        RED,
+        GREEN,
+        BLUE
+    };
+
+    //dc_enum dce;
+
+    DWORD[4] draw_colors = [RGB(0, 0, 0),   // Black
+                            RGB(255, 0, 0), // Red
+                            RGB(0, 255, 0), // Green
+                            RGB(0, 0, 255)  // Blue
+                           ];
+
+    DWORD draw_color = draw_colors[dc_enum.BLUE];
+    DWORD bg_color = draw_colors[dc_enum.BLACK];
 
     while (win.process_messages())
     {
@@ -217,8 +244,8 @@ Usage: wireframe <file>.obj\n\0");
         };
 
         Canvas c(win.handle, win.device_context);
-        c.clear(black);
-        c.set_pen(green, 1);
+        c.clear(bg_color);
+        c.set_pen(draw_color, LINE_WIDTH);
 
         int fi = 0;
         while (fi < mesh.face_count)
@@ -235,7 +262,7 @@ Usage: wireframe <file>.obj\n\0");
         angle_x = angle_x + 0.014;
         angle_y = angle_y + 0.020;
 
-        Sleep(16);
+        Sleep(SLEEP_MS);
     };
 
     free(proj);

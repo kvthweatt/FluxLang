@@ -137,116 +137,116 @@ namespace standard
             // ============================================================================
 
             // Window Styles (WS_*)
-            global DWORD WS_OVERLAPPED = 0x00000000,
-                         WS_POPUP = 0x80000000,
-                         WS_CHILD = 0x40000000,
-                         WS_MINIMIZE = 0x20000000,
-                         WS_VISIBLE = 0x10000000,
-                         WS_DISABLED = 0x08000000,
-                         WS_CLIPSIBLINGS = 0x04000000,
-                         WS_CLIPCHILDREN = 0x02000000,
-                         WS_MAXIMIZE = 0x01000000,
-                         WS_CAPTION = 0x00C00000,
-                         WS_BORDER = 0x00800000,
-                         WS_DLGFRAME = 0x00400000,
-                         WS_VSCROLL = 0x00200000,
-                         WS_HSCROLL = 0x00100000,
-                         WS_SYSMENU = 0x00080000,
-                         WS_THICKFRAME = 0x00040000,
-                         WS_GROUP = 0x00020000,
-                         WS_TABSTOP = 0x00010000,
-                         WS_MINIMIZEBOX = 0x00020000,
-                         WS_MAXIMIZEBOX = 0x00010000,
+            global DWORD WS_OVERLAPPED       = 0x00000000,
+                         WS_POPUP            = 0x80000000,
+                         WS_CHILD            = 0x40000000,
+                         WS_MINIMIZE         = 0x20000000,
+                         WS_VISIBLE          = 0x10000000,
+                         WS_DISABLED         = 0x08000000,
+                         WS_CLIPSIBLINGS     = 0x04000000,
+                         WS_CLIPCHILDREN     = 0x02000000,
+                         WS_MAXIMIZE         = 0x01000000,
+                         WS_CAPTION          = 0x00C00000,
+                         WS_BORDER           = 0x00800000,
+                         WS_DLGFRAME         = 0x00400000,
+                         WS_VSCROLL          = 0x00200000,
+                         WS_HSCROLL          = 0x00100000,
+                         WS_SYSMENU          = 0x00080000,
+                         WS_THICKFRAME       = 0x00040000,
+                         WS_GROUP            = 0x00020000,
+                         WS_TABSTOP          = 0x00010000,
+                         WS_MINIMIZEBOX      = 0x00020000,
+                         WS_MAXIMIZEBOX      = 0x00010000,
                          WS_OVERLAPPEDWINDOW = 0x00CF0000; // WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
 
             // Extended Window Styles (WS_EX_*)
             global DWORD WS_EX_DLGMODALFRAME = 0x00000001,
-                         WS_EX_TOPMOST = 0x00000008,
-                         WS_EX_ACCEPTFILES = 0x00000010,
-                         WS_EX_TRANSPARENT = 0x00000020,
-                         WS_EX_CLIENTEDGE = 0x00000200,
-                         WS_EX_APPWINDOW = 0x00040000;
+                         WS_EX_TOPMOST       = 0x00000008,
+                         WS_EX_ACCEPTFILES   = 0x00000010,
+                         WS_EX_TRANSPARENT   = 0x00000020,
+                         WS_EX_CLIENTEDGE    = 0x00000200,
+                         WS_EX_APPWINDOW     = 0x00040000;
 
             // Window Class Styles (CS_*)
             global UINT CS_VREDRAW = 0x0001,
                         CS_HREDRAW = 0x0002,
-                        CS_OWNDC = 0x0020;
+                        CS_OWNDC   = 0x0020;
 
             // ShowWindow Commands (SW_*)
-            global int SW_HIDE = 0,
-                       SW_SHOWNORMAL = 1,
-                       SW_NORMAL = 1,
-                       SW_SHOWMINIMIZED = 2,
-                       SW_SHOWMAXIMIZED = 3,
-                       SW_MAXIMIZE = 3,
-                       SW_SHOWNOACTIVATE = 4,
-                       SW_SHOW = 5,
-                       SW_MINIMIZE = 6,
+            global int SW_HIDE            = 0,
+                       SW_SHOWNORMAL      = 1,
+                       SW_NORMAL          = 1,
+                       SW_SHOWMINIMIZED   = 2,
+                       SW_SHOWMAXIMIZED   = 3,
+                       SW_MAXIMIZE        = 3,
+                       SW_SHOWNOACTIVATE  = 4,
+                       SW_SHOW            = 5,
+                       SW_MINIMIZE        = 6,
                        SW_SHOWMINNOACTIVE = 7,
-                       SW_SHOWNA = 8,
-                       SW_RESTORE = 9;
+                       SW_SHOWNA          = 8,
+                       SW_RESTORE         = 9;
 
             // Window Messages (WM_*)
-            global UINT WM_NULL = 0x0000,
-                        WM_CREATE = 0x0001,
-                        WM_DESTROY = 0x0002,
-                        WM_MOVE = 0x0003,
-                        WM_SIZE = 0x0005,
-                        WM_ACTIVATE = 0x0006,
-                        WM_PAINT = 0x000F,
-                        WM_ERASEBKGND = 0x0014,
-                        WM_CLOSE = 0x0010,
-                        WM_QUIT = 0x0012,
-                        WM_KEYDOWN = 0x0100,
-                        WM_KEYUP = 0x0101,
-                        WM_CHAR = 0x0102,
-                        WM_MOUSEMOVE = 0x0200,
+            global UINT WM_NULL        = 0x0000,
+                        WM_CREATE      = 0x0001,
+                        WM_DESTROY     = 0x0002,
+                        WM_MOVE        = 0x0003,
+                        WM_SIZE        = 0x0005,
+                        WM_ACTIVATE    = 0x0006,
+                        WM_PAINT       = 0x000F,
+                        WM_ERASEBKGND  = 0x0014,
+                        WM_CLOSE       = 0x0010,
+                        WM_QUIT        = 0x0012,
+                        WM_KEYDOWN     = 0x0100,
+                        WM_KEYUP       = 0x0101,
+                        WM_CHAR        = 0x0102,
+                        WM_MOUSEMOVE   = 0x0200,
                         WM_LBUTTONDOWN = 0x0201,
-                        WM_LBUTTONUP = 0x0202,
+                        WM_LBUTTONUP   = 0x0202,
                         WM_RBUTTONDOWN = 0x0204,
-                        WM_RBUTTONUP = 0x0205;
+                        WM_RBUTTONUP   = 0x0205;
 
             // PeekMessage flags (PM_*)
             global UINT PM_NOREMOVE = 0x0000,
-                        PM_REMOVE = 0x0001,
-                        PM_NOYIELD = 0x0002;
+                        PM_REMOVE   = 0x0001,
+                        PM_NOYIELD  = 0x0002;
 
             // GetStockObject constants
-            global int NULL_BRUSH = 5,
+            global int NULL_BRUSH  = 5,
                        WHITE_BRUSH = 0,
                        BLACK_BRUSH = 4,
                        BLACK_BRUSH = 4,
-                       NULL_PEN = 8;
+                       NULL_PEN    = 8;
 
             // CW_USEDEFAULT
             global int CW_USEDEFAULT = 0x80000000;
 
             // Virtual Key Codes
             global int VK_ESCAPE = 0x1B,
-                       VK_SPACE = 0x20,
-                       VK_LEFT = 0x25,
-                       VK_UP = 0x26,
-                       VK_RIGHT = 0x27,
-                       VK_DOWN = 0x28;
+                       VK_SPACE  = 0x20,
+                       VK_LEFT   = 0x25,
+                       VK_UP     = 0x26,
+                       VK_RIGHT  = 0x27,
+                       VK_DOWN   = 0x28;
 
             // Pixel Format Descriptor flags
             global DWORD PFD_DRAW_TO_WINDOW = 0x00000004,
                          PFD_SUPPORT_OPENGL = 0x00000020,
-                         PFD_DOUBLEBUFFER = 0x00000001;
-            global BYTE PFD_TYPE_RGBA = 0,
+                         PFD_DOUBLEBUFFER   = 0x00000001;
+            global BYTE PFD_TYPE_RGBA  = 0,
                         PFD_MAIN_PLANE = 0;
 
             // Pen styles (CreatePen)
-            global int PS_SOLID = 0,
-                       PS_DASH = 1,
-                       PS_DOT = 2,
-                       PS_DASHDOT = 3,
+            global int PS_SOLID      = 0,
+                       PS_DASH       = 1,
+                       PS_DOT        = 2,
+                       PS_DASHDOT    = 3,
                        PS_DASHDOTDOT = 4,
-                       PS_NULL = 5;
+                       PS_NULL       = 5;
 
             // Background modes (SetBkMode)
             global int TRANSPARENT = 1,
-                       OPAQUE = 2;
+                       OPAQUE      = 2;
 
             // RGB color helper - packs R,G,B into a COLORREF (0x00BBGGRR)
             def RGB(byte r, byte g, byte b) -> DWORD
@@ -423,18 +423,18 @@ namespace standard
                     
                     // Set up window class
                     WNDCLASSEXA wc;
-                    wc.cbSize = (UINT)(sizeof(WNDCLASSEXA) / 8); // sizeof returns bits, cbSize needs bytes
-                    wc.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
-                    wc.lpfnWndProc = (WNDPROC)@DefaultWindowProc;
-                    wc.cbClsExtra = 0;
-                    wc.cbWndExtra = 0;
-                    wc.hInstance = this.instance;
-                    wc.hIcon = LoadIconA((HINSTANCE)0, (LPCSTR)32512); // IDI_APPLICATION
-                    wc.hCursor = LoadCursorA((HINSTANCE)0, (LPCSTR)32512); // IDC_ARROW
+                    wc.cbSize        = (UINT)(sizeof(WNDCLASSEXA) / 8); // sizeof returns bits, cbSize needs bytes
+                    wc.style         = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
+                    wc.lpfnWndProc   = (WNDPROC)@DefaultWindowProc;
+                    wc.cbClsExtra    = 0;
+                    wc.cbWndExtra    = 0;
+                    wc.hInstance     = this.instance;
+                    wc.hIcon         = LoadIconA((HINSTANCE)0, (LPCSTR)32512); // IDI_APPLICATION
+                    wc.hCursor       = LoadCursorA((HINSTANCE)0, (LPCSTR)32512); // IDC_ARROW
                     wc.hbrBackground = GetStockObject(BLACK_BRUSH);
-                    wc.lpszMenuName = (LPCSTR)0;
+                    wc.lpszMenuName  = (LPCSTR)0;
                     wc.lpszClassName = (LPCSTR)this.class_name;
-                    wc.hIconSm = (HICON)0;
+                    wc.hIconSm       = (HICON)0;
                     
                     // Register window class
                     RegisterClassExA(@wc);
