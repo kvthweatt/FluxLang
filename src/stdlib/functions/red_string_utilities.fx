@@ -1240,6 +1240,115 @@ namespace standard
     };
 };
 
+def find_last_substring(byte* str, byte* substr) -> int
+{
+    if (str == 0 | substr == 0)
+    {
+        return -1;
+    };
+    
+    int str_len = strlen(str);
+    int sub_len = strlen(substr);
+    
+    if (sub_len == 0)
+    {
+        return str_len;  // Empty substring found at end
+    };
+    
+    if (sub_len > str_len)
+    {
+        return -1;
+    };
+    
+    // Start from the end and work backwards
+    for (int i = str_len - sub_len; i >= 0; i = i - 1)
+    {
+        bool found = true;
+        
+        // Check if substring matches at position i
+        for (int j = 0; j < sub_len; j = j + 1)
+        {
+            if (str[i + j] != substr[j])
+            {
+                found = false;
+                break;
+            };
+        };
+        
+        if (found)
+        {
+            return i;
+        };
+    };
+    
+    return -1;
+};
+
+def find_last_char(byte* str, char ch) -> int
+{
+    if (str == 0)
+    {
+        return -1;
+    };
+    
+    int len = strlen(str);
+    
+    // Start from the end and work backwards
+    for (int i = len - 1; i >= 0; i = i - 1)
+    {
+        if ((char)str[i] == ch)
+        {
+            return i;
+        };
+    };
+    
+    return -1;
+};
+
+def count_substring(byte* str, byte* substr) -> int
+{
+    if (str == 0 | substr == 0)
+    {
+        return 0;
+    };
+    
+    int str_len = strlen(str);
+    int sub_len = strlen(substr);
+    
+    if (sub_len == 0 | sub_len > str_len)
+    {
+        return 0;
+    };
+    
+    int count = 0;
+    int pos = 0;
+    
+    while (pos <= str_len - sub_len)
+    {
+        // Check if substring matches at current position
+        bool found = true;
+        for (int j = 0; j < sub_len; j = j + 1)
+        {
+            if (str[pos + j] != substr[j])
+            {
+                found = false;
+                break;
+            };
+        };
+        
+        if (found)
+        {
+            count = count + 1;
+            pos = pos + sub_len;  // Move past this occurrence to avoid overlapping
+        }
+        else
+        {
+            pos = pos + 1;  // Move to next character
+        };
+    };
+    
+    return count;
+};
 
 def !!strstr(byte* haystack, byte* needle) -> byte*
 {

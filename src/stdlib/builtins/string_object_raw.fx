@@ -29,11 +29,11 @@ namespace standard
                 contains(byte*) -> bool,
                 startswith(byte*) -> bool,
                 endswith(byte*) -> bool,
-                //indexof(byte*) -> int,
-                //lastindexof(byte*) -> int,
+                indexof(byte*) -> int,
+                lastindexof(byte*) -> int,
                 indexof_char(char) -> int,
-                //lastindexof_char(char) -> int,
-                //count_occurrences(byte*) -> int,
+                lastindexof_char(char) -> int,
+                count_occurrences(byte*) -> int,
                 //count_spaces() -> int, // count_occurances(" \0")
                 
                 // Character access
@@ -101,7 +101,8 @@ namespace standard
                 println() -> void;
         };
         
-        BaseOOPStringTraits object string
+        BaseOOPStringTraits       // Decided this will be more
+        object string             // readable for many traits
         {
             noopstr value;
             int length;
@@ -187,7 +188,7 @@ namespace standard
             {
                 return ends_with(this.value, suffix);
             };
-///
+
             def indexof(byte* substr) -> int
             {
                 return find_substring(this.value, substr, 0);
@@ -197,12 +198,12 @@ namespace standard
             {
                 return find_last_substring(this.value, substr);
             };
-///
+
             def indexof_char(char ch) -> int
             {
                 return find_char(this.value, ch, 0);
             };
-///
+
             def lastindexof_char(char ch) -> int
             {
                 return find_last_char(this.value, ch);
@@ -212,7 +213,6 @@ namespace standard
             {
                 return count_substring(this.value, substr);
             };
-///
 
             // ===== CHARACTER ACCESS =====
             def charat(int index) -> char
