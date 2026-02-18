@@ -173,6 +173,36 @@ class FluxParser:
     def get_errors(self) -> List[str]:
         """Get list of parse error messages"""
         return self.parse_errors.copy()
+
+    def _is_trait_prefixed_object(self) -> bool:
+        """Look ahead to determine if current position is a trait-prefixed object definition.
+        Pattern: IDENTIFIER+ 'object'
+        where the final token before the identifiers run out is OBJECT.
+        """
+        if not self.expect(TokenType.IDENTIFIER):
+            return False
+        # Start scanning from the next token (offset=1 is next after current)
+        offset = 1
+        while True:
+            tok = self.peek(offset)
+            if tok is None:
+                return False
+            if tok.type == TokenType.OBJECT:
+                return True
+            if tok.type != TokenType.IDENTIFIER:
+                return False
+            offset += 1
+
+    def _parse_trait_prefixed_object(self) -> 'ObjectDef':
+        """Parse one or more trait names followed by 'object ...'"""
+        trait_names = []
+        while self.expect(TokenType.IDENTIFIER):
+            # Check that next non-identifier token is OBJECT; if current is identifier and next is object, consume it as trait
+            trait_names.append(self.current_token.value)
+            self.advance()
+            if self.expect(TokenType.OBJECT):
+                break
+        return self.object_def(trait_names=trait_names)
     
     def statement(self) -> Optional[Statement]:
         """
@@ -264,6 +294,10 @@ class FluxParser:
                 return self.struct_def()
         elif self.expect(TokenType.OBJECT):
             return self.object_def()
+        elif self.expect(TokenType.TRAIT):
+            return self.trait_def()
+        elif self._is_trait_prefixed_object():
+            return self._parse_trait_prefixed_object()
         elif self.expect(TokenType.NAMESPACE):
             return self.namespace_def()
         elif self.expect(TokenType.IF):
@@ -891,14 +925,35 @@ class FluxParser:
             member_initial_value = initial_values[0] if initial_values else None
             return StructMember(members[0], type_spec, member_initial_value)
 
-    
-    def object_def(self) -> Union[ObjectDef, List[ObjectDef]]:
+    def trait_def(self) -> 'TraitDef':
+        """
+        trait_def -> 'trait' IDENTIFIER '{' (function_prototype ';')* '}' ';'
+        """
+        self.consume(TokenType.TRAIT)
+        name = self.consume(TokenType.IDENTIFIER).value
+        self.consume(TokenType.LEFT_BRACE)
+        prototypes = []
+        while not self.expect(TokenType.RIGHT_BRACE):
+            if self.expect(TokenType.DEF):
+                proto = self.function_def()
+                if isinstance(proto, list):
+                    prototypes.extend(proto)
+                else:
+                    prototypes.append(proto)
+            else:
+                self.error(f"Expected 'def' inside trait '{name}'")
+        self.consume(TokenType.RIGHT_BRACE)
+        self.consume(TokenType.SEMICOLON)
+        return TraitDef(name, prototypes)
+
+    def object_def(self, trait_names: Optional[List[str]] = None) -> Union[ObjectDef, List[ObjectDef]]:
         """
         object_def -> 'object' IDENTIFIER (',' IDENTIFIER)* (';' | '{' object_body '}')
         object_body -> (object_member | access_specifier)*
         """
         self.consume(TokenType.OBJECT)
         name = self.consume(TokenType.IDENTIFIER).value
+        traits = trait_names if trait_names is not None else []
 
         # Check for comma-separated prototypes
         names = [name]
@@ -926,8 +981,8 @@ class FluxParser:
             self.advance()
             # Return multiple prototypes if comma-separated
             if len(names) > 1:
-                return [ObjectDef(n, [], [], [], []) for n in names]
-            return ObjectDef(name, methods, members, nested_objects, nested_structs)
+                return [ObjectDef(n, [], [], [], [], traits=traits) for n in names]
+            return ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits)
 
         # Full definition - only allowed for single name
         if len(names) > 1:
@@ -1025,7 +1080,7 @@ class FluxParser:
         
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
-        return ObjectDef(name, methods, members, nested_objects, nested_structs)
+        return ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits)
     
     def namespace_def(self) -> NamespaceDef:
         """
@@ -1112,6 +1167,16 @@ class FluxParser:
             elif self.expect(TokenType.OBJECT):
                 obj_result = self.object_def()
                 # Handle both single object and list of objects (comma-separated prototypes)
+                if isinstance(obj_result, list):
+                    objects.extend(obj_result)
+                else:
+                    objects.append(obj_result)
+            elif self.expect(TokenType.TRAIT):
+                trait_result = self.trait_def()
+                # TraitDef is registered at codegen time; store in objects list for codegen traversal
+                objects.append(trait_result)
+            elif self._is_trait_prefixed_object():
+                obj_result = self._parse_trait_prefixed_object()
                 if isinstance(obj_result, list):
                     objects.extend(obj_result)
                 else:

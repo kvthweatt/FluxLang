@@ -1,5 +1,6 @@
 #import "standard.fx";
 #import "redmath.fx";
+#import "redwindows.fx";
 #import "redopengl.fx";
 
 using standard::system::windows;
@@ -223,36 +224,48 @@ Usage: wireframe <file>.obj\n\0");
     DWORD draw_color = draw_colors[dc_enum.BLUE];
     DWORD bg_color = draw_colors[dc_enum.BLACK];
 
+    float sx  = 0.0;
+    float cxr = 0.0;
+    float sy  = 0.0;
+    float cyr = 0.0;
+    int i  = 0;
+    int fi = 0;
+    int a  = 0;
+    int b  = 0;
+    int fv = 0;
+    Vec3 v;
+    Vec3 rx;
+    Vec3 ry;
+    Canvas c(win.handle, win.device_context);
+
     while (win.process_messages())
     {
-        float sx   = sin(angle_x);
-        float cxr  = cos(angle_x);
-        float sy   = sin(angle_y);
-        float cyr  = cos(angle_y);
+        sx  = sin(angle_x);
+        cxr = cos(angle_x);
+        sy  = sin(angle_y);
+        cyr = cos(angle_y);
 
-        int i = 0;
+        i = 0;
         while (i < mesh.vert_count)
         {
-            Vec3 v;
             v.x = mesh.verts[i].x;
             v.y = mesh.verts[i].y;
             v.z = mesh.verts[i].z;
-            Vec3 rx = rotate_x(@v,  sx,  cxr);
-            Vec3 ry = rotate_y(@rx, sy,  cyr);
+            rx = rotate_x(@v,  sx,  cxr);
+            ry = rotate_y(@rx, sy,  cyr);
             proj[i] = project(@ry, cx, cy, fov, cam_z);
             i = i + 1;
         };
 
-        Canvas c(win.handle, win.device_context);
         c.clear(bg_color);
         c.set_pen(draw_color, LINE_WIDTH);
 
-        int fi = 0;
+        fi = 0;
         while (fi < mesh.face_count)
         {
-            int a  = mesh.faces[fi].a;
-            int b  = mesh.faces[fi].b;
-            int fv = mesh.faces[fi].c;
+            a  = mesh.faces[fi].a;
+            b  = mesh.faces[fi].b;
+            fv = mesh.faces[fi].c;
             c.line(proj[a].x,  proj[a].y,  proj[b].x,  proj[b].y);
             c.line(proj[b].x,  proj[b].y,  proj[fv].x, proj[fv].y);
             c.line(proj[fv].x, proj[fv].y, proj[a].x,  proj[a].y);
@@ -261,6 +274,9 @@ Usage: wireframe <file>.obj\n\0");
 
         angle_x = angle_x + 0.014;
         angle_y = angle_y + 0.020;
+
+        if (angle_x > PIF) { angle_x = angle_x - 2.0 * PIF; };
+        if (angle_y > PIF) { angle_y = angle_y - 2.0 * PIF; };
 
         Sleep(SLEEP_MS);
     };

@@ -91,6 +91,7 @@ class TokenType(Enum):
     SWITCH = auto()       # "        switch
     THIS = auto()         # "        this
     THROW = auto()        # "        throw
+    TRAIT = auto()        # "        trait
     TRUE = auto()         # "        true
     TRY = auto()          # "        try
     UNION = auto()        # "        union
@@ -371,6 +372,7 @@ class FluxLexer:
             'switch': TokenType.SWITCH,
             'this': TokenType.THIS,
             'throw': TokenType.THROW,
+            'trait': TokenType.TRAIT,
             'true': TokenType.TRUE,
             'try': TokenType.TRY,
             'typeof': TokenType.TYPEOF,
