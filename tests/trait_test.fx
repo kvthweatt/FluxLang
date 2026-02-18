@@ -1,11 +1,16 @@
 #import "standard.fx";
 
-trait TestTrait
+trait Trait1
 {
 	def foo() -> void;
 };
 
-TestTrait object MyObj
+trait Trait2
+{
+    def bar() -> void;
+};
+
+Trait1 Trait2 object MyObj
 {
     def __init() -> this
     {
@@ -18,6 +23,7 @@ TestTrait object MyObj
     };
 
     def foo() -> void {};
+    def bar() -> void {};
 };
 
 def main() -> int

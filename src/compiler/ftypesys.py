@@ -1253,7 +1253,7 @@ class TypeChecker:
 @dataclass
 class TypeSystem:
     base_type: Union[DataType, str]
-    is_signed: bool = True
+    is_signed: bool = False
     is_const: bool = False
     is_volatile: bool = False
     is_tied: bool = False

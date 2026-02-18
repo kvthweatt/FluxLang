@@ -1207,8 +1207,15 @@ class CastExpression(Expression):
                         # Default to sign extend
                         result = builder.sext(source_val, target_llvm_type)
                 else:
-                    # Not a literal - check if target type is unsigned
-                    if self.target_type.base_type == DataType.UINT or (
+                    # Not a literal - check source signedness from multiple sources
+                    from ftypesys import CoercionContext, TypeResolver
+                    source_unsigned = CoercionContext.is_unsigned(source_val)
+                    # Also check the expression's type spec directly from symbol table
+                    if not source_unsigned and isinstance(self.expression, Identifier):
+                        expr_spec = TypeResolver.resolve_type_spec(self.expression.name, module)
+                        if expr_spec is not None and hasattr(expr_spec, 'is_signed'):
+                            source_unsigned = not expr_spec.is_signed
+                    if source_unsigned or self.target_type.base_type == DataType.UINT or (
                         self.target_type.custom_typename and 
                         self.target_type.custom_typename.startswith('u')
                     ):
@@ -4804,17 +4811,19 @@ class FunctionDef(ASTNode):
         for i, param in enumerate(func.args):
             param_name = self.parameters[i].name if self.parameters[i].name is not None else f"arg{i}"
             alloca = builder.alloca(param.type, name=f"{param_name}.addr")
-            
-            # Attach type metadata to the parameter value before storing
-            # This ensures the parameter carries the correct signedness information
-            param_with_metadata = TypeSystem.attach_type_metadata(param, type_spec=self.parameters[i].type_spec)
+            param_type_spec = self.parameters[i].type_spec
+            # Attach type metadata to both the alloca and param value so
+            # signedness survives through loads in Identifier.codegen
+            if param_type_spec is not None:
+                alloca._flux_type_spec = param_type_spec
+            param_with_metadata = TypeSystem.attach_type_metadata(param, type_spec=param_type_spec)
             
             builder.store(param_with_metadata, alloca)
             # Define parameter in symbol table with type information
             module.symbol_table.define(
                 param_name, 
                 SymbolKind.VARIABLE,
-                type_spec=self.parameters[i].type_spec,
+                type_spec=param_type_spec,
                 llvm_value=alloca
             )
         
@@ -5908,11 +5917,11 @@ class ObjectDef(ASTNode):
             for trait_name in self.traits:
                 required = module.symbol_table._trait_registry.get(trait_name)
                 if required is None:
-                    raise ValueError(f"Trait '{trait_name}' was not implemented in '{self.name}'.")
+                    raise ValueError(f"Object '{self.name}' does not implement required functions from '{trait_name}'")
                 for proto in required:
                     if proto.name not in implemented_names:
                         raise ValueError(
-                            f"Object '{self.name}' does not implement functions from '{trait_name}'")
+                            f"Object '{self.name}' does not implement required functions from '{trait_name}'")
         
         return struct_type
 

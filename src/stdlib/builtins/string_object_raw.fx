@@ -4,7 +4,7 @@
 
 #ifndef FLUX_STANDARD_STRINGS
 #def FLUX_STANDARD_STRINGS 1;
-#endif
+#endif;
 
 #ifdef FLUX_STANDARD_STRINGS
 
