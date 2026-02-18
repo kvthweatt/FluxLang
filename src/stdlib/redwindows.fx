@@ -4,8 +4,6 @@
 #import "redtypes.fx";
 #endif
 
-#warn "test";
-
 #ifndef __WIN32_INTERFACE__
 #def __WIN32_INTERFACE__ 1;
 
@@ -283,6 +281,11 @@ namespace standard
                     SelectObject(HDC, HDC) -> HDC,
                     DeleteObject(HDC) -> bool,
 
+                // GDI back-buffer (double buffering)
+                    CreateCompatibleDC(HDC) -> HDC,
+                    CreateCompatibleBitmap(HDC, int, int) -> HDC,
+                    BitBlt(HDC, int, int, int, int, HDC, int, int, DWORD) -> bool,
+
                 // GDI color and mode
                     SetBkMode(HDC, int) -> int,
                     SetBkColor(HDC, DWORD) -> DWORD,
@@ -485,6 +488,8 @@ namespace standard
             {
                 HWND  hwnd;
                 HDC   hdc;
+                HDC   back_dc;
+                HDC   back_bmp;
                 RECT  bounds;
                 HDC   active_pen;
 
@@ -495,6 +500,11 @@ namespace standard
                     this.hdc  = hdc;
                     GetClientRect(this.hwnd, @this.bounds);
                     this.active_pen = (HDC)0;
+                    int w = this.bounds.right  - this.bounds.left;
+                    int h = this.bounds.bottom - this.bounds.top;
+                    this.back_dc  = CreateCompatibleDC(hdc);
+                    this.back_bmp = CreateCompatibleBitmap(hdc, w, h);
+                    SelectObject(this.back_dc, this.back_bmp);
                     return this;
                 };
 
@@ -503,18 +513,23 @@ namespace standard
                 {
                     if (this.active_pen != (HDC)0)
                     {
-                        SelectObject(this.hdc, GetStockObject(NULL_PEN));
+                        SelectObject(this.back_dc, GetStockObject(NULL_PEN));
                         DeleteObject(this.active_pen);
                     };
+                    DeleteObject(this.back_bmp);
+                    DeleteObject(this.back_dc);
                     return;
                 };
 
                 // Clear the canvas with a solid color
                 def clear(DWORD color) -> void
                 {
+                    int w = this.bounds.right  - this.bounds.left;
+                    int h = this.bounds.bottom - this.bounds.top;
+                    BitBlt(this.hdc, 0, 0, w, h, this.back_dc, 0, 0, (DWORD)0x00CC0020);
                     HBRUSH brush = CreateSolidBrush(color);
-                    FillRect(this.hdc, @this.bounds, brush);
-                    SelectObject(this.hdc, GetStockObject(NULL_BRUSH));
+                    FillRect(this.back_dc, @this.bounds, brush);
+                    SelectObject(this.back_dc, GetStockObject(NULL_BRUSH));
                     DeleteObject(brush);
                     return;
                 };
@@ -524,47 +539,47 @@ namespace standard
                 {
                     if (this.active_pen != (HDC)0)
                     {
-                        SelectObject(this.hdc, GetStockObject(NULL_PEN));
+                        SelectObject(this.back_dc, GetStockObject(NULL_PEN));
                         DeleteObject(this.active_pen);
                     };
                     this.active_pen = CreatePen(PS_SOLID, width, color);
-                    SelectObject(this.hdc, this.active_pen);
+                    SelectObject(this.back_dc, this.active_pen);
                     return;
                 };
 
                 // Draw a line between two points
                 def line(int x1, int y1, int x2, int y2) -> void
                 {
-                    MoveToEx(this.hdc, x1, y1, (POINT*)0);
-                    LineTo(this.hdc, x2, y2);
+                    MoveToEx(this.back_dc, x1, y1, (POINT*)0);
+                    LineTo(this.back_dc, x2, y2);
                     return;
                 };
 
                 // Draw a circle by bounding box center+radius
                 def circle(int cx, int cy, int r) -> void
                 {
-                    Ellipse(this.hdc, cx - r, cy - r, cx + r, cy + r);
+                    Ellipse(this.back_dc, cx - r, cy - r, cx + r, cy + r);
                     return;
                 };
 
                 // Draw an ellipse by bounding box
                 def ellipse(int x1, int y1, int x2, int y2) -> void
                 {
-                    Ellipse(this.hdc, x1, y1, x2, y2);
+                    Ellipse(this.back_dc, x1, y1, x2, y2);
                     return;
                 };
 
                 // Draw a rectangle
                 def rect(int x1, int y1, int x2, int y2) -> void
                 {
-                    Rectangle(this.hdc, x1, y1, x2, y2);
+                    Rectangle(this.back_dc, x1, y1, x2, y2);
                     return;
                 };
 
                 // Set a single pixel
                 def pixel(int x, int y, DWORD color) -> void
                 {
-                    SetPixel(this.hdc, x, y, color);
+                    SetPixel(this.back_dc, x, y, color);
                     return;
                 };
 
