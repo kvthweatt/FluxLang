@@ -135,6 +135,14 @@ class FXPreprocessor:
         # Strip all comments before processing
         content = self._strip_comments(content)
         
+        # Enforce semicolons on directives before processing
+        for lineno, raw_line in enumerate(content.splitlines(), start=1):
+            s = raw_line.strip()
+            if s.startswith("#import") or s.startswith("#warn") or s.startswith("#stop") or s.startswith("#def"):
+                if not s.endswith(';'):
+                    directive = s.split()[0]
+                    raise SyntaxError(f"[PREPROCESSOR] {directive} directive missing semicolon in {filepath} at line {lineno}")
+        
         # Process line by line
         lines = content.splitlines()
         i = 0
@@ -191,6 +199,8 @@ class FXPreprocessor:
         
         # Check for import
         if stripped.startswith("#import"):
+            if not stripped.rstrip().endswith(';'):
+                raise SyntaxError(f"[PREPROCESSOR] #import directive missing semicolon at line {i + 1}")
             # Extract all quoted filenames
             import_files = []
             
@@ -213,6 +223,8 @@ class FXPreprocessor:
         
         # Check for #warn
         if stripped.startswith("#warn"):
+            if not stripped.rstrip().endswith(';'):
+                raise SyntaxError(f"[PREPROCESSOR] #warn directive missing semicolon at line {i + 1}")
             start_idx = line.find('"')
             if start_idx != -1:
                 end_idx = line.find('"', start_idx + 1)
@@ -223,6 +235,8 @@ class FXPreprocessor:
         
         # Check for #stop
         if stripped.startswith("#stop"):
+            if not stripped.rstrip().endswith(';'):
+                raise SyntaxError(f"[PREPROCESSOR] #stop directive missing semicolon at line {i + 1}")
             start_idx = line.find('"')
             if start_idx != -1:
                 end_idx = line.find('"', start_idx + 1)

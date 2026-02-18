@@ -7,7 +7,7 @@
 
 
 #ifndef FLUX_STANDARD_IO
-#def FLUX_STANDARD_IO
+#def FLUX_STANDARD_IO;
 
 #ifndef FLUX_STANDARD_TYPES
 #import "redtypes.fx";

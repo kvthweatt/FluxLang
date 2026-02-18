@@ -4,6 +4,8 @@
 #import "redtypes.fx";
 #endif
 
+#warn "test";
+
 #ifndef __WIN32_INTERFACE__
 #def __WIN32_INTERFACE__ 1;
 
