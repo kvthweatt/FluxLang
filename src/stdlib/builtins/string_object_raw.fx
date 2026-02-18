@@ -12,7 +12,7 @@ namespace standard
 {
     namespace strings
     {
-        trait BaseOOPStringTraits
+        trait BaseSTDStringTraits
         {
             def val() -> byte*,
                 len() -> int,
@@ -101,7 +101,7 @@ namespace standard
                 println() -> void;
         };
         
-        BaseOOPStringTraits       // Decided this will be more
+        BaseSTDStringTraits       // Decided this will be more
         object string             // readable for many traits
         {
             noopstr value;

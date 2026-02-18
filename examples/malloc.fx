@@ -9,8 +9,8 @@ def main() -> int
 
     You should use malloc to allocate the space for a file.
     ///
-    noopstr f = "src\\stdlib\\redio.fx\0";
-    int size = get_file_size(f);
+    noopstr f = "examples\\bugatti.obj\0";
+    u64 size = get_file_size(f);
 	byte* buffer = malloc((u64)size + 1);
 
     int bytes_read = read_file(f, buffer, size);

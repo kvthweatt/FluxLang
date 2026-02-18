@@ -64,22 +64,8 @@ struct Flags {
 };
 
 byte status = 0b10110001;
-Flags f = (Flags)status;
-if (f.enabled && !f.error) { /* ... */ };
-```
-
-### Compile-time execution (coming with bootstrap v1)
-
-Run actual Flux code during compilation:
-
-```flux
-compt {
-    def MY_CONSTANT 42;
-    
-    if (!def(DEBUG_MODE)) {
-        global def DEBUG_MODE true;  // MUST use {} blocks, even for single line side-effects.
-    };
-};
+Flags f from status;
+if (f.enabled & !f.error) { /* ... */ };
 ```
 
 ## Language Basics

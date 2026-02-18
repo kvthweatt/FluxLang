@@ -40,14 +40,27 @@ struct Mesh
 def load_obj(byte* path, Mesh* mesh) -> bool
 {
     print("Loading object ...\n\0");
-    file objfile("examples\\bugatti.obj\0", "rb\0");
-    if (objfile.error_state == 1)
+    noopstr f = "\\Users\\kvthw\\Flux\\examples\\Lowpoly_Notebook_2.obj\0";
+    int size = get_file_size(f);
+    if (size <= 0)
     {
-        print("Error, bugatti.obj not found.\n\0");
+        print("Error: file not found or empty.\n\0");
         return false;
     };
-    void* f = fopen(path, "r\0");
-    if (f == (void*)0) { return false; };
+    byte* buffer = malloc((u64)size + 1);
+    if (buffer == 0)
+    {
+        print("Error: out of memory.\n\0");
+        return false;
+    };
+    int bytes_read = read_file(f, buffer, size);
+    if (bytes_read <= 0)
+    {
+        print("Error: could not read file.\n\0");
+        free(buffer);
+        return false;
+    };
+    buffer[bytes_read] = (byte)0;
     print("File loaded, initializing arrays...\n\0");
 
     mesh.verts      = (Vec3*)malloc((u64)MAX_VERTS * 12);
@@ -56,9 +69,26 @@ def load_obj(byte* path, Mesh* mesh) -> bool
     mesh.face_count = 0;
 
     byte[512] line;
+    int pos = 0;
+    print("Before loop...\n\0");
 
-    while (fgets(line, 512, f) != (void*)0)
+    while (pos < bytes_read)
     {
+        print("In loop..\n\0");
+        int line_len = 0;
+        while (pos + line_len < bytes_read & buffer[pos + line_len] != '\n' & line_len < 511)
+        {
+            byte ch = buffer[pos + line_len];
+            if (ch != '\r')
+            {
+                line[line_len] = ch;
+                line_len = line_len + 1;
+            };
+            pos = pos + 1;
+        };
+        line[line_len] = (byte)0;
+        if (pos < bytes_read) { pos = pos + 1; };
+
         if (line[0] == 'v' & line[1] == ' ')
         {
             if (mesh.vert_count < MAX_VERTS)
@@ -90,7 +120,7 @@ def load_obj(byte* path, Mesh* mesh) -> bool
         };
     };
 
-    fclose(f);
+    free(buffer);
     return true;
 };
 
@@ -157,8 +187,7 @@ def main(int argc, byte** argv) -> int
     }
     else
     {
-        print("Flux 3D Wireframe Renderer (.OBJ)
-Usage: wireframe <file>.obj\n\0");
+        print("Flux 3D Wireframe Renderer (.OBJ)\nUsage: wireframe <file>.obj\n\0");
         loaded = false;
     };
     Window win("Flux 3D Wireframe\0", WIN_WIDTH, WIN_HEIGHT, CW_USEDEFAULT, CW_USEDEFAULT);
