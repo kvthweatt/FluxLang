@@ -25,7 +25,7 @@
             <Keywords name="Folders in comment, middle"></Keywords>
             <Keywords name="Folders in comment, close"></Keywords>
             <Keywords name="Keywords1">and as asm assert auto break case catch continue data default do elif else false for from global if in is local namespace new not or private public register return switch this throw true try using while xor</Keywords>
-            <Keywords name="Keywords2">#ifdef #ifndef #def #endif #else #import</Keywords>
+            <Keywords name="Keywords2">#ifdef #ifndef #def #endif #else #import #warn #stop</Keywords>
             <Keywords name="Keywords3">def extern object struct union namespace enum trait contract layout</Keywords>
             <Keywords name="Keywords4">heap stack const volatile signed unsigned register</Keywords>
             <Keywords name="Keywords5">alignof typeof sizeof</Keywords>

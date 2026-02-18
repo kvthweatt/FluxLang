@@ -18,7 +18,7 @@ contexts:
       scope: comment.line.double-slash.flux
 
     # Preprocessor directives
-    - match: '^\s*(#)(import|def|ifdef|ifndef|else|endif)\b'
+    - match: '^\s*(#)(import|def|ifdef|ifndef|else|endif|warn|stop)\b'
       captures:
         1: punctuation.definition.preprocessor.flux
         2: keyword.control.preprocessor.flux
@@ -121,7 +121,7 @@ contexts:
       scope: constant.numeric.binary.flux
 
     # Numbers - Float
-    - match: '\b\d+\.\d+([eE][+-]?\d+)?\b'
+    - match: '\b\d+(\.\d+)?[f]\b'
       scope: constant.numeric.float.flux
 
     # Numbers - Integer
@@ -133,27 +133,22 @@ contexts:
       scope: keyword.operator.custom.flux
 
     # Operators - Custom operator usage (3+ character combinations that aren't standard)
-    - match: '(>>>|<<<|<->|<<=|>>=|\^\^|~~|!=|<=|>=)'
+    - match: '(`!&=|`!\|=|`\^\^=|`&=|`\|=|<<=|>>=|!&|!\||<->|\^\^=|&=|\|=|%=|\^=|\+=|-=|\*=|/=|`!&|`!\||`\^\^|\+\+|--)'
       scope: keyword.operator.custom.flux
-
     # Operators - Comparison
     - match: '(==|!=|>=|<=|>|<)'
       scope: keyword.operator.comparison.flux
-
     # Operators - Logical
-    - match: '(\&\&|\|\||!|and|or|not|xor)'
+    - match: '(\&|\||!|and|or|not|xor)'
       scope: keyword.operator.logical.flux
-
     # Operators - Bitwise
-    - match: '(\&|\||\^|~|<<|>>)'
+    - match: '(`!|`&|`\||`\^\^|<<|>>)'
       scope: keyword.operator.bitwise.flux
-
     # Operators - Arithmetic
-    - match: '(\+\+|\-\-|\+|\-|\*\*|\*|/|%)'
+    - match: '(\*\*|\+|-|\*|/|%|\^)'
       scope: keyword.operator.arithmetic.flux
-
     # Operators - Assignment
-    - match: '(\+=|\-=|\*=|/=|%=|<<=|>>=|\&=|\|=|\^=|=)'
+    - match: '(=|@|\.\.|::|~|\?|:)'
       scope: keyword.operator.assignment.flux
 
     # Range operator
@@ -239,7 +234,7 @@ contexts:
     - match: "'"
       scope: punctuation.definition.string.end.flux
       pop: true
-    - match: '\\[\\''nrt]'
+    - match: '\\[\\''nrt0]'
       scope: constant.character.escape.flux
     - match: '.'
       scope: string.quoted.single.flux

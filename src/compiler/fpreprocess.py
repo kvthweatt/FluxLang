@@ -211,6 +211,27 @@ class FXPreprocessor:
             
             return i + 1
         
+        # Check for #warn
+        if stripped.startswith("#warn"):
+            start_idx = line.find('"')
+            if start_idx != -1:
+                end_idx = line.find('"', start_idx + 1)
+                if end_idx != -1:
+                    message = line[start_idx + 1:end_idx]
+                    print(f"[PREPROCESSOR] {message}")
+            return i + 1
+        
+        # Check for #stop
+        if stripped.startswith("#stop"):
+            start_idx = line.find('"')
+            if start_idx != -1:
+                end_idx = line.find('"', start_idx + 1)
+                if end_idx != -1:
+                    message = line[start_idx + 1:end_idx]
+                    print(f"[PREPROCESSOR] {message}")
+            print("Compilation failed, preprocessor stopped by macro.")
+            raise SystemExit(1)
+        
         # Check for #endif - skip it
         if stripped.startswith("#endif;"):
             return i + 1

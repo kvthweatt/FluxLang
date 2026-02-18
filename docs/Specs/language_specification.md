@@ -157,6 +157,10 @@ def some_win_generic() -> LPCSTR*;
 def some_nix_generic() -> void*;
 #endif;
 #endif;
+
+#warn "This will show a warning message.";
+
+#stop "This will hard-stop compilation.";
 ```
 
 ---
