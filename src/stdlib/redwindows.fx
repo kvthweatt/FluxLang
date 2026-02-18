@@ -31,8 +31,8 @@ namespace standard
             unsigned data{32} as UINT,
                                  DWORD,
                                  WORD,
-                                 BYTE,
-                                 LONG;
+                                 BYTE;
+            signed data{32} as LONG;
 
             // Pointer-sized types - must be 64-bit on x64
             unsigned data{64} as LONG_PTR,
@@ -214,7 +214,9 @@ namespace standard
             // GetStockObject constants
             global int NULL_BRUSH = 5,
                        WHITE_BRUSH = 0,
-                       BLACK_BRUSH = 4;
+                       BLACK_BRUSH = 4,
+                       BLACK_BRUSH = 4,
+                       NULL_PEN = 8;
 
             // CW_USEDEFAULT
             global int CW_USEDEFAULT = 0x80000000;
@@ -359,6 +361,11 @@ namespace standard
                 {
                     PostQuitMessage(0);
                     return 0;
+                };
+
+                if (msg == WM_ERASEBKGND)
+                {
+                    return 1;
                 };
 
                 if (msg == WM_PAINT)
@@ -568,6 +575,7 @@ namespace standard
                 {
                     if (this.active_pen != (HDC)0)
                     {
+                        SelectObject(this.hdc, GetStockObject(NULL_PEN));
                         DeleteObject(this.active_pen);
                     };
                     return;
@@ -577,7 +585,8 @@ namespace standard
                 def clear(DWORD color) -> void
                 {
                     HBRUSH brush = CreateSolidBrush(color);
-                    FillRect(this.hdc, this.bounds, brush);
+                    FillRect(this.hdc, @this.bounds, brush);
+                    SelectObject(this.hdc, GetStockObject(NULL_BRUSH));
                     DeleteObject(brush);
                     return;
                 };
@@ -587,6 +596,7 @@ namespace standard
                 {
                     if (this.active_pen != (HDC)0)
                     {
+                        SelectObject(this.hdc, GetStockObject(NULL_PEN));
                         DeleteObject(this.active_pen);
                     };
                     this.active_pen = CreatePen(PS_SOLID, width, color);

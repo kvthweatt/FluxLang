@@ -39,14 +39,15 @@ struct Mesh
 def load_obj(byte* path, Mesh* mesh) -> bool
 {
     print("Loading object ...\n\0");
-    file objfile("model.obj\0", "rb\0");
+    file objfile("examples\\bugatti.obj\0", "rb\0");
     if (objfile.error_state == 1)
     {
-        print("Error, model.obj not found.\n\0");
+        print("Error, bugatti.obj not found.\n\0");
         return false;
     };
     void* f = fopen(path, "r\0");
     if (f == (void*)0) { return false; };
+    print("File loaded, initializing arrays...\n\0");
 
     mesh.verts      = (Vec3*)malloc((u64)MAX_VERTS * 12);
     mesh.faces      = (Face*)malloc((u64)MAX_FACES * 12);
@@ -133,13 +134,23 @@ def project(Vec3* v, int cx, int cy, float fov, float cam_z) -> POINT
 // MAIN
 // ============================================================================
 
-def main() -> int
+def main(int argc, byte** argv) -> int
 {
+    Mesh mesh;
+    bool loaded;
+
+    if (argc == 2)
+    {
+        loaded = load_obj(@argv[1], @mesh);
+    }
+    else
+    {
+        print("Flux 3D Wireframe Renderer (.OBJ)
+Usage: wireframe <file>.obj\n\0");
+        loaded = false;
+    };
     Window win("Flux 3D Wireframe\0", 900, 700, CW_USEDEFAULT, CW_USEDEFAULT);
     SetForegroundWindow(win.handle);
-
-    Mesh mesh;
-    bool loaded = load_obj("model.obj\0", @mesh);
 
     if (!loaded)
     {
@@ -206,7 +217,7 @@ def main() -> int
         };
 
         Canvas c(win.handle, win.device_context);
-        //c.clear(black);
+        c.clear(black);
         c.set_pen(green, 1);
 
         int fi = 0;
