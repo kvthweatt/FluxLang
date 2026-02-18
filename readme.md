@@ -274,7 +274,7 @@ Flux is in active development. The language specification is complete, but imple
 
 ## Learning Resources
 
-- **[Language Specification](docs/Specs/lang_spec_full.md)** - Complete language reference  
+- **[Language Specification](docs/Specs/language_specification.md)** - Complete language reference  
 - **[Getting Started Guide](docs/learn_flux_intro.md)** - Tutorial for new users  
 - **[Examples](examples/)** - Real-world Flux programs  
 - **[Windows Setup Guide](docs/SetupGuides/windows_setup_guide.md)**  

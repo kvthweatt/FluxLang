@@ -831,8 +831,6 @@ namespace standard
                 print(this.value);
                 print("\n\0");
             };
-
-            def printval() -> void { print(this.value); };
         };
     };
 };

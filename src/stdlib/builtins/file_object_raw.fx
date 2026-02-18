@@ -11,23 +11,20 @@
 
 #ifdef FLUX_STANDARD_FFI_FIO
 
-enum file_error_states
-{
-    GOOD,
-    NOT_OPEN
-};
-
 namespace standard
 {
     namespace io
     {
         namespace file
         {
-            object file
+            enum file_error_states
             {
-                void* handle;
-                int size, error_state;
+                GOOD,
+                NOT_OPEN
+            };
 
+            trait BaseSTDFileTraits
+            {
                 def is_open()->bool,
                     close()->bool,
                     get_size()->int,
@@ -37,6 +34,13 @@ namespace standard
                     seek(int,int)->bool,
                     tell()->int,
                     rewind()->void;
+            };
+
+            BaseSTDFileTraits
+            object file
+            {
+                void* handle;
+                int size, error_state;
 
                 def __init(byte* path, byte* mode) -> this
                 {
