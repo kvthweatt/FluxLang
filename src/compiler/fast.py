@@ -1835,6 +1835,11 @@ class FunctionCall(Expression):
             return func_ptr_call.codegen(builder, module)
         
         # Step 2: Generate argument values first (needed for overload resolution)
+        for arg in self.arguments:
+            if isinstance(arg, Identifier):
+                entry = module.symbol_table.lookup_variable(arg.name)
+                if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
+                    raise ValueError(f"Compile error: local variable '{arg.name}' cannot leave its scope via function call")
         arg_vals = [arg.codegen(builder, module) for arg in self.arguments]
         
         # Step 3: Get current namespace
@@ -2247,6 +2252,10 @@ class MethodCall(Expression):
         # (then keep your existing arg generation loop)
 
         for i, arg_expr in enumerate(self.arguments):
+            if isinstance(arg_expr, Identifier):
+                entry = module.symbol_table.lookup_variable(arg_expr.name)
+                if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
+                    raise ValueError(f"Compile error: local variable '{arg_expr.name}' cannot leave its scope via method call")
             arg_val = arg_expr.codegen(builder, module)
 
             # Expected type: method params include 'this' as arg0, so user args start at arg1
@@ -2264,32 +2273,6 @@ class MethodCall(Expression):
             args.append(arg_val)
 
         result = builder.call(func, args)
-
-        if self.method_name == '__exit':
-            # Zero the object's memory at runtime so any subsequent access through any
-            # pointer to this object crashes naturally - the object is truly destroyed.
-            i8_ptr_type = ir.PointerType(ir.IntType(8))
-            raw_ptr = builder.bitcast(this_ptr, i8_ptr_type, name="exit_raw_ptr")
-            struct_ty = this_ptr.type.pointee
-            byte_size = SizeOfTypeHandler.bits_from_llvm_type(struct_ty, module)
-            if byte_size is None:
-                byte_size = 8
-            else:
-                byte_size = max(1, byte_size // 8)
-            size_val = ir.Constant(ir.IntType(64), byte_size)
-            memset_fn = module.globals.get('llvm.memset.p0i8.i64')
-            if memset_fn is None:
-                memset_type = ir.FunctionType(
-                    ir.VoidType(),
-                    [i8_ptr_type, ir.IntType(8), ir.IntType(64), ir.IntType(1)]
-                )
-                memset_fn = ir.Function(module, memset_type, 'llvm.memset.p0i8.i64')
-            builder.call(memset_fn, [
-                raw_ptr,
-                ir.Constant(ir.IntType(8), 0),
-                size_val,
-                ir.Constant(ir.IntType(1), 0)
-            ])
 
         return result
 
@@ -2970,7 +2953,20 @@ class VariableDeclaration(ASTNode):
             else:
                 alloca = builder.alloca(llvm_type, name=self.name)
         else:
-            alloca = builder.alloca(llvm_type, name=self.name)
+            # If inside a switch case body, hoist the alloca to the function entry
+            # block so it doesn't land mid-CFG (LLVM requires allocas in entry block)
+            alloca_block = getattr(builder, '_switch_case_alloca_block', None)
+            if alloca_block is not None:
+                current_block = builder.block
+                entry_term = alloca_block.terminator
+                if entry_term is not None:
+                    builder.position_before(entry_term)
+                else:
+                    builder.position_at_end(alloca_block)
+                alloca = builder.alloca(llvm_type, name=self.name)
+                builder.position_at_end(current_block)
+            else:
+                alloca = builder.alloca(llvm_type, name=self.name)
 
         if resolved_type_spec:
             alloca._flux_type_spec = resolved_type_spec
@@ -4158,6 +4154,11 @@ class ReturnStatement(Statement):
             builder.ret_void()
             return None
 
+        if isinstance(self.value, Identifier):
+            entry = module.symbol_table.lookup_variable(self.value.name)
+            if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
+                raise ValueError(f"Compile error: local variable '{self.value.name}' cannot leave its scope via return")
+
         ret_val = self.value.codegen(builder, module)
 
         if ret_val is None:
@@ -4262,8 +4263,22 @@ class SwitchStatement(Statement):
         for i, (value, case_block) in enumerate(case_blocks):
             builder.position_at_start(case_block)
             
+            # Save the function entry block position so any alloca instructions
+            # emitted by variable declarations inside case bodies get hoisted
+            # to the function entry block rather than landing mid-CFG.
+            func_entry = builder.function.entry_basic_block
+            saved_block = builder.block
+            
+            # Insert allocas at the end of the entry block (before its terminator
+            # if it has one, otherwise just append). We do this by temporarily
+            # positioning at the entry block for alloca emission, then restoring.
+            # We accomplish this by patching _codegen_local via a flag on builder.
+            builder._switch_case_alloca_block = func_entry
+            
             # Generate the case body
             self.cases[i].body.codegen(builder, module)
+            
+            builder._switch_case_alloca_block = None
             
             # Add branch to merge block if the case doesn't already have a terminator
             # (cases with return/break will already be terminated)

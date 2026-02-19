@@ -266,6 +266,10 @@ class FluxParser:
                 return self.function_def()
             else:
                 # It's a variable declaration - type_spec() will parse const/volatile
+                # The storage class token was already consumed above; back up so type_spec() can see it
+                if storage_class is not None:
+                    self.position -= 1
+                    self.current_token = self.tokens[self.position]
                 var_decl = self.variable_declaration()
                 self.consume(TokenType.SEMICOLON)
                 return var_decl
@@ -1267,6 +1271,7 @@ class FluxParser:
         NOTE: Storage class can come FIRST, before qualifiers
         """
         is_tied = False
+        is_local = False
         is_const = False
         is_volatile = False
         is_signed = True
@@ -1279,6 +1284,7 @@ class FluxParser:
                 storage_class = StorageClass.GLOBAL
                 self.advance()
             elif self.expect(TokenType.LOCAL):
+                is_local = True
                 storage_class = StorageClass.LOCAL
                 self.advance()
             elif self.expect(TokenType.HEAP):
@@ -1388,6 +1394,7 @@ class FluxParser:
                 is_const=resolved_spec.is_const,
                 is_volatile=resolved_spec.is_volatile,
                 is_tied=resolved_spec.is_tied,
+                is_local=resolved_spec.is_local,
                 bit_width=resolved_spec.bit_width,
                 alignment=resolved_spec.alignment,
                 endianness=resolved_spec.endianness,
@@ -1410,6 +1417,7 @@ class FluxParser:
                 t.is_volatile = True
             if storage_class is not None:
                 t.storage_class = storage_class
+                t.is_local = (storage_class == StorageClass.LOCAL)
 
             # Only override signedness if user explicitly wrote signed/unsigned
             if signedness_explicit:
@@ -1441,6 +1449,7 @@ class FluxParser:
             is_const=is_const,
             is_volatile=is_volatile,
             is_tied=is_tied,
+            is_local=storage_class == StorageClass.LOCAL,
             bit_width=bit_width,
             alignment=alignment,
             endianness=endianness,
@@ -1686,7 +1695,7 @@ class FluxParser:
                 initializers.append(None)
             
             if self.expect(TokenType.COMMA) and initializers[0] is None:
-                # Mode: int x,y,z = 1,2,3; — collect all names first, then all initializers
+                # Mode: int x,y,z = 1,2,3; Ã¢â‚¬â€ collect all names first, then all initializers
                 while self.expect(TokenType.COMMA):
                     self.advance()
                     var_name = self.consume(TokenType.IDENTIFIER).value
@@ -1701,7 +1710,7 @@ class FluxParser:
                         else:
                             break
             elif self.expect(TokenType.COMMA):
-                # Mode: int x = 1, y = 2, z = 3; — each name has its own initializer
+                # Mode: int x = 1, y = 2, z = 3; Ã¢â‚¬â€ each name has its own initializer
                 while self.expect(TokenType.COMMA):
                     self.advance()
                     var_name = self.consume(TokenType.IDENTIFIER).value

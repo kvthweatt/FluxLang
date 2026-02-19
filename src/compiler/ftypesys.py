@@ -1257,6 +1257,7 @@ class TypeSystem:
     is_const: bool = False
     is_volatile: bool = False
     is_tied: bool = False
+    is_local: bool = False
     bit_width: Optional[int] = None
     alignment: Optional[int] = None
     endianness: Optional[int] = 1
@@ -1275,6 +1276,7 @@ TypeSystem(base_type:     {self.base_type}\n\
            is_signed:     {self.is_signed}\n\
            is_const:      {self.is_const}\n\
            is_volatile:   {self.is_volatile}\n\
+           is_local:      {self.is_local}\n\
            bit_width:     {self.bit_width}\n\
            alignment:     {self.alignment}\n\
            endianness:    {self.endianness}\n\
@@ -1815,6 +1817,7 @@ class VariableTypeHandler:
                 is_signed=type_spec.is_signed,
                 is_const=type_spec.is_const,
                 is_volatile=type_spec.is_volatile,
+                is_local=type_spec.is_local,
                 bit_width=type_spec.bit_width or 8,
                 alignment=type_spec.alignment,
                 is_array=True,
@@ -3382,8 +3385,8 @@ class ObjectTypeHandler:
     
     @staticmethod
     def create_member_types(members: List, module: 'ir.Module') -> tuple:
-        member_types = [ir.IntType(8)]
-        member_names = ['__alive']
+        member_types = []
+        member_names = []
         
         for member in members:
             member_type = FunctionTypeHandler.convert_type_spec_to_llvm(member.type_spec, module)
@@ -3537,42 +3540,6 @@ class ObjectTypeHandler:
             SymbolKind.VARIABLE,
             llvm_value=func.args[0],
             type_spec=this_type_spec)
-
-        # __alive sentinel: field 0 of every object struct
-        this_ptr = func.args[0]
-        i32_zero = ir.Constant(ir.IntType(32), 0)
-        alive_ptr = method_builder.gep(
-            this_ptr,
-            [i32_zero, i32_zero],
-            inbounds=True,
-            name="alive_ptr"
-        )
-
-        if method.name == '__init':
-            # Mark object as alive when constructed
-            method_builder.store(ir.Constant(ir.IntType(8), 1), alive_ptr)
-        elif method.name == '__exit':
-            # Mark object as dead when destroyed
-            method_builder.store(ir.Constant(ir.IntType(8), 0), alive_ptr)
-        else:
-            # Every other method: abort at runtime if object has been destroyed
-            alive_val = method_builder.load(alive_ptr, name="alive")
-            zero_i8 = ir.Constant(ir.IntType(8), 0)
-            is_alive = method_builder.icmp_unsigned('!=', alive_val, zero_i8, name="is_alive")
-            live_block = func.append_basic_block('obj.live')
-            dead_block = func.append_basic_block('obj.dead')
-            method_builder.cbranch(is_alive, live_block, dead_block)
-            # Dead branch: abort
-            method_builder.position_at_start(dead_block)
-            abort_fn = module.globals.get('abort')
-            if abort_fn is None:
-                abort_type = ir.FunctionType(ir.VoidType(), [])
-                abort_fn = ir.Function(module, abort_type, 'abort')
-                abort_fn.linkage = 'external'
-            method_builder.call(abort_fn, [])
-            method_builder.unreachable()
-            # Live branch: continue normally
-            method_builder.position_at_start(live_block)
         
         # Store other params
         for i, param in enumerate(func.args[1:], 1):
