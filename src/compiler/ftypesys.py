@@ -1325,10 +1325,10 @@ TypeSystem(base_type:     {self.base_type}\n\
         elif isinstance(llvm_type, ir.PointerType):
             return ir.Constant(llvm_type, None)
         elif isinstance(llvm_type, ir.ArrayType):
-            element_init = get_default_initializer(llvm_type.element)
+            element_init = TypeSystem.get_default_initializer(llvm_type.element)
             return ir.Constant(llvm_type, [element_init] * llvm_type.count)
         elif isinstance(llvm_type, ir.LiteralStructType):
-            field_inits = [get_default_initializer(field) for field in llvm_type.elements]
+            field_inits = [TypeSystem.get_default_initializer(field) for field in llvm_type.elements]
             return ir.Constant(llvm_type, field_inits)
         else:
             # Fallback: try to create a zeroed value
@@ -4007,7 +4007,18 @@ class AssignmentTypeHandler:
             elif var_name in module.globals:
                 obj = module.globals[var_name]  # This is the pointer
             else:
-                raise NameError(f"Unknown variable: {var_name}")
+                # Try namespace-mangled name via using namespaces
+                mangled_obj = None
+                if hasattr(module, '_using_namespaces'):
+                    for namespace in module._using_namespaces:
+                        mangled = namespace.replace('::', '__') + '__' + var_name
+                        if mangled in module.globals:
+                            mangled_obj = module.globals[mangled]
+                            break
+                if mangled_obj is not None:
+                    obj = mangled_obj
+                else:
+                    raise NameError(f"Unknown variable: {var_name}")
         else:
             # For other expressions, generate code normally
             obj = target_obj_expr.codegen(builder, module)

@@ -104,26 +104,26 @@ namespace standard
             {
                 // Globals
 
-                global Slab*       g_slab_head      = (Slab*)0;
-                global size_t      g_next_slab_size = (size_t)4194304;   // 4 MB
-                global size_t      g_slab_size_cap  = (size_t)67108864;  // 64 MB
+                Slab*       g_slab_head      = (Slab*)0;
+                size_t      g_next_slab_size = (size_t)4194304;   // 4 MB
+                size_t      g_slab_size_cap  = (size_t)67108864;  // 64 MB
 
                 // Block table: open-addressed hash map, stored in its own OS slab
-                global BlockEntry* g_table          = (BlockEntry*)0;
-                global size_t      g_table_cap      = (size_t)0;   // entry capacity
-                global size_t      g_table_count    = (size_t)0;   // live entries
-                global size_t      g_table_slab_cap = (size_t)0;   // byte size of table OS slab
+                BlockEntry* g_table          = (BlockEntry*)0;
+                size_t      g_table_cap      = (size_t)0;   // entry capacity
+                size_t      g_table_count    = (size_t)0;   // live entries
+                size_t      g_table_slab_cap = (size_t)0;   // byte size of table OS slab
 
                 // Segregated free list bins (indices 0-8)
-                global FreeNode* g_bin_0 = (FreeNode*)0;
-                global FreeNode* g_bin_1 = (FreeNode*)0;
-                global FreeNode* g_bin_2 = (FreeNode*)0;
-                global FreeNode* g_bin_3 = (FreeNode*)0;
-                global FreeNode* g_bin_4 = (FreeNode*)0;
-                global FreeNode* g_bin_5 = (FreeNode*)0;
-                global FreeNode* g_bin_6 = (FreeNode*)0;
-                global FreeNode* g_bin_7 = (FreeNode*)0;
-                global FreeNode* g_bin_8 = (FreeNode*)0;
+                FreeNode* g_bin_0 = (FreeNode*)0;
+                FreeNode* g_bin_1 = (FreeNode*)0;
+                FreeNode* g_bin_2 = (FreeNode*)0;
+                FreeNode* g_bin_3 = (FreeNode*)0;
+                FreeNode* g_bin_4 = (FreeNode*)0;
+                FreeNode* g_bin_5 = (FreeNode*)0;
+                FreeNode* g_bin_6 = (FreeNode*)0;
+                FreeNode* g_bin_7 = (FreeNode*)0;
+                FreeNode* g_bin_8 = (FreeNode*)0;
 
                 // OS helpers
 
@@ -305,7 +305,41 @@ namespace standard
                         j++;
                     };
 
-                    // Release old table slab
+                    // Remove the stale BLOCK_TABLE entry for the old slab that was
+                    // rehashed into new_tbl, then release the old slab.
+                    u64 old_tbl_addr = (u64)g_table;
+                    size_t rm_idx = table_hash(old_tbl_addr, new_cap);
+                    bool rm_found = false;
+                    while (new_tbl[rm_idx].key != (u64)0)
+                    {
+                        switch (new_tbl[rm_idx].key == old_tbl_addr)
+                        {
+                            case (1)
+                            {
+                                new_tbl[rm_idx].key = (u64)0;
+                                g_table_count--;
+                                // Rehash the run after the removed slot
+                                size_t rm_next = (rm_idx + (size_t)1) & (new_cap - (size_t)1);
+                                while (new_tbl[rm_next].key != (u64)0)
+                                {
+                                    u64    rrkey  = new_tbl[rm_next].key;
+                                    size_t rrsize = new_tbl[rm_next].size;
+                                    u64    rrkind = new_tbl[rm_next].kind;
+                                    u64    rrslab = new_tbl[rm_next].slab;
+                                    new_tbl[rm_next].key = (u64)0;
+                                    g_table_count--;
+                                    table_raw_insert(new_tbl, new_cap, rrkey, rrsize, rrkind, rrslab);
+                                    g_table_count++;
+                                    rm_next = (rm_next + (size_t)1) & (new_cap - (size_t)1);
+                                };
+                                rm_found = true;
+                            }
+                            default {};
+                        };
+                        switch (rm_found) { case (1) { break; } default {}; };
+                        rm_idx = (rm_idx + (size_t)1) & (new_cap - (size_t)1);
+                    };
+
                     heap_os_free((u64)g_table, g_table_slab_cap);
 
                     g_table          = new_tbl;
@@ -578,7 +612,7 @@ namespace standard
                         case (1)
                         {
                             // Large block: slab field holds OS allocation size
-                            heap_os_free(ptr, slab);
+                            heap_os_free(ptr, (size_t)slab);
                             return;
                         }
                         default {};
@@ -620,9 +654,9 @@ namespace standard
                             bool same = new_cls == old_cls;
                             switch (same) { case (1) { return ptr; } default {}; };
 
-                            // Shrinking to a smaller class: data fits, no move needed
+                            // Shrinking to a smaller class: data fits in current block, no move needed
                             bool shrink = new_cls < old_cls;
-                            switch (shrink) { case (1) { entry.size = new_cls; return ptr; } default {}; };
+                            switch (shrink) { case (1) { return ptr; } default {}; };
 
                             // Growing: check if the target bin has a free block before bumping
                             size_t copy_size = class_block_size(old_cls);
