@@ -180,6 +180,24 @@ def make() -> int {
 };
 ```
 
+**Locality:**
+Locals cannot be passed to a function or returned from a function.
+```
+#import "standard.fx";
+
+def foo(int z) -> int
+{
+    return z;
+};
+
+def main() -> int
+{
+    local int y = 5;
+    foo(y); // Illegal, compile error
+    return 0;
+};
+```
+
 Endianness is part of the type
 Network protocols use big-endian. Every other language makes you manually convert with `htons()`, `ntohs()`, `htonl()`, `ntohl()`.
 In Flux, endianness is part of the type:
