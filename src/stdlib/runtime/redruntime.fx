@@ -116,7 +116,8 @@ def !!FRTStartup() -> int
             WIN_STDOUT_HANDLE = GetStdHandle(-11);
             //print("STDOUT: \0"); print(WIN_STDOUT_HANDLE); print();
 
-            // Initialize the Flux heap allocator
+            // Initialize the Flux standard heap allocator
+            // For reference, see runtime/redallocators.fx
             standard::memory::allocators::stdheap::table_init();
 
             // Parse command line manually from GetCommandLineW
@@ -160,7 +161,7 @@ def !!FRTStartup() -> int
             };
 
             // Allocate argv
-            byte** argv = (byte**)malloc((u64)argc * (u64)8);
+            byte** argv = (byte**)fmalloc((u64)argc * (u64)8);
 
             // Fill argv
             int argi = 0;
@@ -206,7 +207,7 @@ def !!FRTStartup() -> int
                 };
 
                 // Copy low byte of each wchar into byte buffer
-                byte* arg = (byte*)malloc((u64)len + (u64)1);
+                byte* arg = (byte*)fmalloc((u64)len + (u64)1);
                 int j = 0;
                 while (j < len)
                 {

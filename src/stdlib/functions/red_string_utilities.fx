@@ -912,7 +912,7 @@ namespace standard
             int len = 0;
             while (src[len] != 0) { len = len + 1; };
             
-            byte* dest = malloc((u64)len + 1);
+            byte* dest = fmalloc((u64)len + 1);
             if (dest == 0)
             {
                 return (byte*)0;
@@ -929,7 +929,7 @@ namespace standard
         // Copy n characters (allocates new buffer with null terminator)
         def copy_n(byte* src, int n) -> byte*
         {
-            byte* dest = malloc((u64)n + 1);
+            byte* dest = fmalloc((u64)n + 1);
             if (dest == 0)
             {
                 return (byte*)0;
@@ -947,7 +947,7 @@ namespace standard
         // Extract substring (allocates new buffer)
         def substring(byte* str, int start, int length) -> byte*
         {
-            byte* result = malloc((u64)length + 1);
+            byte* result = fmalloc((u64)length + 1);
             if (result == 0)
             {
                 return (byte*)0;
@@ -971,7 +971,7 @@ namespace standard
             int len2 = 0;
             while (s2[len2] != 0) { len2 = len2 + 1; };
             
-            byte* result = malloc((u64)len1 + len2 + 1);
+            byte* result = fmalloc((u64)len1 + len2 + 1);
             if (result == 0)
             {
                 return (byte*)0;
@@ -1155,7 +1155,7 @@ namespace standard
             while (replace[replace_len] != 0) { replace_len = replace_len + 1; };
             
             int new_len = str_len - find_len + replace_len;
-            byte* result = malloc((u64)new_len + 1);
+            byte* result = fmalloc((u64)new_len + 1);
             if (result == 0)
             {
                 return (byte*)0;

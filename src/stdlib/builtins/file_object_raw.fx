@@ -105,7 +105,7 @@ namespace standard
                         return empty1;
                     };
 
-                    byte* buf = malloc((u64)s + 1);
+                    byte* buf = fmalloc((u64)s + 1);
                     if (buf == 0)
                     {
                         string empty2("\0");

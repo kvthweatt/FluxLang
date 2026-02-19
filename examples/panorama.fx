@@ -74,8 +74,8 @@ def build_cube(Shape* s, float wx, float wy, float wz) -> void
     s.world_y = wy;
     s.world_z = wz;
     s.spin    = 0.0;
-    s.verts = (Vec3*)malloc((u64)8  * 12);
-    s.edges = (Edge*)malloc((u64)12 * 8);
+    s.verts = (Vec3*)fmalloc((u64)8  * 12);
+    s.edges = (Edge*)fmalloc((u64)12 * 8);
 
     s.verts[0].x = -1.0; s.verts[0].y = -1.0; s.verts[0].z = -1.0;
     s.verts[1].x =  1.0; s.verts[1].y = -1.0; s.verts[1].z = -1.0;
@@ -109,8 +109,8 @@ def build_pyramid(Shape* s, float wx, float wy, float wz) -> void
     s.world_y = wy;
     s.world_z = wz;
     s.spin    = 0.0;
-    s.verts = (Vec3*)malloc((u64)5 * 12);
-    s.edges = (Edge*)malloc((u64)8 * 8);
+    s.verts = (Vec3*)fmalloc((u64)5 * 12);
+    s.edges = (Edge*)fmalloc((u64)8 * 8);
 
     s.verts[0].x =  0.0; s.verts[0].y =  1.5; s.verts[0].z =  0.0;
     s.verts[1].x = -1.0; s.verts[1].y = -1.0; s.verts[1].z = -1.0;
@@ -137,8 +137,8 @@ def build_octahedron(Shape* s, float wx, float wy, float wz) -> void
     s.world_y = wy;
     s.world_z = wz;
     s.spin    = 0.0;
-    s.verts = (Vec3*)malloc((u64)6  * 12);
-    s.edges = (Edge*)malloc((u64)12 * 8);
+    s.verts = (Vec3*)fmalloc((u64)6  * 12);
+    s.edges = (Edge*)fmalloc((u64)12 * 8);
 
     s.verts[0].x =  0.0; s.verts[0].y =  1.4; s.verts[0].z =  0.0;
     s.verts[1].x =  0.0; s.verts[1].y = -1.4; s.verts[1].z =  0.0;
@@ -170,8 +170,8 @@ def build_diamond(Shape* s, float wx, float wy, float wz) -> void
     s.world_y = wy;
     s.world_z = wz;
     s.spin    = 0.0;
-    s.verts = (Vec3*)malloc((u64)9  * 12);
-    s.edges = (Edge*)malloc((u64)16 * 8);
+    s.verts = (Vec3*)fmalloc((u64)9  * 12);
+    s.edges = (Edge*)fmalloc((u64)16 * 8);
 
     s.verts[0].x =  0.0; s.verts[0].y =  1.8; s.verts[0].z =  0.0;
     s.verts[1].x =  0.0; s.verts[1].y = -1.2; s.verts[1].z =  0.0;
@@ -227,7 +227,7 @@ def main(int argc, byte** argv) -> int
     build_octahedron(@shapes[2],   0.0, 0.0, -8.0);
     build_diamond(   @shapes[3],  -8.0, 0.0,  0.0);
 
-    POINT* proj = (POINT*)malloc((u64)512 * 8);
+    POINT* proj = (POINT*)fmalloc((u64)512 * 8);
 
     int cx = WIN_WIDTH  / 2;
     int cy = WIN_HEIGHT / 2;
