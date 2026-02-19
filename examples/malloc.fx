@@ -1,4 +1,5 @@
 #import "standard.fx";
+#import "redallocators.fx";
 
 def main() -> int
 {
@@ -9,7 +10,7 @@ def main() -> int
 
     You should use malloc to allocate the space for a file.
     ///
-    noopstr f = "examples\\bugatti.obj\0";
+    noopstr f = "examples\\malloc.fx\0";
     u64 size = get_file_size(f);
 	byte* buffer = malloc((u64)size + 1);
 

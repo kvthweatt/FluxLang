@@ -2,7 +2,9 @@
 #import "redmath.fx";
 #import "redwindows.fx";
 #import "redopengl.fx";
+#import "redallocators.fx";
 
+using standard::memory::allocators::stdheap;
 using standard::system::windows;
 using standard::math;
 
@@ -47,7 +49,7 @@ def load_obj(byte* path, Mesh* mesh) -> bool
         print("Error: file not found or empty.\n\0");
         return false;
     };
-    byte* buffer = malloc((u64)size + 1);
+    byte* buffer = fmalloc((u64)size + 1);
     if (buffer == 0)
     {
         print("Error: out of memory.\n\0");
@@ -63,8 +65,8 @@ def load_obj(byte* path, Mesh* mesh) -> bool
     buffer[bytes_read] = (byte)0;
     print("File loaded, initializing arrays...\n\0");
 
-    mesh.verts      = (Vec3*)malloc((u64)MAX_VERTS * 12);
-    mesh.faces      = (Face*)malloc((u64)MAX_FACES * 12);
+    mesh.verts      = (Vec3*)fmalloc((u64)MAX_VERTS * 12);
+    mesh.faces      = (Face*)fmalloc((u64)MAX_FACES * 12);
     mesh.vert_count = 0;
     mesh.face_count = 0;
 
@@ -199,8 +201,8 @@ def main(int argc, byte** argv) -> int
         // Fallback: spinning cube
         mesh.vert_count = 8;
         mesh.face_count = 12;
-        mesh.verts      = (Vec3*)malloc((u64)8  * 12);
-        mesh.faces      = (Face*)malloc((u64)12 * 12);
+        mesh.verts      = (Vec3*)fmalloc((u64)8  * 12);
+        mesh.faces      = (Face*)fmalloc((u64)12 * 12);
 
         mesh.verts[0].x = -1.0; mesh.verts[0].y = -1.0; mesh.verts[0].z = -1.0;
         mesh.verts[1].x =  1.0; mesh.verts[1].y = -1.0; mesh.verts[1].z = -1.0;
@@ -225,7 +227,7 @@ def main(int argc, byte** argv) -> int
         mesh.faces[11].a = 3; mesh.faces[11].b = 6; mesh.faces[11].c = 7;
     };
 
-    POINT* proj = (POINT*)malloc((u64)mesh.vert_count * 16);
+    POINT* proj = (POINT*)fmalloc((u64)mesh.vert_count * 16);
 
     float angle_x = 0.0;
     float angle_y = 0.0;

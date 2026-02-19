@@ -26,6 +26,7 @@ global i64 WIN_STDOUT_HANDLE;
 
 #ifndef FLUX_STANDARD_MEMORY
 #import "redmemory.fx";             // FFI-based Memory Operations (CRT)
+#import "redallocators.fx";
 #endif;
 
 #import "red_string_utilities.fx";
@@ -114,6 +115,9 @@ def !!FRTStartup() -> int
             // Initialize stdout handle for win_print
             WIN_STDOUT_HANDLE = GetStdHandle(-11);
             //print("STDOUT: \0"); print(WIN_STDOUT_HANDLE); print();
+
+            // Initialize the Flux heap allocator
+            standard::memory::allocators::stdheap::table_init();
 
             // Parse command line manually from GetCommandLineW
             wchar* cmdLine = GetCommandLineW();
