@@ -710,13 +710,13 @@ class BinaryOp(Expression):
             if isinstance(lhs.type, ir.PointerType):
                 pointee = lhs.type.pointee
                 # Only auto-load scalar types, not arrays or structs
-                if not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType)):
+                if not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType)):
                     lhs = builder.load(lhs, name="auto_deref_lhs")
             
             if isinstance(rhs.type, ir.PointerType):
                 pointee = rhs.type.pointee
                 # Only auto-load scalar types, not arrays or structs
-                if not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType)):
+                if not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType)):
                     rhs = builder.load(rhs, name="auto_deref_rhs")
         else:
             # For potential pointer arithmetic, only dereference pointer-to-pointer to get the actual pointer
@@ -1016,7 +1016,13 @@ class UnaryOp(Expression):
                 elif self.operand.name in module.globals:
                     ptr = module.globals[self.operand.name]
                 else:
-                    raise NameError(f"Variable '{self.operand.name}' not found in any scope")
+                    mangled = IdentifierTypeHandler.resolve_namespace_mangled_name(self.operand.name, module)
+                    if mangled and module.symbol_table.get_llvm_value(mangled) is not None:
+                        ptr = module.symbol_table.get_llvm_value(mangled)
+                    elif mangled and mangled in module.globals:
+                        ptr = module.globals[mangled]
+                    else:
+                        raise NameError(f"Variable '{self.operand.name}' not found in any scope")
                 st = builder.store(new_val, ptr)
                 if hasattr(builder,'volatile_vars') and self.operand.name in builder.volatile_vars:
                     st.volatile = True
@@ -1042,7 +1048,13 @@ class UnaryOp(Expression):
                 elif self.operand.name in module.globals:
                     ptr = module.globals[self.operand.name]
                 else:
-                    raise NameError(f"Variable '{self.operand.name}' not found in any scope")
+                    mangled = IdentifierTypeHandler.resolve_namespace_mangled_name(self.operand.name, module)
+                    if mangled and module.symbol_table.get_llvm_value(mangled) is not None:
+                        ptr = module.symbol_table.get_llvm_value(mangled)
+                    elif mangled and mangled in module.globals:
+                        ptr = module.globals[mangled]
+                    else:
+                        raise NameError(f"Variable '{self.operand.name}' not found in any scope")
                 st = builder.store(new_val, ptr)
                 if hasattr(builder,'volatile_vars') and self.operand.name in builder.volatile_vars:
                     st.volatile = True
@@ -2638,7 +2650,13 @@ class AddressOf(Expression):
                 elif var_name in module.globals:
                     array_ptr = module.globals[var_name]
                 else:
-                    raise NameError(f"Unknown array identifier: {var_name}")
+                    mangled = IdentifierTypeHandler.resolve_namespace_mangled_name(var_name, module)
+                    if mangled and module.symbol_table.get_llvm_value(mangled) is not None:
+                        array_ptr = module.symbol_table.get_llvm_value(mangled)
+                    elif mangled and mangled in module.globals:
+                        array_ptr = module.globals[mangled]
+                    else:
+                        raise NameError(f"Unknown array identifier: {var_name}")
             else:
                 # For more complex expressions, call codegen
                 array_ptr = self.expression.array.codegen(builder, module)
@@ -4257,6 +4275,10 @@ class SwitchStatement(Statement):
         for value, block in case_blocks:
             if value is not None:
                 case_const = value.codegen(builder, module)
+                # Ensure case constant type matches switch value type
+                if isinstance(case_const.type, ir.IntType) and isinstance(switch_val.type, ir.IntType):
+                    if case_const.type.width != switch_val.type.width:
+                        case_const = ir.Constant(switch_val.type, case_const.constant)
                 switch.add_case(case_const, block)
         
         # Generate code for each case block

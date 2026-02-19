@@ -3871,7 +3871,15 @@ class AssignmentTypeHandler:
             # Global variable
             ptr = module.globals[target_name]
         else:
-            raise NameError(f"Unknown variable: {target_name}")
+            # Try namespace-mangled name
+            from ftypesys import IdentifierTypeHandler
+            mangled = IdentifierTypeHandler.resolve_namespace_mangled_name(target_name, module)
+            if mangled and module.symbol_table.get_llvm_value(mangled) is not None:
+                ptr = module.symbol_table.get_llvm_value(mangled)
+            elif mangled and mangled in module.globals:
+                ptr = module.globals[mangled]
+            else:
+                raise NameError(f"Unknown variable: {target_name}")
 
         # Check if variable is const - prevent modification
         symbol_entry = module.symbol_table.lookup_any(target_name)
