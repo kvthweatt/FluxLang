@@ -7,7 +7,7 @@
     // Large allocations (>4096) get a dedicated OS slab, released on ffree.
     // Block metadata lives in a separate table slab (open-addressed hash map
     // keyed by user pointer). The table slab is itself an entry in the table.
-    // No inline headers — user data blocks are completely pure.
+    // No inline headers â€” user data blocks are completely pure.
     // No zeroing (Flux zero-inits at language level).
     // No coalescing (fragments are reusable as-is per Flux memory model).
     // Slabs acquired directly from OS: 4MB -> 8MB -> 16MB -> 32MB -> 64MB cap.
@@ -22,7 +22,7 @@
 #ifndef FLUX_STANDARD_ALLOCATORS
 #def FLUX_STANDARD_ALLOCATORS 1;
 
-// ── OS primitives ─────────────────────────────────────────────────────────────
+// â”€â”€ OS primitives â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #ifdef __WINDOWS__
 extern
@@ -51,19 +51,19 @@ extern
 };
 #endif;
 
-// ── Size classes ──────────────────────────────────────────────────────
+// â”€â”€ Size classes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 //  Index:  0    1    2    3    4    5     6     7     8
 //  Bytes: 16   32   64  128  256  512  1024  2048  4096
 //  >4096 = large, gets its own dedicated OS slab.
 
-// ── Block kinds ───────────────────────────────────────────────────────
+// â”€â”€ Block kinds â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 //  BLOCK_SMALL (0): size field holds size class index (0-8)
 //  BLOCK_LARGE (1): size field holds exact byte count requested
 //  BLOCK_TABLE (2): this entry describes a table slab itself
 
-// ── Block table entry ─────────────────────────────────────────────────
+// â”€â”€ Block table entry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 //  key  : user pointer (null = empty slot)
 //  size : size class index for small; byte count for large/table
@@ -78,7 +78,7 @@ struct BlockEntry
     u64    slab;
 };
 
-// ── Slab descriptor ───────────────────────────────────────────────────
+// â”€â”€ Slab descriptor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 struct Slab
 {
@@ -87,7 +87,7 @@ struct Slab
     Slab*  next;
 };
 
-// ── Free list node (lives in the free block's own memory) ─────────────
+// â”€â”€ Free list node (lives in the free block's own memory) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 struct FreeNode
 {
@@ -102,7 +102,7 @@ namespace standard
         {
             namespace stdheap
             {
-                // ── Globals ───────────────────────────────────────────────────────────
+                // â”€â”€ Globals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
                 global Slab*       g_slab_head      = (Slab*)0;
                 global size_t      g_next_slab_size = (size_t)4194304;   // 4 MB
@@ -125,7 +125,7 @@ namespace standard
                 global FreeNode* g_bin_7 = (FreeNode*)0;
                 global FreeNode* g_bin_8 = (FreeNode*)0;
 
-                // ── OS helpers ────────────────────────────────────────────────────────
+                // â”€â”€ OS helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
                 def heap_os_alloc(size_t bytes) -> u64
                 {
@@ -184,6 +184,7 @@ namespace standard
                         case (5) { return (size_t)512;  }
                         case (6) { return (size_t)1024; }
                         case (7) { return (size_t)2048; }
+                        case (8) { return (size_t)4096; }
                         default  { return (size_t)4096; };
                     };
                     return (size_t)0;
@@ -225,7 +226,7 @@ namespace standard
                     };
                 };
 
-                // ── Block table ───────────────────────────────────────────────────────
+                // â”€â”€ Block table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
                 // entry size: 8+8+8+8 = 32 bytes
                 def entry_size() -> size_t
@@ -282,6 +283,8 @@ namespace standard
 
                     BlockEntry* new_tbl = (BlockEntry*)raw;
 
+                    g_table_count = (size_t)0;
+
                     // Rehash all existing entries into the new table
                     size_t j = (size_t)0;
                     while (j < g_table_cap)
@@ -295,6 +298,7 @@ namespace standard
                                                  g_table[j].size,
                                                  g_table[j].kind,
                                                  g_table[j].slab);
+                                g_table_count++;
                             }
                             default {};
                         };
@@ -439,7 +443,7 @@ namespace standard
                     };
                 };
 
-                // ── Data slab management ──────────────────────────────────────────────
+                // â”€â”€ Data slab management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
                 def slab_header_size() -> size_t
                 {
@@ -487,7 +491,7 @@ namespace standard
                     return ptr;
                 };
 
-                // ── Public API ────────────────────────────────────────────────────────
+                // â”€â”€ Public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
                 def fmalloc(size_t size) -> u64
                 {
@@ -503,7 +507,8 @@ namespace standard
                             u64 raw = heap_os_alloc(size);
                             switch (raw == (u64)0) { case (1) { return (u64)0; } default {}; };
 
-                            switch (!table_insert(raw, size, (u64)1, raw))
+                            // slab field stores OS allocation size so ffree can release correctly
+                            switch (!table_insert(raw, size, (u64)1, size))
                             {
                                 case (1)
                                 {
@@ -572,8 +577,8 @@ namespace standard
                     {
                         case (1)
                         {
-                            // Large block: release OS slab directly
-                            heap_os_free(slab, size);
+                            // Large block: slab field holds OS allocation size
+                            heap_os_free(ptr, slab);
                             return;
                         }
                         default {};
@@ -598,7 +603,7 @@ namespace standard
                     {
                         case (1)
                         {
-                            // Large block: shrinking or same — update size in table, no move
+                            // Large block: shrinking or same â€” update size in table, no move
                             bool fits = old_size >= new_size;
                             switch (fits)
                             {
@@ -642,7 +647,7 @@ namespace standard
                                 default {};
                             };
 
-                            // No free block in bin — bump allocate, copy, free old
+                            // No free block in bin â€” bump allocate, copy, free old
                             u64 new_ptr = fmalloc(new_size);
                             switch (new_ptr == (u64)0) { case (1) { return (u64)0; } default {}; };
                             byte* src = (byte*)ptr;
