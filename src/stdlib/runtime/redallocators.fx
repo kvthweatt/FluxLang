@@ -637,13 +637,15 @@ namespace standard
                     {
                         case (1)
                         {
-                            // Large block: shrinking or same Ã¢â‚¬â€ update size in table, no move
-                            bool fits = old_size >= new_size;
-                            switch (fits)
+                            // Large block: same size, no move needed
+                            bool same = old_size == new_size;
+                            switch (same)
                             {
-                                case (1) { entry.size = new_size; return ptr; }
+                                case (1) { return ptr; }
                                 default  {};
                             };
+                            // Shrinking or growing: fall through to move path below.
+                            // Shrinking releases excess OS memory; growing gets more.
                         }
                         default
                         {
