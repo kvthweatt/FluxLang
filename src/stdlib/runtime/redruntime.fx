@@ -161,7 +161,7 @@ def !!FRTStartup() -> int
             };
 
             // Allocate argv
-            byte** argv = (byte**)malloc((u64)argc * (u64)8);
+            byte** argv = (byte**)fmalloc((u64)argc * (u64)8);
 
             // Fill argv
             int argi = 0;
@@ -207,7 +207,7 @@ def !!FRTStartup() -> int
                 };
 
                 // Copy low byte of each wchar into byte buffer
-                byte* arg = (byte*)malloc((u64)len + (u64)1);
+                byte* arg = (byte*)fmalloc((u64)len + (u64)1);
                 int j = 0;
                 while (j < len)
                 {
@@ -233,10 +233,10 @@ def !!FRTStartup() -> int
             int k = 0;
             while (k < argc)
             {
-                free(argv[k]);
+                ffree((u64)argv[k]);
                 k = k + 1;
             };
-            free(argv);
+            ffree((u64)argv);
         }
         #endif;
         #ifdef __LINUX__

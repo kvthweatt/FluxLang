@@ -4,7 +4,7 @@
 
 using standard::crypto::hashing::SHA256;
 
-def main()->int
+def main() -> int
 {
     SHA256_CTX ctx;
 

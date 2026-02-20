@@ -59,7 +59,7 @@ def load_obj(byte* path, Mesh* mesh) -> bool
     if (bytes_read <= 0)
     {
         print("Error: could not read file.\n\0");
-        free(buffer);
+        ffree((u64)buffer);
         return false;
     };
     buffer[bytes_read] = (byte)0;
@@ -122,7 +122,7 @@ def load_obj(byte* path, Mesh* mesh) -> bool
         };
     };
 
-    free(buffer);
+    ffree((u64)buffer);
     return true;
 };
 
@@ -312,9 +312,9 @@ def main(int argc, byte** argv) -> int
         Sleep(SLEEP_MS);
     };
 
-    free(proj);
-    free(mesh.verts);
-    free(mesh.faces);
+    ffree((u64)proj);
+    ffree((u64)mesh.verts);
+    ffree((u64)mesh.faces);
 
     win.__exit();
 
