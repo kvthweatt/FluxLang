@@ -316,5 +316,7 @@ def main(int argc, byte** argv) -> int
     free(mesh.verts);
     free(mesh.faces);
 
+    win.__exit();
+
     return 0;
 };

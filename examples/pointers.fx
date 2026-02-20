@@ -1,8 +1,4 @@
 #import "standard.fx";
-
-def foo() -> void {};
-def bar() -> void {};
-
 def main() -> int
 {
     uint x, y = 10, 0;
@@ -12,14 +8,14 @@ def main() -> int
     // A pointer is simply a variable and its value is an address
     // An address is a number.
     // Therefore, we can store that address
-    // 
+    //
     u64 kx = px;
 
     // (@) is address-cast. It reinterprets the number as an address
     // When we treat a number as an address, we call that a pointer.
     // Therefore, we can assign this to another pointer.
     //
-    py = (@)kx;
+    py = (@)kx; 
 
     // py now points to x
 
@@ -33,5 +29,5 @@ def main() -> int
         return 0;
     };
 
-	return 1;
+	return 0;
 };

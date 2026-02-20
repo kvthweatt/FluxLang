@@ -1,15 +1,13 @@
 #import "standard.fx";
 
-def "??foo@"() -> void
-{
-    print("I'm working!\n\0");
-};
-
 def main() -> int
 {
-    uint a = 5;
-    uint b = 2;
-    uint c = a `!| b;
-    print(c);
+    uint x = 10;
+    uint y = 0;
+
+    uint* px = @x;
+    uint* py = @y;
+
+	print(*px); print();
 	return 0;
 };

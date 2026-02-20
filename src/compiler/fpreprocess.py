@@ -20,7 +20,6 @@ class FXPreprocessor:
         # Step 2: Build combined source
         combined_source = '\n'.join(self.output_lines)
         
-        
         # Step 4: Keep replacing macros until no more replacements occur
         replaced = True
         iteration = 0

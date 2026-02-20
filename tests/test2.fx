@@ -1,17 +1,12 @@
-#import "redtypes.fx";
+#import "standard.fx";
 
-def foo() -> void**
-{
-	byte* buffer;
-	return buffer;
-};
 
 def main() -> int
 {
-    byte[] x;
+	int x = 5;
 
-    x = foo();
+	int* px = @x;
+
+	print(*px);
 	return 0;
 };
-
-def !!FRTStartup() -> int {return main();};

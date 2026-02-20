@@ -1701,6 +1701,7 @@ class FluxParser:
                     var_name = self.consume(TokenType.IDENTIFIER).value
                     self.symbol_table.define(var_name, SymbolKind.VARIABLE, type_spec)
                     names.append(var_name)
+                initializers = []
                 if self.expect(TokenType.ASSIGN):
                     self.advance()
                     for _ in names:
