@@ -693,13 +693,15 @@ namespace standard
                         };
                     };
 
-                    // Large block growing: must move
+                    // Large block growing or shrinking to small: must move
                     u64 new_ptr = fmalloc(new_size);
                     switch (new_ptr == (u64)0) { case (1) { return (u64)0; } default {}; };
                     byte* src = (byte*)ptr;
                     byte* dst = (byte*)new_ptr;
+                    size_t copy_size = old_size;
+                    switch (new_size < old_size) { case (1) { copy_size = new_size; } default {}; };
                     size_t i = (size_t)0;
-                    while (i < old_size) { dst[i] = src[i]; i++; };
+                    while (i < copy_size) { dst[i] = src[i]; i++; };
                     ffree(ptr);
                     return new_ptr;
                 };

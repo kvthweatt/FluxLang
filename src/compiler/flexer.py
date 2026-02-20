@@ -97,6 +97,7 @@ class TokenType(Enum):
     UNION = auto()        # "        union
     UNSIGNED = auto()     # "        unsigned
     USING = auto()        # "        using
+    VECTOR = auto()       # "        vector
     VOID = auto()         # "        void
     VOLATILE = auto()     # "        volatile
     WHILE = auto()        # "        while
@@ -380,6 +381,7 @@ class FluxLexer:
             'union': TokenType.UNION,
             'unsigned': TokenType.UNSIGNED,
             'using': TokenType.USING,
+            'vector': TokenType.VECTOR,
             'void': TokenType.VOID,
             'volatile': TokenType.VOLATILE,
             'while': TokenType.WHILE,

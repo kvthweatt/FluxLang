@@ -219,7 +219,7 @@ def main(int argc, byte** argv) -> int
               BLUE =  255;
 
     const float CAM_FOV  = 360.0,
-                CAM_Z    = 3.5;     // Distance from origin
+                CAM_Z    = 2.5;     // Distance from origin
 
     if (argc == 2)
     {

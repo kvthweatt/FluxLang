@@ -327,13 +327,13 @@ def main(int argc, byte** argv) -> int
         Sleep(SLEEP_MS);
     };
 
-    free(proj);
+    ffree((u64)proj);
 
     si = 0;
     while (si < NUM_SHAPES)
     {
-        free(shapes[si].verts);
-        free(shapes[si].edges);
+        ffree((u64)shapes[si].verts);
+        ffree((u64)shapes[si].edges);
         si = si + 1;
     };
 

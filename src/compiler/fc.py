@@ -530,6 +530,7 @@ class FluxCompiler:
                     "opengl32.lib",
                     "Ws2_32.lib",
                     "shell32.lib",
+                    #"libsynchronization.lib",
                     #"libcmt.lib",
                     "msvcrt.lib",   # Optional, link with C runtime
                     "user32.lib",  # Uncomment only if GUI functions are used
@@ -574,6 +575,7 @@ class FluxCompiler:
                                 "-luser32 "
                                 "-lgdi32 "
                                 "-lopengl32 "
+                                #"-llibsynchronization "
                                 "-llegacy_stdio_definitions "  # For stdio functions in UCRT
                                 # Alternatively for older MSVCRT:
                                 # "-lmsvcrt "  # Old C runtime (smaller but may have issues)
