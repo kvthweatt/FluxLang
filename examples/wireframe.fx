@@ -64,6 +64,7 @@ def load_obj(byte* path, Mesh* mesh) -> bool
     };
     buffer[bytes_read] = (byte)0;
     print("File loaded, initializing arrays...\n\0");
+    print(buffer);
 
     mesh.verts      = (Vec3*)fmalloc((u64)MAX_VERTS * 12);
     mesh.faces      = (Face*)fmalloc((u64)MAX_FACES * 12);
@@ -76,19 +77,20 @@ def load_obj(byte* path, Mesh* mesh) -> bool
 
     while (pos < bytes_read)
     {
-        print("In loop..\n\0");
         int line_len = 0;
-        while (pos + line_len < bytes_read & buffer[pos + line_len] != '\n' & line_len < 511)
+        int read_pos = pos;
+        while (read_pos < bytes_read & buffer[read_pos] != '\n' & line_len < 511)
         {
-            byte ch = buffer[pos + line_len];
+            byte ch = buffer[read_pos];
             if (ch != '\r')
             {
                 line[line_len] = ch;
                 line_len = line_len + 1;
             };
-            pos = pos + 1;
+            read_pos = read_pos + 1;
         };
         line[line_len] = (byte)0;
+        pos = read_pos;
         if (pos < bytes_read) { pos = pos + 1; };
 
         if (line[0] == 'v' & line[1] == ' ')
@@ -113,7 +115,43 @@ def load_obj(byte* path, Mesh* mesh) -> bool
                 int fa = 0;
                 int fb = 0;
                 int fc = 0;
-                sscanf(line, "f %d %d %d\0", @fa, @fb, @fc);
+                int dummy1 = 0;
+                int dummy2 = 0;
+
+                int matched = sscanf(line, "f %d/%d/%d\0", @fa, @dummy1, @dummy2);
+                if (matched < 1)
+                {
+                    matched = sscanf(line, "f %d\x2F\x2F%d\0", @fa, @dummy1, @dummy2);
+                };
+                if (matched < 1)
+                {
+                    sscanf(line, "f %d %d %d\0", @fa, @fb, @fc);
+                }
+                else
+                {
+                    int si = 2;
+                    while (line[si] != ' ' & line[si] != (byte)0) { si = si + 1; };
+                    if (line[si] == ' ')
+                    {
+                        si = si + 1;
+                        dummy1 = 0;
+                        dummy2 = 0;
+                        matched = sscanf(@line[si], "%d/%d/%d\0", @fb, @dummy1, @dummy2);
+                        if (matched < 1) { matched = sscanf(@line[si], "%d\x2F\x2F%d\0", @fb, @dummy1, @dummy2); };
+                        if (matched < 1) { sscanf(@line[si], "%d\0", @fb, @dummy1, @dummy2); };
+                        while (line[si] != ' ' & line[si] != (byte)0) { si = si + 1; };
+                        if (line[si] == ' ')
+                        {
+                            si = si + 1;
+                            dummy1 = 0;
+                            dummy2 = 0;
+                            int matched = sscanf(@line[si], "%d/%d/%d\0", @fc, @dummy1, @dummy2);
+                            if (matched < 1) { matched = sscanf(@line[si], "%d\x2F\x2F%d\0", @fc, @dummy1, @dummy2); };
+                            if (matched < 1) { sscanf(@line[si], "%d\0", @fc, @dummy1, @dummy2); };
+                        };
+                    };
+                };
+
                 mesh.faces[mesh.face_count].a = fa - 1;
                 mesh.faces[mesh.face_count].b = fb - 1;
                 mesh.faces[mesh.face_count].c = fc - 1;
@@ -181,7 +219,7 @@ def main(int argc, byte** argv) -> int
               BLUE =  255;
 
     const float CAM_FOV  = 360.0,
-                CAM_Z    = 2.5;     // Distance from origin
+                CAM_Z    = 3.5;     // Distance from origin
 
     if (argc == 2)
     {
