@@ -2163,6 +2163,12 @@ class VariableTypeHandler:
                     builder, module, init_val, llvm_type
                 )
             
+            # Pointer to struct: load the struct value so we can store it into the alloca
+            elif (isinstance(init_val.type, ir.PointerType) and
+                  isinstance(llvm_type, (ir.LiteralStructType, ir.IdentifiedStructType)) and
+                  init_val.type.pointee == llvm_type):
+                init_val = builder.load(init_val, name="struct_deref")
+
             # Pointer to integer conversion (addresses are just numbers in Flux)
             elif isinstance(init_val.type, ir.PointerType) and isinstance(llvm_type, ir.IntType):
                 init_val = builder.ptrtoint(init_val, llvm_type, name="ptr_to_int")

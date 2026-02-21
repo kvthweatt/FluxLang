@@ -10,9 +10,6 @@ using standard::math;
 // TYPES
 // ============================================================================
 
-struct Vec3 { float x, y, z; };
-struct Edge { int a, b; };
-
 struct Shape
 {
     Vec3* verts;
@@ -29,7 +26,7 @@ struct Shape
 // MATH HELPERS
 // ============================================================================
 
-def rotate_y_vec(Vec3* v, float s, float c) -> Vec3
+def rotate_y(Vec3* v, float s, float c) -> Vec3
 {
     Vec3 r;
     r.x =  v.x * c + v.z * s;
@@ -38,7 +35,7 @@ def rotate_y_vec(Vec3* v, float s, float c) -> Vec3
     return r;
 };
 
-def rotate_x_vec(Vec3* v, float s, float c) -> Vec3
+def rotate_x(Vec3* v, float s, float c) -> Vec3
 {
     Vec3 r;
     r.x = v.x;
@@ -47,7 +44,7 @@ def rotate_x_vec(Vec3* v, float s, float c) -> Vec3
     return r;
 };
 
-def project_pt(Vec3* v, int cx, int cy, float fov, float cam_z) -> POINT
+def project(Vec3* v, int cx, int cy, float fov, float cam_z) -> POINT
 {
     float dz = v.z + cam_z;
     POINT p;
@@ -287,7 +284,7 @@ def main(int argc, byte** argv) -> int
                 lv.y = shapes[si].verts[vi].y;
                 lv.z = shapes[si].verts[vi].z;
 
-                spun = rotate_y_vec(@lv, spin_s, spin_c);
+                spun = rotate_y(@lv, spin_s, spin_c);
 
                 world.x = spun.x + shapes[si].world_x;
                 world.y = spun.y + shapes[si].world_y;
@@ -300,7 +297,7 @@ def main(int argc, byte** argv) -> int
                 cam_space.y = world.y;
                 cam_space.z = rel_z;
 
-                proj[vi] = project_pt(@cam_space, cx, cy, CAM_FOV, CAM_DIST);
+                proj[vi] = project(@cam_space, cx, cy, CAM_FOV, CAM_DIST);
                 vi = vi + 1;
             };
 

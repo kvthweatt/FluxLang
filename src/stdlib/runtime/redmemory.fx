@@ -13,14 +13,73 @@ extern
     // Memory allocation
     def !!
         malloc(size_t) -> void*,
-        memcpy(void*, void*, size_t) -> void*,
         free(void*) -> void,
         calloc(size_t, size_t) -> void*,
-        realloc(void*, size_t) -> void*,
-        memcpy(void*, void*, size_t) -> void*,
-        memmove(void*, void*, size_t) -> void*,
-        memset(void*, int, size_t) -> void*,
-        memcmp(void*, void*, size_t) -> int;
+        realloc(void*, size_t) -> void*;
+};
+
+def memset(void* dst, int c, size_t n) -> void*
+{
+    byte* d = (byte*)dst;
+    size_t i = (size_t)0;
+    while (i < n)
+    {
+        d[i] = (byte)c;
+        i++;
+    };
+    return dst;
+};
+
+def memcpy(void* dst, void* src, size_t n) -> void*
+{
+    byte* d = (byte*)dst;
+    byte* s = (byte*)src;
+    size_t i = (size_t)0;
+    while (i < n)
+    {
+        d[i] = s[i];
+        i++;
+    };
+    return dst;
+};
+
+def memmove(void* dst, void* src, size_t n) -> void*
+{
+    byte* d = (byte*)dst;
+    byte* s = (byte*)src;
+    size_t i = (size_t)0;
+    if (d < s)
+    {
+        while (i < n)
+        {
+            d[i] = s[i];
+            i++;
+        };
+    }
+    else
+    {
+        i = n;
+        while (i > (size_t)0)
+        {
+            i--;
+            d[i] = s[i];
+        };
+    };
+    return dst;
+};
+
+def memcmp(void* a, void* b, size_t n) -> int
+{
+    byte* pa = (byte*)a;
+    byte* pb = (byte*)b;
+    size_t i = (size_t)0;
+    while (i < n)
+    {
+        if (pa[i] < pb[i]) { return -1; };
+        if (pa[i] > pb[i]) { return 1; };
+        i++;
+    };
+    return 0;
 };
 
 #ifndef FLUX_STANDARD_MEMORY
@@ -30,445 +89,6 @@ namespace standard
 {
     namespace memory
     {
-///
-        // ===== MEMORY BLOCK HEADER =====
-        struct MemoryBlockHeader
-        {
-            size_t size;
-            bool is_free;
-            MemoryBlockHeader* next, prev;
-        };
-        
-        // ===== HEAP ALLOCATOR =====
-        object HeapAllocator
-        {
-            MemoryBlockHeader* head;
-            size_t total_allocated, total_freed, block_count;
-            
-            def __init() -> this
-            {
-                this.head = (MemoryBlockHeader*)0;
-                this.total_allocated = (size_t)0;
-                this.total_freed = (size_t)0;
-                this.block_count = (size_t)0;
-                return this;
-            };
-            
-            def __exit() -> void
-            {
-                this.free_all();
-                return;
-            };
-            
-            def allocate(size_t size) -> void*
-            {
-                if (size == (size_t)0)
-                {
-                    return (void*)0;
-                };
-                
-                // Try to find a free block of sufficient size
-                MemoryBlockHeader* current = this.head;
-                while (current != (MemoryBlockHeader*)0)
-                {
-                    if (current.is_free & current.size >= size)
-                    {
-                        current.is_free = false;
-                        return (void*)(current + (size_t)1);
-                    };
-                    current = current.next;
-                };
-                
-                // No suitable block found, allocate new one
-                size_t total_size = sizeof(MemoryBlockHeader) + size;
-                MemoryBlockHeader* block = (MemoryBlockHeader*)malloc(total_size);
-                
-                if (block == (MemoryBlockHeader*)0)
-                {
-                    return (void*)0;
-                };
-                
-                block.size = size;
-                block.is_free = false;
-                block.next = this.head;
-                block.prev = (MemoryBlockHeader*)0;
-                
-                if (this.head != (MemoryBlockHeader*)0)
-                {
-                    this.head.prev = block;
-                };
-                
-                this.head = block;
-                this.total_allocated += size;
-                this.block_count++;
-                
-                return (void*)(block + (size_t)1);
-            };
-            
-            def deallocate(void* ptr) -> bool
-            {
-                if (ptr == (void*)0)
-                {
-                    return false;
-                };
-                
-                MemoryBlockHeader* block = ((MemoryBlockHeader*)ptr) - (size_t)1;
-                
-                if (block.is_free)
-                {
-                    return false;
-                };
-                
-                block.is_free = true;
-                this.total_freed += block.size;
-                
-                return true;
-            };
-            
-            def reallocate(void* ptr, size_t new_size) -> void*
-            {
-                if (ptr == (void*)0)
-                {
-                    return this.allocate(new_size);
-                };
-                
-                if (new_size == (size_t)0)
-                {
-                    this.deallocate(ptr);
-                    return (void*)0;
-                };
-                
-                MemoryBlockHeader* block = ((MemoryBlockHeader*)ptr) - (size_t)1;
-                
-                if (block.size >= new_size)
-                {
-                    return ptr;
-                };
-                
-                void* new_ptr = this.allocate(new_size);
-                if (new_ptr == (void*)0)
-                {
-                    return (void*)0;
-                };
-                
-                memcpy(new_ptr, ptr, block.size);
-                this.deallocate(ptr);
-                
-                return new_ptr;
-            };
-            
-            def free_all() -> void
-            {
-                MemoryBlockHeader* current = this.head;
-                
-                while (current != (MemoryBlockHeader*)0)
-                {
-                    MemoryBlockHeader* next = current.next;
-                    (void)current;
-                    current = next;
-                };
-                
-                this.head = (MemoryBlockHeader*)0;
-                this.total_allocated = (size_t)0;
-                this.total_freed = (size_t)0;
-                this.block_count = (size_t)0;
-            };
-            
-            def get_allocated() -> size_t
-            {
-                return this.total_allocated;
-            };
-            
-            def get_freed() -> size_t
-            {
-                return this.total_freed;
-            };
-            
-            def get_in_use() -> size_t
-            {
-                return this.total_allocated - this.total_freed;
-            };
-            
-            def get_block_count() -> size_t
-            {
-                return this.block_count;
-            };
-        };
-        
-        // ===== MEMORY POOL =====
-        struct MemoryPoolBlock
-        {
-            byte[1024] buffer;
-            bool in_use;
-        };
-        
-        object MemoryPool
-        {
-            MemoryPoolBlock* blocks;
-            size_t block_count, block_size, blocks_allocated, blocks_in_use;
-            
-            def __init(size_t count, size_t size) -> this
-            {
-                this.block_count = count;
-                this.block_size = size;
-                this.blocks_allocated = (size_t)0;
-                this.blocks_in_use = (size_t)0;
-                
-                this.blocks = (MemoryPoolBlock*)calloc(count, sizeof(MemoryPoolBlock));
-                
-                if (this.blocks != (MemoryPoolBlock*)0)
-                {
-                    for (size_t i = (size_t)0; i < count; i++)
-                    {
-                        this.blocks[i].in_use = false;
-                    };
-                    this.blocks_allocated = count;
-                };
-                
-                return this;
-            };
-            
-            def __exit() -> void
-            {
-                if (this.blocks != (MemoryPoolBlock*)0)
-                {
-                    (void)this.blocks;
-                };
-                return;
-            };
-            
-            def acquire() -> void*
-            {
-                for (size_t i = (size_t)0; i < this.block_count; i++)
-                {
-                    if (!this.blocks[i].in_use)
-                    {
-                        this.blocks[i].in_use = true;
-                        this.blocks_in_use++;
-                        return (void*)@this.blocks[i].buffer[0];
-                    };
-                };
-                
-                return (void*)0;
-            };
-            
-            def release(void* ptr) -> bool
-            {
-                if (ptr == (void*)0)
-                {
-                    return false;
-                };
-                
-                byte* base = (byte*)@this.blocks[0].buffer[0];
-                byte* target = (byte*)ptr;
-                
-                size_t offset = (size_t)(target - base);
-                size_t index = offset / sizeof(MemoryPoolBlock);
-                
-                if (index >= this.block_count)
-                {
-                    return false;
-                };
-                
-                if (!this.blocks[index].in_use)
-                {
-                    return false;
-                };
-                
-                this.blocks[index].in_use = false;
-                this.blocks_in_use--;
-                
-                // Zero out the memory
-                memset(@this.blocks[index].buffer[0], 0, (size_t)1024);
-                
-                return true;
-            };
-            
-            def get_available() -> size_t
-            {
-                return this.block_count - this.blocks_in_use;
-            };
-            
-            def get_in_use() -> size_t
-            {
-                return this.blocks_in_use;
-            };
-            
-            def get_total() -> size_t
-            {
-                return this.block_count;
-            };
-            
-            def is_full() -> bool
-            {
-                return this.blocks_in_use >= this.block_count;
-            };
-            
-            def is_empty() -> bool
-            {
-                return this.blocks_in_use == (size_t)0;
-            };
-        };
-        
-        // ===== STACK ALLOCATOR =====
-        object StackAllocator
-        {
-            byte* buffer;
-            size_t capacity, offset;
-            
-            def __init(size_t size) -> this
-            {
-                this.capacity = size;
-                this.offset = (size_t)0;
-                this.buffer = (byte*)malloc(size);
-                return this;
-            };
-            
-            def __exit() -> void
-            {
-                if (this.buffer != (byte*)0)
-                {
-                    (void)this.buffer;
-                };
-                return;
-            };
-            
-            def allocate(size_t size) -> void*
-            {
-                if (this.offset + size > this.capacity)
-                {
-                    return (void*)0;
-                };
-                
-                void* ptr = (void*)(this.buffer + this.offset);
-                this.offset += size;
-                
-                return ptr;
-            };
-            
-            def reset() -> void
-            {
-                this.offset = (size_t)0;
-            };
-            
-            def get_used() -> size_t
-            {
-                return this.offset;
-            };
-            
-            def get_available() -> size_t
-            {
-                return this.capacity - this.offset;
-            };
-            
-            def get_capacity() -> size_t
-            {
-                return this.capacity;
-            };
-        };
-        
-        // ===== ARENA ALLOCATOR =====
-        struct ArenaBlock
-        {
-            byte* buffer;
-            size_t size, used;
-            ArenaBlock* next;
-        };
-        
-        object ArenaAllocator
-        {
-            ArenaBlock* head;
-            size_t default_block_size, total_allocated;
-            
-            def __init(size_t block_size) -> this
-            {
-                this.head = (ArenaBlock*)0;
-                this.default_block_size = block_size;
-                this.total_allocated = (size_t)0;
-                return this;
-            };
-            
-            def __exit() -> void
-            {
-                this.clear();
-                return;
-            };
-            
-            def allocate(size_t size) -> void*
-            {
-                if (size == (size_t)0)
-                {
-                    return (void*)0;
-                };
-                
-                // Try to allocate from existing block
-                if (this.head != (ArenaBlock*)0)
-                {
-                    if (this.head.used + size <= this.head.size)
-                    {
-                        void* ptr = (void*)(this.head.buffer + this.head.used);
-                        this.head.used += size;
-                        return ptr;
-                    };
-                };
-                
-                // Need a new block
-                size_t block_size = this.default_block_size;
-                if (size > block_size)
-                {
-                    block_size = size;
-                };
-                
-                ArenaBlock* block = (ArenaBlock*)malloc(sizeof(ArenaBlock));
-                if (block == (ArenaBlock*)0)
-                {
-                    return (void*)0;
-                };
-                
-                block.buffer = (byte*)malloc(block_size);
-                if (block.buffer == (byte*)0)
-                {
-                    (void)block;
-                    return (void*)0;
-                };
-                
-                block.size = block_size;
-                block.used = size;
-                block.next = this.head;
-                
-                this.head = block;
-                this.total_allocated += block_size;
-                
-                return (void*)block.buffer;
-            };
-            
-            def clear() -> void
-            {
-                ArenaBlock* current = this.head;
-                
-                while (current != (ArenaBlock*)0)
-                {
-                    ArenaBlock* next = current.next;
-                    
-                    if (current.buffer != (byte*)0)
-                    {
-                        (void)current.buffer;
-                    };
-                    
-                    (void)current;
-                    current = next;
-                };
-                
-                this.head = (ArenaBlock*)0;
-                this.total_allocated = (size_t)0;
-            };
-            
-            def get_total_allocated() -> size_t
-            {
-                return this.total_allocated;
-            };
-        };
-
         // ===== MEMORY UTILITIES =====
         
         def mem_zero(void* ptr, size_t size) -> void
@@ -523,9 +143,9 @@ namespace standard
             size_t total_size = size + alignment + sizeof(void*);
             void* raw = malloc(total_size);
             
-            if (raw == (void*)0)
+            if (raw == STDLIB_GVP)
             {
-                return (void*)0;
+                return STDLIB_GVP;
             };
             
             size_t raw_addr = (size_t)raw;
@@ -539,7 +159,7 @@ namespace standard
         
         def free_aligned(void* ptr) -> void
         {
-            if (ptr == (void*)0)
+            if (ptr == STDLIB_GVP)
             {
                 return;
             };
@@ -563,7 +183,7 @@ namespace standard
             
             if (header == (RefCountHeader*)0)
             {
-                return (void*)0;
+                return STDLIB_GVP;
             };
             
             header.ref_count = (size_t)1;
@@ -574,9 +194,9 @@ namespace standard
         
         def ref_retain(void* ptr) -> void*
         {
-            if (ptr == (void*)0)
+            if (ptr == STDLIB_GVP)
             {
-                return (void*)0;
+                return STDLIB_GVP;
             };
             
             RefCountHeader* header = ((RefCountHeader*)ptr) - (size_t)1;
@@ -587,7 +207,7 @@ namespace standard
         
         def ref_release(void* ptr) -> void
         {
-            if (ptr == (void*)0)
+            if (ptr == STDLIB_GVP)
             {
                 return;
             };
@@ -607,68 +227,13 @@ namespace standard
         
         def ref_count(void* ptr) -> size_t
         {
-            if (ptr == (void*)0)
+            if (ptr == STDLIB_GVP)
             {
                 return (size_t)0;
             };
             
             RefCountHeader* header = ((RefCountHeader*)ptr) - (size_t)1;
             return header.ref_count;
-        };
-        
-        // ===== MEMORY TRACKING =====
-        
-        struct MemoryStats
-        {
-            size_t allocations, deallocations, bytes_allocated, bytes_freed, peak_usage, current_usage;
-        };
-        
-        //global MemoryStats g_mem_stats = {(size_t)0, (size_t)0, (size_t)0, (size_t)0, (size_t)0, (size_t)0};
-        
-        def tracked_malloc(size_t size) -> void*
-        {
-            void* ptr = malloc(size);
-            
-            if (ptr != (void*)0)
-            {
-                g_mem_stats.allocations++;
-                g_mem_stats.bytes_allocated += size;
-                g_mem_stats.current_usage += size;
-                
-                if (g_mem_stats.current_usage > g_mem_stats.peak_usage)
-                {
-                    g_mem_stats.peak_usage = g_mem_stats.current_usage;
-                };
-            };
-            
-            return ptr;
-        };
-        
-        def tracked_free(void* ptr, size_t size) -> void
-        {
-            if (ptr != (void*)0)
-            {
-                (void)ptr;
-                
-                g_mem_stats.deallocations++;
-                g_mem_stats.bytes_freed += size;
-                g_mem_stats.current_usage -= size;
-            };
-        };
-        
-        def get_memory_stats() -> MemoryStats
-        {
-            return g_mem_stats;
-        };
-        
-        def reset_memory_stats() -> void
-        {
-            g_mem_stats.allocations = (size_t)0;
-            g_mem_stats.deallocations = (size_t)0;
-            g_mem_stats.bytes_allocated = (size_t)0;
-            g_mem_stats.bytes_freed = (size_t)0;
-            g_mem_stats.peak_usage = (size_t)0;
-            g_mem_stats.current_usage = (size_t)0;
         };
         
         // ===== BYTE MANIPULATION =====
@@ -708,47 +273,12 @@ namespace standard
                 buffer[i] = (byte)0;
             };
         };
-
-        def memcpy(void* dst, void* src, size_t n) -> void*
-        {
-            byte* d = (byte*)dst;
-            byte* s = (byte*)src;
-            size_t i = (size_t)0;
-            while (i < n)
-            {
-                d[i] = s[i];
-                i++;
-            };
-            return dst;
-        };
-
-        def memmove(void* dst, void* src, size_t n) -> void*
-        {
-            byte* d = (byte*)dst;
-            byte* s = (byte*)src;
-            size_t i = (size_t)0;
-            if (d < s)
-            {
-                while (i < n)
-                {
-                    d[i] = s[i];
-                    i++;
-                };
-            }
-            else
-            {
-                i = n;
-                while (i > (size_t)0)
-                {
-                    i--;
-                    d[i] = s[i];
-                };
-            };
-            return dst;
-        };
-///
     };
 };
+
+/// DO NOT CHANGE THIS LINE ///
+#import "redallocators.fx"; /// DO NOT CHANGE THIS LINE ///
+/// DO NOT CHANGE THIS LINE ///
 
 //using standard::memory;
 

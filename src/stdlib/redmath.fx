@@ -27,6 +27,12 @@ namespace standard
         const i32 E32 = 2;
         const i64 E64 = 2;
         const float EF = 2.71828182845904523536;
+
+        struct Vec3  { float x, y, z;    };
+        struct Vec4  { float w, x, y, z; };
+        struct Face  { int   a, b, c;    };
+        struct Edge  { int   a, b;       };
+        struct POINT { int   x, y;       };
         
         // Absolute value overloads
         def abs(i8 x) -> i8
@@ -784,6 +790,53 @@ namespace standard
                 x >>= 1;
             };
             return result;
+        };
+
+
+        // ============================================================================
+        // 3D MATH
+        // ============================================================================
+
+        def rotate_x(Vec3* v, float s, float c) -> Vec3
+        {
+            Vec3 r;
+            r.x = v.x;
+            r.y = v.y * c - v.z * s;
+            r.z = v.y * s + v.z * c;
+            return r;
+        };
+
+        def rotate_y(Vec3* v, float s, float c) -> Vec3
+        {
+            Vec3 r;
+            r.x =  v.x * c + v.z * s;
+            r.y =  v.y;
+            r.z = (v.x * (0.0 - s)) + v.z * c;
+            return r;
+        };
+
+        def rotate_z(Vec3* v, float s, float c) -> Vec3
+        {
+            Vec3 r;
+            r.x = v.x * c - v.y * s;
+            r.y = v.x * s + v.y * c;
+            r.z = v.z;
+            return r;
+        };
+
+        def project(Vec3* v, int cx, int cy, float fov, float cam_z) -> POINT
+        {
+            float dz = v.z + cam_z;
+            POINT p;
+            if (dz < 0.001)
+            {
+                p.x = cx;
+                p.y = cy;
+                return p;
+            };
+            p.x = cx + (int)(v.x * fov / dz);
+            p.y = cy - (int)(v.y * fov / dz);
+            return p;
         };
     };
 };

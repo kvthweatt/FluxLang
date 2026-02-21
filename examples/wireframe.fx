@@ -24,9 +24,6 @@ extern
 #def MAX_VERTS 8192;
 #def MAX_FACES 16384;
 
-struct Vec3 { float x, y, z; };
-struct Face { int a, b, c;   };
-
 struct Mesh
 {
     Vec3* verts;
@@ -165,43 +162,6 @@ def load_obj(byte* path, Mesh* mesh) -> bool
 };
 
 // ============================================================================
-// 3D MATH
-// ============================================================================
-
-def rotate_x(Vec3* v, float s, float c) -> Vec3
-{
-    Vec3 r;
-    r.x = v.x;
-    r.y = v.y * c - v.z * s;
-    r.z = v.y * s + v.z * c;
-    return r;
-};
-
-def rotate_y(Vec3* v, float s, float c) -> Vec3
-{
-    Vec3 r;
-    r.x =  v.x * c + v.z * s;
-    r.y =  v.y;
-    r.z = (v.x * (0.0 - s)) + v.z * c;
-    return r;
-};
-
-def project(Vec3* v, int cx, int cy, float fov, float cam_z) -> POINT
-{
-    float dz = v.z + cam_z;
-    POINT p;
-    if (dz < 0.001)
-    {
-        p.x = cx;
-        p.y = cy;
-        return p;
-    };
-    p.x = cx + (int)(v.x * fov / dz);
-    p.y = cy - (int)(v.y * fov / dz);
-    return p;
-};
-
-// ============================================================================
 // MAIN
 // ============================================================================
 
@@ -219,7 +179,7 @@ def main(int argc, byte** argv) -> int
               BLUE =  255;
 
     const float CAM_FOV  = 360.0,
-                CAM_Z    = 2.5;     // Distance from origin
+                CAM_Z    = 3.0;     // Distance from origin
 
     if (argc == 2)
     {
@@ -321,7 +281,7 @@ def main(int argc, byte** argv) -> int
             v.y = mesh.verts[i].y;
             v.z = mesh.verts[i].z;
             rx = rotate_x(@v,  sx,  cxr);
-            ry = rotate_y(@rx, sy,  cyr);
+            ry = rotate_y(@v, sy,  cyr);
             proj[i] = project(@ry, cx, cy, fov, cam_z);
             i = i + 1;
         };

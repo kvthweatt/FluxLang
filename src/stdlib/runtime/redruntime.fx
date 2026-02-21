@@ -1,4 +1,7 @@
-global void* STDLIB_GVP = (void*)@0;
+global const void* STDLIB_GVP = (void*)@void;
+global const unsigned data{64} U64MAXVAL = 0xFFFFFFFFFFFFFFFFu;
+
+#def NULL STDLIB_GVP;
 
 #ifndef FLUX_STANDARD
 #def FLUX_STANDARD 1;
@@ -25,8 +28,7 @@ global i64 WIN_STDOUT_HANDLE;
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "redmemory.fx";             // FFI-based Memory Operations (CRT)
-#import "redallocators.fx";
+#import "redmemory.fx";
 #endif;
 
 #import "red_string_utilities.fx";
@@ -53,7 +55,7 @@ global i64 WIN_STDOUT_HANDLE;
 //
 
 #ifndef FLUX_STANDARD_COLLECTIONS
-//#import "redcollections.fx";
+#import "redcollections.fx";
 #endif;
 
 extern
@@ -99,6 +101,7 @@ def !!_start() -> int;
 def !!_start() -> int
 {
     exit(FRTStartup());
+    abort();
     return;
 };
 #endif; // Linux

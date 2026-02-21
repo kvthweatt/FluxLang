@@ -52,12 +52,6 @@ namespace standard
             // WIN32 STRUCTURES
             // ============================================================================
 
-            // POINT structure
-            struct POINT
-            {
-                LONG x,y;
-            };
-
             // MSG structure for message loop
             struct MSG
             {
@@ -285,6 +279,7 @@ namespace standard
                     CreateCompatibleDC(HDC) -> HDC,
                     CreateCompatibleBitmap(HDC, int, int) -> HDC,
                     BitBlt(HDC, int, int, int, int, HDC, int, int, DWORD) -> bool,
+                    DeleteDC(HDC) -> bool,
 
                 // GDI color and mode
                     SetBkMode(HDC, int) -> int,
@@ -428,11 +423,6 @@ namespace standard
                         ReleaseDC(this.handle, this.device_context);
                     };
                     
-                    if (this.handle != 0)
-                    {
-                        DestroyWindow(this.handle);
-                    };
-                    
                     UnregisterClassA((LPCSTR)this.class_name, this.instance);
                     return;
                 };
@@ -517,7 +507,7 @@ namespace standard
                         DeleteObject(this.active_pen);
                     };
                     DeleteObject(this.back_bmp);
-                    DeleteObject(this.back_dc);
+                    DeleteDC(this.back_dc);
                     return;
                 };
 

@@ -83,7 +83,7 @@ struct BlockEntry
 struct Slab
 {
     u64    base;
-    size_t capacity,frontier;
+    size_t capacity,frontier,used;
     Slab*  next;
 };
 
@@ -94,6 +94,20 @@ struct FreeNode
     FreeNode* next;
 };
 
+// Ring allocator result (returned by stdring::allocate)
+//
+//  ptr     : pointer to the allocated region (never null unless size > capacity)
+//  wrapped : true if the write pointer wrapped around and overwrote old data
+
+struct RingAllocResult
+{
+    u64*  ptr;
+    bool  wrapped;
+};
+
+#def NP_FREENODE (FreeNode*)0; // Null free node pointer
+#def NP_SLAB     (Slab*)0;     // Null slab pointer
+
 namespace standard
 {
     namespace memory
@@ -103,10 +117,10 @@ namespace standard
             namespace stdheap
             {
                 // Globals
-
-                Slab*       g_slab_head      = (Slab*)0;
+                Slab*       g_slab_head      = NP_SLAB;
                 size_t      g_next_slab_size = (size_t)4194304;   // 4 MB
                 size_t      g_slab_size_cap  = (size_t)67108864;  // 64 MB
+                size_t      g_large_used     = (size_t)0;         // live large-block count
 
                 // Block table: open-addressed hash map, stored in its own OS slab
                 BlockEntry* g_table          = (BlockEntry*)0;
@@ -115,15 +129,15 @@ namespace standard
                 size_t      g_table_slab_cap = (size_t)0;   // byte size of table OS slab
 
                 // Segregated free list bins (indices 0-8)
-                FreeNode* g_bin_0 = (FreeNode*)0;
-                FreeNode* g_bin_1 = (FreeNode*)0;
-                FreeNode* g_bin_2 = (FreeNode*)0;
-                FreeNode* g_bin_3 = (FreeNode*)0;
-                FreeNode* g_bin_4 = (FreeNode*)0;
-                FreeNode* g_bin_5 = (FreeNode*)0;
-                FreeNode* g_bin_6 = (FreeNode*)0;
-                FreeNode* g_bin_7 = (FreeNode*)0;
-                FreeNode* g_bin_8 = (FreeNode*)0;
+                FreeNode* g_bin_0 = NP_FREENODE,
+                          g_bin_1 = NP_FREENODE,
+                          g_bin_2 = NP_FREENODE,
+                          g_bin_3 = NP_FREENODE,
+                          g_bin_4 = NP_FREENODE,
+                          g_bin_5 = NP_FREENODE,
+                          g_bin_6 = NP_FREENODE,
+                          g_bin_7 = NP_FREENODE,
+                          g_bin_8 = NP_FREENODE;
 
                 // OS helpers
 
@@ -134,13 +148,13 @@ namespace standard
                     #endif;
                     #ifdef __LINUX__
                     u64* p = mmap((u64)0, bytes, 3, 0x22, -1, (i64)0);
-                    switch ((size_t)p == (size_t)0xFFFFFFFFFFFFFFFF) { case (1) { return (u64)0; } default {}; };
-                    return p;
+                    switch ((size_t)p == (size_t)U64MAXVAL) { case (1) { return (u64)0; } default {}; };
+                    return (u64)p;
                     #endif;
                     #ifdef __MACOS__
                     u64* p = mmap((u64)0, bytes, 3, 0x1002, -1, (i64)0);
-                    switch ((size_t)p == (size_t)0xFFFFFFFFFFFFFFFF) { case (1) { return (u64)0; } default {}; };
-                    return p;
+                    switch ((size_t)p == (size_t)U64MAXVAL) { case (1) { return (u64)0; } default {}; };
+                    return (u64)p;
                     #endif;
                 };
 
@@ -192,21 +206,21 @@ namespace standard
 
                 def bin_pop(size_t cls) -> FreeNode*
                 {
-                    FreeNode* n = (FreeNode*)0;
+                    FreeNode* n = NP_FREENODE;
                     switch (cls)
                     {
-                        case (0) { n = g_bin_0; switch (n != (FreeNode*)0) { case (1) { g_bin_0 = n.next; } default {}; }; return n; }
-                        case (1) { n = g_bin_1; switch (n != (FreeNode*)0) { case (1) { g_bin_1 = n.next; } default {}; }; return n; }
-                        case (2) { n = g_bin_2; switch (n != (FreeNode*)0) { case (1) { g_bin_2 = n.next; } default {}; }; return n; }
-                        case (3) { n = g_bin_3; switch (n != (FreeNode*)0) { case (1) { g_bin_3 = n.next; } default {}; }; return n; }
-                        case (4) { n = g_bin_4; switch (n != (FreeNode*)0) { case (1) { g_bin_4 = n.next; } default {}; }; return n; }
-                        case (5) { n = g_bin_5; switch (n != (FreeNode*)0) { case (1) { g_bin_5 = n.next; } default {}; }; return n; }
-                        case (6) { n = g_bin_6; switch (n != (FreeNode*)0) { case (1) { g_bin_6 = n.next; } default {}; }; return n; }
-                        case (7) { n = g_bin_7; switch (n != (FreeNode*)0) { case (1) { g_bin_7 = n.next; } default {}; }; return n; }
-                        case (8) { n = g_bin_8; switch (n != (FreeNode*)0) { case (1) { g_bin_8 = n.next; } default {}; }; return n; }
+                        case (0) { n = g_bin_0; switch (n != NP_FREENODE) { case (1) { g_bin_0 = n.next; } default {}; }; return n; }
+                        case (1) { n = g_bin_1; switch (n != NP_FREENODE) { case (1) { g_bin_1 = n.next; } default {}; }; return n; }
+                        case (2) { n = g_bin_2; switch (n != NP_FREENODE) { case (1) { g_bin_2 = n.next; } default {}; }; return n; }
+                        case (3) { n = g_bin_3; switch (n != NP_FREENODE) { case (1) { g_bin_3 = n.next; } default {}; }; return n; }
+                        case (4) { n = g_bin_4; switch (n != NP_FREENODE) { case (1) { g_bin_4 = n.next; } default {}; }; return n; }
+                        case (5) { n = g_bin_5; switch (n != NP_FREENODE) { case (1) { g_bin_5 = n.next; } default {}; }; return n; }
+                        case (6) { n = g_bin_6; switch (n != NP_FREENODE) { case (1) { g_bin_6 = n.next; } default {}; }; return n; }
+                        case (7) { n = g_bin_7; switch (n != NP_FREENODE) { case (1) { g_bin_7 = n.next; } default {}; }; return n; }
+                        case (8) { n = g_bin_8; switch (n != NP_FREENODE) { case (1) { g_bin_8 = n.next; } default {}; }; return n; }
                         default  {};
                     };
-                    return (FreeNode*)0;
+                    return NP_FREENODE;
                 };
 
                 def bin_push(size_t cls, FreeNode* node) -> void
@@ -318,18 +332,71 @@ namespace standard
                             {
                                 new_tbl[rm_idx].key = (u64)0;
                                 g_table_count--;
-                                // Rehash the run after the removed slot
+                                // Backward-shift deletion to close the gap
+                                size_t rm_hole = rm_idx;
                                 size_t rm_next = (rm_idx + (size_t)1) & (new_cap - (size_t)1);
                                 while (new_tbl[rm_next].key != (u64)0)
                                 {
-                                    u64    rrkey  = new_tbl[rm_next].key;
-                                    size_t rrsize = new_tbl[rm_next].size;
-                                    u64    rrkind = new_tbl[rm_next].kind;
-                                    u64    rrslab = new_tbl[rm_next].slab;
-                                    new_tbl[rm_next].key = (u64)0;
-                                    g_table_count--;
-                                    table_raw_insert(new_tbl, new_cap, rrkey, rrsize, rrkind, rrslab);
-                                    g_table_count++;
+                                    size_t rm_natural = table_hash(new_tbl[rm_next].key, new_cap);
+                                    bool rm_shift;
+                                    switch (rm_hole < rm_next)
+                                    {
+                                        case (1)
+                                        {
+                                            bool rm_in_range;
+                                            switch (rm_natural > rm_hole)
+                                            {
+                                                case (1)
+                                                {
+                                                    switch (rm_natural <= rm_next)
+                                                    {
+                                                        case (1) { rm_in_range = true; }
+                                                        default  { rm_in_range = false; };
+                                                    };
+                                                }
+                                                default { rm_in_range = false; };
+                                            };
+                                            switch (rm_in_range)
+                                            {
+                                                case (1) { rm_shift = false; }
+                                                default  { rm_shift = true; };
+                                            };
+                                        }
+                                        default
+                                        {
+                                            bool rm_in_range;
+                                            switch (rm_natural > rm_hole)
+                                            {
+                                                case (1) { rm_in_range = true; }
+                                                default
+                                                {
+                                                    switch (rm_natural <= rm_next)
+                                                    {
+                                                        case (1) { rm_in_range = true; }
+                                                        default  { rm_in_range = false; };
+                                                    };
+                                                };
+                                            };
+                                            switch (rm_in_range)
+                                            {
+                                                case (1) { rm_shift = false; }
+                                                default  { rm_shift = true; };
+                                            };
+                                        };
+                                    };
+                                    switch (rm_shift)
+                                    {
+                                        case (1)
+                                        {
+                                            new_tbl[rm_hole].key  = new_tbl[rm_next].key;
+                                            new_tbl[rm_hole].size = new_tbl[rm_next].size;
+                                            new_tbl[rm_hole].kind = new_tbl[rm_next].kind;
+                                            new_tbl[rm_hole].slab = new_tbl[rm_next].slab;
+                                            new_tbl[rm_next].key  = (u64)0;
+                                            rm_hole = rm_next;
+                                        }
+                                        default {};
+                                    };
                                     rm_next = (rm_next + (size_t)1) & (new_cap - (size_t)1);
                                 };
                                 rm_found = true;
@@ -455,18 +522,88 @@ namespace standard
                                 g_table[idx].key = (u64)0;
                                 g_table_count--;
 
-                                // Rehash the run after the removed slot to maintain probe invariant
+                                // Backward-shift deletion: slide each following entry one slot
+                                // back if its natural home is at or before the vacant slot,
+                                // stopping when we reach an empty slot or wrap all the way around.
+                                size_t hole = idx;
                                 size_t next = (idx + (size_t)1) & (g_table_cap - (size_t)1);
                                 while (g_table[next].key != (u64)0)
                                 {
-                                    u64  rkey  = g_table[next].key;
-                                    size_t rsize = g_table[next].size;
-                                    u64    rkind = g_table[next].kind;
-                                    u64  rslab = g_table[next].slab;
-                                    g_table[next].key = (u64)0;
-                                    g_table_count--;
-                                    table_raw_insert(g_table, g_table_cap, rkey, rsize, rkind, rslab);
-                                    g_table_count++;
+                                    size_t natural = table_hash(g_table[next].key, g_table_cap);
+                                    // Determine whether this entry belongs at or before the hole.
+                                    // We need to account for wrap-around: entry should shift back
+                                    // if the hole is between its natural slot and its current slot.
+                                    // Shift this entry back to fill the hole if its natural
+                                    // home is NOT strictly between hole (exclusive) and next
+                                    // (inclusive) in the forward/non-wrapping direction.
+                                    // In other words: do NOT shift only when hole < natural <= next.
+                                    // When the probe run wraps (next < hole), the non-shift region
+                                    // is hole < natural (and natural did not wrap past 0) -- i.e.
+                                    // natural > hole && natural <= next is impossible when next < hole
+                                    // so instead: no-shift when natural > hole && next >= natural is
+                                    // replaced by: no-shift when !(natural <= hole || natural > next).
+                                    bool should_shift;
+                                    switch (hole < next)
+                                    {
+                                        case (1)
+                                        {
+                                            // Normal (non-wrapping) run: shift unless hole < natural <= next
+                                            bool in_range;
+                                            switch (natural > hole)
+                                            {
+                                                case (1)
+                                                {
+                                                    switch (natural <= next)
+                                                    {
+                                                        case (1) { in_range = true; }
+                                                        default  { in_range = false; };
+                                                    };
+                                                }
+                                                default { in_range = false; };
+                                            };
+                                            switch (in_range)
+                                            {
+                                                case (1) { should_shift = false; }
+                                                default  { should_shift = true; };
+                                            };
+                                        }
+                                        default
+                                        {
+                                            // Wrapping run (next < hole): shift unless natural is in
+                                            // (hole, cap) union [0, next] -- i.e. natural > hole OR natural <= next
+                                            bool in_range;
+                                            switch (natural > hole)
+                                            {
+                                                case (1) { in_range = true; }
+                                                default
+                                                {
+                                                    switch (natural <= next)
+                                                    {
+                                                        case (1) { in_range = true; }
+                                                        default  { in_range = false; };
+                                                    };
+                                                };
+                                            };
+                                            switch (in_range)
+                                            {
+                                                case (1) { should_shift = false; }
+                                                default  { should_shift = true; };
+                                            };
+                                        };
+                                    };
+                                    switch (should_shift)
+                                    {
+                                        case (1)
+                                        {
+                                            g_table[hole].key  = g_table[next].key;
+                                            g_table[hole].size = g_table[next].size;
+                                            g_table[hole].kind = g_table[next].kind;
+                                            g_table[hole].slab = g_table[next].slab;
+                                            g_table[next].key  = (u64)0;
+                                            hole = next;
+                                        }
+                                        default {};
+                                    };
                                     next = (next + (size_t)1) & (g_table_cap - (size_t)1);
                                 };
                                 return;
@@ -481,7 +618,7 @@ namespace standard
 
                 def slab_header_size() -> size_t
                 {
-                    return (size_t)32;  // sizeof(Slab)
+                    return (size_t)40;  // sizeof(Slab)
                 };
 
                 def heap_new_slab(size_t min_capacity) -> Slab*
@@ -500,6 +637,7 @@ namespace standard
                     slab.base     = (u64)raw;
                     slab.capacity = sz;
                     slab.frontier = slab_header_size();
+                    slab.used     = (size_t)0;
                     slab.next     = g_slab_head;
                     g_slab_head   = slab;
 
@@ -552,6 +690,7 @@ namespace standard
                                 default {};
                             };
 
+                            g_large_used++;
                             return raw;
                         }
                         default {};
@@ -559,13 +698,23 @@ namespace standard
 
                     // Small: try free list bin first
                     FreeNode* node = bin_pop(cls);
-                    switch (node != (FreeNode*)0)
+                    switch (node != NP_FREENODE)
                     {
                         case (1)
                         {
                             u64 ptr = (u64)node;
                             // Re-insert into table as live (kind=0)
                             table_insert(ptr, cls, (u64)0, (u64)0);
+                            // Find which slab owns this block and increment its counter
+                            Slab* s = g_slab_head;
+                            while (s != (Slab*)0)
+                            {
+                                switch (ptr >= s.base & ptr < s.base + (u64)s.capacity)
+                                {
+                                    case (1) { s.used++; s = (Slab*)0; }
+                                    default  { s = s.next; };
+                                };
+                            };
                             return ptr;
                         }
                         default {};
@@ -591,6 +740,7 @@ namespace standard
                         default  {};
                     };
 
+                    g_slab_head.used++;
                     return ptr;
                 };
 
@@ -611,14 +761,28 @@ namespace standard
                     {
                         case (1)
                         {
-                            // Large block: slab field holds OS allocation size
+                            // Large block: release immediately, decrement large counter
+                            g_large_used--;
                             heap_os_free(ptr, (size_t)slab);
                             return;
                         }
                         default {};
                     };
 
-                    // Small block: return to bin
+                    // Small block: decrement owning slab counter, return to bin
+                    Slab* s = g_slab_head;
+                    while (s != (Slab*)0)
+                    {
+                        switch (ptr >= s.base & ptr < s.base + (u64)s.capacity)
+                        {
+                            case (1)
+                            {
+                                switch (s.used > (size_t)0) { case (1) { s.used--; } default {}; };
+                                s = (Slab*)0;
+                            }
+                            default { s = s.next; };
+                        };
+                    };
                     bin_push(size, (FreeNode*)ptr);
                 };
 
@@ -665,7 +829,7 @@ namespace standard
                             switch (new_size < copy_size) { case (1) { copy_size = new_size; } default {}; };
 
                             FreeNode* reuse = bin_pop(new_cls);
-                            bool has_reuse = reuse != (FreeNode*)0;
+                            bool has_reuse = reuse != NP_FREENODE;
                             switch (has_reuse)
                             {
                                 case (1)
@@ -706,6 +870,466 @@ namespace standard
                     while (i < copy_size) { dst[i] = src[i]; i++; };
                     ffree(ptr);
                     return new_ptr;
+                };
+
+                // Walk all small-block slabs and release any whose used counter
+                // has reached zero back to the OS.  Free-list nodes belonging to
+                // released slabs are removed from their bins before the slab is
+                // freed so dangling pointers are never left in the bins.
+                def coalesce_heap() -> void
+                {
+                    Slab* slab = g_slab_head;
+                    Slab* prev = (Slab*)0;
+
+                    while (slab != (Slab*)0)
+                    {
+                        Slab* next = slab.next;
+
+                        switch (slab.used == (size_t)0)
+                        {
+                            case (1)
+                            {
+                                // Purge every free-list node that lives inside this slab
+                                // from all nine bins.
+                                size_t bin_idx = (size_t)0;
+                                while (bin_idx <= (size_t)8)
+                                {
+                                    FreeNode* node = bin_pop(bin_idx);
+                                    FreeNode* keep_head = NP_FREENODE;
+                                    FreeNode* keep_tail = NP_FREENODE;
+
+                                    while (node != NP_FREENODE)
+                                    {
+                                        u64 addr = (u64)node;
+                                        FreeNode* node_next = node.next;
+
+                                        switch (addr >= slab.base & addr < slab.base + (u64)slab.capacity)
+                                        {
+                                            // Node is inside the slab being released: discard it.
+                                            case (1) {}
+                                            default
+                                            {
+                                                // Node belongs to a different slab: keep it.
+                                                node.next = NP_FREENODE;
+                                                switch (keep_tail == NP_FREENODE)
+                                                {
+                                                    case (1)
+                                                    {
+                                                        keep_head = node;
+                                                        keep_tail = node;
+                                                    }
+                                                    default
+                                                    {
+                                                        keep_tail.next = node;
+                                                        keep_tail      = node;
+                                                    };
+                                                };
+                                            };
+                                        };
+
+                                        node = node_next;
+                                    };
+
+                                    // Re-push survivors back into the bin in order.
+                                    FreeNode* reinsert = keep_head;
+                                    while (reinsert != NP_FREENODE)
+                                    {
+                                        FreeNode* reinsert_next = reinsert.next;
+                                        bin_push(bin_idx, reinsert);
+                                        reinsert = reinsert_next;
+                                    };
+
+                                    bin_idx++;
+                                };
+
+                                // Unlink the slab from the chain.
+                                switch (prev == (Slab*)0)
+                                {
+                                    case (1) { g_slab_head = next; }
+                                    default  { prev.next   = next; };
+                                };
+
+                                heap_os_free(slab.base, slab.capacity);
+                            }
+                            default
+                            {
+                                prev = slab;
+                            };
+                        };
+
+                        slab = next;
+                    };
+                };
+
+                // Returns a fragmentation estimate in the range [0.0, 1.0].
+                // The value is the ratio of free (binned) small-block bytes plus
+                // live large-block count to total tracked capacity.
+                // 0.0 means no fragmentation, 1.0 means entirely fragmented.
+                def check_fragmentation() -> float
+                {
+                    // Sum usable capacity and live bytes across all small slabs.
+                    size_t total_capacity = (size_t)0;
+                    size_t total_used     = (size_t)0;
+
+                    Slab* slab = g_slab_head;
+                    while (slab != (Slab*)0)
+                    {
+                        // Usable capacity excludes the slab header.
+                        size_t usable = slab.capacity - slab_header_size();
+                        total_capacity += usable;
+                        // used counts live small blocks; free bytes = usable - used*avg_block
+                        // We track used as a block count not byte count, so we use
+                        // frontier as a proxy for committed bytes instead.
+                        total_used += slab.used;
+                        slab = slab.next;
+                    };
+
+                    switch (total_capacity == (size_t)0)
+                    {
+                        case (1)
+                        {
+                            // No slabs yet; include large blocks if any.
+                            switch (g_large_used > (size_t)0)
+                            {
+                                case (1) { return 1.0; }
+                                default  { return 0.0; };
+                            };
+                        }
+                        default {};
+                    };
+
+                    // free_blocks = frontier bytes committed minus live blocks.
+                    // Fragmentation rises as free blocks accumulate relative to
+                    // total committed space.  Large blocks are live so they do
+                    // not contribute free bytes but are added to used.
+                    size_t committed = (size_t)0;
+                    slab = g_slab_head;
+                    while (slab != (Slab*)0)
+                    {
+                        committed += slab.frontier - slab_header_size();
+                        slab = slab.next;
+                    };
+
+                    size_t all_used = total_used + g_large_used;
+
+                    switch (committed == (size_t)0)
+                    {
+                        case (1) { return 0.0; }
+                        default  {};
+                    };
+
+                    // free_bytes = committed space that has been bumped but is
+                    // currently sitting in a bin waiting to be reused.
+                    // We approximate: each used block occupies at least 16 bytes
+                    // (smallest class), free = committed - used*16 clamped to 0.
+                    size_t used_bytes = all_used * (size_t)16;
+                    switch (used_bytes > committed)
+                    {
+                        case (1) { used_bytes = committed; }
+                        default  {};
+                    };
+                    size_t free_bytes = committed - used_bytes;
+
+                    float frag = (float)free_bytes / (float)committed;
+                    return frag;
+                };
+
+            };
+
+            namespace stdstack
+            {
+                // ===== STACK ALLOCATOR =====
+                object StackAllocator
+                {
+                    byte* buffer;
+                    size_t capacity, offset;
+                    
+                    def __init(size_t size) -> this
+                    {
+                        this.capacity = size;
+                        this.offset = (size_t)0;
+                        this.buffer = (byte*)stdheap::fmalloc(size);
+                        return this;
+                    };
+                    
+                    def __exit() -> void
+                    {
+                        if (this.buffer != (byte*)0)
+                        {
+                            //(void)this.buffer; <- make LLVM call ffree()
+                            stdheap::ffree((u64)@this.buffer);
+                        };
+                        return;
+                    };
+                    
+                    def allocate(size_t size) -> void*
+                    {
+                        if (this.offset + size > this.capacity)
+                        {
+                            return STDLIB_GVP;
+                        };
+                        
+                        u64* ptr = (void*)(this.buffer + this.offset);
+                        this.offset += size;
+                        
+                        return ptr;
+                    };
+                    
+                    def reset() -> void
+                    {
+                        this.offset = (size_t)0;
+                    };
+                    
+                    def get_used() -> size_t
+                    {
+                        return this.offset;
+                    };
+                    
+                    def get_available() -> size_t
+                    {
+                        return this.capacity - this.offset;
+                    };
+                    
+                    def get_capacity() -> size_t
+                    {
+                        return this.capacity;
+                    };
+                };
+            };
+
+            namespace stdpool
+            {
+                // ===== POOL ALLOCATOR =====
+                //
+                // Fixed-size block pool backed by a single stdheap allocation.
+                // All blocks are the same size (block_size), carved at init.
+                // A free list threaded through the blocks themselves gives O(1)
+                // alloc and free.
+                // allocate() returns null when all blocks are in use.
+                // Individual blocks are returned via deallocate(void* ptr).
+                // __exit() releases the backing buffer back to stdheap.
+
+                object PoolAllocator
+                {
+                    byte*     buffer;
+                    size_t    block_size;
+                    size_t    block_count;
+                    FreeNode* free_head;
+
+                    def __init(size_t bsize, size_t bcount) -> this
+                    {
+                        // Enforce a minimum block size large enough to hold a
+                        // FreeNode pointer so the free list can live in-place.
+                        size_t actual_bsize = bsize;
+                        switch (actual_bsize < (size_t)8)
+                        {
+                            case (1) { actual_bsize = (size_t)8; }
+                            default  {};
+                        };
+
+                        this.block_size  = actual_bsize;
+                        this.block_count = bcount;
+                        this.buffer      = (byte*)stdheap::fmalloc(actual_bsize * bcount);
+                        this.free_head   = NP_FREENODE;
+
+                        // Build the free list by threading every block together.
+                        switch (this.buffer != (byte*)0)
+                        {
+                            case (1)
+                            {
+                                size_t i = bcount;
+                                while (i > (size_t)0)
+                                {
+                                    i--;
+                                    FreeNode* node = (FreeNode*)(this.buffer + i * actual_bsize);
+                                    node.next      = this.free_head;
+                                    this.free_head = node;
+                                };
+                            }
+                            default {};
+                        };
+
+                        return this;
+                    };
+
+                    def __exit() -> void
+                    {
+                        switch (this.buffer != (byte*)0)
+                        {
+                            case (1)
+                            {
+                                stdheap::ffree((u64)@this.buffer);
+                            }
+                            default {};
+                        };
+                        return;
+                    };
+
+                    // Returns a pointer to a free block, or null if the pool is
+                    // exhausted.
+                    def allocate() -> void*
+                    {
+                        switch (this.free_head == NP_FREENODE)
+                        {
+                            case (1) { return (void*)0; }
+                            default  {};
+                        };
+
+                        FreeNode* node = this.free_head;
+                        this.free_head = node.next;
+                        return (void*)node;
+                    };
+
+                    // Return a previously allocated block back to the pool.
+                    // Passing a pointer not belonging to this pool is undefined
+                    // behaviour.
+                    def deallocate(void* ptr) -> void
+                    {
+                        switch (ptr == (void*)0)
+                        {
+                            case (1) { return; }
+                            default  {};
+                        };
+
+                        FreeNode* node = (FreeNode*)ptr;
+                        node.next      = this.free_head;
+                        this.free_head = node;
+                    };
+
+                    def get_block_size() -> size_t
+                    {
+                        return this.block_size;
+                    };
+
+                    def get_block_count() -> size_t
+                    {
+                        return this.block_count;
+                    };
+
+                    // Returns the number of blocks currently available.
+                    def get_free_count() -> size_t
+                    {
+                        size_t    count = (size_t)0;
+                        FreeNode* node  = this.free_head;
+                        while (node != NP_FREENODE)
+                        {
+                            count++;
+                            node = node.next;
+                        };
+                        return count;
+                    };
+                };
+            };
+
+            namespace stdring
+            {
+                // ===== RING (CIRCULAR) ALLOCATOR =====
+                //
+                // Fixed-capacity FIFO bump allocator backed by a single stdheap
+                // allocation.  The write pointer advances on each allocate() call
+                // and wraps back to the start when it would exceed the capacity,
+                // overwriting the oldest data.
+                //
+                // allocate() returns a RingAllocResult* (backed by a small
+                // per-call descriptor stored in the ring buffer itself ahead of
+                // the user data):
+                //   ptr     - pointer to the usable region
+                //   wrapped - true if the write pointer wrapped this call
+                //
+                // If size > capacity (request can never fit) both ptr and
+                // wrapped carry null/false and the descriptor pointer itself is
+                // null.
+                //
+                // __exit() releases the backing buffer back to stdheap.
+
+                object RingAllocator
+                {
+                    byte*            buffer;
+                    size_t           capacity;
+                    size_t           write_pos;
+                    RingAllocResult* rallocresult;
+
+                    def __init(size_t size) -> this
+                    {
+                        this.capacity     = size;
+                        this.write_pos    = (size_t)0;
+                        this.buffer       = (byte*)stdheap::fmalloc(size);
+                        this.rallocresult = (RingAllocResult*)stdheap::fmalloc((size_t)16);
+                        return this;
+                    };
+
+                    def __exit() -> void
+                    {
+                        switch (this.buffer != (byte*)0)
+                        {
+                            case (1)
+                            {
+                                stdheap::ffree((u64)@this.buffer);
+                            }
+                            default {};
+                        };
+                        switch (this.rallocresult != (RingAllocResult*)0)
+                        {
+                            case (1)
+                            {
+                                stdheap::ffree((u64)@this.rallocresult);
+                            }
+                            default {};
+                        };
+                        return;
+                    };
+
+                    // Allocate `size` bytes from the ring.
+                    // Returns a pointer to the persistent rallocresult member
+                    // describing the outcome.  The result is valid until the
+                    // next call to allocate().
+                    // Returns null if size > capacity (can never fit).
+                    def allocate(size_t size) -> RingAllocResult*
+                    {
+                        // Request can never fit in the buffer at all.
+                        switch (size > this.capacity)
+                        {
+                            case (1) { return (RingAllocResult*)0; }
+                            default  {};
+                        };
+
+                        bool wrapped = false;
+
+                        // Check if we need to wrap.
+                        switch (this.write_pos + size > this.capacity)
+                        {
+                            case (1)
+                            {
+                                this.write_pos = (size_t)0;
+                                wrapped        = true;
+                            }
+                            default {};
+                        };
+
+                        // The user region is carved directly from the buffer.
+                        u64* user_ptr   = (void*)(this.buffer + this.write_pos);
+                        this.write_pos  += size;
+
+                        this.rallocresult.ptr     = user_ptr;
+                        this.rallocresult.wrapped = wrapped;
+
+                        return this.rallocresult;
+                    };
+
+                    def get_capacity() -> size_t
+                    {
+                        return this.capacity;
+                    };
+
+                    def get_write_pos() -> size_t
+                    {
+                        return this.write_pos;
+                    };
+
+                    def reset() -> void
+                    {
+                        this.write_pos = (size_t)0;
+                    };
                 };
             };
         };
