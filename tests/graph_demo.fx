@@ -15,8 +15,8 @@ extern
 // CONSTANTS
 // ============================================================================
 
-const int WIN_W     = 1000,
-          WIN_H     = 1000,
+const int WIN_W     = 1010,
+          WIN_H     = 1010,
           MARGIN    = 50,   // Pixels of margin around each panel
           PANEL_W   = 425,
           PANEL_H   = 425;
@@ -38,7 +38,6 @@ def fill_sine(float* xs, float* ys, int count, float phase) -> void
         ys[i]     = sin(xs[i] + phase);
         i = i + 1;
     };
-    return;
 };
 
 // Panel 2: sine vs cosine scatter (scatter chart)
@@ -52,16 +51,13 @@ def fill_circle(float* xs, float* ys, int count, float phase) -> void
         ys[i]     = sin(t + phase);
         i = i + 1;
     };
-    return;
 };
 
 // Panel 3: monthly bar chart (static values, 12 bars)
 def fill_bars(float* xs, float* ys, int count) -> void
 {
-    float[12] monthly_vals = [
-        42.0, 58.0, 35.0, 71.0, 88.0, 64.0,
-        95.0, 82.0, 49.0, 67.0, 53.0, 76.0
-    ];
+    float[12] monthly_vals = [42.0, 58.0, 35.0, 71.0, 88.0, 64.0,
+                              95.0, 82.0, 49.0, 67.0, 53.0, 76.0];
     int i = 0;
     while (i < count)
     {
@@ -69,7 +65,6 @@ def fill_bars(float* xs, float* ys, int count) -> void
         ys[i] = monthly_vals[i];
         i = i + 1;
     };
-    return;
 };
 
 // Panel 4: animated step / square wave
@@ -108,6 +103,7 @@ def fill_square(float* xs, float* ys, int count, float phase) -> void
     // Starting y: what is the wave value at x=0?
     float s0 = sin(0.0 - phase);
     float y_start;
+
     if (s0 >= 0.0) { y_start =  1.0; }
     else           { y_start = -1.0; };
 
@@ -128,25 +124,33 @@ def fill_square(float* xs, float* ys, int count, float phase) -> void
     // Segment 0: [0, tr0]
     xs[out] = 0.0;    ys[out] = cur;   out = out + 1;
     xs[out] = tr0;    ys[out] = cur;   out = out + 1;
+
     if (cur ==  1.0) { nxt = -1.0; } else { nxt = 1.0; };
+
     xs[out] = tr0;    ys[out] = nxt;   out = out + 1;
     cur = nxt;
 
     // Segment 1: [tr0, tr1]
     xs[out] = tr1;    ys[out] = cur;   out = out + 1;
+
     if (cur ==  1.0) { nxt = -1.0; } else { nxt = 1.0; };
+
     xs[out] = tr1;    ys[out] = nxt;   out = out + 1;
     cur = nxt;
 
     // Segment 2: [tr1, tr2]
     xs[out] = tr2;    ys[out] = cur;   out = out + 1;
+
     if (cur ==  1.0) { nxt = -1.0; } else { nxt = 1.0; };
+
     xs[out] = tr2;    ys[out] = nxt;   out = out + 1;
     cur = nxt;
 
     // Segment 3: [tr2, tr3]
     xs[out] = tr3;    ys[out] = cur;   out = out + 1;
+
     if (cur ==  1.0) { nxt = -1.0; } else { nxt = 1.0; };
+
     xs[out] = tr3;    ys[out] = nxt;   out = out + 1;
     cur = nxt;
 
@@ -223,6 +227,18 @@ def main() -> int
 
     float phase = 0.0;
 
+    noopstr*   strarr = ["Sine Wave\0",    // 0
+                         "Radians\0",      // 1
+                         "Amplitutde\0",   // 2
+                         "Unit Circle\0",  // 3
+                         "cos(t)\0",       // 4
+                         "sin(t)\0",       // 5
+                         "Monthly Data\0", // 6
+                         "Month\0",        // 7
+                         "Value\0",        // 8
+                         "Square Wave\0"   // 9
+                         ];
+
     while (win.process_messages())
     {
         // Update animated panels
@@ -240,9 +256,9 @@ def main() -> int
         plot_area(@c,   @g1, xs1, ys1, SAMPLE_COUNT, col_area);
         plot_line(@c,   @g1, xs1, ys1, SAMPLE_COUNT, col_sine, 2);
         draw_tick_marks(@c, @g1, 8, 6, 4, col_axis);
-        draw_title(@c,  @g1, "Sine Wave\0", 9, col_text);
-        draw_x_label(@c, @g1, "Radians\0", 7, col_text);
-        draw_y_label(@c, @g1, "Amplitude\0", 9, col_text);
+        draw_title(@c,  @g1, strarr[0], col_text);
+        draw_x_label(@c, @g1, strarr[1], col_text);
+        draw_y_label(@c, @g1, strarr[2], col_text);
 
         // ---- Panel 2: Circle scatter ----
         draw_grid(@c,   @g2, 6, 6, col_grid);
@@ -251,9 +267,9 @@ def main() -> int
         plot_scatter_circles(@c, @g2, xs2, ys2, SAMPLE_COUNT, col_scatter, 4);
         draw_crosshair(@c, @g2, 0.0, 0.0, col_grid);
         draw_tick_marks(@c, @g2, 6, 6, 4, col_axis);
-        draw_title(@c,  @g2, "Unit Circle\0", 11, col_text);
-        draw_x_label(@c, @g2, "cos(t)\0", 6, col_text);
-        draw_y_label(@c, @g2, "sin(t)\0", 6, col_text);
+        draw_title(@c,  @g2, strarr[3], col_text);
+        draw_x_label(@c, @g2, strarr[4], col_text);
+        draw_y_label(@c, @g2, strarr[5], col_text);
 
         // ---- Panel 3: Monthly bar chart ----
         draw_grid(@c,   @g3, 12, 5, col_grid);
@@ -261,9 +277,9 @@ def main() -> int
         draw_border(@c, @g3, col_border, 1);
         plot_bars(@c,   @g3, xs3, ys3, BAR_COUNT, col_bars, 26);
         draw_tick_marks(@c, @g3, 12, 5, 4, col_axis);
-        draw_title(@c,  @g3, "Monthly Data\0", 12, col_text);
-        draw_x_label(@c, @g3, "Month\0", 5, col_text);
-        draw_y_label(@c, @g3, "Value\0", 5, col_text);
+        draw_title(@c,  @g3, strarr[6], col_text);
+        draw_x_label(@c, @g3, strarr[7], col_text);
+        draw_y_label(@c, @g3, strarr[8], col_text);
 
         // ---- Panel 4: Step / square wave ----
         draw_grid(@c,   @g4, 8, 4, col_grid);
@@ -271,14 +287,14 @@ def main() -> int
         draw_border(@c, @g4, col_border, 1);
         plot_step(@c,   @g4, xs4, ys4, SQ_COUNT, col_step, 2);
         draw_tick_marks(@c, @g4, 8, 4, 4, col_axis);
-        draw_title(@c,  @g4, "Square Wave\0", 11, col_text);
-        draw_x_label(@c, @g4, "Radians\0", 7, col_text);
-        draw_y_label(@c, @g4, "Amplitude\0", 9, col_text);
+        draw_title(@c,  @g4, strarr[9], col_text);
+        draw_x_label(@c, @g4, strarr[1], col_text);
+        draw_y_label(@c, @g4, strarr[2], col_text);
 
         phase = phase + 0.03;
         if (phase > 2.0 * PIF) { phase = phase - 2.0 * PIF; };
 
-        Sleep(16);
+        Sleep(5);
     };
 
     c.__exit();

@@ -50,8 +50,8 @@
 #import "redwindows.fx";
 #endif
 
-#ifndef __REDGRAPHING__
-#def __REDGRAPHING__ 1;
+#ifndef FLUX_STANDARD_GRAPHING
+#def FLUX_STANDARD_GRAPHING 1;
 
 using standard::system::windows;
 using standard::math;
@@ -122,8 +122,6 @@ namespace standard
 
             c.line(left, bottom, right, bottom);  // X axis
             c.line(left, top,    left,  bottom);  // Y axis
-
-            return;
         };
 
         // ============================================================================
@@ -159,8 +157,6 @@ namespace standard
                 c.line(left, py, right, py);
                 j = j + 1;
             };
-
-            return;
         };
 
         // ============================================================================
@@ -182,8 +178,6 @@ namespace standard
             c.line(right, top,    right, bottom);
             c.line(right, bottom, left,  bottom);
             c.line(left,  bottom, left,  top);
-
-            return;
         };
 
         // ============================================================================
@@ -213,8 +207,6 @@ namespace standard
                 prev_py = py;
                 i = i + 1;
             };
-
-            return;
         };
 
         // ============================================================================
@@ -237,8 +229,6 @@ namespace standard
                 c.rect(px - radius, py - radius, px + radius, py + radius);
                 i = i + 1;
             };
-
-            return;
         };
 
         // ============================================================================
@@ -261,8 +251,6 @@ namespace standard
                 c.circle(px, py, radius);
                 i = i + 1;
             };
-
-            return;
         };
 
         // ============================================================================
@@ -308,8 +296,6 @@ namespace standard
                 c.rect(bx1, by1, bx2, by2);
                 i = i + 1;
             };
-
-            return;
         };
 
         // ============================================================================
@@ -353,8 +339,6 @@ namespace standard
                 c.rect(bx1, by1, bx2, by2);
                 i = i + 1;
             };
-
-            return;
         };
 
         // ============================================================================
@@ -405,8 +389,6 @@ namespace standard
                 };
                 i = i + 1;
             };
-
-            return;
         };
 
         // ============================================================================
@@ -439,8 +421,6 @@ namespace standard
 
                 i = i + 1;
             };
-
-            return;
         };
 
         // ============================================================================
@@ -462,8 +442,6 @@ namespace standard
 
             c.line(left,  py, right,  py);   // Horizontal
             c.line(px,   top,   px, bottom); // Vertical
-
-            return;
         };
 
         // ============================================================================
@@ -499,8 +477,6 @@ namespace standard
                 c.line(left - tick_len, py, left, py);
                 j = j + 1;
             };
-
-            return;
         };
 
         // ============================================================================
@@ -527,8 +503,6 @@ namespace standard
             SetBkMode(c.back_dc, TRANSPARENT);
             SetTextColor(c.back_dc, text_color);
             TextOutA(c.back_dc, px + 5, py - 14, (LPCSTR)label, label_len);
-
-            return;
         };
 
         // ============================================================================
@@ -538,8 +512,9 @@ namespace standard
         // title_len : character count (excluding null terminator)
         // color     : DWORD text color
         // ============================================================================
-        def draw_title(Canvas* c, Graph* g, byte* title, int title_len, DWORD color) -> void
+        def draw_title(Canvas* c, Graph* g, byte* title, DWORD color) -> void
         {
+            int title_len = strlen(title);
             int center_x = g.x + g.width / 2 - (title_len * 4);
             int title_y  = g.y - 20;
             if (title_y < 0) { title_y = 2; };
@@ -547,8 +522,6 @@ namespace standard
             SetBkMode(c.back_dc, TRANSPARENT);
             SetTextColor(c.back_dc, color);
             TextOutA(c.back_dc, center_x, title_y, (LPCSTR)title, title_len);
-
-            return;
         };
 
         // ============================================================================
@@ -558,16 +531,15 @@ namespace standard
         // label_len : character count (excluding null terminator)
         // color     : DWORD text color
         // ============================================================================
-        def draw_x_label(Canvas* c, Graph* g, byte* label, int label_len, DWORD color) -> void
+        def draw_x_label(Canvas* c, Graph* g, byte* label, DWORD color) -> void
         {
+            int label_len = strlen(label);
             int center_x = g.x + g.width / 2 - (label_len * 4);
-            int label_y  = g.y + g.height + 24;
+            int label_y  = g.y + g.height;
 
             SetBkMode(c.back_dc, TRANSPARENT);
             SetTextColor(c.back_dc, color);
             TextOutA(c.back_dc, center_x, label_y, (LPCSTR)label, label_len);
-
-            return;
         };
 
         // ============================================================================
@@ -577,8 +549,9 @@ namespace standard
         // label_len : character count (excluding null terminator)
         // color     : DWORD text color
         // ============================================================================
-        def draw_y_label(Canvas* c, Graph* g, byte* label, int label_len, DWORD color) -> void
+        def draw_y_label(Canvas* c, Graph* g, byte* label, DWORD color) -> void
         {
+            int label_len = strlen(label);
             int label_x = g.x - (label_len * 8) - 8;
             if (label_x < 0) { label_x = 2; };
             int label_y = g.y + g.height / 2 - 8;
@@ -586,8 +559,6 @@ namespace standard
             SetBkMode(c.back_dc, TRANSPARENT);
             SetTextColor(c.back_dc, color);
             TextOutA(c.back_dc, label_x, label_y, (LPCSTR)label, label_len);
-
-            return;
         };
 
         // ============================================================================
@@ -618,8 +589,6 @@ namespace standard
 
             g.x_min = lo - span * margin;
             g.x_max = hi + span * margin;
-
-            return;
         };
 
         def auto_range_y(Graph* g, float* vals, int count, float margin) -> void
@@ -642,8 +611,6 @@ namespace standard
 
             g.y_min = lo - span * margin;
             g.y_max = hi + span * margin;
-
-            return;
         };
 
     };  // namespace graphing

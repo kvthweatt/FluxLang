@@ -1805,8 +1805,35 @@ class VariableTypeHandler:
     def infer_array_size(type_spec: TypeSystem, initial_value, module: ir.Module) -> TypeSystem:
         """Resolve type spec with automatic array size inference for string literals."""
         # Import here to avoid circular dependency
-        from fast import StringLiteral
+        from fast import StringLiteral, ArrayLiteral
         
+        # Handle ArrayLiteral initializer for pointer types (e.g. noopstr* strarr = [...])
+        # When a pointer type is initialized with an array literal, infer the array size
+        # and convert the type to an array of the pointer's element type.
+        if initial_value and isinstance(initial_value, ArrayLiteral) and not type_spec.is_array:
+            try:
+                resolved_llvm_type = TypeSystem.get_llvm_type(type_spec, module)
+                if isinstance(resolved_llvm_type, ir.PointerType):
+                    elem_count = len(initial_value.elements)
+                    # Build a new TypeSystem that represents [N x <elem_type>]
+                    # Reduce pointer depth by one since the array provides the outer dimension.
+                    new_pointer_depth = (type_spec.pointer_depth - 1) if hasattr(type_spec, 'pointer_depth') and type_spec.pointer_depth > 0 else 0
+                    return TypeSystem(
+                        base_type=type_spec.base_type,
+                        is_signed=type_spec.is_signed,
+                        is_const=type_spec.is_const,
+                        is_volatile=type_spec.is_volatile,
+                        is_local=type_spec.is_local,
+                        bit_width=type_spec.bit_width,
+                        alignment=type_spec.alignment,
+                        is_array=True,
+                        array_size=elem_count,
+                        is_pointer=new_pointer_depth > 0,
+                        pointer_depth=new_pointer_depth,
+                        custom_typename=type_spec.custom_typename)
+            except NameError:
+                pass
+
         if not (initial_value and isinstance(initial_value, StringLiteral)):
             return type_spec
         
@@ -2578,6 +2605,24 @@ class ArrayTypeHandler:
                 for j in range(byte_count):
                     packed_value |= (ord(string_val[j]) << (j * 8))
                 const_elements.append(ir.Constant(llvm_type.element, packed_value))
+
+            # StringLiteral element in a pointer array (e.g. [N x i8*])
+            elif isinstance(elem, StringLiteral) and isinstance(llvm_type.element, ir.PointerType):
+                string_val = elem.value
+                string_bytes = string_val.encode('ascii')
+                str_arr_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+                str_const = ir.Constant(str_arr_ty, bytearray(string_bytes))
+                gv_name = f".str.{abs(hash(string_val))}"
+                if gv_name in module.globals:
+                    gv = module.globals[gv_name]
+                else:
+                    gv = ir.GlobalVariable(module, str_arr_ty, name=gv_name)
+                    gv.initializer = str_const
+                    gv.global_constant = True
+                    gv.linkage = 'internal'
+                zero = ir.Constant(ir.IntType(32), 0)
+                str_ptr = gv.gep([zero, zero])
+                const_elements.append(str_ptr)
             
             # Pack nested ArrayLiteral into integer
             elif hasattr(elem, 'elements') and isinstance(llvm_type.element, ir.IntType):
@@ -2676,6 +2721,13 @@ class ArrayTypeHandler:
         
         zero = ArrayTypeHandler._zero()
         
+        # When llvm_type is a raw PointerType (e.g. i8**) the alloca holds a pointer
+        # slot, not an array. Treat it as an array of the pointee type and use
+        # single-index GEP instead of [0, i] GEP.
+        if isinstance(llvm_type, ir.PointerType):
+            ArrayTypeHandler._initialize_pointer_array(builder, module, alloca, llvm_type, array_literal)
+            return
+        
         for i, elem in enumerate(array_literal.elements):
             if i >= llvm_type.count:
                 break
@@ -2719,6 +2771,37 @@ class ArrayTypeHandler:
                 index = ir.Constant(ir.IntType(32), i)
                 elem_ptr = builder.gep(alloca, [zero, ArrayTypeHandler._index(i)], name=f"elem_{i}")
                 builder.store(elem_val, elem_ptr)
+
+    @staticmethod
+    def _initialize_pointer_array(builder: ir.IRBuilder, module: ir.Module, alloca: ir.Value, llvm_type: ir.PointerType, array_literal) -> None:
+        """Initialize an array whose declared type is a pointer (e.g. noopstr* strarr = [...]).
+        The alloca holds a pointer; allocate a backing array on the stack and store each
+        element into it, then write the base pointer into the alloca.
+        """
+        from fast import StringLiteral
+        elem_type = llvm_type.pointee
+        count = len(array_literal.elements)
+        arr_type = ir.ArrayType(elem_type, count)
+        backing = builder.alloca(arr_type, name="ptr_arr_backing")
+        zero = ArrayTypeHandler._zero()
+        for i, elem in enumerate(array_literal.elements):
+            elem_val = elem.codegen(builder, module)
+            # Convert [N x i8]* to i8* for string literal elements
+            if isinstance(elem_type, ir.PointerType) and isinstance(elem_val.type, ir.PointerType):
+                if isinstance(elem_val.type.pointee, ir.ArrayType):
+                    elem_val = builder.gep(elem_val, [zero, zero], name="str_to_ptr")
+            elif not isinstance(elem_type, ir.PointerType):
+                elem_val = ArrayTypeHandler._load_if_pointer(builder, elem_val)
+            if elem_val.type != elem_type:
+                if isinstance(elem_val.type, ir.IntType) and isinstance(elem_type, ir.IntType):
+                    elem_val = ArrayTypeHandler._cast_int_to_width(builder, elem_val, elem_type)
+                elif isinstance(elem_val.type, ir.PointerType) and isinstance(elem_type, ir.PointerType):
+                    elem_val = builder.bitcast(elem_val, elem_type, name="ptr_cast")
+            slot = builder.gep(backing, [zero, ArrayTypeHandler._index(i)], name=f"slot_{i}")
+            builder.store(elem_val, slot)
+        # Store the pointer to the first element into the alloca
+        base_ptr = builder.gep(backing, [zero, zero], name="arr_base")
+        builder.store(base_ptr, alloca)
 
     @staticmethod
     def pack_array_to_integer(builder: ir.IRBuilder, module: ir.Module, 

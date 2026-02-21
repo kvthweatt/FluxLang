@@ -5,7 +5,7 @@
 #endif;
 
 #ifndef FLUX_STANDARD_CRYPTO
-#def FLUX_STANDARD_CRYPTO
+#def FLUX_STANDARD_CRYPTO;
 
 namespace standard
 {

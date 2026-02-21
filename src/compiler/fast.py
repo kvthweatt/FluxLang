@@ -2307,7 +2307,9 @@ class ArrayAccess(Expression):
         # chained subscripts like argvW[i][j] will over-load and produce a scalar.
         _ts = getattr(array_val, '_flux_type_spec', None)
         _depth = getattr(_ts, 'pointer_depth', 1) if _ts else 1
-        if (_depth <= 1 and
+        _is_arr = getattr(_ts, 'is_array', False) if _ts else False
+        if (not _is_arr and
+            _depth <= 1 and
             isinstance(array_val.type, ir.PointerType) and 
             isinstance(array_val.type.pointee, ir.PointerType) and
             not isinstance(array_val.type.pointee.pointee, ir.ArrayType)):

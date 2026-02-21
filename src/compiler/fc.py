@@ -532,7 +532,7 @@ class FluxCompiler:
                     "shell32.lib",
                     #"libsynchronization.lib",
                     #"libcmt.lib",
-                    "msvcrt.lib",   # Optional, link with C runtime
+                    #"msvcrt.lib",   # Optional, link with C runtime
                     "user32.lib",  # Uncomment only if GUI functions are used
                     "gdi32.lib",   # Uncomment only if drawing functions are used
                     f"/out:build\\{output_dir}\\{output_bin}"

@@ -615,7 +615,6 @@ namespace standard
                 };
 
                 // Data slab management
-
                 def slab_header_size() -> size_t
                 {
                     return (size_t)40;  // sizeof(Slab)
@@ -703,18 +702,20 @@ namespace standard
                         case (1)
                         {
                             u64 ptr = (u64)node;
-                            // Re-insert into table as live (kind=0)
-                            table_insert(ptr, cls, (u64)0, (u64)0);
-                            // Find which slab owns this block and increment its counter
+                            // Find which slab owns this block, increment its counter,
+                            // then store the slab pointer in the table entry
+                            Slab* owner = (Slab*)0;
                             Slab* s = g_slab_head;
                             while (s != (Slab*)0)
                             {
                                 switch (ptr >= s.base & ptr < s.base + (u64)s.capacity)
                                 {
-                                    case (1) { s.used++; s = (Slab*)0; }
+                                    case (1) { s.used++; owner = s; s = (Slab*)0; }
                                     default  { s = s.next; };
                                 };
                             };
+                            // Re-insert into table as live (kind=0), storing owning slab
+                            table_insert(ptr, cls, (u64)0, (u64)owner);
                             return ptr;
                         }
                         default {};
@@ -734,7 +735,7 @@ namespace standard
                         default {};
                     };
 
-                    switch (!table_insert(ptr, cls, (u64)0, (u64)0))
+                    switch (!table_insert(ptr, cls, (u64)0, (u64)g_slab_head))
                     {
                         case (1) { return (u64)0; }
                         default  {};
@@ -770,18 +771,11 @@ namespace standard
                     };
 
                     // Small block: decrement owning slab counter, return to bin
-                    Slab* s = g_slab_head;
-                    while (s != (Slab*)0)
+                    Slab* owner = (Slab*)slab;
+                    switch (owner != (Slab*)0)
                     {
-                        switch (ptr >= s.base & ptr < s.base + (u64)s.capacity)
-                        {
-                            case (1)
-                            {
-                                switch (s.used > (size_t)0) { case (1) { s.used--; } default {}; };
-                                s = (Slab*)0;
-                            }
-                            default { s = s.next; };
-                        };
+                        case (1) { switch (owner.used > (size_t)0) { case (1) { owner.used--; } default {}; }; }
+                        default  {};
                     };
                     bin_push(size, (FreeNode*)ptr);
                 };
@@ -835,11 +829,29 @@ namespace standard
                                 case (1)
                                 {
                                     u64 new_ptr = (u64)reuse;
-                                    table_insert(new_ptr, new_cls, (u64)0, (u64)0);
+                                    // Find and increment owning slab for new_ptr
+                                    Slab* new_owner = (Slab*)0;
+                                    Slab* ws = g_slab_head;
+                                    while (ws != (Slab*)0)
+                                    {
+                                        switch (new_ptr >= ws.base & new_ptr < ws.base + (u64)ws.capacity)
+                                        {
+                                            case (1) { ws.used++; new_owner = ws; ws = (Slab*)0; }
+                                            default  { ws = ws.next; };
+                                        };
+                                    };
+                                    table_insert(new_ptr, new_cls, (u64)0, (u64)new_owner);
                                     byte* src = (byte*)ptr;
                                     byte* dst = (byte*)new_ptr;
                                     size_t i = (size_t)0;
                                     while (i < copy_size) { dst[i] = src[i]; i++; };
+                                    // Decrement old ptr's slab used counter before removing
+                                    Slab* old_owner = (Slab*)entry.slab;
+                                    switch (old_owner != (Slab*)0)
+                                    {
+                                        case (1) { switch (old_owner.used > (size_t)0) { case (1) { old_owner.used--; } default {}; }; }
+                                        default  {};
+                                    };
                                     table_remove(ptr);
                                     bin_push(old_cls, (FreeNode*)ptr);
                                     return new_ptr;
@@ -1054,25 +1066,30 @@ namespace standard
                     
                     def __exit() -> void
                     {
-                        if (this.buffer != (byte*)0)
+                        switch (this.buffer != (byte*)0)
                         {
-                            //(void)this.buffer; <- make LLVM call ffree()
-                            stdheap::ffree((u64)@this.buffer);
+                            case (true)
+                            {
+                                stdheap::ffree((u64)@this.buffer);
+                            }
+                            default {};
                         };
-                        return;
                     };
                     
-                    def allocate(size_t size) -> void*
+                    def allocate(size_t size) -> void_ptr
                     {
-                        if (this.offset + size > this.capacity)
+                        bool b = (this.offset + size) > this.capacity;
+                        switch (b)
                         {
-                            return STDLIB_GVP;
+                            case (true)
+                            {
+                                u64* ptr = (void_ptr)(this.buffer + this.offset);
+                                this.offset += size;
+                                return ptr;
+                            }
+                            default { return STDLIB_GVP; };
                         };
-                        
-                        u64* ptr = (void*)(this.buffer + this.offset);
-                        this.offset += size;
-                        
-                        return ptr;
+                        return STDLIB_GVP;
                     };
                     
                     def reset() -> void
@@ -1106,14 +1123,13 @@ namespace standard
                 // A free list threaded through the blocks themselves gives O(1)
                 // alloc and free.
                 // allocate() returns null when all blocks are in use.
-                // Individual blocks are returned via deallocate(void* ptr).
+                // Individual blocks are returned via deallocate(void_ptr ptr).
                 // __exit() releases the backing buffer back to stdheap.
 
                 object PoolAllocator
                 {
                     byte*     buffer;
-                    size_t    block_size;
-                    size_t    block_count;
+                    size_t    block_size, block_count;
                     FreeNode* free_head;
 
                     def __init(size_t bsize, size_t bcount) -> this
@@ -1162,30 +1178,29 @@ namespace standard
                             }
                             default {};
                         };
-                        return;
                     };
 
                     // Returns a pointer to a free block, or null if the pool is
                     // exhausted.
-                    def allocate() -> void*
+                    def allocate() -> void_ptr
                     {
                         switch (this.free_head == NP_FREENODE)
                         {
-                            case (1) { return (void*)0; }
+                            case (1) { return (void_ptr)0; }
                             default  {};
                         };
 
                         FreeNode* node = this.free_head;
                         this.free_head = node.next;
-                        return (void*)node;
+                        return (void_ptr)node;
                     };
 
                     // Return a previously allocated block back to the pool.
                     // Passing a pointer not belonging to this pool is undefined
                     // behaviour.
-                    def deallocate(void* ptr) -> void
+                    def deallocate(void_ptr ptr) -> void
                     {
-                        switch (ptr == (void*)0)
+                        switch (ptr == (void_ptr)0)
                         {
                             case (1) { return; }
                             default  {};
@@ -1245,8 +1260,7 @@ namespace standard
                 object RingAllocator
                 {
                     byte*            buffer;
-                    size_t           capacity;
-                    size_t           write_pos;
+                    size_t           capacity, write_pos;
                     RingAllocResult* rallocresult;
 
                     def __init(size_t size) -> this
@@ -1276,7 +1290,6 @@ namespace standard
                             }
                             default {};
                         };
-                        return;
                     };
 
                     // Allocate `size` bytes from the ring.
@@ -1307,7 +1320,7 @@ namespace standard
                         };
 
                         // The user region is carved directly from the buffer.
-                        u64* user_ptr   = (void*)(this.buffer + this.write_pos);
+                        u64* user_ptr   = (void_ptr)(this.buffer + this.write_pos);
                         this.write_pos  += size;
 
                         this.rallocresult.ptr     = user_ptr;
