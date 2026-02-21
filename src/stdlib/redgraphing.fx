@@ -1,5 +1,6 @@
-// redgraphing.fx - Flux 2D Graphing Library
-// Provides line graphs, bar charts, scatter plots, and axes/grid rendering
+// redgraphing.fx - Flux Graphing Library
+// Provides 2D line graphs, bar charts, scatter plots, and axes/grid rendering,
+// plus a full 3D graphing system with parametric data generators.
 // Built on top of redwindows.fx (Canvas/GDI) and redmath.fx
 //
 // Usage example:
@@ -613,6 +614,909 @@ namespace standard
             g.y_max = hi + span * margin;
         };
 
+    };  // namespace graphing
+};      // namespace standard
+
+
+// ============================================================================
+// 3D GRAPHING
+// Built on top of standard::math Vec3 / rotate_x/y/z / project.
+// Graph3D describes the data-space ranges and the screen viewport centre,
+// plus the perspective camera parameters forwarded straight to project().
+//
+// Usage example:
+//
+//   #import "standard.fx";
+//   #import "redwindows.fx";
+//   #import "redgraphing.fx";
+//
+//   using standard::system::windows;
+//   using standard::graphing;
+//   using standard::graphing::graph3d;
+//   using standard::graphing::graph3d::generators;
+//
+//   def main() -> int
+//   {
+//       Window win("3D Graph\0", 800, 600, CW_USEDEFAULT, CW_USEDEFAULT);
+//       Canvas c(win.handle, win.device_context);
+//
+//       float[8] xs = [1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0];
+//       float[8] ys = [1.0, 1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0];
+//       float[8] zs = [1.0, 3.0, 2.0, 4.0, 2.0, 1.0, 4.0, 3.0];
+//
+//       // Or generate data with a built-in generator:
+//       float[80] gx; float[80] gy; float[80] gz;
+//       generators::gen_helix(@gx[0], @gy[0], @gz[0], 80, 0.0);
+//
+//       Graph3D g;
+//       g.cx     = 400;      // screen centre X
+//       g.cy     = 300;      // screen centre Y
+//       g.fov    = 300.0;    // perspective field-of-view scale
+//       g.cam_z  = 6.0;      // camera distance along Z
+//       g.rot_x  = 0.45;     // pitch  (radians)
+//       g.rot_y  = 0.6;      // yaw    (radians)
+//       g.x_min  = 0.0;  g.x_max = 5.0;
+//       g.y_min  = 0.0;  g.y_max = 5.0;
+//       g.z_min  = 0.0;  g.z_max = 5.0;
+//       g.scale  = 1.0;      // uniform data-space scale
+//
+//       while (win.process_messages())
+//       {
+//           c.clear(RGB(20, 20, 20));
+//           graph3d::draw_axes3d(@c, @g, RGB(180, 180, 180), 1);
+//           graph3d::draw_grid3d(@c, @g, 5, 5, RGB(50, 50, 50));
+//           graph3d::plot_scatter3d(@c, @g, @xs[0], @ys[0], @zs[0], 8,
+//                                   RGB(0, 200, 255), 3);
+//           graph3d::plot_line3d(@c, @g, @xs[0], @ys[0], @zs[0], 8,
+//                                RGB(255, 100, 50), 1);
+//       };
+//
+//       win.__exit();
+//       return 0;
+//   };
+// ============================================================================
+
+namespace standard
+{
+    namespace graphing
+    {
+        namespace graph3d
+        {
+            // ================================================================
+            // Graph3D - viewport, camera, and data-range descriptor
+            // ================================================================
+
+            struct Graph3D
+            {
+                // Screen-space viewport centre (pixels)
+                int   cx;       // Centre X on canvas
+                int   cy;       // Centre Y on canvas
+
+                // Perspective camera parameters (passed to math::project)
+                float fov;      // Field-of-view scale factor
+                float cam_z;    // Camera distance from origin along Z
+
+                // Euler rotation angles (radians) applied before projection
+                float rot_x;    // Pitch around X axis
+                float rot_y;    // Yaw   around Y axis
+                float rot_z;    // Roll  around Z axis
+
+                // Data-space ranges (used to normalise incoming data)
+                float x_min;
+                float x_max;
+                float y_min;
+                float y_max;
+                float z_min;
+                float z_max;
+
+                // Uniform scale applied after normalisation
+                float scale;
+            };
+
+            // ================================================================
+            // Internal helpers
+            // ================================================================
+
+            // Normalise a single data value to a centred [-0.5, 0.5] range
+            // then multiply by scale.  The same transform is applied to all
+            // three axes so the graph fits symmetrically around the origin.
+            def norm(float val, float lo, float hi, float sc) -> float
+            {
+                float range = hi - lo;
+                if (range == 0.0) { return 0.0; };
+                return ((val - lo) / range - 0.5) * sc;
+            };
+
+            // Build a Vec3 from raw data coordinates, normalise and rotate,
+            // then project to a screen POINT via math::project.
+            def data3_to_screen(Graph3D* g, float dx, float dy, float dz) -> POINT
+            {
+                Vec3 v;
+                v.x =  norm(dx, g.x_min, g.x_max, g.scale);
+                v.y =  norm(dy, g.y_min, g.y_max, g.scale);
+                v.z =  norm(dz, g.z_min, g.z_max, g.scale);
+
+                // Rotate around X then Y then Z
+                float sx = sin(g.rot_x);
+                float cx = cos(g.rot_x);
+                float sy = sin(g.rot_y);
+                float cy = cos(g.rot_y);
+                float sz = sin(g.rot_z);
+                float cz = cos(g.rot_z);
+
+                Vec3 rx = rotate_x(@v,  sx, cx);
+                Vec3 ry = rotate_y(@rx, sy, cy);
+                Vec3 rz = rotate_z(@ry, sz, cz);
+
+                return project(@rz, g.cx, g.cy, g.fov, g.cam_z);
+            };
+
+            // ================================================================
+            // draw_axes3d
+            // Draws the three principal axes (X, Y, Z) from min to max.
+            // axis_color : DWORD color for all three axes
+            // line_width : pen width in pixels
+            // ================================================================
+            def draw_axes3d(Canvas* c, Graph3D* g, DWORD axis_color, int line_width) -> void
+            {
+                c.set_pen(axis_color, line_width);
+
+                // X axis  (y_min, z_min plane)
+                POINT p0 = data3_to_screen(g, g.x_min, g.y_min, g.z_min);
+                POINT p1 = data3_to_screen(g, g.x_max, g.y_min, g.z_min);
+                c.line(p0.x, p0.y, p1.x, p1.y);
+
+                // Y axis  (x_min, z_min plane)
+                POINT p2 = data3_to_screen(g, g.x_min, g.y_min, g.z_min);
+                POINT p3 = data3_to_screen(g, g.x_min, g.y_max, g.z_min);
+                c.line(p2.x, p2.y, p3.x, p3.y);
+
+                // Z axis  (x_min, y_min plane)
+                POINT p4 = data3_to_screen(g, g.x_min, g.y_min, g.z_min);
+                POINT p5 = data3_to_screen(g, g.x_min, g.y_min, g.z_max);
+                c.line(p4.x, p4.y, p5.x, p5.y);
+            };
+
+            // ================================================================
+            // draw_grid3d
+            // Draws a floor grid on the XZ plane at y_min, plus a back wall
+            // grid on the XY plane at z_min.
+            // x_divs     : divisions along X
+            // z_divs     : divisions along Z
+            // grid_color : DWORD color for grid lines
+            // ================================================================
+            def draw_grid3d(Canvas* c, Graph3D* g, int x_divs, int z_divs, DWORD grid_color) -> void
+            {
+                c.set_pen(grid_color, 1);
+
+                // Floor grid lines parallel to Z (along X divisions)
+                int i = 0;
+                while (i <= x_divs)
+                {
+                    float fx = g.x_min + (g.x_max - g.x_min) * (float)i / (float)x_divs;
+                    POINT a = data3_to_screen(g, fx, g.y_min, g.z_min);
+                    POINT b = data3_to_screen(g, fx, g.y_min, g.z_max);
+                    c.line(a.x, a.y, b.x, b.y);
+                    i = i + 1;
+                };
+
+                // Floor grid lines parallel to X (along Z divisions)
+                int j = 0;
+                while (j <= z_divs)
+                {
+                    float fz = g.z_min + (g.z_max - g.z_min) * (float)j / (float)z_divs;
+                    POINT a = data3_to_screen(g, g.x_min, g.y_min, fz);
+                    POINT b = data3_to_screen(g, g.x_max, g.y_min, fz);
+                    c.line(a.x, a.y, b.x, b.y);
+                    j = j + 1;
+                };
+            };
+
+            // ================================================================
+            // draw_box3d
+            // Draws the twelve edges of the data-range bounding box.
+            // color      : DWORD color
+            // line_width : pen width in pixels
+            // ================================================================
+            def draw_box3d(Canvas* c, Graph3D* g, DWORD color, int line_width) -> void
+            {
+                c.set_pen(color, line_width);
+
+                float x0 = g.x_min; float x1 = g.x_max;
+                float y0 = g.y_min; float y1 = g.y_max;
+                float z0 = g.z_min; float z1 = g.z_max;
+
+                // Bottom face
+                POINT a = data3_to_screen(g, x0, y0, z0);
+                POINT b = data3_to_screen(g, x1, y0, z0);
+                POINT cc = data3_to_screen(g, x1, y0, z1);
+                POINT d = data3_to_screen(g, x0, y0, z1);
+                c.line(a.x, a.y, b.x, b.y);
+                c.line(b.x, b.y, cc.x, cc.y);
+                c.line(cc.x, cc.y, d.x, d.y);
+                c.line(d.x, d.y, a.x, a.y);
+
+                // Top face
+                POINT e = data3_to_screen(g, x0, y1, z0);
+                POINT f = data3_to_screen(g, x1, y1, z0);
+                POINT gg = data3_to_screen(g, x1, y1, z1);
+                POINT h = data3_to_screen(g, x0, y1, z1);
+                c.line(e.x, e.y, f.x, f.y);
+                c.line(f.x, f.y, gg.x, gg.y);
+                c.line(gg.x, gg.y, h.x, h.y);
+                c.line(h.x, h.y, e.x, e.y);
+
+                // Vertical edges
+                c.line(a.x, a.y, e.x, e.y);
+                c.line(b.x, b.y, f.x, f.y);
+                c.line(cc.x, cc.y, gg.x, gg.y);
+                c.line(d.x, d.y, h.x, h.y);
+            };
+
+            // ================================================================
+            // plot_scatter3d
+            // Draws a small square marker at each (xs[i], ys[i], zs[i]) point.
+            // xs, ys, zs : pointer to first element of float arrays
+            // count      : number of points
+            // color      : DWORD marker color
+            // radius     : half-size of marker in pixels
+            // ================================================================
+            def plot_scatter3d(Canvas* c, Graph3D* g, float* xs, float* ys, float* zs, int count, DWORD color, int radius) -> void
+            {
+                c.set_pen(color, 1);
+
+                int i = 0;
+                while (i < count)
+                {
+                    POINT p = data3_to_screen(g, xs[i], ys[i], zs[i]);
+                    c.rect(p.x - radius, p.y - radius, p.x + radius, p.y + radius);
+                    i = i + 1;
+                };
+            };
+
+            // ================================================================
+            // plot_scatter3d_circles
+            // Draws a circle marker at each (xs[i], ys[i], zs[i]) point.
+            // xs, ys, zs : pointer to first element of float arrays
+            // count      : number of points
+            // color      : DWORD marker color
+            // radius     : circle radius in pixels
+            // ================================================================
+            def plot_scatter3d_circles(Canvas* c, Graph3D* g, float* xs, float* ys, float* zs, int count, DWORD color, int radius) -> void
+            {
+                c.set_pen(color, 1);
+
+                int i = 0;
+                while (i < count)
+                {
+                    POINT p = data3_to_screen(g, xs[i], ys[i], zs[i]);
+                    c.circle(p.x, p.y, radius);
+                    i = i + 1;
+                };
+            };
+
+            // ================================================================
+            // plot_line3d
+            // Draws a connected polyline through (xs[i], ys[i], zs[i]) points.
+            // xs, ys, zs : pointer to first element of float arrays
+            // count      : number of points
+            // color      : DWORD line color
+            // line_width : pen width in pixels
+            // ================================================================
+            def plot_line3d(Canvas* c, Graph3D* g, float* xs, float* ys, float* zs, int count, DWORD color, int line_width) -> void
+            {
+                if (count < 2) { return; };
+
+                c.set_pen(color, line_width);
+
+                POINT prev = data3_to_screen(g, xs[0], ys[0], zs[0]);
+
+                int i = 1;
+                while (i < count)
+                {
+                    POINT cur = data3_to_screen(g, xs[i], ys[i], zs[i]);
+                    c.line(prev.x, prev.y, cur.x, cur.y);
+                    prev = cur;
+                    i = i + 1;
+                };
+            };
+
+            // ================================================================
+            // plot_surface
+            // Draws a wireframe surface from a 2D grid of Z values.
+            // The grid has (x_count) columns and (y_count) rows.
+            // xs         : pointer to x_count X values (column positions)
+            // ys         : pointer to y_count Y values (row positions)
+            // zs         : pointer to (x_count * y_count) Z values,
+            //              stored row-major: zs[row * x_count + col]
+            // color      : DWORD wireframe color
+            // line_width : pen width in pixels
+            // ================================================================
+            def plot_surface(Canvas* c, Graph3D* g, float* xs, float* ys, float* zs, int x_count, int y_count, DWORD color, int line_width) -> void
+            {
+                if (x_count < 2 | y_count < 2) { return; };
+
+                c.set_pen(color, line_width);
+
+                int row = 0;
+                while (row < y_count)
+                {
+                    int col = 0;
+                    while (col < x_count)
+                    {
+                        float z00 = zs[row * x_count + col];
+
+                        // Horizontal edge to next column
+                        if (col < x_count - 1)
+                        {
+                            float z01 = zs[row * x_count + col + 1];
+                            POINT a = data3_to_screen(g, xs[col],     ys[row], z00);
+                            POINT b = data3_to_screen(g, xs[col + 1], ys[row], z01);
+                            c.line(a.x, a.y, b.x, b.y);
+                        };
+
+                        // Vertical edge to next row
+                        if (row < y_count - 1)
+                        {
+                            float z10 = zs[(row + 1) * x_count + col];
+                            POINT a = data3_to_screen(g, xs[col], ys[row],     z00);
+                            POINT b = data3_to_screen(g, xs[col], ys[row + 1], z10);
+                            c.line(a.x, a.y, b.x, b.y);
+                        };
+
+                        col = col + 1;
+                    };
+                    row = row + 1;
+                };
+            };
+
+            // ================================================================
+            // plot_bars3d
+            // Draws a vertical bar for each (xs[i], zs[i]) data point,
+            // rising from y_min to ys[i].
+            // xs, ys, zs  : pointer to first element of float arrays
+            // count       : number of bars
+            // color       : DWORD bar color
+            // bar_size_px : half-width of the bar footprint in screen pixels
+            // ================================================================
+            def plot_bars3d(Canvas* c, Graph3D* g, float* xs, float* ys, float* zs, int count, DWORD color, int bar_size_px) -> void
+            {
+                c.set_pen(color, 1);
+
+                int i = 0;
+                while (i < count)
+                {
+                    // Top and base of the bar
+                    POINT top  = data3_to_screen(g, xs[i], ys[i],    zs[i]);
+                    POINT base = data3_to_screen(g, xs[i], g.y_min,  zs[i]);
+
+                    // Vertical stem
+                    c.line(base.x, base.y, top.x, top.y);
+
+                    // Small cross at the top to indicate the data point
+                    c.line(top.x - bar_size_px, top.y, top.x + bar_size_px, top.y);
+                    c.line(top.x, top.y - bar_size_px, top.x, top.y + bar_size_px);
+
+                    i = i + 1;
+                };
+            };
+
+            // ================================================================
+            // draw_axes3d_labels
+            // Renders text labels at the positive end of each axis.
+            // x_label, y_label, z_label : null-terminated byte strings
+            // color                     : DWORD text color
+            // ================================================================
+            def draw_axes3d_labels(Canvas* c, Graph3D* g, byte* x_label, byte* y_label, byte* z_label, DWORD color) -> void
+            {
+                SetBkMode(c.back_dc, TRANSPARENT);
+                SetTextColor(c.back_dc, color);
+
+                int x_len = strlen(x_label);
+                int y_len = strlen(y_label);
+                int z_len = strlen(z_label);
+
+                POINT px = data3_to_screen(g, g.x_max, g.y_min, g.z_min);
+                POINT py = data3_to_screen(g, g.x_min, g.y_max, g.z_min);
+                POINT pz = data3_to_screen(g, g.x_min, g.y_min, g.z_max);
+
+                TextOutA(c.back_dc, px.x + 4, px.y - 6, (LPCSTR)x_label, x_len);
+                TextOutA(c.back_dc, py.x + 4, py.y - 6, (LPCSTR)y_label, y_len);
+                TextOutA(c.back_dc, pz.x + 4, pz.y - 6, (LPCSTR)z_label, z_len);
+            };
+
+            // ================================================================
+            // draw_title3d
+            // Renders a title string centered above the viewport centre.
+            // title : null-terminated byte string
+            // color : DWORD text color
+            // ================================================================
+            def draw_title3d(Canvas* c, Graph3D* g, byte* title, DWORD color) -> void
+            {
+                int title_len = strlen(title);
+                int tx = g.cx - (title_len * 4);
+                int ty = g.cy - (int)(g.fov * 0.6);
+                if (ty < 2) { ty = 2; };
+
+                SetBkMode(c.back_dc, TRANSPARENT);
+                SetTextColor(c.back_dc, color);
+                TextOutA(c.back_dc, tx, ty, (LPCSTR)title, title_len);
+            };
+
+            // ================================================================
+            // auto_range_z
+            // Computes a tight range (with a small margin) from a float array.
+            // Writes the result into the Graph3D's z_min / z_max.
+            // vals   : pointer to first element of a float array
+            // count  : number of elements
+            // margin : fractional padding added to each side (e.g. 0.1 = 10%)
+            // ================================================================
+            def auto_range_z(Graph3D* g, float* vals, int count, float margin) -> void
+            {
+                if (count <= 0) { return; };
+
+                float lo = vals[0];
+                float hi = vals[0];
+
+                int i = 1;
+                while (i < count)
+                {
+                    if (vals[i] < lo) { lo = vals[i]; };
+                    if (vals[i] > hi) { hi = vals[i]; };
+                    i = i + 1;
+                };
+
+                float span = hi - lo;
+                if (span == 0.0) { span = 1.0; };
+
+                g.z_min = lo - span * margin;
+                g.z_max = hi + span * margin;
+            };
+
+            // ================================================================
+            // auto_range3d
+            // Convenience wrapper: computes tight ranges for all three axes
+            // from separate float arrays.
+            // xs, ys, zs : pointers to first elements of float arrays
+            // count      : number of elements in each array
+            // margin     : fractional padding (e.g. 0.1 = 10%)
+            // ================================================================
+            def auto_range3d(Graph3D* g, float* xs, float* ys, float* zs, int count, float margin) -> void
+            {
+                if (count <= 0) { return; };
+
+                float xlo = xs[0]; float xhi = xs[0];
+                float ylo = ys[0]; float yhi = ys[0];
+                float zlo = zs[0]; float zhi = zs[0];
+
+                int i = 1;
+                while (i < count)
+                {
+                    if (xs[i] < xlo) { xlo = xs[i]; };
+                    if (xs[i] > xhi) { xhi = xs[i]; };
+                    if (ys[i] < ylo) { ylo = ys[i]; };
+                    if (ys[i] > yhi) { yhi = ys[i]; };
+                    if (zs[i] < zlo) { zlo = zs[i]; };
+                    if (zs[i] > zhi) { zhi = zs[i]; };
+                    i = i + 1;
+                };
+
+                float xspan = xhi - xlo; if (xspan == 0.0) { xspan = 1.0; };
+                float yspan = yhi - ylo; if (yspan == 0.0) { yspan = 1.0; };
+                float zspan = zhi - zlo; if (zspan == 0.0) { zspan = 1.0; };
+
+                g.x_min = xlo - xspan * margin;
+                g.x_max = xhi + xspan * margin;
+                g.y_min = ylo - yspan * margin;
+                g.y_max = yhi + yspan * margin;
+                g.z_min = zlo - zspan * margin;
+                g.z_max = zhi + zspan * margin;
+            };
+
+            // ================================================================
+            // namespace generators
+            // Parametric data generators for common 3D curve and surface types.
+            // All functions write into caller-supplied float* arrays.
+            //
+            // Surface generators fill xs[n] and ys[n] (axis samples) and
+            // zs[n*n] (row-major grid values).
+            //
+            // Curve/scatter generators fill xs[n], ys[n], zs[n] point arrays.
+            //
+            // All output values are normalised to [0, 1] unless noted.
+            // phase : animation parameter (radians); pass 0.0 for a static frame.
+            // ================================================================
+            namespace generators
+            {
+                // ============================================================
+                // gen_ripple
+                // Surface: z = (sin(r + phase) + 1) * 0.5
+                // where r = sqrt((x-0.5)^2 + (y-0.5)^2) * 8
+                // xs[n], ys[n] : axis sample positions (0..1)
+                // zs[n*n]      : row-major z grid
+                // ============================================================
+                def gen_ripple(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        xs[i] = (float)i / (float)(n - 1);
+                        ys[i] = (float)i / (float)(n - 1);
+                        int j = 0;
+                        while (j < n)
+                        {
+                            float fx = xs[j] - 0.5;
+                            float fy = xs[i] - 0.5;
+                            float r  = sqrt(fx * fx + fy * fy) * 8.0;
+                            zs[i * n + j] = (sin(r + phase) + 1.0) * 0.5;
+                            j = j + 1;
+                        };
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_saddle
+                // Surface: z = (x^2 - y^2 + 1) * 0.5
+                // xs[n], ys[n] : axis sample positions (0..1)
+                // zs[n*n]      : row-major z grid
+                // ============================================================
+                def gen_saddle(float* xs, float* ys, float* zs, int n) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        xs[i] = (float)i / (float)(n - 1);
+                        ys[i] = (float)i / (float)(n - 1);
+                        int j = 0;
+                        while (j < n)
+                        {
+                            float u = xs[j] * 2.0 - 1.0;
+                            float v = xs[i] * 2.0 - 1.0;
+                            zs[i * n + j] = (u * u - v * v + 1.0) * 0.5;
+                            j = j + 1;
+                        };
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_peaks
+                // Surface: sum of three Gaussian peaks, output in [0, 1].
+                // xs[n], ys[n] : axis sample positions (0..1)
+                // zs[n*n]      : row-major z grid
+                // ============================================================
+                def gen_peaks(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int k = 0;
+                    while (k < n)
+                    {
+                        xs[k] = (float)k / (float)(n - 1);
+                        ys[k] = (float)k / (float)(n - 1);
+                        k = k + 1;
+                    };
+                    int i = 0;
+                    while (i < n)
+                    {
+                        int j = 0;
+                        while (j < n)
+                        {
+                            float x = xs[j];
+                            float y = xs[i];
+                            float z = 0.0;
+                            // Peak 1
+                            float dx = x - (0.3 + 0.1 * sin(phase));
+                            float dy = y - 0.3;
+                            z = z + exp((0.0 - (dx * dx + dy * dy)) * 20.0);
+                            // Peak 2
+                            dx = x - 0.7;
+                            dy = y - (0.7 + 0.1 * cos(phase));
+                            z = z + exp((0.0 - (dx * dx + dy * dy)) * 20.0);
+                            // Peak 3
+                            dx = x - 0.5;
+                            dy = y - 0.5;
+                            z = z + exp((0.0 - (dx * dx + dy * dy)) * 8.0) * 0.5;
+                            zs[i * n + j] = z / 2.5;
+                            j = j + 1;
+                        };
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_torus_surf
+                // Surface: z-component of a torus mapped to [0, 1].
+                // R = 0.6 (major radius), r = 0.3 (minor radius).
+                // xs[n], ys[n] : axis sample positions (0..1)
+                // zs[n*n]      : row-major z grid
+                // ============================================================
+                def gen_torus_surf(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        xs[i] = (float)i / (float)(n - 1);
+                        ys[i] = (float)i / (float)(n - 1);
+                        int j = 0;
+                        while (j < n)
+                        {
+                            float u = xs[j] * 2.0 * PIF;
+                            float v = xs[i] * 2.0 * PIF + phase;
+                            float R = 0.6;
+                            float r = 0.3;
+                            float x = (R + r * cos(v)) * cos(u);
+                            float y = (R + r * cos(v)) * sin(u);
+                            float z = r * sin(v);
+                            zs[i * n + j] = (z + 1.0) * 0.5;
+                            j = j + 1;
+                        };
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_interference
+                // Surface: z = sin(2x + phase) * cos(3y - phase*0.7), output [0,1].
+                // xs[n], ys[n] : axis sample positions (0..1)
+                // zs[n*n]      : row-major z grid
+                // ============================================================
+                def gen_interference(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        xs[i] = (float)i / (float)(n - 1);
+                        ys[i] = (float)i / (float)(n - 1);
+                        int j = 0;
+                        while (j < n)
+                        {
+                            float x = xs[j] * 2.0 * PIF;
+                            float y = xs[i] * 2.0 * PIF;
+                            float z = sin(2.0 * x + phase) * cos(3.0 * y - phase * 0.7);
+                            zs[i * n + j] = (z + 1.0) * 0.5;
+                            j = j + 1;
+                        };
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_helix
+                // Curve: single-strand helix, 4 full turns.
+                // xs[n], ys[n], zs[n] : output point arrays, values in [0,1]
+                // ============================================================
+                def gen_helix(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        float t = (float)i / (float)(n - 1);
+                        float a = t * 4.0 * PIF + phase;
+                        xs[i] = (cos(a) + 1.0) * 0.5;
+                        ys[i] = t;
+                        zs[i] = (sin(a) + 1.0) * 0.5;
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_double_helix
+                // Curve: two interleaved helices (even indices = strand A, odd = B).
+                // xs[n], ys[n], zs[n] : output point arrays, values in [0,1]
+                // ============================================================
+                def gen_double_helix(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        float t   = (float)(i / 2) / (float)(n / 2 - 1);
+                        float ang = t * 4.0 * PIF + phase;
+                        if ((i % 2) == 0)
+                        {
+                            xs[i] = (cos(ang) + 1.0) * 0.5;
+                            zs[i] = (sin(ang) + 1.0) * 0.5;
+                        }
+                        else
+                        {
+                            xs[i] = (cos(ang + PIF) + 1.0) * 0.5;
+                            zs[i] = (sin(ang + PIF) + 1.0) * 0.5;
+                        };
+                        ys[i] = t;
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_spiral_coil
+                // Curve: Archimedes spiral projected into 3D (flat coil rising).
+                // xs[n], ys[n], zs[n] : output point arrays, values in [0,1]
+                // ============================================================
+                def gen_spiral_coil(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        float t   = (float)i / (float)(n - 1);
+                        float ang = t * 6.0 * PIF + phase;
+                        float r   = t;
+                        xs[i] = (r * cos(ang) + 1.0) * 0.5;
+                        ys[i] = t * 0.5 + sin(t * 4.0 * PIF + phase) * 0.25 + 0.25;
+                        zs[i] = (r * sin(ang) + 1.0) * 0.5;
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_knot_23
+                // Curve: torus knot (2,3).
+                // Output is NOT normalised to [0,1]; use auto_range3d before plotting.
+                // xs[n], ys[n], zs[n] : output point arrays
+                // ============================================================
+                def gen_knot_23(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        float t = (float)i / (float)(n - 1) * 2.0 * PIF + phase;
+                        float r = 2.0 + cos(1.5 * t);
+                        xs[i] = r * cos(t);
+                        ys[i] = sin(1.5 * t);
+                        zs[i] = r * sin(t);
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_fig8
+                // Curve: figure-eight knot.
+                // Output is NOT normalised to [0,1]; use auto_range3d before plotting.
+                // xs[n], ys[n], zs[n] : output point arrays
+                // ============================================================
+                def gen_fig8(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        float t  = (float)i / (float)(n - 1) * 2.0 * PIF + phase;
+                        float c  = cos(t);
+                        float s  = sin(t);
+                        float c2 = cos(2.0 * t);
+                        xs[i] = (2.0 + c2) * c;
+                        ys[i] = (2.0 + c2) * s;
+                        zs[i] = sin(2.0 * t) * 1.5;
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_lissajous
+                // Curve: 3D Lissajous figure with frequencies 3, 4, 5.
+                // xs[n], ys[n], zs[n] : output point arrays, values in [0,1]
+                // ============================================================
+                def gen_lissajous(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        float t = (float)i / (float)(n - 1) * 2.0 * PIF;
+                        xs[i] = (sin(3.0 * t + phase)       + 1.0) * 0.5;
+                        ys[i] = (sin(4.0 * t)               + 1.0) * 0.5;
+                        zs[i] = (cos(5.0 * t + phase * 0.6) + 1.0) * 0.5;
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_sphere
+                // Scatter: golden-angle sphere distribution.
+                // xs[n], ys[n], zs[n] : output point arrays, values in [0,1]
+                // ============================================================
+                def gen_sphere(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        float t    = (float)i / (float)n;
+                        float phi  = t * PIF;
+                        float thet = (float)i * 2.399963 + phase;
+                        float sp   = sin(phi);
+                        xs[i] = (cos(thet) * sp + 1.0) * 0.5;
+                        ys[i] = (cos(phi)       + 1.0) * 0.5;
+                        zs[i] = (sin(thet) * sp + 1.0) * 0.5;
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_cone
+                // Scatter: spiral cone.
+                // xs[n], ys[n], zs[n] : output point arrays, values in [0,1]
+                // ============================================================
+                def gen_cone(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        float t   = (float)i / (float)(n - 1);
+                        float r   = 1.0 - t;
+                        float ang = t * 6.0 * PIF + phase;
+                        xs[i] = (r * cos(ang) + 1.0) * 0.5;
+                        ys[i] = t;
+                        zs[i] = (r * sin(ang) + 1.0) * 0.5;
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_viviani
+                // Curve: Viviani's curve — x=(1+cos t)/2, y=sin(t)/2, z=sin(t/2).
+                // xs[n], ys[n], zs[n] : output point arrays, values in [0,1]
+                // ============================================================
+                def gen_viviani(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        float t = (float)i / (float)(n - 1) * 4.0 * PIF + phase;
+                        xs[i] = (1.0 + cos(t)) * 0.5;
+                        ys[i] = (sin(t)        + 1.0) * 0.5;
+                        zs[i] = (sin(t * 0.5)  + 1.0) * 0.5;
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_cluster
+                // Scatter: deterministic pseudo-random cluster (sin-based seed).
+                // xs[n], ys[n], zs[n] : output point arrays, values approx [0,1]
+                // ============================================================
+                def gen_cluster(float* xs, float* ys, float* zs, int n, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        float t  = (float)i;
+                        float px = sin(t * 1.3 + phase) * 0.5 + 0.5;
+                        float py = sin(t * 2.7 + 1.0)   * 0.5 + 0.5;
+                        float pz = sin(t * 3.9 + 2.0)   * 0.5 + 0.5;
+                        // Small per-point spread
+                        float dx = sin(t * 17.3) * 0.08;
+                        float dy = sin(t * 23.1) * 0.08;
+                        float dz = sin(t * 31.7) * 0.08;
+                        xs[i] = px + dx;
+                        ys[i] = py + dy;
+                        zs[i] = pz + dz;
+                        i = i + 1;
+                    };
+                };
+
+                // ============================================================
+                // gen_bars
+                // Bar-chart data: xs and zs hold grid positions (0..1),
+                // ys holds animated bar height (0..1).
+                // n        : total bar count (typically BAR_N * BAR_N)
+                // bar_cols : number of columns in the bar grid (i.e. BAR_N)
+                // xs[n], ys[n], zs[n] : output point arrays
+                // ============================================================
+                def gen_bars(float* xs, float* ys, float* zs, int n, int bar_cols, float phase) -> void
+                {
+                    int i = 0;
+                    while (i < n)
+                    {
+                        int   col = i % bar_cols;
+                        int   row = i / bar_cols;
+                        float fc  = (float)col / (float)(bar_cols - 1);
+                        float fr  = (float)row / (float)(bar_cols - 1);
+                        xs[i] = fc;
+                        zs[i] = fr;
+                        ys[i] = (sin((fc + fr) * PIF * 2.0 + phase) + 1.0) * 0.5;
+                        i = i + 1;
+                    };
+                };
+
+            };  // namespace generators
+
+        };  // namespace graph3d
     };  // namespace graphing
 };      // namespace standard
 
