@@ -73,16 +73,20 @@ def main() -> int
     float cam_yaw = 0.0;   // radians, rotation around Y axis
     float move_speed = 0.5;
     float turn_speed = 0.03;
+    float aspect;
+    float fwd_x, fwd_z, str_x, str_z;
+    RECT client_rect;
+
+    int cur_w, cur_h;
 
     while (win.process_messages())
     {
         // ---- Query current client area size each frame ----
-        RECT client_rect;
         GetClientRect(win.handle, @client_rect);
-        int cur_w = client_rect.right  - client_rect.left;
-        int cur_h = client_rect.bottom - client_rect.top;
+        cur_w = client_rect.right  - client_rect.left;
+        cur_h = client_rect.bottom - client_rect.top;
         if (cur_h == 0) { cur_h = 1; };
-        float aspect = (float)cur_w / (float)cur_h;
+        aspect = (float)cur_w / (float)cur_h;
 
         // ---- Keyboard input ----
         if ((GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0)
@@ -92,12 +96,12 @@ def main() -> int
         };
 
         // Forward direction vector (flat, ignore Y)
-        float fwd_x = sin(cam_yaw);
-        float fwd_z = (0.0 - cos(cam_yaw));
+        fwd_x = sin(cam_yaw);
+        fwd_z = (0.0 - cos(cam_yaw));
 
         // Strafe direction (perpendicular, 90 degrees)
-        float str_x =  fwd_z;
-        float str_z = (0.0 - fwd_x);
+        str_x =  fwd_z;
+        str_z = (0.0 - fwd_x);
 
         if ((GetAsyncKeyState(VK_W) & 0x8000) != 0)
         {

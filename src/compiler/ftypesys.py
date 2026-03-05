@@ -132,6 +132,7 @@ class SymbolKind(Enum):
     UNION = "union"
     ENUM = "enum"
     TRAIT = "trait"
+    OPERATOR = "operator"
 
 @dataclass
 class BaseType:

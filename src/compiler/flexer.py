@@ -80,6 +80,7 @@ class TokenType(Enum):
     NOT = auto()          # "        not            Represents operator: !
     NO_INIT = auto()      # "        noinit
     OBJECT = auto()       # "        object
+    OPERATOR = auto()     # "        operator
     OR = auto()           # "        or             Represents operator: |
     PRIVATE = auto()      # "        private
     PUBLIC = auto()       # "        public
@@ -361,6 +362,7 @@ class FluxLexer:
             'not': TokenType.NOT,
             'noinit': TokenType.NO_INIT,
             'object': TokenType.OBJECT,
+            'operator': TokenType.OPERATOR,
             'or': TokenType.OR,
             'private': TokenType.PRIVATE,
             'public': TokenType.PUBLIC,

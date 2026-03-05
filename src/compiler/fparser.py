@@ -46,7 +46,47 @@ from contextlib import contextmanager
 from typing import List, Optional, Union, Any
 from flexer import FluxLexer, TokenType, Token
 from fast import *
-    
+
+_TOKEN_SYMBOL_MAP = {
+    TokenType.PLUS:               '+',
+    TokenType.MINUS:              '-',
+    TokenType.MULTIPLY:           '*',
+    TokenType.DIVIDE:             '/',
+    TokenType.MODULO:             '%',
+    TokenType.LESS_THAN:          '<',
+    TokenType.GREATER_THAN:       '>',
+    TokenType.ASSIGN:             '=',
+    TokenType.LOGICAL_OR:         '|',
+    TokenType.LOGICAL_AND:        '&',
+    TokenType.BITXOR_OP:          '^',
+    TokenType.NOT:                '!',
+    TokenType.QUESTION:           '?',
+    TokenType.ADDRESS_OF:         '@',
+    TokenType.TIE:                '~',
+    TokenType.INCREMENT:          '++',
+    TokenType.DECREMENT:          '--',
+    TokenType.EQUAL:              '==',
+    TokenType.NOT_EQUAL:          '!=',
+    TokenType.LESS_EQUAL:         '<=',
+    TokenType.GREATER_EQUAL:      '>=',
+    TokenType.NAND_OP:            '!&',
+    TokenType.NOR_OP:             '!|',
+    TokenType.XOR_OP:             '^^',
+    TokenType.BITSHIFT_LEFT:      '<<',
+    TokenType.BITSHIFT_RIGHT:     '>>',
+    TokenType.BITNAND_OP:         '`!&',
+    TokenType.BITNOR_OP:          '`!|',
+    TokenType.BITXNAND:           '`^^!&',
+    TokenType.BITXNOR:            '`^^!|',
+}
+
+_SYMBOL_MANGLE = {
+    '%': 'pct',  '+': 'plus', '-': 'minus', '*': 'mul',
+    '/': 'div',  '<': 'lt',   '>': 'gt',    '=': 'eq',
+    '&': 'amp',  '|': 'pipe', '^': 'xor',   '!': 'not',
+    '?': 'qst',  '@': 'at',   '~': 'tilde',
+}
+
 class ParseError(Exception):
     """Exception raised when parsing fails"""
     def __init__(self, message: str, token: Optional[Token] = None):
@@ -68,6 +108,7 @@ class FluxParser:
         self._template_functions = {}  # name -> (template_param_names, FunctionDef AST)
         self._emitted_template_instances = set()  # mangled names already instantiated
         self._template_instantiations = []  # concrete FunctionDef nodes to inject into program
+        self._custom_operators: Dict[str, str] = {}  # symbol string -> base function name
 
 
     @classmethod
@@ -150,7 +191,126 @@ class FluxParser:
             self.advance()
 
     # ============ GRAMMAR RULES ============
-    
+
+    # ============ CUSTOM OPERATOR HELPERS ============
+
+    def _tokens_to_op_key(self, token_types: list) -> str:
+        return ''.join(_TOKEN_SYMBOL_MAP[t] for t in token_types)
+
+    def _mangle_op_symbol(self, symbol: str) -> str:
+        return '_'.join(_SYMBOL_MANGLE.get(c, hex(ord(c))) for c in symbol)
+
+    def _symbol_to_token_types(self, symbol: str) -> list:
+        # Build reverse map: string -> token type, sorted longest-first to match lexer greedy behaviour
+        _REVERSE = sorted(_TOKEN_SYMBOL_MAP.items(), key=lambda kv: len(kv[1]), reverse=True)
+        result = []
+        pos = 0
+        while pos < len(symbol):
+            matched = False
+            for tok_type, tok_str in _REVERSE:
+                if symbol[pos:pos+len(tok_str)] == tok_str:
+                    result.append(tok_type)
+                    pos += len(tok_str)
+                    matched = True
+                    break
+            if not matched:
+                return None
+        return result
+
+    def _match_custom_op(self):
+        """
+        Greedy longest-match against registered custom operators from current position.
+        Returns (symbol_string, token_count) or (None, 0).
+        """
+        best_symbol = None
+        best_length = 0
+
+        for symbol in self._custom_operators:
+            candidate_types = self._symbol_to_token_types(symbol)
+            if candidate_types is None:
+                continue
+            n = len(candidate_types)
+            if n <= best_length:
+                continue
+            tokens_match = True
+            for i in range(n):
+                tok = self.current_token if i == 0 else self.peek(i)
+                if tok is None or tok.type != candidate_types[i]:
+                    tokens_match = False
+                    break
+            if tokens_match:
+                best_symbol = symbol
+                best_length = n
+
+        return best_symbol, best_length
+
+    def operator_def(self) -> FunctionDef:
+        """
+        operator_def -> 'operator' '(' parameter_list ')' '[' op_tokens+ ']' '->' type_spec (';' | block ';')
+        """
+        # Consume 'operator' keyword token
+        self.consume(TokenType.OPERATOR)
+        self.consume(TokenType.LEFT_PAREN)
+        params = self.parameter_list()
+        self.consume(TokenType.RIGHT_PAREN)
+
+        self.consume(TokenType.LEFT_BRACKET)
+        op_token_types = []
+        while not self.expect(TokenType.RIGHT_BRACKET):
+            if self.current_token.type not in _TOKEN_SYMBOL_MAP:
+                self.error(f"Token '{self.current_token.value}' cannot be part of an operator symbol")
+            op_token_types.append(self.current_token.type)
+            self.advance()
+        self.consume(TokenType.RIGHT_BRACKET)
+
+        symbol           = self._tokens_to_op_key(op_token_types)
+        mangled_fragment = self._mangle_op_symbol(symbol)
+        func_name        = f"operator__{mangled_fragment}"
+
+        self.consume(TokenType.RETURN_ARROW)
+        return_type = self.type_spec()
+
+        if self.expect(TokenType.SEMICOLON):
+            self.advance()
+            body = Block([])
+            is_prototype = True
+        else:
+            body = self.block()
+            self.consume(TokenType.SEMICOLON)
+            is_prototype = False
+
+        self._custom_operators[symbol] = func_name
+        self.symbol_table.define(symbol, SymbolKind.OPERATOR)
+
+        return FunctionDef(
+            name=func_name,
+            parameters=params,
+            return_type=return_type,
+            body=body,
+            is_prototype=is_prototype,
+            no_mangle=False
+        )
+
+    def custom_op_expression(self) -> Expression:
+        """
+        custom_op_expression -> multiplicative_expression (custom_op multiplicative_expression)*
+        """
+        expr = self.multiplicative_expression()
+
+        while True:
+            matched_symbol, matched_length = self._match_custom_op()
+            if matched_symbol is None:
+                break
+            for _ in range(matched_length):
+                self.advance()
+            right = self.multiplicative_expression()
+            func_name = self._custom_operators[matched_symbol]
+            expr = FunctionCall(func_name, [expr, right])
+
+        return expr
+
+    # ============ GRAMMAR RULES ============
+
     def parse(self) -> Program:
         """
         program -> statement* EOF
@@ -289,6 +449,8 @@ class FluxParser:
             if self.expect(TokenType.USING):
                 self.advance()
                 return self.not_using_statement()
+        elif self.expect(TokenType.OPERATOR):
+            return self.operator_def()
         elif self.expect(TokenType.EXTERN):
             return self.extern_statement()
         elif self.expect(TokenType.DEF):
@@ -1321,7 +1483,7 @@ class FluxParser:
         is_local = False
         is_const = False
         is_volatile = False
-        is_signed = True
+        is_signed = False
         signedness_explicit = False
         storage_class = None
 
@@ -2550,9 +2712,9 @@ class FluxParser:
     
     def arithmetic_expression(self) -> Expression:
         """
-        arithmetic_expression -> multiplicative_expression (('+' | '-') multiplicative_expression)*
+        arithmetic_expression -> custom_op_expression (('+' | '-') custom_op_expression)*
         """
-        expr = self.multiplicative_expression()
+        expr = self.custom_op_expression()
         
         while self.expect(TokenType.PLUS, TokenType.MINUS):
             if self.current_token.type == TokenType.PLUS:
@@ -2561,7 +2723,7 @@ class FluxParser:
                 operator = Operator.SUB
             
             self.advance()
-            right = self.multiplicative_expression()
+            right = self.custom_op_expression()
             expr = BinaryOp(expr, operator, right)
         
         return expr
@@ -2901,11 +3063,17 @@ class FluxParser:
                 # StructFieldAccess or object member based on type
                 expr = MemberAccess(expr, member)
             elif self.expect(TokenType.INCREMENT):
-                # Postfix increment
+                # Postfix increment - but not if ++ begins a registered custom operator
+                matched_sym, _ = self._match_custom_op()
+                if matched_sym is not None:
+                    break
                 self.advance()
                 expr = UnaryOp(Operator.INCREMENT, expr, is_postfix=True)
             elif self.expect(TokenType.DECREMENT):
-                # Postfix decrement
+                # Postfix decrement - but not if -- begins a registered custom operator
+                matched_sym, _ = self._match_custom_op()
+                if matched_sym is not None:
+                    break
                 self.advance()
                 expr = UnaryOp(Operator.DECREMENT, expr, is_postfix=True)
             elif self.expect(TokenType.AS):

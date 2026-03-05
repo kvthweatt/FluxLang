@@ -3066,7 +3066,13 @@ class VariableDeclaration(ASTNode):
             # Extract expected size from the type_spec if it's an array type
             expected_size = None
             if resolved_type_spec and resolved_type_spec.array_size is not None:
-                expected_size = resolved_type_spec.array_size
+                raw_size = resolved_type_spec.array_size
+                if isinstance(raw_size, int):
+                    expected_size = raw_size
+                elif hasattr(raw_size, 'value') and isinstance(raw_size.value, int):
+                    expected_size = raw_size.value
+                else:
+                    expected_size = int(raw_size)
             
             comp_result = self.initial_value.codegen(builder, module, expected_size=expected_size)
             # comp_result is [5 x i32]*, alloca is [5 x i32]*
