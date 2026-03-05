@@ -25,14 +25,3 @@ compt {
 	};
 };
 ```
-
----
-
-## **Templates:**
-You can template functions, and `operator`s.  
-Examples of template syntax with prototypes:
-```
-def myFunc<T>() -> void;
-
-operator<T>(T L, T R)[==] -> T;
-```

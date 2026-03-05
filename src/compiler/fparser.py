@@ -109,6 +109,7 @@ class FluxParser:
         self._emitted_template_instances = set()  # mangled names already instantiated
         self._template_instantiations = []  # concrete FunctionDef nodes to inject into program
         self._custom_operators: Dict[str, str] = {}  # symbol string -> base function name
+        self._function_depth = 0  # Tracks nesting depth; nested function defs are illegal
 
 
     @classmethod
@@ -785,7 +786,11 @@ class FluxParser:
             for param in parameters:
                 if param.name is None:
                     self.error(f"Function definition requires parameter names, but parameter of type {param.type_spec} has no name")
+            if self._function_depth > 0:
+                self.error(f"Illegal nested function definition '{name}': function definitions are not allowed inside another function body")
+            self._function_depth += 1
             body = self.block()
+            self._function_depth -= 1
             self.consume(TokenType.SEMICOLON)
         
         # Only add named parameters to symbol table
