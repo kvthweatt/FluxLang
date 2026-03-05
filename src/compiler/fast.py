@@ -3031,8 +3031,10 @@ class VariableDeclaration(ASTNode):
         # Initialize variable if value is provided (and it's not noinit)
         elif self.initial_value:
             self._initialize_local(builder, module, alloca, llvm_type, resolved_type_spec)
-        # If no initial_value at all, Flux currently zero-initializes
-        # This maintains backward compatibility with existing behavior
+        else:
+            # No initial value: zero-initialize per Flux spec
+            zero = TypeSystem.get_default_initializer(llvm_type)
+            builder.store(zero, alloca)
         
         # Register in scope
         #print(f"[LOCAL VAR] Registering local variable '{self.name}' in scope level {module.symbol_table.scope_level}", file=sys.stdout)

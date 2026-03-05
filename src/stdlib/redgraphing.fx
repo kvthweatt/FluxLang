@@ -70,16 +70,16 @@ namespace standard
         struct Graph
         {
             // Screen-space position and size of the plot area (pixels)
-            int   x;        // Left edge of plot area
-            int   y;        // Top edge of plot area
-            int   width;    // Width of plot area
-            int   height;   // Height of plot area
+            int   x,        // Left edge of plot area
+                  y,        // Top edge of plot area
+                  width,    // Width of plot area
+                  height;   // Height of plot area
 
             // Data-space ranges
-            float x_min;
-            float x_max;
-            float y_min;
-            float y_max;
+            float x_min,
+                  x_max,
+                  y_min,
+                  y_max;
         };
 
         // ============================================================================
@@ -116,10 +116,10 @@ namespace standard
             c.set_pen(axis_color, line_width);
 
             // Bottom border (X axis baseline)
-            int left   = g.x;
-            int right  = g.x + g.width;
-            int top    = g.y;
-            int bottom = g.y + g.height;
+            int left   = g.x,
+                right  = g.x + g.width,
+                top    = g.y,
+                bottom = g.y + g.height;
 
             c.line(left, bottom, right, bottom);  // X axis
             c.line(left, top,    left,  bottom);  // Y axis
@@ -136,13 +136,13 @@ namespace standard
         {
             c.set_pen(grid_color, 1);
 
-            int left   = g.x;
-            int right  = g.x + g.width;
-            int top    = g.y;
-            int bottom = g.y + g.height;
+            int left   = g.x,
+                right  = g.x + g.width,
+                top    = g.y,
+                bottom = g.y + g.height,
+                i = 1, j = 1;
 
             // Vertical grid lines
-            int i = 1;
             while (i < x_divs)
             {
                 int px = left + (g.width * i) / x_divs;
@@ -151,7 +151,6 @@ namespace standard
             };
 
             // Horizontal grid lines
-            int j = 1;
             while (j < y_divs)
             {
                 int py = top + (g.height * j) / y_divs;
@@ -195,10 +194,10 @@ namespace standard
 
             c.set_pen(color, line_width);
 
-            int prev_px = data_to_screen_x(g, xs[0]);
-            int prev_py = data_to_screen_y(g, ys[0]);
+            int prev_px = data_to_screen_x(g, xs[0]),
+                prev_py = data_to_screen_y(g, ys[0]),
+                i = 1;
 
-            int i = 1;
             while (i < count)
             {
                 int px = data_to_screen_x(g, xs[i]);
@@ -271,25 +270,26 @@ namespace standard
             float base_data_y = 0.0;
             if (g.y_min > 0.0) { base_data_y = g.y_min; };
             if (g.y_max < 0.0) { base_data_y = g.y_max; };
-            int base_py = data_to_screen_y(g, base_data_y);
 
-            int half = bar_width_px / 2;
+            int base_py = data_to_screen_y(g, base_data_y),
+                half = bar_width_px / 2,
+                px, py, bx1, bx2, by1, by2,
+                i = 0, tmp;
 
-            int i = 0;
             while (i < count)
             {
-                int px  = data_to_screen_x(g, xs[i]);
-                int py  = data_to_screen_y(g, ys[i]);
+                px  = data_to_screen_x(g, xs[i]);
+                py  = data_to_screen_y(g, ys[i]);
 
-                int bx1 = px - half;
-                int bx2 = px + half;
-                int by1 = py;
-                int by2 = base_py;
+                bx1 = px - half;
+                bx2 = px + half;
+                by1 = py;
+                by2 = base_py;
 
                 // Swap so top < bottom for Rectangle call
                 if (by1 > by2)
                 {
-                    int tmp = by1;
+                    tmp = by1;
                     by1 = by2;
                     by2 = tmp;
                 };
@@ -315,24 +315,25 @@ namespace standard
             float base_data_x = 0.0;
             if (g.x_min > 0.0) { base_data_x = g.x_min; };
             if (g.x_max < 0.0) { base_data_x = g.x_max; };
-            int base_px = data_to_screen_x(g, base_data_x);
 
-            int half = bar_height_px / 2;
+            int base_px = data_to_screen_x(g, base_data_x),
+                half = bar_height_px / 2,
+                px, py, bx1, bx2, by1, by2,
+                i = 0, tmp;
 
-            int i = 0;
             while (i < count)
             {
-                int px  = data_to_screen_x(g, xs[i]);
-                int py  = data_to_screen_y(g, ys[i]);
+                px  = data_to_screen_x(g, xs[i]);
+                py  = data_to_screen_y(g, ys[i]);
 
-                int bx1 = base_px;
-                int bx2 = px;
-                int by1 = py - half;
-                int by2 = py + half;
+                bx1 = base_px;
+                bx2 = px;
+                by1 = py - half;
+                by2 = py + half;
 
                 if (bx1 > bx2)
                 {
-                    int tmp = bx1;
+                    tmp = bx1;
                     bx1 = bx2;
                     bx2 = tmp;
                 };
@@ -356,35 +357,38 @@ namespace standard
 
             c.set_pen(color, 1);
 
-            float base_data_y = 0.0;
+            float base_data_y = 0.0, t;
             if (g.y_min > 0.0) { base_data_y = g.y_min; };
             if (g.y_max < 0.0) { base_data_y = g.y_max; };
-            int base_py = data_to_screen_y(g, base_data_y);
+            int base_py = data_to_screen_y(g, base_data_y),
+                interp_y, xstep,
+                x1, x2, y1, y2, dx,
+                i = 0;
+
 
             // Fill using vertical lines between consecutive data columns
-            int i = 0;
             while (i < count - 1)
             {
-                int x1 = data_to_screen_x(g, xs[i]);
-                int x2 = data_to_screen_x(g, xs[i + 1]);
-                int y1 = data_to_screen_y(g, ys[i]);
-                int y2 = data_to_screen_y(g, ys[i + 1]);
+                x1 = data_to_screen_x(g, xs[i]);
+                x2 = data_to_screen_x(g, xs[i + 1]);
+                y1 = data_to_screen_y(g, ys[i]);
+                y2 = data_to_screen_y(g, ys[i + 1]);
 
                 // Step across pixels between x1 and x2
-                int dx = x2 - x1;
+                dx = x2 - x1;
                 if (dx < 0) { dx = -dx; };
                 if (dx == 0) { dx = 1; };
 
-                int xstep = x1;
+                xstep = x1;
                 while (xstep <= x2)
                 {
                     // Interpolate Y at this column
-                    float t = 0.0;
+                    t = 0.0;
                     if (x2 != x1)
                     {
                         t = (float)(xstep - x1) / (float)(x2 - x1);
                     };
-                    int interp_y = y1 + (int)((float)(y2 - y1) * t);
+                    interp_y = y1 + (int)((float)(y2 - y1) * t);
                     c.line(xstep, interp_y, xstep, base_py);
                     xstep = xstep + 1;
                 };
@@ -407,13 +411,15 @@ namespace standard
 
             c.set_pen(color, line_width);
 
-            int i = 0;
+            int i = 0,
+                px1, px2, py1, py2;
+
             while (i < count - 1)
             {
-                int px1 = data_to_screen_x(g, xs[i]);
-                int py1 = data_to_screen_y(g, ys[i]);
-                int px2 = data_to_screen_x(g, xs[i + 1]);
-                int py2 = data_to_screen_y(g, ys[i + 1]);
+                px1 = data_to_screen_x(g, xs[i]);
+                py1 = data_to_screen_y(g, ys[i]);
+                px2 = data_to_screen_x(g, xs[i + 1]);
+                py2 = data_to_screen_y(g, ys[i + 1]);
 
                 // Horizontal segment at current Y
                 c.line(px1, py1, px2, py1);
@@ -434,12 +440,12 @@ namespace standard
         {
             c.set_pen(color, 1);
 
-            int px     = data_to_screen_x(g, data_x);
-            int py     = data_to_screen_y(g, data_y);
-            int left   = g.x;
-            int right  = g.x + g.width;
-            int top    = g.y;
-            int bottom = g.y + g.height;
+            int px     = data_to_screen_x(g, data_x),
+                py     = data_to_screen_y(g, data_y),
+                left   = g.x,
+                right  = g.x + g.width,
+                top    = g.y,
+                bottom = g.y + g.height;
 
             c.line(left,  py, right,  py);   // Horizontal
             c.line(px,   top,   px, bottom); // Vertical
@@ -457,24 +463,23 @@ namespace standard
         {
             c.set_pen(color, 1);
 
-            int left   = g.x;
-            int bottom = g.y + g.height;
-            int top    = g.y;
+            int left   = g.x,
+                bottom = g.y + g.height,
+                top    = g.y,
+                i = 0, j = 0, px, py;
 
             // X-axis ticks (along bottom)
-            int i = 0;
             while (i <= x_ticks)
             {
-                int px = left + (g.width * i) / x_ticks;
+                px = left + (g.width * i) / x_ticks;
                 c.line(px, bottom, px, bottom + tick_len);
                 i = i + 1;
             };
 
             // Y-axis ticks (along left)
-            int j = 0;
             while (j <= y_ticks)
             {
-                int py = bottom - (g.height * j) / y_ticks;
+                py = bottom - (g.height * j) / y_ticks;
                 c.line(left - tick_len, py, left, py);
                 j = j + 1;
             };
@@ -492,8 +497,8 @@ namespace standard
         // ============================================================================
         def draw_data_point_label(Canvas* c, Graph* g, float data_x, float data_y, byte* label, int label_len, DWORD text_color) -> void
         {
-            int px = data_to_screen_x(g, data_x);
-            int py = data_to_screen_y(g, data_y);
+            int px = data_to_screen_x(g, data_x),
+                py = data_to_screen_y(g, data_y);
 
             // Draw a small cross marker at the point
             c.set_pen(text_color, 1);
@@ -515,9 +520,9 @@ namespace standard
         // ============================================================================
         def draw_title(Canvas* c, Graph* g, byte* title, DWORD color) -> void
         {
-            int title_len = strlen(title);
-            int center_x = g.x + g.width / 2 - (title_len * 4);
-            int title_y  = g.y - 20;
+            int title_len = strlen(title),
+                center_x = g.x + g.width / 2 - (title_len * 4),
+                title_y  = g.y - 20;
             if (title_y < 0) { title_y = 2; };
 
             SetBkMode(c.back_dc, TRANSPARENT);
@@ -534,9 +539,9 @@ namespace standard
         // ============================================================================
         def draw_x_label(Canvas* c, Graph* g, byte* label, DWORD color) -> void
         {
-            int label_len = strlen(label);
-            int center_x = g.x + g.width / 2 - (label_len * 4);
-            int label_y  = g.y + g.height;
+            int label_len = strlen(label),
+                center_x = g.x + g.width / 2 - (label_len * 4),
+                label_y  = g.y + g.height;
 
             SetBkMode(c.back_dc, TRANSPARENT);
             SetTextColor(c.back_dc, color);
@@ -552,8 +557,8 @@ namespace standard
         // ============================================================================
         def draw_y_label(Canvas* c, Graph* g, byte* label, DWORD color) -> void
         {
-            int label_len = strlen(label);
-            int label_x = g.x - (label_len * 8) - 8;
+            int label_len = strlen(label),
+                label_x = g.x - (label_len * 8) - 8;
             if (label_x < 0) { label_x = 2; };
             int label_y = g.y + g.height / 2 - 8;
 
@@ -574,8 +579,9 @@ namespace standard
         {
             if (count <= 0) { return; };
 
-            float lo = vals[0];
-            float hi = vals[0];
+            float lo = vals[0],
+                  hi = vals[0],
+                  span;
 
             int i = 1;
             while (i < count)
@@ -585,7 +591,7 @@ namespace standard
                 i = i + 1;
             };
 
-            float span = hi - lo;
+            span = hi - lo;
             if (span == 0.0) { span = 1.0; };
 
             g.x_min = lo - span * margin;
@@ -596,8 +602,9 @@ namespace standard
         {
             if (count <= 0) { return; };
 
-            float lo = vals[0];
-            float hi = vals[0];
+            float lo = vals[0],
+                  hi = vals[0],
+                  span;
 
             int i = 1;
             while (i < count)
@@ -607,7 +614,7 @@ namespace standard
                 i = i + 1;
             };
 
-            float span = hi - lo;
+            span = hi - lo;
             if (span == 0.0) { span = 1.0; };
 
             g.y_min = lo - span * margin;
@@ -689,28 +696,28 @@ namespace standard
             struct Graph3D
             {
                 // Screen-space viewport centre (pixels)
-                int   cx;       // Centre X on canvas
-                int   cy;       // Centre Y on canvas
+                int   cx,       // Centre X on canvas
+                      cy;       // Centre Y on canvas
 
                 // Perspective camera parameters (passed to math::project)
-                float fov;      // Field-of-view scale factor
-                float cam_z;    // Camera distance from origin along Z
+                float fov,      // Field-of-view scale factor
+                      cam_z,    // Camera distance from origin along Z
 
                 // Euler rotation angles (radians) applied before projection
-                float rot_x;    // Pitch around X axis
-                float rot_y;    // Yaw   around Y axis
-                float rot_z;    // Roll  around Z axis
+                      rot_x,    // Pitch around X axis
+                      rot_y,    // Yaw   around Y axis
+                      rot_z,    // Roll  around Z axis
 
                 // Data-space ranges (used to normalise incoming data)
-                float x_min;
-                float x_max;
-                float y_min;
-                float y_max;
-                float z_min;
-                float z_max;
+                      x_min,
+                      x_max,
+                      y_min,
+                      y_max,
+                      z_min,
+                      z_max,
 
                 // Uniform scale applied after normalisation
-                float scale;
+                      scale;
             };
 
             // ================================================================
@@ -737,12 +744,12 @@ namespace standard
                 v.z =  norm(dz, g.z_min, g.z_max, g.scale);
 
                 // Rotate around X then Y then Z
-                float sx = sin(g.rot_x);
-                float cx = cos(g.rot_x);
-                float sy = sin(g.rot_y);
-                float cy = cos(g.rot_y);
-                float sz = sin(g.rot_z);
-                float cz = cos(g.rot_z);
+                float sx = sin(g.rot_x),
+                      cx = cos(g.rot_x),
+                      sy = sin(g.rot_y),
+                      cy = cos(g.rot_y),
+                      sz = sin(g.rot_z),
+                      cz = cos(g.rot_z);
 
                 Vec3 rx = rotate_x(@v,  sx, cx);
                 Vec3 ry = rotate_y(@rx, sy, cy);
@@ -790,23 +797,24 @@ namespace standard
                 c.set_pen(grid_color, 1);
 
                 // Floor grid lines parallel to Z (along X divisions)
-                int i = 0;
+                int i = 0, j = 0;
+                float fx, fz;
+                POINT a, b;
                 while (i <= x_divs)
                 {
-                    float fx = g.x_min + (g.x_max - g.x_min) * (float)i / (float)x_divs;
-                    POINT a = data3_to_screen(g, fx, g.y_min, g.z_min);
-                    POINT b = data3_to_screen(g, fx, g.y_min, g.z_max);
+                    fx = g.x_min + (g.x_max - g.x_min) * (float)i / (float)x_divs;
+                    a = data3_to_screen(g, fx, g.y_min, g.z_min);
+                    b = data3_to_screen(g, fx, g.y_min, g.z_max);
                     c.line(a.x, a.y, b.x, b.y);
                     i = i + 1;
                 };
 
                 // Floor grid lines parallel to X (along Z divisions)
-                int j = 0;
                 while (j <= z_divs)
                 {
-                    float fz = g.z_min + (g.z_max - g.z_min) * (float)j / (float)z_divs;
-                    POINT a = data3_to_screen(g, g.x_min, g.y_min, fz);
-                    POINT b = data3_to_screen(g, g.x_max, g.y_min, fz);
+                    fz = g.z_min + (g.z_max - g.z_min) * (float)j / (float)z_divs;
+                    a = data3_to_screen(g, g.x_min, g.y_min, fz);
+                    b = data3_to_screen(g, g.x_max, g.y_min, fz);
                     c.line(a.x, a.y, b.x, b.y);
                     j = j + 1;
                 };
@@ -822,25 +830,25 @@ namespace standard
             {
                 c.set_pen(color, line_width);
 
-                float x0 = g.x_min; float x1 = g.x_max;
-                float y0 = g.y_min; float y1 = g.y_max;
-                float z0 = g.z_min; float z1 = g.z_max;
+                float x0 = g.x_min; float x1 = g.x_max,
+                      y0 = g.y_min; float y1 = g.y_max,
+                      z0 = g.z_min; float z1 = g.z_max;
 
                 // Bottom face
-                POINT a = data3_to_screen(g, x0, y0, z0);
-                POINT b = data3_to_screen(g, x1, y0, z0);
-                POINT cc = data3_to_screen(g, x1, y0, z1);
-                POINT d = data3_to_screen(g, x0, y0, z1);
+                POINT a = data3_to_screen(g, x0, y0, z0),
+                      b = data3_to_screen(g, x1, y0, z0),
+                      cc = data3_to_screen(g, x1, y0, z1),
+                      d = data3_to_screen(g, x0, y0, z1);
                 c.line(a.x, a.y, b.x, b.y);
                 c.line(b.x, b.y, cc.x, cc.y);
                 c.line(cc.x, cc.y, d.x, d.y);
                 c.line(d.x, d.y, a.x, a.y);
 
                 // Top face
-                POINT e = data3_to_screen(g, x0, y1, z0);
-                POINT f = data3_to_screen(g, x1, y1, z0);
-                POINT gg = data3_to_screen(g, x1, y1, z1);
-                POINT h = data3_to_screen(g, x0, y1, z1);
+                POINT e = data3_to_screen(g, x0, y1, z0),
+                      f = data3_to_screen(g, x1, y1, z0),
+                      gg = data3_to_screen(g, x1, y1, z1),
+                      h = data3_to_screen(g, x0, y1, z1);
                 c.line(e.x, e.y, f.x, f.y);
                 c.line(f.x, f.y, gg.x, gg.y);
                 c.line(gg.x, gg.y, h.x, h.y);
@@ -866,9 +874,10 @@ namespace standard
                 c.set_pen(color, 1);
 
                 int i = 0;
+                POINT p;
                 while (i < count)
                 {
-                    POINT p = data3_to_screen(g, xs[i], ys[i], zs[i]);
+                    p = data3_to_screen(g, xs[i], ys[i], zs[i]);
                     c.rect(p.x - radius, p.y - radius, p.x + radius, p.y + radius);
                     i = i + 1;
                 };
@@ -887,9 +896,10 @@ namespace standard
                 c.set_pen(color, 1);
 
                 int i = 0;
+                POINT p;
                 while (i < count)
                 {
-                    POINT p = data3_to_screen(g, xs[i], ys[i], zs[i]);
+                    p = data3_to_screen(g, xs[i], ys[i], zs[i]);
                     c.circle(p.x, p.y, radius);
                     i = i + 1;
                 };
@@ -909,12 +919,13 @@ namespace standard
 
                 c.set_pen(color, line_width);
 
-                POINT prev = data3_to_screen(g, xs[0], ys[0], zs[0]);
+                POINT prev = data3_to_screen(g, xs[0], ys[0], zs[0]),
+                      cur;
 
                 int i = 1;
                 while (i < count)
                 {
-                    POINT cur = data3_to_screen(g, xs[i], ys[i], zs[i]);
+                    cur = data3_to_screen(g, xs[i], ys[i], zs[i]);
                     c.line(prev.x, prev.y, cur.x, cur.y);
                     prev = cur;
                     i = i + 1;
@@ -938,29 +949,34 @@ namespace standard
 
                 c.set_pen(color, line_width);
 
-                int row = 0;
+                int row = 0,
+                    col;
+
+                float z00, z01, z10;
+                POINT a,b;
+
                 while (row < y_count)
                 {
-                    int col = 0;
+                    col = 0;
                     while (col < x_count)
                     {
-                        float z00 = zs[row * x_count + col];
+                        z00 = zs[row * x_count + col];
 
                         // Horizontal edge to next column
                         if (col < x_count - 1)
                         {
-                            float z01 = zs[row * x_count + col + 1];
-                            POINT a = data3_to_screen(g, xs[col],     ys[row], z00);
-                            POINT b = data3_to_screen(g, xs[col + 1], ys[row], z01);
+                            z01 = zs[row * x_count + col + 1];
+                            a = data3_to_screen(g, xs[col],     ys[row], z00);
+                            b = data3_to_screen(g, xs[col + 1], ys[row], z01);
                             c.line(a.x, a.y, b.x, b.y);
                         };
 
                         // Vertical edge to next row
                         if (row < y_count - 1)
                         {
-                            float z10 = zs[(row + 1) * x_count + col];
-                            POINT a = data3_to_screen(g, xs[col], ys[row],     z00);
-                            POINT b = data3_to_screen(g, xs[col], ys[row + 1], z10);
+                            z10 = zs[(row + 1) * x_count + col];
+                            a = data3_to_screen(g, xs[col], ys[row],     z00);
+                            b = data3_to_screen(g, xs[col], ys[row + 1], z10);
                             c.line(a.x, a.y, b.x, b.y);
                         };
 
@@ -984,11 +1000,13 @@ namespace standard
                 c.set_pen(color, 1);
 
                 int i = 0;
+                POINT top, base;
+
                 while (i < count)
                 {
                     // Top and base of the bar
-                    POINT top  = data3_to_screen(g, xs[i], ys[i],    zs[i]);
-                    POINT base = data3_to_screen(g, xs[i], g.y_min,  zs[i]);
+                    top  = data3_to_screen(g, xs[i], ys[i],    zs[i]);
+                    base = data3_to_screen(g, xs[i], g.y_min,  zs[i]);
 
                     // Vertical stem
                     c.line(base.x, base.y, top.x, top.y);
@@ -1012,13 +1030,13 @@ namespace standard
                 SetBkMode(c.back_dc, TRANSPARENT);
                 SetTextColor(c.back_dc, color);
 
-                int x_len = strlen(x_label);
-                int y_len = strlen(y_label);
-                int z_len = strlen(z_label);
+                int x_len = strlen(x_label),
+                    y_len = strlen(y_label),
+                    z_len = strlen(z_label);
 
-                POINT px = data3_to_screen(g, g.x_max, g.y_min, g.z_min);
-                POINT py = data3_to_screen(g, g.x_min, g.y_max, g.z_min);
-                POINT pz = data3_to_screen(g, g.x_min, g.y_min, g.z_max);
+                POINT px = data3_to_screen(g, g.x_max, g.y_min, g.z_min),
+                      py = data3_to_screen(g, g.x_min, g.y_max, g.z_min),
+                      pz = data3_to_screen(g, g.x_min, g.y_min, g.z_max);
 
                 TextOutA(c.back_dc, px.x + 4, px.y - 6, (LPCSTR)x_label, x_len);
                 TextOutA(c.back_dc, py.x + 4, py.y - 6, (LPCSTR)y_label, y_len);
@@ -1033,9 +1051,9 @@ namespace standard
             // ================================================================
             def draw_title3d(Canvas* c, Graph3D* g, byte* title, DWORD color) -> void
             {
-                int title_len = strlen(title);
-                int tx = g.cx - (title_len * 4);
-                int ty = g.cy - (int)(g.fov * 0.6);
+                int title_len = strlen(title),
+                    tx = g.cx - (title_len * 4),
+                    ty = g.cy - (int)(g.fov * 0.6);
                 if (ty < 2) { ty = 2; };
 
                 SetBkMode(c.back_dc, TRANSPARENT);
@@ -1055,8 +1073,9 @@ namespace standard
             {
                 if (count <= 0) { return; };
 
-                float lo = vals[0];
-                float hi = vals[0];
+                float lo = vals[0],
+                      hi = vals[0],
+                      span;
 
                 int i = 1;
                 while (i < count)
@@ -1066,7 +1085,7 @@ namespace standard
                     i = i + 1;
                 };
 
-                float span = hi - lo;
+                span = hi - lo;
                 if (span == 0.0) { span = 1.0; };
 
                 g.z_min = lo - span * margin;
@@ -1085,9 +1104,10 @@ namespace standard
             {
                 if (count <= 0) { return; };
 
-                float xlo = xs[0]; float xhi = xs[0];
-                float ylo = ys[0]; float yhi = ys[0];
-                float zlo = zs[0]; float zhi = zs[0];
+                float xlo = xs[0]; float xhi = xs[0],
+                      ylo = ys[0]; float yhi = ys[0],
+                      zlo = zs[0]; float zhi = zs[0],
+                      xspan, yspan, zspan;
 
                 int i = 1;
                 while (i < count)
@@ -1101,9 +1121,9 @@ namespace standard
                     i = i + 1;
                 };
 
-                float xspan = xhi - xlo; if (xspan == 0.0) { xspan = 1.0; };
-                float yspan = yhi - ylo; if (yspan == 0.0) { yspan = 1.0; };
-                float zspan = zhi - zlo; if (zspan == 0.0) { zspan = 1.0; };
+                xspan = xhi - xlo; if (xspan == 0.0) { xspan = 1.0; };
+                yspan = yhi - ylo; if (yspan == 0.0) { yspan = 1.0; };
+                zspan = zhi - zlo; if (zspan == 0.0) { zspan = 1.0; };
 
                 g.x_min = xlo - xspan * margin;
                 g.x_max = xhi + xspan * margin;
@@ -1137,17 +1157,21 @@ namespace standard
                 // ============================================================
                 def gen_ripple(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0;
+                    int i = 0,
+                        j = 0;
+
+                    float fx, fy, r;
+
                     while (i < n)
                     {
                         xs[i] = (float)i / (float)(n - 1);
                         ys[i] = (float)i / (float)(n - 1);
-                        int j = 0;
+                        j = 0;
                         while (j < n)
                         {
-                            float fx = xs[j] - 0.5;
-                            float fy = xs[i] - 0.5;
-                            float r  = sqrt(fx * fx + fy * fy) * 8.0;
+                            fx = xs[j] - 0.5;
+                            fy = xs[i] - 0.5;
+                            r  = sqrt(fx * fx + fy * fy) * 8.0;
                             zs[i * n + j] = (sin(r + phase) + 1.0) * 0.5;
                             j = j + 1;
                         };
@@ -1163,16 +1187,20 @@ namespace standard
                 // ============================================================
                 def gen_saddle(float* xs, float* ys, float* zs, int n) -> void
                 {
-                    int i = 0;
+                    int i = 0,
+                        j = 0;
+
+                    float u, v;
+
                     while (i < n)
                     {
                         xs[i] = (float)i / (float)(n - 1);
                         ys[i] = (float)i / (float)(n - 1);
-                        int j = 0;
+                        j = 0;
                         while (j < n)
                         {
-                            float u = xs[j] * 2.0 - 1.0;
-                            float v = xs[i] * 2.0 - 1.0;
+                            u = xs[j] * 2.0 - 1.0;
+                            v = xs[i] * 2.0 - 1.0;
                             zs[i * n + j] = (u * u - v * v + 1.0) * 0.5;
                             j = j + 1;
                         };
@@ -1188,25 +1216,31 @@ namespace standard
                 // ============================================================
                 def gen_peaks(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int k = 0;
+                    int i = 0,
+                        k = 0,
+                        j = 0;
+
+                    float x, y, z,
+                          dx, dy;
+
                     while (k < n)
                     {
                         xs[k] = (float)k / (float)(n - 1);
                         ys[k] = (float)k / (float)(n - 1);
                         k = k + 1;
                     };
-                    int i = 0;
+                    i = 0;
                     while (i < n)
                     {
-                        int j = 0;
+                        j = 0;
                         while (j < n)
                         {
-                            float x = xs[j];
-                            float y = xs[i];
-                            float z = 0.0;
+                            x = xs[j];
+                            y = xs[i];
+                            z = 0.0;
                             // Peak 1
-                            float dx = x - (0.3 + 0.1 * sin(phase));
-                            float dy = y - 0.3;
+                            dx = x - (0.3 + 0.1 * sin(phase));
+                            dy = y - 0.3;
                             z = z + exp((0.0 - (dx * dx + dy * dy)) * 20.0);
                             // Peak 2
                             dx = x - 0.7;
@@ -1232,7 +1266,8 @@ namespace standard
                 // ============================================================
                 def gen_torus_surf(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0;
+                    int i, j;
+
                     while (i < n)
                     {
                         xs[i] = (float)i / (float)(n - 1);

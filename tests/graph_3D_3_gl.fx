@@ -169,17 +169,19 @@ def gl_draw_grid(Graph3D* g, int x_divs, int z_divs, DWORD col) -> void
 
 def gl_draw_axes(Graph3D* g, DWORD col) -> void
 {
-    float r = dword_to_r(col);
-    float gv = dword_to_g(col);
-    float b = dword_to_b(col);
+    float r = dword_to_r(col),
+          gv = dword_to_g(col),
+          b = dword_to_b(col),
+          x0, x1, y0, y1, z0, z1;
+
     glColor3f(r, gv, b);
 
-    float x0 = gnorm(g.x_min, g.x_min, g.x_max, g.scale);
-    float x1 = gnorm(g.x_max, g.x_min, g.x_max, g.scale);
-    float y0 = gnorm(g.y_min, g.y_min, g.y_max, g.scale);
-    float y1 = gnorm(g.y_max, g.y_min, g.y_max, g.scale);
-    float z0 = gnorm(g.z_min, g.z_min, g.z_max, g.scale);
-    float z1 = gnorm(g.z_max, g.z_min, g.z_max, g.scale);
+    x0 = gnorm(g.x_min, g.x_min, g.x_max, g.scale);
+    x1 = gnorm(g.x_max, g.x_min, g.x_max, g.scale);
+    y0 = gnorm(g.y_min, g.y_min, g.y_max, g.scale);
+    y1 = gnorm(g.y_max, g.y_min, g.y_max, g.scale);
+    z0 = gnorm(g.z_min, g.z_min, g.z_max, g.scale);
+    z1 = gnorm(g.z_max, g.z_min, g.z_max, g.scale);
 
     glBegin(GL_LINES);
         glVertex3f(x0, y0, z0); glVertex3f(x1, y0, z0);  // X
