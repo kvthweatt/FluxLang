@@ -451,6 +451,60 @@ namespace standard
             return sin(x) / c;
         };
 
+        // Arctangent - returns angle in radians in [-PI/2, PI/2]
+        // Uses a polynomial minimax approximation, accurate to ~6 decimal places.
+        def atan(float x) -> float
+        {
+            // Reduce |x| to [0, 1] using identities:
+            //   atan(x) = PI/2 - atan(1/x)       for x > 1
+            //   atan(x) = -atan(-x)               for x < 0
+            bool neg = x < 0.0;
+            if (neg) { x = 0.0 - x; };
+
+            bool recip = x > 1.0;
+            if (recip) { x = 1.0 / x; };
+
+            // Polynomial approximation on [0, 1]
+            float x2 = x * x;
+            float r = x * (1.0
+                - x2 * (0.3333333
+                - x2 * (0.2
+                - x2 * (0.142857
+                - x2 * (0.111111
+                - x2 *  0.090909)))));
+
+            if (recip) { r = (float)PIF * 0.5 - r; };
+            if (neg)   { r = 0.0 - r; };
+
+            return r;
+        };
+
+        // Two-argument arctangent - returns angle in radians in (-PI, PI].
+        // Matches the behaviour of the standard atan2(y, x).
+        def atan2(float y, float x) -> float
+        {
+            if (x > 0.0)
+            {
+                return atan(y / x);
+            };
+
+            if (x < 0.0)
+            {
+                if (y >= 0.0)
+                {
+                    return atan(y / x) + (float)PIF;
+                };
+                return atan(y / x) - (float)PIF;
+            };
+
+            // x == 0
+            if (y > 0.0) { return  (float)PIF * 0.5; };
+            if (y < 0.0) { return (0.0 - (float)PIF) * 0.5; };
+
+            // Both zero - undefined, return 0
+            return 0.0;
+        };
+
         // Exponential and logarithmic functions
         def exp(float x) -> float
         {

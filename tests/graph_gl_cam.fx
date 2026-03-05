@@ -53,7 +53,7 @@ def gnorm(float val, float lo, float hi, float sc) -> float
 
 // Set up the projection and modelview matrices for a panel.
 // Call this once per panel before issuing any geometry.
-def setup_panel_gl(Graph3D* g, int win_w, int win_h) -> void
+def setup_panel_gl(Graph3D* g, int win_w, int win_h, float cam_y_offset) -> void
 {
     // Compute pixel rect for this panel (same formula as setup_panel in the original)
     int px = g.cx - CELL / 2;
@@ -75,8 +75,8 @@ def setup_panel_gl(Graph3D* g, int win_w, int win_h) -> void
     // View: camera sits at (0, 0, cam_z) looking at origin
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    GLVec3 eye;    eye.x    = 0.0; eye.y    = 0.0; eye.z    = g.cam_z;
-    GLVec3 target; target.x = 0.0; target.y = 0.0; target.z = 0.0;
+    GLVec3 eye;    eye.x    = 0.0; eye.y    = cam_y_offset; eye.z    = g.cam_z;
+    GLVec3 target; target.x = 0.0; target.y = cam_y_offset; target.z = 0.0;
     GLVec3 up;     up.x     = 0.0; up.y     = 1.0; up.z     = 0.0;
     Matrix4 view;
     mat4_lookat(@eye, @target, @up, @view);
@@ -451,10 +451,21 @@ def main() -> int
     colors[14] = RGB(120, 255, 255);
     colors[15] = RGB(220, 180, 255);
 
-    float phase = 0.0;
+    float phase = 0.0,
+          cam_y_offset = 0.0;
 
     while (win.process_messages())
     {
+        // Camera Y-axis input: Space = move up, Control = move down
+        if ((GetAsyncKeyState(VK_SPACE) & 0x8000) != 0)
+        {
+            cam_y_offset = cam_y_offset + 0.5;
+        };
+        if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0)
+        {
+            cam_y_offset = cam_y_offset - 0.5;
+        };
+
         // Rotate all panels - different speeds for variety
         g[0].rot_y  = g[0].rot_y  + 0.009;
         g[1].rot_y  = g[1].rot_y  + 0.007;
@@ -482,39 +493,39 @@ def main() -> int
 
         // ---- 0: Sine ripple surface ----
         gen_ripple(sx, sy, sz, SURF_N, phase);
-        setup_panel_gl(@g[0], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[0], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[0], col_box, col_grid, col_axis);
         gl_plot_surface(@g[0], sx, sy, sz, SURF_N, SURF_N, colors[0]);
 
         // ---- 1: Saddle surface (static geometry) ----
         gen_saddle(sx, sy, sz, SURF_N);
-        setup_panel_gl(@g[1], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[1], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[1], col_box, col_grid, col_axis);
         gl_plot_surface(@g[1], sx, sy, sz, SURF_N, SURF_N, colors[1]);
 
         // ---- 2: Peaks surface ----
         gen_peaks(sx, sy, sz, SURF_N, phase);
         auto_range_z(@g[2], sz, surf_cells, 0.05);
-        setup_panel_gl(@g[2], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[2], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[2], col_box, col_grid, col_axis);
         gl_plot_surface(@g[2], sx, sy, sz, SURF_N, SURF_N, colors[2]);
 
         // ---- 3: Torus surface rows ----
         gen_torus_surf(sx, sy, sz, SURF_N, phase);
-        setup_panel_gl(@g[3], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[3], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[3], col_box, col_grid, col_axis);
         gl_plot_surface(@g[3], sx, sy, sz, SURF_N, SURF_N, colors[3]);
 
         // ---- 4: Helix - line only ----
         gen_helix(ax, ay, az, CURVE_N, phase);
-        setup_panel_gl(@g[4], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[4], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[4], col_box, col_grid, col_axis);
         gl_plot_line(@g[4], ax, ay, az, CURVE_N, colors[4]);
 
         // ---- 5: Torus knot (2,3) - line + scatter ----
         gen_knot_23(ax, ay, az, CURVE_N, phase);
         auto_range3d(@g[5], ax, ay, az, CURVE_N, 0.05);
-        setup_panel_gl(@g[5], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[5], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[5], col_box, col_grid, col_axis);
         gl_plot_line(@g[5], ax, ay, az, CURVE_N, colors[5]);
         gl_plot_scatter(@g[5], ax, ay, az, CURVE_N / 5, colors[5], 4.0);
@@ -522,65 +533,65 @@ def main() -> int
         // ---- 6: Figure-8 knot - line + scatter ----
         gen_fig8(ax, ay, az, CURVE_N, phase);
         auto_range3d(@g[6], ax, ay, az, CURVE_N, 0.05);
-        setup_panel_gl(@g[6], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[6], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[6], col_box, col_grid, col_axis);
         gl_plot_line(@g[6], ax, ay, az, CURVE_N, colors[6]);
         gl_plot_scatter(@g[6], ax, ay, az, CURVE_N / 4, colors[6], 6.0);
 
         // ---- 7: Lissajous - line + scatter ----
         gen_lissajous(ax, ay, az, CURVE_N, phase);
-        setup_panel_gl(@g[7], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[7], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[7], col_box, col_grid, col_axis);
         gl_plot_line(@g[7], ax, ay, az, CURVE_N, colors[7]);
         gl_plot_scatter(@g[7], ax, ay, az, CURVE_N / 3, colors[7], 4.0);
 
         // ---- 8: Sphere scatter ----
         gen_sphere(ax, ay, az, CURVE_N, phase);
-        setup_panel_gl(@g[8], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[8], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[8], col_box, col_grid, col_axis);
         gl_plot_scatter(@g[8], ax, ay, az, CURVE_N, colors[8], 6.0);
 
         // ---- 9: Cone scatter ----
         gen_cone(ax, ay, az, CURVE_N, phase);
-        setup_panel_gl(@g[9], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[9], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[9], col_box, col_grid, col_axis);
         gl_plot_scatter(@g[9], ax, ay, az, CURVE_N, colors[9], 4.0);
 
         // ---- 10: Double helix - line ----
         gen_double_helix(ax, ay, az, CURVE_N, phase);
-        setup_panel_gl(@g[10], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[10], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[10], col_box, col_grid, col_axis);
         gl_plot_line(@g[10], ax, ay, az, CURVE_N, colors[10]);
 
         // ---- 11: Spiral coil - line + scatter ----
         gen_spiral_coil(ax, ay, az, CURVE_N, phase);
-        setup_panel_gl(@g[11], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[11], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[11], col_box, col_grid, col_axis);
         gl_plot_line(@g[11], ax, ay, az, CURVE_N, colors[11]);
         gl_plot_scatter(@g[11], ax, ay, az, CURVE_N / 4, colors[11], 4.0);
 
         // ---- 12: 3D bars ----
         gen_bars(bx, by, bz, bar_cells, BAR_N, phase);
-        setup_panel_gl(@g[12], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[12], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[12], col_box, col_grid, col_axis);
         gl_plot_bars(@g[12], bx, by, bz, bar_cells, colors[12], 4.0);
 
         // ---- 13: Viviani curve - line + scatter ----
         gen_viviani(ax, ay, az, CURVE_N, phase);
-        setup_panel_gl(@g[13], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[13], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[13], col_box, col_grid, col_axis);
         gl_plot_line(@g[13], ax, ay, az, CURVE_N, colors[13]);
         gl_plot_scatter(@g[13], ax, ay, az, CURVE_N / 5, colors[13], 6.0);
 
         // ---- 14: Cluster scatter ----
         gen_cluster(ax, ay, az, CURVE_N, phase);
-        setup_panel_gl(@g[14], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[14], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[14], col_box, col_grid, col_axis);
         gl_plot_scatter(@g[14], ax, ay, az, CURVE_N, colors[14], 4.0);
 
         // ---- 15: Wave interference surface ----
         gen_interference(sx, sy, sz, SURF_N, phase);
-        setup_panel_gl(@g[15], WIN_SIZE, WIN_SIZE);
+        setup_panel_gl(@g[15], WIN_SIZE, WIN_SIZE, cam_y_offset);
         gl_draw_frame(@g[15], col_box, col_grid, col_axis);
         gl_plot_surface(@g[15], sx, sy, sz, SURF_N, SURF_N, colors[15]);
 

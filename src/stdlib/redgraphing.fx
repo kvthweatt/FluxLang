@@ -1157,8 +1157,7 @@ namespace standard
                 // ============================================================
                 def gen_ripple(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0,
-                        j = 0;
+                    int i, j;
 
                     float fx, fy, r;
 
@@ -1187,8 +1186,7 @@ namespace standard
                 // ============================================================
                 def gen_saddle(float* xs, float* ys, float* zs, int n) -> void
                 {
-                    int i = 0,
-                        j = 0;
+                    int i, j;
 
                     float u, v;
 
@@ -1216,9 +1214,7 @@ namespace standard
                 // ============================================================
                 def gen_peaks(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0,
-                        k = 0,
-                        j = 0;
+                    int i, j, k;
 
                     float x, y, z,
                           dx, dy;
@@ -1268,20 +1264,22 @@ namespace standard
                 {
                     int i, j;
 
+                    float u, v, R, r, x, y, z;
+
                     while (i < n)
                     {
                         xs[i] = (float)i / (float)(n - 1);
                         ys[i] = (float)i / (float)(n - 1);
-                        int j = 0;
+                        j = 0;
                         while (j < n)
                         {
-                            float u = xs[j] * 2.0 * PIF;
-                            float v = xs[i] * 2.0 * PIF + phase;
-                            float R = 0.6;
-                            float r = 0.3;
-                            float x = (R + r * cos(v)) * cos(u);
-                            float y = (R + r * cos(v)) * sin(u);
-                            float z = r * sin(v);
+                            u = xs[j] * 2.0 * PIF;
+                            v = xs[i] * 2.0 * PIF + phase;
+                            R = 0.6;
+                            r = 0.3;
+                            x = (R + r * cos(v)) * cos(u);
+                            y = (R + r * cos(v)) * sin(u);
+                            z = r * sin(v);
                             zs[i * n + j] = (z + 1.0) * 0.5;
                             j = j + 1;
                         };
@@ -1297,17 +1295,20 @@ namespace standard
                 // ============================================================
                 def gen_interference(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0;
+                    int i, j;
+
+                    float x, y, z;
+
                     while (i < n)
                     {
                         xs[i] = (float)i / (float)(n - 1);
                         ys[i] = (float)i / (float)(n - 1);
-                        int j = 0;
+                        j = 0;
                         while (j < n)
                         {
-                            float x = xs[j] * 2.0 * PIF;
-                            float y = xs[i] * 2.0 * PIF;
-                            float z = sin(2.0 * x + phase) * cos(3.0 * y - phase * 0.7);
+                            x = xs[j] * 2.0 * PIF;
+                            y = xs[i] * 2.0 * PIF;
+                            z = sin(2.0 * x + phase) * cos(3.0 * y - phase * 0.7);
                             zs[i * n + j] = (z + 1.0) * 0.5;
                             j = j + 1;
                         };
@@ -1322,11 +1323,14 @@ namespace standard
                 // ============================================================
                 def gen_helix(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0;
+                    int i;
+
+                    float a, t;
+
                     while (i < n)
                     {
-                        float t = (float)i / (float)(n - 1);
-                        float a = t * 4.0 * PIF + phase;
+                        t = (float)i / (float)(n - 1);
+                        a = t * 4.0 * PIF + phase;
                         xs[i] = (cos(a) + 1.0) * 0.5;
                         ys[i] = t;
                         zs[i] = (sin(a) + 1.0) * 0.5;
@@ -1341,11 +1345,14 @@ namespace standard
                 // ============================================================
                 def gen_double_helix(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0;
+                    int i;
+
+                    float t, ang;
+
                     while (i < n)
                     {
-                        float t   = (float)(i / 2) / (float)(n / 2 - 1);
-                        float ang = t * 4.0 * PIF + phase;
+                        t   = (float)(i / 2) / (float)(n / 2 - 1);
+                        ang = t * 4.0 * PIF + phase;
                         if ((i % 2) == 0)
                         {
                             xs[i] = (cos(ang) + 1.0) * 0.5;
@@ -1368,12 +1375,15 @@ namespace standard
                 // ============================================================
                 def gen_spiral_coil(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0;
+                    int i;
+
+                    float t, r, ang;
+
                     while (i < n)
                     {
-                        float t   = (float)i / (float)(n - 1);
-                        float ang = t * 6.0 * PIF + phase;
-                        float r   = t;
+                        t   = (float)i / (float)(n - 1);
+                        ang = t * 6.0 * PIF + phase;
+                        r   = t;
                         xs[i] = (r * cos(ang) + 1.0) * 0.5;
                         ys[i] = t * 0.5 + sin(t * 4.0 * PIF + phase) * 0.25 + 0.25;
                         zs[i] = (r * sin(ang) + 1.0) * 0.5;
@@ -1389,11 +1399,13 @@ namespace standard
                 // ============================================================
                 def gen_knot_23(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0;
+                    int i;
+
+                    float t, r;
                     while (i < n)
                     {
-                        float t = (float)i / (float)(n - 1) * 2.0 * PIF + phase;
-                        float r = 2.0 + cos(1.5 * t);
+                        t = (float)i / (float)(n - 1) * 2.0 * PIF + phase;
+                        r = 2.0 + cos(1.5 * t);
                         xs[i] = r * cos(t);
                         ys[i] = sin(1.5 * t);
                         zs[i] = r * sin(t);
@@ -1409,13 +1421,16 @@ namespace standard
                 // ============================================================
                 def gen_fig8(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0;
+                    int i;
+
+                    float t, c, c2, s;
+
                     while (i < n)
                     {
-                        float t  = (float)i / (float)(n - 1) * 2.0 * PIF + phase;
-                        float c  = cos(t);
-                        float s  = sin(t);
-                        float c2 = cos(2.0 * t);
+                        t  = (float)i / (float)(n - 1) * 2.0 * PIF + phase;
+                        c  = cos(t);
+                        s  = sin(t);
+                        c2 = cos(2.0 * t);
                         xs[i] = (2.0 + c2) * c;
                         ys[i] = (2.0 + c2) * s;
                         zs[i] = sin(2.0 * t) * 1.5;
@@ -1430,10 +1445,13 @@ namespace standard
                 // ============================================================
                 def gen_lissajous(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0;
+                    int i;
+
+                    float t;
+
                     while (i < n)
                     {
-                        float t = (float)i / (float)(n - 1) * 2.0 * PIF;
+                        t = (float)i / (float)(n - 1) * 2.0 * PIF;
                         xs[i] = (sin(3.0 * t + phase)       + 1.0) * 0.5;
                         ys[i] = (sin(4.0 * t)               + 1.0) * 0.5;
                         zs[i] = (cos(5.0 * t + phase * 0.6) + 1.0) * 0.5;
@@ -1448,13 +1466,16 @@ namespace standard
                 // ============================================================
                 def gen_sphere(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0;
+                    int i;
+
+                    float t, phi, thet, sp;
+
                     while (i < n)
                     {
-                        float t    = (float)i / (float)n;
-                        float phi  = t * PIF;
-                        float thet = (float)i * 2.399963 + phase;
-                        float sp   = sin(phi);
+                        t    = (float)i / (float)n;
+                        phi  = t * PIF;
+                        thet = (float)i * 2.399963 + phase;
+                        sp   = sin(phi);
                         xs[i] = (cos(thet) * sp + 1.0) * 0.5;
                         ys[i] = (cos(phi)       + 1.0) * 0.5;
                         zs[i] = (sin(thet) * sp + 1.0) * 0.5;
@@ -1469,12 +1490,15 @@ namespace standard
                 // ============================================================
                 def gen_cone(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0;
+                    int i;
+
+                    float t, r, ang;
+
                     while (i < n)
                     {
-                        float t   = (float)i / (float)(n - 1);
-                        float r   = 1.0 - t;
-                        float ang = t * 6.0 * PIF + phase;
+                        t   = (float)i / (float)(n - 1);
+                        r   = 1.0 - t;
+                        ang = t * 6.0 * PIF + phase;
                         xs[i] = (r * cos(ang) + 1.0) * 0.5;
                         ys[i] = t;
                         zs[i] = (r * sin(ang) + 1.0) * 0.5;
@@ -1489,10 +1513,13 @@ namespace standard
                 // ============================================================
                 def gen_viviani(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0;
+                    int i;
+
+                    float t;
+
                     while (i < n)
                     {
-                        float t = (float)i / (float)(n - 1) * 4.0 * PIF + phase;
+                        t = (float)i / (float)(n - 1) * 4.0 * PIF + phase;
                         xs[i] = (1.0 + cos(t)) * 0.5;
                         ys[i] = (sin(t)        + 1.0) * 0.5;
                         zs[i] = (sin(t * 0.5)  + 1.0) * 0.5;
@@ -1507,17 +1534,22 @@ namespace standard
                 // ============================================================
                 def gen_cluster(float* xs, float* ys, float* zs, int n, float phase) -> void
                 {
-                    int i = 0;
+                    int i;
+
+                    float t,
+                          px, py, pz,
+                          dx, dy, dz;
+
                     while (i < n)
                     {
-                        float t  = (float)i;
-                        float px = sin(t * 1.3 + phase) * 0.5 + 0.5;
-                        float py = sin(t * 2.7 + 1.0)   * 0.5 + 0.5;
-                        float pz = sin(t * 3.9 + 2.0)   * 0.5 + 0.5;
+                        t  = (float)i;
+                        px = sin(t * 1.3 + phase) * 0.5 + 0.5;
+                        py = sin(t * 2.7 + 1.0)   * 0.5 + 0.5;
+                        pz = sin(t * 3.9 + 2.0)   * 0.5 + 0.5;
                         // Small per-point spread
-                        float dx = sin(t * 17.3) * 0.08;
-                        float dy = sin(t * 23.1) * 0.08;
-                        float dz = sin(t * 31.7) * 0.08;
+                        dx = sin(t * 17.3) * 0.08;
+                        dy = sin(t * 23.1) * 0.08;
+                        dz = sin(t * 31.7) * 0.08;
                         xs[i] = px + dx;
                         ys[i] = py + dy;
                         zs[i] = pz + dz;
@@ -1535,13 +1567,16 @@ namespace standard
                 // ============================================================
                 def gen_bars(float* xs, float* ys, float* zs, int n, int bar_cols, float phase) -> void
                 {
-                    int i = 0;
+                    int i, col, row;
+
+                    float fc, fr;
+
                     while (i < n)
                     {
-                        int   col = i % bar_cols;
-                        int   row = i / bar_cols;
-                        float fc  = (float)col / (float)(bar_cols - 1);
-                        float fr  = (float)row / (float)(bar_cols - 1);
+                        col = i % bar_cols;
+                        row = i / bar_cols;
+                        fc  = (float)col / (float)(bar_cols - 1);
+                        fr  = (float)row / (float)(bar_cols - 1);
                         xs[i] = fc;
                         zs[i] = fr;
                         ys[i] = (sin((fc + fr) * PIF * 2.0 + phase) + 1.0) * 0.5;

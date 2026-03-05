@@ -454,69 +454,69 @@ extern
 // Call gl_load_extensions() after context creation before using any of these.
 // ============================================================================
 
-global void* _glGenBuffers              = (void*)0,
-             _glDeleteBuffers           = (void*)0,
-             _glBindBuffer              = (void*)0,
-             _glBufferData              = (void*)0,
-             _glBufferSubData           = (void*)0,
-             _glMapBuffer               = (void*)0,
-             _glUnmapBuffer             = (void*)0,
+global void* _glGenBuffers              = STDLIB_GVP,
+             _glDeleteBuffers           = STDLIB_GVP,
+             _glBindBuffer              = STDLIB_GVP,
+             _glBufferData              = STDLIB_GVP,
+             _glBufferSubData           = STDLIB_GVP,
+             _glMapBuffer               = STDLIB_GVP,
+             _glUnmapBuffer             = STDLIB_GVP,
 
-             _glGenVertexArrays         = (void*)0,
-             _glDeleteVertexArrays      = (void*)0,
-             _glBindVertexArray         = (void*)0,
+             _glGenVertexArrays         = STDLIB_GVP,
+             _glDeleteVertexArrays      = STDLIB_GVP,
+             _glBindVertexArray         = STDLIB_GVP,
 
-             _glEnableVertexAttribArray  = (void*)0,
-             _glDisableVertexAttribArray = (void*)0,
-             _glVertexAttribPointer      = (void*)0,
+             _glEnableVertexAttribArray  = STDLIB_GVP,
+             _glDisableVertexAttribArray = STDLIB_GVP,
+             _glVertexAttribPointer      = STDLIB_GVP,
 
-             _glCreateShader            = (void*)0,
-             _glDeleteShader            = (void*)0,
-             _glShaderSource            = (void*)0,
-             _glCompileShader           = (void*)0,
-             _glGetShaderiv             = (void*)0,
-             _glGetShaderInfoLog        = (void*)0,
+             _glCreateShader            = STDLIB_GVP,
+             _glDeleteShader            = STDLIB_GVP,
+             _glShaderSource            = STDLIB_GVP,
+             _glCompileShader           = STDLIB_GVP,
+             _glGetShaderiv             = STDLIB_GVP,
+             _glGetShaderInfoLog        = STDLIB_GVP,
 
-             _glCreateProgram           = (void*)0,
-             _glDeleteProgram           = (void*)0,
-             _glAttachShader            = (void*)0,
-             _glDetachShader            = (void*)0,
-             _glLinkProgram             = (void*)0,
-             _glUseProgram              = (void*)0,
-             _glGetProgramiv            = (void*)0,
-             _glGetProgramInfoLog       = (void*)0,
-             _glBindAttribLocation      = (void*)0,
+             _glCreateProgram           = STDLIB_GVP,
+             _glDeleteProgram           = STDLIB_GVP,
+             _glAttachShader            = STDLIB_GVP,
+             _glDetachShader            = STDLIB_GVP,
+             _glLinkProgram             = STDLIB_GVP,
+             _glUseProgram              = STDLIB_GVP,
+             _glGetProgramiv            = STDLIB_GVP,
+             _glGetProgramInfoLog       = STDLIB_GVP,
+             _glBindAttribLocation      = STDLIB_GVP,
 
-             _glGetUniformLocation      = (void*)0,
-             _glUniform1i               = (void*)0,
-             _glUniform1f               = (void*)0,
-             _glUniform2f               = (void*)0,
-             _glUniform3f               = (void*)0,
-             _glUniform4f               = (void*)0,
-             _glUniform1iv              = (void*)0,
-             _glUniform2fv              = (void*)0,
-             _glUniform3fv              = (void*)0,
-             _glUniform4fv              = (void*)0,
-             _glUniformMatrix4fv        = (void*)0,
+             _glGetUniformLocation      = STDLIB_GVP,
+             _glUniform1i               = STDLIB_GVP,
+             _glUniform1f               = STDLIB_GVP,
+             _glUniform2f               = STDLIB_GVP,
+             _glUniform3f               = STDLIB_GVP,
+             _glUniform4f               = STDLIB_GVP,
+             _glUniform1iv              = STDLIB_GVP,
+             _glUniform2fv              = STDLIB_GVP,
+             _glUniform3fv              = STDLIB_GVP,
+             _glUniform4fv              = STDLIB_GVP,
+             _glUniformMatrix4fv        = STDLIB_GVP,
 
-             _glGenFramebuffers         = (void*)0,
-             _glDeleteFramebuffers      = (void*)0,
-             _glBindFramebuffer         = (void*)0,
-             _glFramebufferTexture2D    = (void*)0,
-             _glCheckFramebufferStatus  = (void*)0,
-             _glGenRenderbuffers        = (void*)0,
-             _glDeleteRenderbuffers     = (void*)0,
-             _glBindRenderbuffer        = (void*)0,
-             _glRenderbufferStorage     = (void*)0,
-             _glFramebufferRenderbuffer = (void*)0,
+             _glGenFramebuffers         = STDLIB_GVP,
+             _glDeleteFramebuffers      = STDLIB_GVP,
+             _glBindFramebuffer         = STDLIB_GVP,
+             _glFramebufferTexture2D    = STDLIB_GVP,
+             _glCheckFramebufferStatus  = STDLIB_GVP,
+             _glGenRenderbuffers        = STDLIB_GVP,
+             _glDeleteRenderbuffers     = STDLIB_GVP,
+             _glBindRenderbuffer        = STDLIB_GVP,
+             _glRenderbufferStorage     = STDLIB_GVP,
+             _glFramebufferRenderbuffer = STDLIB_GVP,
 
-             _glGenerateMipmap          = (void*)0,
-             _glActiveTexture           = (void*)0,
+             _glGenerateMipmap          = STDLIB_GVP,
+             _glActiveTexture           = STDLIB_GVP,
 
-             _glDrawArrays              = (void*)0,
-             _glDrawElements            = (void*)0,
-             _glDrawArraysInstanced     = (void*)0,
-             _glDrawElementsInstanced   = (void*)0;
+             _glDrawArrays              = STDLIB_GVP,
+             _glDrawElements            = STDLIB_GVP,
+             _glDrawArraysInstanced     = STDLIB_GVP,
+             _glDrawElementsInstanced   = STDLIB_GVP;
 
 namespace standard
 {
@@ -620,14 +620,18 @@ namespace standard
             // Multiply two Matrix4 values: out = a * b
             def mat4_mul(Matrix4* a, Matrix4* b, Matrix4* out) -> void
             {
-                int row = 0;
+                int row, col,
+                    k;
+
+                float sum;
+
                 while (row < 4)
                 {
-                    int col = 0;
+                    col = 0;
                     while (col < 4)
                     {
-                        float sum = 0.0;
-                        int k = 0;
+                        sum = 0.0;
+                        k = 0;
                         while (k < 4)
                         {
                             sum = sum + a.m[k * 4 + row] * b.m[col * 4 + k];

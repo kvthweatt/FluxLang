@@ -6301,7 +6301,7 @@ class Program(ASTNode):
         # Track initialized unions for immutability enforcement
         builder.initialized_unions = set()
 
-        # 3-pass compilation
+        # 4-pass compilation
         print("[AST] Pass 1: Processing extern blocks...")
         for stmt in self.statements:
             if isinstance(stmt, ExternBlock):
