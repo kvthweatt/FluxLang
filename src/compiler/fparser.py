@@ -64,7 +64,8 @@ class FluxParser:
         self.symbol_table = SymbolTable()
         self._preprocessor_macros = []
         self._namespace_stack = []  # Track current namespace path for symbol registration
-
+        self._object_init_params = {}
+        
 
     @classmethod
     def from_file(self, source_file: str, compiler_macros: Optional[Dict[str, str]] = None):
@@ -1084,6 +1085,15 @@ class FluxParser:
         
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
+
+        # Register __init parameter count for single-arg constructor sugar
+        for method in methods:
+            if isinstance(method, FunctionDef) and method.name == '__init':
+                # Exclude the implicit 'this' parameter
+                explicit_params = [p for p in method.parameters if p.name != 'this']
+                self._object_init_params[name] = len(explicit_params)
+                break
+
         return ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits)
     
     def namespace_def(self) -> NamespaceDef:
@@ -1690,7 +1700,21 @@ class FluxParser:
                     self.error("FROM syntax requires a custom type (struct)")
             elif self.expect(TokenType.ASSIGN):
                 self.advance()
-                initializers.append(self.expression())
+                init_expr = self.expression()
+
+                # Sugar: if the type is a known object with exactly one __init param,
+                # rewrite `ObjType name = expr` as a constructor call `ObjType name(expr)`
+                if (raw_type_identifier is not None and
+                        raw_type_identifier in self._object_init_params and
+                        self._object_init_params[raw_type_identifier] == 1):
+                    constructor_name = f"{raw_type_identifier}.__init"
+                    constructor_call = FunctionCall(constructor_name, [init_expr])
+                    var_decl = VariableDeclaration(name, type_spec, constructor_call)
+                    if type_spec.storage_class == StorageClass.GLOBAL:
+                        var_decl.is_global = True
+                    return var_decl
+
+                initializers.append(init_expr)
             else:
                 initializers.append(None)
             
