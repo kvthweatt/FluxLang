@@ -64,8 +64,11 @@ class FluxParser:
         self.symbol_table = SymbolTable()
         self._preprocessor_macros = []
         self._namespace_stack = []  # Track current namespace path for symbol registration
-        self._object_init_params = {}
-        
+        self._object_init_params = {}  # object_name -> __init parameter count (excluding 'this')
+        self._template_functions = {}  # name -> (template_param_names, FunctionDef AST)
+        self._emitted_template_instances = set()  # mangled names already instantiated
+        self._template_instantiations = []  # concrete FunctionDef nodes to inject into program
+
 
     @classmethod
     def from_file(self, source_file: str, compiler_macros: Optional[Dict[str, str]] = None):
@@ -165,7 +168,10 @@ class FluxParser:
                 print(error_msg, file=sys.stdout)
                 self.parse_errors.append(error_msg)
                 self.synchronize()
-        return Program(self.symbol_table,statements=statements)
+        # Prepend template instantiations so they are emitted before any call site
+        if self._template_instantiations:
+            statements = self._template_instantiations + statements
+        return Program(self.symbol_table, statements=statements)
     
     def has_errors(self) -> bool:
         """Check if any parse errors occurred during parsing"""
@@ -476,6 +482,32 @@ class FluxParser:
         else:
             self.error("Expected function name (identifier or string literal)")
         
+        # Parse optional template parameter list: def name<T, U>(...)
+        # Use lookahead to confirm this is actually a template list (all IDENTIFIERs)
+        # before consuming anything, to avoid misreading comparison operators.
+        template_params = []
+        if self.expect(TokenType.LESS_THAN):
+            with self._lookahead():
+                is_template = False
+                self.advance()  # consume '<'
+                if self.expect(TokenType.IDENTIFIER):
+                    self.advance()
+                    while self.expect(TokenType.COMMA):
+                        self.advance()
+                        if not self.expect(TokenType.IDENTIFIER):
+                            break
+                        self.advance()
+                    if self.expect(TokenType.GREATER_THAN):
+                        is_template = True
+
+            if is_template:
+                self.advance()  # consume '<'
+                template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                self.consume(TokenType.GREATER_THAN)
+
         self.consume(TokenType.LEFT_PAREN)
         parameters = []
         if not self.expect(TokenType.RIGHT_PAREN):
@@ -484,8 +516,6 @@ class FluxParser:
         
         self.consume(TokenType.RETURN_ARROW)
         return_type = self.type_spec()
-        
-        # Check if this is a multi-function prototype declaration
         # Pattern: def foo() -> int, foo() -> bool, foo(int) -> void;
         if self.expect(TokenType.COMMA):
             # This is a multi-function prototype declaration
@@ -546,6 +576,13 @@ class FluxParser:
             if param.name:
                 self.symbol_table.define(param.name, SymbolKind.VARIABLE, param.type_spec)
         
+        # If this is a template function, store it and return None (no immediate codegen)
+        if template_params:
+            func_def = FunctionDef(name, parameters, return_type, body, is_const,
+                                   is_volatile, is_prototype, no_mangle)
+            self._template_functions[name] = (template_params, func_def)
+            return None
+
         return FunctionDef(name, parameters, return_type, body, is_const, 
                           is_volatile, is_prototype, no_mangle)
 
@@ -2668,6 +2705,121 @@ class FluxParser:
         else:
             return self.postfix_expression()
     
+    def _substitute_template(self, node, mapping):
+        """
+        Deep-copy an AST node, substituting every TypeSystem whose custom_typename
+        (or base_type string) appears in `mapping` with the corresponding concrete TypeSystem.
+        Also substitutes Identifier nodes whose name is a template param, for cases
+        where a param name appears as an expression (e.g. sizeof-style use).
+        """
+        import copy
+
+        def sub_type(ts):
+            if not isinstance(ts, TypeSystem):
+                return ts
+            # Check if the whole type is a template param
+            name = ts.custom_typename if ts.custom_typename else (
+                ts.base_type if isinstance(ts.base_type, str) else None)
+            if name and name in mapping:
+                concrete = mapping[name]
+                # Copy concrete and carry over pointer/array depth from the template usage
+                result = copy.copy(concrete)
+                if ts.is_pointer:
+                    result.is_pointer = True
+                    result.pointer_depth = (result.pointer_depth or 0) + ts.pointer_depth
+                if ts.is_array:
+                    result.is_array = True
+                    result.array_dimensions = ts.array_dimensions
+                    result.array_size = ts.array_size
+                if ts.is_const:
+                    result.is_const = True
+                if ts.is_volatile:
+                    result.is_volatile = True
+                return result
+            return copy.copy(ts)
+
+        def walk(obj):
+            if obj is None:
+                return None
+            if isinstance(obj, TypeSystem):
+                return sub_type(obj)
+            if isinstance(obj, list):
+                return [walk(item) for item in obj]
+            if isinstance(obj, dict):
+                return {k: walk(v) for k, v in obj.items()}
+            if not hasattr(obj, '__dataclass_fields__'):
+                return obj
+            # It's a dataclass AST node — shallow copy then recurse into fields
+            new_obj = copy.copy(obj)
+            for field_name in obj.__dataclass_fields__:
+                old_val = getattr(obj, field_name)
+                setattr(new_obj, field_name, walk(old_val))
+            return new_obj
+
+        return walk(node)
+
+    def _type_system_to_mangle_str(self, ts):
+        """Produce a short string identifying a TypeSystem for name mangling."""
+        if ts.custom_typename:
+            return ts.custom_typename
+        if ts.is_pointer:
+            return f"ptr_{self._type_system_to_mangle_str(TypeSystem(base_type=ts.base_type, bit_width=ts.bit_width, custom_typename=ts.custom_typename))}"
+        if isinstance(ts.base_type, str):
+            return ts.base_type
+        return ts.base_type.value if hasattr(ts.base_type, 'value') else str(ts.base_type)
+
+    def _resolve_template_call(self, func_name, arg_type_names):
+        """
+        Given a template function name and a list of concrete type-name strings
+        (one per template param, in declaration order), produce and register a
+        concrete FunctionDef if not already done.  Returns the mangled call name.
+        """
+        template_params, template_func = self._template_functions[func_name]
+
+        if len(arg_type_names) != len(template_params):
+            self.error(
+                f"Template function '{func_name}' expects {len(template_params)} "
+                f"type argument(s), got {len(arg_type_names)}"
+            )
+
+        # Build mangled name: func__tmpl__T1__T2
+        mangled = func_name + '__tmpl__' + '__'.join(arg_type_names)
+
+        if mangled not in self._emitted_template_instances:
+            self._emitted_template_instances.add(mangled)
+
+            # Map DataType enum value strings back to DataType members
+            _datatype_by_value = {dt.value: dt for dt in DataType}
+
+            # Build the substitution mapping: param name -> concrete TypeSystem
+            mapping = {}
+            for param_name, type_name in zip(template_params, arg_type_names):
+                # Try symbol table alias first
+                resolved = self.symbol_table.get_type_spec(type_name)
+                if resolved is not None:
+                    mapping[param_name] = resolved
+                elif type_name in _datatype_by_value:
+                    # Primitive keyword type (sint, uint, float, char, bool, void, data)
+                    mapping[param_name] = TypeSystem(
+                        base_type=_datatype_by_value[type_name],
+                        is_signed=_datatype_by_value[type_name] in (DataType.SINT, DataType.CHAR)
+                    )
+                else:
+                    # Custom type name (object, struct) — use custom_typename
+                    mapping[param_name] = TypeSystem(
+                        base_type=DataType.DATA,
+                        custom_typename=type_name
+                    )
+
+            # Deep-copy + substitute
+            concrete_func = self._substitute_template(template_func, mapping)
+            concrete_func.name = func_name  # Keep original name; normal mangling handles uniqueness
+            concrete_func.no_mangle = False
+
+            self._template_instantiations.append(concrete_func)
+
+        return func_name  # Call site uses the original name; overload resolution finds it
+
     def postfix_expression(self) -> Expression:
         """
         postfix_expression -> primary_expression (postfix_operator)*
@@ -2680,6 +2832,31 @@ class FluxParser:
         """
         expr = self.primary_expression()
         
+        # Handle explicit template call: foo<int>(args) or foo<i32>(args)
+        # Check before the main postfix loop so <type> is consumed before '('
+        if (isinstance(expr, Identifier) and
+                expr.name in self._template_functions and
+                self.expect(TokenType.LESS_THAN)):
+            # Parse the explicit type argument list
+            self.advance()  # consume '<'
+            type_names = []
+            # Each type arg is a full type_spec (covers SINT, UINT, IDENTIFIER aliases, etc.)
+            ts = self.type_spec()
+            type_names.append(self._type_system_to_mangle_str(ts))
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                ts = self.type_spec()
+                type_names.append(self._type_system_to_mangle_str(ts))
+            self.consume(TokenType.GREATER_THAN)
+            # Now consume the argument list
+            self.consume(TokenType.LEFT_PAREN)
+            args = []
+            if not self.expect(TokenType.RIGHT_PAREN):
+                args = self.argument_list()
+            self.consume(TokenType.RIGHT_PAREN)
+            mangled = self._resolve_template_call(expr.name, type_names)
+            expr = FunctionCall(mangled, args)
+
         while True:
             if self.expect(TokenType.LEFT_BRACKET):
                 # Array access or array slice [start:end]

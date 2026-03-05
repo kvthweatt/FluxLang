@@ -289,6 +289,19 @@ object anotherObj
 };
 ```
 
+If an object's `__init` method takes **only one parameter**, you may instance it like sO:
+```
+object SomeOBJ
+{
+    def __init(int) -> this { return this; };
+
+    def __exit() -> void {};
+};
+
+SomeOBJ sobj = 5;
+```
+It is syntactic sugar for `SomeObj sobj(5);`
+
 ---
 
 ## Traits
