@@ -194,14 +194,45 @@ class FluxParser:
 
     # ============ CUSTOM OPERATOR HELPERS ============
 
-    def _tokens_to_op_key(self, token_types: list) -> str:
-        return ''.join(_TOKEN_SYMBOL_MAP[t] for t in token_types)
+    def _tokens_to_op_key(self, token_types: list, token_values: list = None) -> str:
+        parts = []
+        for i, t in enumerate(token_types):
+            if t == TokenType.IDENTIFIER and token_values and token_values[i]:
+                parts.append(token_values[i])
+            else:
+                parts.append(_TOKEN_SYMBOL_MAP[t])
+        return ''.join(parts)
 
     def _mangle_op_symbol(self, symbol: str) -> str:
-        return '_'.join(_SYMBOL_MANGLE.get(c, hex(ord(c))) for c in symbol)
+        parts = self._symbol_to_parts(symbol) or [symbol]
+        mangled_parts = []
+        for part in parts:
+            if all(c in _SYMBOL_MANGLE or c.isalnum() or c == '_' for c in part):
+                # Identifier-like part: use directly if all alnum/underscore, else mangle char by char
+                if all(c.isalnum() or c == '_' for c in part):
+                    mangled_parts.append(part)
+                else:
+                    mangled_parts.append('_'.join(_SYMBOL_MANGLE.get(c, hex(ord(c))) for c in part))
+            else:
+                mangled_parts.append('_'.join(_SYMBOL_MANGLE.get(c, hex(ord(c))) for c in part))
+        return '_'.join(mangled_parts)
 
     def _symbol_to_token_types(self, symbol: str) -> list:
-        # Build reverse map: string -> token type, sorted longest-first to match lexer greedy behaviour
+        parts = self._symbol_to_parts(symbol)
+        if parts is None:
+            return None
+        result = []
+        for part in parts:
+            # Check if this part is an identifier (not in any symbol map value)
+            if all(part != tok_str for tok_str in _TOKEN_SYMBOL_MAP.values()):
+                result.append(TokenType.IDENTIFIER)
+            else:
+                _REVERSE = {v: k for v, k in ((s, t) for t, s in _TOKEN_SYMBOL_MAP.items())}
+                result.append(_REVERSE[part])
+        return result
+
+    def _symbol_to_parts(self, symbol: str) -> list:
+        # Build reverse map sorted longest-first to match lexer greedy behaviour
         _REVERSE = sorted(_TOKEN_SYMBOL_MAP.items(), key=lambda kv: len(kv[1]), reverse=True)
         result = []
         pos = 0
@@ -209,12 +240,20 @@ class FluxParser:
             matched = False
             for tok_type, tok_str in _REVERSE:
                 if symbol[pos:pos+len(tok_str)] == tok_str:
-                    result.append(tok_type)
+                    result.append(tok_str)
                     pos += len(tok_str)
                     matched = True
                     break
             if not matched:
-                return None
+                # Try to consume an identifier (letters, digits, underscore)
+                end = pos
+                if end < len(symbol) and (symbol[end].isalpha() or symbol[end] == '_'):
+                    while end < len(symbol) and (symbol[end].isalnum() or symbol[end] == '_'):
+                        end += 1
+                    result.append(symbol[pos:end])
+                    pos = end
+                else:
+                    return None
         return result
 
     def _match_custom_op(self):
@@ -235,7 +274,17 @@ class FluxParser:
             tokens_match = True
             for i in range(n):
                 tok = self.current_token if i == 0 else self.peek(i)
-                if tok is None or tok.type != candidate_types[i]:
+                if tok is None:
+                    tokens_match = False
+                    break
+                if candidate_types[i] == TokenType.IDENTIFIER:
+                    # Match identifier tokens by value embedded in the symbol string
+                    # Extract the identifier value from the symbol at this position
+                    sym_parts = self._symbol_to_parts(symbol)
+                    if tok.type != TokenType.IDENTIFIER or tok.value != sym_parts[i]:
+                        tokens_match = False
+                        break
+                elif tok.type != candidate_types[i]:
                     tokens_match = False
                     break
             if tokens_match:
@@ -256,14 +305,20 @@ class FluxParser:
 
         self.consume(TokenType.LEFT_BRACKET)
         op_token_types = []
+        op_token_values = []
         while not self.expect(TokenType.RIGHT_BRACKET):
-            if self.current_token.type not in _TOKEN_SYMBOL_MAP:
+            if self.current_token.type == TokenType.IDENTIFIER:
+                op_token_types.append(TokenType.IDENTIFIER)
+                op_token_values.append(self.current_token.value)
+            elif self.current_token.type not in _TOKEN_SYMBOL_MAP:
                 self.error(f"Token '{self.current_token.value}' cannot be part of an operator symbol")
-            op_token_types.append(self.current_token.type)
+            else:
+                op_token_types.append(self.current_token.type)
+                op_token_values.append(None)
             self.advance()
         self.consume(TokenType.RIGHT_BRACKET)
 
-        symbol           = self._tokens_to_op_key(op_token_types)
+        symbol           = self._tokens_to_op_key(op_token_types, op_token_values)
         mangled_fragment = self._mangle_op_symbol(symbol)
         func_name        = f"operator__{mangled_fragment}"
 

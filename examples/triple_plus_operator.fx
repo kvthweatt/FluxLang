@@ -3,7 +3,7 @@
 
 operator (int L, int R) [+++] -> int
 {
-    return (++L + ++R);
+    return ++L + ++R;
 };
 
 
