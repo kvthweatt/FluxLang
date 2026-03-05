@@ -2110,10 +2110,26 @@ class MemberAccess(Expression):
     
     def _get_member_ptr(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Return the GEP pointer to the member without loading it. Used by ++ and --."""
-        obj_val = self.object.codegen(builder, module)
-        if (isinstance(self.object, Identifier) and self.object.name == "this" and
-                MemberAccessTypeHandler.is_this_double_pointer(obj_val)):
-            obj_val = builder.load(obj_val, name="this_ptr")
+        if isinstance(self.object, Identifier):
+            var_name = self.object.name
+            if var_name == "this":
+                obj_val = self.object.codegen(builder, module)
+                if MemberAccessTypeHandler.is_this_double_pointer(obj_val):
+                    obj_val = builder.load(obj_val, name="this_ptr")
+            elif not module.symbol_table.is_global_scope() and module.symbol_table.get_llvm_value(var_name) is not None:
+                obj_val = module.symbol_table.get_llvm_value(var_name)
+            elif var_name in module.globals:
+                obj_val = module.globals[var_name]
+            else:
+                obj_val = self.object.codegen(builder, module)
+        else:
+            obj_val = self.object.codegen(builder, module)
+        # If obj_val is a pointer-to-pointer-to-struct (e.g. local var of pointer type),
+        # load once to get the actual struct pointer before GEP-ing
+        if (isinstance(obj_val.type, ir.PointerType) and
+                isinstance(obj_val.type.pointee, ir.PointerType) and
+                MemberAccessTypeHandler.is_struct_pointer(obj_val.type.pointee)):
+            obj_val = builder.load(obj_val, name="struct_ptr")
         if isinstance(obj_val.type, ir.PointerType) and MemberAccessTypeHandler.is_struct_pointer(obj_val.type):
             struct_type = obj_val.type.pointee
             member_index = MemberAccessTypeHandler.get_member_index(struct_type, self.member)
@@ -2659,6 +2675,10 @@ class AddressOf(Expression):
                         array_ptr = module.globals[mangled]
                     else:
                         raise NameError(f"Unknown array identifier: {var_name}")
+            elif isinstance(self.expression.array, MemberAccess):
+                # For member access (e.g. @proj.m[0]), get the pointer to the member
+                # rather than loading its value, so we can GEP into it
+                array_ptr = self.expression.array._get_member_ptr(builder, module)
             else:
                 # For more complex expressions, call codegen
                 array_ptr = self.expression.array.codegen(builder, module)
@@ -2678,10 +2698,10 @@ class AddressOf(Expression):
                     # Pointer type - single index
                     return builder.gep(array_ptr, [index], inbounds=True)
             
-            if isinstance(array.type, ir.PointerType):
+            if isinstance(array_ptr.type, ir.PointerType):
                 zero = ir.Constant(ir.IntType(32), 0)
                 # FIXED: Pass indices as a single list
-                return builder.gep(array, [zero, index], inbounds=True)
+                return builder.gep(array_ptr, [zero, index], inbounds=True)
         
         # Handle pointer dereference - @(*ptr) is equivalent to ptr
         if isinstance(self.expression, PointerDeref):

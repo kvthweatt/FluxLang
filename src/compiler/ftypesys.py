@@ -5303,12 +5303,12 @@ class EndianOfTypeHandler:
 
 class MemberAccessTypeHandler:
     @staticmethod
-    def is_enum_type(identifier_name: str, module) -> bool:
+    def is_enum_type(identifier_name: str, module: ir.Module) -> bool:
         """Check if an identifier refers to an enum type."""
         return hasattr(module, '_enum_types') and identifier_name in module._enum_types
 
     @staticmethod
-    def get_enum_value(enum_type_name: str, member_name: str, module) -> int:
+    def get_enum_value(enum_type_name: str, member_name: str, module: ir.Module) -> int:
         """Get the integer value of an enum member."""
         if not MemberAccessTypeHandler.is_enum_type(enum_type_name, module):
             raise ValueError(f"'{enum_type_name}' is not an enum type")
@@ -5368,7 +5368,7 @@ class MemberAccessTypeHandler:
             raise ValueError(f"Member '{member_name}' not found in struct")
 
     @staticmethod
-    def get_member_type_spec(struct_name: str, member_name: str, module) -> Optional:
+    def get_member_type_spec(struct_name: str, member_name: str, module: ir.Module) -> Optional:
         """Get the TypeSystem spec for a struct member."""
         if not hasattr(module, '_struct_member_type_specs'):
             return None
@@ -5420,7 +5420,7 @@ class MemberAccessTypeHandler:
         return None
 
     @staticmethod
-    def get_union_member_info(union_name: str, module) -> dict:
+    def get_union_member_info(union_name: str, module: ir.Module) -> dict:
         """Get union member information."""
         if not hasattr(module, '_union_member_info') or union_name not in module._union_member_info:
             raise ValueError(f"Union member info not found for '{union_name}'")
@@ -5428,7 +5428,7 @@ class MemberAccessTypeHandler:
         return module._union_member_info[union_name]
 
     @staticmethod
-    def validate_union_member(union_name: str, member_name: str, module):
+    def validate_union_member(union_name: str, member_name: str, module: ir.Module):
         """Validate that a member exists in a union."""
         union_info = MemberAccessTypeHandler.get_union_member_info(union_name, module)
         member_names = union_info['member_names']
@@ -5437,14 +5437,14 @@ class MemberAccessTypeHandler:
             raise ValueError(f"Member '{member_name}' not found in union '{union_name}'")
 
     @staticmethod
-    def get_union_member_index(union_name: str, member_name: str, module) -> int:
+    def get_union_member_index(union_name: str, member_name: str, module: ir.Module) -> int:
         """Get the index of a member in a union."""
         union_info = MemberAccessTypeHandler.get_union_member_info(union_name, module)
         member_names = union_info['member_names']
         return member_names.index(member_name)
 
     @staticmethod
-    def get_union_member_type(union_name: str, member_name: str, module) -> ir.Type:
+    def get_union_member_type(union_name: str, member_name: str, module: ir.Module) -> ir.Type:
         """Get the LLVM type of a union member."""
         union_info = MemberAccessTypeHandler.get_union_member_info(union_name, module)
         member_names = union_info['member_names']
@@ -5453,12 +5453,12 @@ class MemberAccessTypeHandler:
         return member_types[member_index]
 
     @staticmethod
-    def is_static_struct_member(type_name: str, module) -> bool:
+    def is_static_struct_member(type_name: str, module: ir.Module) -> bool:
         """Check if a type name refers to a struct type (for static member access)."""
         return hasattr(module, '_struct_types') and type_name in module._struct_types
 
     @staticmethod
-    def is_static_union_member(type_name: str, module) -> bool:
+    def is_static_union_member(type_name: str, module: ir.Module) -> bool:
         """Check if a type name refers to a union type (for static member access)."""
         return hasattr(module, '_union_types') and type_name in module._union_types
 
@@ -5485,7 +5485,7 @@ class MemberAccessTypeHandler:
         member_ptr._flux_array_element_type_spec = type_spec.array_element_type
 
     @staticmethod
-    def attach_member_type_metadata(loaded_value: ir.Value, struct_type: ir.Type, member_name: str, module) -> ir.Value:
+    def attach_member_type_metadata(loaded_value: ir.Value, struct_type: ir.Type, member_name: str, module: ir.Module) -> ir.Value:
         """Attach type metadata to a loaded member value."""
         # Find struct name
         struct_name = MemberAccessTypeHandler.get_struct_name_from_type(struct_type, module)
