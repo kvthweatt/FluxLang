@@ -2,6 +2,9 @@
 #import "redformat.fx";
 #import "redmath.fx";
 
+using standard::memory::allocators::stdheap;
+using standard::format;
+
 def fibonacci<T>(T n) -> T
 {
     if (n <= (T)1)
@@ -26,11 +29,11 @@ def fibonacci<T>(T n) -> T
 
 def main() -> int
 {
-    println_colored("Fibonacci Calculator", standard::format::colors::YELLOW);
+    println_colored("Fibonacci Calculator\0", colors::YELLOW);
     hline_heavy(30);
     u64 x;
     
-    for (u64 i = 0; i <= 100; i++)
+    for (u64 i = 0; i <= 93; i++)
     {
         print_cyan("fib(\0");
         print(i);

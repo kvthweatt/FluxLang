@@ -6157,7 +6157,7 @@ class NamespaceDef(ASTNode):
             SymbolTable.register_nested_namespaces(nested_ns, full_nested_name, module)
         
         # Add to using namespaces using NamespaceTypeHandler
-        NamespaceTypeHandler.add_using_namespace(module, self.name)
+        #NamespaceTypeHandler.add_using_namespace(module, self.name)
 
         # Set current namespace context for this namespace
         if not hasattr(module, 'symbol_table'):

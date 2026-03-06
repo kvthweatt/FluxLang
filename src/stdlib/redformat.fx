@@ -20,60 +20,60 @@ namespace standard
         namespace colors
         {
             // Reset
-            global const byte[] RESET = "\x1b[0m\0";
+            global const byte[] RESET = "\x1b[0m\0",
             
             // Regular colors
-            global const byte[] BLACK = "\x1b[30m\0";
-            global const byte[] RED = "\x1b[31m\0";
-            global const byte[] GREEN = "\x1b[32m\0";
-            global const byte[] YELLOW = "\x1b[33m\0";
-            global const byte[] BLUE = "\x1b[34m\0";
-            global const byte[] MAGENTA = "\x1b[35m\0";
-            global const byte[] CYAN = "\x1b[36m\0";
-            global const byte[] WHITE = "\x1b[37m\0";
+                                BLACK = "\x1b[30m\0",
+                                RED = "\x1b[31m\0",
+                                GREEN = "\x1b[32m\0",
+                                YELLOW = "\x1b[33m\0",
+                                BLUE = "\x1b[34m\0",
+                                MAGENTA = "\x1b[35m\0",
+                                CYAN = "\x1b[36m\0",
+                                WHITE = "\x1b[37m\0",
             
             // Bright/Bold colors
-            global const byte[] BRIGHT_BLACK = "\x1b[90m\0";
-            global const byte[] BRIGHT_RED = "\x1b[91m\0";
-            global const byte[] BRIGHT_GREEN = "\x1b[92m\0";
-            global const byte[] BRIGHT_YELLOW = "\x1b[93m\0";
-            global const byte[] BRIGHT_BLUE = "\x1b[94m\0";
-            global const byte[] BRIGHT_MAGENTA = "\x1b[95m\0";
-            global const byte[] BRIGHT_CYAN = "\x1b[96m\0";
-            global const byte[] BRIGHT_WHITE = "\x1b[97m\0";
+                                BRIGHT_BLACK = "\x1b[90m\0",
+                                BRIGHT_RED = "\x1b[91m\0",
+                                BRIGHT_GREEN = "\x1b[92m\0",
+                                BRIGHT_YELLOW = "\x1b[93m\0",
+                                BRIGHT_BLUE = "\x1b[94m\0",
+                                BRIGHT_MAGENTA = "\x1b[95m\0",
+                                BRIGHT_CYAN = "\x1b[96m\0",
+                                BRIGHT_WHITE = "\x1b[97m\0",
             
             // Background colors
-            global const byte[] BG_BLACK = "\x1b[40m\0";
-            global const byte[] BG_RED = "\x1b[41m\0";
-            global const byte[] BG_GREEN = "\x1b[42m\0";
-            global const byte[] BG_YELLOW = "\x1b[43m\0";
-            global const byte[] BG_BLUE = "\x1b[44m\0";
-            global const byte[] BG_MAGENTA = "\x1b[45m\0";
-            global const byte[] BG_CYAN = "\x1b[46m\0";
-            global const byte[] BG_WHITE = "\x1b[47m\0";
+                                BG_BLACK = "\x1b[40m\0",
+                                BG_RED = "\x1b[41m\0",
+                                BG_GREEN = "\x1b[42m\0",
+                                BG_YELLOW = "\x1b[43m\0",
+                                BG_BLUE = "\x1b[44m\0",
+                                BG_MAGENTA = "\x1b[45m\0",
+                                BG_CYAN = "\x1b[46m\0",
+                                BG_WHITE = "\x1b[47m\0",
             
             // Bright background colors
-            global const byte[] BG_BRIGHT_BLACK = "\x1b[100m\0";
-            global const byte[] BG_BRIGHT_RED = "\x1b[101m\0";
-            global const byte[] BG_BRIGHT_GREEN = "\x1b[102m\0";
-            global const byte[] BG_BRIGHT_YELLOW = "\x1b[103m\0";
-            global const byte[] BG_BRIGHT_BLUE = "\x1b[104m\0";
-            global const byte[] BG_BRIGHT_MAGENTA = "\x1b[105m\0";
-            global const byte[] BG_BRIGHT_CYAN = "\x1b[106m\0";
-            global const byte[] BG_BRIGHT_WHITE = "\x1b[107m\0";
+                                BG_BRIGHT_BLACK = "\x1b[100m\0",
+                                BG_BRIGHT_RED = "\x1b[101m\0",
+                                BG_BRIGHT_GREEN = "\x1b[102m\0",
+                                BG_BRIGHT_YELLOW = "\x1b[103m\0",
+                                BG_BRIGHT_BLUE = "\x1b[104m\0",
+                                BG_BRIGHT_MAGENTA = "\x1b[105m\0",
+                                BG_BRIGHT_CYAN = "\x1b[106m\0",
+                                BG_BRIGHT_WHITE = "\x1b[107m\0";
         };
         
         // ============ TEXT STYLES ============
         namespace styles
         {
-            global const byte[] BOLD = "\x1b[1m\0";
-            global const byte[] DIM = "\x1b[2m\0";
-            global const byte[] ITALIC = "\x1b[3m\0";
-            global const byte[] UNDERLINE = "\x1b[4m\0";
-            global const byte[] BLINK = "\x1b[5m\0";
-            global const byte[] REVERSE = "\x1b[7m\0";
-            global const byte[] HIDDEN = "\x1b[8m\0";
-            global const byte[] STRIKETHROUGH = "\x1b[9m\0";
+            global const byte[] BOLD = "\x1b[1m\0",
+                                DIM = "\x1b[2m\0",
+                                ITALIC = "\x1b[3m\0",
+                                UNDERLINE = "\x1b[4m\0",
+                                BLINK = "\x1b[5m\0",
+                                REVERSE = "\x1b[7m\0",
+                                HIDDEN = "\x1b[8m\0",
+                                STRIKETHROUGH = "\x1b[9m\0";
         };
         
         // ============ UTILITY FUNCTIONS ============
@@ -567,7 +567,5 @@ namespace standard
         };
     };
 };
-
-using standard::format;
 
 #endif;
