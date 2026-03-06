@@ -649,8 +649,8 @@ namespace standard
             // fovy_rad: vertical field of view in radians, aspect: width/height
             def mat4_perspective(float fovy_rad, float aspect, float near_z, float far_z, Matrix4* out) -> void
             {
-                float f  = 1.0 / tan(fovy_rad / 2.0);
-                float nf = 1.0 / (near_z - far_z);
+                float f  = 1.0 / tan(fovy_rad / 2.0),
+                      nf = 1.0 / (near_z - far_z);
 
                 out.m[0]  = f / aspect; out.m[1]  = 0.0; out.m[2]  = 0.0;                              out.m[3]  = 0.0;
                 out.m[4]  = 0.0;        out.m[5]  = f;   out.m[6]  = 0.0;                              out.m[7]  = 0.0;
@@ -663,9 +663,9 @@ namespace standard
             // Build an orthographic projection matrix
             def mat4_ortho(float left, float right, float bottom, float top, float near_z, float far_z, Matrix4* out) -> void
             {
-                float rl = 1.0 / (right - left);
-                float tb = 1.0 / (top - bottom);
-                float fn = 1.0 / (far_z - near_z);
+                float rl = 1.0 / (right - left),
+                      tb = 1.0 / (top - bottom),
+                      fn = 1.0 / (far_z - near_z);
 
                 out.m[0]  = 2.0 * rl; out.m[1]  = 0.0;      out.m[2]  = 0.0;       out.m[3]  = 0.0;
                 out.m[4]  = 0.0;      out.m[5]  = 2.0 * tb; out.m[6]  = 0.0;       out.m[7]  = 0.0;
@@ -701,8 +701,8 @@ namespace standard
             // Build a rotation matrix around an arbitrary normalised axis
             def mat4_rotate(float ax, float ay, float az, float angle_rad, Matrix4* out) -> void
             {
-                float c  = cos(angle_rad);
-                float s  = sin(angle_rad);
+                float c  = cos(angle_rad),
+                      s  = sin(angle_rad);
                 float ic = 1.0 - c;
 
                 out.m[0]  = ax * ax * ic + c;          out.m[1]  = ay * ax * ic + az * s;     out.m[2]  = az * ax * ic - ay * s;     out.m[3]  = 0.0;

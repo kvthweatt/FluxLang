@@ -7,7 +7,7 @@
     // Large allocations (>4096) get a dedicated OS slab, released on ffree.
     // Block metadata lives in a separate table slab (open-addressed hash map
     // keyed by user pointer). The table slab is itself an entry in the table.
-    // No inline headers Ã¢â‚¬â€ user data blocks are completely pure.
+    // No inline headers, user data blocks are completely pure.
     // No zeroing (Flux zero-inits at language level).
     // No coalescing (fragments are reusable as-is per Flux memory model).
     // Slabs acquired directly from OS: 4MB -> 8MB -> 16MB -> 32MB -> 64MB cap.

@@ -1894,7 +1894,11 @@ class FunctionCall(Expression):
             gvar = module.globals[self.name]
             if not isinstance(gvar, ir.Function):
                 if isinstance(gvar.type, ir.PointerType):
+                    # Accept explicitly-typed function pointer globals AND void* (i8*)
+                    # globals used as COM/vtable function pointer slots (global void* pattern).
                     if isinstance(gvar.type.pointee, ir.FunctionType):
+                        return True
+                    if isinstance(gvar.type.pointee, ir.PointerType):
                         return True
 
         return False
@@ -5052,9 +5056,35 @@ class FunctionPointerCall(Expression):
         # Generate arguments
         args = [arg.codegen(builder, module) for arg in self.arguments]
         
-        # Simple indirect call - just call through the pointer
-        # The key issue: llvmlite's builder.call() should work, but we need
-        # to ensure the function pointer is properly typed
+        # Coerce arguments to match the function pointer's parameter types
+        if isinstance(func_ptr.type, ir.PointerType) and isinstance(func_ptr.type.pointee, ir.FunctionType):
+            fn_type = func_ptr.type.pointee
+            coerced_args = []
+            for i, (arg_val, arg_expr) in enumerate(zip(args, self.arguments)):
+                if i < len(fn_type.args):
+                    expected_type = fn_type.args[i]
+                    # Handle string literals passed to i8* (void*) parameters
+                    if (isinstance(arg_expr, Literal) and
+                            arg_expr.type == DataType.CHAR and
+                            isinstance(expected_type, ir.PointerType) and
+                            isinstance(expected_type.pointee, ir.IntType) and
+                            expected_type.pointee.width == 8):
+                        string_val = arg_expr.value
+                        string_bytes = string_val.encode('ascii')
+                        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+                        str_const = ir.Constant(str_array_ty, bytearray(string_bytes))
+                        str_name = f".str.fpc.{FunctionCall._string_counter}"
+                        FunctionCall._string_counter += 1
+                        gv = ir.GlobalVariable(module, str_const.type, name=str_name)
+                        gv.linkage = 'internal'
+                        gv.global_constant = True
+                        gv.initializer = str_const
+                        zero = ir.Constant(ir.IntType(32), 0)
+                        arg_val = builder.gep(gv, [zero, zero], name=f"arg{i}_str_ptr")
+                    arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(
+                        builder, module, arg_val, expected_type, i)
+                coerced_args.append(arg_val)
+            args = coerced_args
         return builder.call(func_ptr, args, name="indirect_call")
 
 @dataclass

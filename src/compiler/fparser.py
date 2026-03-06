@@ -911,11 +911,14 @@ class FluxParser:
         if self.expect(TokenType.ASSIGN):
             self.advance()
             
-            # Expect @ followed by function name
-            self.consume(TokenType.ADDRESS_OF, "Expected '@' for function address")
-            func_name = self.consume(TokenType.IDENTIFIER).value
-            
-            initializer = AddressOf(Identifier(func_name))
+            # Accept either @identifier or a null cast expression like (void*)0
+            if self.expect(TokenType.ADDRESS_OF):
+                self.consume(TokenType.ADDRESS_OF, "Expected '@' for function address")
+                func_name = self.consume(TokenType.IDENTIFIER).value
+                initializer = AddressOf(Identifier(func_name))
+            else:
+                # Parse as a general expression (e.g. (void*)0 for null initializer)
+                initializer = self.expression()
         
         self.consume(TokenType.SEMICOLON)
         return FunctionPointerDeclaration(name, fp_type, initializer)
@@ -2981,20 +2984,37 @@ class FluxParser:
         return walk(node)
 
     def _type_system_to_mangle_str(self, ts):
-        """Produce a short string identifying a TypeSystem for name mangling."""
+        """Produce a short string identifying a TypeSystem for name mangling.
+
+        For fully-resolved DATA types (e.g. a u64 alias that resolved to
+        base_type=DATA, bit_width=64, is_signed=False) we incorporate the
+        bit_width and signedness so that distinct numeric types produce distinct
+        mangle strings (e.g. 'data_u64') instead of collapsing to the bare
+        string 'data' and losing all width/signedness information.
+        """
         if ts.custom_typename:
             return ts.custom_typename
         if ts.is_pointer:
             return f"ptr_{self._type_system_to_mangle_str(TypeSystem(base_type=ts.base_type, bit_width=ts.bit_width, custom_typename=ts.custom_typename))}"
-        if isinstance(ts.base_type, str):
-            return ts.base_type
-        return ts.base_type.value if hasattr(ts.base_type, 'value') else str(ts.base_type)
+        base = ts.base_type if isinstance(ts.base_type, str) else (
+            ts.base_type.value if hasattr(ts.base_type, 'value') else str(ts.base_type))
+        # For DATA types with a known bit_width, embed width+signedness so that
+        # e.g. u64 (data/64/unsigned) and i32 (data/32/signed) get distinct names.
+        if base == 'data' and ts.bit_width is not None:
+            sign = 'i' if ts.is_signed else 'u'
+            return f"data_{sign}{ts.bit_width}"
+        return base
 
-    def _resolve_template_call(self, func_name, arg_type_names):
+    def _resolve_template_call(self, func_name, arg_type_names, arg_type_specs=None):
         """
         Given a template function name and a list of concrete type-name strings
         (one per template param, in declaration order), produce and register a
         concrete FunctionDef if not already done.  Returns the mangled call name.
+
+        arg_type_specs, if provided, must be a parallel list of already-resolved
+        TypeSystem objects (as returned by type_spec()).  Using them avoids the
+        lossy round-trip through the mangle string that previously caused fully-
+        resolved alias types (e.g. u64 -> DATA/64-bit) to lose their bit_width.
         """
         template_params, template_func = self._template_functions[func_name]
 
@@ -3015,8 +3035,15 @@ class FluxParser:
 
             # Build the substitution mapping: param name -> concrete TypeSystem
             mapping = {}
-            for param_name, type_name in zip(template_params, arg_type_names):
-                # Try symbol table alias first
+            for i, (param_name, type_name) in enumerate(zip(template_params, arg_type_names)):
+                # If a pre-resolved TypeSystem was supplied, use it directly.
+                # This is the correct path for type aliases like u64 whose
+                # resolution (bit_width, signedness, etc.) would otherwise be
+                # lost when round-tripping through the mangle string.
+                if arg_type_specs is not None and i < len(arg_type_specs):
+                    mapping[param_name] = arg_type_specs[i]
+                    continue
+                # Fallback: try symbol table alias first
                 resolved = self.symbol_table.get_type_spec(type_name)
                 if resolved is not None:
                     mapping[param_name] = resolved
@@ -3062,13 +3089,16 @@ class FluxParser:
             # Parse the explicit type argument list
             self.advance()  # consume '<'
             type_names = []
+            type_specs = []
             # Each type arg is a full type_spec (covers SINT, UINT, IDENTIFIER aliases, etc.)
             ts = self.type_spec()
             type_names.append(self._type_system_to_mangle_str(ts))
+            type_specs.append(ts)
             while self.expect(TokenType.COMMA):
                 self.advance()
                 ts = self.type_spec()
                 type_names.append(self._type_system_to_mangle_str(ts))
+                type_specs.append(ts)
             self.consume(TokenType.GREATER_THAN)
             # Now consume the argument list
             self.consume(TokenType.LEFT_PAREN)
@@ -3076,7 +3106,7 @@ class FluxParser:
             if not self.expect(TokenType.RIGHT_PAREN):
                 args = self.argument_list()
             self.consume(TokenType.RIGHT_PAREN)
-            mangled = self._resolve_template_call(expr.name, type_names)
+            mangled = self._resolve_template_call(expr.name, type_names, type_specs)
             expr = FunctionCall(mangled, args)
 
         while True:

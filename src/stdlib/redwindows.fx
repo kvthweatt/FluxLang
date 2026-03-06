@@ -40,6 +40,9 @@ namespace standard
                                  WPARAM,
                                  LPARAM,
                                  LRESULT;
+            
+            // HRESULT - standard COM return code
+            signed data{32} as HRESULT;
 
             // String types
             byte* as LPCSTR,      // Pointer to const string

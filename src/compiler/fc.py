@@ -576,6 +576,8 @@ class FluxCompiler:
                                 "-lgdi32 "
                                 "-lopengl32 "
                                 "-lgdiplus "
+                                "-ld2d1 "
+                                "-ldwrite "
                                 #"-llibsynchronization "
                                 "-llegacy_stdio_definitions "  # For stdio functions in UCRT
                                 # Alternatively for older MSVCRT:

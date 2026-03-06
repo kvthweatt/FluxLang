@@ -17,14 +17,14 @@ namespace standard
     namespace collections
     {
         // ============================================================================
-        // DYNARRAY
+        // Dynamic Array
         // A heap-allocated, dynamically resizing array of fixed-size elements.
         // Elements are stored as raw bytes; the caller is responsible for casting.
         // elem_size: size in bytes of each element, passed at construction time.
         // Capacity doubles when full (2x growth strategy).
         //
         // Usage example:
-        //   DynArray arr((size_t)4);          // array of 4-byte (int) elements
+        //   Array arr((size_t)4);          // array of 4-byte (int) elements
         //   int x = 42;
         //   arr.push(@x);
         //   int* p = (int*)arr.get((size_t)0);

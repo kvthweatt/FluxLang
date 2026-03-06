@@ -1,15 +1,9 @@
-#import "standard.fx", "redmath.fx", "redwindows.fx", "redgraphing.fx", "redallocators.fx";
+#import "standard.fx", "redmath.fx", "redwindows.fx", "redgraphing.fx";
 
 using standard::system::windows;
 using standard::math;
 using standard::graphing;
 using standard::memory::allocators::stdheap;
-
-extern
-{
-    def !!
-        Sleep(u32) -> void;
-};
 
 // ============================================================================
 // CONSTANTS

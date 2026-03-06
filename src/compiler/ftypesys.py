@@ -3707,7 +3707,20 @@ class FunctionTypeHandler:
             isinstance(expected_type.pointee, ir.IntType) and 
             expected_type.pointee.width == 8):
             if isinstance(arg_val.type, ir.PointerType):
+                # If it's a pointer to an array, decay it first via GEP then bitcast
+                if isinstance(arg_val.type.pointee, ir.ArrayType):
+                    zero = ir.Constant(ir.IntType(32), 0)
+                    decayed = builder.gep(arg_val, [zero, zero], name=f"arg{arg_index}_decay")
+                    return builder.bitcast(decayed, expected_type, name=f"arg{arg_index}_to_void_ptr")
                 return builder.bitcast(arg_val, expected_type, name=f"arg{arg_index}_to_void_ptr")
+
+        # Convert i8* (void*) to pointer-to-array: i8* -> [N x T]*
+        if (isinstance(arg_val.type, ir.PointerType) and
+            isinstance(arg_val.type.pointee, ir.IntType) and
+            arg_val.type.pointee.width == 8 and
+            isinstance(expected_type, ir.PointerType) and
+            isinstance(expected_type.pointee, ir.ArrayType)):
+            return builder.bitcast(arg_val, expected_type, name=f"arg{arg_index}_to_array_ptr")
         
         # Convert FROM void*
         elif (isinstance(arg_val.type, ir.PointerType) and 
@@ -4079,7 +4092,7 @@ class AssignmentTypeHandler:
     
     @staticmethod
     def handle_member_assignment(builder, module, target_obj_expr, member_name: str, val):
-        from fast import Identifier
+        from fast import Identifier, MemberAccess
         
         # For member access, we need the pointer, not the loaded value
         if isinstance(target_obj_expr, Identifier):
@@ -4109,9 +4122,23 @@ class AssignmentTypeHandler:
                     obj = mangled_obj
                 else:
                     raise NameError(f"Unknown variable: {var_name}")
+        elif isinstance(target_obj_expr, MemberAccess):
+            # Nested member access (e.g. foo.bar.baz = val): use _get_member_ptr
+            # to obtain the GEP pointer to the intermediate struct member without
+            # loading it, so the final member store targets the correct memory location.
+            obj = target_obj_expr._get_member_ptr(builder, module)
         else:
             # For other expressions, generate code normally
             obj = target_obj_expr.codegen(builder, module)
+        
+        # If obj is a pointer-to-pointer-to-struct (e.g. a struct pointer field inside
+        # an object), load once to get the actual struct pointer before GEP-ing into it.
+        if (isinstance(obj.type, ir.PointerType) and
+                isinstance(obj.type.pointee, ir.PointerType) and
+                (isinstance(obj.type.pointee.pointee, ir.LiteralStructType) or
+                 hasattr(obj.type.pointee.pointee, '_name') or
+                 hasattr(obj.type.pointee.pointee, 'elements'))):
+            obj = builder.load(obj, name="struct_ptr")
         
         # Handle both literal struct types and identified struct types
         is_struct_pointer = (isinstance(obj.type, ir.PointerType) and 
