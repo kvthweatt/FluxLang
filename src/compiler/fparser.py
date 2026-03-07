@@ -2830,7 +2830,7 @@ class FluxParser:
                 target_type = self.type_spec()
                 if self.expect(TokenType.RIGHT_PAREN):
                     self.advance()  # consume ')'
-                    expr = self.unary_expression()
+                    expr = self.cast_expression()
                     
                     # ALWAYS use CastExpression - let codegen figure out if it's a struct
                     return CastExpression(target_type, expr)

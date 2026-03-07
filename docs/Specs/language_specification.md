@@ -9,6 +9,9 @@ The goal is to create a version 1 of Flux which can be used to rewrite itself.
 Python makes dealing with arrays simplistic, but doesn't have pointers natively. Flux solves this problem.  
 If you like Flux, please consider contributing to the project or joining the [Flux Discord server](https://discord.gg/RAHjbYuNUc) where you can ask questions, provide feedback, and talk with other Flux enjoyers!
 
+**Creator note:** Everything in Flux is **stack allocated** unless specified.  
+This means you are likely to introduce stack overflows if you perform allocations inside loops.
+
 ---
 
 ## **Functions:**

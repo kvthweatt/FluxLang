@@ -2807,58 +2807,84 @@ class ArrayTypeHandler:
     @staticmethod
     def pack_array_to_integer(builder: ir.IRBuilder, module: ir.Module, 
                              array_lit, target_type: ir.IntType) -> ir.Value:
-        """Pack array literal elements into a single integer (compile-time if possible)."""
+        """Pack array literal elements into a single integer (compile-time if possible).
+        Element 0 is leftmost = high bits; element N-1 is rightmost = low bits."""
         #print("[TYPESYS] In pack_array_to_integer()")
-        packed_value = 0
-        bit_offset = 0
-        
+
+        # Collect all elements first so we can compute starting offset
+        elem_vals = []
+        elem_widths = []
         for elem in array_lit.elements:
             elem_val = elem.codegen(builder, module)
-            
+
             # Load if it's a pointer
             if isinstance(elem_val.type, ir.PointerType):
                 elem_val = builder.load(elem_val)
-            
+
+            # Bitcast float/double to integer bits for packing
+            if isinstance(elem_val.type, ir.FloatType):
+                elem_val = builder.bitcast(elem_val, ir.IntType(32), name="float_bits")
+            elif isinstance(elem_val.type, ir.DoubleType):
+                elem_val = builder.bitcast(elem_val, ir.IntType(64), name="double_bits")
+
             # Must be an integer
             if not isinstance(elem_val.type, ir.IntType):
                 raise ValueError(f"Cannot pack non-integer type {elem_val.type} into integer")
-            
-            elem_width = elem_val.type.width
-            
+
             # Convert to runtime packing if not constant
             if not isinstance(elem_val, ir.Constant):
                 return ArrayTypeHandler.pack_array_to_integer_runtime(builder, module, array_lit, target_type)
-            
-            # Pack constant value
+
+            elem_vals.append(elem_val)
+            elem_widths.append(elem_val.type.width)
+
+        total_bits = sum(elem_widths)
+        if total_bits != target_type.width:
+            raise ValueError(f"Array packing size mismatch: packed {total_bits} bits into {target_type.width}-bit integer")
+
+        # Element 0 is leftmost = high bits; place each element stepping down from the top
+        packed_value = 0
+        bit_offset = total_bits
+        for elem_val, elem_width in zip(elem_vals, elem_widths):
+            bit_offset -= elem_width
             packed_value |= (elem_val.constant << bit_offset)
-            bit_offset += elem_width
-        
-        # Verify total width matches target
-        if bit_offset != target_type.width:
-            raise ValueError(f"Array packing size mismatch: packed {bit_offset} bits into {target_type.width}-bit integer")
-        
+
         return ir.Constant(target_type, packed_value)
 
     @staticmethod
     def pack_array_to_integer_runtime(builder: ir.IRBuilder, module: ir.Module, array_lit,  target_type: ir.IntType) -> ir.Value:
-        """Pack array elements into integer at runtime."""
-        result = ir.Constant(target_type, 0)
-        bit_offset = 0
-        
+        """Pack array elements into integer at runtime.
+        Element 0 is leftmost = high bits; element N-1 is rightmost = low bits."""
+        # Collect and convert all elements first to determine total width
+        elem_vals = []
+        elem_widths = []
         for elem in array_lit.elements:
             elem_val = elem.codegen(builder, module)
-            
+
             # Load if it's a pointer
             if isinstance(elem_val.type, ir.PointerType):
                 elem_val = builder.load(elem_val)
-            
+
+            # Bitcast float/double to integer bits for packing
+            if isinstance(elem_val.type, ir.FloatType):
+                elem_val = builder.bitcast(elem_val, ir.IntType(32), name="float_bits")
+            elif isinstance(elem_val.type, ir.DoubleType):
+                elem_val = builder.bitcast(elem_val, ir.IntType(64), name="double_bits")
+
             # Must be an integer
             if not isinstance(elem_val.type, ir.IntType):
                 raise ValueError(f"Cannot pack non-integer type {elem_val.type} into integer")
-            
-            # Use helper to pack value
-            result, bit_offset = ArrayTypeHandler._pack_value_into_integer(builder, result, elem_val, target_type, bit_offset)
-        
+
+            elem_vals.append(elem_val)
+            elem_widths.append(elem_val.type.width)
+
+        # Element 0 is leftmost = high bits; place each element stepping down from the top
+        result = ir.Constant(target_type, 0)
+        bit_offset = target_type.width
+        for elem_val, elem_width in zip(elem_vals, elem_widths):
+            bit_offset -= elem_width
+            result, _ = ArrayTypeHandler._pack_value_into_integer(builder, result, elem_val, target_type, bit_offset)
+
         return result
 
     @staticmethod
@@ -2872,14 +2898,21 @@ class ArrayTypeHandler:
         
         array_type = array_ptr.type.pointee
         elem_type = array_type.element
-        
-        if not isinstance(elem_type, ir.IntType):
+
+        # Determine element bit width; floats are reinterpreted as integer bits
+        if isinstance(elem_type, ir.IntType):
+            elem_bits = elem_type.width
+        elif isinstance(elem_type, ir.FloatType):
+            elem_bits = 32
+        elif isinstance(elem_type, ir.DoubleType):
+            elem_bits = 64
+        else:
             raise ValueError(f"Cannot pack array of non-integer type {elem_type}")
         
         # Calculate expected total bits
-        total_bits = array_type.count * elem_type.width
+        total_bits = array_type.count * elem_bits
         if total_bits != target_type.width:
-            raise ValueError(f"Array packing size mismatch: {array_type.count} x {elem_type.width} = {total_bits} bits into {target_type.width}-bit integer")
+            raise ValueError(f"Array packing size mismatch: {array_type.count} x {elem_bits} = {total_bits} bits into {target_type.width}-bit integer")
         
         # Pack at runtime (big-endian: first element at high bits, last at low bits)
         result = ir.Constant(target_type, 0)
@@ -2890,10 +2923,263 @@ class ArrayTypeHandler:
         for i in range(array_type.count - 1, -1, -1):
             elem_ptr = builder.gep(array_ptr, [zero, ArrayTypeHandler._index(i)], inbounds=True)
             elem_val = builder.load(elem_ptr)
+
+            # Reinterpret float bits as integer for packing
+            if isinstance(elem_val.type, ir.FloatType):
+                elem_val = builder.bitcast(elem_val, ir.IntType(32), name="float_bits")
+            elif isinstance(elem_val.type, ir.DoubleType):
+                elem_val = builder.bitcast(elem_val, ir.IntType(64), name="double_bits")
             
             result, bit_offset = ArrayTypeHandler._pack_value_into_integer(builder, result, elem_val, target_type, bit_offset)
         
         return result
+
+    @staticmethod
+    def pack_array_to_float(builder: ir.IRBuilder, module: ir.Module,
+                            array_lit, target_type: ir.FloatType) -> ir.Value:
+        """Pack array literal elements into a single float by reinterpreting bits (compile-time if possible).
+        Element 0 is leftmost = high bits; element N-1 is rightmost = low bits."""
+        if isinstance(target_type, ir.FloatType):
+            int_width = 32
+        elif isinstance(target_type, ir.DoubleType):
+            int_width = 64
+        else:
+            raise ValueError(f"pack_array_to_float: unsupported target float type {target_type}")
+
+        int_type = ir.IntType(int_width)
+
+        # Collect all elements and their bit widths first
+        elem_as_ints = []
+        elem_bits_list = []
+        all_const = True
+        elem_vals_runtime = []
+
+        for elem in array_lit.elements:
+            elem_val = elem.codegen(builder, module)
+
+            if isinstance(elem_val.type, ir.PointerType):
+                elem_val = builder.load(elem_val)
+
+            # Bitcast float/double elements to their integer representation
+            if isinstance(elem_val.type, ir.FloatType):
+                elem_bits = 32
+                if isinstance(elem_val, ir.Constant):
+                    import struct
+                    elem_as_int = struct.unpack('I', struct.pack('f', elem_val.constant))[0]
+                else:
+                    all_const = False
+                    elem_as_int = None
+            elif isinstance(elem_val.type, ir.DoubleType):
+                elem_bits = 64
+                if isinstance(elem_val, ir.Constant):
+                    import struct
+                    elem_as_int = struct.unpack('Q', struct.pack('d', elem_val.constant))[0]
+                else:
+                    all_const = False
+                    elem_as_int = None
+            elif isinstance(elem_val.type, ir.IntType):
+                elem_bits = elem_val.type.width
+                if isinstance(elem_val, ir.Constant):
+                    elem_as_int = elem_val.constant
+                else:
+                    all_const = False
+                    elem_as_int = None
+            else:
+                raise ValueError(f"Cannot pack element of type {elem_val.type} into float")
+
+            elem_as_ints.append(elem_as_int)
+            elem_bits_list.append(elem_bits)
+            elem_vals_runtime.append(elem_val)
+
+        total_bits = sum(elem_bits_list)
+        if total_bits != int_width:
+            raise ValueError(f"Array packing size mismatch: packed {total_bits} bits into {int_width}-bit float")
+
+        if all_const:
+            # Element 0 is leftmost = high bits
+            packed_value = 0
+            bit_offset = int_width
+            for elem_as_int, elem_bits in zip(elem_as_ints, elem_bits_list):
+                bit_offset -= elem_bits
+                packed_value |= (elem_as_int << bit_offset)
+            import struct
+            if int_width == 32:
+                float_val = struct.unpack('f', struct.pack('I', packed_value & 0xFFFFFFFF))[0]
+            else:
+                float_val = struct.unpack('d', struct.pack('Q', packed_value & 0xFFFFFFFFFFFFFFFF))[0]
+            return ir.Constant(target_type, float_val)
+
+        return ArrayTypeHandler.pack_array_to_float_runtime(builder, module, array_lit, target_type)
+
+    @staticmethod
+    def pack_array_to_float_runtime(builder: ir.IRBuilder, module: ir.Module,
+                                    array_lit, target_type: ir.FloatType) -> ir.Value:
+        """Pack array elements into a single float at runtime by reinterpreting the combined integer bits.
+        Element 0 is leftmost = high bits; element N-1 is rightmost = low bits."""
+        if isinstance(target_type, ir.FloatType):
+            int_width = 32
+        elif isinstance(target_type, ir.DoubleType):
+            int_width = 64
+        else:
+            raise ValueError(f"pack_array_to_float_runtime: unsupported target float type {target_type}")
+
+        int_type = ir.IntType(int_width)
+
+        # Collect elements and widths first so we can place from high to low
+        elem_vals = []
+        elem_widths = []
+        for elem in array_lit.elements:
+            elem_val = elem.codegen(builder, module)
+
+            if isinstance(elem_val.type, ir.PointerType):
+                elem_val = builder.load(elem_val)
+
+            # Bitcast float/double to integer bits
+            if isinstance(elem_val.type, ir.FloatType):
+                elem_val = builder.bitcast(elem_val, ir.IntType(32), name="float_bits")
+            elif isinstance(elem_val.type, ir.DoubleType):
+                elem_val = builder.bitcast(elem_val, ir.IntType(64), name="double_bits")
+
+            if not isinstance(elem_val.type, ir.IntType):
+                raise ValueError(f"Cannot pack element of type {elem_val.type} into float")
+
+            elem_vals.append(elem_val)
+            elem_widths.append(elem_val.type.width)
+
+        # Element 0 is leftmost = high bits; place each element stepping down from the top
+        result = ir.Constant(int_type, 0)
+        bit_offset = int_width
+        for elem_val, elem_width in zip(elem_vals, elem_widths):
+            bit_offset -= elem_width
+            result, _ = ArrayTypeHandler._pack_value_into_integer(builder, result, elem_val, int_type, bit_offset)
+
+        # Reinterpret the packed integer bits as the target float type
+        return builder.bitcast(result, target_type, name="int_to_float_bits")
+
+    @staticmethod
+    def pack_array_pointer_to_float(builder: ir.IRBuilder, module: ir.Module,
+                                    array_ptr: ir.Value, target_type) -> ir.Value:
+        """Pack an array (via pointer) into a single float by reinterpreting bits at runtime."""
+        if not isinstance(array_ptr.type, ir.PointerType):
+            raise ValueError("Expected pointer to array")
+
+        if not isinstance(array_ptr.type.pointee, ir.ArrayType):
+            raise ValueError("Expected pointer to array type")
+
+        array_type = array_ptr.type.pointee
+        elem_type = array_type.element
+
+        if isinstance(target_type, ir.FloatType):
+            int_width = 32
+        elif isinstance(target_type, ir.DoubleType):
+            int_width = 64
+        else:
+            raise ValueError(f"pack_array_pointer_to_float: unsupported target float type {target_type}")
+
+        # Determine element bit width
+        if isinstance(elem_type, ir.IntType):
+            elem_bits = elem_type.width
+        elif isinstance(elem_type, ir.FloatType):
+            elem_bits = 32
+        elif isinstance(elem_type, ir.DoubleType):
+            elem_bits = 64
+        else:
+            raise ValueError(f"Cannot pack array of type {elem_type} into float")
+
+        total_bits = array_type.count * elem_bits
+        if total_bits != int_width:
+            raise ValueError(f"Array packing size mismatch: {array_type.count} x {elem_bits} = {total_bits} bits into {int_width}-bit float")
+
+        int_type = ir.IntType(int_width)
+        result = ir.Constant(int_type, 0)
+        bit_offset = 0
+
+        zero = ArrayTypeHandler._zero()
+        # Iterate in reverse: last element goes to low bits
+        for i in range(array_type.count - 1, -1, -1):
+            elem_ptr = builder.gep(array_ptr, [zero, ArrayTypeHandler._index(i)], inbounds=True)
+            elem_val = builder.load(elem_ptr)
+
+            # Reinterpret float bits as integer for packing
+            if isinstance(elem_val.type, ir.FloatType):
+                elem_val = builder.bitcast(elem_val, ir.IntType(32), name="float_bits")
+            elif isinstance(elem_val.type, ir.DoubleType):
+                elem_val = builder.bitcast(elem_val, ir.IntType(64), name="double_bits")
+
+            result, bit_offset = ArrayTypeHandler._pack_value_into_integer(
+                builder, result, elem_val, int_type, bit_offset)
+
+        # Reinterpret the packed integer bits as the target float type
+        return builder.bitcast(result, target_type, name="int_to_float_bits")
+
+    @staticmethod
+    def unpack_integer_to_array(builder: ir.IRBuilder, module: ir.Module,
+                                source_val: ir.Value, target_type: ir.ArrayType) -> ir.Value:
+        """Unpack an integer (or float) into an array by reinterpreting bits.
+        Each element is extracted from the source value at the appropriate bit offset.
+        Returns a pointer to a stack-allocated array."""
+        elem_type = target_type.element
+        count = target_type.count
+
+        # Determine element bit width
+        if isinstance(elem_type, ir.IntType):
+            elem_bits = elem_type.width
+            is_float_elem = False
+            int_elem_type = elem_type
+        elif isinstance(elem_type, ir.FloatType):
+            elem_bits = 32
+            is_float_elem = True
+            int_elem_type = ir.IntType(32)
+        elif isinstance(elem_type, ir.DoubleType):
+            elem_bits = 64
+            is_float_elem = True
+            int_elem_type = ir.IntType(64)
+        else:
+            raise ValueError(f"Cannot unpack into array of type {elem_type}")
+
+        total_bits = count * elem_bits
+
+        # Normalize source to an integer of the right width
+        int_type = ir.IntType(total_bits)
+        if isinstance(source_val.type, ir.IntType):
+            if source_val.type.width == total_bits:
+                packed = source_val
+            elif source_val.type.width > total_bits:
+                packed = builder.trunc(source_val, int_type, name="unpack_trunc")
+            else:
+                packed = builder.zext(source_val, int_type, name="unpack_zext")
+        elif isinstance(source_val.type, (ir.FloatType, ir.DoubleType)):
+            packed = builder.bitcast(source_val, int_type, name="float_to_bits")
+        else:
+            raise ValueError(f"Cannot unpack source type {source_val.type} into array")
+
+        # Allocate array on the stack and store each extracted element.
+        # Element 0 is leftmost = high bits, so element i lives at bit offset (count-1-i)*elem_bits.
+        alloca = builder.alloca(target_type, name="unpacked_arr")
+        zero = ArrayTypeHandler._zero()
+        mask = ir.Constant(int_type, (1 << elem_bits) - 1)
+
+        for i in range(count):
+            bit_pos = (count - 1 - i) * elem_bits
+            shift = ir.Constant(int_type, bit_pos)
+            shifted = builder.lshr(packed, shift, name=f"unpack_shift_{i}")
+            elem_int = builder.and_(shifted, mask, name=f"unpack_elem_{i}")
+
+            if is_float_elem:
+                # Truncate to element int width if needed, then bitcast to float
+                if total_bits != elem_bits:
+                    elem_int = builder.trunc(elem_int, int_elem_type, name=f"unpack_trunc_{i}")
+                elem_val = builder.bitcast(elem_int, elem_type, name=f"unpack_float_{i}")
+            else:
+                # Truncate to element integer width if needed
+                if total_bits != elem_bits:
+                    elem_int = builder.trunc(elem_int, elem_type, name=f"unpack_trunc_{i}")
+                elem_val = elem_int
+
+            elem_ptr = builder.gep(alloca, [zero, ArrayTypeHandler._index(i)], inbounds=True)
+            builder.store(elem_val, elem_ptr)
+
+        return alloca
 
     @staticmethod
     def initialize_local_string(builder: ir.IRBuilder, module: ir.Module, alloca: ir.Value, llvm_type: ir.Type, string_literal) -> None:

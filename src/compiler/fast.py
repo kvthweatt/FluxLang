@@ -1290,6 +1290,16 @@ class CastExpression(Expression):
                 return ArrayTypeHandler.pack_array_pointer_to_integer(builder, module, source_val, target_llvm_type)
             # Regular pointer to integer (reinterpret cast like (i64*)ptr)
             return builder.ptrtoint(source_val, target_llvm_type, name="ptr_to_int")
+
+        # Handle pointer to float cast: array pointer -> float (reinterpret bits)
+        elif isinstance(source_val.type, ir.PointerType) and isinstance(target_llvm_type, (ir.FloatType, ir.DoubleType)):
+            if isinstance(source_val.type.pointee, ir.ArrayType):
+                return ArrayTypeHandler.pack_array_pointer_to_float(builder, module, source_val, target_llvm_type)
+
+        # Handle integer/float to array cast: unpack bits into array elements
+        elif isinstance(target_llvm_type, ir.ArrayType):
+            return ArrayTypeHandler.unpack_integer_to_array(builder, module, source_val, target_llvm_type)
+
         else:
             raise ValueError(f"Unsupported cast from {source_val.type} to {target_llvm_type}")
     
