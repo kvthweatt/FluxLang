@@ -850,31 +850,6 @@ while (condition)
 
 ---
 
-## **Destructuring with auto:**  
-Destructuring is only done with structs. Structure / Destructure. No confusion.
-```
-struct Point1 { int x; int y; };
-
-Point1 myPoint1 = {x = 10, y = 20};
-
-auto {t, m} = myPoint1{x,y};        // int t=10, int m=20
-```
-
-**Restructuring with from:**
-Since deserialization only cares that the size of the serialized data equals the size of the struct.  
-For example, struct `Point2` has the same size as `Point1`, but the internal datatypes are different.
-```
-struct Point2 { i16 a, b, c, d; };             // Still 64 bits wide
-
-Point2 myPoint2 = {a = 5, b = 10, c = 20, d = 40};
-
-Point2 newPoint2 = serialized from myPoint2;   // Now restructured as i16 types
-```
-
-Since structures are data-only, they are already serialized.
-
----
-
 ## **Error handling with try/throw/catch:**
 ```
 unsigned data{8}[] as string;  // Basic string implementation with no functionality (non-OOP string)
