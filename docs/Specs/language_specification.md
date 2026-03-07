@@ -1023,6 +1023,38 @@ def main() -> int
 
 ---
 
+## **Custom Infix Operators and Overloading**
+- Custom:
+```
+operator (int L, int R) [+++] -> int
+{
+    return ++L + ++R;
+};
+```
+Usage: `a +++ b`
+
+- Identifier-based:
+```
+operator (int L, int R) [NOPOR] -> bool
+{
+    return !L | !R;
+};
+```
+Usage: `a NOPOR b`
+
+- Overloading:
+Overloading built-in operators is allowed, with rules.
+1. One parameter must not be a built-in type.  
+2. The precedence and associativity cannot be changed.
+```
+operator (int L, BigInt R) [+] -> bool
+{
+    // Implementation for adding an int and a BigInt
+};
+```
+
+---
+
 ## **Advanced Pointer Manipulation**
 
 ### Taking Address of Literals

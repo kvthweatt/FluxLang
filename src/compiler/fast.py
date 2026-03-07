@@ -659,6 +659,38 @@ class StringLiteral(Expression):
             # Return the global variable itself (pointer to array)
             return gv
 
+_BUILTIN_OP_SYMBOL_MANGLE = {
+    '%': 'pct',  '+': 'plus', '-': 'minus', '*': 'mul',
+    '/': 'div',  '<': 'lt',   '>': 'gt',    '=': 'eq',
+    '&': 'amp',  '|': 'pipe', '^': 'xor',   '!': 'not',
+    '?': 'qst',  '@': 'at',   '~': 'tilde',
+}
+
+def _mangle_builtin_op(symbol: str) -> str:
+    """Reproduce the parser's _mangle_op_symbol logic for built-in operator names."""
+    # This mirrors parser._symbol_to_parts (greedy longest-first) then _mangle_op_symbol.
+    multi = sorted(['^^!&', '^^!|', '^^!', '^^', '!&', '!|', '<=', '>=', '==', '!=',
+                    '++', '--', '<<', '>>', '`!&', '`!|', '`^^'],
+                   key=len, reverse=True)
+    parts = []
+    i = 0
+    while i < len(symbol):
+        matched = False
+        for m in multi:
+            if symbol[i:i+len(m)] == m:
+                parts.append(m)
+                i += len(m)
+                matched = True
+                break
+        if not matched:
+            parts.append(symbol[i])
+            i += 1
+    # Mangle each part: char-by-char with underscore joining, then join parts with underscore
+    mangled_parts = []
+    for part in parts:
+        mangled_parts.append('_'.join(_BUILTIN_OP_SYMBOL_MANGLE.get(c, hex(ord(c))) for c in part))
+    return '_'.join(mangled_parts)
+
 @dataclass
 class BinaryOp(Expression):
     left: Expression
@@ -673,6 +705,68 @@ class BinaryOp(Expression):
 
         lhs = self.left.codegen(builder, module)
         rhs = self.right.codegen(builder, module)
+
+        # --------------------------------------------------
+        # Built-in operator overload check
+        # If the user has defined `operator(T a, T b)[<op>] -> R`, dispatch
+        # to that function instead of emitting the default built-in IR.
+        # Only dispatch when the argument types match exactly or via standard
+        # implicit decay (array-pointer decay: [N x T]* -> T*).
+        # Never fall back to a count-only match, which would cause recursive
+        # mis-dispatch inside the overload body itself (e.g. `return L + t`
+        # re-entering the overload).
+        # --------------------------------------------------
+        if hasattr(module, '_function_overloads'):
+            op_symbol = self.operator.value
+            op_func_name = f"operator__{_mangle_builtin_op(op_symbol)}"
+            if op_func_name in module._function_overloads:
+                overload_func = None
+                for overload in module._function_overloads[op_func_name]:
+                    if overload['param_count'] != 2:
+                        continue
+                    func = overload['function']
+                    param_types = [p.type for p in func.args]
+                    if len(param_types) != 2:
+                        continue
+                    arg_raw = [lhs, rhs]
+                    types_match = True
+                    for raw, pt in zip(arg_raw, param_types):
+                        rt = raw.type
+                        if rt == pt:
+                            continue
+                        # Scalar alloca load: T* matches T (auto-deref of local variable)
+                        if (isinstance(rt, ir.PointerType) and
+                                not isinstance(rt.pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType)) and
+                                rt.pointee == pt):
+                            continue
+                        # Array-pointer decay: [N x T]* matches T*
+                        if (isinstance(rt, ir.PointerType) and
+                                isinstance(rt.pointee, ir.ArrayType) and
+                                isinstance(pt, ir.PointerType) and
+                                rt.pointee.element == pt.pointee):
+                            continue
+                        types_match = False
+                        break
+                    if types_match:
+                        overload_func = func
+                        break
+                if overload_func is not None:
+                    # Adapt argument types to what the overloaded function expects
+                    arg_vals = [lhs, rhs]
+                    param_types = [p.type for p in overload_func.args]
+                    adapted = []
+                    for i, (av, pt) in enumerate(zip(arg_vals, param_types)):
+                        rt = av.type
+                        # Scalar alloca: load T* to get T
+                        if (isinstance(rt, ir.PointerType) and
+                                not isinstance(rt.pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType)) and
+                                rt.pointee == pt):
+                            av = builder.load(av, name=f"op_deref_{i}")
+                        else:
+                            av = FunctionTypeHandler.convert_argument_to_parameter_type(
+                                builder, module, av, pt, i)
+                        adapted.append(av)
+                    return builder.call(overload_func, adapted, name="op_overload_result")
 
         # --------------------------------------------------
         # Check if this might be pointer arithmetic BEFORE auto-dereferencing
@@ -4432,7 +4526,7 @@ class TryBlock(Statement):
         # Check exception flag
         builder.position_at_start(catch_check_block)
         exc_flag_val = builder.load(exc_flag, name='exc_flag')
-        zero = ir.Constant(ir.IntType(1), 0)
+        zero = ir.Constant(ir.IntType(32), 0)
         has_exception = builder.icmp_signed('!=', exc_flag_val, zero, name='has_exception')
         
         # Branch: if exception, go to first catch; otherwise go to end

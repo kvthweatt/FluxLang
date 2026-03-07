@@ -10,7 +10,7 @@ using standard::math;
 
 const int WIN_W    = 900;
 const int WIN_H    = 900;
-const int MAX_ITER = 1024;
+const int MAX_ITER = 128;
 
 // Virtual key codes
 const int VK_W    = 0x57;
@@ -81,9 +81,9 @@ def fp256_from_float(float f, fp256* r) -> void
     r.hi = (u64)0;
 
     if (((bits >> 23) `& 0xFF) == (u64)0) { return; };  // zero or denormal
-    if (exp < -229) { return; };  // too small to represent
+    if (exp < -225) { return; };  // too small to represent
 
-    shift = 229 + exp;  // bit position of mantissa bit 0 in the 256-bit number (Q4.252 layout)
+    shift = 225 + exp;  // bit position of mantissa bit 0 in the 256-bit number (Q8.248 layout)
 
     // Place mantissa (24 bits) starting at bit `shift`
     // We do this limb by limb.  shift can range roughly from
@@ -173,9 +173,9 @@ def fp256_to_float(fp256* a) -> float
     // Lower half (bits 31:0  of hi) weight:        2^-60
     hi_upper = abs_hi >> 32;
     hi_lower = abs_hi `& 0xFFFFFFFF;
-    f_upper = (float)(i32)hi_upper / 268435456.0;  // divide by 2^28
-    f_lower = (float)(i32)hi_lower / 1073741824.0;  // divide by 2^30
-    f_lower = f_lower              / 1073741824.0;  // divide by 2^30 -> total 2^60
+    f_upper = (float)(i32)hi_upper / 16777216.0;   // divide by 2^24
+    f_lower = (float)(i32)hi_lower / 16777216.0;    // divide by 2^24
+    f_lower = f_lower              / 4294967296.0;  // divide by 2^32 -> total 2^56
     f_hi = f_upper + f_lower;
 
     result = f_hi;
@@ -197,12 +197,12 @@ def fp256_add(fp256* a, fp256* b, fp256* r) -> void
     m1 = a.m1 + b.m1 + c1;
     c2 = (u64)0;
     if (m1 < a.m1) { c2 = (u64)1; };
-    if (c1 != (u64)0 `& m1 == b.m1) { c2 = (u64)1; };
+    if (c1 != (u64)0 `& m1 == a.m1) { c2 = (u64)1; };
 
     m2 = a.m2 + b.m2 + c2;
     c3 = (u64)0;
     if (m2 < a.m2) { c3 = (u64)1; };
-    if (c2 != (u64)0 `& m2 == b.m2) { c3 = (u64)1; };
+    if (c2 != (u64)0 `& m2 == a.m2) { c3 = (u64)1; };
 
     hi = a.hi + b.hi + c3;
 
@@ -270,7 +270,7 @@ def fp256_mul(fp256* a, fp256* b, fp256* r) -> void
 
     sign_a = (a.hi >> 63) `& (u64)1;
     sign_b = (b.hi >> 63) `& (u64)1;
-    sign_r = sign_a ^ sign_b;
+    sign_r = sign_a `^^ sign_b;
 
     // Compute |a|
     abs_a.lo = a.lo; abs_a.m1 = a.m1; abs_a.m2 = a.m2; abs_a.hi = a.hi;
@@ -404,10 +404,10 @@ def fp256_mul(fp256* a, fp256* b, fp256* r) -> void
     // So we take limbs r3..r7 and shift right by 62 within them.
     // Result = (r3 >> 62) | (r4 << 2), etc.
 
-    r.lo = (r3 >> 60) | (r4 << 4);
-    r.m1 = (r4 >> 60) | (r5 << 4);
-    r.m2 = (r5 >> 60) | (r6 << 4);
-    r.hi = (r6 >> 60) | (r7 << 4);
+    r.lo = (r3 >> 56) | (r4 << 8);
+    r.m1 = (r4 >> 56) | (r5 << 8);
+    r.m2 = (r5 >> 56) | (r6 << 8);
+    r.hi = (r6 >> 56) | (r7 << 8);
 
     // Re-apply sign
     if (sign_r != (u64)0)
@@ -527,7 +527,7 @@ def main() -> int
 
     float px0, px1, py0, py1, r, gv, b;
 
-    const int TILE = 1;
+    const int TILE = 4;
     int cols, rows, row, col, iter, cur_w, cur_h;
 
     DWORD t_now, t_last;

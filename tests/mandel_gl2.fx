@@ -8,9 +8,11 @@ using standard::math;
 // W = zoom in, S = zoom out
 // ============================================================================
 
-const int WIN_W    = 900;
-const int WIN_H    = 900;
-const int MAX_ITER = 1024;
+const int WIN_W        = 900;
+const int WIN_H        = 900;
+const int MAX_ITER     = 1024;
+const int TILE_STILL   = 1;   // Tile size when stationary
+const int TILE_MOVING  = 4;   // Tile size while a key is held - faster pan/zoom
 
 // Virtual key codes
 const int VK_W    = 0x57;
@@ -94,21 +96,35 @@ def dd_scale(u64 a, float s) -> u64
 };
 
 // Compute Mandelbrot iteration count using double-double precision
-def mandelbrot(u64 x0, u64 y0) -> int
+def mandelbrot(u64 x0, u64 y0, int max_iter) -> int
 {
     u64 x, y, xx, yy, xtemp;
-    float mag;
+    float cx, cy, q, xhi, yhi, xxhi, yyhi;
     int iter;
+
+    // Cardioid and period-2 bulb check using hi parts only (float precision sufficient)
+    // Points inside either region are guaranteed to never escape - skip iteration entirely
+    cx = dd_hi(x0) - 0.25;
+    cy = dd_hi(y0);
+    q  = cx * cx + cy * cy;
+    // Main cardioid: q*(q + cx) < cy*cy*0.25
+    if (q * (q + cx) < cy * cy * 0.25) { return max_iter; };
+    // Period-2 bulb: (x+1)^2 + y^2 < 1/16
+    cx = dd_hi(x0) + 1.0;
+    if (cx * cx + cy * cy < 0.0625) { return max_iter; };
+
     x    = dd_pack(0.0, 0.0);
     y    = dd_pack(0.0, 0.0);
     iter = 0;
 
-    while (iter < MAX_ITER)
+    while (iter < max_iter)
     {
-        xx  = dd_mul(x, x);
-        yy  = dd_mul(y, y);
-        mag = dd_hi(dd_add(xx, yy));
-        if (mag > 4.0) { return iter; };
+        xx    = dd_mul(x, x);
+        yy    = dd_mul(y, y);
+        // Use hi parts only for the magnitude bailout check - avoids a full dd_add
+        xxhi  = dd_hi(xx);
+        yyhi  = dd_hi(yy);
+        if (xxhi + yyhi > 4.0) { return iter; };
         xtemp = dd_add(dd_sub(xx, yy), x0);
         y     = dd_add(dd_scale(dd_mul(x, y), 2.0), y0);
         x     = xtemp;
@@ -119,11 +135,11 @@ def mandelbrot(u64 x0, u64 y0) -> int
 };
 
 // Map iteration count to an RGB color using a smooth palette
-def iter_to_color(int iter, float* r, float* g, float* b) -> void
+def iter_to_color(int iter, int max_iter, float* r, float* g, float* b) -> void
 {
     float t, s;
 
-    if (iter == MAX_ITER)
+    if (iter == max_iter)
     {
         // Inside the set - black
         *r = 0.0;
@@ -187,10 +203,12 @@ def main() -> int
     float px0, px1, py0, py1,
           r, gv, b;
 
-    // Pixel tile size - each OpenGL quad covers this many pixels
-    const int TILE = 1;
+    // TILE and max_iter adapt based on whether any key is held:
+    // moving = coarser tiles + fewer iterations for responsive panning/zooming
+    int tile, dyn_max_iter;
     int cols, rows, row, col, iter,
         cur_w, cur_h;
+    bool moving;
 
     DWORD t_now, t_last;
     t_last = GetTickCount();
@@ -214,11 +232,6 @@ def main() -> int
         if (cur_w < 1) { cur_w = 1; };
         if (cur_h < 1) { cur_h = 1; };
 
-        cols = cur_w / TILE;
-        rows = cur_h / TILE;
-        if (cols < 1) { cols = 1; };
-        if (rows < 1) { rows = 1; };
-
         // Update viewport to match current window size
         glViewport(0, 0, cur_w, cur_h);
 
@@ -229,18 +242,55 @@ def main() -> int
         up_state = GetAsyncKeyState(VK_UP);
         dn_state = GetAsyncKeyState(VK_DOWN);
 
+        // Detect if any movement key is held for adaptive quality
+        moving = ((w_state  `& 0x8000) != 0) |
+                 ((s_state  `& 0x8000) != 0) |
+                 ((a_state  `& 0x8000) != 0) |
+                 ((d_state  `& 0x8000) != 0) |
+                 ((up_state `& 0x8000) != 0) |
+                 ((dn_state `& 0x8000) != 0);
+
+        // Coarser tile + fewer iters while navigating, full quality when still
+        tile = moving ? TILE_MOVING : TILE_STILL;
+
+        cols = cur_w / tile;
+        rows = cur_h / tile;
+        if (cols < 1) { cols = 1; };
+        if (rows < 1) { rows = 1; };
+
+        // Scale max iterations with zoom depth: shallow zoom needs far fewer iters.
+        // zoom_hi ranges from ~8.0 (fully out) to ~0.0000000001 (deep in).
+        // At zoom 8 cap at 128; at zoom 1 cap at 256; deep zoom uses full MAX_ITER.
+        zoom_hi = dd_hi(zoom);
+        if (zoom_hi > 1.0)
+        {
+            dyn_max_iter = 128;
+        }
+        elif (zoom_hi > 0.01)
+        {
+            dyn_max_iter = 256;
+        }
+        elif (zoom_hi > 0.0001)
+        {
+            dyn_max_iter = 512;
+        }
+        else
+        {
+            dyn_max_iter = MAX_ITER;
+        };
+        // While moving, halve the iteration budget on top of tile coarsening
+        if (moving) { dyn_max_iter = dyn_max_iter >> 1; };
+
         if ((w_state `& 0x8000) != 0)
         {
             zoom   = dd_scale(zoom, 1.0 - zoom_speed * dt);
-            zoom_hi = dd_hi(zoom);
-            if (zoom_hi < 0.0000000001) { zoom = dd_pack(0.0000000001, 0.0); };
+            if (dd_hi(zoom) < 0.0000000001) { zoom = dd_pack(0.0000000001, 0.0); };
         };
 
         if ((s_state `& 0x8000) != 0)
         {
             zoom   = dd_scale(zoom, 1.0 + zoom_speed * dt);
-            zoom_hi = dd_hi(zoom);
-            if (zoom_hi > 8.0) { zoom = dd_pack(8.0, 0.0); };
+            if (dd_hi(zoom) > 8.0) { zoom = dd_pack(8.0, 0.0); };
         };
 
         if ((a_state `& 0x8000) != 0)
@@ -274,6 +324,8 @@ def main() -> int
         x_range = zoom;
         y_range = dd_scale(zoom, (float)cur_h / (float)cur_w);
 
+        // Batch all quads into a single draw call - one glBegin/glEnd for the whole frame
+        glBegin(GL_QUADS);
         row = 0;
         while (row < rows)
         {
@@ -283,33 +335,31 @@ def main() -> int
                 fx = dd_add(x_min, dd_scale(x_range, ((float)col + 0.5) / (float)cols));
                 fy = dd_add(y_min, dd_scale(y_range, ((float)row + 0.5) / (float)rows));
 
-                iter = mandelbrot(fx, fy);
+                iter = mandelbrot(fx, fy, dyn_max_iter);
 
-                iter_to_color(iter, @r, @gv, @b);
+                iter_to_color(iter, dyn_max_iter, @r, @gv, @b);
 
                 glColor3f(r, gv, b);
 
                 // Map tile to NDC [-1, 1] using live window dimensions
                 // Y is inverted: row 0 = top of screen = NDC +1
-                px0 =  -1.0 + 2.0 * (float)(col * TILE) / (float)cur_w;
-                py0 =   1.0 - 2.0 * (float)(row * TILE) / (float)cur_h;
-                px1 =  -1.0 + 2.0 * (float)(col * TILE + TILE) / (float)cur_w;
-                py1 =   1.0 - 2.0 * (float)(row * TILE + TILE) / (float)cur_h;
+                px0 =  -1.0 + 2.0 * (float)(col * tile) / (float)cur_w;
+                py0 =   1.0 - 2.0 * (float)(row * tile) / (float)cur_h;
+                px1 =  -1.0 + 2.0 * (float)(col * tile + tile) / (float)cur_w;
+                py1 =   1.0 - 2.0 * (float)(row * tile + tile) / (float)cur_h;
 
-                glBegin(GL_QUADS);
                 glVertex2f(px0, py0);
                 glVertex2f(px1, py0);
                 glVertex2f(px1, py1);
                 glVertex2f(px0, py1);
-                glEnd();
 
                 col++;
             };
             row++;
         };
+        glEnd();
 
         gl.present();
-        Sleep(16);
     };
 
     gl.__exit();

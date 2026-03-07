@@ -1,246 +1,33 @@
-// Big Integer Library for Flux - Foundation
-// Phase 1: Structure, initialization, and printing
-#import "standard.fx";
+// Big Integer Library for Flux - Full Math Edition
+// Supports: init, print, copy, compare, add, subtract, multiply, divide, modulo, power, shift
+#import "standard.fx", "bigint.fx";
 
 // BigInt structure - stores large integers as arrays of u32 digits
 // Each u32 holds one "digit" in base 2^32
 // digits[0] is least significant, digits[length-1] is most significant
-struct BigInt
-{
-    u32[128] digits;    // Can hold up to 4096 bits (128 * 32)
-    u32 length;         // Number of u32 digits actually used
-    bool negative;      // Sign: false = positive, true = negative
-};
-
-namespace math
-{
-    namespace bigint
-    {
-        // Initialize a BigInt to zero
-        def bigint_zero(BigInt* num) -> void
-        {
-            u32 i;
-            for (i = 0; i < 128; i++)
-            {
-                num.digits[i] = 0;
-            };
-            num.length = 1;
-            num.negative = false;
-            return;
-        };
-        
-        // Initialize a BigInt to one
-        def bigint_one(BigInt* num) -> void
-        {
-            u32 i;
-            num.digits[0] = 1;
-            for (i = 1; i < 128; i++)
-            {
-                num.digits[i] = 0;
-            };
-            num.length = 1;
-            num.negative = false;
-            return;
-        };
-        
-        // Create a BigInt from a u32 value
-        def bigint_from_u32(BigInt* num, u32 value) -> void
-        {
-            u32 i;
-            num.digits[0] = value;
-            for (i = 1; i < 128; i++)
-            {
-                num.digits[i] = 0;
-            };
-            
-            if (value == 0)
-            {
-                num.length = 1;
-            }
-            else
-            {
-                num.length = 1;
-            };
-            
-            num.negative = false;
-            return;
-        };
-        
-        // Create a BigInt from a u64 value
-        def bigint_from_u64(BigInt* num, u64 value) -> void
-        {
-            u32 i;
-            num.digits[0] = (u32)(value & 0xFFFFFFFF);
-            num.digits[1] = (u32)(value >> 32);
-            
-            for (i = 2; i < 128; i++)
-            {
-                num.digits[i] = 0;
-            };
-            
-            if (num.digits[1] != 0)
-            {
-                num.length = 2;
-            }
-            else
-            {
-                if (num.digits[0] != 0)
-                {
-                    num.length = 1;
-                }
-                else
-                {
-                    num.length = 1;
-                };
-            };
-            
-            num.negative = false;
-            return;
-        };
-        
-        // Check if BigInt is zero
-        def bigint_is_zero(BigInt* num) -> bool
-        {
-            if (num.length == 1)
-            {
-                if (num.digits[0] == 0)
-                {
-                    return true;
-                };
-            };
-            return false;
-        };
-        
-        // Check if BigInt is one
-        def bigint_is_one(BigInt* num) -> bool
-        {
-            if (num.negative)
-            {
-                return false;
-            };
-            
-            if (num.length == 1)
-            {
-                if (num.digits[0] == 1)
-                {
-                    return true;
-                };
-            };
-            
-            return false;
-        };
-        
-        // Print a single hex digit
-        def print_hex_digit(u32 digit) -> void
-        {
-            if (digit < 10)
-            {
-                print((byte)('0' + digit));
-            }
-            else
-            {
-                print((byte)('a' + (digit - 10)));
-            };
-            return;
-        };
-        
-        // Print BigInt in hexadecimal format (for debugging)
-        def bigint_print_hex(BigInt* num) -> void
-        {
-            if (num.negative)
-            {
-                print("-\0");
-            };
-            
-            print("0x\0");
-            
-            // Print from most significant to least significant
-            u32 i = num.length;
-            while (i > 0)
-            {
-                i--;
-                
-                u32 digit = num.digits[i];
-                
-                // Print all 8 hex digits for this u32
-                u32 j;
-                for (j = 0; j < 8; j++)
-                {
-                    u32 nibble = (digit >> (28 - j * 4)) & 0xF;
-                    print_hex_digit(nibble);
-                };
-                
-                // Add separator between digits for readability
-                if (i > 0)
-                {
-                    print("_\0");
-                };
-            };
-            
-            return;
-        };
-        
-        // Print BigInt in decimal format (simple version - converts to decimal string)
-        // Note: This is a simplified version that only works for small numbers
-        // We'll implement full decimal conversion later with division
-        def bigint_print_decimal_simple(BigInt* num) -> void
-        {
-            if (num.negative)
-            {
-                print("-\0");
-            };
-            
-            // For now, only handle numbers that fit in u64
-            if (num.length > 2)
-            {
-                print("[Large number - use hex print]\0");
-                return;
-            };
-            
-            u64 value;
-            if (num.length == 2)
-            {
-                value = ((u64)num.digits[1] << 32) | (u64)num.digits[0];
-            }
-            else
-            {
-                value = (u64)num.digits[0];
-            };
-            
-            // Print as u64
-            print((int)value);
-            
-            return;
-        };
-        
-        // Copy one BigInt to another
-        def bigint_copy(BigInt* dest, BigInt* src) -> void
-        {
-            u32 i;
-            for (i = 0; i < 128; i++)
-            {
-                dest.digits[i] = src.digits[i];
-            };
-            dest.length = src.length;
-            dest.negative = src.negative;
-            return;
-        };
-    };
-};
 
 using math::bigint;
 
 def main() -> int
 {
-    print("==== BIG INTEGER FOUNDATION TEST ====\n\n\0");
-    
     BigInt num;
+    BigInt a;
+    BigInt b;
+    BigInt result;
+    BigInt rem_17;
+    BigInt div25;
+    i32 cmp22;
+    i32 cmp23;
+    i32 cmp24;
+    i32 cmp25;
+
+    print("==== BIG INTEGER FOUNDATION TEST ====\n\n\0");
     
     // Test 1: Zero
     print("Test 1: Zero\n\0");
     bigint_zero(@num);
     print("Decimal: \0");
-    bigint_print_decimal_simple(@num);
+    bigint_print(@num);
     print("\nHex: \0");
     bigint_print_hex(@num);
     print("\n\n\0");
@@ -249,7 +36,7 @@ def main() -> int
     print("Test 2: One\n\0");
     bigint_one(@num);
     print("Decimal: \0");
-    bigint_print_decimal_simple(@num);
+    bigint_print(@num);
     print("\nHex: \0");
     bigint_print_hex(@num);
     print("\n\n\0");
@@ -258,7 +45,7 @@ def main() -> int
     print("Test 3: From u32 (42)\n\0");
     bigint_from_u32(@num, 42);
     print("Decimal: \0");
-    bigint_print_decimal_simple(@num);
+    bigint_print(@num);
     print("\nHex: \0");
     bigint_print_hex(@num);
     print("\n\n\0");
@@ -267,7 +54,7 @@ def main() -> int
     print("Test 4: From u32 (0xDEADBEEF)\n\0");
     bigint_from_u32(@num, 0xDEADBEEF);
     print("Decimal: \0");
-    bigint_print_decimal_simple(@num);
+    bigint_print(@num);
     print("\nHex: \0");
     bigint_print_hex(@num);
     print("\n\n\0");
@@ -276,7 +63,7 @@ def main() -> int
     print("Test 5: From u64 (0x123456789ABCDEF0)\n\0");
     bigint_from_u64(@num, 0x123456789ABCDEF0);
     print("Decimal: \0");
-    bigint_print_decimal_simple(@num);
+    bigint_print(@num);
     print("\nHex: \0");
     bigint_print_hex(@num);
     print("\n\n\0");
@@ -285,7 +72,7 @@ def main() -> int
     print("Test 6: From u64 (0xFFFFFFFFFFFFFFFF)\n\0");
     bigint_from_u64(@num, 0xFFFFFFFFFFFFFFFF);
     print("Decimal: \0");
-    bigint_print_decimal_simple(@num);
+    bigint_print(@num);
     print("\nHex: \0");
     bigint_print_hex(@num);
     print("\n\n\0");
@@ -339,8 +126,207 @@ def main() -> int
         print("false\n\0");
     };
     print("\n\0");
-    
-    print("==== ALL FOUNDATION TESTS COMPLETE ====\n\0");
+
+    // ---- 64-bit and full math tests ----
+
+    // Test 9: Add two u64 values
+    print("Test 9: Add u64 (0xFFFFFFFFFFFFFFFF + 1)\n\0");
+    bigint_from_u64(@a, 0xFFFFFFFFFFFFFFFF);
+    bigint_one(@b);
+    bigint_add(@result, @a, @b);
+    print("Hex: \0");
+    bigint_print_hex(@result);
+    print("\nDecimal: \0");
+    bigint_print_decimal(@result);
+    print("\n\n\0");
+
+    // Test 10: Add two large values
+    print("Test 10: Add (0x123456789ABCDEF0 + 0xFEDCBA9876543210)\n\0");
+    bigint_from_u64(@a, 0x123456789ABCDEF0);
+    bigint_from_u64(@b, 0xFEDCBA9876543210);
+    bigint_add(@result, @a, @b);
+    print("Hex: \0");
+    bigint_print_hex(@result);
+    print("\nDecimal: \0");
+    bigint_print_decimal(@result);
+    print("\n\n\0");
+
+    // Test 11: Subtract
+    print("Test 11: Subtract (0xFFFFFFFFFFFFFFFF - 0x123456789ABCDEF0)\n\0");
+    bigint_from_u64(@a, 0xFFFFFFFFFFFFFFFF);
+    bigint_from_u64(@b, 0x123456789ABCDEF0);
+    bigint_sub(@result, @a, @b);
+    print("Hex: \0");
+    bigint_print_hex(@result);
+    print("\nDecimal: \0");
+    bigint_print_decimal(@result);
+    print("\n\n\0");
+
+    // Test 12: Subtract to zero
+    print("Test 12: Subtract to zero (0xDEADBEEF - 0xDEADBEEF)\n\0");
+    bigint_from_u32(@a, 0xDEADBEEF);
+    bigint_from_u32(@b, 0xDEADBEEF);
+    bigint_sub(@result, @a, @b);
+    print("Hex: \0");
+    bigint_print_hex(@result);
+    print("\nDecimal: \0");
+    bigint_print_decimal(@result);
+    print("\n\n\0");
+
+    // Test 13: Multiply two u32 values
+    print("Test 13: Multiply (0xFFFFFFFF * 0xFFFFFFFF)\n\0");
+    bigint_from_u32(@a, 0xFFFFFFFF);
+    bigint_from_u32(@b, 0xFFFFFFFF);
+    bigint_mul(@result, @a, @b);
+    print("Hex: \0");
+    bigint_print_hex(@result);
+    print("\nDecimal: \0");
+    bigint_print_decimal(@result);
+    print("\n\n\0");
+
+    // Test 14: Multiply two u64 values
+    print("Test 14: Multiply (0xFFFFFFFFFFFFFFFF * 0xFFFFFFFFFFFFFFFF)\n\0");
+    bigint_from_u64(@a, 0xFFFFFFFFFFFFFFFF);
+    bigint_from_u64(@b, 0xFFFFFFFFFFFFFFFF);
+    bigint_mul(@result, @a, @b);
+    print("Hex: \0");
+    bigint_print_hex(@result);
+    print("\nDecimal: \0");
+    bigint_print_decimal(@result);
+    print("\n\n\0");
+
+    // Test 15: Divide
+    print("Test 15: Divide (100 / 7)\n\0");
+    bigint_from_u32(@a, 100);
+    bigint_from_u32(@b, 7);
+    bigint_div(@result, @a, @b);
+    print("Quotient Decimal: \0");
+    bigint_print_decimal(@result);
+    print("\n\n\0");
+
+    // Test 16: Modulo
+    print("Test 16: Modulo (100 % 7)\n\0");
+    bigint_from_u32(@a, 100);
+    bigint_from_u32(@b, 7);
+    bigint_mod(@result, @a, @b);
+    print("Remainder Decimal: \0");
+    bigint_print_decimal(@result);
+    print("\n\n\0");
+
+    // Test 17: Divide large u64 values
+    print("Test 17: Divide (0xFFFFFFFFFFFFFFFF / 0x123456789ABCDEF0)\n\0");
+    bigint_from_u64(@a, 0xFFFFFFFFFFFFFFFF);
+    bigint_from_u64(@b, 0x123456789ABCDEF0);
+    bigint_divmod(@result, @rem_17, @a, @b);
+    print("Quotient Hex: \0");
+    bigint_print_hex(@result);
+    print("\nRemainder Hex: \0");
+    bigint_print_hex(@rem_17);
+    print("\n\n\0");
+
+    // Test 18: Power (2^64)
+    print("Test 18: Power (2^64)\n\0");
+    bigint_from_u32(@a, 2);
+    bigint_pow_u32(@result, @a, 64);
+    print("Hex: \0");
+    bigint_print_hex(@result);
+    print("\nDecimal: \0");
+    bigint_print_decimal(@result);
+    print("\n\n\0");
+
+    // Test 19: Power (10^20)
+    print("Test 19: Power (10^20)\n\0");
+    bigint_from_u32(@a, 10);
+    bigint_pow_u32(@result, @a, 20);
+    print("Hex: \0");
+    bigint_print_hex(@result);
+    print("\nDecimal: \0");
+    bigint_print_decimal(@result);
+    print("\n\n\0");
+
+    // Test 20: Shift left
+    print("Test 20: Shift left (1 << 63)\n\0");
+    bigint_one(@a);
+    bigint_shl(@result, @a, 63);
+    print("Hex: \0");
+    bigint_print_hex(@result);
+    print("\nDecimal: \0");
+    bigint_print_decimal(@result);
+    print("\n\n\0");
+
+    // Test 21: Shift right
+    print("Test 21: Shift right (0xFFFFFFFFFFFFFFFF >> 4)\n\0");
+    bigint_from_u64(@a, 0xFFFFFFFFFFFFFFFF);
+    bigint_shr(@result, @a, 4);
+    print("Hex: \0");
+    bigint_print_hex(@result);
+    print("\nDecimal: \0");
+    bigint_print_decimal(@result);
+    print("\n\n\0");
+
+    // Test 22: Compare equal
+    print("Test 22: Compare equal (0xDEADBEEF == 0xDEADBEEF)\n\0");
+    bigint_from_u32(@a, 0xDEADBEEF);
+    bigint_from_u32(@b, 0xDEADBEEF);
+    cmp22 = bigint_cmp(@a, @b);
+    if (cmp22 == 0)
+    {
+        print("Equal: true\n\0");
+    }
+    else
+    {
+        print("Equal: false\n\0");
+    };
+    print("\n\0");
+
+    // Test 23: Compare less than
+    print("Test 23: Compare less than (42 < 0xFFFFFFFF)\n\0");
+    bigint_from_u32(@a, 42);
+    bigint_from_u32(@b, 0xFFFFFFFF);
+    cmp23 = bigint_cmp(@a, @b);
+    if (cmp23 < 0)
+    {
+        print("Less: true\n\0");
+    }
+    else
+    {
+        print("Less: false\n\0");
+    };
+    print("\n\0");
+
+    // Test 24: Compare greater than
+    print("Test 24: Compare greater than (0xFFFFFFFFFFFFFFFF > 0xFFFFFFFF)\n\0");
+    bigint_from_u64(@a, 0xFFFFFFFFFFFFFFFF);
+    bigint_from_u32(@b, 0xFFFFFFFF);
+    cmp24 = bigint_cmp(@a, @b);
+    if (cmp24 > 0)
+    {
+        print("Greater: true\n\0");
+    }
+    else
+    {
+        print("Greater: false\n\0");
+    };
+    print("\n\0");
+
+    // Test 25: Large multiply then divide should recover original
+    print("Test 25: (0x123456789ABCDEF0 * 1000) / 1000 == original\n\0");
+    bigint_from_u64(@a, 0x123456789ABCDEF0);
+    bigint_from_u32(@b, 1000);
+    bigint_mul(@result, @a, @b);
+    bigint_div(@div25, @result, @b);
+    cmp25 = bigint_cmp(@div25, @a);
+    if (cmp25 == 0)
+    {
+        print("Round-trip: true\n\0");
+    }
+    else
+    {
+        print("Round-trip: false\n\0");
+    };
+    print("\n\0");
+
+    print("==== ALL TESTS COMPLETE ====\n\0");
     
     return 0;
 };

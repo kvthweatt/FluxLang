@@ -335,7 +335,15 @@ class FluxParser:
             self.consume(TokenType.SEMICOLON)
             is_prototype = False
 
-        self._custom_operators[symbol] = func_name
+        # Only register truly novel symbols in _custom_operators.
+        # Built-in operator symbols (those whose string matches an Operator enum value)
+        # must NOT be added here, because custom_op_expression would then rewrite every
+        # use of that operator into a FunctionCall regardless of operand types.
+        # Built-in operator overloads are resolved at codegen time inside BinaryOp.codegen.
+        from ftypesys import Operator as _Operator
+        _builtin_op_values = {op.value for op in _Operator}
+        if symbol not in _builtin_op_values:
+            self._custom_operators[symbol] = func_name
         self.symbol_table.define(symbol, SymbolKind.OPERATOR)
 
         return FunctionDef(
