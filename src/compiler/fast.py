@@ -1859,6 +1859,26 @@ class FunctionCall(Expression):
         
         # Step 4: SINGLE RESOLUTION CALL - handles everything
         func = TypeResolver.resolve_function(module, self.name, current_ns, arg_vals)
+
+        # Step 4b: If not found, check if the name is a known object type used as a
+        # constructor expression (e.g. `this.deck = Deck(@this.rng)`).
+        # Alloca a temporary of the struct type, call ObjectName.__init with the
+        # supplied arguments, and return the temporary pointer so the caller can
+        # copy/store it as needed.
+        if func is None and hasattr(module, '_struct_types') and self.name in module._struct_types:
+            struct_type = module._struct_types[self.name]
+            tmp = builder.alloca(struct_type, name=f"{self.name}_tmp")
+            init_name = f"{self.name}.__init"
+            init_func = TypeResolver.resolve_function(module, init_name, current_ns, [tmp] + arg_vals)
+            if init_func is None and hasattr(module, '_using_namespaces'):
+                for ns in module._using_namespaces:
+                    mangled = f"{ns.replace('::', '__')}__{init_name}"
+                    init_func = TypeResolver.resolve_function(module, mangled, current_ns, [tmp] + arg_vals)
+                    if init_func:
+                        break
+            if init_func is not None:
+                builder.call(init_func, [tmp] + arg_vals)
+                return tmp
         
         # Step 5: Error if not found
         if func is None:
@@ -2990,10 +3010,14 @@ class VariableDeclaration(ASTNode):
             elif resolved_type_spec.array_size is not None:
                 dim_expr = resolved_type_spec.array_size
             if dim_expr is not None and not isinstance(dim_expr, int) and not (hasattr(dim_expr, 'value') and isinstance(dim_expr.value, int)):
-                # Runtime expression: codegen the size and alloca count elements
                 count_val = dim_expr.codegen(builder, module)
                 element_type = llvm_type.pointee
                 alloca = builder.alloca(element_type, size=count_val, name=self.name)
+                if resolved_type_spec:
+                    alloca._flux_type_spec = resolved_type_spec
+                module.symbol_table.define(self.name, SymbolKind.VARIABLE, type_spec=resolved_type_spec, llvm_value=alloca)
+                # VLA: cannot store an aggregate initializer into an element pointer — skip init
+                return alloca
             else:
                 alloca = builder.alloca(llvm_type, name=self.name)
         else:

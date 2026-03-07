@@ -7,7 +7,7 @@
     // Large allocations (>4096) get a dedicated OS slab, released on ffree.
     // Block metadata lives in a separate table slab (open-addressed hash map
     // keyed by user pointer). The table slab is itself an entry in the table.
-    // No inline headers, user data blocks are completely pure.
+    // No inline headers user data blocks are completely pure.
     // No zeroing (Flux zero-inits at language level).
     // No coalescing (fragments are reusable as-is per Flux memory model).
     // Slabs acquired directly from OS: 4MB -> 8MB -> 16MB -> 32MB -> 64MB cap.
@@ -1066,11 +1066,11 @@ namespace standard
                     
                     def __exit() -> void
                     {
-                        switch (this.buffer != (byte*)0)
+                        switch (this.buffer != 0)
                         {
                             case (true)
                             {
-                                stdheap::ffree((u64)@this.buffer);
+                                stdheap::ffree((u64)this.buffer);
                             }
                             default {};
                         };
@@ -1083,11 +1083,14 @@ namespace standard
                         {
                             case (true)
                             {
+                                return STDLIB_GVP;
+                            }
+                            default
+                            {
                                 u64* ptr = (void_ptr)(this.buffer + this.offset);
                                 this.offset += size;
                                 return ptr;
-                            }
-                            default { return STDLIB_GVP; };
+                            };
                         };
                         return STDLIB_GVP;
                     };

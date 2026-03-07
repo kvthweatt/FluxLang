@@ -1415,7 +1415,7 @@ def wait_for_ready(int* status_reg) -> void
 
 ### Callback Systems
 
-```flux
+```
 // Function pointer type for callbacks
 def{}* callback(int)->void = eventHandler;
 
@@ -1493,48 +1493,6 @@ print(calculate(2, 10, 5));  // 50 (mul)
 print(calculate(3, 10, 5));  // 2  (div)
 ```
 
-### Vtable-like Structures
-```
-struct ShapeVTable
-{
-    float *area(void*) as area_fn;
-    float *perimeter(void*) as perim_fn;
-};
-
-object Circle
-{
-    float radius;
-    ShapeVTable* vtable;
-    
-    def __init(float r) -> this
-    {
-        this.radius = r;
-        this.vtable = @{
-            area_fn = @Circle::calc_area,
-            perim_fn = @Circle::calc_perimeter
-        };
-        return this;
-    };
-};
-
-def Circle::calc_area(void* self_ptr) -> float
-{
-    Circle* self = (Circle*)self_ptr;
-    return 3.14159 * self.radius * self.radius;
-};
-
-def Circle::calc_perimeter(void* self_ptr) -> float
-{
-    Circle* self = (Circle*)self_ptr;
-    return 2.0 * 3.14159 * self.radius;
-};
-
-// Usage
-Circle c = Circle(5.0);
-float area = *c.vtable.area_fn(@c);
-print(f"Area: {area}\0");  // approx 78.54
-```
-
 ---
 
 ## **Array Comprehension Advanced Examples**
@@ -1581,106 +1539,19 @@ int[5] evens_squared = [
 
 ---
 
-## **Memory Management Patterns**
-
-### Manual Memory Pools
-```
-struct MemoryBlock
-{
-    unsigned data{8}[1024] as byte_array bytes;
-    bool in_use;
-};
-
-object MemoryPool
-{
-    MemoryBlock[100] blocks;
-    
-    def __init() -> this
-    {
-        for (int i = 0; i < 100; i++)
-        {
-            this.blocks[i].in_use = false;
-        };
-        return this;
-    };
-    
-    def allocate() -> byte*
-    {
-        for (int i = 0; i < 100; i++)
-        {
-            if (!this.blocks[i].in_use)
-            {
-                this.blocks[i].in_use = true;
-                return @this.blocks[i].bytes[0];
-            };
-        };
-        return (byte*)0;  // null
-    };
-    
-    def free(byte* ptr) -> void
-    {
-        unsigned data{64}* as u64ptr;
-        u64ptr block_base = (u64ptr)@this.blocks[0];
-        u64ptr ptr_addr = (u64ptr)ptr;
-        
-        int index = (int)((ptr_addr - block_base) / sizeof(MemoryBlock));
-        if (index >= 0 & index < 100)
-        {
-            this.blocks[index].in_use = false;
-        };
-    };
-};
-```
-
-### Stack vs Heap Allocation
-```
-def test_allocation() -> void
-{
-    // Stack allocation (automatic)
-    stack int stack_var = 42;
-    stack int[1000] stack_array;
-    
-    // Heap allocation (manual)
-    heap int heap_var = 22;
-    *heap_var = 42;
-    
-    heap int[] heap_array = void;
-    
-    // Use the variables
-    print(stack_var);
-    print(*heap_var);
-    
-    // Manual cleanup for heap
-    (void)heap_var;
-    (void)heap_array;
-    
-    // stack_var automatically cleaned up on return
-};
-```
-
----
-
 ## **Practical Real-World Examples**
 
 ### Simple Packet Parser
 ```
-unsigned data{8}[] as bytes;
-unsigned data{16::1} as be16;  // Big-endian 16-bit
-unsigned data{32::1} as be32;  // Big-endian 32-bit
 
 struct IPHeader
 {
-    unsigned data{4} as nibble version;
-    unsigned data{4} as nibble ihl;
-    unsigned data{8} as byte tos;
-    be16 total_length;
-    be16 identification;
-    be16 flags_offset;
-    unsigned data{8} as byte ttl;
-    unsigned data{8} as byte protocol;
+    nybble version, ihl;
+    byte tos;
+    be16 total_length, identification, flags_offset;
+    byte ttl, protocol;
     be16 checksum;
-    be32 src_addr;
-    be32 dst_addr;
+    be32 src_addr, dst_addr;
 };
 
 def parse_ip_header(bytes* packet) -> IPHeader
@@ -1830,26 +1701,7 @@ def get_nullable() -> int*
 
 ### Auto Type Inference
 ```
-// Auto infers from right-hand side
-auto x = 42;           // int
-auto y = 3.14;         // float
-auto z = "hello\0";  // unsigned data{8}[]
-auto w = @x;           // int*
-
-// Auto with complex types
 auto result = calculate_something();  // Infers return type
-
-// Auto in loops
-for (auto val in array)
-{
-    // val type inferred from array element type
-    print(val);
-};
-
-// Auto destructuring
-struct Pair { int first; int second; };
-Pair p = {first = 10, second = 20};
-auto {a, b} = p{first, second};  // a=10, b=20
 ```
 
 ---

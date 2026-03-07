@@ -2,7 +2,6 @@
 #import "redformat.fx";
 #import "redmath.fx";
 
-using standard::memory::allocators::stdheap;
 using standard::format;
 
 def fibonacci<T>(T n) -> T
@@ -38,7 +37,7 @@ def main() -> int
         print_cyan("fib(\0");
         print(i);
         print_cyan(") = \0");
-        x = fibonacci<u64>(i); // Not working with custom identifiers
+        x = fibonacci<u64>(i);
         print(x);
         print("\n\0");
     };

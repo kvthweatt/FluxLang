@@ -894,5 +894,3 @@ namespace standard
         };
     };
 };
-
-using standard::math;

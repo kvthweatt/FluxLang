@@ -31,6 +31,8 @@ global i64 WIN_STDOUT_HANDLE;
 #import "redmemory.fx";
 #endif;
 
+using standard::memory::allocators::stdheap;
+
 #import "red_string_utilities.fx";
 
 #ifndef FLUX_STANDARD_SYSTEM

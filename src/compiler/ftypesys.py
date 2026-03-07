@@ -4160,19 +4160,31 @@ class AssignmentTypeHandler:
             if hasattr(struct_type, 'names'):
                 try:
                     idx = struct_type.names.index(member_name)
-                    member_ptr = builder.gep(
-                        obj,
-                        [ir.Constant(ir.IntType(1), 0),
-                         ir.Constant(ir.IntType(32), idx)],
-                        inbounds=True
-                    )
-                    # Convert value type to match target member type if needed
-                    member_type = member_ptr.type.pointee
-                    val = AssignmentTypeHandler.convert_value_for_assignment(builder, val, member_type)
-                    builder.store(val, member_ptr)
-                    return val
                 except ValueError:
                     raise ValueError(f"Member '{member_name}' not found in struct")
+                member_ptr = builder.gep(
+                    obj,
+                    [ir.Constant(ir.IntType(1), 0),
+                     ir.Constant(ir.IntType(32), idx)],
+                    inbounds=True
+                )
+                # Convert value type to match target member type if needed
+                member_type = member_ptr.type.pointee
+                # If assigning a pointer-to-struct into a value-typed struct member
+                # (e.g. `this.deck = Deck(@this.rng)` where deck is `Deck` not `Deck*`),
+                # load the pointer to get the struct value before storing.
+                if (isinstance(val.type, ir.PointerType) and
+                        not isinstance(member_type, ir.PointerType) and
+                        val.type.pointee == member_type):
+                    val = builder.load(val, name="obj_val_deref")
+                elif (isinstance(val.type, ir.PointerType) and
+                        not isinstance(member_type, ir.PointerType) and
+                        hasattr(val.type.pointee, 'name') and hasattr(member_type, 'name') and
+                        val.type.pointee.name == member_type.name):
+                    val = builder.load(val, name="obj_val_deref")
+                val = AssignmentTypeHandler.convert_value_for_assignment(builder, val, member_type)
+                builder.store(val, member_ptr)
+                return val
             else:
                 # This is a byte-array based struct - use vtable for field assignment
                 return AssignmentTypeHandler.handle_vtable_struct_assignment(
