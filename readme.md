@@ -97,9 +97,9 @@ def abc() -> void,
 **Universal External FFI:**  
 Flux has an operator called the "no mangle" operator, `!!`, which instructs the compiler to not mangle any function names following it. This only applies to function names.
 ```
-extern def stcmp(byte*,byte*)->int;  // Single-line
+extern def stcmp(byte*,byte*)->int;  // Single
 
-extern                               // Multi-line
+extern                               // Multiple
 {
     def foo() -> void;
     def zad() -> void;
