@@ -7,8 +7,8 @@
 
 struct BigInt
 {
-    u32[128] digits;    // Can hold up to 4096 bits (128 * 32)
-    u32 length;         // Number of u32 digits actually used
+    uint[128] digits;    // Can hold up to 4096 bits (128 * 32)
+    uint length;         // Number of uint digits actually used
     bool negative;      // Sign: false = positive, true = negative
 };
 
@@ -19,8 +19,8 @@ namespace math
         // Initialize a BigInt to zero
         def bigint_zero(BigInt* num) -> void
         {
-            u32* nd = @num.digits[0];
-            u32 i;
+            uint* nd = @num.digits[0];
+            uint i;
             for (i = 0; i < 128; i++)
             {
                 nd[i] = 0;
@@ -33,8 +33,8 @@ namespace math
         // Initialize a BigInt to one
         def bigint_one(BigInt* num) -> void
         {
-            u32* nd = @num.digits[0];
-            u32 i;
+            uint* nd = @num.digits[0];
+            uint i;
             nd[0] = 1;
             for (i = 1; i < 128; i++)
             {
@@ -45,11 +45,11 @@ namespace math
             return;
         };
         
-        // Create a BigInt from a u32 value
-        def bigint_from_u32(BigInt* num, u32 value) -> void
+        // Create a BigInt from a uint value
+        def bigint_from_uint(BigInt* num, uint value) -> void
         {
-            u32* nd = @num.digits[0];
-            u32 i;
+            uint* nd = @num.digits[0];
+            uint i;
             nd[0] = value;
             for (i = 1; i < 128; i++)
             {
@@ -72,10 +72,10 @@ namespace math
         // Create a BigInt from a u64 value
         def bigint_from_u64(BigInt* num, u64 value) -> void
         {
-            u32* nd = @num.digits[0];
-            u32 i;
-            nd[0] = (u32)(value & 0xFFFFFFFF);
-            nd[1] = (u32)(value >> 32);
+            uint* nd = @num.digits[0];
+            uint i;
+            nd[0] = (uint)(value & 0xFFFFFFFF);
+            nd[1] = (uint)(value >> 32);
             
             for (i = 2; i < 128; i++)
             {
@@ -105,7 +105,7 @@ namespace math
         // Check if BigInt is zero
         def bigint_is_zero(BigInt* num) -> bool
         {
-            u32* nd = @num.digits[0];
+            uint* nd = @num.digits[0];
             if (num.length == 1)
             {
                 if (nd[0] == 0)
@@ -119,7 +119,7 @@ namespace math
         // Check if BigInt is one
         def bigint_is_one(BigInt* num) -> bool
         {
-            u32* nd = @num.digits[0];
+            uint* nd = @num.digits[0];
             if (num.negative)
             {
                 return false;
@@ -137,7 +137,7 @@ namespace math
         };
         
         // Print a single hex digit
-        def print_hex_digit(u32 digit) -> void
+        def print_hex_digit(uint digit) -> void
         {
             if (digit < 10)
             {
@@ -153,7 +153,7 @@ namespace math
         // Print BigInt in hexadecimal format (for debugging)
         def bigint_print_hex(BigInt* num) -> void
         {
-            u32* nd = @num.digits[0];
+            uint* nd = @num.digits[0];
             if (num.negative)
             {
                 print("-\0");
@@ -162,17 +162,17 @@ namespace math
             print("0x\0");
             
             // Print from most significant to least significant
-            u32 digit;
-            u32 j;
-            u32 nibble;
-            u32 i = num.length;
+            uint digit,
+                j,
+                nibble,
+                i = num.length;
             while (i > 0)
             {
                 i--;
                 
                 digit = nd[i];
                 
-                // Print all 8 hex digits for this u32
+                // Print all 8 hex digits for this uint
                 for (j = 0; j < 8; j++)
                 {
                     nibble = (digit >> (28 - j * 4)) & 0xF;
@@ -206,7 +206,7 @@ namespace math
                 return;
             };
             
-            u32* nd = @num.digits[0];
+            uint* nd = @num.digits[0];
             u64 value;
             if (num.length == 2)
             {
@@ -226,9 +226,9 @@ namespace math
         // Copy one BigInt to another
         def bigint_copy(BigInt* dest, BigInt* src) -> void
         {
-            u32* dd = @dest.digits[0];
-            u32* sd = @src.digits[0];
-            u32 i;
+            uint* dd = @dest.digits[0],
+                 sd = @src.digits[0];
+            uint i;
             for (i = 0; i < 128; i++)
             {
                 dd[i] = sd[i];
@@ -241,8 +241,8 @@ namespace math
         // Normalize: remove leading zero digits, ensure length >= 1
         def bigint_normalize(BigInt* num) -> void
         {
-            u32* nd = @num.digits[0];
-            u32 top_idx;
+            uint* nd = @num.digits[0];
+            uint top_idx;
             while (num.length > 1)
             {
                 top_idx = num.length - 1;
@@ -268,15 +268,15 @@ namespace math
 
         // Compare absolute values of two BigInts
         // Returns: -1 if |a| < |b|, 0 if equal, 1 if |a| > |b|
-        def bigint_cmp_abs(BigInt* a, BigInt* b) -> i32
+        def bigint_cmp_abs(BigInt* a, BigInt* b) -> int
         {
-            u32* ad = @a.digits[0];
-            u32* bd = @b.digits[0];
+            uint* ad = @a.digits[0],
+                 bd = @b.digits[0];
             if (a.length > b.length) { return 1; };
             if (a.length < b.length) { return -1; };
 
             // Same length - compare from most significant
-            u32 i = a.length;
+            uint i = a.length;
             while (i > 0)
             {
                 i--;
@@ -288,7 +288,7 @@ namespace math
 
         // Compare two BigInts (signed)
         // Returns: -1 if a < b, 0 if equal, 1 if a > b
-        def bigint_cmp(BigInt* a, BigInt* b) -> i32
+        def bigint_cmp(BigInt* a, BigInt* b) -> int
         {
             // Both zero
             if (bigint_is_zero(a) & bigint_is_zero(b)) { return 0; };
@@ -310,7 +310,7 @@ namespace math
         def bigint_add_abs(BigInt* result, BigInt* a, BigInt* b) -> void
         {
             u64 carry = 0;
-            u32 max_len;
+            uint max_len;
             if (a.length > b.length)
             {
                 max_len = a.length;
@@ -320,10 +320,10 @@ namespace math
                 max_len = b.length;
             };
 
-            u32* rd = @result.digits[0];
-            u32* ad = @a.digits[0];
-            u32* bd = @b.digits[0];
-            u32 i = 0;
+            uint* rd = @result.digits[0],
+                 ad = @a.digits[0],
+                 bd = @b.digits[0];
+            uint i = 0;
             u64 sum;
             while (i < max_len | carry != 0)
             {
@@ -336,7 +336,7 @@ namespace math
                 {
                     sum = sum + (u64)bd[i];
                 };
-                rd[i] = (u32)(sum & 0xFFFFFFFF);
+                rd[i] = (uint)(sum & 0xFFFFFFFF);
                 carry = sum >> 32;
                 i++;
             };
@@ -348,11 +348,11 @@ namespace math
         // Subtract absolute values: result = |a| - |b|  (assumes |a| >= |b|, sign not set)
         def bigint_sub_abs(BigInt* result, BigInt* a, BigInt* b) -> void
         {
-            u32* rd = @result.digits[0];
-            u32* ad = @a.digits[0];
-            u32* bd = @b.digits[0];
+            uint* rd = @result.digits[0],
+                 ad = @a.digits[0],
+                 bd = @b.digits[0];
             i64 borrow = 0;
-            u32 i;
+            uint i;
             i64 diff;
             for (i = 0; i < a.length; i++)
             {
@@ -363,12 +363,12 @@ namespace math
                 };
                 if (diff < 0)
                 {
-                    rd[i] = (u32)(diff + (i64)4294967296);
+                    rd[i] = (uint)(diff + (i64)4294967296);
                     borrow = 1;
                 }
                 else
                 {
-                    rd[i] = (u32)diff;
+                    rd[i] = (uint)diff;
                     borrow = 0;
                 };
             };
@@ -392,7 +392,7 @@ namespace math
             else
             {
                 // Different signs: subtract smaller magnitude from larger
-                i32 cmp;
+                int cmp;
                 cmp = bigint_cmp_abs(a, b);
                 if (cmp == 0)
                 {
@@ -442,13 +442,11 @@ namespace math
                 return;
             };
 
-            u32* rd = @result.digits[0];
-            u32* ad = @a.digits[0];
-            u32* bd = @b.digits[0];
-            u32 i;
-            u64 carry;
-            u32 j;
-            u64 prod;
+            uint* rd = @result.digits[0],
+                 ad = @a.digits[0],
+                 bd = @b.digits[0];
+            uint i, j;
+            u64 carry, prod;
             for (i = 0; i < a.length; i++)
             {
                 carry = 0;
@@ -460,7 +458,7 @@ namespace math
                     {
                         prod = prod + (u64)ad[i] * (u64)bd[j];
                     };
-                    rd[i + j] = (u32)(prod & 0xFFFFFFFF);
+                    rd[i + j] = (uint)(prod & 0xFFFFFFFF);
                     carry = prod >> 32;
                     j++;
                 };
@@ -485,11 +483,11 @@ namespace math
         // Shift left by one bit in-place
         def bigint_shift_left_1(BigInt* num) -> void
         {
-            u32* nd = @num.digits[0];
-            u32 carry = 0;
-            u32 new_carry;
-            u32 len;
-            u32 i;
+            uint* nd = @num.digits[0];
+            uint carry = 0,
+                new_carry,
+                len,
+                i;
             for (i = 0; i < num.length; i++)
             {
                 new_carry = nd[i] >> 31;
@@ -508,10 +506,10 @@ namespace math
         // Shift right by one bit in-place
         def bigint_shift_right_1(BigInt* num) -> void
         {
-            u32* nd = @num.digits[0];
-            u32 carry = 0;
-            u32 new_carry;
-            u32 i = num.length;
+            uint* nd = @num.digits[0];
+            uint carry = 0,
+                 new_carry,
+                 i = num.length;
             while (i > 0)
             {
                 i--;
@@ -524,10 +522,10 @@ namespace math
         };
 
         // Shift left by n bits: result = a << n
-        def bigint_shl(BigInt* result, BigInt* a, u32 n) -> void
+        def bigint_shl(BigInt* result, BigInt* a, uint n) -> void
         {
             bigint_copy(result, a);
-            u32 i;
+            uint i;
             for (i = 0; i < n; i++)
             {
                 bigint_shift_left_1(result);
@@ -536,10 +534,10 @@ namespace math
         };
 
         // Shift right by n bits: result = a >> n
-        def bigint_shr(BigInt* result, BigInt* a, u32 n) -> void
+        def bigint_shr(BigInt* result, BigInt* a, uint n) -> void
         {
             bigint_copy(result, a);
-            u32 i;
+            uint i;
             for (i = 0; i < n; i++)
             {
                 bigint_shift_right_1(result);
@@ -552,10 +550,10 @@ namespace math
         def bigint_divmod(BigInt* quotient, BigInt* remainder, BigInt* a, BigInt* b) -> void
         {
             // Declare all locals first so they land in the IR entry block
-            BigInt abs_a;
-            BigInt abs_b;
-            BigInt rem;
-            BigInt quot;
+            BigInt abs_a,
+                   abs_b,
+                   rem,
+                   quot;
 
             bigint_zero(quotient);
             bigint_zero(remainder);
@@ -581,13 +579,13 @@ namespace math
             abs_b.negative = false;
 
             // Use pointers to local struct digit arrays for safe element access
-            u32* abs_a_d = @abs_a.digits[0];
+            uint* abs_a_d = @abs_a.digits[0];
 
             // Count total bits in abs_a
-            u32 total_bits = (abs_a.length - 1) * 32;
-            u32 top_idx = abs_a.length - 1;
-            u32 top_digit = abs_a_d[top_idx];
-            u32 bit_pos = 31;
+            uint total_bits = (abs_a.length - 1) * 32,
+                 top_idx = abs_a.length - 1,
+                 top_digit = abs_a_d[top_idx],
+                 bit_pos = 31;
             while (bit_pos > 0)
             {
                 if (((top_digit >> bit_pos) & 1) != 0)
@@ -603,23 +601,23 @@ namespace math
             bigint_zero(@quot);
 
             // Pointers to local struct digit arrays for safe element access
-            u32* rem_d  = @rem.digits[0];
-            u32* quot_d = @quot.digits[0];
+            uint* rem_d  = @rem.digits[0],
+                  quot_d = @quot.digits[0];
 
-            u32 word_idx;
-            u32 bit_idx;
-            u32 the_bit;
-            u32 q_word;
-            u32 q_bit;
-            i32 bit;
-            for (bit = (i32)total_bits; bit >= 0; bit--)
+            uint word_idx,
+                 bit_idx,
+                 the_bit,
+                 q_word,
+                 q_bit;
+            int bit;
+            for (bit = (int)total_bits; bit >= 0; bit--)
             {
                 // rem = rem << 1
                 bigint_shift_left_1(@rem);
 
                 // rem |= bit 'bit' of abs_a
-                word_idx = (u32)bit / 32;
-                bit_idx  = (u32)bit % 32;
+                word_idx = (uint)bit / 32;
+                bit_idx  = (uint)bit % 32;
                 the_bit  = (abs_a_d[word_idx] >> bit_idx) & 1;
                 if (the_bit != 0)
                 {
@@ -632,8 +630,8 @@ namespace math
                     bigint_sub_abs(@rem, @rem, @abs_b);
 
                     // Set bit 'bit' in quot
-                    q_word = (u32)bit / 32;
-                    q_bit  = (u32)bit % 32;
+                    q_word = (uint)bit / 32;
+                    q_bit  = (uint)bit % 32;
                     quot_d[q_word] = quot_d[q_word] | (1 << q_bit);
                     if (q_word + 1 > quot.length)
                     {
@@ -683,19 +681,19 @@ namespace math
             return;
         };
 
-        // Power: result = base ^ exp  (exp is a non-negative u32 for simplicity)
-        def bigint_pow_u32(BigInt* result, BigInt* base, u32 exp) -> void
+        // Power: result = base ^ exp  (exp is a non-negative uint for simplicity)
+        def bigint_pow_uint(BigInt* result, BigInt* base, uint exp) -> void
         {
             // Declare all locals first so they land in the IR entry block
-            BigInt cur_base;
-            BigInt tmp;
+            BigInt cur_base,
+                   tmp;
 
             bigint_copy(@cur_base, base);
             bigint_one(result);
 
             if (exp == 0) { return; };
 
-            u32 e = exp;
+            uint e = exp;
             while (e > 0)
             {
                 if ((e & 1) != 0)
@@ -724,9 +722,8 @@ namespace math
 
             // Max u64 is 20 decimal digits
             byte[21] buf;
-            u32 idx;
+            uint idx, pos;
             u64 v;
-            u32 pos;
             idx = 0;
             v = value;
             while (v > 0)
@@ -750,10 +747,10 @@ namespace math
         def bigint_print_decimal(BigInt* num) -> void
         {
             // Declare all locals first so they land in the IR entry block
-            BigInt divisor;
-            BigInt work;
-            BigInt quot;
-            BigInt rem;
+            BigInt divisor,
+                   work,
+                   quot,
+                   rem;
 
             if (num.negative)
             {
@@ -768,16 +765,16 @@ namespace math
 
             // Collect decimal chunks (base 10^9 = 1,000,000,000)
             // A 4096-bit number needs at most ceil(4096 * log10(2)) ~ 1234 digits, so ~138 chunks of 9
-            u32[140] chunks;
-            u32 num_chunks = 0;
+            uint[140] chunks;
+            uint num_chunks = 0;
 
-            bigint_from_u32(@divisor, 1000000000);
+            bigint_from_uint(@divisor, 1000000000);
 
             bigint_copy(@work, num);
             work.negative = false;
 
             // Pointer to rem digits for safe element read
-            u32* rem_d = @rem.digits[0];
+            uint* rem_d = @rem.digits[0];
 
             while (!bigint_is_zero(@work))
             {
@@ -789,7 +786,11 @@ namespace math
             };
 
             // Print from most significant chunk
-            u32 c;
+            uint c, d,
+                 chunk_val,
+                 digits_needed,
+                 power,
+                 digit_val;
             c = num_chunks;
             while (c > 0)
             {
@@ -802,11 +803,6 @@ namespace math
                 else
                 {
                     // Remaining chunks: always print exactly 9 digits with leading zeros
-                    u32 chunk_val;
-                    u32 digits_needed;
-                    u32 power;
-                    u32 d;
-                    u32 digit_val;
                     chunk_val = chunks[c];
                     digits_needed = 9;
                     power = 100000000; // 10^8

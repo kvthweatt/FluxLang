@@ -100,7 +100,7 @@ def dd_mul(u64 a, u64 b) -> u64
     bhi = dd_hi(b);
     blo = dd_lo(b);
     p   = ahi * bhi;
-    e   = ahi * blo + alo * bhi;
+    e   = ahi * blo + alo * bhi + alo * blo;
     return dd_pack(p, e);
 };
 

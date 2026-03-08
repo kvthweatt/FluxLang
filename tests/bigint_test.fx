@@ -43,7 +43,7 @@ def main() -> int
     
     // Test 3: Small u32 value
     print("Test 3: From u32 (42)\n\0");
-    bigint_from_u32(@num, 42);
+    bigint_from_uint(@num, 42);
     print("Decimal: \0");
     bigint_print(@num);
     print("\nHex: \0");
@@ -52,7 +52,7 @@ def main() -> int
     
     // Test 4: Larger u32 value
     print("Test 4: From u32 (0xDEADBEEF)\n\0");
-    bigint_from_u32(@num, 0xDEADBEEF);
+    bigint_from_uint(@num, 0xDEADBEEF);
     print("Decimal: \0");
     bigint_print(@num);
     print("\nHex: \0");
@@ -164,8 +164,8 @@ def main() -> int
 
     // Test 12: Subtract to zero
     print("Test 12: Subtract to zero (0xDEADBEEF - 0xDEADBEEF)\n\0");
-    bigint_from_u32(@a, 0xDEADBEEF);
-    bigint_from_u32(@b, 0xDEADBEEF);
+    bigint_from_uint(@a, 0xDEADBEEF);
+    bigint_from_uint(@b, 0xDEADBEEF);
     bigint_sub(@result, @a, @b);
     print("Hex: \0");
     bigint_print_hex(@result);
@@ -175,8 +175,8 @@ def main() -> int
 
     // Test 13: Multiply two u32 values
     print("Test 13: Multiply (0xFFFFFFFF * 0xFFFFFFFF)\n\0");
-    bigint_from_u32(@a, 0xFFFFFFFF);
-    bigint_from_u32(@b, 0xFFFFFFFF);
+    bigint_from_uint(@a, 0xFFFFFFFF);
+    bigint_from_uint(@b, 0xFFFFFFFF);
     bigint_mul(@result, @a, @b);
     print("Hex: \0");
     bigint_print_hex(@result);
@@ -197,8 +197,8 @@ def main() -> int
 
     // Test 15: Divide
     print("Test 15: Divide (100 / 7)\n\0");
-    bigint_from_u32(@a, 100);
-    bigint_from_u32(@b, 7);
+    bigint_from_uint(@a, 100);
+    bigint_from_uint(@b, 7);
     bigint_div(@result, @a, @b);
     print("Quotient Decimal: \0");
     bigint_print_decimal(@result);
@@ -206,8 +206,8 @@ def main() -> int
 
     // Test 16: Modulo
     print("Test 16: Modulo (100 % 7)\n\0");
-    bigint_from_u32(@a, 100);
-    bigint_from_u32(@b, 7);
+    bigint_from_uint(@a, 100);
+    bigint_from_uint(@b, 7);
     bigint_mod(@result, @a, @b);
     print("Remainder Decimal: \0");
     bigint_print_decimal(@result);
@@ -226,8 +226,8 @@ def main() -> int
 
     // Test 18: Power (2^64)
     print("Test 18: Power (2^64)\n\0");
-    bigint_from_u32(@a, 2);
-    bigint_pow_u32(@result, @a, 64);
+    bigint_from_uint(@a, 2);
+    bigint_from_uint(@result, 64);
     print("Hex: \0");
     bigint_print_hex(@result);
     print("\nDecimal: \0");
@@ -236,8 +236,8 @@ def main() -> int
 
     // Test 19: Power (10^20)
     print("Test 19: Power (10^20)\n\0");
-    bigint_from_u32(@a, 10);
-    bigint_pow_u32(@result, @a, 20);
+    bigint_from_uint(@a, 10);
+    bigint_from_uint(@result, 20);
     print("Hex: \0");
     bigint_print_hex(@result);
     print("\nDecimal: \0");
@@ -266,8 +266,8 @@ def main() -> int
 
     // Test 22: Compare equal
     print("Test 22: Compare equal (0xDEADBEEF == 0xDEADBEEF)\n\0");
-    bigint_from_u32(@a, 0xDEADBEEF);
-    bigint_from_u32(@b, 0xDEADBEEF);
+    bigint_from_uint(@a, 0xDEADBEEF);
+    bigint_from_uint(@b, 0xDEADBEEF);
     cmp22 = bigint_cmp(@a, @b);
     if (cmp22 == 0)
     {
@@ -281,8 +281,8 @@ def main() -> int
 
     // Test 23: Compare less than
     print("Test 23: Compare less than (42 < 0xFFFFFFFF)\n\0");
-    bigint_from_u32(@a, 42);
-    bigint_from_u32(@b, 0xFFFFFFFF);
+    bigint_from_uint(@a, 42);
+    bigint_from_uint(@b, 0xFFFFFFFF);
     cmp23 = bigint_cmp(@a, @b);
     if (cmp23 < 0)
     {
@@ -297,7 +297,7 @@ def main() -> int
     // Test 24: Compare greater than
     print("Test 24: Compare greater than (0xFFFFFFFFFFFFFFFF > 0xFFFFFFFF)\n\0");
     bigint_from_u64(@a, 0xFFFFFFFFFFFFFFFF);
-    bigint_from_u32(@b, 0xFFFFFFFF);
+    bigint_from_uint(@b, 0xFFFFFFFFu);
     cmp24 = bigint_cmp(@a, @b);
     if (cmp24 > 0)
     {
@@ -311,8 +311,8 @@ def main() -> int
 
     // Test 25: Large multiply then divide should recover original
     print("Test 25: (0x123456789ABCDEF0 * 1000) / 1000 == original\n\0");
-    bigint_from_u64(@a, 0x123456789ABCDEF0);
-    bigint_from_u32(@b, 1000);
+    bigint_from_u64(@a, 0x123456789ABCDEF0u);
+    bigint_from_uint(@b, 1000u);
     bigint_mul(@result, @a, @b);
     bigint_div(@div25, @result, @b);
     cmp25 = bigint_cmp(@div25, @a);

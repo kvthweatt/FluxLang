@@ -1,5 +1,5 @@
 # Flux
-### *A general purpose, statically typed, broadly mid-level, object-oriented systems programming language for precise control over binary data.*
+### *A general purpose, statically typed, broadly mid-level, object-oriented compiled programming language for easy control over data.*
 
 <p align="center">
     <img src="https://github.com/kvthweatt/FluxLang/blob/main/resources/logo_cropped.jpg" width="300" height="150">
@@ -7,13 +7,19 @@
 
 ## What is Flux?
 
-Flux is a compiled systems language that combines C-like performance with Python-inspired syntax. It's for everyone, designed to have all the bells and whistles you could want in one place. Gone now are the days of writing your performance critical code in one language and calling it from another.
+Flux is a systems language that combines the performance of C with the readability of Python. It's for everyone, designed to have all the bells and whistles you could want in one place. Gone now are the days of writing your performance critical code in one language and calling it from another.
 
 **Characteristics:**
 - Manual memory management
 - Compiler that does not fight you
 - First class data control features
 - Consistent grammar and syntax constructs throughout
+- Rich operator set with distinct bitwise set
+- Everything stack allocated unless otherwise specified
+- Everything is zero initialized unless otherwise specified
+- Custom infix operator support
+- Templates without SFINAE
+- Opt-in ownership without a borrow checker
 
 
 ## Core Features
@@ -56,10 +62,10 @@ Extract individual bits from bytes as named fields:
 
 ```flux
 struct Flags {
-    unsigned data{1} enabled;
-    unsigned data{1} error;
-    unsigned data{1} ready;
-    unsigned data{1} busy;
+    unsigned data{1} enabled,
+                     error,
+                     ready,
+                     busy;
     unsigned data{4} mode;
 };
 
