@@ -95,7 +95,7 @@ def abc() -> void,
 ```
 
 **Universal External FFI:**  
-Flux has an operator called the "no mangle" operator, `!!`, which instructs the compiler to not mangle the function name to its right. This only applies to function names.
+Flux has an operator called the "no mangle" operator, `!!`, which instructs the compiler to not mangle any function names following it. This only applies to function names.
 ```
 extern def stcmp(byte*,byte*)->int;  // Single-line
 
