@@ -342,7 +342,21 @@ class FluxParser:
         # Built-in operator overloads are resolved at codegen time inside BinaryOp.codegen.
         from ftypesys import Operator as _Operator
         _builtin_op_values = {op.value for op in _Operator}
-        if symbol not in _builtin_op_values:
+        if symbol in _builtin_op_values:
+            # Overloading a built-in operator is only permitted when at least one
+            # parameter is an object or struct type.  Allowing purely primitive
+            # operand pairs (e.g. int + int) would silently hijack all uses of
+            # that operator on those types.
+            def _is_object_or_struct(ts):
+                return (ts.custom_typename is not None or
+                        ts.base_type in (DataType.STRUCT, DataType.OBJECT) or
+                        ts.is_pointer)
+            if not any(_is_object_or_struct(p.type_spec) for p in params):
+                self.error(
+                    f"Overloading built-in operator '{symbol}' requires at least "
+                    f"one parameter to be an object or struct type"
+                )
+        else:
             self._custom_operators[symbol] = func_name
         self.symbol_table.define(symbol, SymbolKind.OPERATOR)
 
@@ -901,35 +915,53 @@ class FluxParser:
         
         return FunctionPointerType(return_type, parameter_types)
 
-    def function_pointer_declaration(self) -> FunctionPointerDeclaration:
+    def function_pointer_declaration(self) -> Union['FunctionPointerDeclaration', List['FunctionPointerDeclaration']]:
         """
-        Parse function pointer declaration.
+        Parse function pointer declaration(s).
         
-        Syntax: def{}* name()->return_type = @function_name;
-        Example: def{}* fp()->void = @foo;
+        Single syntax:
+            def{}* name(param_types) -> return_type;
+            def{}* name(param_types) -> return_type = @function_name;
+        
+        Comma-separated syntax (all share the same def{}* prefix):
+            def{}* name1(param_types) -> return_type,
+                   name2(param_types) -> return_type,
+                   name3(param_types) -> return_type;
+        
+        Returns a single FunctionPointerDeclaration or a list when multiple
+        declarations are chained with commas.
         """
-        # Get the identifier name FIRST
-        name = self.consume(TokenType.IDENTIFIER).value
-        
-        # Parse the function pointer type (param types + return type)
-        fp_type = self.function_pointer_type()
-        
-        # Optional initializer
-        initializer = None
-        if self.expect(TokenType.ASSIGN):
-            self.advance()
-            
-            # Accept either @identifier or a null cast expression like (void*)0
-            if self.expect(TokenType.ADDRESS_OF):
-                self.consume(TokenType.ADDRESS_OF, "Expected '@' for function address")
-                func_name = self.consume(TokenType.IDENTIFIER).value
-                initializer = AddressOf(Identifier(func_name))
-            else:
-                # Parse as a general expression (e.g. (void*)0 for null initializer)
-                initializer = self.expression()
-        
+        def _parse_one_fp() -> 'FunctionPointerDeclaration':
+            """Parse a single name + type + optional initializer."""
+            name = self.consume(TokenType.IDENTIFIER).value
+            fp_type = self.function_pointer_type()
+
+            initializer = None
+            if self.expect(TokenType.ASSIGN):
+                self.advance()
+                if self.expect(TokenType.ADDRESS_OF):
+                    self.consume(TokenType.ADDRESS_OF, "Expected '@' for function address")
+                    func_name = self.consume(TokenType.IDENTIFIER).value
+                    initializer = AddressOf(Identifier(func_name))
+                else:
+                    initializer = self.expression()
+
+            return FunctionPointerDeclaration(name, fp_type, initializer)
+
+        # Parse the first declaration
+        first = _parse_one_fp()
+
+        # If followed by a comma, this is a multi-declaration chain
+        if self.expect(TokenType.COMMA):
+            declarations = [first]
+            while self.expect(TokenType.COMMA):
+                self.advance()  # consume ','
+                declarations.append(_parse_one_fp())
+            self.consume(TokenType.SEMICOLON)
+            return declarations
+
         self.consume(TokenType.SEMICOLON)
-        return FunctionPointerDeclaration(name, fp_type, initializer)
+        return first
 
     def parameter_list(self) -> List[Parameter]:
         """

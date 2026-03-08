@@ -1,5 +1,6 @@
 #ifndef FLUX_STANDARD_MATH
 #import "redmath.fx";
+#endif;
 
 #ifndef FLUX_BIG_INTEGERS
 #def FLUX_BIG_INTEGERS 1;
@@ -824,4 +825,3 @@ namespace math
 };
 
 #endif; // FLUX_BIG_INTEGERS
-#endif; // FLUX_STANDARD_MATH

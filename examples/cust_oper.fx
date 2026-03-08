@@ -19,7 +19,9 @@ def main() -> int
     int    x = 12;
     i16[2] y = [0,55];
     int    z = x + y;
+    
     print(z); print(); // 67
+
     print(5 +++ 3);    // 10
     return 0;
 };
