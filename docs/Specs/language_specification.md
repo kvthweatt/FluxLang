@@ -1806,8 +1806,8 @@ ADDRESS_CAST = "(@)"
 
 ## Primitive types:
 
-bool, int `5`, float `3.14`, char `"B"` == `66` - `65` == `'A'`, data
+bool, int `5`, float `3.14159`, double `3.1415926585`, char `"B"` == `66` - `65` == `'A'`, data
 
 ## All types:
 
-bool, int, uint, float, char, data, void, object, struct, union, enum
+bool, int, uint, float, double, char, data, void, object, struct, union, enum

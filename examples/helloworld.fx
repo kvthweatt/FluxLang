@@ -1,7 +1,6 @@
 #import "standard.fx";
 
-!using standard::io::socket;
-!using standard::io::file;
+using standard::io::console;
 
 def main() -> int
 {

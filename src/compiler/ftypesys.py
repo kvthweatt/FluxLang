@@ -100,6 +100,7 @@ class DataType(Enum):
     SINT = "int"
     UINT = "uint"
     FLOAT = "float"
+    DOUBLE = "double"
     CHAR = "char"
     BOOL = "bool"
     DATA = "data"
@@ -158,6 +159,8 @@ class PrimitiveType(BaseType):
             return ir.IntType(self.width or 32)
         elif self.kind == DataType.FLOAT:
             return ir.FloatType()
+        elif self.kind == DataType.DOUBLE:
+            return ir.DoubleType()
         elif self.kind == DataType.BOOL:
             return ir.IntType(1)
         elif self.kind == DataType.CHAR:
@@ -1354,6 +1357,8 @@ TypeSystem(base_type:     {self.base_type}\n\
                 return ir.IntType(32)
             elif type_spec == DataType.FLOAT:
                 return ir.FloatType()
+            elif type_spec == DataType.DOUBLE:
+                return ir.DoubleType()
             elif type_spec == DataType.BOOL:
                 return ir.IntType(1)
             elif type_spec == DataType.CHAR:
@@ -1416,6 +1421,8 @@ TypeSystem(base_type:     {self.base_type}\n\
             base_type = ir.IntType(32)
         elif type_spec.base_type == DataType.FLOAT:
             base_type = ir.FloatType()
+        elif type_spec.base_type == DataType.DOUBLE:
+            base_type = ir.DoubleType()
         elif type_spec.base_type == DataType.BOOL:
             base_type = ir.IntType(1)
         elif type_spec.base_type == DataType.CHAR:
@@ -2002,6 +2009,8 @@ class VariableTypeHandler:
             return ir.Constant(llvm_type, lit.value)
         elif lit.type == FastDataType.FLOAT:
             return ir.Constant(llvm_type, lit.value)
+        elif lit.type == FastDataType.DOUBLE:
+            return ir.Constant(llvm_type, lit.value)
         elif lit.type == FastDataType.BOOL:
             return ir.Constant(llvm_type, 1 if lit.value else 0)
         return None
@@ -2058,6 +2067,8 @@ class VariableTypeHandler:
                 return ir.Constant(ir.IntType(32), expr.value)
             elif expr.type == FastDataType.FLOAT:
                 return ir.Constant(ir.FloatType(), expr.value)
+            elif expr.type == FastDataType.DOUBLE:
+                return ir.Constant(ir.DoubleType(), expr.value)
             elif expr.type == FastDataType.BOOL:
                 return ir.Constant(ir.IntType(1), 1 if expr.value else 0)
             return None
@@ -2941,8 +2952,6 @@ class ArrayTypeHandler:
         Element 0 is leftmost = high bits; element N-1 is rightmost = low bits."""
         if isinstance(target_type, ir.FloatType):
             int_width = 32
-        elif isinstance(target_type, ir.DoubleType):
-            int_width = 64
         else:
             raise ValueError(f"pack_array_to_float: unsupported target float type {target_type}")
 
@@ -3018,8 +3027,6 @@ class ArrayTypeHandler:
         Element 0 is leftmost = high bits; element N-1 is rightmost = low bits."""
         if isinstance(target_type, ir.FloatType):
             int_width = 32
-        elif isinstance(target_type, ir.DoubleType):
-            int_width = 64
         else:
             raise ValueError(f"pack_array_to_float_runtime: unsupported target float type {target_type}")
 
@@ -3132,7 +3139,7 @@ class ArrayTypeHandler:
             int_elem_type = ir.IntType(32)
         elif isinstance(elem_type, ir.DoubleType):
             elem_bits = 64
-            is_float_elem = True
+            is_double_elem = True
             int_elem_type = ir.IntType(64)
         else:
             raise ValueError(f"Cannot unpack into array of type {elem_type}")
@@ -3423,9 +3430,13 @@ class CoercionContext:
         # Be defensive: older code sometimes attached raw DataType enums.
         if isinstance(spec, DataType):
             return spec == DataType.UINT
-        if not hasattr(spec, 'is_signed'):
+        if not hasattr(spec, 'base_type'):
             return False
-        return not spec.is_signed
+        # A type is unsigned only when its base type is explicitly UINT.
+        # is_signed=False is the default for ALL types (including int/SINT),
+        # so we cannot use `not spec.is_signed` as the unsigned test — that
+        # would incorrectly treat plain `int` variables as unsigned.
+        return spec.base_type == DataType.UINT
 
     @staticmethod
     def comparison_is_unsigned(a: ir.Value, b: ir.Value) -> bool:
@@ -3663,6 +3674,8 @@ def get_builtin_bit_width(base_type: DataType) -> int:
         return 32  # Default integer width
     elif base_type == DataType.FLOAT:
         return 32  # Single precision float
+    elif base_type == DataType.DOUBLE:
+        return 64  # Double precision float
     elif base_type == DataType.CHAR:
         return 8
     elif base_type == DataType.BOOL:

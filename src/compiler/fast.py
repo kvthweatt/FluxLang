@@ -50,6 +50,9 @@ class Literal(ASTNode):
         elif self.type == DataType.FLOAT:
             llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             return ir.Constant(llvm_type, float(self.value))
+        elif self.type == DataType.DOUBLE:
+            llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
+            return ir.Constant(llvm_type, float(self.value))
         elif self.type == DataType.BOOL:
             llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             return ir.Constant(llvm_type, bool(self.value))
@@ -71,7 +74,7 @@ class Literal(ASTNode):
             llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             if isinstance(llvm_type, ir.IntType):
                 return ir.Constant(llvm_type, int(self.value) if isinstance(self.value, str) else self.value)
-            elif isinstance(llvm_type, ir.FloatType):
+            elif isinstance(llvm_type, (ir.FloatType, ir.DoubleType)):
                 return ir.Constant(llvm_type, float(self.value))
             raise ValueError(f"Unsupported DATA literal: {self.value}")
         else:
@@ -79,7 +82,7 @@ class Literal(ASTNode):
             llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             if isinstance(llvm_type, ir.IntType):
                 return ir.Constant(llvm_type, int(self.value) if isinstance(self.value, str) else self.value)
-            elif isinstance(llvm_type, ir.FloatType):
+            elif isinstance(llvm_type, (ir.FloatType, ir.DoubleType)):
                 return ir.Constant(llvm_type, float(self.value))
             raise ValueError(f"Unsupported literal type: {self.type}")
 
@@ -187,9 +190,9 @@ class Literal(ASTNode):
                                 field_value = builder.trunc(field_value, expected_type)
                             elif field_value.type.width < expected_type.width:
                                 field_value = builder.sext(field_value, expected_type)
-                        elif isinstance(field_value.type, ir.IntType) and isinstance(expected_type, ir.FloatType):
+                        elif isinstance(field_value.type, ir.IntType) and isinstance(expected_type, (ir.FloatType, ir.DoubleType)):
                             field_value = builder.sitofp(field_value, expected_type)
-                        elif isinstance(field_value.type, ir.FloatType) and isinstance(expected_type, ir.IntType):
+                        elif isinstance(field_value.type, (ir.FloatType, ir.DoubleType)) and isinstance(expected_type, ir.IntType):
                             field_value = builder.fptosi(field_value, expected_type)
                 
                 builder.store(field_value, field_ptr)
@@ -236,6 +239,8 @@ class Identifier(Expression):
             # Load the value if it's a non-array, non-struct pointer type
             elif isinstance(ptr.type, ir.PointerType):
                 ret_val = builder.load(ptr, name=self.name)
+                if hasattr(ptr, '_flux_type_spec'):
+                    ret_val._flux_type_spec = ptr._flux_type_spec
                 if IdentifierTypeHandler.is_volatile(self.name, builder):
                     ret_val.volatile = True
                 # Attach type metadata to loaded value from multiple sources
@@ -867,7 +872,7 @@ class BinaryOp(Expression):
         # --------------------------------------------------
 
         if self.operator in (Operator.ADD, Operator.SUB, Operator.MUL, Operator.DIV, Operator.MOD, Operator.POWER):
-            if isinstance(lhs.type, ir.FloatType):
+            if isinstance(lhs.type, (ir.FloatType, ir.DoubleType)):
                 if self.operator == Operator.POWER:
                     # Use LLVM pow intrinsic for floating point power
                     pow_fn_type = ir.FunctionType(lhs.type, [lhs.type, lhs.type])
@@ -941,7 +946,7 @@ class BinaryOp(Expression):
             }
             op = op_map[self.operator]
 
-            if isinstance(lhs.type, ir.FloatType) and isinstance(rhs.type, ir.FloatType):
+            if isinstance(lhs.type, (ir.FloatType, ir.DoubleType)) and isinstance(rhs.type, (ir.FloatType, ir.DoubleType)):
                 return builder.fcmp_ordered(op, lhs, rhs)
 
             if isinstance(lhs.type, ir.PointerType) or isinstance(rhs.type, ir.PointerType):
@@ -1009,7 +1014,7 @@ class BinaryOp(Expression):
 
             result = (
                 builder.lshr(lhs, rhs)
-                if ctx.is_unsigned(lhs)
+                if ctx.is_unsigned(lhs) or not hasattr(lhs, '_flux_type_spec')
                 else builder.ashr(lhs, rhs)
             )
             # Shifts preserve signedness of left operand
@@ -1081,11 +1086,11 @@ class UnaryOp(Expression):
             if module.symbol_table.is_global_scope() and isinstance(operand_val, ir.Constant):
                 if isinstance(operand_val.type, ir.IntType):
                     return ir.Constant(operand_val.type, -operand_val.constant)
-                elif isinstance(operand_val.type, ir.FloatType):
+                elif isinstance(operand_val.type, (ir.FloatType, ir.DoubleType)):
                     return ir.Constant(operand_val.type, -operand_val.constant)
             
             # Use appropriate negation based on type
-            if isinstance(operand_val.type, ir.FloatType):
+            if isinstance(operand_val.type, (ir.FloatType, ir.DoubleType)):
                 # For floats, use fsub with 0.0
                 zero = ir.Constant(operand_val.type, 0.0)
                 return builder.fsub(zero, operand_val)
@@ -1345,6 +1350,13 @@ class CastExpression(Expression):
         elif isinstance(source_val.type, (ir.FloatType, ir.DoubleType)) and isinstance(target_llvm_type, ir.IntType):
             return builder.fptosi(source_val, target_llvm_type)
         
+        # Handle float <-> double conversion
+        elif isinstance(source_val.type, ir.FloatType) and isinstance(target_llvm_type, ir.DoubleType):
+            return builder.fpext(source_val, target_llvm_type)
+        
+        elif isinstance(source_val.type, ir.DoubleType) and isinstance(target_llvm_type, ir.FloatType):
+            return builder.fptrunc(source_val, target_llvm_type)
+        
         # Handle pointer to struct reinterpretation (e.g., char* -> MyStruct)
         elif isinstance(source_val.type, ir.PointerType) and isinstance(target_llvm_type, ir.LiteralStructType):
             # Bitcast the pointer to pointer-to-struct then load
@@ -1472,6 +1484,24 @@ class CastExpression(Expression):
         asm_type = ir.FunctionType(ir.VoidType(), [i8_ptr])
         inline_asm = ir.InlineAsm(asm_type, asm_code, constraints, side_effect=True)
         builder.call(inline_asm, [void_ptr])
+
+@dataclass
+class TypeConvertExpression(Expression):
+    """
+    Represents a built-in type conversion expression: float(x), int(y), etc.
+    This is a value-convert (not a bitcast) — e.g. float(intval) emits sitofp.
+    Delegates codegen to CastExpression since the conversion semantics are identical.
+    """
+    target_type: TypeSystem
+    expression: Expression
+
+    def __repr__(self) -> str:
+        name = self.target_type.custom_typename if self.target_type.custom_typename else self.target_type.base_type.value
+        return f"{name}({self.expression})"
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        return CastExpression(self.target_type, self.expression).codegen(builder, module)
+
 
 @dataclass
 class RangeExpression(Expression):
@@ -1797,7 +1827,7 @@ class FStringLiteral(Expression):
                 # Determine format string based on type
                 if isinstance(val.type, ir.IntType):
                     fmt_str = "%llu" if is_unsigned(val) else "%lld"
-                elif isinstance(val.type, ir.FloatType):
+                elif isinstance(val.type, (ir.FloatType, ir.DoubleType)):
                     fmt_str = "%f"
                 else:
                     fmt_str = "%p"
@@ -1841,6 +1871,8 @@ class FStringLiteral(Expression):
             if expr.type == DataType.SINT:
                 return int(expr.value)
             elif expr.type == DataType.FLOAT:
+                return float(expr.value)
+            elif expr.type == DataType.DOUBLE:
                 return float(expr.value)
             elif expr.type == DataType.BOOL:
                 return bool(expr.value)
@@ -2530,6 +2562,20 @@ class ArrayAccess(Expression):
             loaded = builder.load(gep, name="ptr_load")
             # Preserve type metadata from pointer element type
             return ArrayTypeHandler.preserve_array_element_type_metadata(loaded, array_val, module)
+
+        elif isinstance(array_val.type, ir.IntType):
+            # Scalar integer - extract byte at index via shift + truncate.
+            # Used by the multi-var FROM unpack: `byte b0,b1,...,b7 from some_u64;`
+            # Each variable gets (byte)(value >> (i * 8)).
+            index_i64 = index_val
+            if index_val.type != ir.IntType(64):
+                index_i64 = builder.sext(index_val, ir.IntType(64), name="idx_i64")
+            shift_amt = builder.mul(index_i64, ir.Constant(ir.IntType(64), 8), name="byte_shift")
+            val_i64 = array_val
+            if array_val.type != ir.IntType(64):
+                val_i64 = builder.zext(array_val, ir.IntType(64), name="val_i64")
+            shifted = builder.lshr(val_i64, shift_amt, name="byte_shr")
+            return builder.trunc(shifted, ir.IntType(8), name="byte_extract")
         
         else:
             raise ValueError(f"Cannot access array element for type: {array_val.type}")
@@ -4354,6 +4400,11 @@ class ReturnStatement(Statement):
         else:
             raise RuntimeError("Cannot determine function return type")
 
+        # return <value>; in a void function is legal (value is discarded)
+        if isinstance(expected, ir.VoidType):
+            builder.ret_void()
+            return None
+
         # Rework to use lowering context.
         ret_val = CoercionContext.coerce_return_value(builder, ret_val, expected)
 
@@ -5704,7 +5755,7 @@ class StructDef(ASTNode):
                 # Handle case where type_spec might be DataType instead of TypeSystem
                 if isinstance(type_spec, DataType):
                     # If it's a raw DataType, default signedness based on the type
-                    is_signed_value = type_spec in (DataType.SINT, DataType.CHAR, DataType.FLOAT)
+                    is_signed_value = type_spec in (DataType.SINT, DataType.CHAR, DataType.FLOAT, DataType.DOUBLE)
                 elif hasattr(type_spec, 'is_signed'):
                     is_signed_value = type_spec.is_signed
                 else:
@@ -5947,7 +5998,7 @@ class StructFieldAccess(Expression):
             # Optional typed reinterpret (if your vtable carries it)
             if hasattr(vtable, "field_types") and self.field_name in vtable.field_types:
                 target_type = vtable.field_types[self.field_name]
-                if isinstance(target_type, ir.FloatType) and isinstance(result.type, ir.IntType):
+                if isinstance(target_type, (ir.FloatType, ir.DoubleType)) and isinstance(result.type, ir.IntType):
                     result = builder.bitcast(result, target_type)
             return result
 

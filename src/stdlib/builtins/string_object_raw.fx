@@ -111,7 +111,7 @@ namespace standard
             def __init(byte* x) -> this
             {
                 this.value = x;
-                this.length = (i32)strlen(x);
+                this.length = standard::strings::strlen(x);
                 return this;
             };
 
@@ -127,7 +127,7 @@ namespace standard
 
             def len() -> int
             {
-                return strlen(this.value);
+                return standard::strings::strlen(this.value);
             };
 
             def set(byte* s) -> bool
@@ -135,7 +135,7 @@ namespace standard
                 try
                 {
                     this.value = s;
-                    this.length = (i32)strlen(s); // assignment needs to auto coerce
+                    this.length = (i32)standard::strings::strlen(s); // assignment needs to auto coerce
                     return true;
                 }
                 catch()
@@ -170,7 +170,7 @@ namespace standard
             def icompare(byte* s) -> int
             {
                 // Case-insensitive compare
-                return compare_ignore_case(this.value, s);
+                return helpers::compare_ignore_case(this.value, s);
             };
 
             // ===== SEARCH =====
@@ -181,17 +181,17 @@ namespace standard
 
             def startswith(byte* prefix) -> bool
             {
-                return starts_with(this.value, prefix);
+                return helpers::starts_with(this.value, prefix);
             };
 
             def endswith(byte* suffix) -> bool
             {
-                return ends_with(this.value, suffix);
+                return helpers::ends_with(this.value, suffix);
             };
 
             def indexof(byte* substr) -> int
             {
-                return find_substring(this.value, substr, 0);
+                return helpers::find_substring(this.value, substr, 0);
             };
 
             def lastindexof(byte* substr) -> int
@@ -201,7 +201,7 @@ namespace standard
 
             def indexof_char(char ch) -> int
             {
-                return find_char(this.value, ch, 0);
+                return helpers::find_char(this.value, ch, 0);
             };
 
             def lastindexof_char(char ch) -> int
@@ -245,7 +245,7 @@ namespace standard
                 {
                     length = this.length - start;
                 };
-                return copy_n(this.value + start, length);
+                return manip::copy_n(this.value + start, length);
             };
 
             def left(int n) -> byte*
@@ -258,7 +258,7 @@ namespace standard
                 {
                     n = this.length;
                 };
-                return copy_n(this.value, n);
+                return manip::copy_n(this.value, n);
             };
 
             def right(int n) -> byte*
@@ -271,26 +271,26 @@ namespace standard
                 {
                     n = this.length;
                 };
-                return copy_n(this.value + (this.length - n), n);
+                return manip::copy_n(this.value + (this.length - n), n);
             };
 
             // ===== CONCATENATION =====
             def concat(byte* s) -> byte*
             {
-                return concat(this.value, s);
+                return manip::concat(this.value, s);
             };
 
             def append(byte* s) -> bool
             {
                 try
                 {
-                    byte* newval = concat(this.value, s);
+                    byte* newval = manip::concat(this.value, s);
                     if (newval == 0)
                     {
                         return false;
                     };
                     this.value = newval;
-                    this.length = (i32)strlen(newval);
+                    this.length = (i32)standard::strings::strlen(newval);
                     return true;
                 }
                 catch()
@@ -304,13 +304,13 @@ namespace standard
             {
                 try
                 {
-                    byte* newval = concat(s, this.value);
+                    byte* newval = manip::concat(s, this.value);
                     if (newval == 0)
                     {
                         return false;
                     };
                     this.value = newval;
-                    this.length = (i32)strlen(newval);
+                    this.length = (i32)standard::strings::strlen(newval);
                     return true;
                 }
                 catch()
@@ -329,13 +329,13 @@ namespace standard
             def replace_all(byte* find, byte* replace) -> byte*
             {
                 // Replace all occurrences
-                byte* result = copy_string(this.value);
+                byte* result = manip::copy_string(this.value);
                 if (result == 0)
                 {
                     return (byte*)0;
                 };
 
-                int find_len = strlen(find);
+                int find_len = standard::strings::strlen(find);
                 if (find_len == 0)
                 {
                     return result;
@@ -343,7 +343,7 @@ namespace standard
 
                 while (true)
                 {
-                    int pos = find_substring(result, find, 0);
+                    int pos = helpers::find_substring(result, find, 0);
                     if (pos == -1)
                     {
                         break;
@@ -381,8 +381,8 @@ namespace standard
                     return false;
                 };
 
-                byte* before = copy_n(this.value, pos);
-                byte* after = copy_string(this.value + pos);
+                byte* before = manip::copy_n(this.value, pos);
+                byte* after = manip::copy_string(this.value + pos);
                 
                 if (before == 0 | after == 0)
                 {
@@ -391,7 +391,7 @@ namespace standard
                     return false;
                 };
 
-                byte* temp = concat(before, s);
+                byte* temp = manip::concat(before, s);
                 free(before);
                 
                 if (temp == 0)
@@ -400,7 +400,7 @@ namespace standard
                     return false;
                 };
 
-                byte* result = concat(temp, after);
+                byte* result = manip::concat(temp, after);
                 free(temp);
                 free(after);
 
@@ -410,7 +410,7 @@ namespace standard
                 };
 
                 this.value = result;
-                this.length = (i32)strlen(result);
+                this.length = (i32)standard::strings::strlen(result);
                 return true;
             };
 
@@ -429,8 +429,8 @@ namespace standard
                     length = this.length - start;
                 };
 
-                byte* before = copy_n(this.value, start);
-                byte* after = copy_string(this.value + start + length);
+                byte* before = manip::copy_n(this.value, start);
+                byte* after = manip::copy_string(this.value + start + length);
 
                 if (before == 0 | after == 0)
                 {
@@ -439,7 +439,7 @@ namespace standard
                     return false;
                 };
 
-                byte* result = concat(before, after);
+                byte* result = manip::concat(before, after);
                 free(before);
                 free(after);
 
@@ -449,7 +449,7 @@ namespace standard
                 };
 
                 this.value = result;
-                this.length = (i32)strlen(result);
+                this.length = (i32)standard::strings::strlen(result);
                 return true;
             };
 
@@ -458,7 +458,7 @@ namespace standard
             {
                 for (int i = 0; i < this.length; i = i + 1)
                 {
-                    this.value[i] = (byte)to_upper((char)this.value[i]);
+                    this.value[i] = (byte)helpers::to_upper((char)this.value[i]);
                 };
                 return true;
             };
@@ -467,7 +467,7 @@ namespace standard
             {
                 for (int i = 0; i < this.length; i = i + 1)
                 {
-                    this.value[i] = (byte)to_lower((char)this.value[i]);
+                    this.value[i] = (byte)helpers::to_lower((char)this.value[i]);
                 };
                 return true;
             };
@@ -479,18 +479,18 @@ namespace standard
                 for (int i = 0; i < this.length; i = i + 1)
                 {
                     char ch = (char)this.value[i];
-                    if (is_whitespace(ch))
+                    if (helpers::is_whitespace(ch))
                     {
                         at_word_start = true;
                     }
                     elif (at_word_start)
                     {
-                        this.value[i] = (byte)to_upper(ch);
+                        this.value[i] = (byte)helpers::to_upper(ch);
                         at_word_start = false;
                     }
                     else
                     {
-                        this.value[i] = (byte)to_lower(ch);
+                        this.value[i] = (byte)helpers::to_lower(ch);
                     };
                 };
                 return true;
@@ -500,13 +500,13 @@ namespace standard
             def trim() -> bool
             {
                 int start = 0;
-                while (start < this.length & is_whitespace((char)this.value[start]))
+                while (start < this.length & helpers::is_whitespace((char)this.value[start]))
                 {
                     start = start + 1;
                 };
 
                 int end = this.length - 1;
-                while (end >= start & is_whitespace((char)this.value[end]))
+                while (end >= start & helpers::is_whitespace((char)this.value[end]))
                 {
                     end = end - 1;
                 };
@@ -518,7 +518,7 @@ namespace standard
                     return true;
                 };
 
-                byte* result = copy_n(this.value + start, newlen);
+                byte* result = manip::copy_n(this.value + start, newlen);
                 if (result == 0)
                 {
                     return false;
@@ -532,7 +532,7 @@ namespace standard
             def trimstart() -> bool
             {
                 int start = 0;
-                while (start < this.length & is_whitespace((char)this.value[start]))
+                while (start < this.length & helpers::is_whitespace((char)this.value[start]))
                 {
                     start = start + 1;
                 };
@@ -542,21 +542,21 @@ namespace standard
                     return true;
                 };
 
-                byte* result = copy_string(this.value + start);
+                byte* result = manip::copy_string(this.value + start);
                 if (result == 0)
                 {
                     return false;
                 };
 
                 this.value = result;
-                this.length = (i32)strlen(result);
+                this.length = (i32)standard::strings::strlen(result);
                 return true;
             };
 
             def trimend() -> bool
             {
                 int end = this.length - 1;
-                while (end >= 0 & is_whitespace((char)this.value[end]))
+                while (end >= 0 & helpers::is_whitespace((char)this.value[end]))
                 {
                     end = end - 1;
                 };
@@ -592,7 +592,7 @@ namespace standard
                     return true;
                 };
 
-                byte* result = copy_n(this.value + start, newlen);
+                byte* result = manip::copy_n(this.value + start, newlen);
                 if (result == 0)
                 {
                     return false;
@@ -612,7 +612,7 @@ namespace standard
                 };
                 for (int i = 0; i < this.length; i = i + 1)
                 {
-                    if (!is_alpha((char)this.value[i]))
+                    if (!helpers::is_alpha((char)this.value[i]))
                     {
                         return false;
                     };
@@ -628,7 +628,7 @@ namespace standard
                 };
                 for (int i = 0; i < this.length; i = i + 1)
                 {
-                    if (!is_digit((char)this.value[i]))
+                    if (!helpers::is_digit((char)this.value[i]))
                     {
                         return false;
                     };
@@ -644,7 +644,7 @@ namespace standard
                 };
                 for (int i = 0; i < this.length; i = i + 1)
                 {
-                    if (!is_alnum((char)this.value[i]))
+                    if (!helpers::is_alnum((char)this.value[i]))
                     {
                         return false;
                     };
@@ -726,7 +726,7 @@ namespace standard
             {
                 byte[32] buffer;
                 i32str(value, buffer);
-                return this.set(copy_string(buffer));
+                return this.set(manip::copy_string(buffer));
             };
 
             // ===== LINE OPERATIONS =====
@@ -773,7 +773,7 @@ namespace standard
                     if (i == this.length | (char)this.value[i] == delimiter)
                     {
                         int part_len = i - start;
-                        result[part_idx] = copy_n(this.value + start, part_len);
+                        result[part_idx] = manip::copy_n(this.value + start, part_len);
                         part_idx = part_idx + 1;
                         start = i + 1;
                     };
@@ -807,7 +807,7 @@ namespace standard
 
             def copy() -> byte*
             {
-                return copy_string(this.value);
+                return manip::copy_string(this.value);
             };
 
             def hash() -> int

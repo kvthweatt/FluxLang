@@ -1,0 +1,42 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "flux",
+      "camelcase": "Flux",
+      "title": "Flux",
+      "scope": "source.flux",
+      "file-types": [
+        "fx"
+      ],
+      "injection-regex": "^flux$",
+      "class-name": "TreeSitterFlux"
+    }
+  ],
+  "metadata": {
+    "version": "1.0.0",
+    "license": "MIT",
+    "description": "A general purpose, statically typed, compiled language featuring first class data manipulation capabilities.",
+    "authors": [
+      {
+        "name": "Karac Thweatt",
+        "email": "kvthweatt@gmail.com",
+        "url": "https://uttcex.net/kvthweatt"
+      }
+    ],
+    "links": {
+      "repository": "github.com/FluxSysLang/Flux",
+      "funding": ""
+    }
+  },
+  "bindings": {
+    "c": false,
+    "go": false,
+    "java": false,
+    "node": true,
+    "python": true,
+    "rust": false,
+    "swift": false,
+    "zig": false
+  }
+}

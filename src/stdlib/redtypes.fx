@@ -54,9 +54,6 @@ namespace standard
 
         i16 as wchar;
 
-        // ============ FLOATING POINT ============
-        u64 as double;  // Using u64 as placeholder for double
-
         // ============ NETWORK/ENDIAN TYPES ============
         // Big-endian types (network byte order)
         unsigned data{16::1} as be16;
@@ -94,7 +91,7 @@ namespace standard
                    ((value >> 40) & 0xFF00)    |
                    ((value >> 56) & 0xFF);
         };
-
+/// DEPRECATED
         // Network to host conversion
         def ntoh16(be16 net_value) -> le16
         {
@@ -115,24 +112,7 @@ namespace standard
         {
             return (be32)bswap32((u32)host_value);
         };
-
-        // ============ BIT MANIPULATION ============
-        ///
-        def bit_set(u32* value, u32 bit) -> void
-        {
-            *value |= (1 << bit);
-        };
-        
-        def bit_clear(u32* value, u32 bit) -> void
-        {
-            *value &= ~(1 << bit);
-        };
-        
-        def bit_toggle(u32* value, u32 bit) -> void
-        {
-            *value ^= (1 << bit);
-        };
-        ///
+///
         
         def bit_test(u32 value, u32 bit) -> bool
         {

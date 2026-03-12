@@ -582,7 +582,7 @@ class FluxParser:
         elif self.expect(TokenType.SIGNED):
             return self.variable_declaration_statement()
         elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.DATA, TokenType.CHAR, 
-                         TokenType.FLOAT_KW, TokenType.BOOL_KW, TokenType.VOID):
+                         TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.BOOL_KW, TokenType.VOID):
             return self.variable_declaration_statement()
         elif self.expect(TokenType.SEMICOLON):
             self.advance()
@@ -850,7 +850,7 @@ class FluxParser:
                 self.advance()
             
             # Must have a base type
-            if not self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.CHAR, 
+            if not self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.CHAR, 
                               TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
                               TokenType.IDENTIFIER):
                 return False
@@ -1791,6 +1791,9 @@ class FluxParser:
         elif self.expect(TokenType.FLOAT_KW):
             self.advance()
             return DataType.FLOAT
+        elif self.expect(TokenType.DOUBLE_KW):
+            self.advance()
+            return DataType.DOUBLE
         elif self.expect(TokenType.CHAR):
             self.advance()
             return DataType.CHAR
@@ -1841,8 +1844,8 @@ class FluxParser:
                 self.advance()
             
             # Must have a base type
-            if not self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.CHAR, 
-                             TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
+            if not self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW,
+                             TokenType.CHAR,  TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
                              TokenType.STRUCT, TokenType.IDENTIFIER):
                 return False
             
@@ -2021,14 +2024,21 @@ class FluxParser:
                 initializers.append(None)
             
             if self.expect(TokenType.COMMA) and initializers[0] is None:
-                # Mode: int x,y,z = 1,2,3; Ã¢â‚¬â€ collect all names first, then all initializers
+                # Mode: int x,y,z = 1,2,3; Collect all names first, then all initializers
                 while self.expect(TokenType.COMMA):
                     self.advance()
                     var_name = self.consume(TokenType.IDENTIFIER).value
                     self.symbol_table.define(var_name, SymbolKind.VARIABLE, type_spec)
                     names.append(var_name)
                 initializers = []
-                if self.expect(TokenType.ASSIGN):
+                if self.expect(TokenType.FROM):
+                    # Mode: type a,b,c,d from source_expr;
+                    # Unpacks source_expr into each variable by index order
+                    self.advance()
+                    source_expr = self.expression()
+                    for i in range(len(names)):
+                        initializers.append(ArrayAccess(source_expr, Literal(i, DataType.SINT)))
+                elif self.expect(TokenType.ASSIGN):
                     self.advance()
                     for _ in names:
                         initializers.append(self.expression())
@@ -2051,6 +2061,8 @@ class FluxParser:
             
             # If we have multiple variables, create multiple declarations
             if len(names) > 1:
+                if len(initializers) < len(names):
+                    initializers = [None] * (len(names) - len(initializers)) + initializers
                 # Create a declaration for each variable
                 declarations = []
                 for i, var_name in enumerate(names):
@@ -3359,6 +3371,10 @@ class FluxParser:
             value = float(self.current_token.value)
             self.advance()
             return Literal(value, DataType.FLOAT)
+        elif self.expect(TokenType.DOUBLE):
+            value = float(self.current_token.value)
+            self.advance()
+            return Literal(value, DataType.DOUBLE)
         elif self.expect(TokenType.CHAR):
             value = self.current_token.value
             self.advance()
@@ -3414,6 +3430,32 @@ class FluxParser:
             return self.alignof_expression()
         elif self.expect(TokenType.ENDIANOF):
             return self.endianof_expression()
+        elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW,
+                         TokenType.CHAR, TokenType.BOOL_KW):
+            # Built-in type convert expression: float(x), int(y), char(z), etc.
+            kw_token = self.current_token
+            kw_map = {
+                TokenType.SINT:      DataType.SINT,
+                TokenType.UINT:      DataType.UINT,
+                TokenType.FLOAT_KW:  DataType.FLOAT,
+                TokenType.DOUBLE_KW: DataType.DOUBLE,
+                TokenType.CHAR:      DataType.CHAR,
+                TokenType.BOOL_KW:   DataType.BOOL,
+            }
+            target_data_type = kw_map[kw_token.type]
+            saved_pos = self.position
+            self.advance()  # consume the type keyword
+            if self.expect(TokenType.LEFT_PAREN):
+                self.advance()  # consume '('
+                inner_expr = self.expression()
+                self.consume(TokenType.RIGHT_PAREN)
+                target_type = TypeSystem(base_type=target_data_type)
+                return TypeConvertExpression(target_type, inner_expr)
+            else:
+                # Not a type-convert expression — backtrack and fall through to error
+                self.position = saved_pos
+                self.current_token = self.tokens[self.position]
+                self.error(f"Unexpected token: {self.current_token.type.name if self.current_token else 'EOF'}")
         else:
             self.error(f"Unexpected token: {self.current_token.type.name if self.current_token else 'EOF'}")
 
@@ -3475,7 +3517,7 @@ class FluxParser:
         saved_pos = self.position
         
         # Check if it starts with a known type keyword
-        if self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.CHAR, 
+        if self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.CHAR, 
                       TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID,
                       TokenType.CONST, TokenType.VOLATILE, TokenType.SIGNED, TokenType.UNSIGNED):
             # Definitely a type, parse as type_spec
@@ -3510,7 +3552,7 @@ class FluxParser:
 
         saved_pos = self.position
 
-        if self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.CHAR,
+        if self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.CHAR,
                       TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID,
                       TokenType.CONST, TokenType.VOLATILE, TokenType.SIGNED, TokenType.UNSIGNED,
                       TokenType.IDENTIFIER):

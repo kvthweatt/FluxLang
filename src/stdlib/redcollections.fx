@@ -232,6 +232,4 @@ namespace standard
     };
 };
 
-using standard::collections;
-
 #endif;

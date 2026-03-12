@@ -254,7 +254,7 @@ A global is something that can be referred to anywhere in the program. It exists
 </ul>
 
 If we look at this tree, we can see `int a`, `myFunction()` and `main()` exist at the same level as each other.  
-Figure 2.2 demonstrates this program.
+Figure 1.2 demonstrates this program.
 
 #### f1.2
 ```
@@ -450,13 +450,13 @@ We now have a basic understanding of functions, and logical operations. Now it's
 
 #### f3.1 Hello World
 ```
-import "io.fx";
+#import "standard.fx";
 
-using io::output::print;
+using standard::io::console;   // Contains print()
 
 def main() -> int
 {
-    print("Hello World!");
+    print("Hello World!\0");
     return 0;
 };
 ```
@@ -473,18 +473,18 @@ This means if we tried to interpret a character like the capital letter `A` as s
 
 #### f3.2 What's your name?
 ```
-import "io.fx";
-import "types.fx";
+import "standard.fx";
 
-using io::output::print, io::input::input;
-using types::string;
+using standard::io::console; // Also includes input()
 
 def main() -> int
 {
-    string s();
-    s = input("What's your name? ");
-    print("\n");
-    print("Hello, ); print(s); print("!")
+    int max = 32;
+    byte[max] name;
+    print("What's your name? \0");
+    int bytes_read = input(@name, max);
+    print(); // Empty prints perform newlines
+    print("Hello, \0"); print(@name, bytes_read); print("!\0")
     return 0;
 };
 ```
@@ -501,16 +501,17 @@ like this.
 What's actually happening is there is an invisible character which instructs a text editor to move to a new line. In memory, the file spans linearly, it doesn't break into lines. We write programs to show these line breaks.
 #### f3.3 Introducing `f-strings`:
 ```
-import "io.fx", "types.fx";  // You can do multiple imports on one line.
+#import "standard.fx";
 
-using io::output::print, io::input::input;
-using types::string;
+using standard::io::console;
 
 def main() -> int
 {
-    string s();
-    s = input("What's your name? ");
-    print(f"\nHello, {s}!");
+    int max = 32;
+    byte[max] name;
+    print("What's your name? \0");
+    int bytes_read = input(@name, max);
+    print(f"\nHello, {s}!\0");
     return 0;
 };
 ```

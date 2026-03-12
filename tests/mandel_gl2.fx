@@ -1,5 +1,6 @@
 #import "standard.fx", "redmath.fx", "redwindows.fx", "redopengl.fx";
 
+using standard::io::console;
 using standard::system::windows;
 using standard::math;
 
@@ -8,19 +9,19 @@ using standard::math;
 // W = zoom in, S = zoom out
 // ============================================================================
 
-const int WIN_W        = 900;
-const int WIN_H        = 900;
-const int MAX_ITER     = 1024;
-const int TILE_STILL   = 1;   // Tile size when stationary
-const int TILE_MOVING  = 4;   // Tile size while a key is held - faster pan/zoom
+const int WIN_W        = 900,
+          WIN_H        = 900,
+          MAX_ITER     = 1024,
+          TILE_STILL   = 1,   // Tile size when stationary
+          TILE_MOVING  = 4,   // Tile size while a key is held - faster pan/zoom
 
 // Virtual key codes
-const int VK_W    = 0x57;
-const int VK_S    = 0x53;
-const int VK_A    = 0x41;
-const int VK_D    = 0x44;
-const int VK_UP   = 0x26;
-const int VK_DOWN = 0x28;
+          VK_W    = 0x57,
+          VK_S    = 0x53,
+          VK_A    = 0x41,
+          VK_D    = 0x44,
+          VK_UP   = 0x26,
+          VK_DOWN = 0x28;
 
 // ============================================================================
 // Double-double arithmetic using Flux array packing.
@@ -30,69 +31,69 @@ const int VK_DOWN = 0x28;
 // ============================================================================
 
 // Pack two floats into a u64
-def dd_pack(float hi, float lo) -> u64
+def ff_pack(float hi, float lo) -> u64
 {
     float[2] parts = [hi, lo];
     return (u64)parts;
 };
 
 // Unpack hi part
-def dd_hi(u64 dd) -> float
+def ff_hi(u64 dd) -> float
 {
     float[2] parts = (float[2])dd;
     return parts[0];
 };
 
 // Unpack lo part
-def dd_lo(u64 dd) -> float
+def ff_lo(u64 dd) -> float
 {
     float[2] parts = (float[2])dd;
     return parts[1];
 };
 
 // Add dd + dd, return dd
-def dd_add(u64 a, u64 b) -> u64
+def ff_add(u64 a, u64 b) -> u64
 {
     float ahi, alo, bhi, blo, s, e;
-    ahi = dd_hi(a);
-    alo = dd_lo(a);
-    bhi = dd_hi(b);
-    blo = dd_lo(b);
+    ahi = ff_hi(a);
+    alo = ff_lo(a);
+    bhi = ff_hi(b);
+    blo = ff_lo(b);
     s   = ahi + bhi;
     e   = bhi - (s - ahi);
-    return dd_pack(s, (alo + blo) + e);
+    return ff_pack(s, (alo + blo) + e);
 };
 
 // Subtract dd - dd, return dd
-def dd_sub(u64 a, u64 b) -> u64
+def ff_sub(u64 a, u64 b) -> u64
 {
     float ahi, alo, bhi, blo, s, e;
-    ahi = dd_hi(a);
-    alo = dd_lo(a);
-    bhi = dd_hi(b);
-    blo = dd_lo(b);
+    ahi = ff_hi(a);
+    alo = ff_lo(a);
+    bhi = ff_hi(b);
+    blo = ff_lo(b);
     s   = ahi - bhi;
     e   = (0.0 - bhi) - (s - ahi);
-    return dd_pack(s, (alo - blo) + e);
+    return ff_pack(s, (alo - blo) + e);
 };
 
 // Multiply dd * dd, return dd
-def dd_mul(u64 a, u64 b) -> u64
+def ff_mul(u64 a, u64 b) -> u64
 {
     float ahi, alo, bhi, blo, p, e;
-    ahi = dd_hi(a);
-    alo = dd_lo(a);
-    bhi = dd_hi(b);
-    blo = dd_lo(b);
+    ahi = ff_hi(a);
+    alo = ff_lo(a);
+    bhi = ff_hi(b);
+    blo = ff_lo(b);
     p   = ahi * bhi;
     e   = ahi * blo + alo * bhi;
-    return dd_pack(p, e);
+    return ff_pack(p, e);
 };
 
 // Scale dd by a float, return dd
-def dd_scale(u64 a, float s) -> u64
+def ff_scale(u64 a, float s) -> u64
 {
-    return dd_pack(dd_hi(a) * s, dd_lo(a) * s);
+    return ff_pack(ff_hi(a) * s, ff_lo(a) * s);
 };
 
 // Compute Mandelbrot iteration count using double-double precision
@@ -104,29 +105,29 @@ def mandelbrot(u64 x0, u64 y0, int max_iter) -> int
 
     // Cardioid and period-2 bulb check using hi parts only (float precision sufficient)
     // Points inside either region are guaranteed to never escape - skip iteration entirely
-    cx = dd_hi(x0) - 0.25;
-    cy = dd_hi(y0);
+    cx = ff_hi(x0) - 0.25;
+    cy = ff_hi(y0);
     q  = cx * cx + cy * cy;
     // Main cardioid: q*(q + cx) < cy*cy*0.25
     if (q * (q + cx) < cy * cy * 0.25) { return max_iter; };
     // Period-2 bulb: (x+1)^2 + y^2 < 1/16
-    cx = dd_hi(x0) + 1.0;
+    cx = ff_hi(x0) + 1.0;
     if (cx * cx + cy * cy < 0.0625) { return max_iter; };
 
-    x    = dd_pack(0.0, 0.0);
-    y    = dd_pack(0.0, 0.0);
+    x    = ff_pack(0.0, 0.0);
+    y    = ff_pack(0.0, 0.0);
     iter = 0;
 
     while (iter < max_iter)
     {
-        xx    = dd_mul(x, x);
-        yy    = dd_mul(y, y);
-        // Use hi parts only for the magnitude bailout check - avoids a full dd_add
-        xxhi  = dd_hi(xx);
-        yyhi  = dd_hi(yy);
+        xx    = ff_mul(x, x);
+        yy    = ff_mul(y, y);
+        // Use hi parts only for the magnitude bailout check - avoids a full ff_add
+        xxhi  = ff_hi(xx);
+        yyhi  = ff_hi(yy);
         if (xxhi + yyhi > 4.0) { return iter; };
-        xtemp = dd_add(dd_sub(xx, yy), x0);
-        y     = dd_add(dd_scale(dd_mul(x, y), 2.0), y0);
+        xtemp = ff_add(ff_sub(xx, yy), x0);
+        y     = ff_add(ff_scale(ff_mul(x, y), 2.0), y0);
         x     = xtemp;
         iter++;
     };
@@ -190,9 +191,9 @@ def main() -> int
     u64 cx, cy, zoom, half_zoom, x_min, y_min,
         x_range, y_range, fx, fy;
 
-    cx   = dd_pack(-0.5, 0.0);
-    cy   = dd_pack( 0.0, 0.0);
-    zoom = dd_pack( 3.0, 0.0);
+    cx   = ff_pack(-0.5, 0.0);
+    cy   = ff_pack( 0.0, 0.0);
+    zoom = ff_pack( 3.0, 0.0);
 
     // Scalar control parameters stay float
     float zoom_speed, pan_speed, dt, zoom_hi;
@@ -205,8 +206,8 @@ def main() -> int
 
     // TILE and max_iter adapt based on whether any key is held:
     // moving = coarser tiles + fewer iterations for responsive panning/zooming
-    int tile, dyn_max_iter;
-    int cols, rows, row, col, iter,
+    int tile, dyn_max_iter,
+        cols, rows, row, col, iter,
         cur_w, cur_h;
     bool moving;
 
@@ -261,7 +262,7 @@ def main() -> int
         // Scale max iterations with zoom depth: shallow zoom needs far fewer iters.
         // zoom_hi ranges from ~8.0 (fully out) to ~0.0000000001 (deep in).
         // At zoom 8 cap at 128; at zoom 1 cap at 256; deep zoom uses full MAX_ITER.
-        zoom_hi = dd_hi(zoom);
+        zoom_hi = ff_hi(zoom);
         if (zoom_hi > 1.0)
         {
             dyn_max_iter = 128;
@@ -283,34 +284,34 @@ def main() -> int
 
         if ((w_state `& 0x8000) != 0)
         {
-            zoom   = dd_scale(zoom, 1.0 - zoom_speed * dt);
-            if (dd_hi(zoom) < 0.0000000001) { zoom = dd_pack(0.0000000001, 0.0); };
+            zoom   = ff_scale(zoom, 1.0 - zoom_speed * dt);
+            if (ff_hi(zoom) < 0.0000000001) { zoom = ff_pack(0.0000000001, 0.0); };
         };
 
         if ((s_state `& 0x8000) != 0)
         {
-            zoom   = dd_scale(zoom, 1.0 + zoom_speed * dt);
-            if (dd_hi(zoom) > 8.0) { zoom = dd_pack(8.0, 0.0); };
+            zoom   = ff_scale(zoom, 1.0 + zoom_speed * dt);
+            if (ff_hi(zoom) > 8.0) { zoom = ff_pack(8.0, 0.0); };
         };
 
         if ((a_state `& 0x8000) != 0)
         {
-            cx = dd_sub(cx, dd_scale(zoom, pan_speed * dt));
+            cx = ff_sub(cx, ff_scale(zoom, pan_speed * dt));
         };
 
         if ((d_state `& 0x8000) != 0)
         {
-            cx = dd_add(cx, dd_scale(zoom, pan_speed * dt));
+            cx = ff_add(cx, ff_scale(zoom, pan_speed * dt));
         };
 
         if ((up_state `& 0x8000) != 0)
         {
-            cy = dd_sub(cy, dd_scale(zoom, pan_speed * dt));
+            cy = ff_sub(cy, ff_scale(zoom, pan_speed * dt));
         };
 
         if ((dn_state `& 0x8000) != 0)
         {
-            cy = dd_add(cy, dd_scale(zoom, pan_speed * dt));
+            cy = ff_add(cy, ff_scale(zoom, pan_speed * dt));
         };
 
         // Clear
@@ -318,11 +319,11 @@ def main() -> int
         gl.clear();
 
         // Render Mandelbrot as colored quads - all complex math in double-double
-        half_zoom = dd_scale(zoom, 0.5);
-        x_min   = dd_sub(cx, half_zoom);
-        y_min   = dd_sub(cy, dd_scale(zoom, (float)cur_h / (float)cur_w * 0.5));
+        half_zoom = ff_scale(zoom, 0.5);
+        x_min   = ff_sub(cx, half_zoom);
+        y_min   = ff_sub(cy, ff_scale(zoom, (float)cur_h / (float)cur_w * 0.5));
         x_range = zoom;
-        y_range = dd_scale(zoom, (float)cur_h / (float)cur_w);
+        y_range = ff_scale(zoom, (float)cur_h / (float)cur_w);
 
         // Batch all quads into a single draw call - one glBegin/glEnd for the whole frame
         glBegin(GL_QUADS);
@@ -332,8 +333,8 @@ def main() -> int
             col = 0;
             while (col < cols)
             {
-                fx = dd_add(x_min, dd_scale(x_range, ((float)col + 0.5) / (float)cols));
-                fy = dd_add(y_min, dd_scale(y_range, ((float)row + 0.5) / (float)rows));
+                fx = ff_add(x_min, ff_scale(x_range, ((float)col + 0.5) / (float)cols));
+                fy = ff_add(y_min, ff_scale(y_range, ((float)row + 0.5) / (float)rows));
 
                 iter = mandelbrot(fx, fy, dyn_max_iter);
 

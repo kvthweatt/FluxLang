@@ -1,0 +1,35 @@
+{
+  "name": "tree-sitter-flux",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the Flux programming language",
+  "main": "bindings/node",
+  "keywords": [
+    "parser",
+    "tree-sitter",
+    "flux"
+  ],
+  "author": "Karac Thweatt",
+  "license": "MIT",
+  "dependencies": {
+    "nan": "^2.17.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.20.8"
+  },
+  "scripts": {
+    "build": "tree-sitter generate && node-gyp build",
+    "test": "tree-sitter test",
+    "generate": "tree-sitter generate"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.flux",
+      "file-types": [
+        "fx"
+      ],
+      "highlights": "queries/highlights.scm",
+      "injections": "queries/injections.scm",
+      "locals": "queries/locals.scm"
+    }
+  ]
+}

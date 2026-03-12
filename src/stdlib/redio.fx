@@ -347,7 +347,7 @@ namespace standard
 
             def print(noopstr s) -> void
             {
-                int len = strlen(@s);
+                int len = standard::strings::strlen(@s);
                 // GENERIC PRINT
                 //
                 // Designed to use sys.fx to determine which OS we're on
@@ -383,21 +383,23 @@ namespace standard
                 print(noopstr) -> void,
                 print(byte) -> void, // print single character
                 print(bool) -> void,
-                printchar(noopstr x) -> void,
-                print(byte x) -> void,
-                print(i8 x) -> void,
-                print(i16 x) -> void,
-                print(u16 x) -> void,
-                print(int x) -> void,
-                print(i32 x) -> void,
-                print(uint x) -> void,
-                print(u32 x) -> void,
+                printchar(noopstr) -> void,
+                print(byte) -> void,
+                print(i8) -> void,
+                print(i16) -> void,
+                print(u16) -> void,
+                print(int) -> void,
+                print(i32) -> void,
+                print(uint) -> void,
+                print(u32) -> void,
                 print_hex_byte(byte) -> void,
                 print_hex_u32(u32) -> void,
-                print(i64 x) -> void,
-                print(u64 x) -> void,
-                print(float x) -> void,
-                print(float x, int y) -> void;
+                print(i64) -> void,
+                print(u64) -> void,
+                print(float) -> void,
+                print(float,int) -> void,
+                print(double) -> void,
+                print(double,int) -> void;
 
             def print(bool b) -> void
             {
@@ -412,36 +414,80 @@ namespace standard
             def print(int x) -> void
             {
                 byte[21] buf;
-                i32str(x,buf);
+                standard::strings::i32str(x,buf);
                 print(buf);
                 return;
             };
             def print(i16 x) -> void
             {
                 byte[21] buf;
-                i16str(x,buf);
+                standard::strings::i16str(x,buf);
                 print(buf);
                 return;
             };
             def print(u16 x) -> void
             {
                 byte[21] buf;
-                u16str(x,buf);
+                standard::strings::u16str(x,buf);
                 print(buf);
                 return;
             };
             def print(i32 x) -> void
             {
                 byte[21] buf;
-                i32str(x,buf);
+                standard::strings::i32str(x,buf);
                 print(buf);
                 return;
             };
             def print(u32 x) -> void
             {
                 byte[21] buf;
-                u32str(x,buf);
+                standard::strings::u32str(x,buf);
                 print(buf);
+                return;
+            };
+            def print(i64 x) -> void
+            {
+                byte[21] buf;
+                standard::strings::i64str(x,buf);
+                print(buf);
+                return;
+            };
+            def print(u64 x) -> void
+            {
+                byte[21] buf;
+                standard::strings::u64str(x,buf);
+                print(buf);
+                return;
+            };
+            def print(float x) -> void
+            {
+                byte[256] buffer;
+                standard::strings::float2str(x, @buffer, 5);
+                print(buffer);
+                return;
+            };
+            def print(float x, int y) -> void
+            {
+                byte[256] buffer;
+                if (y > 5) { y = 5; };
+                standard::strings::float2str(x, @buffer, y);
+                print(buffer);
+                return;
+            };
+            def print(double x) -> void
+            {
+                byte[256] buffer;
+                standard::strings::dbl2str(x, @buffer, 14);
+                print(buffer);
+                return 0;
+            };
+            def print(double x, int y) -> void
+            {
+                byte[256] buffer;
+                if (y > 14) { y = 14; };
+                standard::strings::dbl2str(x, @buffer, y);
+                print(buffer);
                 return;
             };
             def print_hex_byte(byte b) -> void
@@ -481,35 +527,6 @@ namespace standard
                 print_hex_byte(b);
                 return;
             };
-            def print(i64 x) -> void
-            {
-                byte[21] buf;
-                i64str(x,buf);
-                print(buf);
-                return;
-            };
-            def print(u64 x) -> void
-            {
-                byte[21] buf;
-                u64str(x,buf);
-                print(buf);
-                return;
-            };
-            def print(float x) -> void
-            {
-                byte[256] buffer;
-                float2str(x, @buffer, 5);
-                print(buffer);
-                return;
-            };
-            def print(float x, int y) -> void
-            {
-                byte[256] buffer;
-                float2str(x, @buffer, y);
-                print(buffer);
-                return;
-            };
-
             def print() -> void
             {
                 // No params = newline printed
@@ -785,8 +802,5 @@ namespace standard
         };
     };
 };
-
-using standard::io::console;
-using standard::io::file;
 
 #endif;

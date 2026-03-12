@@ -1,14 +1,14 @@
 #import "redstandard.fx";
 
-using standard::io;
+using standard::io::console;
 
 def main() -> int
 {
-    int MAX = 10;
-    char[10] buffer;
+    int max = 16;
+    char[max] buffer;
 
     print("What's your name? \0");
-    int bytes_read = win_input(buffer, MAX);
+    int bytes_read = input(buffer, max);
     print("Hello, \0");
     print(@buffer, bytes_read);
     print(".\0");

@@ -37,6 +37,9 @@ extern
         FillConsoleOutputCharacterA(i64, byte, i32, i32, i32*)         -> bool,
         FillConsoleOutputAttribute(i64, i16, i32, i32, i32*)           -> bool,
         WriteConsoleOutputCharacterA(i64, byte*, i32, i32, i32*)       -> bool,
+        WriteConsoleOutputAttribute(i64, i16*, i32, i32, i32*)         -> bool,
+        ReadConsoleOutputCharacterA(i64, byte*, i32, i32, i32*)        -> bool,
+        ReadConsoleOutputAttribute(i64, i16*, i32, i32, i32*)          -> bool,
         ScrollConsoleScreenBufferA(i64, void*, void*, i32, void*)      -> bool,
         SetConsoleWindowInfo(i64, bool, void*)                         -> bool,
         SetConsoleScreenBufferSize(i64, i32)                           -> bool;

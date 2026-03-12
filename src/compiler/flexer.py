@@ -26,6 +26,7 @@ class TokenType(Enum):
     SINT_LITERAL = auto()
     UINT_LITERAL = auto() # Unsigned integer literal support `123u`
     FLOAT = auto() # Support for 1f == float type == 1.0
+    DOUBLE = auto() # Support for 64 bit floating point types
     CHAR = auto()
     STRING_LITERAL = auto()
     BOOL = auto()
@@ -60,6 +61,7 @@ class TokenType(Enum):
     DEF = auto()          # "        def
     DEFAULT = auto()      # "        default
     DO = auto()           # "        do
+    DOUBLE_KW = auto()       # "        double
     ELIF = auto()         # "        elif | else if
     ELSE = auto()         # "        else
     ENUM = auto()         # "        enum
@@ -342,6 +344,7 @@ class FluxLexer:
             'def': TokenType.DEF,
             'default': TokenType.DEFAULT,
             'do': TokenType.DO,
+            'double': TokenType.DOUBLE_KW,
             'elif': TokenType.ELIF,
             'else': TokenType.ELSE,
             'endianof': TokenType.ENDIANOF,
@@ -535,6 +538,7 @@ class FluxLexer:
         start_pos = (self.line, self.column)
         result = ""
         is_float = False
+        is_double = False
         is_unsigned = False
         
         # Handle duotrigesimal (0d), hex (0x), octal (0o), and binary (0b) prefixes
@@ -615,31 +619,44 @@ class FluxLexer:
             result += self.current_char()
             self.advance()
         
+        dc = 0
         # Check for decimal point
         if self.current_char() == '.' and self.peek_char() and self.peek_char().isdigit():
             is_float = True
             result += self.current_char()
             self.advance()
+            dc = 0
             while self.current_char() and self.current_char().isdigit():
+                dc += 1
                 result += self.current_char()
                 self.advance()
+        #print("DECIMAL COUNT:", dc)
         
         # Determine token type based on suffixes
         token_type = TokenType.SINT_LITERAL
         
         # Check for float suffix (lowercase 'f' only)
-        if self.current_char() and self.current_char() == 'f':
+        if self.current_char() and self.current_char() == 'f' and dc <= 5:
             token_type = TokenType.FLOAT
             is_float = True
             self.advance()
+        elif self.current_char() and self.current_char() == 'd' and dc > 5:
+            token_type = TokenType.DOUBLE
+            is_double = True
+            self.advance()
+        if dc > 5:
+            token_type = TokenType.DOUBLE
+            is_double = True
         # Check for unsigned suffix (lowercase 'u' only) - but NOT if we already found 'f'
         elif not is_float and self.current_char() and self.current_char() == 'u':
             token_type = TokenType.UINT_LITERAL
             #result += self.current_char()  # Keep the 'u' in the token value
             self.advance()
         # If we have a decimal point but no 'f' suffix, it's still a float
-        elif is_float:
+        if is_float and dc <= 5:
             token_type = TokenType.FLOAT
+        if is_double and dc > 5:
+            token_type = TokenType.DOUBLE
         
         return Token(token_type, result, start_pos[0], start_pos[1])
     

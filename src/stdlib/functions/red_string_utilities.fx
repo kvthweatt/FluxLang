@@ -629,365 +629,518 @@ namespace standard
             return write_pos;
         };
 
+        def dbl2str(double value, byte* buffer, i32 precision) -> i32
+        {
+            i32 write_pos = 0;
+            
+            // Handle negative numbers
+            if (value < (double)0.0)
+            {
+                buffer[0] = '\x45'; // '-'
+                write_pos = 1;
+                value = -value;
+            };
+            
+            // Handle zero case
+            if (value == (double)0.0)
+            {
+                buffer[write_pos] = (byte)48; // '0'
+                buffer[write_pos + 1] = (byte)46; // '.'
+                
+                i32 i = 0;
+                while (i < precision)
+                {
+                    buffer[write_pos + 2 + i] = (byte)48; // '0'
+                    i++;
+                };
+                
+                buffer[write_pos + 2 + precision] = (byte)0;
+                return write_pos + 1 + precision;
+            };
+            
+            // Extract integer part
+            i64 int_part = (i64)value;
+            
+            // Extract fractional part
+            double fractional = value - double(int_part);
+            
+            // Multiply fractional by 10^precision without helper function
+            i64 frac_multiplier = (i64)1;
+            i32 j = 0;
+            while (j < precision)
+            {
+                frac_multiplier = frac_multiplier * (i64)10;
+                j++;
+            };
+            
+            // Calculate fractional part with rounding
+            double scaled_frac = fractional * double(frac_multiplier);
+            i64 frac_part = (i64)(scaled_frac + double(0.5));
+            
+            // Handle overflow from rounding (e.g., 0.999 becomes 1.00)
+            if (frac_part >= frac_multiplier)
+            {
+                int_part = int_part + (i64)1;
+                frac_part = (i64)0;
+                
+                // If int_part became 10, 100, etc., adjust
+                if (int_part % (i64)10 == (i64)0 & precision > 0)
+                {
+                    // Simple adjustment for common cases
+                    // Full general solution would be more complex
+                };
+            };
+            
+            // Convert integer part to string
+            if (int_part == (i64)0)
+            {
+                buffer[write_pos] = (byte)48; // '0'
+                write_pos = write_pos + 1;
+            }
+            else
+            {
+                // Convert integer part in reverse
+                byte[32] int_temp;
+                i32 temp_pos = 0;
+                i64 temp_int = int_part;
+                
+                while (temp_int > (i64)0)
+                {
+                    int_temp[temp_pos] = (byte)((temp_int % (i64)10) + (i64)48);
+                    temp_int = temp_int / (i64)10;
+                    temp_pos++;
+                };
+                
+                // Copy integer part to buffer
+                i32 k = temp_pos - 1;
+                while (k >= 0)
+                {
+                    buffer[write_pos] = int_temp[k];
+                    write_pos = write_pos + 1;
+                    k--;
+                };
+            };
+            
+            // Add decimal point if precision > 0
+            if (precision > 0)
+            {
+                buffer[write_pos] = (byte)46; // '.'
+                write_pos = write_pos + 1;
+                
+                // Convert fractional part to string with leading zeros
+                if (frac_part == (i64)0)
+                {
+                    i32 m = 0;
+                    while (m < precision)
+                    {
+                        buffer[write_pos] = (byte)48; // '0'
+                        write_pos = write_pos + 1;
+                        m++;
+                    };
+                }
+                else
+                {
+                    // Build fractional part in reverse
+                    byte[32] frac_temp;
+                    i32 frac_digits = 0;
+                    i64 temp_frac = frac_part;
+                    
+                    while (temp_frac > (i64)0)
+                    {
+                        frac_temp[frac_digits] = (byte)((temp_frac % (i64)10) + (i64)48);
+                        temp_frac = temp_frac / (i64)10;
+                        frac_digits++;
+                    };
+                    
+                    // Add leading zeros if needed
+                    i32 leading_zeros = precision - frac_digits;
+                    i32 n = 0;
+                    while (n < leading_zeros)
+                    {
+                        buffer[write_pos] = (byte)48; // '0'
+                        write_pos = write_pos + 1;
+                        n++;
+                    };
+                    
+                    // Copy fractional digits in reverse (to get correct order)
+                    i32 p = frac_digits - 1;
+                    while (p >= 0)
+                    {
+                        buffer[write_pos] = frac_temp[p];
+                        write_pos = write_pos + 1;
+                        p--;
+                    };
+                };
+            };
+            
+            // Add null terminator
+            buffer[write_pos] = (byte)0;
+            return write_pos;
+        };
+
         // ===== CHARACTER CLASSIFICATION =====
         
-        def is_whitespace(char c) -> bool
+        namespace helpers
         {
-            return c == ' ' | c == '\t' | c == '\n' | c == '\r';
-        };
-        
-        def is_digit(char c) -> bool
-        {
-            return c >= '0' & c <= '9';
-        };
-        
-        def is_alpha(char c) -> bool
-        {
-            return (c >= 'a' & c <= 'z') | (c >= 'A' & c <= 'Z');
-        };
-        
-        def is_alnum(char c) -> bool
-        {
-            return is_alpha(c) | is_digit(c);
-        };
-        
-        def is_hex_digit(char c) -> bool
-        {
-            return is_digit(c) | (c >= 'a' & c <= 'f') | (c >= 'A' & c <= 'F');
-        };
-        
-        def is_identifier_start(char c) -> bool
-        {
-            return is_alpha(c) | c == '_';
-        };
-        
-        def is_identifier_char(char c) -> bool
-        {
-            return is_alnum(c) | c == '_';
-        };
-        
-        def is_newline(char c) -> bool
-        {
-            return c == '\n' | c == '\r';
-        };
-        
-        
-        // ===== CHARACTER CONVERSION =====
-        
-        def to_lower(char c) -> char
-        {
-            if (c >= 'A' & c <= 'Z')
+            def is_whitespace(char c) -> bool
             {
-                return c + 32;
+                return c == ' ' | c == '\t' | c == '\n' | c == '\r';
             };
-            return c;
-        };
-        
-        def to_upper(char c) -> char
-        {
-            if (c >= 'a' & c <= 'z')
+            
+            def is_digit(char c) -> bool
             {
-                return c - 32;
+                return c >= '0' & c <= '9';
             };
-            return c;
-        };
-        
-        def char_to_digit(char c) -> int
-        {
-            if (c >= '0' & c <= '9')
+            
+            def is_alpha(char c) -> bool
             {
-                return c - '0';
+                return (c >= 'a' & c <= 'z') | (c >= 'A' & c <= 'Z');
             };
-            return -1;
-        };
-        
-        def hex_to_int(char c) -> int
-        {
-            if (c >= '0' & c <= '9')
+            
+            def is_alnum(char c) -> bool
             {
-                return c - '0';
+                return is_alpha(c) | is_digit(c);
             };
-            if (c >= 'a' & c <= 'f')
+            
+            def is_hex_digit(char c) -> bool
             {
-                return 10 + (c - 'a');
+                return is_digit(c) | (c >= 'a' & c <= 'f') | (c >= 'A' & c <= 'F');
             };
-            if (c >= 'A' & c <= 'F')
+            
+            def is_identifier_start(char c) -> bool
             {
-                return 10 + (c - 'A');
+                return is_alpha(c) | c == '_';
             };
-            return -1;
-        };
-        
-        
-        // ===== STRING SEARCHING =====
-        
-        // Find first occurrence of character
-        // Returns index or -1 if not found
-        def find_char(byte* str, char ch, int start_pos) -> int
-        {
-            for (int i = start_pos; str[i] != 0; i = i + 1)
+            
+            def is_identifier_char(char c) -> bool
             {
-                if (str[i] == ch)
+                return is_alnum(c) | c == '_';
+            };
+            
+            def is_newline(char c) -> bool
+            {
+                return c == '\n' | c == '\r';
+            };
+            
+            
+            // ===== CHARACTER CONVERSION =====
+            
+            def to_lower(char c) -> char
+            {
+                if (c >= 'A' & c <= 'Z')
                 {
-                    return i;
+                    return c + 32;
                 };
+                return c;
             };
-            return -1;
-        };
-        
-        // Find last occurrence of character
-        def find_char_last(byte* str, char ch) -> int
-        {
-            int last = -1;
-            for (int i = 0; str[i] != 0; i = i + 1)
+            
+            def to_upper(char c) -> char
             {
-                if (str[i] == ch)
+                if (c >= 'a' & c <= 'z')
                 {
-                    last = i;
+                    return c - 32;
                 };
+                return c;
             };
-            return last;
-        };
-        
-        // Find first occurrence of any character from set
-        def find_any(byte* str, byte* char_set, int start_pos) -> int
-        {
-            for (int i = start_pos; str[i] != 0; i = i + 1)
+            
+            def char_to_digit(char c) -> int
             {
-                for (int j = 0; char_set[j] != 0; j = j + 1)
+                if (c >= '0' & c <= '9')
                 {
-                    if (str[i] == char_set[j])
+                    return c - '0';
+                };
+                return -1;
+            };
+            
+            def hex_to_int(char c) -> int
+            {
+                if (c >= '0' & c <= '9')
+                {
+                    return c - '0';
+                };
+                if (c >= 'a' & c <= 'f')
+                {
+                    return 10 + (c - 'a');
+                };
+                if (c >= 'A' & c <= 'F')
+                {
+                    return 10 + (c - 'A');
+                };
+                return -1;
+            };
+            
+            
+            // ===== STRING SEARCHING =====
+            
+            // Find first occurrence of character
+            // Returns index or -1 if not found
+            def find_char(byte* str, char ch, int start_pos) -> int
+            {
+                for (int i = start_pos; str[i] != 0; i = i + 1)
+                {
+                    if (str[i] == ch)
                     {
                         return i;
                     };
                 };
-            };
-            return -1;
-        };
-        
-        // Find substring
-        // Returns index or -1 if not found
-        def find_substring(byte* str, byte* substr, int start_pos) -> int
-        {
-            int str_len = 0;
-            while (str[str_len] != 0) { str_len = str_len + 1; };
-            
-            int substr_len = 0;
-            while (substr[substr_len] != 0) { substr_len = substr_len + 1; };
-            
-            if (substr_len == 0)
-            {
-                return start_pos;
+                return -1;
             };
             
-            for (int i = start_pos; i <= str_len - substr_len; i = i + 1)
+            // Find last occurrence of character
+            def find_char_last(byte* str, char ch) -> int
             {
-                bool match = true;
-                for (int j = 0; j < substr_len; j = j + 1)
+                int last = -1;
+                for (int i = 0; str[i] != 0; i = i + 1)
                 {
-                    if (str[i + j] != substr[j])
+                    if (str[i] == ch)
                     {
-                        match = false;
-                        break;
+                        last = i;
                     };
                 };
-                if (match)
-                {
-                    return i;
-                };
+                return last;
             };
-            return -1;
-        };
-        
-        
-        // ===== STRING TRIMMING =====
-        
-        // Skip leading whitespace, return new start position
-        def skip_whitespace(byte* str, int pos) -> int
-        {
-            while (str[pos] != 0 & is_whitespace(str[pos]))
-            {
-                pos = pos + 1;
-            };
-            return pos;
-        };
-        
-        // Trim whitespace in-place from end (by writing null terminator)
-        def trim_end(byte* str) -> void
-        {
-            int len = 0;
-            while (str[len] != 0) { len = len + 1; };
             
-            while (len > 0 & is_whitespace(str[len - 1]))
+            // Find first occurrence of any character from set
+            def find_any(byte* str, byte* char_set, int start_pos) -> int
             {
-                len = len - 1;
-            };
-            str[len] = (byte)0;
-            return;
-        };
-        
-        
-        // ===== STRING COMPARISON =====
-        
-        // Compare n characters
-        def compare_n(byte* s1, byte* s2, int n) -> int
-        {
-            for (int i = 0; i < n; i = i + 1)
-            {
-                if (s1[i] != s2[i])
+                for (int i = start_pos; str[i] != 0; i = i + 1)
                 {
-                    return s1[i] - s2[i];
+                    for (int j = 0; char_set[j] != 0; j = j + 1)
+                    {
+                        if (str[i] == char_set[j])
+                        {
+                            return i;
+                        };
+                    };
                 };
-                if (s1[i] == 0)
-                {
-                    return 0;
-                };
+                return -1;
             };
-            return 0;
-        };
-        
-        // Case-insensitive compare
-        def compare_ignore_case(byte* s1, byte* s2) -> int
-        {
-            int i = 0;
-            while (s1[i] != 0 & s2[i] != 0)
+            
+            // Find substring
+            // Returns index or -1 if not found
+            def find_substring(byte* str, byte* substr, int start_pos) -> int
             {
-                char c1 = to_lower(s1[i]);
-                char c2 = to_lower(s2[i]);
-                if (c1 != c2)
+                int str_len = 0;
+                while (str[str_len] != 0) { str_len = str_len + 1; };
+                
+                int substr_len = 0;
+                while (substr[substr_len] != 0) { substr_len = substr_len + 1; };
+                
+                if (substr_len == 0)
                 {
-                    return c1 - c2;
+                    return start_pos;
                 };
-                i = i + 1;
+                
+                for (int i = start_pos; i <= str_len - substr_len; i = i + 1)
+                {
+                    bool match = true;
+                    for (int j = 0; j < substr_len; j = j + 1)
+                    {
+                        if (str[i + j] != substr[j])
+                        {
+                            match = false;
+                            break;
+                        };
+                    };
+                    if (match)
+                    {
+                        return i;
+                    };
+                };
+                return -1;
             };
-            return to_lower(s1[i]) - to_lower(s2[i]);
-        };
-        
-        // Check if string starts with prefix
-        def starts_with(byte* str, byte* prefix) -> bool
-        {
-            int i = 0;
-            while (prefix[i] != 0)
+            
+            
+            // ===== STRING TRIMMING =====
+            
+            // Skip leading whitespace, return new start position
+            def skip_whitespace(byte* str, int pos) -> int
             {
-                if (str[i] != prefix[i])
+                while (str[pos] != 0 & is_whitespace(str[pos]))
+                {
+                    pos = pos + 1;
+                };
+                return pos;
+            };
+            
+            // Trim whitespace in-place from end (by writing null terminator)
+            def trim_end(byte* str) -> void
+            {
+                int len = 0;
+                while (str[len] != 0) { len = len + 1; };
+                
+                while (len > 0 & is_whitespace(str[len - 1]))
+                {
+                    len = len - 1;
+                };
+                str[len] = (byte)0;
+                return;
+            };
+            
+            
+            // ===== STRING COMPARISON =====
+            
+            // Compare n characters
+            def compare_n(byte* s1, byte* s2, int n) -> int
+            {
+                for (int i = 0; i < n; i = i + 1)
+                {
+                    if (s1[i] != s2[i])
+                    {
+                        return s1[i] - s2[i];
+                    };
+                    if (s1[i] == 0)
+                    {
+                        return 0;
+                    };
+                };
+                return 0;
+            };
+            
+            // Case-insensitive compare
+            def compare_ignore_case(byte* s1, byte* s2) -> int
+            {
+                int i = 0;
+                while (s1[i] != 0 & s2[i] != 0)
+                {
+                    char c1 = to_lower(s1[i]);
+                    char c2 = to_lower(s2[i]);
+                    if (c1 != c2)
+                    {
+                        return c1 - c2;
+                    };
+                    i = i + 1;
+                };
+                return to_lower(s1[i]) - to_lower(s2[i]);
+            };
+            
+            // Check if string starts with prefix
+            def starts_with(byte* str, byte* prefix) -> bool
+            {
+                int i = 0;
+                while (prefix[i] != 0)
+                {
+                    if (str[i] != prefix[i])
+                    {
+                        return false;
+                    };
+                    i = i + 1;
+                };
+                return true;
+            };
+            
+            // Check if string ends with suffix
+            def ends_with(byte* str, byte* suffix) -> bool
+            {
+                int str_len = 0;
+                while (str[str_len] != 0) { str_len = str_len + 1; };
+                
+                int suffix_len = 0;
+                while (suffix[suffix_len] != 0) { suffix_len = suffix_len + 1; };
+                
+                if (suffix_len > str_len)
                 {
                     return false;
                 };
-                i = i + 1;
-            };
-            return true;
-        };
-        
-        // Check if string ends with suffix
-        def ends_with(byte* str, byte* suffix) -> bool
-        {
-            int str_len = 0;
-            while (str[str_len] != 0) { str_len = str_len + 1; };
-            
-            int suffix_len = 0;
-            while (suffix[suffix_len] != 0) { suffix_len = suffix_len + 1; };
-            
-            if (suffix_len > str_len)
-            {
-                return false;
-            };
-            
-            int offset = str_len - suffix_len;
-            for (int i = 0; i < suffix_len; i = i + 1)
-            {
-                if (str[offset + i] != suffix[i])
+                
+                int offset = str_len - suffix_len;
+                for (int i = 0; i < suffix_len; i = i + 1)
                 {
-                    return false;
+                    if (str[offset + i] != suffix[i])
+                    {
+                        return false;
+                    };
                 };
+                return true;
             };
-            return true;
         };
-        
         
         // ===== STRING COPYING/MANIPULATION =====
-        
-        // Copy string (allocates new buffer)
-        def copy_string(byte* src) -> byte*
+        namespace manip
         {
-            int len = 0;
-            while (src[len] != 0) { len = len + 1; };
-            
-            byte* dest = fmalloc((u64)len + 1);
-            if (dest == 0)
+            // Copy string (allocates new buffer)
+            def copy_string(byte* src) -> byte*
             {
-                return (byte*)0;
+                int len = 0;
+                while (src[len] != 0) { len = len + 1; };
+                
+                byte* dest = fmalloc((u64)len + 1);
+                if (dest == 0)
+                {
+                    return (byte*)0;
+                };
+                
+                for (int i = 0; i <= len; i = i + 1)
+                {
+                    dest[i] = src[i];
+                };
+                
+                return dest;
             };
-            
-            for (int i = 0; i <= len; i = i + 1)
-            {
-                dest[i] = src[i];
-            };
-            
-            return dest;
-        };
 
-        // Copy n characters (allocates new buffer with null terminator)
-        def copy_n(byte* src, int n) -> byte*
-        {
-            byte* dest = fmalloc((u64)n + 1);
-            if (dest == 0)
+            // Copy n characters (allocates new buffer with null terminator)
+            def copy_n(byte* src, int n) -> byte*
             {
-                return (byte*)0;
+                byte* dest = fmalloc((u64)n + 1);
+                if (dest == 0)
+                {
+                    return (byte*)0;
+                };
+                
+                for (int i = 0; i < n & src[i] != 0; i = i + 1)
+                {
+                    dest[i] = src[i];
+                };
+                dest[n] = (byte)0;
+                
+                return dest;
             };
             
-            for (int i = 0; i < n & src[i] != 0; i = i + 1)
+            // Extract substring (allocates new buffer)
+            def substring(byte* str, int start, int length) -> byte*
             {
-                dest[i] = src[i];
-            };
-            dest[n] = (byte)0;
-            
-            return dest;
-        };
-        
-        // Extract substring (allocates new buffer)
-        def substring(byte* str, int start, int length) -> byte*
-        {
-            byte* result = fmalloc((u64)length + 1);
-            if (result == 0)
-            {
-                return (byte*)0;
-            };
-            
-            for (int i = 0; i < length & str[start + i] != 0; i = i + 1)
-            {
-                result[i] = (byte)str[start + i];
-            };
-            result[length] = (byte)0;
-            
-            return result;
-        };
-        
-        // Concatenate two strings (allocates new buffer)
-        def concat(byte* s1, byte* s2) -> byte*
-        {
-            int len1 = 0;
-            while (s1[len1] != 0) { len1 = len1 + 1; };
-            
-            int len2 = 0;
-            while (s2[len2] != 0) { len2 = len2 + 1; };
-            
-            byte* result = fmalloc((u64)len1 + len2 + 1);
-            if (result == 0)
-            {
-                return (byte*)0;
+                byte* result = fmalloc((u64)length + 1);
+                if (result == 0)
+                {
+                    return (byte*)0;
+                };
+                
+                for (int i = 0; i < length & str[start + i] != 0; i = i + 1)
+                {
+                    result[i] = (byte)str[start + i];
+                };
+                result[length] = (byte)0;
+                
+                return result;
             };
             
-            for (int i = 0; i < len1; i = i + 1)
+            // Concatenate two strings (allocates new buffer)
+            def concat(byte* s1, byte* s2) -> byte*
             {
-                result[i] = s1[i];
+                int len1 = 0;
+                while (s1[len1] != 0) { len1 = len1 + 1; };
+                
+                int len2 = 0;
+                while (s2[len2] != 0) { len2 = len2 + 1; };
+                
+                byte* result = fmalloc((u64)len1 + len2 + 1);
+                if (result == 0)
+                {
+                    return (byte*)0;
+                };
+                
+                for (int i = 0; i < len1; i = i + 1)
+                {
+                    result[i] = s1[i];
+                };
+                for (int i = 0; i < len2; i = i + 1)
+                {
+                    result[len1 + i] = s2[i];
+                };
+                result[len1 + len2] = (byte)0;
+                
+                return result;
             };
-            for (int i = 0; i < len2; i = i + 1)
-            {
-                result[len1 + i] = s2[i];
-            };
-            result[len1 + len2] = (byte)0;
-            
-            return result;
         };
         
         
@@ -997,7 +1150,7 @@ namespace standard
         // Returns the parsed value, updates *end_pos to position after last digit
         def parse_int(byte* str, int start_pos, int* end_pos) -> int
         {
-            int pos = skip_whitespace(str, start_pos);
+            int pos = helpers::skip_whitespace(str, start_pos);
             
             bool negative = false;
             if (str[pos] == '-')
@@ -1011,7 +1164,7 @@ namespace standard
             };
             
             int value = 0;
-            while (is_digit(str[pos]))
+            while (helpers::is_digit(str[pos]))
             {
                 value = value * 10 + (str[pos] - '0');
                 pos = pos + 1;
@@ -1029,7 +1182,7 @@ namespace standard
         // Parse hex integer (expects 0x prefix)
         def parse_hex(byte* str, int start_pos, int* end_pos) -> int
         {
-            int pos = skip_whitespace(str, start_pos);
+            int pos = helpers::skip_whitespace(str, start_pos);
             
             // Skip 0x prefix
             if (str[pos] == '0' & (str[pos + 1] == 'x' | str[pos + 1] == 'X'))
@@ -1038,9 +1191,9 @@ namespace standard
             };
             
             int value = 0;
-            while (is_hex_digit(str[pos]))
+            while (helpers::is_hex_digit(str[pos]))
             {
-                int digit = hex_to_int(str[pos]);
+                int digit = helpers::hex_to_int(str[pos]);
                 value = value * 16 + digit;
                 pos = pos + 1;
             };
@@ -1107,7 +1260,7 @@ namespace standard
             
             // Copy line
             int line_len = line_end - line_start;
-            return substring(str, line_start, line_len);
+            return manip::substring(str, line_start, line_len);
         };
         
         // Count words (whitespace-separated)
@@ -1118,7 +1271,7 @@ namespace standard
             
             for (int i = 0; str[i] != 0; i = i + 1)
             {
-                if (is_whitespace(str[i]))
+                if (helpers::is_whitespace(str[i]))
                 {
                     in_word = false;
                 }
@@ -1139,10 +1292,10 @@ namespace standard
         // Returns new allocated string
         def replace_first(byte* str, byte* find, byte* replace) -> byte*
         {
-            int pos = find_substring(str, find, 0);
+            int pos = helpers::find_substring(str, find, 0);
             if (pos == -1)
             {
-                return copy_string(str);
+                return manip::copy_string(str);
             };
             
             int str_len = 0;
@@ -1184,58 +1337,60 @@ namespace standard
         
         
         // ===== TOKENIZATION HELPERS (for lexer) =====
-        
-        // Skip until character found or end of string
-        def skip_until(byte* str, int pos, char ch) -> int
+        namespace tokenization
         {
-            while (str[pos] != 0 & str[pos] != ch)
+            // Skip until character found or end of string
+            def skip_until(byte* str, int pos, char ch) -> int
             {
-                pos = pos + 1;
-            };
-            return pos;
-        };
-        
-        // Skip while condition is true
-        def skip_while_digit(byte* str, int pos) -> int
-        {
-            while (str[pos] != 0 & is_digit(str[pos]))
-            {
-                pos = pos + 1;
-            };
-            return pos;
-        };
-        
-        def skip_while_alnum(byte* str, int pos) -> int
-        {
-            while (str[pos] != 0 & is_alnum(str[pos]))
-            {
-                pos = pos + 1;
-            };
-            return pos;
-        };
-        
-        def skip_while_identifier(byte* str, int pos) -> int
-        {
-            while (str[pos] != 0 & is_identifier_char(str[pos]))
-            {
-                pos = pos + 1;
-            };
-            return pos;
-        };
-        
-        // Match at position (doesn't advance, just checks)
-        def match_at(byte* str, int pos, byte* pattern) -> bool
-        {
-            int i = 0;
-            while (pattern[i] != 0)
-            {
-                if (str[pos + i] != pattern[i])
+                while (str[pos] != 0 & str[pos] != ch)
                 {
-                    return false;
+                    pos = pos + 1;
                 };
-                i = i + 1;
+                return pos;
             };
-            return true;
+            
+            // Skip while condition is true
+            def skip_while_digit(byte* str, int pos) -> int
+            {
+                while (str[pos] != 0 & helpers::is_digit(str[pos]))
+                {
+                    pos = pos + 1;
+                };
+                return pos;
+            };
+            
+            def skip_while_alnum(byte* str, int pos) -> int
+            {
+                while (str[pos] != 0 & helpers::is_alnum(str[pos]))
+                {
+                    pos = pos + 1;
+                };
+                return pos;
+            };
+            
+            def skip_while_identifier(byte* str, int pos) -> int
+            {
+                while (str[pos] != 0 & helpers::is_identifier_char(str[pos]))
+                {
+                    pos = pos + 1;
+                };
+                return pos;
+            };
+            
+            // Match at position (doesn't advance, just checks)
+            def match_at(byte* str, int pos, byte* pattern) -> bool
+            {
+                int i = 0;
+                while (pattern[i] != 0)
+                {
+                    if (str[pos + i] != pattern[i])
+                    {
+                        return false;
+                    };
+                    i = i + 1;
+                };
+                return true;
+            };
         };
     };
 };
@@ -1247,8 +1402,8 @@ def find_last_substring(byte* str, byte* substr) -> int
         return -1;
     };
     
-    int str_len = strlen(str);
-    int sub_len = strlen(substr);
+    int str_len = standard::strings::strlen(str);
+    int sub_len = standard::strings::strlen(substr);
     
     if (sub_len == 0)
     {
@@ -1291,7 +1446,7 @@ def find_last_char(byte* str, char ch) -> int
         return -1;
     };
     
-    int len = strlen(str);
+    int len = standard::strings::strlen(str);
     
     // Start from the end and work backwards
     for (int i = len - 1; i >= 0; i = i - 1)
@@ -1312,8 +1467,8 @@ def count_substring(byte* str, byte* substr) -> int
         return 0;
     };
     
-    int str_len = strlen(str);
-    int sub_len = strlen(substr);
+    int str_len = standard::strings::strlen(str);
+    int sub_len = standard::strings::strlen(substr);
     
     if (sub_len == 0 | sub_len > str_len)
     {

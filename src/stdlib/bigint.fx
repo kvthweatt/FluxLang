@@ -16,6 +16,7 @@ namespace math
 {
     namespace bigint
     {
+        def print_u64_decimal(u64 value) -> void;
         // Initialize a BigInt to zero
         def bigint_zero(BigInt* num) -> void
         {
@@ -162,10 +163,8 @@ namespace math
             print("0x\0");
             
             // Print from most significant to least significant
-            uint digit,
-                j,
-                nibble,
-                i = num.length;
+            uint digit, j, nibble;
+            uint i = num.length;
             while (i > 0)
             {
                 i--;
@@ -218,7 +217,7 @@ namespace math
             };
             
             // Print as u64
-            print((int)value);
+            print_u64_decimal(value);
             
             return;
         };
@@ -226,8 +225,8 @@ namespace math
         // Copy one BigInt to another
         def bigint_copy(BigInt* dest, BigInt* src) -> void
         {
-            uint* dd = @dest.digits[0],
-                 sd = @src.digits[0];
+            uint* dd = @dest.digits[0];
+            uint* sd = @src.digits[0];
             uint i;
             for (i = 0; i < 128; i++)
             {
@@ -325,7 +324,7 @@ namespace math
                  bd = @b.digits[0];
             uint i = 0;
             u64 sum;
-            while (i < max_len | carry != 0)
+            while ((i < max_len | carry != 0) & i < 128)
             {
                 sum = carry;
                 if (i < a.length)
@@ -337,7 +336,7 @@ namespace math
                     sum = sum + (u64)bd[i];
                 };
                 rd[i] = (uint)(sum & 0xFFFFFFFF);
-                carry = sum >> 32;
+                carry = (sum >> 32) & 0xFFFFFFFF;
                 i++;
             };
             result.length = i;
@@ -451,7 +450,7 @@ namespace math
             {
                 carry = 0;
                 j = 0;
-                while (j < b.length | carry != 0)
+                while ((j < b.length | carry != 0) & (i + j) < 128)
                 {
                     prod = (u64)rd[i + j] + carry;
                     if (j < b.length)
@@ -459,7 +458,7 @@ namespace math
                         prod = prod + (u64)ad[i] * (u64)bd[j];
                     };
                     rd[i + j] = (uint)(prod & 0xFFFFFFFF);
-                    carry = prod >> 32;
+                    carry = (prod >> 32) & 0xFFFFFFFF;
                     j++;
                 };
                 if (i + j > result.length)
@@ -484,10 +483,10 @@ namespace math
         def bigint_shift_left_1(BigInt* num) -> void
         {
             uint* nd = @num.digits[0];
-            uint carry = 0,
-                new_carry,
-                len,
-                i;
+            uint carry = 0;
+            uint new_carry;
+            uint len;
+            uint i;
             for (i = 0; i < num.length; i++)
             {
                 new_carry = nd[i] >> 31;
@@ -497,8 +496,11 @@ namespace math
             if (carry != 0)
             {
                 len = num.length;
-                nd[len] = carry;
-                num.length++;
+                if (len < 128)
+                {
+                    nd[len] = carry;
+                    num.length++;
+                };
             };
             return;
         };
@@ -507,9 +509,9 @@ namespace math
         def bigint_shift_right_1(BigInt* num) -> void
         {
             uint* nd = @num.digits[0];
-            uint carry = 0,
-                 new_carry,
-                 i = num.length;
+            uint carry = 0;
+            uint new_carry;
+            uint i = num.length;
             while (i > 0)
             {
                 i--;
@@ -609,15 +611,18 @@ namespace math
                  the_bit,
                  q_word,
                  q_bit;
-            int bit;
-            for (bit = (int)total_bits; bit >= 0; bit--)
+            // Count down from total_bits to 0 inclusive using uint.
+            // Cannot use "bit >= 0" with int: compiler emits icmp uge which is always
+            // true for a uint, turning the loop infinite. Use do/while with break instead.
+            uint bit = total_bits;
+            do
             {
                 // rem = rem << 1
                 bigint_shift_left_1(@rem);
 
                 // rem |= bit 'bit' of abs_a
-                word_idx = (uint)bit / 32;
-                bit_idx  = (uint)bit % 32;
+                word_idx = bit / 32;
+                bit_idx  = bit % 32;
                 the_bit  = (abs_a_d[word_idx] >> bit_idx) & 1;
                 if (the_bit != 0)
                 {
@@ -630,15 +635,19 @@ namespace math
                     bigint_sub_abs(@rem, @rem, @abs_b);
 
                     // Set bit 'bit' in quot
-                    q_word = (uint)bit / 32;
-                    q_bit  = (uint)bit % 32;
+                    q_word = bit / 32;
+                    q_bit  = bit % 32;
                     quot_d[q_word] = quot_d[q_word] | (1 << q_bit);
                     if (q_word + 1 > quot.length)
                     {
                         quot.length = q_word + 1;
                     };
                 };
-            };
+
+                if (bit == 0) { break; };
+                bit--;
+            }
+            while (true);
 
             bigint_normalize(@quot);
             bigint_normalize(@rem);
@@ -723,14 +732,34 @@ namespace math
             // Max u64 is 20 decimal digits
             byte[21] buf;
             uint idx, pos;
-            u64 v;
             idx = 0;
-            v = value;
-            while (v > 0)
+
+            // Repeatedly divide by 10 using only uint arithmetic to avoid
+            // signed division of u64 (compiler emits sdiv/srem for u64).
+            // We implement 64-bit division-by-10 manually:
+            //   high = value >> 32,  low = value & 0xFFFFFFFF
+            //   q_high = high / 10,  r_high = high % 10
+            //   combined = (r_high << 32) | low
+            //   q_low = combined / 10,  remainder = combined % 10
+            //   quotient = (q_high << 32) | q_low
+            u64 v = value;
+            uint lo, hi, r_hi, q_hi, q_lo, rem;
+            u64 combined;
+            while (v != 0)
             {
-                buf[idx] = (byte)('0' + (v % 10));
-                v = v / 10;
+                hi  = (uint)(v >> 32);
+                lo  = (uint)(v & 0xFFFFFFFF);
+                q_hi = hi / 10;
+                r_hi = hi % 10;
+                combined = ((u64)r_hi << 32) | (u64)lo;
+                // combined fits in 34 bits (r_hi < 10, so combined < 10 * 2^32 + 2^32 < 2^36)
+                // divide combined by 10 using u64 arithmetic on a value known < 2^36
+                // Since combined < 2^36, the high 32 bits of combined are < 16, safe to use uint
+                q_lo = (uint)(combined / 10);
+                rem  = (uint)(combined % 10);
+                buf[idx] = (byte)('0' + rem);
                 idx++;
+                v = ((u64)q_hi << 32) | (u64)q_lo;
             };
 
             // Print reversed

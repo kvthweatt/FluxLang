@@ -62,10 +62,10 @@ namespace math
         {
             // We repeatedly divide by 10 and count steps.
             // For performance we use chunks of 10^9 to reduce iterations.
-            BigInt work;
-            BigInt divisor;
-            BigInt quot;
-            BigInt rem;
+            BigInt work,
+                   divisor,
+                   quot,
+                   rem;
 
             math::bigint::bigint_copy(@work, n);
             work.negative = false;
@@ -75,7 +75,7 @@ namespace math
                 return 1;
             };
 
-            math::bigint::bigint_from_u32(@divisor, 1000000000);
+            math::bigint::bigint_from_uint(@divisor, 1000000000);
 
             i32 count = 0;
             u32* rem_d = @rem.digits[0];
@@ -96,7 +96,7 @@ namespace math
             work.negative = false;
 
             BigInt ten;
-            math::bigint::bigint_from_u32(@ten, 10);
+            math::bigint::bigint_from_uint(@ten, 10);
 
             count = 0;
             while (!math::bigint::bigint_is_zero(@work))
@@ -121,9 +121,8 @@ namespace math
             {
                 return;
             };
-            BigInt ten;
-            BigInt tmp;
-            math::bigint::bigint_from_u32(@ten, 10);
+            BigInt ten, tmp;
+            math::bigint::bigint_from_uint(@ten, 10);
 
             i32 i;
             for (i = 0; i < n; i++)
@@ -141,14 +140,14 @@ namespace math
             {
                 return;
             };
-            BigInt ten;
-            BigInt tmp;
-            BigInt rem;
-            BigInt five;
-            BigInt one;
-            BigInt rounded;
-            math::bigint::bigint_from_u32(@ten, 10);
-            math::bigint::bigint_from_u32(@five, 5);
+            BigInt ten,
+                   tmp,
+                   rem,
+                   five,
+                   one,
+                   rounded;
+            math::bigint::bigint_from_uint(@ten, 10);
+            math::bigint::bigint_from_uint(@five, 5);
 
             i32 i;
             for (i = 0; i < n; i++)
@@ -173,10 +172,10 @@ namespace math
         // E.g. coeff=1230, exp=-3  =>  coeff=123, exp=-2
         def decimal_trim_zeros(Decimal* d) -> void
         {
-            BigInt ten;
-            BigInt quot;
-            BigInt rem;
-            math::bigint::bigint_from_u32(@ten, 10);
+            BigInt ten,
+                   quot,
+                   rem;
+            math::bigint::bigint_from_uint(@ten, 10);
 
             u32* rem_d = @rem.digits[0];
 
@@ -197,6 +196,14 @@ namespace math
         // digits, scale it down and raise exponent accordingly.
         def decimal_apply_precision(Decimal* d) -> void
         {
+            // Fast upper bound check first
+            i32 limbs = (i32)d.coefficient.length;
+            i32 upper_bound = limbs * 10;  // 10 decimal digits per 32-bit limb
+            if (upper_bound <= DECIMAL_PRECISION)
+            {
+                return;  // Definitely within precision, skip expensive count
+            };
+            // Only do the expensive exact count when we might be over
             i32 digits = decimal_bigint_digit_count(@d.coefficient);
             i32 excess = digits - DECIMAL_PRECISION;
             if (excess > 0)
@@ -204,8 +211,6 @@ namespace math
                 decimal_coeff_scale_down(@d.coefficient, excess);
                 d.exponent = d.exponent + excess;
             };
-
-            // If coefficient became zero, canonicalise sign
             if (math::bigint::bigint_is_zero(@d.coefficient))
             {
                 d.negative = false;
@@ -255,9 +260,9 @@ namespace math
             else
             {
                 // d2 has larger exponent: need to scale d2 up (or d1 down)
-                i32 diff = d2.exponent - d1.exponent;
-                i32 d2_digits = decimal_bigint_digit_count(@d2.coefficient);
-                i32 headroom = max_digits - d2_digits;
+                i32 diff = d2.exponent - d1.exponent,
+                    d2_digits = decimal_bigint_digit_count(@d2.coefficient),
+                    headroom = max_digits - d2_digits;
                 if (diff <= headroom)
                 {
                     // Safe: scale d2 up
@@ -364,10 +369,10 @@ namespace math
             i32 frac_digits = 0;      // digits after the dot
             bool in_frac    = false;
 
-            BigInt ten;
-            BigInt tmp;
-            BigInt digit_bi;
-            math::bigint::bigint_from_u32(@ten, 10);
+            BigInt ten,
+                   tmp,
+                   digit_bi;
+            math::bigint::bigint_from_uint(@ten, 10);
             math::bigint::bigint_zero(@d.coefficient);
 
             while (s[idx] != 0 & s[idx] != 'e' & s[idx] != 'E')
@@ -388,7 +393,7 @@ namespace math
 
                 // coefficient = coefficient * 10 + digit
                 math::bigint::bigint_mul(@tmp, @d.coefficient, @ten);
-                math::bigint::bigint_from_u32(@digit_bi, (u32)(ch - '0'));
+                math::bigint::bigint_from_uint(@digit_bi, (u32)(ch - '0'));
                 math::bigint::bigint_add(@d.coefficient, @tmp, @digit_bi);
 
                 if (in_frac)
@@ -480,8 +485,7 @@ namespace math
         def decimal_cmp_abs(Decimal* a, Decimal* b) -> i32
         {
             // Make aligned copies so we can compare coefficients
-            Decimal ta;
-            Decimal tb;
+            Decimal ta, tb;
             decimal_copy(@ta, a);
             decimal_copy(@tb, b);
             decimal_align(@ta, @tb);
@@ -491,8 +495,8 @@ namespace math
         // Signed compare.  Returns: -1 if a < b, 0 if a == b, 1 if a > b
         def decimal_cmp(Decimal* a, Decimal* b) -> i32
         {
-            bool az = decimal_is_zero(a);
-            bool bz = decimal_is_zero(b);
+            bool az = decimal_is_zero(a),
+                 bz = decimal_is_zero(b);
 
             if (az & bz) { return 0; };
 
@@ -516,8 +520,8 @@ namespace math
         // result = a + b
         def decimal_add(Decimal* result, Decimal* a, Decimal* b) -> void
         {
-            Decimal ta;
-            Decimal tb;
+            Decimal ta,
+                    tb;
             decimal_copy(@ta, a);
             decimal_copy(@tb, b);
             decimal_align(@ta, @tb);
@@ -620,12 +624,12 @@ namespace math
             };
 
             Decimal scaled_a;
-            BigInt quot;
-            BigInt rem;
-            BigInt two_rem;
-            BigInt two;
-            BigInt one;
-            BigInt rounded;
+            BigInt quot,
+                   rem,
+                   two_rem,
+                   two,
+                   one,
+                   rounded;
 
             // We need the integer quotient (scaled_a.coeff / b.coeff) to have
             // at least DECIMAL_PRECISION significant digits.  The number of
@@ -634,12 +638,12 @@ namespace math
             // Solve for scale_up:
             //   scale_up = DECIMAL_PRECISION + guard - digits(a) + digits(b)
             // But also cap so that digits(a) + scale_up <= max_digits (1152).
-            i32 guard      = 4;
-            i32 max_digits = 1152;
-            i32 digits_a   = decimal_bigint_digit_count(@a.coefficient);
-            i32 digits_b   = decimal_bigint_digit_count(@b.coefficient);
-            i32 scale_up   = DECIMAL_PRECISION + guard - digits_a + digits_b;
-            i32 cap        = max_digits - digits_a;
+            i32 guard      = 4,
+                max_digits = 1152,
+                digits_a   = decimal_bigint_digit_count(@a.coefficient),
+                digits_b   = decimal_bigint_digit_count(@b.coefficient),
+                scale_up   = DECIMAL_PRECISION + guard - digits_a + digits_b,
+                cap        = max_digits - digits_a;
             if (scale_up > cap)
             {
                 scale_up = cap;
@@ -658,7 +662,7 @@ namespace math
 
             // Round half-up using the remainder
             // If 2*rem >= b.coefficient, round up
-            math::bigint::bigint_from_u32(@two, 2);
+            math::bigint::bigint_from_uint(@two, 2);
             math::bigint::bigint_mul(@two_rem, @rem, @two);
             if (math::bigint::bigint_cmp_abs(@two_rem, @b.coefficient) >= 0)
             {
@@ -817,7 +821,7 @@ namespace math
             BigInt ten;
             BigInt tmp;
             BigInt rem;
-            math::bigint::bigint_from_u32(@ten, 10);
+            math::bigint::bigint_from_uint(@ten, 10);
 
             i32 i;
             for (i = 0; i < remove; i++)
@@ -980,7 +984,7 @@ namespace math
             BigInt rem;
             math::bigint::bigint_copy(@work, @d.coefficient);
             work.negative = false;
-            math::bigint::bigint_from_u32(@divisor, 1000000000);
+            math::bigint::bigint_from_uint(@divisor, 1000000000);
             u32* rem_d = @rem.digits[0];
 
             // Collect base-10^9 chunks (least-significant first)
@@ -1132,7 +1136,7 @@ namespace math
             BigInt rem;
             math::bigint::bigint_copy(@work, @d.coefficient);
             work.negative = false;
-            math::bigint::bigint_from_u32(@divisor, 1000000000);
+            math::bigint::bigint_from_uint(@divisor, 1000000000);
             u32* rem_d = @rem.digits[0];
 
             u32[145] chunks;

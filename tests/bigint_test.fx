@@ -10,16 +10,16 @@ using math::bigint;
 
 def main() -> int
 {
-    BigInt num;
-    BigInt a;
-    BigInt b;
-    BigInt result;
-    BigInt rem_17;
-    BigInt div25;
-    i32 cmp22;
-    i32 cmp23;
-    i32 cmp24;
-    i32 cmp25;
+    BigInt num,
+           a,
+           b,
+           result,
+           rem_17,
+           div25;
+    i32 cmp22,
+        cmp23,
+        cmp24,
+        cmp25;
 
     print("==== BIG INTEGER FOUNDATION TEST ====\n\n\0");
     
