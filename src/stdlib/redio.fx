@@ -396,6 +396,8 @@ namespace standard
                 print_hex_u32(u32) -> void,
                 print(i64) -> void,
                 print(u64) -> void,
+                print(long) -> void,
+                print(ulong) -> void,
                 print(float) -> void,
                 print(float,int) -> void,
                 print(double) -> void,
@@ -460,6 +462,16 @@ namespace standard
                 print(buf);
                 return;
             };
+            def print(long x) -> void
+            {
+                print((i64)x);
+                return;
+            };
+            def print(ulong x) -> void
+            {
+                print((u64)x);
+                return;
+            };
             def print(float x) -> void
             {
                 byte[256] buffer;
@@ -480,7 +492,7 @@ namespace standard
                 byte[256] buffer;
                 standard::strings::dbl2str(x, @buffer, 14);
                 print(buffer);
-                return 0;
+                return;
             };
             def print(double x, int y) -> void
             {

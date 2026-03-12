@@ -53,6 +53,10 @@ class Literal(ASTNode):
         elif self.type == DataType.DOUBLE:
             llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             return ir.Constant(llvm_type, float(self.value))
+        elif self.type in (DataType.LONG, DataType.ULONG):
+            llvm_type = ir.IntType(64)
+            normalized_val = LiteralTypeHandler.normalize_int_value(self.value, self.type, 64)
+            return TypeSystem.attach_type_metadata(ir.Constant(llvm_type, normalized_val), self.type)
         elif self.type == DataType.BOOL:
             llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             return ir.Constant(llvm_type, bool(self.value))
@@ -1874,6 +1878,8 @@ class FStringLiteral(Expression):
                 return float(expr.value)
             elif expr.type == DataType.DOUBLE:
                 return float(expr.value)
+            elif expr.type in (DataType.LONG, DataType.ULONG):
+                return int(expr.value)
             elif expr.type == DataType.BOOL:
                 return bool(expr.value)
             elif expr.type == DataType.CHAR:

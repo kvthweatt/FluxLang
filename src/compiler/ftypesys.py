@@ -99,6 +99,8 @@ class Operator(Enum):
 class DataType(Enum):
     SINT = "int"
     UINT = "uint"
+    LONG = "long"
+    ULONG = "ulong"
     FLOAT = "float"
     DOUBLE = "double"
     CHAR = "char"
@@ -157,6 +159,10 @@ class PrimitiveType(BaseType):
             return ir.IntType(self.width or 32)
         elif self.kind == DataType.UINT:
             return ir.IntType(self.width or 32)
+        elif self.kind == DataType.LONG:
+            return ir.IntType(64)
+        elif self.kind == DataType.ULONG:
+            return ir.IntType(64)
         elif self.kind == DataType.FLOAT:
             return ir.FloatType()
         elif self.kind == DataType.DOUBLE:
@@ -1359,6 +1365,8 @@ TypeSystem(base_type:     {self.base_type}\n\
                 return ir.FloatType()
             elif type_spec == DataType.DOUBLE:
                 return ir.DoubleType()
+            elif type_spec in (DataType.LONG, DataType.ULONG):
+                return ir.IntType(64)
             elif type_spec == DataType.BOOL:
                 return ir.IntType(1)
             elif type_spec == DataType.CHAR:
@@ -1423,6 +1431,8 @@ TypeSystem(base_type:     {self.base_type}\n\
             base_type = ir.FloatType()
         elif type_spec.base_type == DataType.DOUBLE:
             base_type = ir.DoubleType()
+        elif type_spec.base_type in (DataType.LONG, DataType.ULONG):
+            base_type = ir.IntType(64)
         elif type_spec.base_type == DataType.BOOL:
             base_type = ir.IntType(1)
         elif type_spec.base_type == DataType.CHAR:
@@ -2242,9 +2252,25 @@ class VariableTypeHandler:
             elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.FloatType):
                 init_val = builder.sitofp(init_val, llvm_type)
             
+            # Int to double conversion
+            elif isinstance(init_val.type, ir.IntType) and isinstance(llvm_type, ir.DoubleType):
+                init_val = builder.sitofp(init_val, llvm_type)
+            
             # Float to int conversion
             elif isinstance(init_val.type, ir.FloatType) and isinstance(llvm_type, ir.IntType):
                 init_val = builder.fptosi(init_val, llvm_type)
+            
+            # Double to int conversion
+            elif isinstance(init_val.type, ir.DoubleType) and isinstance(llvm_type, ir.IntType):
+                init_val = builder.fptosi(init_val, llvm_type)
+            
+            # Float to double promotion (fpext)
+            elif isinstance(init_val.type, ir.FloatType) and isinstance(llvm_type, ir.DoubleType):
+                init_val = builder.fpext(init_val, llvm_type, name="float_to_double")
+            
+            # Double to float demotion (fptrunc)
+            elif isinstance(init_val.type, ir.DoubleType) and isinstance(llvm_type, ir.FloatType):
+                init_val = builder.fptrunc(init_val, llvm_type, name="double_to_float")
         
         # Preserve _flux_type_spec metadata if present on init_val
         # This helps maintain signedness through store/load cycles
@@ -2647,7 +2673,7 @@ class ArrayTypeHandler:
                     if isinstance(inner_elem, Literal):
                         if inner_elem.type == FastDataType.INT or inner_elem.type == FastDataType.SINT:
                             elem_val = inner_elem.value
-                            elem_width = 32  # This is wrong - need to infer from context
+                            elem_width = 32  # This is wrong (hardcode = bad) - need to infer from context
                         else:
                             raise ValueError(f"Cannot pack {inner_elem.type} in global array initializer")
                     elif isinstance(inner_elem, Identifier):
@@ -3636,7 +3662,7 @@ def infer_int_width(value: int, data_type: DataType) -> int:
             return 32
         else:
             return 64
-    else:  # DataType.UINT
+    elif data_type == DataType.UINT:  # DataType.UINT
         # Unsigned integers should never be negative in the source
         # However, after normalize_int_value(), large unsigned values may be 
         # represented as negative (two's complement). We need to account for this.
@@ -3659,6 +3685,10 @@ def infer_int_width(value: int, data_type: DataType) -> int:
             else:
                 # This requires 64-bit
                 return 64
+    elif data_type == DataType.LONG:
+        return 64
+    elif data_type == DataType.ULONG:
+        return 64
 
 def is_unsigned(val: ir.Value) -> bool:
     if hasattr(val, '_flux_type_spec'):
@@ -3672,6 +3702,8 @@ def is_unsigned(val: ir.Value) -> bool:
 def get_builtin_bit_width(base_type: DataType) -> int:
     if base_type in (DataType.SINT, DataType.UINT):
         return 32  # Default integer width
+    elif base_type in (DataType.LONG, DataType.ULONG):
+        return 64
     elif base_type == DataType.FLOAT:
         return 32  # Single precision float
     elif base_type == DataType.DOUBLE:

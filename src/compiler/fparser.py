@@ -582,7 +582,8 @@ class FluxParser:
         elif self.expect(TokenType.SIGNED):
             return self.variable_declaration_statement()
         elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.DATA, TokenType.CHAR, 
-                         TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.BOOL_KW, TokenType.VOID):
+                         TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.BOOL_KW, TokenType.VOID,
+                         TokenType.SLONG, TokenType.ULONG):
             return self.variable_declaration_statement()
         elif self.expect(TokenType.SEMICOLON):
             self.advance()
@@ -852,6 +853,7 @@ class FluxParser:
             # Must have a base type
             if not self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.CHAR, 
                               TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
+                              TokenType.SLONG, TokenType.ULONG,
                               TokenType.IDENTIFIER):
                 return False
             
@@ -1794,6 +1796,12 @@ class FluxParser:
         elif self.expect(TokenType.DOUBLE_KW):
             self.advance()
             return DataType.DOUBLE
+        elif self.expect(TokenType.SLONG):
+            self.advance()
+            return DataType.LONG
+        elif self.expect(TokenType.ULONG):
+            self.advance()
+            return DataType.ULONG
         elif self.expect(TokenType.CHAR):
             self.advance()
             return DataType.CHAR
@@ -1846,6 +1854,7 @@ class FluxParser:
             # Must have a base type
             if not self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW,
                              TokenType.CHAR,  TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
+                             TokenType.SLONG, TokenType.ULONG,
                              TokenType.STRUCT, TokenType.IDENTIFIER):
                 return False
             
@@ -3431,7 +3440,7 @@ class FluxParser:
         elif self.expect(TokenType.ENDIANOF):
             return self.endianof_expression()
         elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW,
-                         TokenType.CHAR, TokenType.BOOL_KW):
+                         TokenType.CHAR, TokenType.BOOL_KW, TokenType.SLONG, TokenType.ULONG):
             # Built-in type convert expression: float(x), int(y), char(z), etc.
             kw_token = self.current_token
             kw_map = {
@@ -3441,6 +3450,8 @@ class FluxParser:
                 TokenType.DOUBLE_KW: DataType.DOUBLE,
                 TokenType.CHAR:      DataType.CHAR,
                 TokenType.BOOL_KW:   DataType.BOOL,
+                TokenType.SLONG:      DataType.LONG,
+                TokenType.ULONG:     DataType.ULONG,
             }
             target_data_type = kw_map[kw_token.type]
             saved_pos = self.position
@@ -3519,6 +3530,7 @@ class FluxParser:
         # Check if it starts with a known type keyword
         if self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.CHAR, 
                       TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID,
+                      TokenType.SLONG, TokenType.ULONG,
                       TokenType.CONST, TokenType.VOLATILE, TokenType.SIGNED, TokenType.UNSIGNED):
             # Definitely a type, parse as type_spec
             try:
@@ -3554,6 +3566,7 @@ class FluxParser:
 
         if self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.CHAR,
                       TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID,
+                      TokenType.SLONG, TokenType.ULONG,
                       TokenType.CONST, TokenType.VOLATILE, TokenType.SIGNED, TokenType.UNSIGNED,
                       TokenType.IDENTIFIER):
             print("EndianOf encountered")
