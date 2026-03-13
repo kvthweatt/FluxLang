@@ -76,7 +76,7 @@ class TokenType(Enum):
     IN = auto()           # "        in
     IS = auto()           # "        is
     LOCAL = auto()        # "        local
-    SLONG = auto()         # "        long
+    SLONG = auto()         # "       long
     ULONG = auto()        # "        ulong
     SINT = auto()         # "        int
     UINT = auto()         # "        uint

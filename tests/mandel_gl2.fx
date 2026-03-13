@@ -25,34 +25,34 @@ const int WIN_W        = 900,
 
 // ============================================================================
 // Double-double arithmetic using Flux array packing.
-// A dd (double-double) is two floats packed into a u64: [hi, lo]
+// A dd (double-double) is two floats packed into a ulong: [hi, lo]
 // hi holds the main value, lo holds the error term.
 // Together they give ~14 decimal digits of precision.
 // ============================================================================
 
-// Pack two floats into a u64
-def ff_pack(float hi, float lo) -> u64
+// Pack two floats into a ulong
+def ff_pack(float hi, float lo) -> ulong
 {
     float[2] parts = [hi, lo];
-    return (u64)parts;
+    return (ulong)parts;
 };
 
 // Unpack hi part
-def ff_hi(u64 dd) -> float
+def ff_hi(ulong dd) -> float
 {
     float[2] parts = (float[2])dd;
     return parts[0];
 };
 
 // Unpack lo part
-def ff_lo(u64 dd) -> float
+def ff_lo(ulong dd) -> float
 {
     float[2] parts = (float[2])dd;
     return parts[1];
 };
 
 // Add dd + dd, return dd
-def ff_add(u64 a, u64 b) -> u64
+def ff_add(ulong a, ulong b) -> ulong
 {
     float ahi, alo, bhi, blo, s, e;
     ahi = ff_hi(a);
@@ -65,7 +65,7 @@ def ff_add(u64 a, u64 b) -> u64
 };
 
 // Subtract dd - dd, return dd
-def ff_sub(u64 a, u64 b) -> u64
+def ff_sub(ulong a, ulong b) -> ulong
 {
     float ahi, alo, bhi, blo, s, e;
     ahi = ff_hi(a);
@@ -78,7 +78,7 @@ def ff_sub(u64 a, u64 b) -> u64
 };
 
 // Multiply dd * dd, return dd
-def ff_mul(u64 a, u64 b) -> u64
+def ff_mul(ulong a, ulong b) -> ulong
 {
     float ahi, alo, bhi, blo, p, e;
     ahi = ff_hi(a);
@@ -91,15 +91,15 @@ def ff_mul(u64 a, u64 b) -> u64
 };
 
 // Scale dd by a float, return dd
-def ff_scale(u64 a, float s) -> u64
+def ff_scale(ulong a, float s) -> ulong
 {
     return ff_pack(ff_hi(a) * s, ff_lo(a) * s);
 };
 
 // Compute Mandelbrot iteration count using double-double precision
-def mandelbrot(u64 x0, u64 y0, int max_iter) -> int
+def mandelbrot(ulong x0, ulong y0, int max_iter) -> int
 {
-    u64 x, y, xx, yy, xtemp;
+    ulong x, y, xx, yy, xtemp;
     float cx, cy, q, xhi, yhi, xxhi, yyhi;
     int iter;
 
@@ -157,7 +157,7 @@ def iter_to_color(int iter, int max_iter, float* r, float* g, float* b) -> void
     if (t < 0.5)
     {
         s = t * 2.0;
-        *r = 0.0;
+        *r = 0.0d;
         *g = s;
         *b = 1.0;
     }
@@ -187,8 +187,8 @@ def main() -> int
 
     glDisable(GL_DEPTH_TEST);
 
-    // View parameters as double-double (u64 = packed float[hi, lo])
-    u64 cx, cy, zoom, half_zoom, x_min, y_min,
+    // View parameters as double-double (ulong = packed float[hi, lo])
+    ulong cx, cy, zoom, half_zoom, x_min, y_min,
         x_range, y_range, fx, fy;
 
     cx   = ff_pack(-0.5, 0.0);

@@ -1810,4 +1810,4 @@ bool, int `5`, float `3.14159`, double `3.1415926585`, char `"B"` == `66` - `65`
 
 ## All types:
 
-bool, int, uint, float, double, char, data, void, object, struct, union, enum
+bool, int, uint, long, ulong, float, double, char, data, void, object, struct, union, enum

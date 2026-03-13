@@ -876,6 +876,11 @@ class BinaryOp(Expression):
         # --------------------------------------------------
 
         if self.operator in (Operator.ADD, Operator.SUB, Operator.MUL, Operator.DIV, Operator.MOD, Operator.POWER):
+            # Promote float to double when operands are mixed float/double
+            if isinstance(lhs.type, ir.FloatType) and isinstance(rhs.type, ir.DoubleType):
+                lhs = builder.fpext(lhs, ir.DoubleType(), name="float_to_double_lhs")
+            elif isinstance(lhs.type, ir.DoubleType) and isinstance(rhs.type, ir.FloatType):
+                rhs = builder.fpext(rhs, ir.DoubleType(), name="float_to_double_rhs")
             if isinstance(lhs.type, (ir.FloatType, ir.DoubleType)):
                 if self.operator == Operator.POWER:
                     # Use LLVM pow intrinsic for floating point power
@@ -951,6 +956,11 @@ class BinaryOp(Expression):
             op = op_map[self.operator]
 
             if isinstance(lhs.type, (ir.FloatType, ir.DoubleType)) and isinstance(rhs.type, (ir.FloatType, ir.DoubleType)):
+                # Promote float to double when operands are mixed float/double
+                if isinstance(lhs.type, ir.FloatType) and isinstance(rhs.type, ir.DoubleType):
+                    lhs = builder.fpext(lhs, ir.DoubleType(), name="float_to_double_lhs")
+                elif isinstance(lhs.type, ir.DoubleType) and isinstance(rhs.type, ir.FloatType):
+                    rhs = builder.fpext(rhs, ir.DoubleType(), name="float_to_double_rhs")
                 return builder.fcmp_ordered(op, lhs, rhs)
 
             if isinstance(lhs.type, ir.PointerType) or isinstance(rhs.type, ir.PointerType):

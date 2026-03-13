@@ -3558,7 +3558,9 @@ class CoercionContext:
         if isinstance(src, (ir.FloatType, ir.DoubleType)) and isinstance(expected, (ir.FloatType, ir.DoubleType)):
             if src != expected:
                 # fpext for widening (float to double), fptrunc for narrowing (double to float)
-                if src.width < expected.width:
+                src_width = 64 if isinstance(src, ir.DoubleType) else 32
+                expected_width = 64 if isinstance(expected, ir.DoubleType) else 32
+                if src_width < expected_width:
                     result = builder.fpext(value, expected)
                 else:
                     result = builder.fptrunc(value, expected)
@@ -4080,6 +4082,12 @@ class FunctionTypeHandler:
                 else:
                     # Truncating to smaller width
                     return builder.trunc(arg_val, expected_type)
+
+        # Float/double coercion at call sites
+        if isinstance(arg_val.type, ir.FloatType) and isinstance(expected_type, ir.DoubleType):
+            return builder.fpext(arg_val, expected_type, name=f"arg{arg_index}_float_to_double")
+        if isinstance(arg_val.type, ir.DoubleType) and isinstance(expected_type, ir.FloatType):
+            return builder.fptrunc(arg_val, expected_type, name=f"arg{arg_index}_double_to_float")
         
         # Check if this is an object type that has a __expr method for automatic conversion
         if isinstance(arg_val.type, ir.PointerType):
