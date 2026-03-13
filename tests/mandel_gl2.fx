@@ -157,7 +157,7 @@ def iter_to_color(int iter, int max_iter, float* r, float* g, float* b) -> void
     if (t < 0.5)
     {
         s = t * 2.0;
-        *r = 0.0d;
+        *r = 0.0;
         *g = s;
         *b = 1.0;
     }

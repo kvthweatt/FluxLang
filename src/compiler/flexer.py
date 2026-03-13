@@ -173,6 +173,7 @@ class TokenType(Enum):
     # Other operators
     ADDRESS_OF = auto()     # @
     RANGE = auto()          # ..
+    ELLIPSIS = auto()       # ...
     SCOPE = auto()          # ::
     QUESTION = auto()       # ?     a?b:c = Parse as ternary
     COLON = auto()          # :
@@ -243,6 +244,7 @@ triple_char_tokens = {
     '{}*': TokenType.FUNCTION_POINTER,
     '(@)': TokenType.ADDRESS_CAST,
     '<:-': TokenType.LAMBDA_ARROW,
+    '...': TokenType.ELLIPSIS,
 } | triple_binary_tokens
 
 double_binary_tokens = {

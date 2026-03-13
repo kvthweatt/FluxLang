@@ -761,10 +761,14 @@ class FluxParser:
         if self.expect(TokenType.COMMA):
             # This is a multi-function prototype declaration
             prototypes = []
+
+            # Detect variadic sentinel in first prototype's parameters
+            _is_var = any(getattr(p, '_is_variadic_sentinel', False) for p in parameters)
+            _real_params = [p for p in parameters if not getattr(p, '_is_variadic_sentinel', False)]
             
             # Add the first prototype
-            prototypes.append(FunctionDef(name, parameters, return_type, Block([]), 
-                                        is_const, is_volatile, True, no_mangle))
+            prototypes.append(FunctionDef(name, _real_params, return_type, Block([]), 
+                                        is_const, is_volatile, True, no_mangle, _is_var))
             
             # Parse additional prototypes
             while self.expect(TokenType.COMMA):
@@ -786,10 +790,13 @@ class FluxParser:
                 
                 self.consume(TokenType.RETURN_ARROW)
                 proto_return_type = self.type_spec()
+
+                _proto_is_var = any(getattr(p, '_is_variadic_sentinel', False) for p in proto_parameters)
+                _proto_real = [p for p in proto_parameters if not getattr(p, '_is_variadic_sentinel', False)]
                 
                 # no_mangle applies to ALL functions in this comma-separated list
-                prototypes.append(FunctionDef(proto_name, proto_parameters, proto_return_type, 
-                                            Block([]), is_const, is_volatile, True, no_mangle))
+                prototypes.append(FunctionDef(proto_name, _proto_real, proto_return_type, 
+                                            Block([]), is_const, is_volatile, True, no_mangle, _proto_is_var))
             
             self.consume(TokenType.SEMICOLON)
             
@@ -799,14 +806,18 @@ class FluxParser:
         # Check if this is a single prototype by looking for semicolon vs body
         is_prototype = False
         body = None
+
+        # Detect and strip variadic sentinel parameters
+        is_variadic = any(getattr(p, '_is_variadic_sentinel', False) for p in parameters)
+        real_parameters = [p for p in parameters if not getattr(p, '_is_variadic_sentinel', False)]
         
         if self.expect(TokenType.SEMICOLON):
             is_prototype = True
             self.advance()
             body = Block([])
         else:
-            # If any parameter lacks a name, this is an error for a definition
-            for param in parameters:
+            # If any real parameter lacks a name, this is an error for a definition
+            for param in real_parameters:
                 if param.name is None:
                     self.error(f"Function definition requires parameter names, but parameter of type {param.type_spec} has no name")
             if self._function_depth > 0:
@@ -816,20 +827,20 @@ class FluxParser:
             self._function_depth -= 1
             self.consume(TokenType.SEMICOLON)
         
-        # Only add named parameters to symbol table
-        for param in parameters:
+        # Only add named real parameters to symbol table
+        for param in real_parameters:
             if param.name:
                 self.symbol_table.define(param.name, SymbolKind.VARIABLE, param.type_spec)
         
         # If this is a template function, store it and return None (no immediate codegen)
         if template_params:
-            func_def = FunctionDef(name, parameters, return_type, body, is_const,
-                                   is_volatile, is_prototype, no_mangle)
+            func_def = FunctionDef(name, real_parameters, return_type, body, is_const,
+                                   is_volatile, is_prototype, no_mangle, is_variadic)
             self._template_functions[name] = (template_params, func_def)
             return None
 
-        return FunctionDef(name, parameters, return_type, body, is_const, 
-                          is_volatile, is_prototype, no_mangle)
+        return FunctionDef(name, real_parameters, return_type, body, is_const, 
+                          is_volatile, is_prototype, no_mangle, is_variadic)
 
     def _is_function_pointer_declaration(self) -> bool:
         """
@@ -982,8 +993,15 @@ class FluxParser:
         parameter -> type_spec IDENTIFIER?
         Returns Parameter where name may be None.
         """
+        # Handle variadic ellipsis sentinel: def foo(...) -> void
+        if self.expect(TokenType.ELLIPSIS):
+            self.advance()
+            sentinel = Parameter(None, TypeSystem(base_type=DataType.VOID))
+            sentinel._is_variadic_sentinel = True
+            return sentinel
+
         type_spec = self.type_spec()
-        
+
         # Identifier is optional
         name = None
         if self.expect(TokenType.IDENTIFIER):
@@ -3421,6 +3439,13 @@ class FluxParser:
             return expr
         elif self.expect(TokenType.LEFT_BRACKET):
             return self.array_literal()
+        elif self.expect(TokenType.ELLIPSIS):
+            # Variadic access: ...[N]
+            self.advance()
+            self.consume(TokenType.LEFT_BRACKET)
+            index_expr = self.expression()
+            self.consume(TokenType.RIGHT_BRACKET)
+            return VariadicAccess(index_expr)
         elif self.expect(TokenType.COLON):
             # Placeholder syntax :(N)
             self.advance()  # consume ':'

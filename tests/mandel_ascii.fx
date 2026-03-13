@@ -1,7 +1,6 @@
-#import "redstandard.fx";
-#import "redmath.fx";
-#import "redformat.fx";
+#import "redstandard.fx", "redmath.fx", "redformat.fx";
 
+using standard::io::console;
 using standard::format;
 using standard::math;
 

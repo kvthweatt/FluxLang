@@ -2480,6 +2480,117 @@ class MethodCall(Expression):
 
         return result
 
+def _emit_va_arg(builder: ir.IRBuilder, va_list_i8ptr: ir.Value, arg_type: ir.Type, name: str = '') -> ir.Value:
+    """
+    Emit a va_arg instruction using llvmlite's low-level instruction API.
+    llvmlite's IRBuilder does not expose va_arg directly, so we construct
+    the instruction manually and insert it via builder._insert().
+    The LLVM IR text produced is:  %name = va_arg i8* %ap, <type>
+    """
+    from llvmlite.ir import instructions as _insns
+
+    class _VaArgInstr(_insns.Instruction):
+        """Custom instruction that emits: %name = va_arg <ptr>, <type>"""
+        def __init__(self, parent, typ, ptr, name=''):
+            super().__init__(parent, typ, 'va_arg', [ptr], name)
+            self._va_type = typ
+
+        def descr(self, buf):
+            # Emit:  va_arg <ptr_type> <ptr_value>, <result_type>
+            buf.append(f'va_arg {self.operands[0].type} {self.operands[0].get_reference()}, {self._va_type}\n')
+
+    instr = _VaArgInstr(builder.block, arg_type, va_list_i8ptr, name)
+    builder._insert(instr)
+    return instr
+
+
+@dataclass
+class VariadicAccess(Expression):
+    """Represents ...[N] — access the Nth variadic argument."""
+    index: Expression
+
+    def __repr__(self) -> str:
+        return f"...[{self.index}]"
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        va_list_alloca = getattr(builder, '_flux_va_list', None)
+        if va_list_alloca is None:
+            raise RuntimeError("...[N] used outside of a variadic function")
+
+        va_list_i8ptr = getattr(builder, '_flux_va_list_i8ptr')
+
+        # Determine index value
+        index_val = self.index.codegen(builder, module)
+        if isinstance(index_val.type, ir.IntType) and index_val.type.width != 32:
+            if index_val.type.width > 32:
+                index_val = builder.trunc(index_val, ir.IntType(32), name="va_idx_trunc")
+            else:
+                index_val = builder.sext(index_val, ir.IntType(32), name="va_idx_ext")
+
+        # Use va_copy to get a fresh copy of va_list so we can seek to index N
+        va_list_type = ir.ArrayType(ir.IntType(8).as_pointer(), 1)
+        va_copy_list = builder.alloca(va_list_type, name="va_copy")
+        va_copy_i8ptr = builder.bitcast(va_copy_list, ir.IntType(8).as_pointer(), name="va_copy_ptr")
+
+        # Declare llvm.va_copy if needed
+        va_copy_fn_type = ir.FunctionType(ir.VoidType(), [ir.IntType(8).as_pointer(), ir.IntType(8).as_pointer()])
+        if 'llvm.va_copy' not in module.globals:
+            va_copy_fn = ir.Function(module, va_copy_fn_type, 'llvm.va_copy')
+        else:
+            va_copy_fn = module.globals['llvm.va_copy']
+        builder.call(va_copy_fn, [va_copy_i8ptr, va_list_i8ptr])
+
+        # Declare llvm.va_end if needed
+        va_end_fn_type = ir.FunctionType(ir.VoidType(), [ir.IntType(8).as_pointer()])
+        if 'llvm.va_end' not in module.globals:
+            va_end_fn = ir.Function(module, va_end_fn_type, 'llvm.va_end')
+        else:
+            va_end_fn = module.globals['llvm.va_end']
+
+        # All variadic args are promoted to i64 per C variadic ABI
+        arg_type = ir.IntType(64)
+
+        result_alloca = builder.alloca(arg_type, name="va_result")
+
+        # Build a loop: advance the va_copy N times (discarding), then extract once
+        current_fn = builder.block.parent
+
+        loop_init_bb  = current_fn.append_basic_block(name="va_loop_init")
+        loop_cond_bb  = current_fn.append_basic_block(name="va_loop_cond")
+        loop_body_bb  = current_fn.append_basic_block(name="va_loop_body")
+        loop_end_bb   = current_fn.append_basic_block(name="va_loop_end")
+        merge_bb      = current_fn.append_basic_block(name="va_merge")
+
+        builder.branch(loop_init_bb)
+
+        with builder.goto_block(loop_init_bb):
+            counter_alloca = builder.alloca(ir.IntType(32), name="va_counter")
+            builder.store(ir.Constant(ir.IntType(32), 0), counter_alloca)
+            builder.branch(loop_cond_bb)
+
+        with builder.goto_block(loop_cond_bb):
+            counter_val = builder.load(counter_alloca, name="va_cnt_load")
+            cond = builder.icmp_signed('<', counter_val, index_val, name="va_cond")
+            builder.cbranch(cond, loop_body_bb, loop_end_bb)
+
+        with builder.goto_block(loop_body_bb):
+            _emit_va_arg(builder, va_copy_i8ptr, arg_type, name="va_discard")
+            cnt = builder.load(counter_alloca, name="va_cnt_inc_load")
+            cnt_inc = builder.add(cnt, ir.Constant(ir.IntType(32), 1), name="va_cnt_inc")
+            builder.store(cnt_inc, counter_alloca)
+            builder.branch(loop_cond_bb)
+
+        with builder.goto_block(loop_end_bb):
+            result_val = _emit_va_arg(builder, va_copy_i8ptr, arg_type, name="va_result_val")
+            builder.store(result_val, result_alloca)
+            builder.call(va_end_fn, [va_copy_i8ptr])
+            builder.branch(merge_bb)
+
+        # Position builder in merge_bb for all subsequent codegen
+        builder.position_at_end(merge_bb)
+        result = builder.load(result_alloca, name="va_arg_result")
+        return result
+
 @dataclass
 class ArrayAccess(Expression):
     array: Expression
@@ -4981,6 +5092,7 @@ class FunctionDef(ASTNode):
     is_volatile: bool = False
     is_prototype: bool = False
     no_mangle: bool = False
+    is_variadic: bool = False
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Function:
         # Convert return type and parameter types using FunctionTypeHandler
@@ -4994,7 +5106,7 @@ class FunctionDef(ASTNode):
             param_types.append(param_type)
         
         # Create function type
-        func_type = ir.FunctionType(ret_type, param_types)
+        func_type = ir.FunctionType(ret_type, param_types, var_arg=self.is_variadic)
         
         # Generate mangled name using FunctionTypeHandler
         mangled_name = SymbolTable.mangle_function_name(self.name, self.parameters, self.return_type, self.no_mangle)
@@ -5120,7 +5232,33 @@ class FunctionDef(ASTNode):
                 type_spec=param_type_spec,
                 llvm_value=alloca
             )
-        
+
+        # If variadic, set up va_list and store in builder for VariadicAccess use
+        if self.is_variadic:
+            # va_list is represented as an array of 1 x i8* on most platforms
+            va_list_type = ir.ArrayType(ir.IntType(8).as_pointer(), 1)
+            va_list_alloca = builder.alloca(va_list_type, name="va_list")
+            # Cast va_list pointer to i8* for llvm.va_start
+            va_list_i8ptr = builder.bitcast(va_list_alloca, ir.IntType(8).as_pointer(), name="va_list_ptr")
+            # Call llvm.va_start
+            va_start_type = ir.FunctionType(ir.VoidType(), [ir.IntType(8).as_pointer()])
+            if 'llvm.va_start' not in module.globals:
+                va_start_fn = ir.Function(module, va_start_type, 'llvm.va_start')
+            else:
+                va_start_fn = module.globals['llvm.va_start']
+            builder.call(va_start_fn, [va_list_i8ptr])
+            # Store va_list alloca on builder for VariadicAccess nodes to use
+            builder._flux_va_list = va_list_alloca
+            builder._flux_va_list_i8ptr = va_list_i8ptr
+            builder._flux_va_end_fn = None  # Will set up va_end lazily
+            # Also declare va_end
+            va_end_type = ir.FunctionType(ir.VoidType(), [ir.IntType(8).as_pointer()])
+            if 'llvm.va_end' not in module.globals:
+                va_end_fn = ir.Function(module, va_end_type, 'llvm.va_end')
+            else:
+                va_end_fn = module.globals['llvm.va_end']
+            builder._flux_va_end_fn = va_end_fn
+
         # Generate function body
         self.body.codegen(builder, module)
         
