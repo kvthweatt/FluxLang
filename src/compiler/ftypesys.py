@@ -2171,6 +2171,13 @@ class VariableTypeHandler:
             else:
                 return None
             return ir.Constant(operand.type, result)
+
+        elif isinstance(operand.type, ir.DoubleType):
+            if op == Operator.SUB:
+                result = -operand.constant
+            else:
+                return None
+            return ir.Constant(operand.type, result)
         
         return None
     
