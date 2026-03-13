@@ -4427,6 +4427,13 @@ class AssignmentTypeHandler:
                     
                     return result
         
+        # Handle float <-> double coercion
+        # float is f32, double is f64 - promote or demote automatically
+        if isinstance(val.type, ir.FloatType) and isinstance(target_type, ir.DoubleType):
+            return builder.fpext(val, target_type, name="f32_to_f64")
+        if isinstance(val.type, ir.DoubleType) and isinstance(target_type, ir.FloatType):
+            return builder.fptrunc(val, target_type, name="f64_to_f32")
+        
         return val
     
     @staticmethod

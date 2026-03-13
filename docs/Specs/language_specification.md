@@ -713,6 +713,24 @@ All of this is runtime behavior, but can also happen in comptime.
 
 ---
 
+## Direct type conversion
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+
+def main() -> int
+{
+    double d = 3.1415925658;
+
+    int i = int(d);
+    return 0;
+};
+```
+
+---
+
 ## **Array and pointer operations based on data types:**
 ```
 unsigned data{16::0}[] as larray3 little_array[3] = {0x1234, 0x5678, 0x9ABC};
