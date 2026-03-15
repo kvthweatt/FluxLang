@@ -5274,53 +5274,18 @@ class FunctionDef(ASTNode):
         return func
 
 @dataclass
-class FunctionPointer(Expression):
-    """
-    Function pointer type and operations.
-    
-    Supports:
-    - Function pointer declarations: int (*fp)(int, int)
-    - Function pointer assignments: fp = @my_function
-    - Function pointer calls: result = fp(arg1, arg2)
-    """
-    name: str
-    return_type: TypeSystem
-    parameter_types: List[TypeSystem]
-    
-    def get_function_type(self, module: ir.Module) -> ir.FunctionType:
-        """Get LLVM function type for this function pointer"""
-        ret_type = TypeSystem.get_llvm_type(self.return_type, module)
-        param_types = [TypeSystem.get_llvm_type(param, module) for param in self.parameter_types]
-        return ir.FunctionType(ret_type, param_types)
-    
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        """Generate function pointer variable"""
-        func_type = self.get_function_type(module)
-        ptr_type = ir.PointerType(func_type)
-        
-        # Allocate space for function pointer
-        if module.symbol_table.is_global_scope():
-            # Global function pointer
-            gvar = ir.GlobalVariable(module, ptr_type, self.name)
-            gvar.initializer = ir.Constant(ptr_type, None)
-            gvar.linkage = 'internal'
-            return gvar
-        else:
-            # Local function pointer
-            alloca = builder.alloca(ptr_type, name=self.name)
-            module.symbol_table.define(self.name, SymbolKind.VARIABLE, type_spec=resolved_type_spec, llvm_value=alloca)
-            return alloca
-
-@dataclass
 class FunctionPointerDeclaration(Statement):
     """
     Function pointer variable declaration.
     
-    Syntax: void{}* fp() = @foo;
+    Syntax: def{}* fp() -> rtype = @foo;
     """
     name: str
     fp_type: FunctionPointerType
     initializer: Optional[Expression] = None
+
+    def __repr__(self) -> str:
+        return f"def{{}}* {self.name}{self.fp_type}"
 
     @staticmethod
     def get_llvm_type(func_ptr, module: ir.Module) -> ir.FunctionType:

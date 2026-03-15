@@ -1281,23 +1281,9 @@ class TypeSystem:
     storage_class: Optional[StorageClass] = None
     
     def __repr__(self) -> str:
-        return f"\n\
-TypeSystem(base_type:     {self.base_type}\n\
-           is_signed:     {self.is_signed}\n\
-           is_const:      {self.is_const}\n\
-           is_volatile:   {self.is_volatile}\n\
-           is_local:      {self.is_local}\n\
-           bit_width:     {self.bit_width}\n\
-           alignment:     {self.alignment}\n\
-           endianness:    {self.endianness}\n\
-           is_array:      {self.is_array}\n\
-           array_size:    {self.array_size}\n\
-           array_dimensions: {self.array_dimensions}\n\
-           array_element_type: {self.array_element_type}\n\
-           is_pointer:    {self.is_pointer}\n\
-           pointer_depth: {self.pointer_depth}\n\
-           custom_typename: {self.custom_typename}\n\
-           storage_class: {self.storage_class})\n\n"
+        if self.custom_typename is not None:
+            return self.custom_typename
+        return f"{self.base_type}"
     
     def to_new_type(self) -> BaseType:
         # THIS IS BAD, WHY THE FUCK ARE WE DROPPING TYPESYSTEM
@@ -1802,6 +1788,11 @@ class NamespaceTypeHandler:
 class FunctionPointerType:
     return_type: TypeSystem
     parameter_types: List[TypeSystem]
+
+    def __repr__(self) -> str:
+        if self.return_type.custom_typename is not None:
+            return f"({self.parameter_types}) -> {self.return_type.custom_typename}"
+        return f"({self.parameter_types}) -> {self.return_type.base_type}"
 
     @staticmethod
     def get_llvm_type(func_ptr, module: ir.Module) -> ir.FunctionType:
@@ -3721,6 +3712,8 @@ def get_builtin_bit_width(base_type: DataType) -> int:
         return 8
     elif base_type == DataType.BOOL:
         return 1
+    elif base_type == DataType.VOID:
+        return 64   # URGENT: Should be based on default pointer width
     else:
         raise ValueError(f"Type {base_type} does not have a defined bit width")
 

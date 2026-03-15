@@ -59,9 +59,9 @@ def mandelbrot(double x0, double y0, int max_iter) -> int
 };
 
 // Map iteration count to an RGB color using a smooth palette
-def iter_to_color(int iter, int max_iter, float* r, float* g, float* b) -> void
+def iter_to_color(int iter, int max_iter, double palette_offset, double* r, double* g, double* b) -> void
 {
-    float t, s;
+    double t, s;
 
     if (iter == max_iter)
     {
@@ -72,49 +72,52 @@ def iter_to_color(int iter, int max_iter, float* r, float* g, float* b) -> void
         return;
     };
 
-    // t in [0,1] across one 80-step cycle - always positive
-    t = (float)(iter % 80) / 79.0;
+    // t in [0,1] across one 256-step cycle - always positive
+    // palette_offset rotates the color band over time for a breathing animation
+    t = (double)(iter % 256) / 255.0 + palette_offset;
+    t = t - (double)(int)t;
 
     // 5-stop palette for deep contrast:
-    // 0.00 - 0.20: black -> toxic green
-    // 0.20 - 0.42: toxic green -> molten yellow
-    // 0.42 - 0.62: molten yellow -> hot magenta
-    // 0.62 - 0.82: hot magenta -> void purple
-    // 0.82 - 1.00: void purple -> black
+    // 0.00 - 0.20: black -> deep purple
+    // 0.20 - 0.45: deep purple -> electric blue
+    // 0.45 - 0.65: electric blue -> bright teal/cyan
+    // 0.65 - 0.85: bright teal -> deep gold
+    // 0.85 - 1.00: deep gold -> crimson -> fades back to black (matches t=0 for seamless wrap)
     if (t < 0.2)
     {
         s = t / 0.2;
-        *r = s * 0.05;
-        *g = s * 1.0;
-        *b = s * 0.15;
-    }
-    elif (t < 0.42)
-    {
-        s = (t - 0.2) / 0.22;
-        *r = 0.05 + s * 0.95;
-        *g = 1.0 - s * 0.1;
-        *b = 0.15 - s * 0.15;
-    }
-    elif (t < 0.62)
-    {
-        s = (t - 0.42) / 0.2;
-        *r = 1.0 - s * 0.05;
-        *g = 0.9 - s * 0.9;
-        *b = s * 1.0;
-    }
-    elif (t < 0.82)
-    {
-        s = (t - 0.62) / 0.2;
-        *r = 0.95 - s * 0.6;
+        *r = s * 0.45;
         *g = 0.0;
-        *b = 1.0 - s * 0.4;
+        *b = s * 0.6;
+    }
+    elif (t < 0.45)
+    {
+        s = (t - 0.2) / 0.25;
+        *r = 0.45 - s * 0.45;
+        *g = s * 0.05;
+        *b = 0.6 + s * 0.4;
+    }
+    elif (t < 0.65)
+    {
+        s = (t - 0.45) / 0.2;
+        *r = s * 0.05;
+        *g = s * 0.9;
+        *b = 1.0;
+    }
+    elif (t < 0.85)
+    {
+        s = (t - 0.65) / 0.2;
+        *r = 0.05 + s * 0.85;
+        *g = 0.9 - s * 0.5;
+        *b = 1.0 - s * 1.0;
     }
     else
     {
-        s = (t - 0.82) / 0.18;
-        *r = 0.35 - s * 0.35;
-        *g = 0.0;
-        *b = 0.6 - s * 0.6;
+        // Fade from deep gold/crimson back to black so the wrap joins t=0 smoothly
+        s = (t - 0.85) / 0.15;
+        *r = 0.9 - s * 0.9;
+        *g = 0.4 - s * 0.4;
+        *b = 0.0;
     };
 
     return;
@@ -137,11 +140,14 @@ def main() -> int
 
     // View parameters as native doubles
     double cx, cy, zoom, half_zoom, x_min, y_min,
-           x_range, y_range, fx, fy;
+           x_range, y_range, fx, fy,
+           r, gv, b,
+           palette_time, palette_offset;
 
     cx   = -0.5;
     cy   =  0.0;
     zoom =  3.0;
+    palette_time = 0.0;
 
     // Scalar control parameters stay float
     float zoom_speed, pan_speed, dt;
@@ -149,8 +155,7 @@ def main() -> int
     pan_speed  = 0.6;
 
     // NDC quad corners and color
-    float px0, px1, py0, py1,
-          r, gv, b;
+    float px0, px1, py0, py1;
 
     // TILE and max_iter adapt based on whether any key is held:
     // moving = coarser tiles + fewer iterations for responsive panning/zooming
@@ -173,6 +178,14 @@ def main() -> int
         t_last = t_now;
         // Clamp dt so a stall doesn't cause a huge jump
         if (dt > 0.1) { dt = 0.1; };
+
+        // Advance palette rotation time - 0.12 cycles/second for a gentle breathing effect
+        palette_time = palette_time + (double)dt * 0.12;
+
+        // Keep palette_time in [0,1) to prevent precision loss over long sessions
+        if (palette_time >= 1.0) { palette_time = palette_time - 1.0; };
+
+        palette_offset = palette_time;
 
         // Query actual client area each frame so resize/maximize works
         GetClientRect(win.handle, @client_rect);
@@ -285,9 +298,9 @@ def main() -> int
 
                 iter = mandelbrot(fx, fy, dyn_max_iter);
 
-                iter_to_color(iter, dyn_max_iter, @r, @gv, @b);
+                iter_to_color(iter, dyn_max_iter, palette_offset, @r, @gv, @b);
 
-                glColor3f(r, gv, b);
+                glColor3f((float)r, (float)gv, (float)b);
 
                 // Map tile to NDC [-1, 1] using live window dimensions
                 // Y is inverted: row 0 = top of screen = NDC +1
@@ -305,6 +318,7 @@ def main() -> int
             };
             row++;
         };
+
         glEnd();
 
         gl.present();

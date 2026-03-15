@@ -245,8 +245,6 @@ def main() -> int
             row++;
         };
 
-        print("CX: \0"); print(cx); print();
-        print("CY: \0"); print(cy); print();
         glEnd();
 
         gl.present();
