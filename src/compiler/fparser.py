@@ -955,7 +955,13 @@ class FluxParser:
                 if self.expect(TokenType.ADDRESS_OF):
                     self.consume(TokenType.ADDRESS_OF, "Expected '@' for function address")
                     func_name = self.consume(TokenType.IDENTIFIER).value
-                    initializer = AddressOf(Identifier(func_name))
+                    expr = Identifier(func_name)
+                    # Support member access chains: @item.fn, @obj.member.fn, etc.
+                    while self.expect(TokenType.DOT):
+                        self.advance()
+                        member = self.consume(TokenType.IDENTIFIER).value
+                        expr = MemberAccess(expr, member)
+                    initializer = AddressOf(expr)
                 else:
                     initializer = self.expression()
 
