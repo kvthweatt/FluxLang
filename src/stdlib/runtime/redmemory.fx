@@ -18,6 +18,17 @@ extern
         realloc(void*, size_t) -> void*;
 };
 
+#ifdef __WINDOWS__
+extern
+{
+    def !!
+        VirtualAlloc(ulong, size_t, u32, u32)   -> ulong,
+        VirtualFree(ulong, size_t, u32)          -> bool,
+        VirtualProtect(ulong, size_t, u32, u32*) -> bool,
+        FlushInstructionCache(ulong, ulong, size_t) -> bool;
+};
+#endif;
+
 def memset(void* dst, int c, size_t n) -> void*
 {
     byte* d = (byte*)dst;
