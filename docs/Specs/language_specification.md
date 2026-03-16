@@ -1297,6 +1297,24 @@ uint32 byte1 = extract_bits(packed, 8, 8);     // 0x56
 
 ---
 
+## **Raw bytecode functions**
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+def main() -> int
+{
+    byte[] some_bytecode = [0x48, 0x31, 0xC0, 0xC3];  // xor rax,rax ; ret
+    def{}* fp()->void = @some_bytecode;
+    fp();
+    
+    return 0;
+};
+```
+
+---
+
 ## **Advanced Data Type Features**
 
 ### Unusual Bit Widths
