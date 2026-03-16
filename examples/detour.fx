@@ -168,8 +168,7 @@ object Detour
         this.hook_addr   = hook;
 
         // --- Step 1: allocate trampoline page ---
-        this.trampoline_page = VirtualAlloc(
-            (ulong)0, (size_t)4096, (u32)0x3000, (u32)0x40);
+        this.trampoline_page = VirtualAlloc((ulong)0, (size_t)4096, (u32)0x3000, (u32)0x40);
 
         if (this.trampoline_page == (ulong)0)
         {

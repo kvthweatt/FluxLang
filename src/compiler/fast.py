@@ -3584,6 +3584,30 @@ class Assignment(Statement):
                 builder, module, self.target.object, self.target.member, val)
     
         elif isinstance(self.target, ArrayAccess):
+            # Special case: struct_var.array_member[i] = val
+            # _get_member_ptr returns [N x T]* directly, GEP into it and store.
+            if isinstance(self.target.array, MemberAccess):
+                member_ptr = self.target.array._get_member_ptr(builder, module)
+                if (isinstance(member_ptr.type, ir.PointerType) and
+                        isinstance(member_ptr.type.pointee, ir.ArrayType)):
+                    index = self.target.index.codegen(builder, module)
+                    if index.type != ir.IntType(32):
+                        if isinstance(index.type, ir.IntType):
+                            if index.type.width > 32:
+                                index = builder.trunc(index, ir.IntType(32), name="idx_trunc")
+                            else:
+                                index = builder.sext(index, ir.IntType(32), name="idx_ext")
+                    zero = ir.Constant(ir.IntType(32), 0)
+                    elem_ptr = builder.gep(member_ptr, [zero, index], inbounds=True)
+                    element_type = member_ptr.type.pointee.element
+                    if val.type != element_type:
+                        if isinstance(val.type, ir.IntType) and isinstance(element_type, ir.IntType):
+                            if val.type.width > element_type.width:
+                                val = builder.trunc(val, element_type, name="val_trunc")
+                            else:
+                                val = builder.sext(val, element_type, name="val_ext")
+                    builder.store(val, elem_ptr)
+                    return val
             # Array element assignment - delegate to type handler
             return AssignmentTypeHandler.handle_array_element_assignment(
                 builder, module, self.target.array, self.target.index, self.value, val)

@@ -572,12 +572,13 @@ class FluxCompiler:
                                 # Link only necessary libraries:
                                 "-lkernel32 "  # Windows kernel functions (CreateFile, ReadFile, etc.)
                                 "-lucrt "  # Modern C runtime (strlen, fopen, etc.)
-                                "-luser32 "
-                                "-lgdi32 "
-                                "-lopengl32 "
-                                "-lgdiplus "
-                                "-ld2d1 "
-                                "-ldwrite "
+                                "-lWs2_32 "
+                                #"-luser32 "
+                                #"-lgdi32 "
+                                #"-lopengl32 "
+                                #"-lgdiplus "
+                                #"-ld2d1 "
+                                #"-ldwrite "
                                 #"-llibsynchronization "
                                 "-llegacy_stdio_definitions "  # For stdio functions in UCRT
                                 # Alternatively for older MSVCRT:
