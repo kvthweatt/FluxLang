@@ -26,7 +26,7 @@ using math::decimal;
 
 const int WIN_W        = 900,
           WIN_H        = 900,
-          MAX_ITER     = 16384,  // Hard ceiling - scales dynamically with zoom depth
+          MAX_ITER     = 32768,  // Hard ceiling - scales dynamically with zoom depth
           TILE_STILL   = 1,
           TILE_MOVING  = 4,
           MAX_THREADS  = 64,
@@ -454,7 +454,8 @@ def worker(void* arg) -> void*
 
 def main() -> int
 {
-    decimal_set_precision(32);
+    int precision = 32;
+    decimal_set_precision(precision);
 
     // ── Query core count ──────────────────────────────────
     SYSTEM_INFO_PARTIAL sysinfo;
@@ -492,13 +493,13 @@ def main() -> int
     Decimal cx, cy, zoom, half_zoom,
             x_min, y_min, x_range, y_range,
             tmp, tmp2, tmp3,
-            zoom_delta, pan_delta;
+            zoom_delta, pan_delta,
 
     // Zoom threshold sentinels
     // double_limit: below this zoom level double arithmetic loses pixel-level
     // precision (~1e-14 covers the full double mantissa at screen resolution).
     // Below this threshold the Decimal reference orbit path must be used.
-    Decimal thresh1, thresh2, thresh3,
+            thresh1, thresh2, thresh3,
             double_limit;
     decimal_from_string(@thresh1,      "1\0");
     decimal_from_string(@thresh2,      "0.01\0");
@@ -509,35 +510,33 @@ def main() -> int
     decimal_from_string(@cy,   "0\0");
     decimal_from_string(@zoom, "3\0");
 
+
     float zoom_speed, pan_speed, dt;
-    zoom_speed = 1.5;
-    pan_speed  = 0.6;
-
-    double palette_time, palette_offset;
-    palette_time = 0.0;
-
+    double palette_time, palette_offset,
+           ref_cr, ref_ci;
     int tile, dyn_max_iter,
         cols, rows,
         cur_w, cur_h,
         rows_per_thread, t;
-    bool moving, recolor_only;
-
-    // ref_dirty: reference orbit must be recomputed before next stationary render
-    bool ref_dirty;
-    ref_dirty = true;
-
-    // Reference centre cached as double for dc computation in workers
-    double ref_cr, ref_ci;
-    ref_cr = 0.0;
-    ref_ci = 0.0;
-
+    bool moving, recolor_only,
+         ref_dirty, need_decimal;
     DWORD t_now, t_last;
-    t_last = GetTickCount();
-
     RECT client_rect;
     WORD w_state, s_state, a_state, d_state, up_state, dn_state;
 
+    i32 zoom_exp, zoom_digits, depth;
+
     Thread[64] threads;
+
+    ref_dirty = true;
+
+    zoom_speed = 1.5;
+    pan_speed  = 0.6;
+    palette_time = 0.0;
+    ref_cr = 0.0;
+    ref_ci = 0.0;
+
+    t_last = GetTickCount();
 
     while (win.process_messages())
     {
@@ -605,9 +604,9 @@ def main() -> int
             // Read the raw exponent of zoom.  For zoom = a * 10^e,
             // depth_decades ~ -(e + digit_count - 1).  We cap at 40 decades
             // (matches 28-digit Decimal precision with headroom).
-            i32 zoom_exp    = zoom.exponent;
-            i32 zoom_digits = decimal_bigint_digit_count(@zoom.coefficient);
-            i32 depth       = -(zoom_exp + zoom_digits - 1);
+            zoom_exp    = zoom.exponent;
+            zoom_digits = decimal_bigint_digit_count(@zoom.coefficient);
+            depth       = -(zoom_exp + zoom_digits - 1);
             if (depth < 0)  { depth = 0;  };
             if (depth > 40) { depth = 40; };
             // 200 iterations per decade of zoom depth, minimum 128
@@ -730,7 +729,6 @@ def main() -> int
         // the reference orbit - use the fast double path.
         // Below double_limit zoom has exceeded double precision; use the Decimal
         // path so the reference centre stays exact.
-        bool need_decimal;
         need_decimal = decimal_cmp(@zoom, @double_limit) < 0;
 
         if (ref_dirty & !moving)

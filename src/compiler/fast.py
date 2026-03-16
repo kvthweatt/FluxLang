@@ -5311,6 +5311,11 @@ class FunctionPointerDeclaration(Statement):
             if self.initializer:
                 # Evaluate initializer
                 init_val = self.initializer.codegen(builder, module)
+                if isinstance(init_val, ir.Function):
+                    init_val = init_val.bitcast(ptr_type)
+                elif isinstance(init_val, (ir.GlobalVariable, ir.Constant)) and isinstance(init_val.type, ir.PointerType) and init_val.type != ptr_type:
+                    # Byte array global (i8*) assigned to function pointer: bitcast constant
+                    init_val = init_val.bitcast(ptr_type)
                 gvar.initializer = init_val
             else:
                 gvar.initializer = ir.Constant(ptr_type, None)
@@ -5330,6 +5335,10 @@ class FunctionPointerDeclaration(Statement):
                     # This ensures the linker properly resolves the function address
                     func_as_int = builder.ptrtoint(init_val, ir.IntType(64))
                     init_val = builder.inttoptr(func_as_int, ptr_type)
+                elif isinstance(init_val.type, ir.PointerType) and init_val.type != ptr_type:
+                    # Byte array pointer (i8*) or other pointer assigned to function pointer:
+                    # bitcast the raw pointer to the target function pointer type
+                    init_val = builder.bitcast(init_val, ptr_type)
                 builder.store(init_val, alloca)
             
             return alloca
