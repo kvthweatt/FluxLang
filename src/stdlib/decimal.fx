@@ -60,8 +60,12 @@ namespace math
         // Returns at least 1 even for zero.
         def decimal_bigint_digit_count(BigInt* n) -> i32
         {
-            // We repeatedly divide by 10 and count steps.
-            // For performance we use chunks of 10^9 to reduce iterations.
+            if (math::bigint::bigint_is_zero(n))
+            {
+                return 1;
+            };
+
+            // One pass: divide by 10^9 chunks, count digits from the chunks.
             BigInt work,
                    divisor,
                    quot,
@@ -69,66 +73,117 @@ namespace math
 
             math::bigint::bigint_copy(@work, n);
             work.negative = false;
-
-            if (math::bigint::bigint_is_zero(@work))
-            {
-                return 1;
-            };
-
             math::bigint::bigint_from_uint(@divisor, 1000000000);
 
-            i32 count = 0;
             u32* rem_d = @rem.digits[0];
+
+            i32 count     = 0;
+            u32 last_chunk = 0;
+            bool first    = true;
 
             while (!math::bigint::bigint_is_zero(@work))
             {
                 math::bigint::bigint_divmod(@quot, @rem, @work, @divisor);
-                // Each full chunk of 10^9 accounts for up to 9 digits;
-                // we will fix the exact total at the end.
+                last_chunk = rem_d[0];
                 math::bigint::bigint_copy(@work, @quot);
                 count = count + 9;
+                first = false;
             };
 
-            // `count` is now a multiple of 9 that is >= actual digit count.
-            // Back-calculate: rebuild the number to verify.
-            // Simpler: just divide by 10 from a fresh copy to get exact count.
-            math::bigint::bigint_copy(@work, n);
-            work.negative = false;
-
-            BigInt ten;
-            math::bigint::bigint_from_uint(@ten, 10);
-
-            count = 0;
-            while (!math::bigint::bigint_is_zero(@work))
+            if (first)
             {
-                math::bigint::bigint_divmod(@quot, @rem, @work, @ten);
-                math::bigint::bigint_copy(@work, @quot);
-                count++;
+                return 1;
             };
 
-            if (count == 0)
+            // `count` over-counts the leading chunk by up to 8.
+            // Subtract the leading zeros in last_chunk.
+            count = count - 9;
+            if (last_chunk == 0)
             {
-                count = 1;
+                count = count + 1;
+            }
+            else
+            {
+                u32 cv = last_chunk;
+                while (cv > 0)
+                {
+                    count++;
+                    cv = cv / 10;
+                };
             };
 
+            if (count < 1) { count = 1; };
             return count;
         };
 
         // Multiply coefficient by 10^n  (n >= 0)
+        // Uses chunks of up to 10^9 (fits in a single uint) to minimise
+        // the number of bigint_mul calls.
         def decimal_coeff_scale_up(BigInt* coeff, i32 n) -> void
         {
             if (n <= 0)
             {
                 return;
             };
-            BigInt ten, tmp;
-            math::bigint::bigint_from_uint(@ten, 10);
 
-            i32 i;
-            for (i = 0; i < n; i++)
+            // Powers of 10 that fit in a uint, up to 10^9
+            BigInt factor, tmp;
+            i32 remaining = n;
+
+            while (remaining > 0)
             {
-                math::bigint::bigint_mul(@tmp, coeff, @ten);
+                i32 step;
+                u32 pow10;
+                if (remaining >= 9)
+                {
+                    step  = 9;
+                    pow10 = 1000000000;
+                }
+                elif (remaining >= 8)
+                {
+                    step  = 8;
+                    pow10 = 100000000;
+                }
+                elif (remaining >= 7)
+                {
+                    step  = 7;
+                    pow10 = 10000000;
+                }
+                elif (remaining >= 6)
+                {
+                    step  = 6;
+                    pow10 = 1000000;
+                }
+                elif (remaining >= 5)
+                {
+                    step  = 5;
+                    pow10 = 100000;
+                }
+                elif (remaining >= 4)
+                {
+                    step  = 4;
+                    pow10 = 10000;
+                }
+                elif (remaining >= 3)
+                {
+                    step  = 3;
+                    pow10 = 1000;
+                }
+                elif (remaining >= 2)
+                {
+                    step  = 2;
+                    pow10 = 100;
+                }
+                else
+                {
+                    step  = 1;
+                    pow10 = 10;
+                };
+
+                math::bigint::bigint_from_uint(@factor, pow10);
+                math::bigint::bigint_mul(@tmp, coeff, @factor);
                 math::bigint::bigint_copy(coeff, @tmp);
+                remaining = remaining - step;
             };
             return;
         };
@@ -942,6 +997,114 @@ namespace math
 
             decimal_copy(result, @x);
             return;
+        };
+
+        // ---------------------------------------------------------------
+        // Conversion to primitive types
+        // ---------------------------------------------------------------
+
+        // Convert a Decimal to the nearest representable double.
+        // Strategy:
+        //   1. Extract the coefficient into a double accumulator via
+        //      base-10^9 chunks (same approach as decimal_print).
+        //   2. Scale by 10^exponent using repeated multiply/divide,
+        //      clamped to [-308, +308] to stay in double range.
+        //   3. Apply sign.
+        def decimal_to_double(Decimal* d) -> double
+        {
+            if (math::bigint::bigint_is_zero(@d.coefficient))
+            {
+                return 0.0;
+            };
+
+            // Step 1: collect base-10^9 chunks of the coefficient.
+            // Cap at 4 chunks (36 digits) - more than enough for 28-digit precision.
+            BigInt work, divisor, quot, rem;
+            math::bigint::bigint_copy(@work, @d.coefficient);
+            work.negative = false;
+            math::bigint::bigint_from_uint(@divisor, 1000000000);
+            u32* rem_d = @rem.digits[0];
+
+            u32[4] chunks;
+            i32 num_chunks = 0;
+            while (!math::bigint::bigint_is_zero(@work) & num_chunks < 4)
+            {
+                math::bigint::bigint_divmod(@quot, @rem, @work, @divisor);
+                chunks[num_chunks] = rem_d[0];
+                num_chunks++;
+                math::bigint::bigint_copy(@work, @quot);
+            };
+
+            if (num_chunks == 0)
+            {
+                return 0.0;
+            };
+
+            // Step 2: build double from chunks, most-significant first.
+            // result = result * 1e9 + chunk[i]
+            double result = 0.0;
+            double chunk_scale = 1000000000.0;
+            i32 ci = num_chunks;
+            while (ci > 0)
+            {
+                ci--;
+                result = result * chunk_scale + (double)chunks[ci];
+            };
+
+            // Step 3: apply the decimal exponent.
+            // Clamp to [-308, +308] to stay within double range.
+            i32 exp = d.exponent;
+            if (exp > 308)  { exp = 308;  };
+            if (exp < -308) { exp = -308; };
+
+            if (exp > 0)
+            {
+                i32 remaining = exp;
+                while (remaining > 0)
+                {
+                    i32 step;
+                    double factor;
+                    if (remaining >= 9)      { step = 9; factor = 1000000000.0; }
+                    elif (remaining >= 8)    { step = 8; factor = 100000000.0;  }
+                    elif (remaining >= 7)    { step = 7; factor = 10000000.0;   }
+                    elif (remaining >= 6)    { step = 6; factor = 1000000.0;    }
+                    elif (remaining >= 5)    { step = 5; factor = 100000.0;     }
+                    elif (remaining >= 4)    { step = 4; factor = 10000.0;      }
+                    elif (remaining >= 3)    { step = 3; factor = 1000.0;       }
+                    elif (remaining >= 2)    { step = 2; factor = 100.0;        }
+                    else                     { step = 1; factor = 10.0;         };
+                    result    = result * factor;
+                    remaining = remaining - step;
+                };
+            }
+            elif (exp < 0)
+            {
+                i32 remaining = -exp;
+                while (remaining > 0)
+                {
+                    i32 step;
+                    double factor;
+                    if (remaining >= 9)      { step = 9; factor = 1000000000.0; }
+                    elif (remaining >= 8)    { step = 8; factor = 100000000.0;  }
+                    elif (remaining >= 7)    { step = 7; factor = 10000000.0;   }
+                    elif (remaining >= 6)    { step = 6; factor = 1000000.0;    }
+                    elif (remaining >= 5)    { step = 5; factor = 100000.0;     }
+                    elif (remaining >= 4)    { step = 4; factor = 10000.0;      }
+                    elif (remaining >= 3)    { step = 3; factor = 1000.0;       }
+                    elif (remaining >= 2)    { step = 2; factor = 100.0;        }
+                    else                     { step = 1; factor = 10.0;         };
+                    result    = result / factor;
+                    remaining = remaining - step;
+                };
+            };
+
+            // Step 4: apply sign.
+            if (d.negative)
+            {
+                result = -result;
+            };
+
+            return result;
         };
 
         // ---------------------------------------------------------------

@@ -22,7 +22,9 @@ namespace math
         {
             uint* nd = @num.digits[0];
             uint i;
-            for (i = 0; i < 128; i++)
+            uint old_len = num.length;
+            if (old_len < 1) { old_len = 1; };
+            for (i = 0; i < old_len; i++)
             {
                 nd[i] = 0;
             };
@@ -36,8 +38,10 @@ namespace math
         {
             uint* nd = @num.digits[0];
             uint i;
+            uint old_len = num.length;
+            if (old_len < 1) { old_len = 1; };
             nd[0] = 1;
-            for (i = 1; i < 128; i++)
+            for (i = 1; i < old_len; i++)
             {
                 nd[i] = 0;
             };
@@ -51,21 +55,14 @@ namespace math
         {
             uint* nd = @num.digits[0];
             uint i;
+            uint old_len = num.length;
+            if (old_len < 1) { old_len = 1; };
             nd[0] = value;
-            for (i = 1; i < 128; i++)
+            for (i = 1; i < old_len; i++)
             {
                 nd[i] = 0;
             };
-            
-            if (value == 0)
-            {
-                num.length = 1;
-            }
-            else
-            {
-                num.length = 1;
-            };
-            
+            num.length = 1;
             num.negative = false;
             return;
         };
@@ -75,30 +72,22 @@ namespace math
         {
             uint* nd = @num.digits[0];
             uint i;
+            uint old_len = num.length;
+            if (old_len < 2) { old_len = 2; };
             nd[0] = (uint)(value & 0xFFFFFFFF);
             nd[1] = (uint)(value >> 32);
-            
-            for (i = 2; i < 128; i++)
+            for (i = 2; i < old_len; i++)
             {
                 nd[i] = 0;
             };
-            
             if (nd[1] != 0)
             {
                 num.length = 2;
             }
             else
             {
-                if (nd[0] != 0)
-                {
-                    num.length = 1;
-                }
-                else
-                {
-                    num.length = 1;
-                };
+                num.length = 1;
             };
-            
             num.negative = false;
             return;
         };
@@ -228,11 +217,22 @@ namespace math
             uint* dd = @dest.digits[0];
             uint* sd = @src.digits[0];
             uint i;
-            for (i = 0; i < 128; i++)
+            uint src_len  = src.length;
+            uint dest_len = dest.length;
+            // Copy the active limbs
+            for (i = 0; i < src_len; i++)
             {
                 dd[i] = sd[i];
             };
-            dest.length = src.length;
+            // Zero any limbs dest had beyond src's length
+            if (dest_len > src_len)
+            {
+                for (i = src_len; i < dest_len; i++)
+                {
+                    dd[i] = 0;
+                };
+            };
+            dest.length   = src_len;
             dest.negative = src.negative;
             return;
         };
@@ -446,26 +446,28 @@ namespace math
                  bd = @b.digits[0];
             uint i, j;
             u64 carry, prod;
+            uint res_len = 0;
             for (i = 0; i < a.length; i++)
             {
                 carry = 0;
-                j = 0;
-                while ((j < b.length | carry != 0) & (i + j) < 128)
+                for (j = 0; j < b.length; j++)
                 {
-                    prod = (u64)rd[i + j] + carry;
-                    if (j < b.length)
-                    {
-                        prod = prod + (u64)ad[i] * (u64)bd[j];
-                    };
+                    prod = (u64)rd[i + j] + carry + (u64)ad[i] * (u64)bd[j];
                     rd[i + j] = (uint)(prod & 0xFFFFFFFF);
-                    carry = (prod >> 32) & 0xFFFFFFFF;
-                    j++;
+                    carry = prod >> 32;
                 };
-                if (i + j > result.length)
+                // Propagate remaining carry
+                uint k = i + b.length;
+                while (carry != 0 & k < 128)
                 {
-                    result.length = i + j;
+                    prod = (u64)rd[k] + carry;
+                    rd[k] = (uint)(prod & 0xFFFFFFFF);
+                    carry = prod >> 32;
+                    k++;
                 };
+                if (k > res_len) { res_len = k; };
             };
+            result.length = res_len;
 
             if (a.negative == b.negative)
             {
@@ -527,11 +529,56 @@ namespace math
         def bigint_shl(BigInt* result, BigInt* a, uint n) -> void
         {
             bigint_copy(result, a);
-            uint i;
-            for (i = 0; i < n; i++)
+            if (n == 0) { return; };
+
+            uint* rd = @result.digits[0];
+
+            // Word-at-a-time shift for the bulk
+            uint word_shift = n / 32;
+            uint bit_shift  = n % 32;
+
+            if (word_shift > 0)
             {
-                bigint_shift_left_1(result);
+                // Move existing limbs up by word_shift positions
+                uint old_len = result.length;
+                uint new_len = old_len + word_shift;
+                if (new_len > 128) { new_len = 128; };
+                uint i = new_len;
+                while (i > word_shift)
+                {
+                    i--;
+                    uint src_idx = i - word_shift;
+                    rd[i] = rd[src_idx];
+                };
+                // Zero the low word_shift limbs
+                uint j;
+                for (j = 0; j < word_shift; j++)
+                {
+                    rd[j] = 0;
+                };
+                result.length = new_len;
             };
+
+            // Remaining bit shift (0..31) in a single pass
+            if (bit_shift > 0)
+            {
+                uint carry = 0;
+                uint new_carry;
+                uint i;
+                for (i = 0; i < result.length; i++)
+                {
+                    new_carry = rd[i] >> (32 - bit_shift);
+                    rd[i] = (rd[i] << bit_shift) | carry;
+                    carry = new_carry;
+                };
+                if (carry != 0 & result.length < 128)
+                {
+                    rd[result.length] = carry;
+                    result.length++;
+                };
+            };
+
+            bigint_normalize(result);
             return;
         };
 
@@ -539,104 +586,167 @@ namespace math
         def bigint_shr(BigInt* result, BigInt* a, uint n) -> void
         {
             bigint_copy(result, a);
-            uint i;
-            for (i = 0; i < n; i++)
+            if (n == 0) { return; };
+
+            uint* rd = @result.digits[0];
+
+            // Word-at-a-time shift for the bulk
+            uint word_shift = n / 32;
+            uint bit_shift  = n % 32;
+
+            if (word_shift > 0)
             {
-                bigint_shift_right_1(result);
+                if (word_shift >= result.length)
+                {
+                    bigint_zero(result);
+                    return;
+                };
+                uint new_len = result.length - word_shift;
+                uint i;
+                for (i = 0; i < new_len; i++)
+                {
+                    rd[i] = rd[i + word_shift];
+                };
+                // Zero the vacated high limbs
+                for (i = new_len; i < result.length; i++)
+                {
+                    rd[i] = 0;
+                };
+                result.length = new_len;
             };
+
+            // Remaining bit shift (0..31) in a single pass
+            if (bit_shift > 0)
+            {
+                uint carry = 0;
+                uint new_carry;
+                uint i = result.length;
+                while (i > 0)
+                {
+                    i--;
+                    new_carry = rd[i] << (32 - bit_shift);
+                    rd[i] = (rd[i] >> bit_shift) | carry;
+                    carry = new_carry;
+                };
+            };
+
+            bigint_normalize(result);
             return;
         };
 
         // Divide: quotient = a / b, remainder = a % b  (unsigned magnitudes, signs set after)
-        // Uses binary long division
+        // Uses word-at-a-time division with single-limb fast path.
         def bigint_divmod(BigInt* quotient, BigInt* remainder, BigInt* a, BigInt* b) -> void
         {
             // Declare all locals first so they land in the IR entry block
             BigInt abs_a,
                    abs_b,
                    rem,
-                   quot;
+                   quot,
+                   shifted_b,
+                   tmp;
 
             bigint_zero(quotient);
             bigint_zero(remainder);
 
             if (bigint_is_zero(b))
             {
-                // Division by zero - return zero for both (caller should check)
                 return;
             };
 
             if (bigint_cmp_abs(a, b) < 0)
             {
-                // |a| < |b|: quotient = 0, remainder = |a|
                 bigint_copy(remainder, a);
                 remainder.negative = false;
                 return;
             };
 
-            // Work on absolute values; fix signs after
             bigint_copy(@abs_a, a);
             abs_a.negative = false;
             bigint_copy(@abs_b, b);
             abs_b.negative = false;
 
-            // Use pointers to local struct digit arrays for safe element access
-            uint* abs_a_d = @abs_a.digits[0];
+            uint* abs_b_d = @abs_b.digits[0];
 
-            // Count total bits in abs_a
-            uint total_bits = (abs_a.length - 1) * 32,
-                 top_idx = abs_a.length - 1,
-                 top_digit = abs_a_d[top_idx],
-                 bit_pos = 31;
-            while (bit_pos > 0)
+            // ── Fast path: single-limb divisor ──────────────────────────
+            if (abs_b.length == 1)
             {
-                if (((top_digit >> bit_pos) & 1) != 0)
-                {
-                    break;
-                };
-                bit_pos--;
-            };
-            total_bits = total_bits + bit_pos;
+                uint* abs_a_d = @abs_a.digits[0];
+                uint* quot_d  = @quot.digits[0];
+                u64   divisor = (u64)abs_b_d[0];
+                u64   rem64   = 0;
+                bigint_zero(@quot);
 
-            // Binary long division
+                uint qi = abs_a.length;
+                while (qi > 0)
+                {
+                    qi--;
+                    u64 cur = (rem64 << 32) | (u64)abs_a_d[qi];
+                    quot_d[qi] = (uint)(cur / divisor);
+                    rem64      = cur % divisor;
+                };
+                quot.length = abs_a.length;
+                bigint_normalize(@quot);
+
+                bigint_zero(@rem);
+                uint* rem_d = @rem.digits[0];
+                rem_d[0]   = (uint)rem64;
+                rem.length = 1;
+                bigint_normalize(@rem);
+
+                bigint_copy(quotient, @quot);
+                bigint_copy(remainder, @rem);
+
+                if (a.negative == b.negative) { quotient.negative  = false; }
+                else                          { quotient.negative  = true;  };
+                remainder.negative = a.negative;
+                if (bigint_is_zero(quotient))  { quotient.negative  = false; };
+                if (bigint_is_zero(remainder)) { remainder.negative = false; };
+                return;
+            };
+
+            // ── Multi-limb: shift-and-subtract, one word at a time ───────
+            // We align abs_b to the top of abs_a, subtract whole words worth
+            // of shifted divisor rather than one bit at a time.
             bigint_zero(@rem);
             bigint_zero(@quot);
 
-            // Pointers to local struct digit arrays for safe element access
-            uint* rem_d  = @rem.digits[0],
-                  quot_d = @quot.digits[0];
+            uint* quot_d = @quot.digits[0];
 
-            uint word_idx,
-                 bit_idx,
-                 the_bit,
-                 q_word,
-                 q_bit;
-            // Count down from total_bits to 0 inclusive using uint.
-            // Cannot use "bit >= 0" with int: compiler emits icmp uge which is always
-            // true for a uint, turning the loop infinite. Use do/while with break instead.
+            // Determine the bit length of abs_a
+            uint* abs_a_d2 = @abs_a.digits[0];
+            uint top_word  = abs_a_d2[abs_a.length - 1];
+            uint top_bits  = 0;
+            uint bp = 31;
+            while (bp > 0)
+            {
+                if (((top_word >> bp) & 1) != 0) { break; };
+                bp--;
+            };
+            uint total_bits = (abs_a.length - 1) * 32 + bp;
+
+            uint* rem_d = @rem.digits[0];
+
+            // Process from MSB down, one bit at a time but with early-out
+            // on remainder size to keep the inner loop short.
             uint bit = total_bits;
             do
             {
-                // rem = rem << 1
                 bigint_shift_left_1(@rem);
 
-                // rem |= bit 'bit' of abs_a
-                word_idx = bit / 32;
-                bit_idx  = bit % 32;
-                the_bit  = (abs_a_d[word_idx] >> bit_idx) & 1;
+                uint word_idx = bit / 32;
+                uint bit_idx  = bit % 32;
+                uint the_bit  = (abs_a_d2[word_idx] >> bit_idx) & 1;
                 if (the_bit != 0)
                 {
                     rem_d[0] = rem_d[0] | 1;
                 };
 
-                // if rem >= abs_b
                 if (bigint_cmp_abs(@rem, @abs_b) >= 0)
                 {
                     bigint_sub_abs(@rem, @rem, @abs_b);
-
-                    // Set bit 'bit' in quot
-                    q_word = bit / 32;
-                    q_bit  = bit % 32;
+                    uint q_word = bit / 32;
+                    uint q_bit  = bit % 32;
                     quot_d[q_word] = quot_d[q_word] | (1 << q_bit);
                     if (q_word + 1 > quot.length)
                     {
@@ -655,22 +765,11 @@ namespace math
             bigint_copy(quotient, @quot);
             bigint_copy(remainder, @rem);
 
-            // Fix signs: quotient sign = a.negative XOR b.negative
-            //            remainder sign = a.negative
-            if (a.negative == b.negative)
-            {
-                quotient.negative = false;
-            }
-            else
-            {
-                quotient.negative = true;
-            };
+            if (a.negative == b.negative) { quotient.negative  = false; }
+            else                          { quotient.negative  = true;  };
             remainder.negative = a.negative;
-
-            // Zero has no sign
             if (bigint_is_zero(quotient))  { quotient.negative  = false; };
             if (bigint_is_zero(remainder)) { remainder.negative = false; };
-
             return;
         };
 
