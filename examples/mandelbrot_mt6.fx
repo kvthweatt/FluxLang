@@ -355,13 +355,19 @@ struct WorkSlice
            dyn_max_iter,
            tile,
            recolor_only,
-           use_perturb;     // 1 = perturbation path, 0 = full double precision
+           use_perturb,     // 1 = perturbation path, 0 = full double precision
+           need_decimal;    // 1 = pixel coords need Decimal, 0 = double is sufficient
     Decimal x_min,
             y_min,
             x_range,
             y_range;
     double  ref_cr,         // Reference centre as double (for dc computation)
             ref_ci,
+            // Double equivalents of view bounds - used when need_decimal == 0
+            x_min_d,
+            y_min_d,
+            x_range_d,
+            y_range_d,
             palette_offset;
 };
 
@@ -379,15 +385,6 @@ def worker(void* arg) -> void*
     double r, gv, b;
     double fx_d, fy_d;
 
-    Decimal fx, fy,
-            col_d, row_d,
-            cols_d, rows_d,
-            half, tmp, tmp2;
-
-    decimal_from_string(@half,   "0.5\0");
-    decimal_from_i64(@cols_d, (i64)sl.cols);
-    decimal_from_i64(@rows_d, (i64)sl.rows);
-
     row = sl.row_start;
     while (row < sl.row_end)
     {
@@ -398,25 +395,49 @@ def worker(void* arg) -> void*
 
             if (sl.recolor_only == 0)
             {
-                // fx = x_min + x_range * (col + 0.5) / cols
-                decimal_from_i64(@col_d, (i64)col);
-                decimal_add(@tmp, @col_d, @half);
-                decimal_mul(@tmp2, @sl.x_range, @tmp);
-                decimal_div(@tmp, @tmp2, @cols_d);
-                decimal_add(@fx, @sl.x_min, @tmp);
+                if (sl.need_decimal == 0)
+                {
+                    // ── Fast double path ─────────────────────────────────────
+                    // Pixel coordinates computed entirely in double; no Decimal
+                    // overhead.  Safe while zoom >= double_limit (~1e-15).
+                    fx_d = sl.x_min_d + sl.x_range_d * ((double)col + 0.5) / (double)sl.cols;
+                    fy_d = sl.y_min_d + sl.y_range_d * ((double)row + 0.5) / (double)sl.rows;
+                }
+                else
+                {
+                    // ── Decimal path ─────────────────────────────────────────
+                    // Pixel coordinates computed in Decimal to avoid catastrophic
+                    // cancellation at deep zoom where double mantissa is exhausted.
+                    Decimal fx, fy,
+                            col_d, row_d,
+                            cols_d, rows_d,
+                            half, tmp, tmp2;
 
-                // fy = y_min + y_range * (row + 0.5) / rows
-                decimal_from_i64(@row_d, (i64)row);
-                decimal_add(@tmp, @row_d, @half);
-                decimal_mul(@tmp2, @sl.y_range, @tmp);
-                decimal_div(@tmp, @tmp2, @rows_d);
-                decimal_add(@fy, @sl.y_min, @tmp);
+                    decimal_from_string(@half,   "0.5\0");
+                    decimal_from_i64(@cols_d, (i64)sl.cols);
+                    decimal_from_i64(@rows_d, (i64)sl.rows);
+
+                    // fx = x_min + x_range * (col + 0.5) / cols
+                    decimal_from_i64(@col_d, (i64)col);
+                    decimal_add(@tmp, @col_d, @half);
+                    decimal_mul(@tmp2, @sl.x_range, @tmp);
+                    decimal_div(@tmp, @tmp2, @cols_d);
+                    decimal_add(@fx, @sl.x_min, @tmp);
+
+                    // fy = y_min + y_range * (row + 0.5) / rows
+                    decimal_from_i64(@row_d, (i64)row);
+                    decimal_add(@tmp, @row_d, @half);
+                    decimal_mul(@tmp2, @sl.y_range, @tmp);
+                    decimal_div(@tmp, @tmp2, @rows_d);
+                    decimal_add(@fy, @sl.y_min, @tmp);
+
+                    fx_d = decimal_to_double(@fx);
+                    fy_d = decimal_to_double(@fy);
+                };
 
                 if (sl.use_perturb == 1)
                 {
                     // Convert pixel coord to double and compute delta from reference
-                    fx_d = decimal_to_double(@fx);
-                    fy_d = decimal_to_double(@fy);
                     iter = mandelbrot_perturb(sl.ref_cr, sl.ref_ci,
                                              fx_d - sl.ref_cr, fy_d - sl.ref_ci,
                                              sl.dyn_max_iter);
@@ -424,8 +445,6 @@ def worker(void* arg) -> void*
                 else
                 {
                     // Full double precision path (navigation or interior reference)
-                    fx_d = decimal_to_double(@fx);
-                    fy_d = decimal_to_double(@fy);
                     iter = mandelbrot_double(fx_d, fy_d, sl.dyn_max_iter);
                 };
 
@@ -496,15 +515,17 @@ def main() -> int
             zoom_delta, pan_delta,
 
     // Zoom threshold sentinels
-    // double_limit: below this zoom level double arithmetic loses pixel-level
-    // precision (~1e-14 covers the full double mantissa at screen resolution).
-    // Below this threshold the Decimal reference orbit path must be used.
+    // Hysteresis band prevents flickering at the double/Decimal boundary:
+    //   decimal_enter : zoom-in  crossing - switch double->Decimal at 1e-14
+    //   decimal_exit  : zoom-out crossing - switch Decimal->double at 1e-13
+    // The 10x gap means a single direction of travel cannot cause oscillation.
             thresh1, thresh2, thresh3,
-            double_limit;
-    decimal_from_string(@thresh1,      "1\0");
-    decimal_from_string(@thresh2,      "0.01\0");
-    decimal_from_string(@thresh3,      "0.0001\0");
-    decimal_from_string(@double_limit, "0.000000000000001\0");  // 1e-15
+            decimal_enter, decimal_exit;
+    decimal_from_string(@thresh1,       "1\0");
+    decimal_from_string(@thresh2,       "0.01\0");
+    decimal_from_string(@thresh3,       "0.0001\0");
+    decimal_from_string(@decimal_enter, "0.00000000000001\0");   // 1e-14  enter Decimal mode
+    decimal_from_string(@decimal_exit,  "0.0000000000001\0");    // 1e-13  leave Decimal mode
 
     decimal_from_string(@cx,   "-0.5\0");
     decimal_from_string(@cy,   "0\0");
@@ -725,11 +746,34 @@ def main() -> int
         // ── Recompute reference orbit when view has changed ──────────────────
         // Only for stationary frames; moving always uses full double precision.
         //
-        // Above double_limit (zoom >= 1e-15) double arithmetic is sufficient for
-        // the reference orbit - use the fast double path.
-        // Below double_limit zoom has exceeded double precision; use the Decimal
-        // path so the reference centre stays exact.
-        need_decimal = decimal_cmp(@zoom, @double_limit) < 0;
+        // Hysteresis prevents flickering at the double/Decimal boundary:
+        //   Zooming in:  switch to Decimal when zoom crosses below decimal_enter (1e-14)
+        //   Zooming out: switch back to double only when zoom rises above decimal_exit (1e-13)
+        // If the mode actually changes, invalidate the reference orbit immediately so
+        // it is recomputed under the correct arithmetic on the very next still frame.
+        {
+            bool was_decimal = need_decimal;
+            if (!need_decimal)
+            {
+                // Currently in double mode - enter Decimal if zoom dropped below enter threshold
+                if (decimal_cmp(@zoom, @decimal_enter) < 0)
+                {
+                    need_decimal = true;
+                };
+            }
+            else
+            {
+                // Currently in Decimal mode - leave only when zoom rises above exit threshold
+                if (decimal_cmp(@zoom, @decimal_exit) > 0)
+                {
+                    need_decimal = false;
+                };
+            };
+            if (need_decimal != was_decimal)
+            {
+                ref_dirty = true;
+            };
+        };
 
         if (ref_dirty & !moving)
         {
@@ -759,6 +803,13 @@ def main() -> int
         rows_per_thread = rows / num_threads;
         if (rows_per_thread < 1) { rows_per_thread = 1; };
 
+        // Pre-convert view bounds to double once for the fast path
+        double x_min_d, y_min_d, x_range_d, y_range_d;
+        x_min_d   = decimal_to_double(@x_min);
+        y_min_d   = decimal_to_double(@y_min);
+        x_range_d = decimal_to_double(@x_range);
+        y_range_d = decimal_to_double(@y_range);
+
         t = 0;
         while (t < num_threads)
         {
@@ -772,10 +823,15 @@ def main() -> int
             g_slices[t].tile           = tile;
             g_slices[t].recolor_only   = recolor_only ? 1 : 0;
             g_slices[t].use_perturb    = use_perturb;
+            g_slices[t].need_decimal   = need_decimal ? 1 : 0;
             decimal_copy(@g_slices[t].x_min,   @x_min);
             decimal_copy(@g_slices[t].y_min,   @y_min);
             decimal_copy(@g_slices[t].x_range, @x_range);
             decimal_copy(@g_slices[t].y_range, @y_range);
+            g_slices[t].x_min_d        = x_min_d;
+            g_slices[t].y_min_d        = y_min_d;
+            g_slices[t].x_range_d      = x_range_d;
+            g_slices[t].y_range_d      = y_range_d;
             g_slices[t].ref_cr         = ref_cr;
             g_slices[t].ref_ci         = ref_ci;
             g_slices[t].palette_offset = palette_offset;

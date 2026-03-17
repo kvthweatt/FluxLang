@@ -126,65 +126,15 @@ namespace math
                 return;
             };
 
-            // Powers of 10 that fit in a uint, up to 10^9
-            BigInt factor, tmp;
-            i32 remaining = n;
+            BigInt ten,
+                   pow10,
+                   tmp;
+            math::bigint::bigint_from_uint(@ten, 10);
 
-            while (remaining > 0)
-            {
-                i32 step;
-                u32 pow10;
-                if (remaining >= 9)
-                {
-                    step  = 9;
-                    pow10 = 1000000000;
-                }
-                elif (remaining >= 8)
-                {
-                    step  = 8;
-                    pow10 = 100000000;
-                }
-                elif (remaining >= 7)
-                {
-                    step  = 7;
-                    pow10 = 10000000;
-                }
-                elif (remaining >= 6)
-                {
-                    step  = 6;
-                    pow10 = 1000000;
-                }
-                elif (remaining >= 5)
-                {
-                    step  = 5;
-                    pow10 = 100000;
-                }
-                elif (remaining >= 4)
-                {
-                    step  = 4;
-                    pow10 = 10000;
-                }
-                elif (remaining >= 3)
-                {
-                    step  = 3;
-                    pow10 = 1000;
-                }
-                elif (remaining >= 2)
-                {
-                    step  = 2;
-                    pow10 = 100;
-                }
-                else
-                {
-                    step  = 1;
-                    pow10 = 10;
-                };
-
-                math::bigint::bigint_from_uint(@factor, pow10);
-                math::bigint::bigint_mul(@tmp, coeff, @factor);
-                math::bigint::bigint_copy(coeff, @tmp);
-                remaining = remaining - step;
-            };
+            // Compute 10^n using bigint_pow_uint (fast exponentiation)
+            math::bigint::bigint_pow_uint(@pow10, @ten, (uint)n);
+            math::bigint::bigint_mul(@tmp, coeff, @pow10);
+            math::bigint::bigint_copy(coeff, @tmp);
             return;
         };
 
@@ -195,30 +145,33 @@ namespace math
             {
                 return;
             };
+
+            // Compute 10^n once, then do a single divmod + half-up round.
+            // This avoids n sequential bigint divisions for large n.
             BigInt ten,
+                   pow10,
                    tmp,
                    rem,
-                   five,
+                   two_rem,
+                   two,
                    one,
                    rounded;
             math::bigint::bigint_from_uint(@ten, 10);
-            math::bigint::bigint_from_uint(@five, 5);
+            math::bigint::bigint_pow_uint(@pow10, @ten, (uint)n);
+            math::bigint::bigint_divmod(@tmp, @rem, coeff, @pow10);
 
-            i32 i;
-            for (i = 0; i < n; i++)
+            // Half-up rounding: if 2*rem >= 10^n, round up
+            math::bigint::bigint_from_uint(@two, 2);
+            math::bigint::bigint_mul(@two_rem, @rem, @two);
+            if (math::bigint::bigint_cmp_abs(@two_rem, @pow10) >= 0)
             {
-                math::bigint::bigint_divmod(@tmp, @rem, coeff, @ten);
-                // Half-up rounding: if remainder >= 5, add 1
-                if (math::bigint::bigint_cmp_abs(@rem, @five) >= 0)
-                {
-                    math::bigint::bigint_one(@one);
-                    math::bigint::bigint_add(@rounded, @tmp, @one);
-                    math::bigint::bigint_copy(coeff, @rounded);
-                }
-                else
-                {
-                    math::bigint::bigint_copy(coeff, @tmp);
-                };
+                math::bigint::bigint_one(@one);
+                math::bigint::bigint_add(@rounded, @tmp, @one);
+                math::bigint::bigint_copy(coeff, @rounded);
+            }
+            else
+            {
+                math::bigint::bigint_copy(coeff, @tmp);
             };
             return;
         };
@@ -227,12 +180,29 @@ namespace math
         // E.g. coeff=1230, exp=-3  =>  coeff=123, exp=-2
         def decimal_trim_zeros(Decimal* d) -> void
         {
-            BigInt ten,
+            BigInt chunk_div,
                    quot,
                    rem;
-            math::bigint::bigint_from_uint(@ten, 10);
 
+            // Fast path: strip trailing zeros 9 at a time using 10^9 chunks,
+            // then fall through to single-digit stripping for the remainder.
+            math::bigint::bigint_from_uint(@chunk_div, 1000000000);
             u32* rem_d = @rem.digits[0];
+
+            while (!math::bigint::bigint_is_zero(@d.coefficient))
+            {
+                math::bigint::bigint_divmod(@quot, @rem, @d.coefficient, @chunk_div);
+                if (rem_d[0] != 0)
+                {
+                    break;
+                };
+                math::bigint::bigint_copy(@d.coefficient, @quot);
+                d.exponent = d.exponent + 9;
+            };
+
+            // Now strip remaining single trailing zeros
+            BigInt ten;
+            math::bigint::bigint_from_uint(@ten, 10);
 
             while (!math::bigint::bigint_is_zero(@d.coefficient))
             {
@@ -421,14 +391,18 @@ namespace math
             };
 
             // --- parse integer and fractional parts ---
+            // Accumulate digits in chunks of up to 9 (fits in a u32) and
+            // call bigint_mul/add once per chunk to minimise bigint operations.
             i32 frac_digits = 0;      // digits after the dot
             bool in_frac    = false;
 
-            BigInt ten,
-                   tmp,
-                   digit_bi;
-            math::bigint::bigint_from_uint(@ten, 10);
+            BigInt chunk_mul,
+                   chunk_bi,
+                   tmp;
             math::bigint::bigint_zero(@d.coefficient);
+
+            u32 chunk_acc   = 0;   // native accumulator for current chunk
+            i32 chunk_size  = 0;   // how many digits are in chunk_acc
 
             while (s[idx] != 0 & s[idx] != 'e' & s[idx] != 'E')
             {
@@ -446,16 +420,42 @@ namespace math
                     break;
                 };
 
-                // coefficient = coefficient * 10 + digit
-                math::bigint::bigint_mul(@tmp, @d.coefficient, @ten);
-                math::bigint::bigint_from_uint(@digit_bi, (u32)(ch - '0'));
-                math::bigint::bigint_add(@d.coefficient, @tmp, @digit_bi);
+                chunk_acc  = chunk_acc * 10 + (u32)(ch - '0');
+                chunk_size = chunk_size + 1;
 
                 if (in_frac)
                 {
                     frac_digits++;
                 };
+
+                // Flush a full chunk of 9 digits into the BigInt coefficient.
+                if (chunk_size == 9)
+                {
+                    math::bigint::bigint_from_uint(@chunk_mul, 1000000000);
+                    math::bigint::bigint_mul(@tmp, @d.coefficient, @chunk_mul);
+                    math::bigint::bigint_from_uint(@chunk_bi, chunk_acc);
+                    math::bigint::bigint_add(@d.coefficient, @tmp, @chunk_bi);
+                    chunk_acc  = 0;
+                    chunk_size = 0;
+                };
+
                 idx++;
+            };
+
+            // Flush any remaining partial chunk
+            if (chunk_size > 0)
+            {
+                // pow10 for partial chunk
+                u32 partial_pow = 1;
+                i32 pi;
+                for (pi = 0; pi < chunk_size; pi++)
+                {
+                    partial_pow = partial_pow * 10;
+                };
+                math::bigint::bigint_from_uint(@chunk_mul, partial_pow);
+                math::bigint::bigint_mul(@tmp, @d.coefficient, @chunk_mul);
+                math::bigint::bigint_from_uint(@chunk_bi, chunk_acc);
+                math::bigint::bigint_add(@d.coefficient, @tmp, @chunk_bi);
             };
 
             // exponent so far: -frac_digits (each fractional digit divides by 10)
@@ -872,18 +872,15 @@ namespace math
 
             i32 remove = target_exp - result.exponent;
 
-            // Scale down without rounding (pure truncation)
-            BigInt ten;
-            BigInt tmp;
-            BigInt rem;
+            // Compute 10^remove once and do a single divmod (pure truncation, no rounding).
+            BigInt ten,
+                   pow10,
+                   tmp,
+                   rem;
             math::bigint::bigint_from_uint(@ten, 10);
-
-            i32 i;
-            for (i = 0; i < remove; i++)
-            {
-                math::bigint::bigint_divmod(@tmp, @rem, @result.coefficient, @ten);
-                math::bigint::bigint_copy(@result.coefficient, @tmp);
-            };
+            math::bigint::bigint_pow_uint(@pow10, @ten, (uint)remove);
+            math::bigint::bigint_divmod(@tmp, @rem, @result.coefficient, @pow10);
+            math::bigint::bigint_copy(@result.coefficient, @tmp);
 
             result.exponent = target_exp;
 

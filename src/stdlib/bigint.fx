@@ -16,7 +16,9 @@ namespace math
 {
     namespace bigint
     {
-        def print_u64_decimal(u64 value) -> void;
+        def print_u64_decimal(u64 value) -> void,
+            bigint_shl(BigInt* result, BigInt* a, uint n) -> void;
+
         // Initialize a BigInt to zero
         def bigint_zero(BigInt* num) -> void
         {
@@ -431,8 +433,8 @@ namespace math
             return;
         };
 
-        // Multiply: result = a * b  (signed, schoolbook long multiplication)
-        def bigint_mul(BigInt* result, BigInt* a, BigInt* b) -> void
+        // Schoolbook multiply: result = a * b  (unsigned magnitudes)
+        def bigint_mul_schoolbook(BigInt* result, BigInt* a, BigInt* b) -> void
         {
             bigint_zero(result);
 
@@ -456,7 +458,6 @@ namespace math
                     rd[i + j] = (uint)(prod & 0xFFFFFFFF);
                     carry = prod >> 32;
                 };
-                // Propagate remaining carry
                 uint k = i + b.length;
                 while (carry != 0 & k < 128)
                 {
@@ -468,7 +469,152 @@ namespace math
                 if (k > res_len) { res_len = k; };
             };
             result.length = res_len;
+            bigint_normalize(result);
+            return;
+        };
 
+        // Karatsuba multiply: result = a * b  (unsigned magnitudes)
+        // Assumes a.length >= b.length and both non-zero, length >= KARATSUBA_THRESHOLD.
+        def bigint_mul_karatsuba(BigInt* result, BigInt* a, BigInt* b) -> void
+        {
+            // Threshold where Karatsuba beats schoolbook (tune if needed)
+            const uint KARATSUBA_THRESHOLD = 16;
+
+            // For small sizes, fall back to schoolbook
+            if (a.length < KARATSUBA_THRESHOLD | b.length < KARATSUBA_THRESHOLD)
+            {
+                bigint_mul_schoolbook(result, a, b);
+                return;
+            };
+
+            // Ensure a is the longer operand
+            BigInt aa, bb;
+            if (a.length < b.length)
+            {
+                bigint_copy(@aa, b);
+                bigint_copy(@bb, a);
+            }
+            else
+            {
+                bigint_copy(@aa, a);
+                bigint_copy(@bb, b);
+            };
+
+            uint n = aa.length;
+            uint m = n >> 1;  // split point
+
+            // Split aa into a0 (low m limbs) and a1 (high)
+            BigInt a0, a1, b0, b1;
+            bigint_zero(@a0);
+            bigint_zero(@a1);
+            bigint_zero(@b0);
+            bigint_zero(@b1);
+
+            uint* aad = @aa.digits[0];
+            uint* bbd = @bb.digits[0];
+            uint* a0d = @a0.digits[0];
+            uint* a1d = @a1.digits[0];
+            uint* b0d = @b0.digits[0];
+            uint* b1d = @b1.digits[0];
+
+            uint i;
+            // a0, b0: low m limbs
+            for (i = 0; i < m; i++)
+            {
+                a0d[i] = aad[i];
+                b0d[i] = (i < bb.length) ? bbd[i] : 0;
+            };
+            a0.length = m;
+            b0.length = (bb.length > m) ? m : bb.length;
+            bigint_normalize(@a0);
+            bigint_normalize(@b0);
+
+            // a1, b1: high limbs
+            uint a1_len = (aa.length > m) ? (aa.length - m) : 0;
+            uint b1_len = (bb.length > m) ? (bb.length - m) : 0;
+            for (i = 0; i < a1_len; i++)
+            {
+                a1d[i] = aad[m + i];
+            };
+            for (i = 0; i < b1_len; i++)
+            {
+                b1d[i] = bbd[m + i];
+            };
+            a1.length = a1_len;
+            b1.length = b1_len;
+            bigint_normalize(@a1);
+            bigint_normalize(@b1);
+
+            // z0 = a0 * b0
+            BigInt z0, z1, z2;
+            bigint_zero(@z0);
+            bigint_zero(@z1);
+            bigint_zero(@z2);
+
+            bigint_mul_karatsuba(@z0, @a0, @b0);
+
+            // z2 = a1 * b1
+            if (!bigint_is_zero(@a1) & !bigint_is_zero(@b1))
+            {
+                bigint_mul_karatsuba(@z2, @a1, @b1);
+            };
+
+            // (a0 + a1), (b0 + b1)
+            BigInt a_sum, b_sum;
+            bigint_zero(@a_sum);
+            bigint_zero(@b_sum);
+            bigint_add(@a_sum, @a0, @a1);
+            bigint_add(@b_sum, @b0, @b1);
+
+            // z1 = (a0 + a1)*(b0 + b1) - z0 - z2
+            BigInt z1_tmp;
+            bigint_zero(@z1_tmp);
+            bigint_mul_karatsuba(@z1_tmp, @a_sum, @b_sum);
+
+            BigInt tmp;
+            bigint_zero(@tmp);
+            bigint_add(@tmp, @z0, @z2);
+            bigint_sub(@z1, @z1_tmp, @tmp);  // z1 = z1_tmp - (z0 + z2)
+
+            // result = z2 * B^(2m) + z1 * B^m + z0
+            bigint_zero(result);
+
+            BigInt z1_shift, z2_shift;
+            bigint_zero(@z1_shift);
+            bigint_zero(@z2_shift);
+
+            // shift by m limbs = m*32 bits
+            bigint_shl(@z1_shift, @z1, m * 32);
+            bigint_shl(@z2_shift, @z2, m * 64); // 2m limbs
+
+            BigInt acc;
+            bigint_zero(@acc);
+            bigint_add(@acc, @z0, @z1_shift);
+            bigint_add(result, @acc, @z2_shift);
+            bigint_normalize(result);
+            return;
+        };
+
+        // Multiply: result = a * b  (signed, uses Karatsuba for large operands)
+        def bigint_mul(BigInt* result, BigInt* a, BigInt* b) -> void
+        {
+            bigint_zero(result);
+
+            if (bigint_is_zero(a) | bigint_is_zero(b))
+            {
+                return;
+            };
+
+            // Work on magnitudes via Karatsuba+schoolbook
+            BigInt abs_a, abs_b;
+            bigint_copy(@abs_a, a);
+            bigint_copy(@abs_b, b);
+            abs_a.negative = false;
+            abs_b.negative = false;
+
+            bigint_mul_karatsuba(result, @abs_a, @abs_b);
+
+            // Set sign
             if (a.negative == b.negative)
             {
                 result.negative = false;
@@ -477,9 +623,14 @@ namespace math
             {
                 result.negative = true;
             };
-            bigint_normalize(result);
+
+            if (bigint_is_zero(result))
+            {
+                result.negative = false;
+            };
             return;
         };
+
 
         // Shift left by one bit in-place
         def bigint_shift_left_1(BigInt* num) -> void

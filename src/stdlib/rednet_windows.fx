@@ -21,41 +21,41 @@ extern
 {
     // Core socket functions
     def !!
-        socket(int domain, int type, int protocol) -> int,
-        bind(int sockfd, void* addr, int addrlen) -> int,
-        listen(int sockfd, int backlog) -> int,
-        accept(int sockfd, void* addr, int* addrlen) -> int,
-        connect(int sockfd, void* addr, int addrlen) -> int,
-        send(int sockfd, void* buf, int len, int flags) -> int,
-        recv(int sockfd, void* buf, int len, int flags) -> int,
-        sendto(int sockfd, void* buf, int len, int flags, void* dest_addr, int addrlen) -> int,
-        recvfrom(int sockfd, void* buf, int len, int flags, void* src_addr, int* addrlen) -> int,
-        closesocket(int fd) -> int,
-        shutdown(int sockfd, int how) -> int,
+        socket(int, int, int) -> int,
+        bind(int, void*, int) -> int,
+        listen(int, int) -> int,
+        accept(int, void*, int*) -> int,
+        connect(int, void*, int) -> int,
+        send(int, void*, int, int) -> int,
+        recv(int, void*, int, int) -> int,
+        sendto(int, void*, int, int, void*, int) -> int,
+        recvfrom(int, void*, int, int, void*, int*) -> int,
+        closesocket(int) -> int,
+        shutdown(int, int) -> int,
     
         // Socket options
-        setsockopt(int sockfd, int level, int optname, void* optval, int optlen) -> int,
-        getsockopt(int sockfd, int level, int optname, void* optval, int* optlen) -> int,
+        setsockopt(int, int, int, void*, int) -> int,
+        getsockopt(int, int, int, void*, int*) -> int,
         
         // Address conversion
-        inet_addr(byte* cp) -> u32,
-        inet_ntoa(u32 addr) -> byte*,
-        htons(u16 hostshort) -> u16,
-        htonl(u32 hostlong) -> u32,
-        ntohs(u16 netshort) -> u16,
-        ntohl(u32 netlong) -> u32,
+        inet_addr(byte*) -> u32,
+        inet_ntoa(u32) -> byte*,
+        htons(u16) -> u16,
+        htonl(u32) -> u32,
+        ntohs(u16) -> u16,
+        ntohl(u32) -> u32,
         
         // Name resolution
-        gethostbyname(byte* name) -> void*,
-        getaddrinfo(byte* node, byte* service, void* hints, void** res) -> int,
+        gethostbyname(byte*) -> void*,
+        getaddrinfo(byte*, byte*, void*, void**) -> int,
         freeaddrinfo(void* res) -> void,
         
         // Socket control (Windows uses ioctlsocket instead of fcntl)
-        ioctlsocket(int sockfd, u32 cmd, u32* argp) -> int,
-        select(int nfds, void* readfds, void* writefds, void* exceptfds, void* timeout) -> int,
+        ioctlsocket(int, u32, u32*) -> int,
+        select(int, void*, void*, void*, void*) -> int,
         
         // WSA initialization/cleanup
-        WSAStartup(u16 version, void* wsadata) -> int,
+        WSAStartup(u16, void*) -> int,
         WSACleanup() -> int,
         WSAGetLastError() -> int;
 };
