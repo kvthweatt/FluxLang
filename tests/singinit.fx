@@ -9,10 +9,15 @@ def foo() -> void
     print(x); print();
 };
 
+def call(int y) -> void
+{
+    if (y == 0) { return; };
+    foo();
+    call(--y);
+};
+
 def main() -> int
 {
-    foo();
-    foo();
-    foo();
+    call(10);
 	return 0;
 };

@@ -767,6 +767,8 @@ signed   data{64} as  i64;
 unsigned data{64} as ui64;
 ```
 
+---
+
 ## **Namespace elimination with `!using` or `not using`:**
 ```
 !using standard::io::file;
@@ -863,6 +865,35 @@ while (x in y);
 while (condition)
 {
     // ... code ...
+};
+```
+
+---
+
+## **Single-initialized variables:**
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+def foo() -> void
+{
+    singinit int x;
+    x += 1;
+    print(x); print();
+};
+
+def call(int y) -> void
+{
+    if (y == 0) { return; };
+    foo();
+    call(--y);
+};
+
+def main() -> int
+{
+    call(10);
+    return 0;
 };
 ```
 
@@ -1802,7 +1833,7 @@ auto result = calculate_something();  // Infers return type
 ```
 alignof, and, as, asm, assert, auto, break, bool, case, catch, const, continue, data, def, default,
 do, double, elif, else, enum, false, float, for, global, heap, if, in, is, int, local, long, namespace, new, noinit, not, object, or,
-private, public, register, return, signed, sizeof, stack, struct, switch, this, throw, true, try, typeof, uint, ulong,
+private, public, register, return, signed, singinit, sizeof, stack, struct, switch, this, throw, true, try, typeof, uint, ulong,
 union, unsigned, void, volatile, while, xor
 ```
 

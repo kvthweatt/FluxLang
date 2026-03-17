@@ -1,5 +1,6 @@
 #import "standard.fx";
 
+using standard::io::console;
 
 unsigned data{16::1} as be16;
 unsigned data{16::0} as le16;
