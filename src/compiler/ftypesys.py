@@ -1501,8 +1501,36 @@ class TypeSystem:
                     # Literal AST node wrapping a plain integer - treat as compile-time constant
                     return ir.ArrayType(element_type, type_spec.array_size.value)
                 else:
-                    # Runtime size - return pointer to element type
-                    # The actual allocation will be handled in _codegen_local
+                    # May be an Identifier or other AST expression referencing a
+                    # compile-time constant (e.g. `byte[FHF_SYM_NAME_MAX]`).
+                    # Try to resolve it from the module's global constants before
+                    # giving up and emitting a pointer.
+                    resolved_size = None
+                    if hasattr(type_spec.array_size, 'name'):
+                        # Identifier node — look up in module globals
+                        const_name = type_spec.array_size.name
+                        if hasattr(module, 'globals') and const_name in module.globals:
+                            gvar = module.globals[const_name]
+                            if hasattr(gvar, 'initializer') and gvar.initializer is not None:
+                                init = gvar.initializer
+                                if hasattr(init, 'constant') and isinstance(init.constant, int):
+                                    resolved_size = init.constant
+                                elif hasattr(init, 'value') and isinstance(init.value, int):
+                                    resolved_size = init.value
+                        # Also try via symbol table
+                        if resolved_size is None and hasattr(module, 'symbol_table'):
+                            entry = module.symbol_table.lookup_any(const_name)
+                            if entry and entry.llvm_value is not None:
+                                lv = entry.llvm_value
+                                if hasattr(lv, 'initializer') and lv.initializer is not None:
+                                    init = lv.initializer
+                                    if hasattr(init, 'constant') and isinstance(init.constant, int):
+                                        resolved_size = init.constant
+                                    elif hasattr(init, 'value') and isinstance(init.value, int):
+                                        resolved_size = init.value
+                    if resolved_size is not None:
+                        return ir.ArrayType(element_type, resolved_size)
+                    # Truly runtime size - return pointer to element type
                     return ir.PointerType(element_type)
             else:
                 if isinstance(element_type, ir.PointerType):
@@ -3460,10 +3488,6 @@ class CoercionContext:
         # is_signed=False is the default for ALL types (including int/SINT),
         # so we cannot use `not spec.is_signed` as the unsigned test — that
         # would incorrectly treat plain `int` variables as unsigned.
-        # DataType.DATA with is_signed=False covers unsigned bit-width types
-        # such as u8, u16, u32, u64 — these must also be treated as unsigned.
-        if spec.base_type == DataType.DATA and not spec.is_signed:
-            return True
         return spec.base_type == DataType.UINT
 
     @staticmethod
@@ -4345,7 +4369,7 @@ class AssignmentTypeHandler:
                 return val
             else:
                 # For global variables, we can't easily resize, so convert to element pointer
-                zero = ir.Constant(ir.IntType(1), 0)
+                zero = ir.Constant(ir.IntType(32), 0)
                 array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
                 builder.store(array_ptr, ptr)
                 return array_ptr
@@ -4389,7 +4413,7 @@ class AssignmentTypeHandler:
             isinstance(target_type, ir.PointerType)):
             # This is assigning an array to a pointer type (like noopstr)
             # Get pointer to first element of array
-            zero = ir.Constant(ir.IntType(1), 0)
+            zero = ir.Constant(ir.IntType(32), 0)
             array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
             return array_ptr
         
@@ -4514,7 +4538,7 @@ class AssignmentTypeHandler:
                     raise ValueError(f"Member '{member_name}' not found in struct")
                 member_ptr = builder.gep(
                     obj,
-                    [ir.Constant(ir.IntType(1), 0),
+                    [ir.Constant(ir.IntType(32), 0),
                      ir.Constant(ir.IntType(32), idx)],
                     inbounds=True
                 )
@@ -4709,7 +4733,7 @@ class AssignmentTypeHandler:
         
         if isinstance(array.type, ir.PointerType) and isinstance(array.type.pointee, ir.ArrayType):
             # Calculate element pointer for pointer-to-array
-            zero = ir.Constant(ir.IntType(1), 0)
+            zero = ir.Constant(ir.IntType(32), 0)
             elem_ptr = builder.gep(array, [zero, index], inbounds=True)
             
             # Determine element type

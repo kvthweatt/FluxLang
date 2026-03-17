@@ -31,6 +31,21 @@ class ASTNode:
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Any:
         raise NotImplementedError(f"codegen not implemented for {self.__class__.__name__}")
 
+def _coerce_to_i1(builder: ir.IRBuilder, val: ir.Value) -> ir.Value:
+    """Ensure val is i1 for use as a branch condition.
+    If val is already i1, return it unchanged.
+    If val is a wider integer, emit icmp ne val, 0.
+    If val is a pointer, emit icmp ne val, null.
+    """
+    if isinstance(val.type, ir.IntType):
+        if val.type.width == 1:
+            return val
+        return builder.icmp_signed('!=', val, ir.Constant(val.type, 0), name="tobool")
+    if isinstance(val.type, ir.PointerType):
+        null = ir.Constant(val.type, None)
+        return builder.icmp_unsigned('!=', val, null, name="tobool")
+    return val
+
 # Literal values (no dependencies)
 @dataclass
 class Literal(ASTNode):
@@ -1094,6 +1109,13 @@ class UnaryOp(Expression):
             if module.symbol_table.is_global_scope() and isinstance(operand_val, ir.Constant):
                 if isinstance(operand_val.type, ir.IntType):
                     return ir.Constant(operand_val.type, ~operand_val.constant)
+            # For i1 (bool), bitwise not is correct logical not.
+            # For wider integers (i32 etc.), builder.not_ emits xor val,-1 which
+            # preserves the width and is invalid as a branch condition.
+            # Emit icmp ne val, 0 instead to produce a proper i1.
+            if isinstance(operand_val.type, ir.IntType) and operand_val.type.width != 1:
+                zero = ir.Constant(operand_val.type, 0)
+                return builder.icmp_signed('==', operand_val, zero, name="lnot")
             return builder.not_(operand_val)
         elif self.operator == Operator.SUB:
             # Handle negation - for constants in global scope, create negative constant
@@ -3206,6 +3228,15 @@ class VariableDeclaration(ASTNode):
         if self.name in module.globals:
             return module.globals[self.name]
         
+        # Check for namespaced duplicates
+        base_name = self.name.split('__')[-1]
+        for existing_name in list(module.globals.keys()):
+            existing_base_name = existing_name.split('__')[-1]
+            if existing_base_name == base_name and existing_name != self.name:
+                return module.globals[existing_name]
+            elif existing_name == self.name:
+                return module.globals[existing_name]
+        
         # Create new global
         gvar = ir.GlobalVariable(module, llvm_type, self.name)
         
@@ -3842,14 +3873,14 @@ class IfStatement(Statement):
         else_block = func.append_basic_block('else')
         merge_block = func.append_basic_block('ifcont')
         
-        builder.cbranch(cond_val, then_block, else_block)
-        
+        builder.cbranch(_coerce_to_i1(builder, cond_val), then_block, else_block)
+
         # Emit then block
         builder.position_at_start(then_block)
         self.then_block.codegen(builder, module)
         if not builder.block.is_terminated:
             builder.branch(merge_block)
-        
+
         # Emit else block (which may contain elif chain)
         builder.position_at_start(else_block)
         
@@ -3864,7 +3895,7 @@ class IfStatement(Statement):
             elif_else = func.append_basic_block(f'elif_else_{i}')
             
             # Branch based on elif condition
-            builder.cbranch(elif_cond_val, elif_then, elif_else)
+            builder.cbranch(_coerce_to_i1(builder, elif_cond_val), elif_then, elif_else)
             
             # Emit elif body
             builder.position_at_start(elif_then)
@@ -4210,7 +4241,7 @@ class WhileLoop(Statement):
         # Emit condition block
         builder.position_at_start(cond_block)
         cond_val = self.condition.codegen(builder, module)
-        builder.cbranch(cond_val, body_block, end_block)
+        builder.cbranch(_coerce_to_i1(builder, cond_val), body_block, end_block)
         
         # Emit body block
         builder.position_at_start(body_block)
@@ -4337,7 +4368,7 @@ class DoWhileLoop(Statement):
         # Generate the condition
         builder.position_at_start(cond_block)
         cond_val = self.condition.codegen(builder, module)
-        builder.cbranch(cond_val, body_block, end_block)
+        builder.cbranch(_coerce_to_i1(builder, cond_val), body_block, end_block)
         
         # Restore break/continue targets
         builder.break_block = old_break
@@ -4376,7 +4407,7 @@ class ForLoop(Statement):
         builder.position_at_start(cond_block)
         if self.condition:
             cond_val = self.condition.codegen(builder, module)
-            builder.cbranch(cond_val, body_block, end_block)
+            builder.cbranch(_coerce_to_i1(builder, cond_val), body_block, end_block)
         else:  # Infinite loop if no condition
             builder.branch(body_block)
 
@@ -4846,7 +4877,7 @@ class AssertStatement(Statement):
         fail_block = func.append_basic_block('assert.fail')
         
         # Branch based on condition
-        builder.cbranch(cond_val, pass_block, fail_block)
+        builder.cbranch(_coerce_to_i1(builder, cond_val), pass_block, fail_block)
 
         # Failure block
         builder.position_at_start(fail_block)
