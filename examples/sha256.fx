@@ -2,6 +2,8 @@
 // Based on FIPS 180-4 specification
 #import "standard.fx", "redcrypto.fx";
 
+using standard::io::console;
+using standard::strings;
 using standard::crypto::hashing::SHA256;
 
 def main() -> int

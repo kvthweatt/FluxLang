@@ -528,7 +528,7 @@ class FluxCompiler:
                     "kernel32.lib",
                     "ucrt.lib",
                     "opengl32.lib",
-                    #"Ws2_32.lib",
+                    "Ws2_32.lib",
                     "shell32.lib",
                     #"libsynchronization.lib",
                     #"libcmt.lib",
@@ -572,7 +572,7 @@ class FluxCompiler:
                                 # Link only necessary libraries:
                                 "-lkernel32 "  # Windows kernel functions (CreateFile, ReadFile, etc.)
                                 "-lucrt "  # Modern C runtime (strlen, fopen, etc.)
-                                #"-lWs2_32 "
+                                "-lWs2_32 "
                                 "-luser32 "
                                 "-lgdi32 "
                                 "-lopengl32 "

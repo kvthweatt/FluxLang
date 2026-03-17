@@ -44,41 +44,41 @@ namespace standard
                 ];
                 
                 // Right rotate
-def rotr(u32 value, u32 n) -> u32
-{
-    return (value >> n) `| (value << (32 - n));
-};
-                
-                // SHA-256 functions
-def ch(u32 x, u32 y, u32 z) -> u32
-{
-    return (x `& y) `^^ (`!x `& z);
-};
+                def rotr(u32 value, u32 n) -> u32
+                {
+                    return (value >> n) `| (value << (32 - n));
+                };
+                                
+                                // SHA-256 functions
+                def ch(u32 x, u32 y, u32 z) -> u32
+                {
+                    return (x `& y) `^^ (`!x `& z);
+                };
 
-def maj(u32 x, u32 y, u32 z) -> u32
-{
-    return (x `& y) `^^ (x `& z) `^^ (y `& z);
-};
+                def maj(u32 x, u32 y, u32 z) -> u32
+                {
+                    return (x `& y) `^^ (x `& z) `^^ (y `& z);
+                };
 
-def sigma0(u32 x) -> u32
-{
-    return rotr(x, 2) `^^ rotr(x, 13) `^^ rotr(x, 22);
-};
+                def sigma0(u32 x) -> u32
+                {
+                    return rotr(x, 2) `^^ rotr(x, 13) `^^ rotr(x, 22);
+                };
 
-def sigma1(u32 x) -> u32
-{
-    return rotr(x, 6) `^^ rotr(x, 11) `^^ rotr(x, 25);
-};
+                def sigma1(u32 x) -> u32
+                {
+                    return rotr(x, 6) `^^ rotr(x, 11) `^^ rotr(x, 25);
+                };
 
-def gamma0(u32 x) -> u32
-{
-    return rotr(x, 7) `^^ rotr(x, 18) `^^ (x >> 3);
-};
+                def gamma0(u32 x) -> u32
+                {
+                    return rotr(x, 7) `^^ rotr(x, 18) `^^ (x >> 3);
+                };
 
-def gamma1(u32 x) -> u32
-{
-    return rotr(x, 17) `^^ rotr(x, 19) `^^ (x >> 10);
-};
+                def gamma1(u32 x) -> u32
+                {
+                    return rotr(x, 17) `^^ rotr(x, 19) `^^ (x >> 10);
+                };
                 
                 // Initialize SHA-256 context
                 def sha256_init(SHA256_CTX* ctx) -> void

@@ -3206,15 +3206,6 @@ class VariableDeclaration(ASTNode):
         if self.name in module.globals:
             return module.globals[self.name]
         
-        # Check for namespaced duplicates
-        base_name = self.name.split('__')[-1]
-        for existing_name in list(module.globals.keys()):
-            existing_base_name = existing_name.split('__')[-1]
-            if existing_base_name == base_name and existing_name != self.name:
-                return module.globals[existing_name]
-            elif existing_name == self.name:
-                return module.globals[existing_name]
-        
         # Create new global
         gvar = ir.GlobalVariable(module, llvm_type, self.name)
         

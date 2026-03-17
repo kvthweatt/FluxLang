@@ -2,6 +2,8 @@
 // Based on FIPS 197 specification
 #import "standard.fx", "redcrypto.fx";
 
+using standard::io::console;
+using standard::strings;
 using standard::crypto::encryption::AES;
 
 def main() -> int

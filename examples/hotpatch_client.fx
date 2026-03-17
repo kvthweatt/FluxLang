@@ -26,25 +26,6 @@ using standard::io::console;
 using standard::net;
 
 // ============================================================================
-// Win32 memory + cache primitives
-// ============================================================================
-
-extern
-{
-    def !!
-        VirtualAlloc(ulong, size_t, u32, u32)      -> ulong,
-        VirtualFree(ulong, size_t, u32)             -> bool,
-        VirtualProtect(ulong, size_t, u32, u32*)    -> bool,
-        FlushInstructionCache(ulong, ulong, size_t) -> bool,
-        connect(int, void*, int)                    -> int,
-        closesocket(int)                            -> int,
-        inet_addr(byte*)                            -> u32,
-        htons(u16)                                  -> u16,
-        send(int, void*, int, int)                  -> int,
-        recv(int, void*, int, int)                  -> int;
-};
-
-// ============================================================================
 // The broken function - intentional null-write segfault
 // ============================================================================
 

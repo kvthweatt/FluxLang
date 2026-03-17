@@ -3460,6 +3460,10 @@ class CoercionContext:
         # is_signed=False is the default for ALL types (including int/SINT),
         # so we cannot use `not spec.is_signed` as the unsigned test — that
         # would incorrectly treat plain `int` variables as unsigned.
+        # DataType.DATA with is_signed=False covers unsigned bit-width types
+        # such as u8, u16, u32, u64 — these must also be treated as unsigned.
+        if spec.base_type == DataType.DATA and not spec.is_signed:
+            return True
         return spec.base_type == DataType.UINT
 
     @staticmethod
