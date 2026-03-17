@@ -626,38 +626,54 @@ class FluxParser:
         else:
             return self.expression_statement()
     
-    def using_statement(self) -> UsingStatement:
+    def using_statement(self) -> Union[UsingStatement, List[UsingStatement]]:
         """
         using_statement -> 'using' namespace_path (',' namespace_path)* ';'
         namespace_path -> IDENTIFIER ('::' IDENTIFIER)*
         """
         self.consume(TokenType.USING)
-        
-        # Parse namespace path (e.g., "standard::io")
-        namespace_path = self.consume(TokenType.IDENTIFIER).value
-        while self.expect(TokenType.SCOPE):  # ::
-            self.advance()
-            namespace_path += "__" + self.consume(TokenType.IDENTIFIER).value
-        
-        # For now, handle only single namespace per statement
-        # TODO: Add support for comma-separated namespaces
-        self.consume(TokenType.SEMICOLON)
-        return UsingStatement(namespace_path)
 
-    def not_using_statement(self) -> NotUsingStatement:
+        def parse_namespace_path() -> str:
+            path = self.consume(TokenType.IDENTIFIER).value
+            while self.expect(TokenType.SCOPE):  # ::
+                self.advance()
+                path += "__" + self.consume(TokenType.IDENTIFIER).value
+            return path
+
+        paths = [parse_namespace_path()]
+        while self.expect(TokenType.COMMA):
+            self.advance()
+            paths.append(parse_namespace_path())
+
+        self.consume(TokenType.SEMICOLON)
+
+        if len(paths) == 1:
+            return UsingStatement(paths[0])
+        return [UsingStatement(p) for p in paths]
+
+    def not_using_statement(self) -> Union[NotUsingStatement, List[NotUsingStatement]]:
         """
         not_using_statement -> '!' 'using' namespace_path (',' namespace_path)* ';'
         namespace_path -> IDENTIFIER ('::' IDENTIFIER)*
         """
-        # Parse namespace path (e.g., "standard::io::file")
-        namespace_path = self.consume(TokenType.IDENTIFIER).value
-        while self.expect(TokenType.SCOPE):  # ::
+        def parse_namespace_path() -> str:
+            path = self.consume(TokenType.IDENTIFIER).value
+            while self.expect(TokenType.SCOPE):  # ::
+                self.advance()
+                path += "__" + self.consume(TokenType.IDENTIFIER).value
+            return path
+
+        paths = [parse_namespace_path()]
+        while self.expect(TokenType.COMMA):
             self.advance()
-            namespace_path += "__" + self.consume(TokenType.IDENTIFIER).value
-        
+            paths.append(parse_namespace_path())
+
         # For now, handle only single namespace per statement
         self.consume(TokenType.SEMICOLON)
-        return NotUsingStatement(namespace_path)
+
+        if len(paths) == 1:
+            return NotUsingStatement(paths[0])
+        return [NotUsingStatement(p) for p in paths]
     
     def extern_statement(self) -> ExternBlock:
         """

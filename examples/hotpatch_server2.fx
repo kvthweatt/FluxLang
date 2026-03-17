@@ -24,8 +24,8 @@
 #import "..\\..\\examples\\hotpatch_protocol2.fx";
 #import "rednet_windows.fx";
 
-using standard::io::console;
-using standard::net;
+using standard::io::console,
+      standard::net;
 
 // ============================================================================
 // The fix — what bad_compute should have been
