@@ -71,12 +71,14 @@ class TokenType(Enum):
     FOR = auto()          # "        for
     FROM = auto()         # "        from
     GLOBAL = auto()       # "        global
+    GOTO = auto()         # "        goto
     HEAP = auto()         # "        heap
     IF = auto()           # "        if
     IN = auto()           # "        in
     IS = auto()           # "        is
+    LABEL = auto()        # "        label
     LOCAL = auto()        # "        local
-    SLONG = auto()         # "       long
+    SLONG = auto()        # "        long
     ULONG = auto()        # "        ulong
     SINT = auto()         # "        int
     UINT = auto()         # "        uint
@@ -368,10 +370,12 @@ class FluxLexer:
             'for': TokenType.FOR,
             'if': TokenType.IF,
             'global': TokenType.GLOBAL,
+            'goto': TokenType.GOTO,
             'heap': TokenType.HEAP,
             'in': TokenType.IN,
             'is': TokenType.IS,
             'int': TokenType.SINT,
+            'label': TokenType.LABEL,
             'local': TokenType.LOCAL,
             'long': TokenType.SLONG,
             'ulong': TokenType.ULONG,

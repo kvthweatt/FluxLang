@@ -378,7 +378,7 @@ class FluxCompiler:
                 # TODO:
                 # match (compiler):   case "clang", case "llc", etc...
                 compiler_args = [
-                    "-O" + config['lto_optimization_level'],  # Aggressive optimization level
+                    #"-O" + config['lto_optimization_level'],  # Aggressive optimization level
                     "-filetype=obj",                    # Direct object file output
                     "-mtriple=" + self.module_triple,   # Target triple
                     #"-march=" + config['architecture'], # Architecture

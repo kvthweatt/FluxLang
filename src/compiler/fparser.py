@@ -128,6 +128,7 @@ class FluxParser:
         self._template_instantiations = []  # concrete FunctionDef nodes to inject into program
         self._custom_operators: Dict[str, str] = {}  # symbol string -> base function name
         self._function_depth = 0  # Tracks nesting depth; nested function defs are illegal
+        self._loop_depth = 0      # Tracks nesting depth of for/while/do-while loops
 
 
     @classmethod
@@ -592,6 +593,10 @@ class FluxParser:
             return self.break_statement()
         elif self.expect(TokenType.CONTINUE):
             return self.continue_statement()
+        elif self.expect(TokenType.LABEL):
+            return self.label_statement()
+        elif self.expect(TokenType.GOTO):
+            return self.goto_statement()
         elif self.expect(TokenType.THROW):
             return self.throw_statement()
         elif self.expect(TokenType.ASSERT):
@@ -2370,7 +2375,9 @@ class FluxParser:
         self.consume(TokenType.LEFT_PAREN)
         condition = self.expression()
         self.consume(TokenType.RIGHT_PAREN)
+        self._loop_depth += 1
         body = self.block()
+        self._loop_depth -= 1
         self.consume(TokenType.SEMICOLON)
         return WhileLoop(condition, body)
     
@@ -2383,7 +2390,9 @@ class FluxParser:
             do { ... } while (cond); # Do-while loop (repeats while condition is true)
         """
         self.consume(TokenType.DO)
+        self._loop_depth += 1
         body = self.block()
+        self._loop_depth -= 1
         
         # Check if this is a do-while or plain do
         if self.expect(TokenType.WHILE):
@@ -2436,7 +2445,9 @@ class FluxParser:
             self.consume(TokenType.IN)
             iterable = self.expression()
             self.consume(TokenType.RIGHT_PAREN)
+            self._loop_depth += 1
             body = self.block()
+            self._loop_depth -= 1
             self.consume(TokenType.SEMICOLON)
             
             return ForInLoop(variables, iterable, body)
@@ -2465,7 +2476,9 @@ class FluxParser:
                 update = ExpressionStatement(self.expression())
             
             self.consume(TokenType.RIGHT_PAREN)
+            self._loop_depth += 1
             body = self.block()
+            self._loop_depth -= 1
             self.consume(TokenType.SEMICOLON)
             
             return ForLoop(init, condition, update, body)
@@ -2569,6 +2582,26 @@ class FluxParser:
         self.consume(TokenType.CONTINUE)
         self.consume(TokenType.SEMICOLON)
         return ContinueStatement()
+
+    def label_statement(self) -> LabelStatement:
+        """
+        label_statement -> 'label' IDENTIFIER ':'
+        """
+        self.consume(TokenType.LABEL)
+        if self._loop_depth > 0:
+            self.error("'label' is not permitted inside a loop body")
+        name = self.consume(TokenType.IDENTIFIER).value
+        self.consume(TokenType.COLON)
+        return LabelStatement(name)
+
+    def goto_statement(self) -> GotoStatement:
+        """
+        goto_statement -> 'goto' IDENTIFIER ';'
+        """
+        self.consume(TokenType.GOTO)
+        name = self.consume(TokenType.IDENTIFIER).value
+        self.consume(TokenType.SEMICOLON)
+        return GotoStatement(name)
 
     def throw_statement(self) -> ThrowStatement:
         """

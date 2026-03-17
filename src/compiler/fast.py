@@ -4613,6 +4613,9 @@ class ReturnStatement(Statement):
         return f"return {self.value};"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        if builder.block.is_terminated:
+            return None
+
         if self.value is None:
             builder.ret_void()
             return None
@@ -4680,6 +4683,32 @@ class ContinueStatement(Statement):
         
         # Don't call unreachable() - the branch already terminated the block
         # Any subsequent code will naturally be unreachable
+        return None
+
+@dataclass
+class LabelStatement(Statement):
+    name: str
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        target_block = builder._flux_label_blocks[self.name]
+        # Close the current block with a fallthrough branch if not already terminated
+        if not builder.block.is_terminated:
+            builder.branch(target_block)
+        # Position the builder at the pre-created block
+        builder.position_at_start(target_block)
+        return None
+
+@dataclass
+class GotoStatement(Statement):
+    target: str
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        if self.target not in builder._flux_label_blocks:
+            raise SyntaxError(f"'goto' to undefined label '{self.target}'")
+        # Don't emit unreachable code
+        if builder.block.is_terminated:
+            return None
+        builder.branch(builder._flux_label_blocks[self.target])
         return None
 
 @dataclass
@@ -5191,6 +5220,25 @@ class InlineAsm(Expression):
         
         return result
 
+def _collect_label_names(stmts) -> list:
+    """Recursively walk a statement list and collect all LabelStatement names."""
+    names = []
+    for stmt in stmts:
+        if stmt is None:
+            continue
+        if isinstance(stmt, LabelStatement):
+            names.append(stmt.name)
+        # Recurse into blocks / compound statements
+        if isinstance(stmt, Block):
+            names.extend(_collect_label_names(stmt.statements))
+        elif hasattr(stmt, 'body') and isinstance(getattr(stmt, 'body', None), Block):
+            names.extend(_collect_label_names(stmt.body.statements))
+        elif hasattr(stmt, 'then_block') and isinstance(getattr(stmt, 'then_block', None), Block):
+            names.extend(_collect_label_names(stmt.then_block.statements))
+        if hasattr(stmt, 'else_block') and isinstance(getattr(stmt, 'else_block', None), Block):
+            names.extend(_collect_label_names(stmt.else_block.statements))
+    return names
+
 # Function definition
 @dataclass
 class FunctionDef(ASTNode):
@@ -5332,6 +5380,14 @@ class FunctionDef(ASTNode):
         # Create entry block
         entry_block = func.append_basic_block('entry')
         builder.position_at_start(entry_block)
+
+        # Pre-pass: collect all LabelStatement names in the function body and
+        # pre-create their basic blocks so forward gotos resolve correctly.
+        # 'entry' is always available as the function entry block.
+        builder._flux_label_blocks = {'entry': entry_block}
+        for label_name in _collect_label_names(self.body.statements):
+            if label_name not in builder._flux_label_blocks:
+                builder._flux_label_blocks[label_name] = func.append_basic_block(label_name)
         
         # Create new scope for function body
         module.symbol_table.enter_scope()  # Enter function scope

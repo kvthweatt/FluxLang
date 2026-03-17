@@ -59,7 +59,7 @@ contexts:
       scope: storage.type.flux
 
     # Keywords (but NOT types)
-    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|contract|compt|const|continue|def|default|do|elif|else|extern|false|for|from|global|heap|if|in|is|local|namespace|not|operator|or|private|public|register|return|signed|sizeof|stack|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|volatile|while|xor)\b'
+    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|contract|compt|const|continue|def|default|do|elif|else|extern|false|for|from|goto|global|heap|if|in|is|label|local|namespace|not|operator|or|private|public|register|return|signed|sizeof|stack|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|volatile|while|xor)\b'
       scope: keyword.control.flux
 
     # Type modifiers

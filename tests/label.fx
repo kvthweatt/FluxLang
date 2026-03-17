@@ -2,14 +2,12 @@
 
 using standard::io::console;
 
-fastcall foo() -> void
-{
-    print("TESTING!\0");
-	return;
-};
-
 def main() -> int
 {
-    foo();
+label a1:
+	int x = 5;
+label a2:
+	print(x); print();
+    goto a1;
 	return 0;
 };
