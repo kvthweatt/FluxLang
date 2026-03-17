@@ -50,20 +50,12 @@ contexts:
         1: entity.name.namespace.flux
         2: punctuation.accessor.double-colon.flux
 
-    # Data type definitions (must come before keywords to avoid matching 'data' keyword)
-    - match: '\b(const\s+)?(signed|unsigned)?\s*data\s*\{[^}]+\}(\s*\[\])?\s+as\s+({{identifier}})'
-      captures:
-        1: storage.modifier.flux
-        2: storage.modifier.flux
-        3: storage.type.data.flux
-        5: entity.name.type.flux
-
     # Primitive types (MUST come before keywords)
-    - match: '\b(int|uint|float|void|bool|char|data)\b'
+    - match: '\b(int|uint|long|ulong|float|double|void|bool|char|data)\b'
       scope: storage.type.primitive.flux
 
     # Storage types
-    - match: '\b(enum|struct|object|union|trait|contract)\b'
+    - match: '\b(enum|struct|object|union|trait|contract|singinit)\b'
       scope: storage.type.flux
 
     # Keywords (but NOT types)
@@ -78,11 +70,18 @@ contexts:
     - match: '\b__[a-z]+__\b'
       scope: entity.name.function.special.flux
 
-    # Function definitions
-    - match: '\b(def)\s+({{identifier}})'
+    # Function definitions with optional template parameters: def name<T, U>(...)
+    - match: '\b(def|cdecl|stdcall|fastcall|thiscall|vectorcall)\s+({{identifier}})(\s*<[a-zA-Z_][a-zA-Z0-9_,\s]*>)?'
       captures:
         1: keyword.control.flux
         2: entity.name.function.flux
+        3: storage.type.generic.flux
+
+    # Template call sites: identifier<Type>(...)
+    - match: '({{identifier}})(<[a-zA-Z_][a-zA-Z0-9_,\s]*>)(?=\s*\()'
+      captures:
+        1: entity.name.function.call.flux
+        2: storage.type.generic.flux
 
     # Function calls
     - match: '{{identifier}}(?=\s*\()'
@@ -121,7 +120,7 @@ contexts:
       scope: constant.numeric.binary.flux
 
     # Numbers - Float
-    - match: '\b\d+(\.\d+)?[f]\b'
+    - match: '\b\d+(\.\d+)?[f|d]\b'
       scope: constant.numeric.float.flux
 
     # Numbers - Integer

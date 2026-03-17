@@ -7,15 +7,7 @@
     <key>scope</key>
     <string>source.flux</string>
     <key>settings</key>
-    <dict>
-        <!-- Increase indent after { -->
-        <key>increaseIndentPattern</key>
-        <string>^.*\{[^}"']*$</string>
-        
-        <!-- Decrease indent when line starts with } or }; -->
-        <key>decreaseIndentPattern</key>
-        <string>^\s*(\}|\};)\s*$</string>
-        
+    <dict>        
         <!-- Smart typing: when you type { and press enter, } stays at same level -->
         <key>smartIndent</key>
         <false/>

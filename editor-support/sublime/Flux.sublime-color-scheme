@@ -181,6 +181,12 @@
             "font_style": "bold"
         },
         {
+            "name": "Storage Type Generic (Templates)",
+            "scope": "storage.type.generic",
+            "foreground": "var(gold)",
+            "font_style": "bold"
+        },
+        {
             "name": "Storage Modifier",
             "scope": "storage.modifier",
             "foreground": "var(pink)"

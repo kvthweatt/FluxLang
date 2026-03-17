@@ -47,6 +47,24 @@ from typing import List, Optional, Union, Any
 from flexer import FluxLexer, TokenType, Token
 from fast import *
 
+# Calling-convention tokens that may appear in place of 'def'
+_CALLING_CONV_TOKENS = {
+    TokenType.CDECL,
+    TokenType.STDCALL,
+    TokenType.FASTCALL,
+    TokenType.THISCALL,
+    TokenType.VECTORCALL,
+}
+
+# Map calling-convention TokenType -> Flux keyword string used by FunctionDef._CALLING_CONV_MAP
+_CALLING_CONV_TOKEN_TO_STR = {
+    TokenType.CDECL:      'cdecl',
+    TokenType.STDCALL:    'stdcall',
+    TokenType.FASTCALL:   'fastcall',
+    TokenType.THISCALL:   'thiscall',
+    TokenType.VECTORCALL: 'vectorcall',
+}
+
 _TOKEN_SYMBOL_MAP = {
     TokenType.PLUS:               '+',
     TokenType.MINUS:              '-',
@@ -497,7 +515,7 @@ class FluxParser:
                 self.advance()
             
             is_asm = self.expect(TokenType.ASM)
-            is_func = self.expect(TokenType.DEF)
+            is_func = self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS
             
             # Restore position
             self.position = saved_pos
@@ -535,6 +553,8 @@ class FluxParser:
         elif self.expect(TokenType.EXTERN):
             return self.extern_statement()
         elif self.expect(TokenType.DEF):
+            return self.function_def()
+        elif self.current_token.type in _CALLING_CONV_TOKENS:
             return self.function_def()
         elif self.expect(TokenType.ENUM):
             return self.enum_def()
@@ -650,7 +670,7 @@ class FluxParser:
             
             while not self.expect(TokenType.RIGHT_BRACE):
                 # Each declaration must be a function prototype
-                if self.expect(TokenType.DEF):
+                if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                     func_def = self.function_def()
                     # Handle both single FunctionDef and list of FunctionDef (multi-function prototypes)
                     if isinstance(func_def, list):
@@ -667,8 +687,8 @@ class FluxParser:
             
             self.consume(TokenType.RIGHT_BRACE)
             self.consume(TokenType.SEMICOLON)
-        elif self.expect(TokenType.DEF):
-            # Single declaration form: extern def ...;
+        elif self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
+            # Single declaration form: extern def ...;  or  extern cdecl ...;
             func_def = self.function_def()
             # Handle both single FunctionDef and list of FunctionDef (multi-function prototypes)
             if isinstance(func_def, list):
@@ -685,12 +705,16 @@ class FluxParser:
         
         return ExternBlock(declarations)
     
-    def function_def(self) -> Union[FunctionDef, List[FunctionDef]]:
+    def function_def(self, calling_conv: Optional[str] = None) -> Union[FunctionDef, List[FunctionDef]]:
         """
-        function_def -> ('const')? ('volatile')? 'def' ('!!')? (IDENTIFIER | STRING_LITERAL) '(' parameter_list? ')' '->' type_spec (';' | block ';')
+        function_def -> ('const')? ('volatile')? ('def' | calling_conv_kw) ('!!')? (IDENTIFIER | STRING_LITERAL) '(' parameter_list? ')' '->' type_spec (';' | block ';')
         
         Now supports string literals as function names for mangled/decorated names:
             def "??@YAPAX?_FOO"()->void{};
+
+        Calling convention syntax (replaces 'def'):
+            cdecl foo() -> void {};
+            fastcall bar(int x) -> int {};
         """
         is_const = False
         is_volatile = False
@@ -704,12 +728,20 @@ class FluxParser:
             is_volatile = True
             self.advance()
         
-        self.consume(TokenType.DEF)
+        # Consume 'def' OR a calling-convention keyword (already consumed by caller when CC-prefixed)
+        if self.current_token.type in _CALLING_CONV_TOKENS:
+            # Calling convention keyword stands in place of 'def'
+            calling_conv = _CALLING_CONV_TOKEN_TO_STR[self.current_token.type]
+            self.advance()
+        elif self.expect(TokenType.DEF):
+            self.advance()
+        else:
+            self.error("Expected 'def' or calling convention keyword")
         
-        # Check if this is a function pointer declaration (def{}*)
+        # Check if this is a function pointer declaration (def{}* or cc{}*)
         if self.expect(TokenType.FUNCTION_POINTER):
             self.advance()  # consume the {}* token
-            return self.function_pointer_declaration()
+            return self.function_pointer_declaration(calling_conv=calling_conv)
         
         if self.expect(TokenType.NO_MANGLE):
             no_mangle = True
@@ -771,7 +803,7 @@ class FluxParser:
             
             # Add the first prototype
             prototypes.append(FunctionDef(name, _real_params, return_type, Block([]), 
-                                        is_const, is_volatile, True, no_mangle, _is_var))
+                                        is_const, is_volatile, True, no_mangle, _is_var, calling_conv))
             
             # Parse additional prototypes
             while self.expect(TokenType.COMMA):
@@ -799,7 +831,7 @@ class FluxParser:
                 
                 # no_mangle applies to ALL functions in this comma-separated list
                 prototypes.append(FunctionDef(proto_name, _proto_real, proto_return_type, 
-                                            Block([]), is_const, is_volatile, True, no_mangle, _proto_is_var))
+                                            Block([]), is_const, is_volatile, True, no_mangle, _proto_is_var, calling_conv))
             
             self.consume(TokenType.SEMICOLON)
             
@@ -838,12 +870,12 @@ class FluxParser:
         # If this is a template function, store it and return None (no immediate codegen)
         if template_params:
             func_def = FunctionDef(name, real_parameters, return_type, body, is_const,
-                                   is_volatile, is_prototype, no_mangle, is_variadic)
+                                   is_volatile, is_prototype, no_mangle, is_variadic, calling_conv)
             self._template_functions[name] = (template_params, func_def)
             return None
 
         return FunctionDef(name, real_parameters, return_type, body, is_const, 
-                          is_volatile, is_prototype, no_mangle, is_variadic)
+                          is_volatile, is_prototype, no_mangle, is_variadic, calling_conv)
 
     def _is_function_pointer_declaration(self) -> bool:
         """
@@ -931,13 +963,14 @@ class FluxParser:
         
         return FunctionPointerType(return_type, parameter_types)
 
-    def function_pointer_declaration(self) -> Union['FunctionPointerDeclaration', List['FunctionPointerDeclaration']]:
+    def function_pointer_declaration(self, calling_conv: Optional[str] = None) -> Union['FunctionPointerDeclaration', List['FunctionPointerDeclaration']]:
         """
         Parse function pointer declaration(s).
         
         Single syntax:
             def{}* name(param_types) -> return_type;
             def{}* name(param_types) -> return_type = @function_name;
+            fastcall{}* name(param_types) -> return_type = @function_name;
         
         Comma-separated syntax (all share the same def{}* prefix):
             def{}* name1(param_types) -> return_type,
@@ -951,6 +984,7 @@ class FluxParser:
             """Parse a single name + type + optional initializer."""
             name = self.consume(TokenType.IDENTIFIER).value
             fp_type = self.function_pointer_type()
+            fp_type.calling_conv = calling_conv  # Attach the calling convention
 
             initializer = None
             if self.expect(TokenType.ASSIGN):
@@ -1270,7 +1304,7 @@ class FluxParser:
         self.consume(TokenType.LEFT_BRACE)
         prototypes = []
         while not self.expect(TokenType.RIGHT_BRACE):
-            if self.expect(TokenType.DEF):
+            if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                 proto = self.function_def()
                 if isinstance(proto, list):
                     prototypes.extend(proto)
@@ -1333,7 +1367,7 @@ class FluxParser:
                 self.consume(TokenType.LEFT_BRACE)
                 
                 while not self.expect(TokenType.RIGHT_BRACE):
-                    if self.expect(TokenType.DEF):
+                    if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                         method = self.function_def()
                         if isinstance(method, list):
                             for m in method:
@@ -1380,7 +1414,7 @@ class FluxParser:
                 self.consume(TokenType.SEMICOLON)
             else:
                 # Regular member (defaults to public)
-                if self.expect(TokenType.DEF):
+                if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                     method = self.function_def()
                     if isinstance(method, list):
                         methods.extend(method)
@@ -1470,11 +1504,17 @@ class FluxParser:
                 else:
                     variables.append(var_decl)
                 self.consume(TokenType.SEMICOLON)
-            elif self.expect(TokenType.DEF):
-                if self.peek().type == TokenType.FUNCTION_POINTER:
+            elif self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
+                if self.expect(TokenType.DEF) and self.peek().type == TokenType.FUNCTION_POINTER:
                     self.advance() #def
                     self.advance() #{}*
                     func_ptr = self.function_pointer_declaration()
+                    variables.append(func_ptr)
+                elif self.current_token.type in _CALLING_CONV_TOKENS and self.peek().type == TokenType.FUNCTION_POINTER:
+                    cc_str = _CALLING_CONV_TOKEN_TO_STR[self.current_token.type]
+                    self.advance() # cc keyword
+                    self.advance() # {}*
+                    func_ptr = self.function_pointer_declaration(calling_conv=cc_str)
                     variables.append(func_ptr)
                 else:
                     func = self.function_def()

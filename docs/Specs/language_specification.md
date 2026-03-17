@@ -1831,10 +1831,10 @@ auto result = calculate_something();  // Infers return type
 
 # Keyword list:
 ```
-alignof, and, as, asm, assert, auto, break, bool, case, catch, const, continue, data, def, default,
-do, double, elif, else, enum, false, float, for, global, heap, if, in, is, int, local, long, namespace, new, noinit, not, object, or,
-private, public, register, return, signed, singinit, sizeof, stack, struct, switch, this, throw, true, try, typeof, uint, ulong,
-union, unsigned, void, volatile, while, xor
+alignof, and, as, asm, assert, auto, break, bool, case, catch, cdecl, const, continue, data, def, default,
+do, double, elif, else, enum, false, fastcall, float, for, global, heap, if, in, is, int, local, long, namespace, new, noinit, not, object, or,
+private, public, register, return, signed, singinit, sizeof, stack, stdcall, struct, switch, this, thiscall, throw, true, try, typeof, uint, ulong,
+union, unsigned, vectorcall, void, volatile, while, xor
 ```
 
 # Operator list:

@@ -1817,6 +1817,7 @@ class NamespaceTypeHandler:
 class FunctionPointerType:
     return_type: TypeSystem
     parameter_types: List[TypeSystem]
+    calling_conv: Optional[str] = None  # LLVM calling convention string, e.g. 'fastcc'
 
     def __repr__(self) -> str:
         if self.return_type.custom_typename is not None:

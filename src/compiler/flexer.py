@@ -108,7 +108,14 @@ class TokenType(Enum):
     VOLATILE = auto()     # "        volatile
     WHILE = auto()        # "        while
     XOR = auto()          # "        xor            Represents operator: ^^
-    
+
+    # Calling conventions (used in place of 'def' to declare a function with a specific ABI)
+    CDECL = auto()        # "        cdecl
+    STDCALL = auto()      # "        stdcall
+    FASTCALL = auto()     # "        fastcall
+    THISCALL = auto()     # "        thiscall
+    VECTORCALL = auto()   # "        vectorcall
+
     # Regular Operators
     PLUS = auto()           # +
     MINUS = auto()          # -
@@ -399,6 +406,11 @@ class FluxLexer:
             'volatile': TokenType.VOLATILE,
             'while': TokenType.WHILE,
             'xor': TokenType.XOR,
+            'cdecl': TokenType.CDECL,
+            'stdcall': TokenType.STDCALL,
+            'fastcall': TokenType.FASTCALL,
+            'thiscall': TokenType.THISCALL,
+            'vectorcall': TokenType.VECTORCALL,
         }
     
     def current_char(self) -> Optional[str]:

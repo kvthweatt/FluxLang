@@ -5203,7 +5203,17 @@ class FunctionDef(ASTNode):
     is_prototype: bool = False
     no_mangle: bool = False
     is_variadic: bool = False
-    
+    calling_conv: Optional[str] = None  # LLVM calling convention string, e.g. 'fastcc'
+
+    # Map Flux calling-convention keywords to LLVM CC strings
+    _CALLING_CONV_MAP: ClassVar[dict] = {
+        'cdecl':      'ccc',
+        'stdcall':    'x86_stdcallcc',
+        'fastcall':   'fastcc',
+        'thiscall':   'x86_thiscallcc',
+        'vectorcall': 'x86_vectorcallcc',
+    }
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Function:
         # Convert return type and parameter types using FunctionTypeHandler
         ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(self.return_type, module)
@@ -5302,9 +5312,17 @@ class FunctionDef(ASTNode):
                     raise
         
         if self.is_prototype:
+            # Apply calling convention to prototype declaration too
+            if self.calling_conv:
+                llvm_cc = FunctionDef._CALLING_CONV_MAP.get(self.calling_conv, self.calling_conv)
+                func.calling_convention = llvm_cc
             return func
         
         # Set parameter names (use generic names for unnamed parameters)
+        if self.calling_conv:
+            llvm_cc = FunctionDef._CALLING_CONV_MAP.get(self.calling_conv, self.calling_conv)
+            func.calling_convention = llvm_cc
+
         for i, param in enumerate(func.args):
             if self.parameters[i].name is not None:
                 param.name = self.parameters[i].name
@@ -5389,13 +5407,15 @@ class FunctionPointerDeclaration(Statement):
     Function pointer variable declaration.
     
     Syntax: def{}* fp() -> rtype = @foo;
+            fastcall{}* fp() -> rtype = @foo;
     """
     name: str
     fp_type: FunctionPointerType
     initializer: Optional[Expression] = None
 
     def __repr__(self) -> str:
-        return f"def{{}}* {self.name}{self.fp_type}"
+        cc = self.fp_type.calling_conv or 'def'
+        return f"{cc}{{}}* {self.name}{self.fp_type}"
 
     @staticmethod
     def get_llvm_type(func_ptr, module: ir.Module) -> ir.FunctionType:
@@ -5412,11 +5432,23 @@ class FunctionPointerDeclaration(Statement):
         # Store type information for later lookup
         # Type information will be stored in symbol table during define()
         
+        # Resolve LLVM calling convention string from the FunctionPointerType
+        _flux_cc = None
+        if self.fp_type.calling_conv:
+            _flux_cc = FunctionDef._CALLING_CONV_MAP.get(
+                self.fp_type.calling_conv, self.fp_type.calling_conv)
+
+        # Register calling convention for later call-site use
+        if not hasattr(module, '_flux_fp_calling_convs'):
+            module._flux_fp_calling_convs = {}
+
         # Allocate storage
         if module.symbol_table.is_global_scope():
             # Global function pointer
             gvar = ir.GlobalVariable(module, ptr_type, self.name)
             gvar.linkage = 'internal'
+            if _flux_cc:
+                module._flux_fp_calling_convs[self.name] = _flux_cc
             
             if self.initializer:
                 # Evaluate initializer
@@ -5434,6 +5466,8 @@ class FunctionPointerDeclaration(Statement):
         else:
             # Local function pointer
             alloca = builder.alloca(ptr_type, name=self.name)
+            if _flux_cc:
+                module._flux_fp_calling_convs[self.name] = _flux_cc
             module.symbol_table.define(self.name, SymbolKind.VARIABLE, type_spec=resolved_type_spec, llvm_value=alloca)
             
             if self.initializer:
@@ -5452,6 +5486,15 @@ class FunctionPointerDeclaration(Statement):
                 builder.store(init_val, alloca)
             
             return alloca
+
+def _get_fp_cconv(pointer_expr, module) -> Optional[str]:
+    """Look up the LLVM calling convention for an indirect call through a named function pointer."""
+    name = None
+    if isinstance(pointer_expr, Identifier):
+        name = pointer_expr.name
+    if name and hasattr(module, '_flux_fp_calling_convs'):
+        return module._flux_fp_calling_convs.get(name)
+    return None
 
 @dataclass
 class FunctionPointerCall(Expression):
@@ -5502,7 +5545,7 @@ class FunctionPointerCall(Expression):
                         builder, module, arg_val, expected_type, i)
                 coerced_args.append(arg_val)
             args = coerced_args
-        return builder.call(func_ptr, args, name="indirect_call")
+        return builder.call(func_ptr, args, name="indirect_call", cconv=_get_fp_cconv(self.pointer, module))
 
 @dataclass
 class FunctionPointerAssignment(Statement):
