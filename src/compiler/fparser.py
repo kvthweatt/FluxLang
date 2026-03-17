@@ -481,6 +481,9 @@ class FluxParser:
         elif self.expect(TokenType.REGISTER):
             storage_class = 'register'
             self.advance()
+        elif self.expect(TokenType.SINGINIT):
+            storage_class = 'singinit'
+            self.advance()
         
         # Check for const/volatile (but DON'T consume them - type_spec will handle that)
         # OR check if we just parsed a storage class
@@ -852,7 +855,7 @@ class FluxParser:
         with self._lookahead():
             # Skip storage class and qualifiers
             if self.expect(TokenType.GLOBAL, TokenType.LOCAL, TokenType.HEAP, 
-                          TokenType.STACK, TokenType.REGISTER):
+                          TokenType.STACK, TokenType.REGISTER, TokenType.SINGINIT):
                 self.advance()
             if self.expect(TokenType.CONST):
                 self.advance()
@@ -1459,7 +1462,7 @@ class FluxParser:
         
         while not self.expect(TokenType.RIGHT_BRACE):
             if self.expect(TokenType.GLOBAL, TokenType.LOCAL, TokenType.HEAP, 
-                           TokenType.STACK, TokenType.REGISTER,
+                           TokenType.STACK, TokenType.REGISTER, TokenType.SINGINIT,
                            TokenType.CONST, TokenType.VOLATILE):
                 var_decl = self.variable_declaration()
                 if isinstance(var_decl, list):
@@ -1633,6 +1636,9 @@ class FluxParser:
                 self.advance()
         elif self.expect(TokenType.REGISTER):
             storage_class = StorageClass.REGISTER
+            self.advance()
+        elif self.expect(TokenType.SINGINIT):
+            storage_class = StorageClass.SINGINIT
             self.advance()
 
         # Parse qualifiers AFTER storage class

@@ -124,6 +124,7 @@ class StorageClass(Enum):
     GLOBAL = "global"
     LOCAL = "local"
     REGISTER = "register"
+    SINGINIT = "singinit"
 
 class SymbolKind(Enum):
     TYPE = "type"

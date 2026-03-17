@@ -31,21 +31,6 @@ class ASTNode:
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Any:
         raise NotImplementedError(f"codegen not implemented for {self.__class__.__name__}")
 
-def _coerce_to_i1(builder: ir.IRBuilder, val: ir.Value) -> ir.Value:
-    """Ensure val is i1 for use as a branch condition.
-    If val is already i1, return it unchanged.
-    If val is a wider integer, emit icmp ne val, 0.
-    If val is a pointer, emit icmp ne val, null.
-    """
-    if isinstance(val.type, ir.IntType):
-        if val.type.width == 1:
-            return val
-        return builder.icmp_signed('!=', val, ir.Constant(val.type, 0), name="tobool")
-    if isinstance(val.type, ir.PointerType):
-        null = ir.Constant(val.type, None)
-        return builder.icmp_unsigned('!=', val, null, name="tobool")
-    return val
-
 # Literal values (no dependencies)
 @dataclass
 class Literal(ASTNode):
@@ -824,6 +809,13 @@ class BinaryOp(Expression):
             rhs = ir.Constant(lhs.type, None)
         elif is_comparison and rhs_is_ptr and lhs_is_int_zero:
             lhs = ir.Constant(rhs.type, None)
+
+        # Pointer-to-pointer comparison: compare addresses, never dereference.
+        # This covers ptr == (T*)0 after cast, ptr != other_ptr, etc.
+        # If both operands are pointers after the null-literal promotion above,
+        # skip auto-deref entirely and fall through to the icmp path below.
+        elif is_comparison and lhs_is_ptr and rhs_is_ptr:
+            pass  # compare pointer values directly — no auto-deref
         elif not might_be_ptr_arithmetic:
             if isinstance(lhs.type, ir.PointerType):
                 pointee = lhs.type.pointee
@@ -1109,13 +1101,6 @@ class UnaryOp(Expression):
             if module.symbol_table.is_global_scope() and isinstance(operand_val, ir.Constant):
                 if isinstance(operand_val.type, ir.IntType):
                     return ir.Constant(operand_val.type, ~operand_val.constant)
-            # For i1 (bool), bitwise not is correct logical not.
-            # For wider integers (i32 etc.), builder.not_ emits xor val,-1 which
-            # preserves the width and is invalid as a branch condition.
-            # Emit icmp ne val, 0 instead to produce a proper i1.
-            if isinstance(operand_val.type, ir.IntType) and operand_val.type.width != 1:
-                zero = ir.Constant(operand_val.type, 0)
-                return builder.icmp_signed('==', operand_val, zero, name="lnot")
             return builder.not_(operand_val)
         elif self.operator == Operator.SUB:
             # Handle negation - for constants in global scope, create negative constant
@@ -3276,9 +3261,88 @@ class VariableDeclaration(ASTNode):
         """Create compile-time constant initializer for global variable."""
         return VariableTypeHandler.create_global_initializer(self.initial_value, llvm_type, module)
     
+    def _codegen_singinit(self, builder: ir.IRBuilder, module: ir.Module,
+                         llvm_type: ir.Type, resolved_type_spec: TypeSystem) -> ir.Value:
+        """Generate code for a singinit (single-init, program-lifetime) local variable.
+        The variable is stored as an internal global with a boolean init-guard global.
+        On first entry the guard is false: we initialize the variable and set the guard.
+        On subsequent entries the guard is true: we skip initialization.
+        The alloca-pointer returned to callers points at the global storage so
+        reads/writes in the function body work transparently."""
+        func_name = builder.function.name
+        global_name = f"__singinit__{func_name}__{self.name}"
+        guard_name  = f"__singinit_guard__{func_name}__{self.name}"
+
+        # Create (or reuse) the backing global for the variable value
+        if global_name not in module.globals:
+            gvar = ir.GlobalVariable(module, llvm_type, global_name)
+            gvar.initializer = TypeSystem.get_default_initializer(llvm_type)
+            gvar.linkage = 'internal'
+        else:
+            gvar = module.globals[global_name]
+
+        # Create (or reuse) the init-guard (i1, false)
+        guard_type = ir.IntType(1)
+        if guard_name not in module.globals:
+            gguard = ir.GlobalVariable(module, guard_type, guard_name)
+            gguard.initializer = ir.Constant(guard_type, 0)
+            gguard.linkage = 'internal'
+        else:
+            gguard = module.globals[guard_name]
+
+        # Build the init-guard branch inline
+        cur_func   = builder.function
+        init_block = cur_func.append_basic_block(f"singinit_{self.name}_init")
+        done_block = cur_func.append_basic_block(f"singinit_{self.name}_done")
+
+        guard_val = builder.load(gguard, name=f"{self.name}_guard")
+        builder.cbranch(guard_val, done_block, init_block)
+
+        # init_block: initialize the global and set the guard
+        builder.position_at_end(init_block)
+        if self.initial_value and not isinstance(self.initial_value, NoInit):
+            self._initialize_singinit(builder, module, gvar, llvm_type, resolved_type_spec)
+        else:
+            zero = TypeSystem.get_default_initializer(llvm_type)
+            builder.store(zero, gvar)
+        builder.store(ir.Constant(guard_type, 1), gguard)
+        builder.branch(done_block)
+
+        # done_block: resume normal execution
+        builder.position_at_end(done_block)
+
+        # Register the global pointer in the symbol table so the rest of the
+        # function body can load/store it transparently
+        if resolved_type_spec:
+            gvar._flux_type_spec = resolved_type_spec
+        module.symbol_table.define(self.name, SymbolKind.VARIABLE,
+                                   type_spec=resolved_type_spec, llvm_value=gvar)
+        return gvar
+
+    def _initialize_singinit(self, builder: ir.IRBuilder, module: ir.Module,
+                             gvar: ir.Value, llvm_type: ir.Type,
+                             resolved_type_spec: TypeSystem) -> None:
+        """Initialize the backing global of a singinit variable."""
+        if isinstance(self.initial_value, ArrayLiteral):
+            if isinstance(llvm_type, ir.IntType):
+                packed_val = ArrayTypeHandler.pack_array_to_integer(builder, module, self.initial_value, llvm_type)
+                builder.store(packed_val, gvar)
+            else:
+                ArrayTypeHandler.initialize_local_array(builder, module, gvar, llvm_type, self.initial_value)
+            return
+        init_val = self.initial_value.codegen(builder, module)
+        if hasattr(init_val, 'type') and init_val.type != llvm_type:
+            init_val = TypeSystem.cast_value(builder, module, init_val, llvm_type, resolved_type_spec)
+        builder.store(init_val, gvar)
+
     def _codegen_local(self, builder: ir.IRBuilder, module: ir.Module, 
                       llvm_type: ir.Type, resolved_type_spec: TypeSystem) -> ir.Value:
         """Generate code for local variable."""
+        # Handle singinit: single-init, program-lifetime, function-scoped variable
+        if (resolved_type_spec is not None and
+                resolved_type_spec.storage_class == StorageClass.SINGINIT):
+            return self._codegen_singinit(builder, module, llvm_type, resolved_type_spec)
+
         # If this is a constructor call and llvm_type resolved to i8* (void pointer),
         # the type was polluted by a local variable named the same as the object type.
         # Recover the correct struct type from the constructor's this parameter.
@@ -3873,14 +3937,14 @@ class IfStatement(Statement):
         else_block = func.append_basic_block('else')
         merge_block = func.append_basic_block('ifcont')
         
-        builder.cbranch(_coerce_to_i1(builder, cond_val), then_block, else_block)
-
+        builder.cbranch(cond_val, then_block, else_block)
+        
         # Emit then block
         builder.position_at_start(then_block)
         self.then_block.codegen(builder, module)
         if not builder.block.is_terminated:
             builder.branch(merge_block)
-
+        
         # Emit else block (which may contain elif chain)
         builder.position_at_start(else_block)
         
@@ -3895,7 +3959,7 @@ class IfStatement(Statement):
             elif_else = func.append_basic_block(f'elif_else_{i}')
             
             # Branch based on elif condition
-            builder.cbranch(_coerce_to_i1(builder, elif_cond_val), elif_then, elif_else)
+            builder.cbranch(elif_cond_val, elif_then, elif_else)
             
             # Emit elif body
             builder.position_at_start(elif_then)
@@ -4241,7 +4305,7 @@ class WhileLoop(Statement):
         # Emit condition block
         builder.position_at_start(cond_block)
         cond_val = self.condition.codegen(builder, module)
-        builder.cbranch(_coerce_to_i1(builder, cond_val), body_block, end_block)
+        builder.cbranch(cond_val, body_block, end_block)
         
         # Emit body block
         builder.position_at_start(body_block)
@@ -4368,7 +4432,7 @@ class DoWhileLoop(Statement):
         # Generate the condition
         builder.position_at_start(cond_block)
         cond_val = self.condition.codegen(builder, module)
-        builder.cbranch(_coerce_to_i1(builder, cond_val), body_block, end_block)
+        builder.cbranch(cond_val, body_block, end_block)
         
         # Restore break/continue targets
         builder.break_block = old_break
@@ -4407,7 +4471,7 @@ class ForLoop(Statement):
         builder.position_at_start(cond_block)
         if self.condition:
             cond_val = self.condition.codegen(builder, module)
-            builder.cbranch(_coerce_to_i1(builder, cond_val), body_block, end_block)
+            builder.cbranch(cond_val, body_block, end_block)
         else:  # Infinite loop if no condition
             builder.branch(body_block)
 
@@ -4877,7 +4941,7 @@ class AssertStatement(Statement):
         fail_block = func.append_basic_block('assert.fail')
         
         # Branch based on condition
-        builder.cbranch(_coerce_to_i1(builder, cond_val), pass_block, fail_block)
+        builder.cbranch(cond_val, pass_block, fail_block)
 
         # Failure block
         builder.position_at_start(fail_block)

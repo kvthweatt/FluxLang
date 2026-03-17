@@ -24,7 +24,7 @@ extern
 {
     def !!
         QueryPerformanceCounter(i64*) -> bool,
-        QueryPerformanceFrequency(i64*) -> bool,
+        QueryPerformanceFrequency(i64*) -> bool;
 };
 #endif;
 

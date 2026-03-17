@@ -91,6 +91,7 @@ class TokenType(Enum):
     REGISTER = auto()     # "        register
     RETURN = auto()       # "        return
     SIGNED = auto()       # "        signed
+    SINGINIT = auto()     # "        singinit
     STACK = auto()        # "        stack
     STRUCT = auto()       # "        struct
     SWITCH = auto()       # "        switch
@@ -378,6 +379,7 @@ class FluxLexer:
             'register': TokenType.REGISTER,
             'return': TokenType.RETURN,
             'signed': TokenType.SIGNED,
+            'singinit': TokenType.SINGINIT,
             'sizeof': TokenType.SIZEOF,
             'stack': TokenType.STACK,
             'struct': TokenType.STRUCT,
