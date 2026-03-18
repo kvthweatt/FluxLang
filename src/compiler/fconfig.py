@@ -42,5 +42,23 @@ def load_config():
     return config
 
 
+VALID_BYTE_WIDTHS = {4, 6, 7, 8, 9, 12, 18, 24, 36}
+
+
+def get_byte_width(cfg: dict) -> int:
+    """Return the configured byte width, validated against the allowed set."""
+    raw = cfg.get('default_byte_width', '8')
+    try:
+        width = int(raw)
+    except ValueError:
+        print(f"Error: default_byte_width '{raw}' is not an integer. Defaulting to 8.")
+        return 8
+    if width not in VALID_BYTE_WIDTHS:
+        print(f"Error: default_byte_width {width} is not a valid byte width.")
+        print(f"       Valid widths: {sorted(VALID_BYTE_WIDTHS)}")
+        raise SystemExit(1)
+    return width
+
+
 # Load config when module is imported
 config = load_config()

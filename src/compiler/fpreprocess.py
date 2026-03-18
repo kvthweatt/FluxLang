@@ -102,7 +102,8 @@ class FXPreprocessor:
             cwd / "src" / "stdlib" / filepath,
             cwd / "src" / "stdlib" / "runtime" / filepath,
             cwd / "src" / "stdlib" / "functions" / filepath,
-            cwd / "src" / "stdlib" / "builtins" / filepath
+            cwd / "src" / "stdlib" / "builtins" / filepath,
+            cwd / "src" / "stdlib" / "utility" / filepath
         ]
         
         for location in locations:

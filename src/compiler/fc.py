@@ -194,6 +194,7 @@ class FluxCompiler:
                 '__SIZEOF_PTR__': '8',     # Assume 64-bit.
                 '__SIZEOF_INT__': '4',     # Always 32-bit
                 '__SIZEOF_LONG__': '8',    # Always 64-bit
+                '__BYTE_WIDTH__': str(get_byte_width(config)),
                 
                 # Compilation mode
                 '__DEBUG__': '1' if config.get('debug', False) else '0',

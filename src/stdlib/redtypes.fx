@@ -11,7 +11,6 @@ namespace standard
 	namespace types
 	{
 		unsigned data{4} as nybble;
-        unsigned data{8} as byte;
         byte[] as noopstr;
         unsigned data{16} as u16;
         unsigned data{32} as u32;

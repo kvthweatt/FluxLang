@@ -3061,50 +3061,139 @@ class AlignOf(Expression):
 class TypeOf(Expression):
     expression: Expression
 
+    # Type-kind constants used for comparison (typeof(x) == struct)
+    KIND_UNKNOWN   = 0
+    KIND_SINT      = 1
+    KIND_UINT      = 2
+    KIND_FLOAT     = 3
+    KIND_DOUBLE    = 4
+    KIND_BOOL      = 5
+    KIND_CHAR      = 6
+    KIND_BYTE      = 7
+    KIND_LONG      = 8
+    KIND_ULONG     = 9
+    KIND_POINTER   = 10
+    KIND_ARRAY     = 11
+    KIND_STRUCT    = 12
+    KIND_OBJECT    = 13
+    KIND_VOID      = 14
+    KIND_FUNCTION  = 15
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """
-        typeof(expr) - Returns type information (as a runtime value)
+        typeof(expr) - Returns a compile-time integer type-kind constant.
+        Allows comparisons like: typeof(myvar) == struct
         """
-        # Generate code for the expression
-        val = self.expression.codegen(builder, module)
-        
-        # Create a type descriptor structure
-        type_info = self._create_type_info(val.type, module)
-        
-        # Return pointer to type info
-        gv = ir.GlobalVariable(module, type_info, name=f"typeinfo.{uuid.uuid4().hex}")
-        gv.initializer = type_info
-        gv.linkage = 'internal'
-        return builder.bitcast(gv, ir.PointerType(ir.IntType(8)))
+        from ftypesys import DataType as DT
 
-    def _create_type_info(self, llvm_type: ir.Type, module: ir.Module) -> ir.Constant:
-        """Create a type descriptor constant"""
-        # Basic type info structure:
-        # - size (i32)
-        # - alignment (i32)
-        # - name (i8*)
-        
-        size = module.data_layout.get_type_size(llvm_type)
-        align = module.data_layout.preferred_alignment(llvm_type)
-        
-        # Get type name
-        type_name = str(llvm_type)
-        name_constant = ir.Constant(ir.ArrayType(ir.IntType(8), len(type_name)),
-                             bytearray(type_name.encode('ascii')))
-        
-        # Create struct constant
-        return ir.Constant(ir.LiteralStructType([
-            ir.IntType(32),  # size
-            ir.IntType(32),  # alignment
-            # ENDIANNESS HERE
-            ir.PointerType(ir.IntType(8))  # name pointer
-        ]), [
-            ir.Constant(ir.IntType(32), size),
-            ir.Constant(ir.IntType(32), align),
-            # ENDIANNESS HERE
-            builder.gep(name_constant, [ir.Constant(ir.IntType(32), 0)],
-                      [ir.Constant(ir.IntType(32), 0)])
-            ])
+        expr = self.expression
+
+        # If the expression is an Identifier, try to resolve it as a type name first
+        if isinstance(expr, Identifier):
+            kind = self._resolve_identifier_kind(expr.name, module)
+            if kind is not None:
+                return ir.Constant(ir.IntType(32), kind)
+
+        # If the expression is a Literal holding a DataType (e.g. the 'struct' keyword literal)
+        if isinstance(expr, Literal):
+            kind = self._kind_from_datatype(expr.type)
+            return ir.Constant(ir.IntType(32), kind)
+
+        # Fall back: codegen the expression and inspect its LLVM type
+        val = expr.codegen(builder, module)
+        kind = self._kind_from_llvm_type(val.type)
+        return ir.Constant(ir.IntType(32), kind)
+
+    def _resolve_identifier_kind(self, name: str, module) -> Optional[int]:
+        """Resolve a name as a type (struct/variable) and return its kind constant."""
+        from ftypesys import DataType as DT
+
+        current_ns = getattr(module, '_current_namespace', '') or module.symbol_table.current_namespace
+
+        # Check symbol table for a type entry
+        type_entry = module.symbol_table.lookup_type(name, current_ns)
+        if type_entry is not None:
+            return self.KIND_STRUCT
+
+        # Check _struct_types directly
+        if hasattr(module, '_struct_types'):
+            if name in module._struct_types:
+                return self.KIND_STRUCT
+            namespaces = list(getattr(module, '_namespaces', []))
+            namespaces += list(getattr(module.symbol_table, 'registered_namespaces', []))
+            namespaces += list(getattr(module.symbol_table, 'using_namespaces', []))
+            for ns in namespaces:
+                mangled = ns.replace('::', '__') + '__' + name
+                if mangled in module._struct_types:
+                    return self.KIND_STRUCT
+            if current_ns:
+                mangled = current_ns.replace('::', '__') + '__' + name
+                if mangled in module._struct_types:
+                    return self.KIND_STRUCT
+
+        # Check _struct_vtables
+        if hasattr(module, '_struct_vtables') and name in module._struct_vtables:
+            return self.KIND_STRUCT
+
+        # Check as a variable and inspect its type_spec
+        var_entry = module.symbol_table.lookup_variable(name, current_ns)
+        if var_entry is not None and var_entry.type_spec is not None:
+            return self._kind_from_datatype(var_entry.type_spec.base_type)
+
+        # Last resort: check LLVM context for an identified struct type with this name
+        try:
+            llvm_type = module.context.get_identified_type(name)
+            if llvm_type is not None:
+                return self.KIND_STRUCT
+        except Exception:
+            pass
+
+        # Also scan all _struct_types keys for a suffix match (handles namespace-mangled names)
+        if hasattr(module, '_struct_types'):
+            for key in module._struct_types:
+                if key == name or key.endswith('__' + name) or key.endswith('.' + name):
+                    return self.KIND_STRUCT
+
+        return None
+
+    def _kind_from_datatype(self, dt) -> int:
+        from ftypesys import DataType as DT
+        mapping = {
+            DT.SINT:    self.KIND_SINT,
+            DT.UINT:    self.KIND_UINT,
+            DT.FLOAT:   self.KIND_FLOAT,
+            DT.DOUBLE:  self.KIND_DOUBLE,
+            DT.BOOL:    self.KIND_BOOL,
+            DT.CHAR:    self.KIND_CHAR,
+            DT.DATA:    self.KIND_BYTE,
+            DT.LONG:    self.KIND_LONG,
+            DT.ULONG:   self.KIND_ULONG,
+            DT.STRUCT:  self.KIND_STRUCT,
+            DT.OBJECT:  self.KIND_OBJECT,
+            DT.VOID:    self.KIND_VOID,
+        }
+        return mapping.get(dt, self.KIND_UNKNOWN)
+
+    def _kind_from_llvm_type(self, llvm_type) -> int:
+        if isinstance(llvm_type, ir.IntType):
+            if llvm_type.width == 1:
+                return self.KIND_BOOL
+            if llvm_type.width == 8:
+                return self.KIND_BYTE
+            return self.KIND_SINT
+        if isinstance(llvm_type, ir.FloatType):
+            return self.KIND_FLOAT
+        if isinstance(llvm_type, ir.DoubleType):
+            return self.KIND_DOUBLE
+        if isinstance(llvm_type, ir.PointerType):
+            return self.KIND_POINTER
+        if isinstance(llvm_type, ir.ArrayType):
+            return self.KIND_ARRAY
+        if isinstance(llvm_type, (ir.LiteralStructType, ir.IdentifiedStructType)):
+            return self.KIND_STRUCT
+        if isinstance(llvm_type, ir.VoidType):
+            return self.KIND_VOID
+        return self.KIND_UNKNOWN
 
 @dataclass
 class SizeOf(Expression):
@@ -6875,7 +6964,7 @@ class Program(ASTNode):
             if not isinstance(stmt, UsingStatement) and not isinstance(stmt, ExternBlock) and not isinstance(stmt, NotUsingStatement):
                 stmt.codegen(builder, module)
         
-        main_args_name = "main__2__int__data_ptr2_ubits8__ret_int"
+        main_args_name = "main__2__int__byte_ptr2__ret_int"
         main_no_args_name = "main__0__ret_int"
 
         main_func      = module.globals.get(main_no_args_name)

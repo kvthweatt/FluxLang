@@ -78,8 +78,7 @@ struct PatchHeader
 def hmac_sha256(byte* key, int key_len, byte* xdata, int xdata_len, byte* out) -> void
 {
     // Build padded inner and outer keys (64-byte SHA-256 block size)
-    byte[64] ipad_key;
-    byte[64] opad_key;
+    byte[64] ipad_key, opad_key;
     int i;
 
     // Zero-pad key into the 64-byte blocks, XOR with ipad/opad constants

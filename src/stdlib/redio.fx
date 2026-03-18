@@ -407,6 +407,10 @@ namespace standard
             {
                 if (b) { print("True\0"); } else { print("False\0"); };
             };
+            def print(i8 s) -> void
+            {
+                print(byte(s));
+            };
             def print(byte s) -> void
             {
                 byte[2] x = [s, 0];

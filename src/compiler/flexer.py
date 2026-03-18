@@ -51,6 +51,7 @@ class TokenType(Enum):
     AUTO = auto()         # "        auto
     BREAK = auto()        # "        break
     BOOL_KW = auto()      # "        bool
+    BYTE = auto()         # "        byte
     CASE = auto()         # "        case
     CATCH = auto()        # "        catch
     COMPT = auto()        # "        compt
@@ -348,6 +349,7 @@ class FluxLexer:
             'auto': TokenType.AUTO,
             'break': TokenType.BREAK,
             'bool': TokenType.BOOL_KW,
+            'byte': TokenType.BYTE,
             'case': TokenType.CASE,
             'catch': TokenType.CATCH,
             'char': TokenType.CHAR,

@@ -1,11 +1,11 @@
 #import "standard.fx", "redmath.fx", "redwindows.fx", "redopengl.fx", "threading.fx", "decimal.fx";
 
-using standard::io::console;
-using standard::system::windows;
-using standard::math;
-using standard::atomic;
-using standard::threading;
-using math::decimal;
+using standard::io::console,
+      standard::system::windows,
+      standard::math,
+      standard::atomic,
+      standard::threading,
+      math::decimal;
 
 // ============================================================================
 // Mandelbrot Set - OpenGL Viewer
@@ -80,8 +80,8 @@ def mandelbrot_double(double x0, double y0, int max_iter) -> int
 //  Identical structure to compute_reference_orbit but avoids all Decimal cost.
 // ============================================================================
 
-heap double* g_ref_zr = (double*)0;
-heap double* g_ref_zi = (double*)0;
+heap double* g_ref_zr = (double*)0,
+             g_ref_zi = (double*)0;
 int          g_ref_len = 0;
 
 def compute_reference_orbit_double(double cx, double cy, int max_iter) -> void
@@ -194,8 +194,8 @@ def compute_reference_orbit(Decimal* cx, Decimal* cy, int max_iter) -> void
 
 def mandelbrot_perturb(double ref_cr, double ref_ci, double dcr, double dci, int max_iter) -> int
 {
-    double dzr, dzi, dzr_new, dzi_new;
-    double zr, zi, zmod2, dzmod2, tr, ti;
+    double dzr, dzi, dzr_new, dzi_new,
+           zr, zi, zmod2, dzmod2, tr, ti;
     int n;
 
     dzr = 0.0;
@@ -382,8 +382,19 @@ def worker(void* arg) -> void*
     WorkSlice* sl = (WorkSlice*)arg;
 
     int row, col, iter, idx;
-    double r, gv, b;
-    double fx_d, fy_d;
+    double r, gv, b,
+           fx_d, fy_d;
+    // ── Decimal path ─────────────────────────────────────────
+    // Pixel coordinates computed in Decimal to avoid catastrophic
+    // cancellation at deep zoom where double mantissa is exhausted.
+    singinit Decimal fx, fy,
+            col_d, row_d,
+            cols_d, rows_d,
+            half, tmp, tmp2;
+
+    decimal_from_string(@half,   "0.5\0");
+    decimal_from_i64(@cols_d, (i64)sl.cols);
+    decimal_from_i64(@rows_d, (i64)sl.rows);
 
     row = sl.row_start;
     while (row < sl.row_end)
@@ -405,18 +416,6 @@ def worker(void* arg) -> void*
                 }
                 else
                 {
-                    // ── Decimal path ─────────────────────────────────────────
-                    // Pixel coordinates computed in Decimal to avoid catastrophic
-                    // cancellation at deep zoom where double mantissa is exhausted.
-                    Decimal fx, fy,
-                            col_d, row_d,
-                            cols_d, rows_d,
-                            half, tmp, tmp2;
-
-                    decimal_from_string(@half,   "0.5\0");
-                    decimal_from_i64(@cols_d, (i64)sl.cols);
-                    decimal_from_i64(@rows_d, (i64)sl.rows);
-
                     // fx = x_min + x_range * (col + 0.5) / cols
                     decimal_from_i64(@col_d, (i64)col);
                     decimal_add(@tmp, @col_d, @half);
@@ -534,25 +533,29 @@ def main() -> int
 
     float zoom_speed, pan_speed, dt;
     double palette_time, palette_offset,
-           ref_cr, ref_ci;
-    int tile, dyn_max_iter,
+           ref_cr, ref_ci,
+           x_min_d, y_min_d, x_range_d, y_range_d;
+    int tile, dyn_max_iter, prev_dyn_max_iter,
         cols, rows,
         cur_w, cur_h,
         rows_per_thread, t;
     bool moving, recolor_only,
-         ref_dirty, need_decimal;
+         ref_dirty, need_decimal, was_decimal;
     DWORD t_now, t_last;
     RECT client_rect;
     WORD w_state, s_state, a_state, d_state, up_state, dn_state;
 
     i32 zoom_exp, zoom_digits, depth;
 
+    int use_perturb;
+
     Thread[64] threads;
 
     ref_dirty = true;
+    prev_dyn_max_iter = 0;
 
-    zoom_speed = 1.5;
-    pan_speed  = 0.6;
+    zoom_speed = 0.3;
+    pan_speed  = 0.05;
     palette_time = 0.0;
     ref_cr = 0.0;
     ref_ci = 0.0;
@@ -637,6 +640,15 @@ def main() -> int
         // While moving, halve the iteration budget on top of tile coarsening
         if (moving) { dyn_max_iter = dyn_max_iter >> 1; };
 
+        // If the iteration budget changed the cached iter values are no longer
+        // comparable against the new max (interior pixels stored as old max will
+        // be misidentified as escaped, producing black screens and palette noise).
+        if (dyn_max_iter != prev_dyn_max_iter)
+        {
+            ref_dirty = true;
+            prev_dyn_max_iter = dyn_max_iter;
+        };
+
         // Zoom in: zoom *= (1 - zoom_speed * dt)
         if ((w_state `& 0x8000) != 0)
         {
@@ -654,14 +666,16 @@ def main() -> int
             };
         };
 
-        // Zoom out: zoom *= (1 + zoom_speed * dt)
+        // Zoom out: zoom /= (1 - zoom_speed * dt)  -- exact inverse of zoom-in
         if ((s_state `& 0x8000) != 0)
         {
             decimal_from_i64(@tmp2, (i64)(zoom_speed * dt * 1000000f));
             decimal_from_string(@tmp3, "1000000\0");
             decimal_div(@zoom_delta, @tmp2, @tmp3);
-            decimal_mul(@tmp, @zoom, @zoom_delta);
-            decimal_add(@zoom, @zoom, @tmp);
+            decimal_from_string(@tmp, "1\0");
+            decimal_sub(@tmp, @tmp, @zoom_delta);
+            decimal_div(@tmp2, @zoom, @tmp);
+            decimal_copy(@zoom, @tmp2);
             decimal_from_string(@tmp, "8\0");
             if (decimal_cmp(@zoom, @tmp) > 0)
             {
@@ -722,8 +736,10 @@ def main() -> int
         }
         else
         {
-            // Only skip fractal recompute when stationary - moving always needs fresh iters
-            recolor_only = !moving;
+            // Only skip fractal recompute when stationary and the reference orbit
+            // is clean.  A dirty ref means the arithmetic mode may have changed
+            // (double/Decimal boundary crossing) so cached iters must be discarded.
+            recolor_only = !moving & !ref_dirty;
         };
 
         // ── Compute view parameters in Decimal ───────────────────────────────
@@ -752,7 +768,7 @@ def main() -> int
         // If the mode actually changes, invalidate the reference orbit immediately so
         // it is recomputed under the correct arithmetic on the very next still frame.
         {
-            bool was_decimal = need_decimal;
+            was_decimal = need_decimal;
             if (!need_decimal)
             {
                 // Currently in double mode - enter Decimal if zoom dropped below enter threshold
@@ -796,7 +812,6 @@ def main() -> int
         // Use perturbation only when stationary and the reference orbit escaped.
         // If ref is interior (g_ref_len == dyn_max_iter) every delta also runs to
         // max_iter producing a black blob - disable and fall back to full precision.
-        int use_perturb;
         use_perturb = (!moving & g_ref_len > 0 & g_ref_len < dyn_max_iter) ? 1 : 0;
 
         // ── Partition rows across threads and launch ──────────────────────────
@@ -804,7 +819,6 @@ def main() -> int
         if (rows_per_thread < 1) { rows_per_thread = 1; };
 
         // Pre-convert view bounds to double once for the fast path
-        double x_min_d, y_min_d, x_range_d, y_range_d;
         x_min_d   = decimal_to_double(@x_min);
         y_min_d   = decimal_to_double(@y_min);
         x_range_d = decimal_to_double(@x_range);

@@ -35,7 +35,7 @@ using standard::net;
 def bad_compute(ulong x) -> ulong
 {
     // BUG: writes to address 0 - instant segfault
-    ulong* null_ptr = (ulong*)0;
+    ulong* null_ptr = (@)0;
     *null_ptr = x;
     return x * (ulong)3;
 };
@@ -89,10 +89,10 @@ def install_patch(ulong target_addr, ulong patch_addr) -> void
 // Receive exactly `n` bytes from `sockfd` into `buf`.
 def recv_exact(int sockfd, byte* buf, int n) -> bool
 {
-    int total = 0;
+    int total, got;
     while (total < n)
     {
-        int got = recv(sockfd, (void*)(buf + total), n - total, 0);
+        got = recv(sockfd, (void*)(buf + total), n - total, 0);
         if (got <= 0)
         {
             return false;

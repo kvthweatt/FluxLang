@@ -106,6 +106,7 @@ class DataType(Enum):
     CHAR = "char"
     BOOL = "bool"
     DATA = "data"
+    BYTE = "byte"
     STRUCT = "struct"
     ENUM = "enum"
     UNION = "union"
@@ -172,6 +173,10 @@ class PrimitiveType(BaseType):
             return ir.IntType(1)
         elif self.kind == DataType.CHAR:
             return ir.IntType(8)
+        elif self.kind == DataType.BYTE:
+            from fconfig import config as _cfg, get_byte_width as _gbw
+            width = self.width if self.width is not None else _gbw(_cfg)
+            return ir.IntType(width)
         elif self.kind == DataType.VOID:
             return ir.VoidType()
         elif self.kind == DataType.DATA:
@@ -184,6 +189,8 @@ class PrimitiveType(BaseType):
     def __str__(self) -> str:
         if self.kind == DataType.DATA and self.width:
             return f"data{{{self.width}}}"
+        if self.kind == DataType.BYTE and self.width and self.width != 8:
+            return f"byte{{{self.width}}}"
         return self.kind.value
 
 
@@ -1358,6 +1365,9 @@ class TypeSystem:
                 return ir.IntType(1)
             elif type_spec == DataType.CHAR:
                 return ir.IntType(8)
+            elif type_spec == DataType.BYTE:
+                from fconfig import config as _cfg, get_byte_width as _gbw
+                return ir.IntType(_gbw(_cfg))
             elif type_spec == DataType.VOID:
                 return ir.VoidType()
             elif type_spec == DataType.STRUCT:
@@ -1424,6 +1434,13 @@ class TypeSystem:
             base_type = ir.IntType(1)
         elif type_spec.base_type == DataType.CHAR:
             base_type = ir.IntType(8)
+        elif type_spec.base_type == DataType.BYTE:
+            byte_width = type_spec.bit_width
+            if byte_width is None:
+                # Read from module config macro, fall back to 8
+                macros = getattr(module, '_preprocessor_macros', {})
+                byte_width = int(macros.get('__BYTE_WIDTH__', 8))
+            base_type = ir.IntType(byte_width)
         elif type_spec.base_type == DataType.STRUCT:
             base_type = ir.IntType(8)
         elif type_spec.base_type == DataType.ENUM:
@@ -3739,6 +3756,8 @@ def get_builtin_bit_width(base_type: DataType) -> int:
     elif base_type == DataType.DOUBLE:
         return 64  # Double precision float
     elif base_type == DataType.CHAR:
+        return 8
+    elif base_type == DataType.BYTE:
         return 8
     elif base_type == DataType.BOOL:
         return 1

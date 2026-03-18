@@ -184,9 +184,8 @@ def !!FRTStartup() -> int
                 };
 
                 // Measure token length
-                int start = pos;
-                int len = 0;
-                bool quoted = false;
+                int start = pos, len = 0;
+                bool quoted;
                 if (cmdLine[pos] == (wchar)34)
                 {
                     quoted = true;
@@ -227,7 +226,7 @@ def !!FRTStartup() -> int
             // Call the appropriate main overload
             if (argc > 1)
             {
-                return_code = main__2__int__data_ptr2_ubits8__ret_int(argc, argv);
+                return_code = main__2__int__byte_ptr2__ret_int(argc, argv);
             }
             else
             {

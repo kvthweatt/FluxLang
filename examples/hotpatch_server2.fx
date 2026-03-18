@@ -42,10 +42,10 @@ def good_compute(ulong x) -> ulong
 
 def send_exact(int sockfd, byte* buf, int n) -> bool
 {
-    int total = 0;
+    int total, sent;
     while (total < n)
     {
-        int sent = send(sockfd, (void*)(buf + total), n - total, 0);
+        sent = send(sockfd, (void*)(buf + total), n - total, 0);
         if (sent <= 0)
         {
             return false;

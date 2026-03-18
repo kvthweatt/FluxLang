@@ -23,7 +23,7 @@ from typing import Set, Dict, Optional, List
 from dataclasses import dataclass
 from enum import Enum
 import sys
-# from flogger import FluxLogger, FluxLoggerConfig, LogLevel
+from fconfig import config as _flux_config, get_byte_width as _get_byte_width
 from flexer import FluxLexer
 from fpreprocess import *
 
@@ -113,7 +113,7 @@ class ParseError(Exception):
         super().__init__(f"{message} Line {token.line}:{token.column}")
 
 class FluxParser:
-    def __init__(self, tokens: List[Token]):
+    def __init__(self, tokens: List[Token], default_byte_width: int = None):
         self.tokens = tokens
         self.position = 0
         self.current_token = self.tokens[0] if tokens else None
@@ -129,7 +129,7 @@ class FluxParser:
         self._custom_operators: Dict[str, str] = {}  # symbol string -> base function name
         self._function_depth = 0  # Tracks nesting depth; nested function defs are illegal
         self._loop_depth = 0      # Tracks nesting depth of for/while/do-while loops
-
+        self._default_byte_width = default_byte_width if default_byte_width is not None else _get_byte_width(_flux_config)
 
     @classmethod
     def from_file(self, source_file: str, compiler_macros: Optional[Dict[str, str]] = None):
@@ -1847,6 +1847,10 @@ class FluxParser:
             #print(f"[TYPE_SPEC DEBUG] Resolved alias: custom_typename={custom_typename}, is_array={t.is_array}, array_size={t.array_size}, is_pointer={t.is_pointer}, pointer_depth={t.pointer_depth}", file=sys.stdout)
             return t
 
+        if base_type == DataType.BYTE and bit_width is None:
+            bit_width = self._default_byte_width
+            alignment = alignment if alignment is not None else bit_width
+
         # No alias: return what we parsed normally
         return TypeSystem(
             base_type=base_type,
@@ -1899,6 +1903,9 @@ class FluxParser:
         elif self.expect(TokenType.BOOL_KW):
             self.advance()
             return DataType.BOOL
+        elif self.expect(TokenType.BYTE):
+            self.advance()
+            return DataType.BYTE
         elif self.expect(TokenType.DATA):
             self.advance()
             return DataType.DATA
@@ -1944,7 +1951,7 @@ class FluxParser:
             
             # Must have a base type
             if not self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW,
-                             TokenType.CHAR,  TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID, 
+                             TokenType.CHAR,  TokenType.BOOL_KW, TokenType.BYTE, TokenType.DATA, TokenType.VOID, 
                              TokenType.SLONG, TokenType.ULONG,
                              TokenType.STRUCT, TokenType.IDENTIFIER):
                 return False
@@ -3565,8 +3572,16 @@ class FluxParser:
             return self.alignof_expression()
         elif self.expect(TokenType.ENDIANOF):
             return self.endianof_expression()
+        elif self.expect(TokenType.TYPEOF):
+            return self.typeof_expression()
+        elif self.expect(TokenType.STRUCT):
+            self.advance()
+            return Literal(value=12, type=DataType.SINT)  # TypeOf.KIND_STRUCT
+        elif self.expect(TokenType.OBJECT):
+            self.advance()
+            return Literal(value=13, type=DataType.SINT)  # TypeOf.KIND_OBJECT
         elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW,
-                         TokenType.CHAR, TokenType.BOOL_KW, TokenType.SLONG, TokenType.ULONG):
+                         TokenType.CHAR, TokenType.BYTE, TokenType.BOOL_KW, TokenType.SLONG, TokenType.ULONG):
             # Built-in type convert expression: float(x), int(y), char(z), etc.
             kw_token = self.current_token
             kw_map = {
@@ -3575,6 +3590,7 @@ class FluxParser:
                 TokenType.FLOAT_KW:  DataType.FLOAT,
                 TokenType.DOUBLE_KW: DataType.DOUBLE,
                 TokenType.CHAR:      DataType.CHAR,
+                TokenType.BYTE:      DataType.BYTE,
                 TokenType.BOOL_KW:   DataType.BOOL,
                 TokenType.SLONG:      DataType.LONG,
                 TokenType.ULONG:     DataType.ULONG,
@@ -3706,6 +3722,41 @@ class FluxParser:
                 target = self.expression()
                 self.consume(TokenType.RIGHT_PAREN)
                 return EndianOf(target)
+
+    def typeof_expression(self) -> TypeOf:
+        """
+        typeof_expression -> 'typeof' '(' (type_spec | expression) ')'
+        """
+        self.consume(TokenType.TYPEOF)
+        self.consume(TokenType.LEFT_PAREN)
+
+        saved_pos = self.position
+
+        if self.expect(TokenType.SINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.CHAR,
+                      TokenType.BOOL_KW, TokenType.DATA, TokenType.VOID,
+                      TokenType.SLONG, TokenType.ULONG,
+                      TokenType.CONST, TokenType.VOLATILE, TokenType.SIGNED, TokenType.UNSIGNED):
+            try:
+                target = self.type_spec()
+                self.consume(TokenType.RIGHT_PAREN)
+                return TypeOf(target)
+            except ParseError:
+                self.position = saved_pos
+                self.current_token = self.tokens[self.position]
+                expr = self.expression()
+                self.consume(TokenType.RIGHT_PAREN)
+                return TypeOf(expr)
+        else:
+            try:
+                expr = self.expression()
+                self.consume(TokenType.RIGHT_PAREN)
+                return TypeOf(expr)
+            except ParseError:
+                self.position = saved_pos
+                self.current_token = self.tokens[self.position]
+                target = self.type_spec()
+                self.consume(TokenType.RIGHT_PAREN)
+                return TypeOf(target)
 
     def array_literal(self) -> Expression:
         """

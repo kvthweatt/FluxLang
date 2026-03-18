@@ -1,5 +1,7 @@
 #import "standard.fx";
 
+using standard::io::console;
+
 def main(int argc, byte** argv) -> int
 {
     print(argv[1]);
