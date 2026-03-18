@@ -3813,7 +3813,54 @@ class CompoundAssignment(Statement):
         
         return AssignmentTypeHandler.handle_compound_assignment(
             builder, module, self.target, self.op_token, self.value)
-    
+
+@dataclass
+class TernaryAssign(Statement):
+    """x ?= value  -- assign value to x only if x == 0"""
+    target: Expression
+    value: Expression
+
+    def __repr__(self) -> str:
+        return f"{self.target} ?= {self.value};"
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Generate code for ternary assignment: assign value to target only if target == 0."""
+        # Load the current value of the target
+        if isinstance(self.target, Identifier):
+            sym = module.symbol_table.lookup(self.target.name)
+            if sym is None:
+                raise ValueError(f"Undefined variable '{self.target.name}'")
+            ptr = module.symbol_table.get_llvm_value(self.target.name)
+            current_val = builder.load(ptr, name="ternary_assign_cur")
+        else:
+            raise ValueError(f"TernaryAssign: unsupported target type {type(self.target).__name__}")
+
+        # Compare current value to zero
+        zero = ir.Constant(current_val.type, 0)
+        is_zero = builder.icmp_unsigned('==', current_val, zero, name="ternary_assign_cmp")
+
+        # Create blocks for the conditional store
+        then_block = builder.append_basic_block(name="ternary_assign_then")
+        merge_block = builder.append_basic_block(name="ternary_assign_merge")
+
+        builder.cbranch(is_zero, then_block, merge_block)
+
+        # then: store value
+        builder.position_at_start(then_block)
+        new_val = self.value.codegen(builder, module)
+        # Coerce type if needed
+        if new_val.type != current_val.type:
+            if isinstance(new_val.type, ir.IntType) and isinstance(current_val.type, ir.IntType):
+                if new_val.type.width > current_val.type.width:
+                    new_val = builder.trunc(new_val, current_val.type, name="ternary_assign_trunc")
+                else:
+                    new_val = builder.sext(new_val, current_val.type, name="ternary_assign_ext")
+        builder.store(new_val, ptr)
+        builder.branch(merge_block)
+
+        builder.position_at_start(merge_block)
+        return None
+
 @dataclass
 class Block(Statement):
     statements: List[Statement] = field(default_factory=list)

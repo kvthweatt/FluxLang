@@ -2709,7 +2709,12 @@ class FluxParser:
             self.advance()
             value = self.assignment_expression()
             return CompoundAssignment(expr, op_token, value)
-        
+        elif self.expect(TokenType.TERNARY_ASSIGN):
+            # Handle ternary assignment: x ?= value  (assign value to x only if x == 0)
+            self.advance()
+            value = self.assignment_expression()
+            return TernaryAssign(expr, value)
+            
         return expr
 
     def ternary_expression(self) -> Expression:

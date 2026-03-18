@@ -188,6 +188,7 @@ class TokenType(Enum):
     ELLIPSIS = auto()       # ...
     SCOPE = auto()          # ::
     QUESTION = auto()       # ?     a?b:c = Parse as ternary
+    TERNARY_ASSIGN = auto() # ?=    x ?= 45 // assign if x == 0
     COLON = auto()          # :
     TIE = auto()            # ~             Ownership/move semantics
     LAMBDA_ARROW = auto()   # <:-
@@ -292,7 +293,8 @@ double_char_tokens = {
     '<-': TokenType.CHAIN_ARROW,
     '<~': TokenType.RECURSE_ARROW,
     '..': TokenType.RANGE,
-    '::': TokenType.SCOPE
+    '::': TokenType.SCOPE,
+    '?=': TokenType.TERNARY_ASSIGN
 } | double_binary_tokens
 
 # Single-character tokens dictionary
