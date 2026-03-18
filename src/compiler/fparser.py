@@ -601,6 +601,8 @@ class FluxParser:
             return self.throw_statement()
         elif self.expect(TokenType.ASSERT):
             return self.assert_statement()
+        elif self.expect(TokenType.DEFER):
+            return self.defer_statement()
         elif self.expect(TokenType.LEFT_BRACE):
             return self.block_statement()
         elif self.is_variable_declaration():
@@ -2653,7 +2655,16 @@ class FluxParser:
         self.consume(TokenType.RIGHT_PAREN)
         self.consume(TokenType.SEMICOLON)
         return AssertStatement(condition, message)
-    
+
+    def defer_statement(self) -> DeferStatement:
+        """
+        defer_statement -> 'defer' expression ';'
+        """
+        self.consume(TokenType.DEFER)
+        expr = self.expression()
+        self.consume(TokenType.SEMICOLON)
+        return DeferStatement(expr)
+
     def expression_statement(self) -> ExpressionStatement:
         """
         expression_statement -> expression ';'

@@ -3826,6 +3826,11 @@ class Block(Statement):
         result = None
         #print(self.statements)
         #print(f"DEBUG Block: Processing {len(self.statements)} statements")
+
+        # Save the outer defer stack and start a fresh one for this scope
+        outer_defer_stack = getattr(builder, '_flux_defer_stack', None)
+        builder._flux_defer_stack = []
+
         for i, stmt in enumerate(self.statements):
             #print(f"DEBUG Block: Processing statement {i}: {type(stmt).__name__}")
             if stmt is not None:  # Skip None statements
@@ -3842,6 +3847,15 @@ class Block(Statement):
                     for i, frame_info in enumerate(reversed(stack)):
                         print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
                     raise ValueError(f"Block{{}} Debug: Error in statement {i} ({type(stmt).__name__}): {e} \n\n {stmt} \n\n {module.name}")
+
+        # Flush this scope's deferred expressions in LIFO order at natural block exit
+        if builder._flux_defer_stack and not builder.block.is_terminated:
+            for deferred_expr in reversed(builder._flux_defer_stack):
+                deferred_expr.codegen(builder, module)
+
+        # Restore outer defer stack
+        builder._flux_defer_stack = outer_defer_stack if outer_defer_stack is not None else []
+
         return result
 
 
@@ -4716,6 +4730,11 @@ class ReturnStatement(Statement):
 
         ret_val = self.value.codegen(builder, module)
 
+        # Flush deferred expressions in LIFO order before returning
+        if hasattr(builder, '_flux_defer_stack') and builder._flux_defer_stack:
+            for deferred_expr in reversed(builder._flux_defer_stack):
+                deferred_expr.codegen(builder, module)
+
         if ret_val is None:
             builder.ret_void()
             return None
@@ -4772,6 +4791,20 @@ class ContinueStatement(Statement):
         
         # Don't call unreachable() - the branch already terminated the block
         # Any subsequent code will naturally be unreachable
+        return None
+
+@dataclass
+class DeferStatement(Statement):
+    expression: 'Expression'
+
+    def __repr__(self) -> str:
+        return f"defer {self.expression};"
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        # Push onto the builder's defer stack for the current scope
+        if not hasattr(builder, '_flux_defer_stack'):
+            builder._flux_defer_stack = []
+        builder._flux_defer_stack.append(self.expression)
         return None
 
 @dataclass

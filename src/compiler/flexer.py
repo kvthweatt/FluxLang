@@ -60,6 +60,7 @@ class TokenType(Enum):
     CONTRACT = auto()     # "        contract
     DATA = auto()         # "        data
     DEF = auto()          # "        def
+    DEFER = auto()        # "        defer
     DEFAULT = auto()      # "        default
     DO = auto()           # "        do
     DOUBLE_KW = auto()    # "        double
@@ -358,6 +359,7 @@ class FluxLexer:
             'continue': TokenType.CONTINUE,
             'data': TokenType.DATA,
             'def': TokenType.DEF,
+            'defer': TokenType.DEFER,
             'default': TokenType.DEFAULT,
             'do': TokenType.DO,
             'double': TokenType.DOUBLE_KW,
