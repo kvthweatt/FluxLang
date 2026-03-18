@@ -18,7 +18,7 @@ contexts:
       scope: comment.line.double-slash.flux
 
     # Preprocessor directives
-    - match: '^\s*(#)(import|def|ifdef|ifndef|else|endif|warn|stop)\b'
+    - match: '^\s*(#)(import|def|dir|ifdef|ifndef|else|endif|warn|stop)\b'
       captures:
         1: punctuation.definition.preprocessor.flux
         2: keyword.control.preprocessor.flux
@@ -59,7 +59,7 @@ contexts:
       scope: storage.type.flux
 
     # Keywords (but NOT types)
-    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|contract|compt|const|continue|def|default|do|elif|else|extern|false|for|from|goto|global|heap|if|in|is|label|local|namespace|not|operator|or|private|public|register|return|signed|sizeof|stack|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|volatile|while|xor)\b'
+    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|contract|compt|const|continue|def|defer|default|do|elif|else|extern|false|for|from|goto|global|heap|if|in|is|label|local|namespace|not|operator|or|private|public|register|return|signed|sizeof|stack|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|volatile|while|xor)\b'
       scope: keyword.control.flux
 
     # Type modifiers
@@ -98,6 +98,9 @@ contexts:
     # Address-of operator
     - match: '@'
       scope: keyword.operator.address.flux
+
+    - match: '\${{identifier}}'
+      scope: keyword.operator.stringify.flux
 
     # Pointer dereference
     - match: '\*(?=[a-zA-Z_])'

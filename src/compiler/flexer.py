@@ -203,6 +203,7 @@ class TokenType(Enum):
     # SPECIAL
     FUNCTION_POINTER = auto() # {}*
     ADDRESS_CAST = auto()     # (@)
+    STRINGIFY = auto()        # $
     
     # Delimiters
     LEFT_PAREN = auto()     # (
@@ -323,7 +324,8 @@ single_char_tokens = {
     ';': TokenType.SEMICOLON,
     ',': TokenType.COMMA,
     '.': TokenType.DOT,
-    '~': TokenType.TIE
+    '~': TokenType.TIE,
+    '$': TokenType.STRINGIFY
 }
 
 @dataclass

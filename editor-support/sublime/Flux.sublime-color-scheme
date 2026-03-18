@@ -145,6 +145,12 @@
             "font_style": "bold"
         },
         {
+            "name": "Stringify ($)",
+            "scope": "keyword.operator.stringify",
+            "foreground": "var(pink)",
+            "font_style": "bold"
+        },
+        {
             "name": "Keyword Operator Custom",
             "scope": "keyword.operator.custom",
             "foreground": "var(bright_yellow)",

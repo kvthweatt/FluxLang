@@ -3032,6 +3032,27 @@ class AddressOf(Expression):
         raise ValueError(f"Cannot take address of {type(self.expression).__name__}")
 
 @dataclass
+class Stringify(Expression):
+    """$x  -- produce the name of x as a compile-time string literal (byte*)"""
+    name: str
+
+    def __repr__(self) -> str:
+        return f"${self.name}"
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Emit the identifier name as a null-terminated i8* global constant."""
+        string_bytes = bytearray(self.name.encode('ascii')) + bytearray(1)  # null terminator
+        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+        str_val = ir.Constant(str_array_ty, string_bytes)
+        str_name = f".stringify.{self.name}.{id(self)}"
+        gv = ir.GlobalVariable(module, str_val.type, name=str_name)
+        gv.linkage = 'internal'
+        gv.global_constant = True
+        gv.initializer = str_val
+        zero = ir.Constant(ir.IntType(32), 0)
+        return builder.gep(gv, [zero, zero], inbounds=True, name=f"str_{self.name}")
+
+@dataclass
 class AlignOf(Expression):
     target: Union[TypeSystem, Expression]
 

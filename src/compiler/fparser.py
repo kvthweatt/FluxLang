@@ -2714,7 +2714,7 @@ class FluxParser:
             self.advance()
             value = self.assignment_expression()
             return TernaryAssign(expr, value)
-            
+
         return expr
 
     def ternary_expression(self) -> Expression:
@@ -3130,6 +3130,14 @@ class FluxParser:
             self.advance()
             operand = self.unary_expression()
             return TieExpression(operand)
+        elif self.expect(TokenType.STRINGIFY):
+            # Stringify operator: $x produces the name of x as a compile-time string
+            self.advance()
+            if not self.expect(TokenType.IDENTIFIER):
+                raise SyntaxError(f"Expected identifier after '$'")
+            name = self.current_token.value
+            self.advance()
+            return Stringify(name)
         else:
             return self.postfix_expression()
     

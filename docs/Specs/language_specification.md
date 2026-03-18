@@ -67,6 +67,8 @@ Ternary logic:
 ```
 #import "standard.fx";
 
+using standard::io::console;
+
 def main() -> int
 {
     int x = 0;
@@ -78,6 +80,26 @@ def main() -> int
     {
         print("Success!\0");
     };
+    return 0;
+};
+```
+
+Ternary assignment:
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+def main() -> int
+{
+    int x = 10,
+        y;
+
+    x ?= 50;
+    y ?= x;
+
+    if (x == y) { print("Success!\n\0"); };
+
     return 0;
 };
 ```
@@ -453,7 +475,7 @@ The brackets are replaced with the results of the statements in order respective
 ```
 #import "standard.fx";
 
-using standard::io;
+using standard::io::console;
 
 unsigned data{8}[] as string;
 
@@ -474,9 +496,10 @@ This allows you to write clean interpolated strings without strange formatting.
 **f-string Example:**
 
 ```
-#import "standard.fx"; // standard::io::print()
+#import "standard.fx";
 
-unsigned data{8}[] as string;
+using standard::io::console;
+using standard::strings;
 
 def main() -> int
 {
@@ -537,7 +560,7 @@ const* int* x; // Constant pointer to int pointer
 // Pointer Arithmetic:
 #import "standard.fx";
 
-using standard::io, standard::types;
+using standard::io::console;
 
 def main() -> int
 {
@@ -600,6 +623,37 @@ You can also do `if` expressions:
 int x = 0;
 int y = x if (x > 5) else noinit;
 ```
+
+---
+
+## **Single initialization with `singinit`:**
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+def foo() -> void
+{
+    singinit int x;
+    x += 1;
+    print(x); print();
+};
+
+def call(int y) -> void
+{
+    if (y == 0) { return; };
+    foo();
+    call(--y);
+};
+
+def main() -> int
+{
+    call(10);
+    return 0;
+};
+```
+
+---
 
 ## **The `data` keyword:**
 
@@ -1895,6 +1949,9 @@ BITXOR_ASSIGN = "`^^="
 BITXNOT_ASSIGN = "`^^!="
 BITXNAND_ASSIGN = "`^^!&="
 BITXNOR_ASSIGN = "`^^!|="
+
+# Ternary assignment, assign if left side is null.
+TERN_ASSIGN = "?="
 
 # Shift
 BITSHIFT_LEFT = "<<"
