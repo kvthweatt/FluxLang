@@ -164,6 +164,9 @@ def some_nix_generic() -> void*;
 #warn "This will show a warning message.";
 
 #stop "This will hard-stop compilation.";
+
+#dir "C:\\path\\to\\some\\lib";
+// Adds a path to the preprocessor's search list
 ```
 
 ---

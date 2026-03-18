@@ -8,6 +8,7 @@ class FXPreprocessor:
         self.processed_files: Set[str] = set()
         self.output_lines = []
         self.macros: Dict[str, str] = {}
+        self.lib_dirs: List[str] = []
         
         if compiler_macros:
             self.macros.update(compiler_macros)
@@ -106,6 +107,10 @@ class FXPreprocessor:
             cwd / "src" / "stdlib" / "utility" / filepath
         ]
         
+        # Also search any directories added via #dir
+        for lib_dir in self.lib_dirs:
+            locations.append(Path(lib_dir) / filepath)
+        
         for location in locations:
             loc_path = Path(location)
             if loc_path.exists():
@@ -138,7 +143,7 @@ class FXPreprocessor:
         # Enforce semicolons on directives before processing
         for lineno, raw_line in enumerate(content.splitlines(), start=1):
             s = raw_line.strip()
-            if s.startswith("#import") or s.startswith("#warn") or s.startswith("#stop") or s.startswith("#def"):
+            if s.startswith("#import") or s.startswith("#warn") or s.startswith("#stop") or s.startswith("#def") or s.startswith("#dir"):
                 if not s.endswith(';'):
                     directive = s.split()[0]
                     raise SyntaxError(f"[PREPROCESSOR] {directive} directive missing semicolon in {filepath} at line {lineno}")
@@ -158,6 +163,22 @@ class FXPreprocessor:
             return i + 1
         
         stripped = line.strip()
+        
+        # Check for #dir
+        if stripped.startswith("#dir"):
+            if not stripped.rstrip().endswith(';'):
+                raise SyntaxError(f"[PREPROCESSOR] #dir directive missing semicolon at line {i + 1}")
+            start_idx = line.find('"')
+            if start_idx != -1:
+                end_idx = line.find('"', start_idx + 1)
+                if end_idx != -1:
+                    dir_path = line[start_idx + 1:end_idx]
+                    # Normalize: replace backslashes with forward slashes
+                    dir_path = dir_path.replace('\\', '/')
+                    if dir_path not in self.lib_dirs:
+                        self.lib_dirs.append(dir_path)
+                        print(f"[PREPROCESSOR] Added library directory: {dir_path}")
+            return i + 1
         
         # Check for #def
         if stripped.startswith("#def"):
