@@ -4429,6 +4429,12 @@ class AssignmentTypeHandler:
     def convert_value_for_assignment(builder, val, target_type):
         if val.type == target_type:
             return val
+
+        # Structural pointer equality check: same string representation means same type
+        # from different llvmlite instances — bitcast to unify them.
+        if (isinstance(val.type, ir.PointerType) and isinstance(target_type, ir.PointerType)
+                and str(val.type) == str(target_type)):
+            return builder.bitcast(val, target_type, name="ptr_structural_compat")
         
         # This happens when assigning a pointer variable to a struct member
         if (isinstance(val.type, ir.PointerType) and 
@@ -4449,14 +4455,28 @@ class AssignmentTypeHandler:
                 isinstance(target_type.pointee, ir.IntType) and target_type.pointee.width == 8):
                 return builder.bitcast(val, target_type, name="i8ptr_compat")
         
-        # Handle array pointer assignments - for arrays, just store the pointer directly
-        if (isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType) and
-            isinstance(target_type, ir.PointerType)):
-            # This is assigning an array to a pointer type (like noopstr)
-            # Get pointer to first element of array
-            zero = ir.Constant(ir.IntType(32), 0)
-            array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
-            return array_ptr
+        # Handle array pointer assignments
+        if (isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType)):
+            if isinstance(target_type, ir.PointerType):
+                # If target is pointer to the same array type, store the pointer directly
+                if target_type.pointee == val.type.pointee:
+                    return val
+                # If target is pointer to array element type, GEP to first element
+                if target_type.pointee == val.type.pointee.element:
+                    zero = ir.Constant(ir.IntType(32), 0)
+                    return builder.gep(val, [zero, zero], name="array_to_elem_ptr")
+                # If target is pointer to an array of the same count (but different element type),
+                # bitcast — e.g. assigning [1 x i8*]* to [1 x i8]* for glShaderSource-style params
+                if (isinstance(target_type.pointee, ir.ArrayType) and
+                        target_type.pointee.count == val.type.pointee.count):
+                    return builder.bitcast(val, target_type, name="array_ptr_bitcast")
+                # Otherwise GEP to first element (legacy behaviour for noopstr etc.)
+                zero = ir.Constant(ir.IntType(32), 0)
+                array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
+                return array_ptr
+            # Target is the array type itself (not a pointer) — load the aggregate value
+            if target_type == val.type.pointee or str(target_type) == str(val.type.pointee):
+                return builder.load(val, name="array_load")
         
         # Handle void* to typed pointer assignment (e.g., py = (@)pxk where pxk is int)
         if (isinstance(val.type, ir.PointerType) and 

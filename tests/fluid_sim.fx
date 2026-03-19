@@ -29,7 +29,7 @@ using standard::system::windows,
 #def VISCOSITY 0.00008;
 #def DIFFUSION 0.0008;
 #def DT        0.15;
-#def DECAY     0.995;
+#def DECAY     0.994;
 #def INV255    0.00392156862745098;
 
 const int    WIN_W        = 1024,
@@ -47,16 +47,20 @@ heap double* g_dens      = (double*)0,
              g_vx_prev   = (double*)0,
              g_vy_prev   = (double*)0;
 
-heap float*  g_pixels    = (float*)0;
+// Upload buffers - floats for GL texture upload (solver uses double internally)
+// g_dens_tex: 1 float per cell for GL_LUMINANCE upload
+// g_vel_tex:  2 floats per cell (vx, vy) for GL_LUMINANCE_ALPHA upload
+heap float*  g_dens_tex = (float*)0,
+             g_vel_tex  = (float*)0;
 
 // ============================================================================
 // PARTICLE SYSTEM
 // ============================================================================
 
-#def NUM_PARTICLES 4096;
+#def NUM_PARTICLES 300;
 
-heap float* g_part_x = (float*)0;   // particle x in grid coords [0, SIM_W)
-heap float* g_part_y = (float*)0;   // particle y in grid coords [0, SIM_H)
+heap float* g_part_x = (float*)0,   // particle x in grid coords [0, SIM_W)
+            g_part_y = (float*)0;   // particle y in grid coords [0, SIM_H)
 
 global int g_rand_seed = 12345;
 
@@ -69,7 +73,7 @@ const int PHASE_LINSOLVE_RED   = 0,
           PHASE_ADVECT         = 2,
           PHASE_PROJECT_DIV    = 3,
           PHASE_PROJECT_GRAD   = 4,
-          PHASE_DECAY_PIXELS   = 5,
+          PHASE_DECAY          = 5,
           PHASE_EXIT           = 6;
 
 // Hot fields written every dispatch - kept together for cache locality
@@ -77,44 +81,34 @@ const int PHASE_LINSOLVE_RED   = 0,
 struct WorkSlice
 {
     // Cold - set once at startup
-    int     row_start;
-    int     row_end;
+    int     row_start,
+            row_end,
     // Hot - written each dispatch
-    int     phase;
-    int     ls_color;
-    double* ls_x;
-    double* ls_x0;
-    double  ls_a;
-    double  ls_c_inv;
-    double* adv_dst;
-    double* adv_src;
-    double* adv_u;
-    double* adv_v;
-    double* proj_u;
-    double* proj_v;
-    double* proj_p;
-    double* proj_div;
-    double  proj_hx;
-    double  proj_hy;
-    double  proj_hx_inv;
-    double  proj_hy_inv;
-    // decay_pixels - passed as params to avoid global pointer reloads
+            phase,
+            ls_color;
+    double* ls_x, ls_x0;
+    double  ls_a, ls_c_inv;
+    double* adv_dst,
+            adv_src,
+            adv_u,
+            adv_v,
+            proj_u,
+            proj_v,
+            proj_p,
+            proj_div;
+    double  proj_hx,
+            proj_hy,
+            proj_hx_inv,
+            proj_hy_inv;
+    // decay - passed as param to avoid global pointer reload
     double* dp_dens;
-    float*  dp_pixels;
 };
 
-WorkSlice[64]  g_slices;
-Thread[64]     g_threads;
-Semaphore      g_work_sem;
-Semaphore      g_done_sem;
-global int     g_num_threads    = 1;
-global int     g_rows_per_thread = 1;
-
-// Second pool for concurrent dual-field lin_solve (vx and vy diffuse together)
-WorkSlice[64]  g_slices2;
-Thread[64]     g_threads2;
-Semaphore      g_work_sem2;
-Semaphore      g_done_sem2;
+WorkSlice[64]  g_slices, g_slices2;
+Thread[64]     g_threads, g_threads2;
+Semaphore      g_work_sem, g_done_sem, g_work_sem2, g_done_sem2;
+int g_num_threads    = 1,
+    g_rows_per_thread = 1;
 
 // ============================================================================
 // MOUSE / WINDOW STATE
@@ -129,6 +123,8 @@ global int  mouse_x    = 0,
 global int  cur_w      = WIN_W,
             cur_h      = WIN_H;
 
+global int g_palette = 0;
+
 // Smoothed injection velocity - exponential moving average of mouse delta
 global double g_smooth_vx = 0.0,
               g_smooth_vy = 0.0;
@@ -139,8 +135,7 @@ global double g_smooth_vx = 0.0,
 
 def FluidWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT
 {
-    int nx;
-    int ny;
+    int nx, ny;
 
     if (msg == WM_CLOSE)      { DestroyWindow(hwnd); return 0; };
     if (msg == WM_DESTROY)    { PostQuitMessage(0);  return 0; };
@@ -178,6 +173,21 @@ def FluidWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESUL
         mouse_py = mouse_y;
         mouse_x  = nx;
         mouse_y  = ny;
+        return 0;
+    };
+
+    if (msg == WM_KEYDOWN)
+    {
+        if (wParam == 0x31) { g_palette = 0; return 0; };
+        if (wParam == 0x32) { g_palette = 1; return 0; };
+        if (wParam == 0x33) { g_palette = 2; return 0; };
+        if (wParam == 0x34) { g_palette = 3; return 0; };
+        if (wParam == 0x35) { g_palette = 4; return 0; };
+        if (wParam == 0x36) { g_palette = 5; return 0; };
+        if (wParam == 0x37) { g_palette = 6; return 0; };
+        if (wParam == 0x38) { g_palette = 7; return 0; };
+        if (wParam == 0x39) { g_palette = 8; return 0; };
+        if (wParam == 0x30) { g_palette = 9; return 0; };
         return 0;
     };
 
@@ -244,12 +254,11 @@ def set_bnd(int b, double* x) -> void
 def linsolve_band(int row_start, int row_end, int color,
                   double* x, double* x0, double a, double c_inv) -> void
 {
-    int jstart;
-    int jend;
-    int i_start;
-    int i;
-    int j;
-    int base;     // j * SIM_W - row base offset
+    int jstart,
+        jend,
+        i_start,
+        i, j,
+        base;     // j * SIM_W - row base offset
 
     jstart = row_start;
     jend   = row_end;
@@ -274,27 +283,21 @@ def linsolve_band(int row_start, int row_end, int color,
 def advect_band(int row_start, int row_end,
                 double* d, double* d0, double* u, double* v) -> void
 {
-    double dt0x;
-    double dt0y;
-    double max_x;
-    double max_y;
-    double bx;
-    double by;
-    double s0;
-    double s1;
-    double t0;
-    double t1;
-    int jstart;
-    int jend;
-    int i;
-    int j;
-    int i0;
-    int j0;
-    int i1;
-    int j1;
-    int base;
-    int base00;
-    int base01;
+    double dt0x,
+           dt0y,
+           max_x,
+           max_y,
+           bx,
+           by,
+           s0,
+           s1,
+           t0,
+           t1;
+    int jstart, jend,
+        i,  j,
+        i0, j0,
+        i1, j1,
+        base, base00, base01;
 
     dt0x  = DT * (double)(SIM_W - 2);
     dt0y  = DT * (double)(SIM_H - 2);
@@ -344,11 +347,9 @@ def project_div_band(int row_start, int row_end,
                      double* u, double* v, double* p, double* div,
                      double hx, double hy) -> void
 {
-    int jstart;
-    int jend;
-    int i;
-    int j;
-    int base;
+    int jstart, jend,
+        i, j,
+        base;
 
     jstart = row_start;
     jend   = row_end;
@@ -373,11 +374,9 @@ def project_grad_band(int row_start, int row_end,
                       double* u, double* v, double* p,
                       double hx_inv, double hy_inv) -> void
 {
-    int jstart;
-    int jend;
-    int i;
-    int j;
-    int base;
+    int jstart, jend,
+        i, j,
+        base;
 
     jstart = row_start;
     jend   = row_end;
@@ -396,19 +395,11 @@ def project_grad_band(int row_start, int row_end,
     return;
 };
 
-// Fused decay + plasma color mapping - dark saturated palette, never blows to white
-def decay_pixels_band(int row_start, int row_end, double* dens, float* pixels) -> void
+// Decay only - shader does color mapping on GPU
+def decay_band(int row_start, int row_end, double* dens) -> void
 {
-    int    i;
-    int    j;
-    int    base;
-    int    pidx;
+    int i, j, base;
     double d;
-    double t;
-    double s;
-    float  r;
-    float  g;
-    float  b;
 
     for (j = row_start; j < row_end; j++)
     {
@@ -418,68 +409,14 @@ def decay_pixels_band(int row_start, int row_end, double* dens, float* pixels) -
             d = dens[base + i] * DECAY;
             if (d < 0.0001) { d = 0.0; };
             dens[base + i] = d;
-
-            // Clamp and remap - t never exceeds 0.75 so we stay in deep color range
-            if (d > 200.0) { d = 200.0; };
-            t = d * INV255;
-            s = 0.0;
-            r = 0.0;
-            g = 0.0;
-            b = 0.0;
-
-            // Deep plasma palette: black -> deep blue -> cyan -> teal/green
-            // Caps at bright cyan, never reaches white
-            if (t < 0.15)
-            {
-                s = t * 6.667;
-                b = (float)(s * 0.6);
-            }
-            elif (t < 0.35)
-            {
-                s = (t - 0.15) * 5.0;
-                r = 0.0;
-                g = (float)(s * 0.4);
-                b = (float)(0.6 + s * 0.4);
-            }
-            elif (t < 0.55)
-            {
-                s = (t - 0.35) * 5.0;
-                r = 0.0;
-                g = (float)(0.4 + s * 0.5);
-                b = 1.0;
-            }
-            elif (t < 0.75)
-            {
-                s = (t - 0.55) * 5.0;
-                r = (float)(s * 0.2);
-                g = (float)(0.9 + s * 0.1);
-                b = (float)(1.0 - s * 0.3);
-            }
-            else
-            {
-                // Deep magenta/purple peak - still dark, never white
-                s = (t - 0.75) * 4.0;
-                r = (float)(0.2 + s * 0.4);
-                g = (float)(1.0 - s * 0.5);
-                b = (float)(0.7 + s * 0.1);
-            };
-
-            // Scale down overall brightness - keeps it translucent-feeling
-            r = r * 0.75;
-            g = g * 0.75;
-            b = b * 0.75;
-
-            pidx = (base + i) * 3;
-            pixels[pidx]     = r;
-            pixels[pidx + 1] = g;
-            pixels[pidx + 2] = b;
         };
     };
     return;
 };
 
+// Convert double fields to float upload buffers for GL texture upload
 // ============================================================================
-// PARTICLE SYSTEM
+// PARTICLE SYSTEM - update only, rendering done by GPU point sprites
 // ============================================================================
 
 def fast_rand() -> int
@@ -501,17 +438,13 @@ def particles_init() -> void
     return;
 };
 
-def particles_update_render(float* pixels) -> void
+def particles_update() -> void
 {
-    int    i;
-    int    pi;
-    int    pj;
-    int    pidx;
-    float  px;
-    float  py;
-    float  vx;
-    float  vy;
-    double dens_here;
+    int   i, pi, pj;
+    float px,
+          py,
+          vx,
+          vy;
 
     for (i = 0; i < NUM_PARTICLES; i++)
     {
@@ -526,11 +459,9 @@ def particles_update_render(float* pixels) -> void
         if (pj < 1)       { pj = 1;       };
         if (pj > SIM_H-2) { pj = SIM_H-2; };
 
-        // Sample velocity field - scale up significantly since solver values are small
         vx = (float)(g_vx[pj * SIM_W + pi] * 15.0);
         vy = (float)(g_vy[pj * SIM_W + pi] * 15.0);
 
-        // Thermal drift - strong enough to prevent lattice settling
         g_rand_seed = g_rand_seed * 1664525 + 1013904223;
         vx = vx + (float)((g_rand_seed & 0xFF) - 128) * 0.012;
         g_rand_seed = g_rand_seed * 1664525 + 1013904223;
@@ -539,7 +470,6 @@ def particles_update_render(float* pixels) -> void
         px = px + vx;
         py = py + vy;
 
-        // Wrap
         if (px < 0.0)           { px = px + (float)SIM_W; };
         if (px >= (float)SIM_W) { px = px - (float)SIM_W; };
         if (py < 0.0)           { py = py + (float)SIM_H; };
@@ -547,21 +477,6 @@ def particles_update_render(float* pixels) -> void
 
         g_part_x[i] = px;
         g_part_y[i] = py;
-
-        // Render only inside fluid
-        pi = (int)px;
-        pj = (int)py;
-        if (pi >= 1 & pi < SIM_W-1 & pj >= 1 & pj < SIM_H-1)
-        {
-            dens_here = g_dens[pj * SIM_W + pi];
-            if (dens_here > 15.0)
-            {
-                pidx = (pj * SIM_W + pi) * 3;
-                pixels[pidx]     = 1.0;
-                pixels[pidx + 1] = 1.0;
-                pixels[pidx + 2] = 1.0;
-            };
-        };
     };
     return;
 };
@@ -604,9 +519,9 @@ def worker(void* arg) -> void*
                               sl.proj_u, sl.proj_v, sl.proj_p,
                               sl.proj_hx_inv, sl.proj_hy_inv);
         }
-        elif (sl.phase == PHASE_DECAY_PIXELS)
+        elif (sl.phase == PHASE_DECAY)
         {
-            decay_pixels_band(sl.row_start, sl.row_end, sl.dp_dens, sl.dp_pixels);
+            decay_band(sl.row_start, sl.row_end, sl.dp_dens);
         };
 
         semaphore_post(@g_done_sem);
@@ -649,9 +564,9 @@ def worker2(void* arg) -> void*
                               sl.proj_u, sl.proj_v, sl.proj_p,
                               sl.proj_hx_inv, sl.proj_hy_inv);
         }
-        elif (sl.phase == PHASE_DECAY_PIXELS)
+        elif (sl.phase == PHASE_DECAY)
         {
-            decay_pixels_band(sl.row_start, sl.row_end, sl.dp_dens, sl.dp_pixels);
+            decay_band(sl.row_start, sl.row_end, sl.dp_dens);
         };
 
         semaphore_post(@g_done_sem2);
@@ -788,19 +703,40 @@ def dispatch_project_grad(double* u, double* v, double* p,
     return;
 };
 
-def dispatch_decay_pixels() -> void
+def dispatch_decay() -> void
 {
     int t;
 
     for (t = 0; t < g_num_threads; t++)
     {
-        g_slices[t].phase     = PHASE_DECAY_PIXELS;
-        g_slices[t].dp_dens   = g_dens;
-        g_slices[t].dp_pixels = g_pixels;
+        g_slices[t].phase   = PHASE_DECAY;
+        g_slices[t].dp_dens = g_dens;
     };
     store_fence();
     for (t = 0; t < g_num_threads; t++) { semaphore_post(@g_work_sem); };
     for (t = 0; t < g_num_threads; t++) { semaphore_wait(@g_done_sem); };
+    return;
+};
+
+// Convert double fields to float upload buffers - single-threaded, cheap
+def upload_textures() -> void
+{
+    int   i, n, vidx;
+    float d, scale;
+
+    scale = 4.0;
+    n     = SIM_W * SIM_H;
+
+    for (i = 0; i < n; i++)
+    {
+        d = (float)(g_dens[i] * INV255);
+        if (d > 1.0) { d = 1.0; };
+        g_dens_tex[i] = d;
+
+        vidx = i * 2;
+        g_vel_tex[vidx]     = (float)(g_vx[i] * scale) + 0.5;
+        g_vel_tex[vidx + 1] = (float)(g_vy[i] * scale) + 0.5;
+    };
     return;
 };
 
@@ -844,10 +780,7 @@ def diffuse(int b, double* x, double* x0, double diff) -> void
 
 def project(double* u, double* v, double* p, double* div) -> void
 {
-    double hx;
-    double hy;
-    double hx_inv;
-    double hy_inv;
+    double hx, hy, hx_inv, hy_inv;
 
     hx     = 1.0 / (double)(SIM_W - 2);
     hy     = 1.0 / (double)(SIM_H - 2);
@@ -893,10 +826,8 @@ def lin_solve_parallel2(int b, double* x, double* x0, double a, double c) -> voi
 def diffuse_concurrent(int b1, double* x1, double* x10, double diff1,
                         int b2, double* x2, double* x20, double diff2) -> void
 {
-    double a1;
-    double a2;
-    double c_inv1;
-    double c_inv2;
+    double a1, a2,
+           c_inv1, c_inv2;
     int k;
 
     a1     = DT * diff1 * (double)(SIM_W - 2) * (double)(SIM_H - 2);
@@ -967,17 +898,11 @@ def dens_step() -> void
 
 def add_source() -> void
 {
-    int    gx;
-    int    gy;
-    int    r;
-    int    i;
-    int    j;
-    double raw_vx;
-    double raw_vy;
-    double dx;
-    double dy;
-    double dist;
-    double fall;
+    int    gx, gy, r, i, j;
+    double raw_vx,
+           raw_vy,
+           dx, dy,
+           dist, fall;
 
     if (!mouse_down)
     {
@@ -988,7 +913,7 @@ def add_source() -> void
     };
 
     gx = mouse_x * SIM_W / cur_w;
-    gy = mouse_y * SIM_H / cur_h;
+    gy = (cur_h - 1 - mouse_y) * SIM_H / cur_h;
 
     if (gx < 1)       { gx = 1;       };
     if (gx > SIM_W-2) { gx = SIM_W-2; };
@@ -997,13 +922,13 @@ def add_source() -> void
 
     // Raw delta scaled to grid space
     raw_vx = (double)(mouse_x - mouse_px) * (double)SIM_W / (double)cur_w;
-    raw_vy = (double)(mouse_y - mouse_py) * (double)SIM_H / (double)cur_h;
+    raw_vy = (double)(mouse_py - mouse_y) * (double)SIM_H / (double)cur_h;
 
     // Exponential moving average - smooths direction, follows gesture
     g_smooth_vx = g_smooth_vx * 0.8 + raw_vx * 0.2;
     g_smooth_vy = g_smooth_vy * 0.8 + raw_vy * 0.2;
 
-    r = 6;
+    r = 3;
 
     for (j = gy - r; j <= gy + r; j++)
     {
@@ -1037,6 +962,170 @@ def add_source() -> void
 };
 
 // ============================================================================
+// GLSL SHADER SOURCES
+// ============================================================================
+
+byte[] VERT_SRC = "#version 120
+void main() {
+    gl_TexCoord[0] = gl_MultiTexCoord0;
+    gl_Position    = gl_Vertex;
+}
+\0";
+
+byte[] FRAG_SRC = "#version 120
+uniform sampler2D u_dens;
+uniform sampler2D u_vel;
+uniform vec2      u_res;
+uniform int       u_palette;
+
+void main() {
+    vec2 uv = gl_TexCoord[0].xy;
+
+    float d  = texture2D(u_dens, uv).r;
+    vec2  v  = texture2D(u_vel,  uv).ra - 0.5;
+    float vm = length(v) * 2.0;
+    float t  = clamp(d, 0.0, 1.0);
+
+    // Wide bloom - 8-tap gather at two radii
+    vec2  px   = 1.0 / u_res;
+    float blur = 0.0;
+    blur += texture2D(u_dens, uv + vec2(-px.x,       0.0      )).r;
+    blur += texture2D(u_dens, uv + vec2( px.x,       0.0      )).r;
+    blur += texture2D(u_dens, uv + vec2( 0.0,       -px.y     )).r;
+    blur += texture2D(u_dens, uv + vec2( 0.0,        px.y     )).r;
+    blur += texture2D(u_dens, uv + vec2(-px.x*2.5,  -px.y*2.5 )).r;
+    blur += texture2D(u_dens, uv + vec2( px.x*2.5,  -px.y*2.5 )).r;
+    blur += texture2D(u_dens, uv + vec2(-px.x*2.5,   px.y*2.5 )).r;
+    blur += texture2D(u_dens, uv + vec2( px.x*2.5,   px.y*2.5 )).r;
+    blur *= 0.125;
+    float glow = clamp(blur * 3.0 + vm * t * 0.5, 0.0, 1.0);
+
+    vec3 col = vec3(0.0);
+
+    // 1: Classic plasma - blue/cyan/magenta
+    if (u_palette == 0) {
+        col.r = 0.5 - 0.5 * cos(3.14159 * (t * 1.2 + 0.0));
+        col.g = 0.5 - 0.5 * cos(3.14159 * (t * 1.2 + 0.4));
+        col.b = 0.5 - 0.5 * cos(3.14159 * (t * 1.2 + 0.8));
+    }
+    // 2: Fire - black -> red -> orange -> yellow
+    else if (u_palette == 1) {
+        col.r = clamp(t * 3.0,       0.0, 1.0);
+        col.g = clamp(t * 3.0 - 1.0, 0.0, 1.0);
+        col.b = clamp(t * 3.0 - 2.0, 0.0, 1.0);
+    }
+    // 3: Toxic - green/yellow-green
+    else if (u_palette == 2) {
+        col.r = 0.5 - 0.5 * cos(3.14159 * (t * 1.2 + 0.9));
+        col.g = 0.5 - 0.5 * cos(3.14159 * (t * 1.2 + 0.3));
+        col.b = 0.5 - 0.5 * cos(3.14159 * (t * 1.2 + 1.3));
+    }
+    // 4: Ice - deep blue -> cyan -> white
+    else if (u_palette == 3) {
+        col.r = 0.5 - 0.5 * cos(3.14159 * (t * 1.0 + 1.0));
+        col.g = 0.5 - 0.5 * cos(3.14159 * (t * 1.0 + 0.6));
+        col.b = 0.5 - 0.5 * cos(3.14159 * (t * 1.0 + 0.1));
+    }
+    // 5: Sunset - purple -> magenta -> orange
+    else if (u_palette == 4) {
+        col.r = 0.5 - 0.5 * cos(3.14159 * (t * 1.1 + 0.1));
+        col.g = 0.5 - 0.5 * cos(3.14159 * (t * 1.1 + 0.9));
+        col.b = 0.5 - 0.5 * cos(3.14159 * (t * 1.1 + 0.5));
+    }
+    // 6: Deep ocean - navy -> teal -> seafoam
+    else if (u_palette == 5) {
+        col.r = 0.5 - 0.5 * cos(3.14159 * (t * 1.3 + 1.2));
+        col.g = 0.5 - 0.5 * cos(3.14159 * (t * 1.3 + 0.7));
+        col.b = 0.5 - 0.5 * cos(3.14159 * (t * 1.3 + 0.2));
+    }
+    // 7: Neon - hot pink -> purple -> electric blue
+    else if (u_palette == 6) {
+        col.r = 0.5 - 0.5 * cos(3.14159 * (t * 1.4 + 0.2));
+        col.g = 0.5 - 0.5 * cos(3.14159 * (t * 1.4 + 1.1));
+        col.b = 0.5 - 0.5 * cos(3.14159 * (t * 1.4 + 0.6));
+    }
+    // 8: Gold - brown -> gold -> bright yellow
+    else if (u_palette == 7) {
+        col.r = clamp(t * 2.5,       0.0, 1.0);
+        col.g = clamp(t * 2.5 - 0.4, 0.0, 1.0);
+        col.b = clamp(t * 3.0 - 2.2, 0.0, 0.3);
+    }
+    // 9: Monochrome - white core with soft halo
+    else if (u_palette == 8) {
+        float lum = t * t * 2.0;
+        col = vec3(clamp(lum, 0.0, 1.0));
+    }
+    // 0: Rainbow - full hue cycle across density
+    else {
+        float h = t * 6.0;
+        float f = clamp(h - floor(h), 0.0, 1.0);
+        if      (h < 1.0) { col = vec3(1.0,     f,       0.0     ); }
+        else if (h < 2.0) { col = vec3(1.0-f,   1.0,     0.0     ); }
+        else if (h < 3.0) { col = vec3(0.0,     1.0,     f       ); }
+        else if (h < 4.0) { col = vec3(0.0,     1.0-f,   1.0     ); }
+        else if (h < 5.0) { col = vec3(f,       0.0,     1.0     ); }
+        else              { col = vec3(1.0,     0.0,     1.0-f   ); }
+        col *= t;
+    }
+
+    // Saturation boost
+    float grey = dot(col, vec3(0.299, 0.587, 0.114));
+    col = mix(vec3(grey), col, 1.8);
+
+    // Additive glow halo
+    col += col * glow * 1.4;
+
+    // Velocity shimmer
+    col += vec3(0.08, 0.2, 0.4) * vm * d * 0.6;
+
+    col *= t;
+    float alpha = clamp(t * 8.0, 0.0, 1.0);
+    gl_FragColor = vec4(col, alpha);
+}
+\0";
+
+// ============================================================================
+// GL EXTENSION FUNCTION POINTERS
+// ============================================================================
+
+def{}* glCreateShader_fp(int)                 -> int;
+def{}* glShaderSource_fp(int,int,byte**,int*) -> void;
+def{}* glCompileShader_fp(int)                -> void;
+def{}* glCreateProgram_fp()                   -> int;
+def{}* glAttachShader_fp(int,int)             -> void;
+def{}* glLinkProgram_fp(int)                  -> void;
+def{}* glUseProgram_fp(int)                   -> void;
+def{}* glGetUniformLocation_fp(int,byte*)     -> int;
+def{}* glUniform1i_fp(int,int)                -> void;
+def{}* glUniform2f_fp(int,float,float)        -> void;
+def{}* glActiveTexture_fp(int)                -> void;
+def{}* glDeleteShader_fp(int)                 -> void;
+def{}* glDeleteProgram_fp(int)                -> void;
+
+def compile_shader(int shader_type, byte* src) -> int
+{
+    int shader;
+    byte[1]* src_arr;
+    int[1]   len_arr;
+    shader       = glCreateShader_fp(shader_type);
+    src_arr      = [src];
+    len_arr[0]   = -1;
+    glShaderSource_fp(shader, 1, @src_arr[0], @len_arr[0]);
+    glCompileShader_fp(shader);
+    return shader;
+};
+
+def link_program(int vert, int frag) -> int
+{
+    int prog;
+    prog = glCreateProgram_fp();
+    glAttachShader_fp(prog, vert);
+    glAttachShader_fp(prog, frag);
+    glLinkProgram_fp(prog);
+    return prog;
+};
+
+// ============================================================================
 // SYSTEM_INFO for core count
 // ============================================================================
 
@@ -1062,15 +1151,22 @@ extern def !! GetSystemInfo(void*) -> void;
 
 def main() -> int
 {
-    size_t field_bytes;
-    size_t pixel_bytes;
+    size_t field_bytes, dens_tex_bytes, vel_tex_bytes;
     HINSTANCE hInstance;
     HWND hwnd;
     HDC  hdc;
     MSG  msg;
     bool running;
-    int  tex_id;
-    int  t;
+    int  tex_dens,
+         tex_vel,
+         vert_sh,
+         frag_sh,
+         prog,
+         u_dens,
+         u_vel, u_res,
+         u_palette,
+         t, i;
+    float px, py;
     RECT client_rect;
     SYSTEM_INFO_PARTIAL sysinfo;
 
@@ -1079,8 +1175,9 @@ def main() -> int
     if (g_num_threads < 1)           { g_num_threads = 1;           };
     if (g_num_threads > MAX_THREADS) { g_num_threads = MAX_THREADS; };
 
-    field_bytes = (size_t)(SIM_W * SIM_H * 8);
-    pixel_bytes = (size_t)(SIM_W * SIM_H * 3 * 4);
+    field_bytes    = (size_t)(SIM_W * SIM_H * 8);
+    dens_tex_bytes = (size_t)(SIM_W * SIM_H * 4);        // 1 float per cell
+    vel_tex_bytes  = (size_t)(SIM_W * SIM_H * 4 * 2);    // 2 floats per cell
 
     g_dens      = (double*)fmalloc(field_bytes);
     g_dens_prev = (double*)fmalloc(field_bytes);
@@ -1088,7 +1185,8 @@ def main() -> int
     g_vy        = (double*)fmalloc(field_bytes);
     g_vx_prev   = (double*)fmalloc(field_bytes);
     g_vy_prev   = (double*)fmalloc(field_bytes);
-    g_pixels    = (float*)fmalloc(pixel_bytes);
+    g_dens_tex  = (float*)fmalloc(dens_tex_bytes);
+    g_vel_tex   = (float*)fmalloc(vel_tex_bytes);
     g_part_x    = (float*)fmalloc((size_t)(NUM_PARTICLES * 4));
     g_part_y    = (float*)fmalloc((size_t)(NUM_PARTICLES * 4));
 
@@ -1099,7 +1197,6 @@ def main() -> int
     semaphore_init(@g_work_sem2, 0);
     semaphore_init(@g_done_sem2, 0);
 
-    // Row ranges computed once at startup - never change
     g_rows_per_thread = SIM_H / g_num_threads;
     if (g_rows_per_thread < 1) { g_rows_per_thread = 1; };
 
@@ -1107,10 +1204,10 @@ def main() -> int
     {
         g_slices[t].row_start  = t * g_rows_per_thread;
         g_slices[t].row_end    = (t == g_num_threads - 1) ? SIM_H : (t + 1) * g_rows_per_thread;
-        g_slices[t].phase      = PHASE_DECAY_PIXELS;
+        g_slices[t].phase      = PHASE_DECAY;
         g_slices2[t].row_start = t * g_rows_per_thread;
         g_slices2[t].row_end   = (t == g_num_threads - 1) ? SIM_H : (t + 1) * g_rows_per_thread;
-        g_slices2[t].phase     = PHASE_DECAY_PIXELS;
+        g_slices2[t].phase     = PHASE_DECAY;
         thread_create((void*)@worker,  (void*)@g_slices[t],  @g_threads[t]);
         thread_create((void*)@worker2, (void*)@g_slices2[t], @g_threads2[t]);
     };
@@ -1147,6 +1244,22 @@ def main() -> int
     hdc = GetDC(hwnd);
 
     GLContext gl(hdc);
+    gl.load_extensions();
+
+    // Bind extension function pointers
+    glCreateShader_fp       = _glCreateShader;
+    glShaderSource_fp       = _glShaderSource;
+    glCompileShader_fp      = _glCompileShader;
+    glCreateProgram_fp      = _glCreateProgram;
+    glAttachShader_fp       = _glAttachShader;
+    glLinkProgram_fp        = _glLinkProgram;
+    glUseProgram_fp         = _glUseProgram;
+    glGetUniformLocation_fp = _glGetUniformLocation;
+    glUniform1i_fp          = _glUniform1i;
+    glUniform2f_fp          = _glUniform2f;
+    glActiveTexture_fp      = _glActiveTexture;
+    glDeleteShader_fp       = _glDeleteShader;
+    glDeleteProgram_fp      = _glDeleteProgram;
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -1155,16 +1268,37 @@ def main() -> int
     glDisable(GL_DEPTH_TEST);
     glEnable(GL_TEXTURE_2D);
 
-    tex_id = 0;
-    glGenTextures(1, @tex_id);
-    glBindTexture(GL_TEXTURE_2D, tex_id);
+    // Compile and link shader
+    vert_sh = compile_shader(GL_VERTEX_SHADER,   @VERT_SRC[0]);
+    frag_sh = compile_shader(GL_FRAGMENT_SHADER, @FRAG_SRC[0]);
+    prog    = link_program(vert_sh, frag_sh);
+
+    u_dens    = glGetUniformLocation_fp(prog, "u_dens\0");
+    u_vel     = glGetUniformLocation_fp(prog, "u_vel\0");
+    u_res     = glGetUniformLocation_fp(prog, "u_res\0");
+    u_palette = glGetUniformLocation_fp(prog, "u_palette\0");
+
+    // Density texture - single channel float
+    tex_dens = 0;
+    glGenTextures(1, @tex_dens);
+    glBindTexture(GL_TEXTURE_2D, tex_dens);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, (i32)GL_LUMINANCE, SIM_W, SIM_H, 0,
+                 (i32)GL_LUMINANCE, (i32)GL_FLOAT, (void*)g_dens_tex);
 
-    glTexImage2D(GL_TEXTURE_2D, 0, (i32)GL_RGB, SIM_W, SIM_H, 0,
-                 (i32)GL_RGB, (i32)GL_FLOAT, (void*)g_pixels);
+    // Velocity texture - two channel (vx=luminance, vy=alpha)
+    tex_vel = 0;
+    glGenTextures(1, @tex_vel);
+    glBindTexture(GL_TEXTURE_2D, tex_vel);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, (i32)GL_LUMINANCE_ALPHA, SIM_W, SIM_H, 0,
+                 (i32)GL_LUMINANCE_ALPHA, (i32)GL_FLOAT, (void*)g_vel_tex);
 
     ShowWindow(hwnd, SW_SHOW);
     UpdateWindow(hwnd);
@@ -1189,33 +1323,85 @@ def main() -> int
         if (cur_h < 1) { cur_h = 1; };
         glViewport(0, 0, cur_w, cur_h);
 
+        // Simulate
         add_source();
         vel_step();
         dens_step();
-        dispatch_decay_pixels();
+        dispatch_decay();
 
-        // Particle update + render on top of density field, single-threaded
-        // (4096 particles is trivial cost vs the solver)
-        particles_update_render(g_pixels);
+        // Update particles CPU-side
+        particles_update();
 
-        glBindTexture(GL_TEXTURE_2D, tex_id);
+        // Convert double fields to float upload buffers
+        upload_textures();
+
+        // Upload density texture to unit 0
+        glActiveTexture_fp(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, tex_dens);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SIM_W, SIM_H,
-                        (i32)GL_RGB, (i32)GL_FLOAT, (void*)g_pixels);
+                        (i32)GL_LUMINANCE, (i32)GL_FLOAT, (void*)g_dens_tex);
+
+        // Upload velocity texture to unit 1
+        glActiveTexture_fp(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, tex_vel);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, SIM_W, SIM_H,
+                        (i32)GL_LUMINANCE_ALPHA, (i32)GL_FLOAT, (void*)g_vel_tex);
 
         glClearColor(0.0, 0.0, 0.0, 1.0);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        glBegin(GL_QUADS);
-        glTexCoord2f(0.0, 1.0); glVertex2f(-1.0, -1.0);
-        glTexCoord2f(1.0, 1.0); glVertex2f( 1.0, -1.0);
-        glTexCoord2f(1.0, 0.0); glVertex2f( 1.0,  1.0);
-        glTexCoord2f(0.0, 0.0); glVertex2f(-1.0,  1.0);
+        // Draw fluid via shader - fullscreen triangle
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glUseProgram_fp(prog);
+        glUniform1i_fp(u_dens, 0);
+        glUniform1i_fp(u_vel,  1);
+        glUniform2f_fp(u_res, (float)SIM_W, (float)SIM_H);
+        glUniform1i_fp(u_palette, g_palette);
+
+        glBegin(GL_TRIANGLES);
+        glTexCoord2f(0.0, 0.0); glVertex2f(-1.0, -1.0);
+        glTexCoord2f(2.0, 0.0); glVertex2f( 3.0, -1.0);
+        glTexCoord2f(0.0, 2.0); glVertex2f(-1.0,  3.0);
         glEnd();
+
+        glUseProgram_fp(0);
+        glDisable(GL_BLEND);
+
+        // Draw particles as GL_POINTS on top of fluid
+        // Switch to unit 0 so fixed-function point rendering works
+        glActiveTexture_fp(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture_fp(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture_fp(GL_TEXTURE0);
+
+        glPointSize(2.0);
+        glColor4f(1.0, 1.0, 1.0, 1.0);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+
+        glBegin(GL_POINTS);
+        for (i = 0; i < NUM_PARTICLES; i++)
+        {
+            px = g_part_x[i];
+            py = g_part_y[i];
+            // Only draw where density is present
+            if (g_dens[(int)py * SIM_W + (int)px] > 15.0)
+            {
+                // Convert grid coords to NDC
+                glVertex2f((px / (float)SIM_W) * 2.0 - 1.0,
+                           (py / (float)SIM_H) * 2.0 - 1.0);
+            };
+        };
+        glEnd();
+
+        glDisable(GL_BLEND);
 
         gl.present();
     };
 
-    // Shut down both thread pools
+    // Shutdown
     for (t = 0; t < g_num_threads; t++)
     {
         g_slices[t].phase  = PHASE_EXIT;
@@ -1234,7 +1420,11 @@ def main() -> int
     semaphore_destroy(@g_work_sem2);
     semaphore_destroy(@g_done_sem2);
 
-    glDeleteTextures(1, @tex_id);
+    glDeleteShader_fp(vert_sh);
+    glDeleteShader_fp(frag_sh);
+    glDeleteProgram_fp(prog);
+    glDeleteTextures(1, @tex_dens);
+    glDeleteTextures(1, @tex_vel);
     gl.__exit();
 
     ffree((u64)g_dens);
@@ -1243,7 +1433,8 @@ def main() -> int
     ffree((u64)g_vy);
     ffree((u64)g_vx_prev);
     ffree((u64)g_vy_prev);
-    ffree((u64)g_pixels);
+    ffree((u64)g_dens_tex);
+    ffree((u64)g_vel_tex);
     ffree((u64)g_part_x);
     ffree((u64)g_part_y);
 

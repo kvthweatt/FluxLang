@@ -62,28 +62,28 @@ namespace standard
     {
         // ============ CONSTANTS ============
 
-        global const i64 TIME_NS_PER_US  = 1000;
-        global const i64 TIME_NS_PER_MS  = 1000000;
-        global const i64 TIME_NS_PER_SEC = 1000000000;
+        global const i64 TIME_NS_PER_US  = 1000,
+                         TIME_NS_PER_MS  = 1000000,
+                         TIME_NS_PER_SEC = 1000000000;
 
         // ============ FORWARD DECLARATIONS ============
 
 #ifdef __WINDOWS__
-        def win_time_now() -> i64;
-        def win_sleep_ms(u32) -> void;
-        def win_sleep_us(u32) -> void;
+        def win_time_now() -> i64,
+            win_sleep_ms(u32) -> void,
+            win_sleep_us(u32) -> void;
 #endif;
 
 #ifdef __LINUX__
-        def nix_time_now() -> i64;
-        def nix_sleep_ms(u32) -> void;
-        def nix_sleep_us(u32) -> void;
+        def nix_time_now() -> i64,
+            nix_sleep_ms(u32) -> void,
+            nix_sleep_us(u32) -> void;
 #endif;
 
 #ifdef __MACOS__
-        def mac_time_now() -> i64;
-        def mac_sleep_ms(u32) -> void;
-        def mac_sleep_us(u32) -> void;
+        def mac_time_now() -> i64,
+            mac_sleep_ms(u32) -> void,
+            mac_sleep_us(u32) -> void;
 #endif;
 
         // ============ PLATFORM IMPLEMENTATIONS ============

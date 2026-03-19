@@ -405,22 +405,22 @@ namespace standard
         // Rounding functions overloads
         def floor(float x) -> float
         {
-            i64 int_part = (i64)x;
+            i64 int_part = x;
             if (x >= 0.0 | x == (float)int_part)
             {
                 return (float)int_part;
             };
-            return (float)(int_part - (i64)1);
+            return (float)(int_part - 1);
         };
         
         def ceil(float x) -> float
         {
-            i64 int_part = (i64)x;
+            i64 int_part = x;
             if (x <= 0.0 | x == (float)int_part)
             {
                 return (float)int_part;
             };
-            return (float)(int_part + (i64)1);
+            return (float)(int_part + 1);
         };
         
         def round(float x) -> float

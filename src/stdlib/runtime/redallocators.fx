@@ -780,6 +780,11 @@ namespace standard
                     bin_push(size, (FreeNode*)ptr);
                 };
 
+                def ffree(byte* ptr) -> void
+                {
+                    ffree((u64)ptr);
+                };
+
                 def frealloc(u64 ptr, size_t new_size) -> u64
                 {
                     switch (ptr == (u64)0) { case (1) { return fmalloc(new_size); } default {}; };

@@ -1408,6 +1408,9 @@ class CastExpression(Expression):
 
         # Handle integer to pointer cast (ADDRESS_CAST support)
         elif isinstance(source_val.type, ir.IntType) and isinstance(target_llvm_type, ir.PointerType):
+            # LLVM requires pointer-sized integer for inttoptr; zext if narrower
+            if source_val.type.width < 64:
+                source_val = builder.zext(source_val, ir.IntType(64), name="int_to_ptr_zext")
             return builder.inttoptr(source_val, target_llvm_type, name="int_to_ptr")
 
         # Handle pointer to integer cast
@@ -2480,6 +2483,11 @@ class MethodCall(Expression):
 
                 zero = ir.Constant(ir.IntType(32), 0)
                 arg_val = builder.gep(arg_val, [zero, zero], name=f"marg{i}_decay")
+
+            # Coerce argument type to match expected parameter type (e.g. i32 -> i64)
+            if arg_val.type != expected_type:
+                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(
+                    builder, module, arg_val, expected_type, i)
 
             args.append(arg_val)
 
@@ -3690,7 +3698,11 @@ class VariableDeclaration(ASTNode):
                 )
             else:
                 arg_val = arg_expr.codegen(builder, module)
-            
+
+            if param_index < len(func.args):
+                expected_type = func.args[param_index].type
+                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(builder, module, arg_val, expected_type, i)
+
             args.append(arg_val)
         
         builder.call(func, args)
