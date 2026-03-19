@@ -111,7 +111,11 @@ def !!_start() -> int
 #ifdef FLUX_RUNTIME
 def !!FRTStartup() -> int
 {
-    int return_code;
+    int return_code, argc, argi, pos, start, len, j;
+    byte* arg;
+    bool quoted;
+    wchar* cmdLine;
+
     switch (CURRENT_OS)
     {
         #ifdef __WINDOWS__
@@ -126,11 +130,8 @@ def !!FRTStartup() -> int
             standard::memory::allocators::stdheap::table_init();
 
             // Parse command line manually from GetCommandLineW
-            wchar* cmdLine = GetCommandLineW();
+            cmdLine = GetCommandLineW();
 
-            // Count arguments
-            int argc = 0;
-            int pos = 0;
             while (cmdLine[pos] != (wchar)0)
             {
                 // Skip whitespace
@@ -169,7 +170,7 @@ def !!FRTStartup() -> int
             byte** argv = (byte**)fmalloc((u64)argc * (u64)8);
 
             // Fill argv
-            int argi = 0;
+            argi = 0;
             pos = 0;
             while (cmdLine[pos] != (wchar)0)
             {
@@ -184,8 +185,8 @@ def !!FRTStartup() -> int
                 };
 
                 // Measure token length
-                int start = pos, len = 0;
-                bool quoted;
+                start = pos;
+                len = 0;
                 if (cmdLine[pos] == (wchar)34)
                 {
                     quoted = true;
@@ -211,8 +212,8 @@ def !!FRTStartup() -> int
                 };
 
                 // Copy low byte of each wchar into byte buffer
-                byte* arg = (byte*)fmalloc((u64)len + (u64)1);
-                int j = 0;
+                arg = (byte*)fmalloc((u64)len + (u64)1);
+                j = 0;
                 while (j < len)
                 {
                     arg[j] = (byte)cmdLine[start + j];

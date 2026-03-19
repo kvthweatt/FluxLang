@@ -1451,6 +1451,17 @@ class TypeSystem:
             if type_spec.bit_width is None:
                 raise ValueError(f"DATA type missing bit_width for {type_spec}")
             base_type = ir.IntType(type_spec.bit_width)
+        elif type_spec.base_type == DataType.THIS:
+            # 'this' return type — resolve to a pointer to the enclosing object's struct type.
+            # create_method_signature handles the authoritative THIS->struct* conversion;
+            # here we just need to not crash. Fall back to i8* when context is unavailable.
+            obj_name = getattr(module, '_current_object_name', None)
+            if obj_name is not None:
+                resolved = NamespaceTypeHandler.resolve_custom_type(module, obj_name,
+                                getattr(module, '_current_namespace', ''))
+                base_type = ir.PointerType(resolved) if resolved is not None else ir.PointerType(ir.IntType(8))
+            else:
+                base_type = ir.PointerType(ir.IntType(8))
         else:
             raise ValueError(f"Unsupported type: {type_spec.base_type}")
         
@@ -3921,6 +3932,10 @@ class ObjectTypeHandler:
                                 struct_type: 'ir.Type', module: 'ir.Module') -> tuple:
         from fast import DataType
         
+        # Make the enclosing object name available to get_llvm_type for 'this' return types
+        prev_object_name = getattr(module, '_current_object_name', None)
+        module._current_object_name = object_name
+
         # Return type
         if method.return_type.base_type == DataType.THIS:
             ret_type = ir.PointerType(struct_type)
@@ -3943,6 +3958,8 @@ class ObjectTypeHandler:
         # Combine object name with mangled method name
         # For namespace__objectname, this produces: namespace__objectname.__init_0_ret_void
         func_name = f"{object_name}.{mangled_method_name}"
+
+        module._current_object_name = prev_object_name
         
         return func_type, func_name
     
@@ -4001,6 +4018,8 @@ class ObjectTypeHandler:
         method_builder = ir.IRBuilder(entry_block)
         
         saved_namespace = module.symbol_table.current_namespace
+        prev_object_name = getattr(module, '_current_object_name', None)
+        module._current_object_name = object_name
         
         # Enter method scope
         module.symbol_table.enter_scope()
@@ -4042,6 +4061,7 @@ class ObjectTypeHandler:
         module.symbol_table.exit_scope()
         
         module.symbol_table.current_namespace = saved_namespace
+        module._current_object_name = prev_object_name
         return
 
 

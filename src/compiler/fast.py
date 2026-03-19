@@ -3041,6 +3041,13 @@ class Stringify(Expression):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Emit the identifier name as a null-terminated i8* global constant."""
+        # Validate that the identifier actually exists
+        current_ns = getattr(module, '_current_namespace', '') or module.symbol_table.current_namespace
+        if (module.symbol_table.get_llvm_value(self.name) is None and
+                self.name not in module.globals and
+                module.symbol_table.lookup_variable(self.name, current_ns) is None and
+                module.symbol_table.lookup_function(self.name, current_ns) is None):
+            raise ComptimeError(f"Cannot stringify undefined identifier '{self.name}'")
         string_bytes = bytearray(self.name.encode('ascii')) + bytearray(1)  # null terminator
         str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
         str_val = ir.Constant(str_array_ty, string_bytes)

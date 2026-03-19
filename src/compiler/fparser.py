@@ -126,6 +126,7 @@ class FluxParser:
         self._template_functions = {}  # name -> (template_param_names, FunctionDef AST)
         self._emitted_template_instances = set()  # mangled names already instantiated
         self._template_instantiations = []  # concrete FunctionDef nodes to inject into program
+        self._parsed_objects = {}  # object_name -> ObjectDef AST node
         self._custom_operators: Dict[str, str] = {}  # symbol string -> base function name
         self._function_depth = 0  # Tracks nesting depth; nested function defs are illegal
         self._loop_depth = 0      # Tracks nesting depth of for/while/do-while loops
@@ -1392,7 +1393,13 @@ class FluxParser:
                 while not self.expect(TokenType.RIGHT_BRACE):
                     if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                         method = self.function_def()
-                        if isinstance(method, list):
+                        if method is None:
+                            # Template method: re-register under qualified ObjectName.methodname key
+                            for bare_name, tmpl in list(self._template_functions.items()):
+                                qualified = f"{name}.{bare_name}"
+                                if qualified not in self._template_functions:
+                                    self._template_functions[qualified] = tmpl
+                        elif isinstance(method, list):
                             for m in method:
                                 m.is_private = is_private
                                 methods.append(m)
@@ -1439,7 +1446,13 @@ class FluxParser:
                 # Regular member (defaults to public)
                 if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                     method = self.function_def()
-                    if isinstance(method, list):
+                    if method is None:
+                        # Template method: re-register under qualified ObjectName.methodname key
+                        for bare_name, tmpl in list(self._template_functions.items()):
+                            qualified = f"{name}.{bare_name}"
+                            if qualified not in self._template_functions:
+                                self._template_functions[qualified] = tmpl
+                    elif isinstance(method, list):
                         methods.extend(method)
                     else:
                         methods.append(method)
@@ -1482,7 +1495,9 @@ class FluxParser:
                 self._object_init_params[name] = len(explicit_params)
                 break
 
-        return ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits)
+        obj_def = ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits)
+        self._parsed_objects[name] = obj_def
+        return obj_def
     
     def namespace_def(self) -> NamespaceDef:
         """
@@ -3276,7 +3291,20 @@ class FluxParser:
             concrete_func.name = func_name  # Keep original name; normal mangling handles uniqueness
             concrete_func.no_mangle = False
 
-            self._template_instantiations.append(concrete_func)
+            # If this is a method template (qualified name), inject directly into the
+            # object's method list so it is compiled via emit_method_body, which
+            # correctly registers 'this' and builds the method signature.
+            if '.' in func_name:
+                object_part = func_name.rsplit('.', 1)[0]
+                method_part = func_name.rsplit('.', 1)[1]
+                concrete_func.name = method_part
+                obj_def = self._parsed_objects.get(object_part)
+                if obj_def is not None:
+                    obj_def.methods.append(concrete_func)
+                else:
+                    self._template_instantiations.append(concrete_func)
+            else:
+                self._template_instantiations.append(concrete_func)
 
         return func_name  # Call site uses the original name; overload resolution finds it
 
@@ -3359,7 +3387,34 @@ class FluxParser:
                 # Member access - could be struct field or object method/member
                 self.advance()
                 member = self.consume(TokenType.IDENTIFIER).value
-                
+
+                # Handle templated method call: obj.method<T>(args)
+                # Build the qualified key that was registered in object_def
+                if self.expect(TokenType.LESS_THAN):
+                    obj_name = expr.name if isinstance(expr, Identifier) else None
+                    qualified = f"{obj_name}.{member}" if obj_name else None
+                    if qualified and qualified in self._template_functions:
+                        self.advance()  # consume '<'
+                        type_names = []
+                        type_specs = []
+                        ts = self.type_spec()
+                        type_names.append(self._type_system_to_mangle_str(ts))
+                        type_specs.append(ts)
+                        while self.expect(TokenType.COMMA):
+                            self.advance()
+                            ts = self.type_spec()
+                            type_names.append(self._type_system_to_mangle_str(ts))
+                            type_specs.append(ts)
+                        self.consume(TokenType.GREATER_THAN)
+                        self.consume(TokenType.LEFT_PAREN)
+                        args = []
+                        if not self.expect(TokenType.RIGHT_PAREN):
+                            args = self.argument_list()
+                        self.consume(TokenType.RIGHT_PAREN)
+                        mangled = self._resolve_template_call(qualified, type_names, type_specs)
+                        expr = FunctionCall(mangled, args)
+                        continue
+
                 # Create MemberAccess node - codegen will determine if it's
                 # StructFieldAccess or object member based on type
                 expr = MemberAccess(expr, member)
