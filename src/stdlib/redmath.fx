@@ -65,6 +65,12 @@ namespace standard
             return x;
         };
 
+        def abs(double x) -> double
+        {
+            if (x < 0.0) {return 0.0 - x;};
+            return x;
+        };
+
         // Minimum overloads
         def min(i8 a, i8 b) -> i8
         {
@@ -172,8 +178,8 @@ namespace standard
         {
             if (x <= 0) {return 0;};
             
-            i8 y = x / 2;
-            i8 prev_y = 0;
+            i8 y = x / 2,
+               prev_y = 0;
             
             while (y != prev_y)
             {
@@ -188,8 +194,8 @@ namespace standard
         {
             if (x <= 0) {return 0;};
             
-            i16 y = x / 2;
-            i16 prev_y = 0;
+            i16 y = x / 2,
+                prev_y = 0;
             
             while (y != prev_y)
             {
@@ -204,8 +210,8 @@ namespace standard
         {
             if (x <= 0) {return 0;};
             
-            i32 y = x / 2;
-            i32 prev_y = 0;
+            i32 y = x / 2,
+                prev_y = 0;
             
             while (y != prev_y)
             {
@@ -220,8 +226,8 @@ namespace standard
         {
             if (x <= 0) {return 0;};
             
-            i64 y = x / 2;
-            i64 prev_y = 0;
+            i64 y = x / 2,
+                prev_y = 0;
             
             while (y != prev_y)
             {
@@ -236,8 +242,8 @@ namespace standard
         {
             if (x <= 0.0) {return 0.0;};
             
-            float y = x / 2.0;
-            float prev_y = 0.0;
+            float y = x / 2.0,
+                  prev_y = 0.0;
             
             for (i32 i = 0; i < 20; i++)  // Fixed iterations
             {
@@ -252,6 +258,26 @@ namespace standard
             return y;
         };
         
+        def sqrt(double x) -> double
+        {
+            if (x <= 0.0) {return 0.0;};
+            
+            double y = x / 2.0,
+                   prev_y = 0.0;
+            
+            for (i32 i = 0; i < 40; i++)  // More iterations for double precision
+            {
+                prev_y = y;
+                y = (y + x / y) / 2.0;
+                if (abs(y - prev_y) < 0.000000000000001)
+                {
+                    break;
+                };
+            };
+            
+            return y;
+        };
+
 
         // Factorial overloads
         def factorial(i8 n) -> i8
@@ -305,9 +331,10 @@ namespace standard
         // GCD overloads
         def gcd(i8 a, i8 b) -> i8
         {
+            i8 temp;
             while (b != 0)
             {
-                i8 temp = b;
+                temp = b;
                 b = a % b;
                 a = temp;
             };
@@ -316,9 +343,10 @@ namespace standard
         
         def gcd(i16 a, i16 b) -> i16
         {
+            i16 temp;
             while (b != 0)
             {
-                i16 temp = b;
+                temp = b;
                 b = a % b;
                 a = temp;
             };
@@ -327,9 +355,10 @@ namespace standard
         
         def gcd(i32 a, i32 b) -> i32
         {
+            i32 temp;
             while (b != 0)
             {
-                i32 temp = b;
+                temp = b;
                 b = a % b;
                 a = temp;
             };
@@ -338,9 +367,10 @@ namespace standard
         
         def gcd(i64 a, i64 b) -> i64
         {
+            i64 temp;
             while (b != 0)
             {
-                i64 temp = b;
+                temp = b;
                 b = a % b;
                 a = temp;
             };
@@ -425,9 +455,9 @@ namespace standard
             while (x < (float)-PIF) { x += 2.0 * (float)PIF; };
             
             // Taylor series approximation
-            float result = x;
-            float term = x;
-            float x2 = x * x;
+            float result = x,
+                  term = x,
+                  x2 = x * x;
             
             for (i32 i = 1; i <= 5; i++)
             {
@@ -458,15 +488,17 @@ namespace standard
             // Reduce |x| to [0, 1] using identities:
             //   atan(x) = PI/2 - atan(1/x)       for x > 1
             //   atan(x) = -atan(-x)               for x < 0
-            bool neg = x < 0.0;
+            bool neg = x < 0.0,
+                 recip;
             if (neg) { x = 0.0 - x; };
 
-            bool recip = x > 1.0;
+            recip = x > 1.0;
             if (recip) { x = 1.0 / x; };
 
             // Polynomial approximation on [0, 1]
-            float x2 = x * x;
-            float r = x * (1.0
+            float x2 = x * x,
+
+                r = x * (1.0
                 - x2 * (0.3333333
                 - x2 * (0.2
                 - x2 * (0.142857
@@ -509,8 +541,8 @@ namespace standard
         def exp(float x) -> float
         {
             // Simple Taylor series for exp(x)
-            float result = 1.0;
-            float term = 1.0;
+            float result = 1.0,
+                  term = 1.0;
             
             for (i32 i = 1; i <= 10; i++)
             {
@@ -526,10 +558,10 @@ namespace standard
             if (x <= 0.0) {return 0.0;};
             
             // Simple approximation using series
-            float y = (x - 1.0) / (x + 1.0);
-            float y2 = y * y;
-            float result = 2.0 * y;
-            float term = y;
+            float y = (x - 1.0) / (x + 1.0),
+                  y2 = y * y,
+                  result = 2.0 * y,
+                  term = y;
             
             for (i32 i = 1; i <= 10; i += 2)
             {
@@ -539,97 +571,65 @@ namespace standard
             
             return result;
         };
+
+        def log(double x) -> double
+        {
+            if (x <= 0.0) {return 0.0;};
+            if (x == 1.0) {return 0.0;};
+
+            // Reduce x = m * 2^e so that m is in [1, 2)
+            // then ln(x) = ln(m) + e * ln(2)
+            double m = x;
+            i32 e = 0;
+
+            while (m >= 2.0)
+            {
+                m = m / 2.0;
+                e = e + 1;
+            };
+            while (m < 1.0)
+            {
+                m = m * 2.0;
+                e = e - 1;
+            };
+
+            double t, t2, term, result, contrib;
+
+            // Now m in [1, 2); let t = (m-1)/(m+1), ln(m) via Artanh series:
+            // ln(m) = 2 * (t + t^3/3 + t^5/5 + ...)  converges fast for |t| < 0.18
+            t  = (m - 1.0) / (m + 1.0);
+            t2 = t * t;
+            term = t;
+            result = t;
+            
+            for (i32 i = 1; i < 40; i++)
+            {
+                term = term * t2;
+                contrib = term / (double)(2 * i + 1);
+                result = result + contrib;
+                if (contrib < 0.000000000000001 & contrib > (0.0 - 0.000000000000001))
+                {
+                    break;
+                };
+            };
+
+            result = result * 2.0;
+
+            // ln(2) ~ 0.6931471805599453
+            result = result + (double)e * 0.6931471805599453;
+
+            return result;
+        };
         
         def log10(float x) -> float
         {
-            return log(x) / 2.30258509299404568402;  // ln(10)
+            return log(x) / 2.30258;  // ln(10.7)
         };
 
-        // RNG
-        ///
-        object Random
+        def log10(double x) -> double
         {
-            i64 seed;
-            
-            def __init() -> this
-            {
-                this.seed = (i64*)12345;
-                return this;
-            };
-            
-            def __init(i64 seed) -> this
-            {
-                if (seed == 0) {seed = 12345;};
-                this.seed = seed & 0x7FFFFFFF;
-                return this;
-            };
-            
-            def next_i8() -> i8
-            {
-                this.seed = (this.seed * 1103515245 + 12345) & 0x7FFFFFFF;
-                return (this.seed & 0xFF);
-            };
-            
-            def next_i16() -> i16
-            {
-                this.seed = (this.seed * 1103515245 + 12345) & 0x7FFFFFFF;
-                return (i16)(this.seed & 0xFFFF);
-            };
-            
-            def next_i32() -> i32
-            {
-                this.seed = (this.seed * 1103515245 + 12345) & 0x7FFFFFFF;
-                return (i32)(this.seed & 0xFFFFFFFF);
-            };
-            
-            def next_i64() -> i64
-            {
-                this.seed = (this.seed * 1103515245 + 12345) & 0x7FFFFFFF;
-                i64 high = this.next_i32();
-                i64 low = this.next_i32();
-                return (high << 32) | low;
-            };
-            
-            def next_float() -> float
-            {
-                return (float)this.next_i32() / 2147483647.0;
-            };
-            
-            def next_range_i8(i8 min_val, i8 max_val) -> i8
-            {
-                i8 range = max_val - min_val + 1;
-                return min_val + (this.next_i8() % range);
-            };
-            
-            def next_range_i16(i16 min_val, i16 max_val) -> i16
-            {
-                i16 range = max_val - min_val + 1;
-                return min_val + (this.next_i16() % range);
-            };
-            
-            def next_range_i32(i32 min_val, i32 max_val) -> i32
-            {
-                i32 range = max_val - min_val + 1;
-                return min_val + (this.next_i32() % range);
-            };
-            
-            def next_range_i64(i64 min_val, i64 max_val) -> i64
-            {
-                i64 range = max_val - min_val + 1;
-                return min_val + (this.next_i64() % range);
-            };
-            
-            def next_range_float(float min_val, float max_val) -> float
-            {
-                return min_val + this.next_float() * (max_val - min_val);
-            };
-            
-            def next_bool() -> bool
-            {
-                return (this.next_i32() & 1) == 1;
-            };
+            return log(x) / 2.30258509299404568402; // ln(3.0)
         };
-        ///
 
         // Additional math utilities with overloads
         def lerp(i8 a, i8 b, float t) -> i8

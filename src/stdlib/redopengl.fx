@@ -620,8 +620,7 @@ namespace standard
             // Multiply two Matrix4 values: out = a * b
             def mat4_mul(Matrix4* a, Matrix4* b, Matrix4* out) -> void
             {
-                int row, col,
-                    k;
+                int row, col, k;
 
                 float sum;
 
@@ -784,17 +783,15 @@ namespace standard
             // Build a look-at view matrix
             def mat4_lookat(GLVec3* eye, GLVec3* target, GLVec3* up, Matrix4* out) -> void
             {
-                GLVec3 f;
+                GLVec3 f,s,u;
                 f.x = target.x - eye.x;
                 f.y = target.y - eye.y;
                 f.z = target.z - eye.z;
                 vec3_normalize(@f);
 
-                GLVec3 s;
                 vec3_cross(@f, up, @s);
                 vec3_normalize(@s);
 
-                GLVec3 u;
                 vec3_cross(@s, @f, @u);
 
                 out.m[0]  =  s.x; out.m[1]  =  u.x; out.m[2]  = -f.x; out.m[3]  = 0.0;

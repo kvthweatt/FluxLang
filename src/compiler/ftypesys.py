@@ -4805,6 +4805,8 @@ class AssignmentTypeHandler:
                 if val.type != element_type:
                     val = builder.bitcast(val, element_type, name="ptr_cast")
             
+            # Coerce val to match element_type (e.g. float literal -> double*, int width)
+            val = AssignmentTypeHandler.convert_value_for_assignment(builder, val, element_type)
             builder.store(val, elem_ptr)
             return val
         elif isinstance(array.type, ir.PointerType):
@@ -4846,8 +4848,8 @@ class AssignmentTypeHandler:
             if isinstance(val.type, ir.PointerType) and not isinstance(element_type, ir.PointerType):
                 elem_ptr = builder.bitcast(elem_ptr, ir.PointerType(val.type), name="void_arr_elem_ptr")
             
-            # Note: val is already generated in the caller, so we just use it directly
-            # No type conversion needed - LLVM handles compatible pointer types
+            # Coerce val to match element_type (e.g. float literal -> double*, int width)
+            val = AssignmentTypeHandler.convert_value_for_assignment(builder, val, element_type)
             builder.store(val, elem_ptr)
             return val
         else:

@@ -2,7 +2,11 @@
 // Provides clean wrapper around Win32 API for window creation and management
 #ifndef FLUX_STANDARD_TYPES
 #import "redtypes.fx";
-#endif
+#endif;
+
+#ifndef FLUX_STANDARD_MATH
+#import "redmath.fx";
+#endif;
 
 #ifndef __WIN32_INTERFACE__
 #def __WIN32_INTERFACE__ 1;
