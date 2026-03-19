@@ -770,6 +770,23 @@ All of this is runtime behavior, but can also happen in comptime.
 
 ---
 
+## Stringification:
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+def main() -> int
+{
+    int Hello = 5;
+
+    print($Hello); print();
+    return 0;
+};
+```
+
+---
+
 ## Direct type conversion
 ```
 #import "standard.fx";
@@ -1889,7 +1906,7 @@ auto result = calculate_something();  // Infers return type
 # Keyword list:
 ```
 alignof, and, as, asm, assert, auto, break, bool, case, catch, cdecl, const, continue, data, def, default,
-do, double, elif, else, enum, false, fastcall, float, for, global, heap, if, in, is, int, local, long, namespace, new, noinit, not, object, or,
+do, double, elif, else, enum, false, fastcall, float, for, global, goto, heap, if, in, is, int, label, local, long, namespace, new, noinit, not, object, or,
 private, public, register, return, signed, singinit, sizeof, stack, stdcall, struct, switch, this, thiscall, throw, true, try, typeof, uint, ulong,
 union, unsigned, vectorcall, void, volatile, while, xor
 ```
@@ -1965,6 +1982,7 @@ SCOPE = "::"
 QUESTION = "?"
 COLON = ":"
 TIE = "~"
+STRINGIFY = "$"
 LAMBDA_ARROW = "<:-"
 RETURN_ARROW = "->"
 CHAIN_ARROW = "<-"
@@ -1984,3 +2002,6 @@ bool, int `5`, float `3.14159`, double `3.1415926585`, char `"B"` == `66` - `65`
 ## All types:
 
 bool, int, uint, long, ulong, float, double, char, data, void, object, struct, union, enum
+
+## Preprocesor directives:
+`#import`, `#dir`, `#def`, `#ifdef`, `#ifndef`, `#else`, `#warn`, `#stop`
