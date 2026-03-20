@@ -78,7 +78,7 @@ namespace standard
                 // Returns file size without changing current position
                 def get_size() -> int
                 {
-                    if (this.handle == 0)
+                    if (this.handle is void)
                     {
                         this.error_state = 1;
                         return -1;

@@ -87,6 +87,7 @@ class TokenType(Enum):
     NAMESPACE = auto()    # "        namespace
     NOT = auto()          # "        not            Represents operator: !
     NO_INIT = auto()      # "        noinit
+    NORET = auto()        # "        noreturn
     OBJECT = auto()       # "        object
     OPERATOR = auto()     # "        operator
     OR = auto()           # "        or             Represents operator: |
@@ -390,6 +391,7 @@ class FluxLexer:
             'namespace': TokenType.NAMESPACE,
             'not': TokenType.NOT,
             'noinit': TokenType.NO_INIT,
+            'noreturn': TokenType.NORET,
             'object': TokenType.OBJECT,
             'operator': TokenType.OPERATOR,
             'or': TokenType.OR,

@@ -796,33 +796,48 @@ class TypeResolver:
     def resolve_type(module: ir.Module, typename: str, current_namespace: str = "") -> Optional[ir.Type]:
         # 1. SYMBOL TABLE - HIGHEST PRIORITY (PRIMARY SOURCE)
         if hasattr(module, 'symbol_table'):
-            result = module.symbol_table.lookup(typename, current_namespace)
+            entry = module.symbol_table.lookup_any(typename, current_namespace)
             
-            if result and result[0] == SymbolKind.TYPE:
-                # result[1] should be the TypeSystem for this type alias
-                if result[1] is not None:
-                    t = TypeSystem.get_llvm_type(result[1], module, include_array=True)
-                    #if isinstance(t, ir.VoidType):
-                    #    print(f"[TYPE RESOLVE] WARNING: resolved {typename} to void", file=sys.stdout)
-                    return t
-                
-                # If no TypeSystem stored but it's marked as a type,
-                # try to find it in module storage
-                # First try direct name
-                for storage_name in ['_type_aliases', '_struct_types', '_union_types', '_enum_types']:
-                    if hasattr(module, storage_name):
-                        storage = getattr(module, storage_name)
-                        if typename in storage:
-                            return storage[typename]
-                
-                # Try mangled name in current namespace
-                if current_namespace:
-                    mangled = TypeResolver.mangle_namespace_name(current_namespace, typename)
+            if entry:
+                if entry.kind == SymbolKind.TYPE:
+                    # result[1] should be the TypeSystem for this type alias
+                    if entry.type_spec is not None:
+                        t = TypeSystem.get_llvm_type(entry.type_spec, module, include_array=True)
+                        #if isinstance(t, ir.VoidType):
+                        #    print(f"[TYPE RESOLVE] WARNING: resolved {typename} to void", file=sys.stdout)
+                        return t
+                    
+                    # If no TypeSystem stored but it's marked as a type,
+                    # try to find it in module storage
+                    # First try direct name
                     for storage_name in ['_type_aliases', '_struct_types', '_union_types', '_enum_types']:
                         if hasattr(module, storage_name):
                             storage = getattr(module, storage_name)
-                            if mangled in storage:
-                                return storage[mangled]
+                            if typename in storage:
+                                return storage[typename]
+                    
+                    # Try mangled name in current namespace
+                    if current_namespace:
+                        mangled = TypeResolver.mangle_namespace_name(current_namespace, typename)
+                        for storage_name in ['_type_aliases', '_struct_types', '_union_types', '_enum_types']:
+                            if hasattr(module, storage_name):
+                                storage = getattr(module, storage_name)
+                                if mangled in storage:
+                                    return storage[mangled]
+                
+                elif entry.kind in (SymbolKind.STRUCT, SymbolKind.UNION):
+                    if entry.llvm_type is not None:
+                        return entry.llvm_type
+                    # Fallback to _struct_types/_union_types storage
+                    for storage_name in ['_struct_types', '_union_types']:
+                        if hasattr(module, storage_name):
+                            storage = getattr(module, storage_name)
+                            if typename in storage:
+                                return storage[typename]
+                            if current_namespace:
+                                mangled = TypeResolver.mangle_namespace_name(current_namespace, typename)
+                                if mangled in storage:
+                                    return storage[mangled]
         
         # 2. NAMESPACE RESOLUTION - fallback for types not in symbol table yet
         # (e.g., during parsing before all types are registered)
@@ -1229,10 +1244,14 @@ class TypeResolver:
     def resolve_custom_type(module: ir.Module, typename: str, current_namespace: str = "") -> Optional[ir.Type]:
         """Resolve custom type name to LLVM type - UNIFIED method."""
         if hasattr(module, 'symbol_table'):
-            result = module.symbol_table.lookup(typename, current_namespace)
-            if result and result[0] == SymbolKind.TYPE:
-                if result[1] is not None:
-                    return TypeSystem.get_llvm_type(result[1], module)
+            entry = module.symbol_table.lookup_any(typename, current_namespace)
+            if entry:
+                if entry.kind == SymbolKind.TYPE:
+                    if entry.type_spec is not None:
+                        return TypeSystem.get_llvm_type(entry.type_spec, module)
+                elif entry.kind in (SymbolKind.STRUCT, SymbolKind.UNION):
+                    if entry.llvm_type is not None:
+                        return entry.llvm_type
         return TypeResolver.resolve_type(module, typename, current_namespace)
     
     @staticmethod
@@ -1332,6 +1351,9 @@ class TypeSystem:
             element_init = TypeSystem.get_default_initializer(llvm_type.element)
             return ir.Constant(llvm_type, [element_init] * llvm_type.count)
         elif isinstance(llvm_type, ir.LiteralStructType):
+            field_inits = [TypeSystem.get_default_initializer(field) for field in llvm_type.elements]
+            return ir.Constant(llvm_type, field_inits)
+        elif isinstance(llvm_type, ir.IdentifiedStructType):
             field_inits = [TypeSystem.get_default_initializer(field) for field in llvm_type.elements]
             return ir.Constant(llvm_type, field_inits)
         else:

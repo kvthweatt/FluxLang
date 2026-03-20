@@ -219,9 +219,9 @@ namespace standard
             {
                 if (index < 0 | index >= this.length)
                 {
-                    return (char)0;
+                    return 0;
                 };
-                return (char)this.value[index];
+                return char(this.value[index]);
             };
 
             def setat(int index, char ch) -> bool
@@ -350,7 +350,7 @@ namespace standard
                     };
                     
                     byte* temp = replace_first(result, find, replace);
-                    free(result);
+                    ffree(long(result));
                     result = temp;
                     
                     if (result == 0)
@@ -364,7 +364,7 @@ namespace standard
 
             def replace_char(char oldch, char newch) -> bool
             {
-                for (int i = 0; i < this.length; i = i + 1)
+                for (int i; i < this.length; i = i + 1)
                 {
                     if ((char)this.value[i] == oldch)
                     {
@@ -386,23 +386,23 @@ namespace standard
                 
                 if (before == 0 | after == 0)
                 {
-                    if (before != 0) { free(before); };
-                    if (after != 0) { free(after); };
+                    if (before != 0) { ffree(long(before)); };
+                    if (after != 0) { ffree(long(after)); };
                     return false;
                 };
 
                 byte* temp = manip::concat(before, s);
-                free(before);
+                ffree(long(before));
                 
                 if (temp == 0)
                 {
-                    free(after);
+                    ffree(long(after));
                     return false;
                 };
 
                 byte* result = manip::concat(temp, after);
-                free(temp);
-                free(after);
+                ffree(long(temp));
+                ffree(long(after));
 
                 if (result == 0)
                 {
@@ -429,19 +429,19 @@ namespace standard
                     length = this.length - start;
                 };
 
-                byte* before = manip::copy_n(this.value, start);
-                byte* after = manip::copy_string(this.value + start + length);
+                byte* before = manip::copy_n(this.value, start),
+                      after = manip::copy_string(this.value + start + length);
 
                 if (before == 0 | after == 0)
                 {
-                    if (before != 0) { free(before); };
-                    if (after != 0) { free(after); };
+                    if (before != 0) { ffree(long(before)); };
+                    if (after != 0) { ffree(long(after)); };
                     return false;
                 };
 
                 byte* result = manip::concat(before, after);
-                free(before);
-                free(after);
+                ffree(long(before));
+                ffree(long(after));
 
                 if (result == 0)
                 {
@@ -449,16 +449,16 @@ namespace standard
                 };
 
                 this.value = result;
-                this.length = (i32)standard::strings::strlen(result);
+                this.length = standard::strings::strlen(result);
                 return true;
             };
 
             // ===== CASE CONVERSION =====
             def toupper() -> bool
             {
-                for (int i = 0; i < this.length; i = i + 1)
+                for (int i; i < this.length; i = i + 1)
                 {
-                    this.value[i] = (byte)helpers::to_upper((char)this.value[i]);
+                    this.value[i] = helpers::to_upper(this.value[i]);
                 };
                 return true;
             };
@@ -467,7 +467,7 @@ namespace standard
             {
                 for (int i = 0; i < this.length; i = i + 1)
                 {
-                    this.value[i] = (byte)helpers::to_lower((char)this.value[i]);
+                    this.value[i] = helpers::to_lower(this.value[i]);
                 };
                 return true;
             };
@@ -476,21 +476,22 @@ namespace standard
             {
                 // Capitalize first letter of each word
                 bool at_word_start = true;
-                for (int i = 0; i < this.length; i = i + 1)
+                char ch;
+                for (int i; i < this.length; i = i + 1)
                 {
-                    char ch = (char)this.value[i];
+                    ch = this.value[i];
                     if (helpers::is_whitespace(ch))
                     {
                         at_word_start = true;
                     }
                     elif (at_word_start)
                     {
-                        this.value[i] = (byte)helpers::to_upper(ch);
+                        this.value[i] = helpers::to_upper(ch);
                         at_word_start = false;
                     }
                     else
                     {
-                        this.value[i] = (byte)helpers::to_lower(ch);
+                        this.value[i] = helpers::to_lower(ch);
                     };
                 };
                 return true;
@@ -499,19 +500,19 @@ namespace standard
             // ===== TRIMMING =====
             def trim() -> bool
             {
-                int start = 0;
-                while (start < this.length & helpers::is_whitespace((char)this.value[start]))
+                int start, end, newlen;
+                while (start < this.length & helpers::is_whitespace(this.value[start])
                 {
                     start = start + 1;
                 };
 
-                int end = this.length - 1;
-                while (end >= start & helpers::is_whitespace((char)this.value[end]))
+                end = this.length - 1;
+                while (end >= start & helpers::is_whitespace(this.value[end])
                 {
                     end = end - 1;
                 };
 
-                int newlen = end - start + 1;
+                newlen = end - start + 1;
                 if (newlen <= 0)
                 {
                     this.clear();
@@ -531,7 +532,7 @@ namespace standard
 
             def trimstart() -> bool
             {
-                int start = 0;
+                int start;
                 while (start < this.length & helpers::is_whitespace((char)this.value[start]))
                 {
                     start = start + 1;
@@ -573,19 +574,19 @@ namespace standard
 
             def trim_char(char ch) -> bool
             {
-                int start = 0;
+                int start, end, newlen;
                 while (start < this.length & (char)this.value[start] == ch)
                 {
                     start = start + 1;
                 };
 
-                int end = this.length - 1;
+                end = this.length - 1;
                 while (end >= start & (char)this.value[end] == ch)
                 {
                     end = end - 1;
                 };
 
-                int newlen = end - start + 1;
+                newlen = end - start + 1;
                 if (newlen <= 0)
                 {
                     this.clear();
@@ -610,7 +611,7 @@ namespace standard
                 {
                     return false;
                 };
-                for (int i = 0; i < this.length; i = i + 1)
+                for (int i; i < this.length; i = i + 1)
                 {
                     if (!helpers::is_alpha((char)this.value[i]))
                     {
@@ -626,7 +627,7 @@ namespace standard
                 {
                     return false;
                 };
-                for (int i = 0; i < this.length; i = i + 1)
+                for (int i; i < this.length; i = i + 1)
                 {
                     if (!helpers::is_digit((char)this.value[i]))
                     {
@@ -642,7 +643,7 @@ namespace standard
                 {
                     return false;
                 };
-                for (int i = 0; i < this.length; i = i + 1)
+                for (int i; i < this.length; i = i + 1)
                 {
                     if (!helpers::is_alnum((char)this.value[i]))
                     {
@@ -651,17 +652,18 @@ namespace standard
                 };
                 return true;
             };
-///
+
             def isupper() -> bool
             {
                 if (this.length == 0)
                 {
                     return false;
                 };
-                bool has_alpha = false;
-                for (int i = 0; i < this.length; i = i + 1)
+                bool has_alpha;
+                char ch;
+                for (int i; i < this.length; i = i + 1)
                 {
-                    char ch = (char)this.value[i];
+                    ch = this.value[i];
                     if (is_alpha(ch))
                     {
                         has_alpha = true;
@@ -680,10 +682,11 @@ namespace standard
                 {
                     return false;
                 };
-                bool has_alpha = false;
+                bool has_alpha;
+                char ch;
                 for (int i = 0; i < this.length; i = i + 1)
                 {
-                    char ch = (char)this.value[i];
+                    ch = this.value[i];
                     if (is_alpha(ch))
                     {
                         has_alpha = true;
@@ -695,7 +698,7 @@ namespace standard
                 };
                 return has_alpha;
             };
-///
+
             // ===== CONVERSION =====
             def toint() -> int
             {
@@ -745,12 +748,12 @@ namespace standard
                 return count_words(this.value);
             };
 
-            // ===== SPLITTING (Note: These return arrays that must be freed) =====
+            // ===== SPLITTING (Note: These return arrays that must be ffree'd) =====
             def split(char delimiter) -> byte**
             {
                 // Count delimiters to know array size
                 int count = 1;
-                for (int i = 0; i < this.length; i = i + 1)
+                for (int i; i < this.length; i = i + 1)
                 {
                     if ((char)this.value[i] == delimiter)
                     {
@@ -759,20 +762,19 @@ namespace standard
                 };
 
                 // Allocate array of string pointers
-                byte** result = (byte**)malloc((u64)(count + 1) * 8); // +1 for null terminator
+                byte** result = (byte**)fmalloc((u64)(count + 1) * 8); // +1 for null terminator
                 if (result == 0)
                 {
                     return (byte**)0;
                 };
 
-                int part_idx = 0;
-                int start = 0;
+                int part_idx, start, part_len;
 
-                for (int i = 0; i <= this.length; i = i + 1)
+                for (int i; i <= this.length; i = i + 1)
                 {
                     if (i == this.length | (char)this.value[i] == delimiter)
                     {
-                        int part_len = i - start;
+                        part_len = i - start;
                         result[part_idx] = manip::copy_n(this.value + start, part_len);
                         part_idx = part_idx + 1;
                         start = i + 1;
@@ -796,7 +798,7 @@ namespace standard
             // ===== OTHER =====
             def reverse() -> bool
             {
-                for (int i = 0; i < this.length / 2; i = i + 1)
+                for (int i; i < this.length / 2; i = i + 1)
                 {
                     byte temp = this.value[i];
                     this.value[i] = this.value[this.length - 1 - i];
@@ -814,9 +816,9 @@ namespace standard
             {
                 // Simple DJB2 hash
                 int hash = 5381;
-                for (int i = 0; i < this.length; i = i + 1)
+                for (int i; i < this.length; i = i + 1)
                 {
-                    hash = ((hash << 5) + hash) + (int)this.value[i];
+                    hash = ((hash << 5) + hash) + int(this.value[i]);
                 };
                 return hash;
             };

@@ -21,12 +21,11 @@
 //   9. Call bad_compute() again - now routed through the fix
 //  10. Send ACK to server
 
-#import "standard.fx";
+#import "standard.fx", "rednet_windows.fx";
 #import "..\\..\\examples\\hotpatch_protocol2.fx";
-#import "rednet_windows.fx";
 
-using standard::io::console;
-using standard::net;
+using standard::io::console,
+      standard::net;
 
 // ============================================================================
 // The broken function - intentional null-write segfault
@@ -37,7 +36,7 @@ def bad_compute(ulong x) -> ulong
     // BUG: writes to address 0 - instant segfault
     ulong* null_ptr = (@)0;
     *null_ptr = x;
-    return x * (ulong)3;
+    return x * 3;
 };
 
 // ============================================================================
@@ -49,37 +48,37 @@ global int PATCH_BYTES = 14;
 def write_jmp_indirect(ulong dst) -> void
 {
     byte* p = (byte*)dst;
-    p[0] = (byte)0xFF;
-    p[1] = (byte)0x25;
-    p[2] = (byte)0x00;
-    p[3] = (byte)0x00;
-    p[4] = (byte)0x00;
-    p[5] = (byte)0x00;
+    p[0] = 0xFF;
+    p[1] = 0x25;
+    p[2] = 0x00;
+    p[3] = 0x00;
+    p[4] = 0x00;
+    p[5] = 0x00;
 };
 
 def write_addr64(ulong dst, ulong addr) -> void
 {
     byte* p = (byte*)dst;
-    p[0] = (byte)(addr & (ulong)0xFF);
-    p[1] = (byte)((addr >> (ulong)8)  & (ulong)0xFF);
-    p[2] = (byte)((addr >> (ulong)16) & (ulong)0xFF);
-    p[3] = (byte)((addr >> (ulong)24) & (ulong)0xFF);
-    p[4] = (byte)((addr >> (ulong)32) & (ulong)0xFF);
-    p[5] = (byte)((addr >> (ulong)40) & (ulong)0xFF);
-    p[6] = (byte)((addr >> (ulong)48) & (ulong)0xFF);
-    p[7] = (byte)((addr >> (ulong)56) & (ulong)0xFF);
+    p[0] = (addr & 0xFF);
+    p[1] = ((addr >> 8)  & 0xFF);
+    p[2] = ((addr >> 16) & 0xFF);
+    p[3] = ((addr >> 24) & 0xFF);
+    p[4] = ((addr >> 32) & 0xFF);
+    p[5] = ((addr >> 40) & 0xFF);
+    p[6] = ((addr >> 48) & 0xFF);
+    p[7] = ((addr >> 56) & 0xFF);
 };
 
 // Stamp a 14-byte absolute indirect JMP at target_addr pointing to patch_addr
 def install_patch(ulong target_addr, ulong patch_addr) -> void
 {
-    u32 old_protect = (u32)0;
-    VirtualProtect(target_addr, (size_t)PATCH_BYTES, (u32)0x40, @old_protect);
+    u32 old_protect = 0;
+    VirtualProtect(target_addr, PATCH_BYTES, 0x40, @old_protect);
 
     write_jmp_indirect(target_addr);
-    write_addr64(target_addr + (ulong)6, patch_addr);
+    write_addr64(target_addr + 6, patch_addr);
 
-    FlushInstructionCache((ulong)0xFFFFFFFFFFFFFFFF, target_addr, (size_t)PATCH_BYTES);
+    FlushInstructionCache(0xFFFFFFFFFFFFFFFF, target_addr, PATCH_BYTES);
 };
 
 // ============================================================================
@@ -124,7 +123,7 @@ def main() -> int
 
     // --- Connect to hotpatch server ---
     print("\n[client] connecting to 127.0.0.1:\0");
-    print((int)HOTPATCH_PORT);
+    print(HOTPATCH_PORT);
     print("...\n\0");
 
     // Build sockaddr_in manually - inet_addr already returns network byte order,
@@ -142,14 +141,14 @@ def main() -> int
     server_addr.sin_family  = (u16)AF_INET;
     server_addr.sin_port    = htons(HOTPATCH_PORT);
     server_addr.sin_addr    = inet_addr("127.0.0.1\0");
-    server_addr.sin_zero[0] = (byte)0;
-    server_addr.sin_zero[1] = (byte)0;
-    server_addr.sin_zero[2] = (byte)0;
-    server_addr.sin_zero[3] = (byte)0;
-    server_addr.sin_zero[4] = (byte)0;
-    server_addr.sin_zero[5] = (byte)0;
-    server_addr.sin_zero[6] = (byte)0;
-    server_addr.sin_zero[7] = (byte)0;
+    server_addr.sin_zero[0] = 0;
+    server_addr.sin_zero[1] = 0;
+    server_addr.sin_zero[2] = 0;
+    server_addr.sin_zero[3] = 0;
+    server_addr.sin_zero[4] = 0;
+    server_addr.sin_zero[5] = 0;
+    server_addr.sin_zero[6] = 0;
+    server_addr.sin_zero[7] = 0;
 
     int conn_result = connect(sockfd, @server_addr, 16);
     if (conn_result < 0)
@@ -187,10 +186,10 @@ def main() -> int
     };
 
     print("[client] magic OK, payload size = \0");
-    print((int)header.patch_size);
+    print(header.patch_size);
     print(" bytes\n\0");
 
-    if (header.patch_size > (u32)PATCH_MAX_SIZE)
+    if (header.patch_size > PATCH_MAX_SIZE)
     {
         print("[client] payload too large - rejecting\n\0");
         closesocket(sockfd);
@@ -199,10 +198,9 @@ def main() -> int
     };
 
     // --- Allocate RWX page for incoming code ---
-    ulong patch_page = VirtualAlloc(
-        (ulong)0, (size_t)4096, (u32)0x3000, (u32)0x40);
+    ulong patch_page = VirtualAlloc(0, 4096, 0x3000, 0x40);
 
-    if (patch_page == (ulong)0)
+    if (patch_page == 0)
     {
         print("[client] VirtualAlloc failed\n\0");
         closesocket(sockfd);
@@ -218,7 +216,7 @@ def main() -> int
     if (!recv_exact(sockfd, payload_ptr, (int)header.patch_size))
     {
         print("[client] failed to receive payload\n\0");
-        VirtualFree(patch_page, (size_t)0, (u32)0x8000);
+        VirtualFree(patch_page, 0, 0x8000);
         closesocket(sockfd);
         cleanup();
         return 1;
@@ -233,7 +231,7 @@ def main() -> int
     if (!recv_exact(sockfd, @recv_sig[0], HMAC_SIG_SIZE))
     {
         print("[client] failed to receive signature\n\0");
-        VirtualFree(patch_page, (size_t)0, (u32)0x8000);
+        VirtualFree(patch_page, 0, 0x8000);
         closesocket(sockfd);
         cleanup();
         return 1;
@@ -244,12 +242,12 @@ def main() -> int
 
     byte[32] expected_sig;
     byte* key_ptr = (byte*)@HMAC_KEY[0];
-    hmac_sha256(key_ptr, 32, payload_ptr, (int)header.patch_size, @expected_sig[0]);
+    hmac_sha256(key_ptr, 32, payload_ptr, header.patch_size, @expected_sig[0]);
 
     if (!sig_equal(@recv_sig[0], @expected_sig[0]))
     {
         print("[client] SIGNATURE INVALID - rejecting patch, possible tampering!\n\0");
-        VirtualFree(patch_page, (size_t)0, (u32)0x8000);
+        VirtualFree(patch_page, 0, 0x8000);
         closesocket(sockfd);
         cleanup();
         return 1;
@@ -258,8 +256,7 @@ def main() -> int
     print("[client] signature OK - patch is authentic\n\0");
 
     // --- Flush cache on the newly written page ---
-    FlushInstructionCache(
-        (ulong)0xFFFFFFFFFFFFFFFF, patch_page, (size_t)header.patch_size);
+    FlushInstructionCache(0xFFFFFFFFFFFFFFFF, patch_page, header.patch_size);
 
     // --- Install detour: bad_compute -> patch_page ---
     print("[client] installing patch over bad_compute...\n\0");
@@ -274,19 +271,19 @@ def main() -> int
 
     // --- Now call bad_compute - routed to the fix ---
     print("\n[client] calling bad_compute(7) via hotpatch...\n\0");
-    ulong result = bad_compute((ulong)7);
+    ulong result = bad_compute(7);
     print("[client] result = \0");
     print(result);
     print("\n\0");
 
     print("\n[client] calling bad_compute(10) via hotpatch...\n\0");
-    ulong result2 = bad_compute((ulong)10);
+    ulong result2 = bad_compute(10);
     print("[client] result2 = \0");
     print(result2);
     print("\n\0");
 
     // --- Cleanup ---
-    VirtualFree(patch_page, (size_t)0, (u32)0x8000);
+    VirtualFree(patch_page, 0, 0x8000);
     cleanup();
 
     print("\n=== Client Done ===\n\0");

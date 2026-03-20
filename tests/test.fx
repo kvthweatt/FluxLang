@@ -1,9 +1,13 @@
 #import "standard.fx";
 
+using standard::io::console,
+      standard::strings;
+
 def main() -> int
 {
-    float fragmentation = check_fragmentation();
-
-    print(fragmentation, 5);
+    for (int x; x < 10; x++)
+    {
+        print((int)x); print();
+    };
     return 0;
 };

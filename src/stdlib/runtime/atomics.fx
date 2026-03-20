@@ -440,8 +440,7 @@ namespace standard
         // Atomically bitwise-AND *ptr with mask; returns the old value.
         def fetch_and32(i32* ptr, i32 mask) -> i32
         {
-            i32 old;
-            i32 desired;
+            i32 old, desired;
             do
             {
                 old     = load32(ptr);
@@ -453,8 +452,7 @@ namespace standard
 
         def fetch_and64(i64* ptr, i64 mask) -> i64
         {
-            i64 old;
-            i64 desired;
+            i64 old, desired;
             do
             {
                 old     = load64(ptr);
@@ -480,8 +478,7 @@ namespace standard
 
         def fetch_or64(i64* ptr, i64 mask) -> i64
         {
-            i64 old;
-            i64 desired;
+            i64 old, desired;
             do
             {
                 old     = load64(ptr);
@@ -494,8 +491,7 @@ namespace standard
         // Atomically bitwise-XOR *ptr with mask; returns the old value.
         def fetch_xor32(i32* ptr, i32 mask) -> i32
         {
-            i32 old;
-            i32 desired;
+            i32 old, desired;
             do
             {
                 old     = load32(ptr);
@@ -507,8 +503,7 @@ namespace standard
 
         def fetch_xor64(i64* ptr, i64 mask) -> i64
         {
-            i64 old;
-            i64 desired;
+            i64 old, desired;
             do
             {
                 old     = load64(ptr);

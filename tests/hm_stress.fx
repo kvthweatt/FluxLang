@@ -10,7 +10,7 @@
 //   7. Collision/probe stress: sequential integer keys
 
 #import "standard.fx";
-#import "redhashmap.fx";
+#import "redcollections.fx";
 
 using standard::io::console,
       standard::collections;

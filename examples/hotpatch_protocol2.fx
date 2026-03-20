@@ -110,13 +110,13 @@ def hmac_sha256(byte* key, int key_len, byte* xdata, int xdata_len, byte* out) -
 // Constant-time prevents timing side-channels on the signature check.
 def sig_equal(byte* a, byte* b) -> bool
 {
-    byte diff = (byte)0;
+    byte diff;
     int i;
     for (i = 0; i < 32; i++)
     {
         diff = diff | (a[i] ^^ b[i]);
     };
-    return diff == (byte)0;
+    return diff == 0;
 };
 
 #endif;

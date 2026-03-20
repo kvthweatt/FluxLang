@@ -2247,7 +2247,13 @@ class MemberAccess(Expression):
             MemberAccessTypeHandler.is_this_double_pointer(obj_val)):
             # Load the actual 'this' pointer from the alloca
             obj_val = builder.load(obj_val, name="this_ptr")
-        
+
+        # General case: if obj_val is a pointer-to-struct-pointer (T**), load once to get T*
+        if (isinstance(obj_val.type, ir.PointerType) and
+                isinstance(obj_val.type.pointee, ir.PointerType) and
+                MemberAccessTypeHandler.is_struct_pointer(obj_val.type.pointee)):
+            obj_val = builder.load(obj_val, name="deref_struct_ptr")
+
         if isinstance(obj_val.type, ir.PointerType):
             # Handle pointer to struct (both literal and identified struct types)
             if MemberAccessTypeHandler.is_struct_pointer(obj_val.type):
@@ -4895,6 +4901,16 @@ class DeferStatement(Statement):
         return None
 
 @dataclass
+class NoreturnStatement(Statement):
+    def __repr__(self) -> str:
+        return "noreturn;"
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        if not builder.block.is_terminated:
+            builder.unreachable()
+        return None
+
+@dataclass
 class LabelStatement(Statement):
     name: str
 
@@ -5263,6 +5279,9 @@ class InlineAsm(Expression):
     body: str
     is_volatile: bool = False
     constraints: str = ""
+
+    def __repr__(self) -> str:
+        return self.body
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # Clean and format the assembly string - remove comment lines
@@ -5653,8 +5672,12 @@ class FunctionDef(ASTNode):
             builder._flux_va_end_fn = va_end_fn
 
         # Generate function body
-        self.body.codegen(builder, module)
-        
+        try:
+            self.body.codegen(builder, module)
+        finally:
+            # Restore previous scope — must happen even if body raises
+            module.symbol_table.exit_scope()  # Exit function scope
+
         # Add implicit return if needed
         if not builder.block.is_terminated:
             if isinstance(ret_type, ir.VoidType):
@@ -5662,8 +5685,6 @@ class FunctionDef(ASTNode):
             else:
                 raise RuntimeError("Function must end with return statement")
         
-        # Restore previous scope
-        module.symbol_table.exit_scope()  # Exit function scope
         return func
 
 @dataclass

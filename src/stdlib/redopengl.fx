@@ -2,7 +2,7 @@
 // Provides OpenGL context setup and rendering helpers via Win32 WGL
 #ifndef __WIN32_INTERFACE__
 #import "redwindows.fx";
-#endif
+#endif;
 
 #ifndef __REDOPENGL__
 #def __REDOPENGL__ 1;

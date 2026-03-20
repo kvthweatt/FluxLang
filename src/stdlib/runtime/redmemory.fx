@@ -8,6 +8,7 @@
 #import "redtypes.fx";
 #endif;
 
+#ifdef __WINDOWS__
 extern
 {
     // Memory allocation
@@ -17,22 +18,12 @@ extern
         calloc(size_t, size_t) -> void*,
         realloc(void*, size_t) -> void*;
 };
-
-#ifdef __WINDOWS__
-extern
-{
-    def !!
-        VirtualAlloc(ulong, size_t, u32, u32)   -> ulong,
-        VirtualFree(ulong, size_t, u32)          -> bool,
-        VirtualProtect(ulong, size_t, u32, u32*) -> bool,
-        FlushInstructionCache(ulong, ulong, size_t) -> bool;
-};
 #endif;
 
-def memset(void* dst, int c, size_t n) -> void*
+def !!memset(void* dst, int c, size_t n) -> void*
 {
     byte* d = (byte*)dst;
-    size_t i = (size_t)0;
+    size_t i;
     while (i < n)
     {
         d[i] = (byte)c;
@@ -41,11 +32,11 @@ def memset(void* dst, int c, size_t n) -> void*
     return dst;
 };
 
-def memcpy(void* dst, void* src, size_t n) -> void*
+def !!memcpy(void* dst, void* src, size_t n) -> void*
 {
-    byte* d = (byte*)dst;
-    byte* s = (byte*)src;
-    size_t i = (size_t)0;
+    byte* d = (byte*)dst,
+          s = (byte*)src;
+    size_t i;
     while (i < n)
     {
         d[i] = s[i];
@@ -56,9 +47,9 @@ def memcpy(void* dst, void* src, size_t n) -> void*
 
 def memmove(void* dst, void* src, size_t n) -> void*
 {
-    byte* d = (byte*)dst;
-    byte* s = (byte*)src;
-    size_t i = (size_t)0;
+    byte* d = (byte*)dst,
+          s = (byte*)src;
+    size_t i;
     if (d < s)
     {
         while (i < n)
@@ -70,7 +61,7 @@ def memmove(void* dst, void* src, size_t n) -> void*
     else
     {
         i = n;
-        while (i > (size_t)0)
+        while (i > 0)
         {
             i--;
             d[i] = s[i];
@@ -81,9 +72,9 @@ def memmove(void* dst, void* src, size_t n) -> void*
 
 def memcmp(void* a, void* b, size_t n) -> int
 {
-    byte* pa = (byte*)a;
-    byte* pb = (byte*)b;
-    size_t i = (size_t)0;
+    byte* pa = (byte*)a,
+          pb = (byte*)b;
+    size_t i;
     while (i < n)
     {
         if (pa[i] < pb[i]) { return -1; };
@@ -92,6 +83,169 @@ def memcmp(void* a, void* b, size_t n) -> int
     };
     return 0;
 };
+
+
+#ifdef __LINUX__
+def !!malloc(size_t size) -> void*
+{
+    // mmap(NULL, size+8, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+    // Store size in header for free
+    size_t total;
+    total = size + (size_t)8;
+    u64 result;
+    volatile asm
+    {
+        movq $$9, %rax
+        xorq %rdi, %rdi
+        movq $0, %rsi
+        movq $$3, %rdx
+        movq $$0x22, %r10
+        movq $$-1, %r8
+        xorq %r9, %r9
+        syscall
+        movq %rax, $1
+    } : : "r"(total), "r"(@result) : "rax", "rdi", "rsi", "rdx", "r10", "r8", "r9", "memory";
+    if (result == (u64)0xFFFFFFFFFFFFFFFF) { return (void*)STDLIB_GVP; };
+    u64* header = (u64*)result;
+    header[0] = total;
+    return (void*)(result + (u64)8);
+};
+
+def !!free(void* ptr) -> void
+{
+    if (ptr == STDLIB_GVP) { return; };
+    u64 base;
+    base = (u64)ptr - (u64)8;
+    u64* header = (u64*)base;
+    u64 total;
+    total = header[0];
+    volatile asm
+    {
+        movq $$11, %rax
+        movq $0, %rdi
+        movq $1, %rsi
+        syscall
+    } : : "r"(base), "r"(total) : "rax", "rdi", "rsi", "memory";
+};
+
+def !!calloc(size_t count, size_t size) -> void*
+{
+    size_t total;
+    total = count * size;
+    void* ptr = malloc(total);
+    if (ptr == STDLIB_GVP) { return STDLIB_GVP; };
+    memset(ptr, 0, total);
+    return ptr;
+};
+
+def !!realloc(void* ptr, size_t new_size) -> void*
+{
+    if (ptr == STDLIB_GVP) { return malloc(new_size); };
+    u64 base;
+    base = (u64)ptr - (u64)8;
+    u64* header = (u64*)base;
+    size_t old_total;
+    old_total = (size_t)header[0];
+    size_t old_size;
+    old_size = old_total - (size_t)8;
+    void* new_ptr = malloc(new_size);
+    if (new_ptr == STDLIB_GVP) { return STDLIB_GVP; };
+    size_t copy_size;
+    if (old_size < new_size) { copy_size = old_size; } else { copy_size = new_size; };
+    memcpy(new_ptr, ptr, copy_size);
+    free(ptr);
+    return new_ptr;
+};
+
+extern
+{
+    def !!
+        mmap(u64, size_t, int, int, int, i64) -> u64,
+        munmap(u64, size_t)                   -> int;
+};
+#endif;
+
+#ifdef __MACOS__
+def !!malloc(size_t size) -> void*
+{
+    size_t total;
+    total = size + (size_t)8;
+    u64 result;
+    volatile asm
+    {
+        movq $$0x20000C5, %rax
+        xorq %rdi, %rdi
+        movq $0, %rsi
+        movq $$3, %rdx
+        movq $$0x1002, %r10
+        movq $$-1, %r8
+        xorq %r9, %r9
+        syscall
+        movq %rax, $1
+    } : : "r"(total), "r"(@result) : "rax", "rdi", "rsi", "rdx", "r10", "r8", "r9", "memory";
+    if (result == (u64)0xFFFFFFFFFFFFFFFF) { return (void*)STDLIB_GVP; };
+    u64* header = (u64*)result;
+    header[0] = total;
+    return (void*)(result + (u64)8);
+};
+
+def !!free(void* ptr) -> void
+{
+    if (ptr == STDLIB_GVP) { return; };
+    u64 base;
+    base = (u64)ptr - (u64)8;
+    u64* header = (u64*)base;
+    u64 total;
+    total = header[0];
+    volatile asm
+    {
+        movq $$0x2000049, %rax
+        movq $0, %rdi
+        movq $1, %rsi
+        syscall
+    } : : "r"(base), "r"(total) : "rax", "rdi", "rsi", "memory";
+};
+
+def !!calloc(size_t count, size_t size) -> void*
+{
+    size_t total;
+    total = count * size;
+    void* ptr = malloc(total);
+    if (ptr == STDLIB_GVP) { return STDLIB_GVP; };
+    memset(ptr, 0, total);
+    return ptr;
+};
+
+def !!realloc(void* ptr, size_t new_size) -> void*
+{
+    if (ptr == STDLIB_GVP) { return malloc(new_size); };
+    u64 base;
+    base = (u64)ptr - (u64)8;
+    u64* header = (u64*)base;
+    size_t old_total;
+    old_total = (size_t)header[0];
+    size_t old_size;
+    old_size = old_total - (size_t)8;
+    void* new_ptr = malloc(new_size);
+    if (new_ptr == STDLIB_GVP) { return STDLIB_GVP; };
+    size_t copy_size;
+    if (old_size < new_size) { copy_size = old_size; } else { copy_size = new_size; };
+    memcpy(new_ptr, ptr, copy_size);
+    free(ptr);
+    return new_ptr;
+};
+#endif;
+
+#ifdef __WINDOWS__
+extern
+{
+    def !!
+        VirtualAlloc(ulong, size_t, u32, u32)   -> ulong,
+        VirtualFree(ulong, size_t, u32)          -> bool,
+        VirtualProtect(ulong, size_t, u32, u32*) -> bool,
+        FlushInstructionCache(ulong, ulong, size_t) -> bool;
+};
+#endif;
 
 #ifndef FLUX_STANDARD_MEMORY
 #def FLUX_STANDARD_MEMORY 1;
@@ -109,7 +263,7 @@ namespace standard
         
         def mem_fill(void* ptr, byte value, size_t size) -> void
         {
-            memset(ptr, (int)value, size);
+            memset(ptr, value, size);
         };
         
         def mem_copy(void* dest, void* src, size_t size) -> void
@@ -136,8 +290,8 @@ namespace standard
         
         def align_forward(size_t addr, size_t alignment) -> size_t
         {
-            size_t modulo = addr & (alignment - (size_t)1);
-            if (modulo != (size_t)0)
+            size_t modulo = addr & (alignment - 1);
+            if (modulo != 0)
             {
                 addr += alignment - modulo;
             };
@@ -146,7 +300,7 @@ namespace standard
         
         def is_aligned(size_t addr, size_t alignment) -> bool
         {
-            return (addr & (alignment - (size_t)1)) == (size_t)0;
+            return (addr & (alignment - 1)) == 0;
         };
         
         def malloc_aligned(size_t size, size_t alignment) -> void*
@@ -197,10 +351,10 @@ namespace standard
                 return STDLIB_GVP;
             };
             
-            header.ref_count = (size_t)1;
+            header.ref_count = 1;
             header.size = size;
             
-            return (void*)(header + (size_t)1);
+            return (void*)(header + 1);
         };
         
         def ref_retain(void* ptr) -> void*
@@ -210,7 +364,7 @@ namespace standard
                 return STDLIB_GVP;
             };
             
-            RefCountHeader* header = ((RefCountHeader*)ptr) - (size_t)1;
+            RefCountHeader* header = ((RefCountHeader*)ptr) - 1;
             header.ref_count++;
             
             return ptr;
@@ -223,14 +377,14 @@ namespace standard
                 return;
             };
             
-            RefCountHeader* header = ((RefCountHeader*)ptr) - (size_t)1;
+            RefCountHeader* header = ((RefCountHeader*)ptr) - 1;
             
-            if (header.ref_count > (size_t)0)
+            if (header.ref_count > 0)
             {
                 header.ref_count--;
             };
             
-            if (header.ref_count == (size_t)0)
+            if (header.ref_count == 0)
             {
                 (void)header;
             };
@@ -243,7 +397,7 @@ namespace standard
                 return (size_t)0;
             };
             
-            RefCountHeader* header = ((RefCountHeader*)ptr) - (size_t)1;
+            RefCountHeader* header = ((RefCountHeader*)ptr) - 1;
             return header.ref_count;
         };
         
@@ -258,8 +412,8 @@ namespace standard
         
         def reverse_bytes(byte* buffer, size_t size) -> void
         {
-            size_t i = (size_t)0;
-            size_t j = size - (size_t)1;
+            size_t i,
+                   j = size - 1;
             
             while (i < j)
             {
@@ -271,7 +425,7 @@ namespace standard
         
         def copy_bytes(byte* dest, byte* src, size_t count) -> void
         {
-            for (size_t i = (size_t)0; i < count; i++)
+            for (size_t i = 0; i < count; i++)
             {
                 dest[i] = src[i];
             };
@@ -279,9 +433,9 @@ namespace standard
         
         def zero_bytes(byte* buffer, size_t count) -> void
         {
-            for (size_t i = (size_t)0; i < count; i++)
+            for (size_t i = 0; i < count; i++)
             {
-                buffer[i] = (byte)0;
+                buffer[i] = 0;
             };
         };
     };

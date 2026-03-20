@@ -20,9 +20,8 @@
 // machine code, verifies the HMAC-SHA256 signature, and only then
 // executes it directly — no interpretation, no JIT.
 
-#import "standard.fx";
+#import "standard.fx", "rednet_windows.fx";
 #import "..\\..\\examples\\hotpatch_protocol2.fx";
-#import "rednet_windows.fx";
 
 using standard::io::console,
       standard::net;
@@ -33,7 +32,7 @@ using standard::io::console,
 
 def good_compute(ulong x) -> ulong
 {
-    return x * (ulong)3;
+    return x * 3;
 };
 
 // ============================================================================
@@ -70,7 +69,7 @@ def measure_fn(ulong fn_addr) -> int
     while (i < 256)
     {
         // 0xC3 = RET, 0xC2 = RET imm16
-        if (p[i] == (byte)0xC3 | p[i] == (byte)0xC2)
+        if (p[i] == 0xC3 | p[i] == 0xC2)
         {
             return i + 1;
         };
@@ -96,7 +95,7 @@ def main() -> int
     };
 
     // --- Measure good_compute's compiled body ---
-    ulong fix_addr = (ulong)@good_compute;
+    ulong fix_addr = @good_compute;
     int   fix_size = measure_fn(fix_addr);
 
     print("[server] good_compute at 0x\0");
@@ -117,7 +116,7 @@ def main() -> int
 
     // --- Create server socket ---
     print("\n[server] listening on port \0");
-    print((int)HOTPATCH_PORT);
+    print(HOTPATCH_PORT);
     print("...\n\0");
 
     int server_sock = tcp_server_create(HOTPATCH_PORT, 1);
@@ -146,8 +145,8 @@ def main() -> int
     // --- Build and send patch header ---
     PatchHeader header;
     header.magic       = PATCH_MAGIC;
-    header.patch_size  = (u32)fix_size;
-    header.target_rva  = (u64)0;   // client resolves target directly via @bad_compute
+    header.patch_size  = fix_size;
+    header.target_rva  = 0;   // client resolves target directly via @bad_compute
 
     byte* hdr_ptr = (byte*)@header;
 
@@ -190,10 +189,10 @@ def main() -> int
     print("[server] signature: \0");
     for (int si = 0; si < 32; si++)
     {
-        byte hi = (sig[si] >> 4) & (byte)0x0F;
-        byte lo = sig[si] & (byte)0x0F;
-        if (hi < (byte)10) { print((byte)('0' + hi)); } else { print((byte)('a' + (hi - (byte)10))); };
-        if (lo < (byte)10) { print((byte)('0' + lo)); } else { print((byte)('a' + (lo - (byte)10))); };
+        byte hi = (sig[si] >> 4) & 0x0F;
+        byte lo = sig[si] & 0x0F;
+        if (hi < 10) { print('0' + hi); } else { print(('a' + (hi - 10))); };
+        if (lo < 10) { print('0' + lo); } else { print(('a' + (lo - 10))); };
     };
     print("\n\0");
 
@@ -211,7 +210,7 @@ def main() -> int
     // --- Wait for ACK ---
     print("[server] waiting for ACK...\n\0");
 
-    u32 ack = (u32)0;
+    u32 ack = 0;
     byte* ack_ptr = (byte*)@ack;
     int got = recv(client_sock, ack_ptr, 4, 0);
 

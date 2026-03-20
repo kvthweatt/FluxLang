@@ -25,7 +25,7 @@ namespace standard
             def win_input(byte[] buffer, int max_len) -> int;
 #endif; // Windows
 #ifdef __LINUX__
-            def nix_input(byte[] buffer, int max_len) -> int;
+            //def nix_input(byte[] buffer, int max_len) -> int;
 #endif; // Linux
 #ifdef __MACOS__
             def mac_input(byte[] buffer, int max_len) -> int;
@@ -45,18 +45,14 @@ namespace standard
             def mac_print(byte* msg, int x) -> void;
 #endif;
 
-// INPUT DEFINITIONS BEGIN
-#ifdef __WINDOWS__
-            def reset_from_input() -> void;
-
 #ifdef __ARCH_X86_64__
+#ifdef __WINDOWS__
             // INPUT DEFINITIONS
             def win_input(byte[] buf, int max_len) -> int
             {
-                i32 bytes_read = 0;
-                i32* bytes_read_ptr = @bytes_read;
-                i32 original_mode = 0;
-                i32* mode_ptr = @original_mode;
+                i32 bytes_read, original_mode;
+                i32* bytes_read_ptr = @bytes_read,
+                     mode_ptr = @original_mode;
                 
                 volatile asm
                 {
@@ -104,13 +100,12 @@ namespace standard
                     movl ($2), %eax
                 } : : "r"(buf), "r"(max_len), "r"(bytes_read_ptr), "r"(mode_ptr)
                   : "rax","rcx","rdx","r8","r9","r10","r11","r12","memory";
-                reset_from_input();
                 return bytes_read - 2;
             };
+#endif;
 #endif; // ARCH 86 64
 #ifdef __ARCH_ARM64__
-#endif // ARCH ARM
-#endif; // WINDOWS
+#endif; // ARCH ARM
 
             def input(byte[] buffer, int max_len) -> int
             {
@@ -125,13 +120,15 @@ namespace standard
 #ifdef __LINUX__
                     case (2)
                     {
-                        return nix_input(buffer, max_len);
+                        return 0;
+                        //return nix_input(buffer, max_len);
                     }
 #endif;
 #ifdef __MACOS__
                     case (3)
                     {
-                        return mac_input(buffer, max_len);
+                        return 0;
+                        //return mac_input(buffer, max_len);
                     }
 #endif;
                     default

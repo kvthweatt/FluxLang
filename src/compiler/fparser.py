@@ -604,6 +604,8 @@ class FluxParser:
             return self.assert_statement()
         elif self.expect(TokenType.DEFER):
             return self.defer_statement()
+        elif self.expect(TokenType.NORET):
+            return self.noreturn_statement()
         elif self.expect(TokenType.LEFT_BRACE):
             return self.block_statement()
         elif self.is_variable_declaration():
@@ -2679,6 +2681,15 @@ class FluxParser:
         expr = self.expression()
         self.consume(TokenType.SEMICOLON)
         return DeferStatement(expr)
+
+    def noreturn_statement(self) -> 'NoreturnStatement':
+        """
+        noreturn_statement -> 'noreturn' ';'
+        Emits an LLVM unreachable instruction — the program terminates here.
+        """
+        self.consume(TokenType.NORET)
+        self.consume(TokenType.SEMICOLON)
+        return NoreturnStatement()
 
     def expression_statement(self) -> ExpressionStatement:
         """

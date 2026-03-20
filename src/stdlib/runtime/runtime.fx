@@ -46,14 +46,14 @@ using standard::memory::allocators::stdheap;
 // ---------------------------
 //
 // Import runtime helpers
-//#import "ffifio.fx";                 // FFI-based File Input/Output (CRT)
+//#import "ffifio.fx";             // FFI-based File Input/Output (CRT)
 //
 // ---------------------------
 //
 // Import raw functions & builtins
-//#import "string_object_raw.fx";
-//#import "file_object_raw.fx";
-//#import "socket_object_raw.fx";
+//#import "string_object_raw.fx";  // Deprecated from direct use in runtime
+//#import "file_object_raw.fx";    // "
+//#import "socket_object_raw.fx";  // "
 //
 
 //#ifndef FLUX_STANDARD_COLLECTIONS
@@ -68,19 +68,69 @@ extern
         GetCommandLineW() -> wchar*,
         LocalFree(void* x) -> void*;
 #endif;
-#ifdef __LINUX__
-    def !!
-        exit(int code) -> void,
-        abort() -> void,
-        atexit(void*) -> int;
-#endif;
-#ifdef __MACOS__
-    def !!
-        exit(int code) -> void,
-        abort() -> void,
-        atexit(void*) -> int;
-#endif;
 };
+
+#ifdef __LINUX__
+def !!exit(int code) -> void
+{
+    volatile asm
+    {
+        movl $0, %edi
+        movq $$231, %rax
+        syscall
+    } : : "r"(code) : "edi", "rax", "memory";
+    noreturn;
+};
+
+def !!abort() -> void
+{
+    volatile asm
+    {
+        movq $$231, %rax
+        movq $$134, %rdi
+        syscall
+    } : : : "rax", "rdi", "memory";
+    noreturn;
+};
+
+def !!atexit(void* fn) -> int
+{
+    int r;
+    r = 0;
+    return r;
+};
+#endif;
+
+#ifdef __MACOS__
+def !!exit(int code) -> void
+{
+    volatile asm
+    {
+        movl $0, %edi
+        movq $$0x2000001, %rax
+        syscall
+    } : : "r"(code) : "edi", "rax", "memory";
+    noreturn;
+};
+
+def !!abort() -> void
+{
+    volatile asm
+    {
+        movq $$0x2000001, %rax
+        movq $$134, %rdi
+        syscall
+    } : : : "rax", "rdi", "memory";
+    noreturn;
+};
+
+def !!atexit(void* fn) -> int
+{
+    int r;
+    r = 0;
+    return r;
+};
+#endif;
 
 
 
@@ -98,27 +148,27 @@ def !!FRTStartup() -> int; // GO AWAY, SHOO
 ///                                       ///
 
 #ifdef __LINUX__
-def !!_start() -> int;
+def !!_start() -> void;
 
-def !!_start() -> int
+def !!_start() -> void
 {
     exit(FRTStartup());
     abort();
-    return;
+    noreturn;
 };
 #endif; // Linux
 
 #ifdef FLUX_RUNTIME
+#ifdef __WINDOWS__
 def !!FRTStartup() -> int
 {
-    int return_code, argc, argi, pos, start, len, j;
+    int return_code, argc, argi, pos, start, len, j, k;
     byte* arg;
     bool quoted;
     wchar* cmdLine;
 
     switch (CURRENT_OS)
     {
-        #ifdef __WINDOWS__
         case (1)
         {
             // Initialize stdout handle for win_print
@@ -235,33 +285,15 @@ def !!FRTStartup() -> int
             };
 
             // Free converted argv
-            int k = 0;
             while (k < argc)
             {
                 ffree((u64)argv[k]);
                 k = k + 1;
             };
-            ffree((u64)argv);
+            ffree(long(argv));
         }
-        #endif;
-        #ifdef __LINUX__
-        case (2)
-        {
-            // Try main with args first
-            return_code = main();
-        }
-        #endif;
-        #ifdef __MACOS__
-        case (3)
-        {
-            return_code = main();
-        }
-        #endif;
         default
         {
-            #ifdef __LINUX__
-            abort();
-            #endif;
             return return_code;
         };
     };
@@ -275,7 +307,42 @@ def !!FRTStartup() -> int
     };
     return return_code;
 };
-#endif;
+#endif; // __WINDOWS__
+
+#ifdef __LINUX__
+def !!FRTStartup() -> int
+{
+    int return_code;
+    return_code = main();
+    if (return_code != 0)
+    {
+        // Handle error
+        if (return_code == 3221225477)
+        {
+            standard::io::console::print("SEGFAULT\n\0");
+        };
+    };
+    return return_code;
+};
+#endif; // __LINUX__
+
+#ifdef __MACOS__
+def !!FRTStartup() -> int
+{
+    int return_code;
+    return_code = main();
+    if (return_code != 0)
+    {
+        // Handle error
+        if (return_code == 3221225477)
+        {
+            standard::io::console::print("SEGFAULT\n\0");
+        };
+    };
+    return return_code;
+};
+#endif; // __MACOS__
+#endif; // FLUX_RUNTIME
 ///
 #ifndef FLUX_STANDARD_EXCEPTIONS
 #import "redexceptions.fx";

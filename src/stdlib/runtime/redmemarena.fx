@@ -49,16 +49,17 @@ namespace standard
             {
                 // -- Globals ------------------------------------------------
 
-                global ArenaSlab* g_arena_head          = (ArenaSlab*)0;
-                global size_t     g_arena_next_slab_sz  = (size_t)4194304;  // 4 MB
-                global size_t     g_arena_slab_sz_cap   = (size_t)67108864; // 64 MB
+                global const ArenaSlab* NULLARENASLAB   = (ArenaSlab*)0;
+                global ArenaSlab* g_arena_head          = NULLARENASLAB;
+                global size_t     g_arena_next_slab_sz  = 4194304,  // 4 MB
+                       size_t     g_arena_slab_sz_cap   = 67108864; // 64 MB
 
                 // -- Internal helpers ---------------------------------------
 
                 // Round size up to next 16-byte aligned value.
                 def arena_align16(size_t size) -> size_t
                 {
-                    size_t mask = (size_t)15;
+                    size_t mask = 15;
                     return (size + mask) & ~mask;
                 };
 
@@ -85,17 +86,17 @@ namespace standard
                     // Allocate memory for the descriptor + data in one OS call.
                     size_t total = sizeof(ArenaSlab) + slab_bytes;
                     u64 raw = standard::memory::allocators::stdheap::heap_os_alloc(total);
-                    switch (raw == (u64)0)
+                    switch (raw is void)
                     {
-                        case (1) { return (ArenaSlab*)0; }
+                        case (1) { return NULLARENASLAB; }
                         default  {};
                     };
 
                     // Descriptor lives at the very start of the OS allocation.
                     ArenaSlab* slab = (ArenaSlab*)raw;
-                    slab.base     = raw + (u64)sizeof(ArenaSlab);
+                    slab.base     = raw + sizeof(ArenaSlab);
                     slab.capacity = slab_bytes;
-                    slab.frontier = (size_t)0;
+                    slab.frontier = 0;
                     slab.next     = g_arena_head;
                     g_arena_head  = slab;
 
@@ -109,16 +110,16 @@ namespace standard
                 // Allocation size is rounded up to 16-byte alignment.
                 def arena_alloc(size_t size) -> u64
                 {
-                    switch (size == (size_t)0)
+                    switch (size == 0)
                     {
-                        case (1) { return (u64)0; }
+                        case (1) { return 0; }
                         default  {};
                     };
 
                     size_t aligned = arena_align16(size);
 
                     // Try to satisfy from the current head slab.
-                    switch (g_arena_head != (ArenaSlab*)0)
+                    switch (g_arena_head != NULLARENASLAB)
                     {
                         case (1)
                         {
@@ -139,9 +140,9 @@ namespace standard
 
                     // Current slab exhausted (or no slab yet); get a new one.
                     ArenaSlab* slab = arena_new_slab(aligned);
-                    switch (slab == (ArenaSlab*)0)
+                    switch (slab == NULLARENASLAB)
                     {
-                        case (1) { return (u64)0; }
+                        case (1) { return 0; }
                         default  {};
                     };
 
@@ -162,13 +163,13 @@ namespace standard
                 def arena_reset() -> void
                 {
                     ArenaSlab* slab = g_arena_head;
-                    while (slab != (ArenaSlab*)0)
+                    while (slab != NULLARENASLAB)
                     {
-                        slab.frontier = (size_t)0;
+                        slab.frontier = 0;
                         slab = slab.next;
                     };
                     // Also reset the growth counter so the next alloc starts fresh.
-                    g_arena_next_slab_sz = (size_t)4194304;
+                    g_arena_next_slab_sz = 4194304;
                 };
 
                 // Destroy the arena: release every slab back to the OS.
@@ -176,15 +177,15 @@ namespace standard
                 def arena_destroy() -> void
                 {
                     ArenaSlab* slab = g_arena_head;
-                    while (slab != (ArenaSlab*)0)
+                    while (slab != NULLARENASLAB)
                     {
                         ArenaSlab* next = slab.next;
                         size_t total    = sizeof(ArenaSlab) + slab.capacity;
                         standard::memory::allocators::stdheap::heap_os_free((u64)slab, total);
                         slab = next;
                     };
-                    g_arena_head         = (ArenaSlab*)0;
-                    g_arena_next_slab_sz = (size_t)4194304;
+                    g_arena_head         = NULLARENASLAB;
+                    g_arena_next_slab_sz = 4194304;
                 };
             };
         };

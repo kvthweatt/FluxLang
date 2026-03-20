@@ -316,7 +316,7 @@ class FXPreprocessor:
                 continue
             
             # Check for #endif
-            if stripped.startswith("#endif"):
+            if stripped.startswith("#endif;"):
                 depth -= 1
                 if depth == 0:
                     # End of our block - process collected lines

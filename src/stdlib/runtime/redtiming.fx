@@ -50,8 +50,7 @@ extern
 
 struct timespec
 {
-    i64 tv_sec;
-    i64 tv_nsec;
+    i64 tv_sec, tv_nsec;
 };
 
 // ============ NAMESPACE ============
@@ -91,11 +90,10 @@ namespace standard
 #ifdef __WINDOWS__
         def win_time_now() -> i64
         {
-            i64 counter = 0;
-            i64 freq    = 0;
+            i64 counter, freq;
             QueryPerformanceCounter(@counter);
             QueryPerformanceFrequency(@freq);
-            if (freq == (i64)0)
+            if (freq == 0)
             {
                 return 0;
             };
@@ -124,8 +122,6 @@ namespace standard
         def nix_time_now() -> i64
         {
             timespec ts;
-            ts.tv_sec  = 0;
-            ts.tv_nsec = 0;
             clock_gettime(1, @ts);  // CLOCK_MONOTONIC = 1
             return ts.tv_sec * TIME_NS_PER_SEC + ts.tv_nsec;
         };
@@ -151,8 +147,8 @@ namespace standard
         def mac_time_now() -> i64
         {
             timespec ts;
-            ts.tv_sec  = (i64)0;
-            ts.tv_nsec = (i64)0;
+            ts.tv_sec  = 0;
+            ts.tv_nsec = 0;
             clock_gettime(1, @ts);  // CLOCK_MONOTONIC = 1
             return ts.tv_sec * TIME_NS_PER_SEC + ts.tv_nsec;
         };
@@ -160,8 +156,8 @@ namespace standard
         def mac_sleep_ms(u32 ms) -> void
         {
             timespec req;
-            req.tv_sec  = (i64)ms / (i64)1000;
-            req.tv_nsec = ((i64)ms % (i64)1000) * TIME_NS_PER_MS;
+            req.tv_sec  = ms / 1000;
+            req.tv_nsec = (ms % 1000) * TIME_NS_PER_MS;
             nanosleep(@req, (void*)0);
             return;
         };
@@ -169,8 +165,8 @@ namespace standard
         def mac_sleep_us(u32 us) -> void
         {
             timespec req;
-            req.tv_sec  = (i64)us / (i64)1000000;
-            req.tv_nsec = ((i64)us % (i64)1000000) * TIME_NS_PER_US;
+            req.tv_sec  = us / 1000000;
+            req.tv_nsec = (us % 1000000) * TIME_NS_PER_US;
             nanosleep(@req, (void*)0);
             return;
         };
@@ -295,15 +291,14 @@ namespace standard
 
         struct Timer
         {
-            i64 start;
-            i64 stop;
+            i64 start, stop;
             bool running;
         };
 
         def timer_start(Timer* t) -> void
         {
             t.start   = time_now();
-            t.stop    = (i64)0;
+            t.stop    = 0;
             t.running = true;
         };
 
@@ -327,8 +322,8 @@ namespace standard
 
         def timer_reset(Timer* t) -> void
         {
-            t.start   = (i64)0;
-            t.stop    = (i64)0;
+            t.start   = 0;
+            t.stop    = 0;
             t.running = false;
         };
 

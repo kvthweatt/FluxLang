@@ -136,7 +136,10 @@ extern
         pthread_key_create(void*, void*) -> int,
         pthread_key_delete(u64) -> int,
         pthread_getspecific(u64) -> void*,
-        pthread_setspecific(u64, void*) -> int;
+        pthread_setspecific(u64, void*) -> int,
+
+        // Sleep
+        nanosleep(void*, void*) -> int;
 };
 
 #endif; // __LINUX__
@@ -185,7 +188,10 @@ extern
         pthread_key_create(void*, void*) -> int,
         pthread_key_delete(u64) -> int,
         pthread_getspecific(u64) -> void*,
-        pthread_setspecific(u64, void*) -> int;
+        pthread_setspecific(u64, void*) -> int,
+
+        // Sleep
+        nanosleep(void*, void*) -> int;
 };
 
 #endif; // __MACOS__
@@ -208,12 +214,18 @@ extern
 //  pthread_key_t            :  8 bytes
 // ============================================================
 
-global const int THREAD_OPAQUE_BYTES   = 8;   // Handle / pthread_t
-global const int MUTEX_OPAQUE_BYTES    = 64;  // Covers all platforms
-global const int RWLOCK_OPAQUE_BYTES   = 64;
-global const int COND_OPAQUE_BYTES     = 64;
-global const int SEM_OPAQUE_BYTES      = 32;
-global const int TLS_KEY_OPAQUE_BYTES  = 8;
+const int THREAD_OPAQUE_BYTES   = 8,   // Handle / pthread_t
+          MUTEX_OPAQUE_BYTES    = 64,  // Covers all platforms
+          RWLOCK_OPAQUE_BYTES   = 64,
+          COND_OPAQUE_BYTES     = 64,
+          SEM_OPAQUE_BYTES      = 32,
+          TLS_KEY_OPAQUE_BYTES  = 8,
+// ============================================================
+//  Thread result / exit status constants
+// ============================================================
+          THREAD_OK      =  0,
+          THREAD_ERROR   = -1,
+          THREAD_TIMEOUT = -2;
 
 // ============================================================
 //  Structs
@@ -255,10 +267,10 @@ struct Semaphore
 // Barrier: blocks N threads until all have arrived.
 struct Barrier
 {
-    i32 total;      // How many threads must arrive
-    i32 arrived;    // Atomic counter of arrivals
-    i32 phase;      // Atomic phase flip, prevents reuse races
-    i32 _pad;       // Alignment
+    i32 total,      // How many threads must arrive
+        arrived,    // Atomic counter of arrivals
+        phase,      // Atomic phase flip, prevents reuse races
+        _pad;       // Alignment
 };
 
 // Thread-local storage key.
@@ -267,13 +279,6 @@ struct TLSKey
     byte[8] key;    // DWORD on Windows (4 bytes, padded); pthread_key_t on POSIX
 };
 
-// ============================================================
-//  Thread result / exit status constants
-// ============================================================
-
-global const int THREAD_OK      =  0;
-global const int THREAD_ERROR   = -1;
-global const int THREAD_TIMEOUT = -2;
 
 // ============================================================
 //  Namespace
@@ -319,10 +324,10 @@ namespace standard
             #ifdef __WINDOWS__
             void* h = CreateThread(
                 (void*)0,       // default security
-                (size_t)0,      // default stack size
+                0,              // default stack size
                 (void*)fn,      // thread function
                 arg,            // argument
-                (u32)0,         // run immediately
+                0,              // run immediately
                 (u32*)0         // don't need thread ID
             );
             if ((u64)h == (u64)0)
@@ -431,66 +436,29 @@ namespace standard
             #endif;
 
             #ifdef __LINUX__
-            // nanosleep via inline asm syscall (x86-64 SYS_nanosleep = 35)
-            // timespec: tv_sec = ms/1000, tv_nsec = (ms%1000)*1000000
-            i64 tv_sec  = (i64)(ms / (u32)1000);
-            i64 tv_nsec = (i64)((ms % (u32)1000)) * (i64)1000000;
-            #ifdef __ARCH_X86_64__
-            volatile asm
-            {
-                lea  rdi, [rsp - 16]
-                mov  [rdi],     $0
-                mov  [rdi + 8], $1
-                xor  rsi, rsi
-                mov  rax, 35
-                syscall
-            } : : "r"(tv_sec), "r"(tv_nsec) : "rax", "rdi", "rsi", "rcx", "r11", "memory";
-            #endif;
-            #ifdef __ARCH_ARM64__
-            // ARM64 Linux SYS_nanosleep = 101
-            volatile asm
-            {
-                sub  sp, sp, #16
-                str  $0, [sp]
-                str  $1, [sp, #8]
-                mov  x0, sp
-                mov  x1, #0
-                mov  x8, #101
-                svc  #0
-                add  sp, sp, #16
-            } : : "r"(tv_sec), "r"(tv_nsec) : "x0", "x1", "x8", "memory";
-            #endif;
+            // Build a timespec in a local byte buffer and call nanosleep.
+            // timespec layout: tv_sec (i64) at offset 0, tv_nsec (i64) at offset 8.
+            i64 tv_sec  = (i64)(ms / 1000),
+                tv_nsec = (i64)((ms % 1000) * 1000000);
+            byte[16] ts;
+            i64* sec_ptr  = (i64*)@ts[0];
+            i64* nsec_ptr = (i64*)@ts[8];
+            *sec_ptr  = tv_sec;
+            *nsec_ptr = tv_nsec;
+            nanosleep((void*)@ts[0], (void*)0);
             #endif; // __LINUX__
 
             #ifdef __MACOS__
-            i64 tv_sec  = (i64)(ms / (u32)1000);
-            i64 tv_nsec = (i64)((ms % (u32)1000)) * (i64)1000000;
-            #ifdef __ARCH_X86_64__
-            // macOS SYS_nanosleep = 0x2000023
-            volatile asm
-            {
-                lea  rdi, [rsp - 16]
-                mov  [rdi],     $0
-                mov  [rdi + 8], $1
-                xor  rsi, rsi
-                mov  rax, 0x2000023
-                syscall
-            } : : "r"(tv_sec), "r"(tv_nsec) : "rax", "rdi", "rsi", "rcx", "r11", "memory";
-            #endif;
-            #ifdef __ARCH_ARM64__
-            // macOS ARM64 SYS_nanosleep = 0x2000023
-            volatile asm
-            {
-                sub  sp, sp, #16
-                str  $0, [sp]
-                str  $1, [sp, #8]
-                mov  x0, sp
-                mov  x1, #0
-                mov  x16, #0x2000023
-                svc  #0x80
-                add  sp, sp, #16
-            } : : "r"(tv_sec), "r"(tv_nsec) : "x0", "x1", "x16", "memory";
-            #endif;
+            // Build a timespec in a local byte buffer and call nanosleep.
+            // timespec layout: tv_sec (i64) at offset 0, tv_nsec (i64) at offset 8.
+            i64 tv_sec  = (i64)(ms / 1000),
+                tv_nsec = (i64)((ms % 1000) * 1000000);
+            byte[16] ts;
+            i64* sec_ptr  = (i64*)@ts[0];
+            i64* nsec_ptr = (i64*)@ts[8];
+            *sec_ptr  = tv_sec;
+            *nsec_ptr = tv_nsec;
+            nanosleep((void*)@ts[0], (void*)0);
             #endif; // __MACOS__
         };
 
@@ -796,8 +764,7 @@ namespace standard
             // We build one from a relative ms delta via inline asm.
             #ifdef __LINUX__
             // clock_gettime(CLOCK_REALTIME=0, &ts) then add ms.
-            i64 ts_sec  = (i64)0;
-            i64 ts_nsec = (i64)0;
+            i64 ts_sec, ts_nsec;
             #ifdef __ARCH_X86_64__
             volatile asm
             {
@@ -833,7 +800,7 @@ namespace standard
             };
             // Build timespec on the stack and call pthread_cond_timedwait.
             // We pass a pointer to a local [sec, nsec] pair.
-            i64 ts[2] = [ts_sec, ts_nsec];
+            i64[2] ts = [ts_sec, ts_nsec];
             int rc = pthread_cond_timedwait(
                 (void*)@cv.storage[0],
                 (void*)@m.storage[0],
@@ -843,8 +810,7 @@ namespace standard
             #endif;
 
             #ifdef __MACOS__
-            i64 ts_sec  = (i64)0;
-            i64 ts_nsec = (i64)0;
+            i64 ts_sec, ts_nsec;
             #ifdef __ARCH_X86_64__
             volatile asm
             {
@@ -877,7 +843,7 @@ namespace standard
                 ts_sec++;
                 ts_nsec = ts_nsec - (i64)1000000000;
             };
-            i64 ts[2] = [ts_sec, ts_nsec];
+            i64[2] ts = [ts_sec, ts_nsec];
             int rc = pthread_cond_timedwait(
                 (void*)@cv.storage[0],
                 (void*)@m.storage[0],
@@ -991,7 +957,7 @@ namespace standard
         {
             #ifdef __WINDOWS__
             void* h = _ptr_from_bytes(@s.storage[0]);
-            return WaitForSingleObject(h, (u32)0) == (u32)0;
+            return WaitForSingleObject(h, 0) == (u32)0;
             #endif;
 
             #ifdef __LINUX__
@@ -1058,8 +1024,8 @@ namespace standard
         // Returns true only for the thread that was the last to arrive.
         def barrier_wait(Barrier* b) -> bool
         {
-            i32 current_phase = load32(@b.phase);
-            i32 arrived = inc32(@b.arrived);
+            i32 current_phase = load32(@b.phase),
+                arrived = inc32(@b.arrived);
 
             if (arrived == load32(@b.total))
             {

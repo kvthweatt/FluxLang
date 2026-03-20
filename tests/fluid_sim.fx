@@ -29,7 +29,7 @@ using standard::system::windows,
 #def VISCOSITY 0.00008;
 #def DIFFUSION 0.0008;
 #def DT        0.15;
-#def DECAY     0.994;
+#def DECAY     0.997;
 #def INV255    0.00392156862745098;
 
 const int    WIN_W        = 1024,

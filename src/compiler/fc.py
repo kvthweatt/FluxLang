@@ -620,12 +620,14 @@ class FluxCompiler:
                     #"--plugin-opt=merge-functions",     # Merge similar functions
                     #"--plugin-opt=dce",                 # Dead code elimination
                     #"--plugin-opt=inline",              # Function inlining
-                    "--unresolved-symbols=ignore-all",
-                    "-Ttext-segment=0x400000",          # Text segment address
+                    #"--unresolved-symbols=ignore-all",
+                    #"-lc",
+                    "-Ttext-segment=0x400000",              # Text segment address
                     "--section-start", ".rodata=0x500000",  # Read-only data address
                     "--section-start", ".data=0x600000",    # Data section address
                     "--section-start", ".bss=0x700000",     # BSS section address
-                    "-e", "_start",                       # Entry point
+                    "-dynamic-linker", "/lib64/ld-linux-x86-64.so.2",
+                    "-e", "_start",                         # Entry point
                     str(obj_file),
                     # Runtime dependencies -- Enable if you want them in your code.
                     #"/usr/lib/x86_64-linux-gnu/Scrt1.o",        # Startup code
@@ -635,6 +637,7 @@ class FluxCompiler:
                     #"-lgcc",                                   # GCC runtime
                     #"-lgcc_eh",                                # GCC exception handling
                     "--start-group",
+                    "/lib/x86_64-linux-gnu/libc.so.6",
                     "--end-group",
                     "-o", f"build/{output_dir}/{output_bin}"
                 ]

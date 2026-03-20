@@ -245,7 +245,7 @@ namespace standard
             float y = x / 2.0,
                   prev_y = 0.0;
             
-            for (i32 i = 0; i < 20; i++)  // Fixed iterations
+            for (i32 i; i < 20; i++)  // Fixed iterations
             {
                 prev_y = y;
                 y = (y + x / y) / 2.0;
@@ -265,7 +265,7 @@ namespace standard
             double y = x / 2.0,
                    prev_y = 0.0;
             
-            for (i32 i = 0; i < 40; i++)  // More iterations for double precision
+            for (i32 i; i < 40; i++)  // More iterations for double precision
             {
                 prev_y = y;
                 y = (y + x / y) / 2.0;
@@ -406,21 +406,21 @@ namespace standard
         def floor(float x) -> float
         {
             i64 int_part = x;
-            if (x >= 0.0 | x == (float)int_part)
+            if (x >= 0.0 | x == float(int_part))
             {
-                return (float)int_part;
+                return float(int_part);
             };
-            return (float)(int_part - 1);
+            return float(int_part - 1);
         };
         
         def ceil(float x) -> float
         {
             i64 int_part = x;
-            if (x <= 0.0 | x == (float)int_part)
+            if (x <= 0.0 | x == float(int_part))
             {
-                return (float)int_part;
+                return float(int_part);
             };
-            return (float)(int_part + 1);
+            return float(int_part + 1);
         };
         
         def round(float x) -> float
@@ -451,8 +451,8 @@ namespace standard
         def sin(float x) -> float
         {
             // Reduce to [-π, π]
-            while (x > (float)PIF) { x -= 2.0 * (float)PIF; };
-            while (x < (float)-PIF) { x += 2.0 * (float)PIF; };
+            while (x > PIF) { x -= 2.0 * PIF; };
+            while (x < -PIF) { x += 2.0 * PIF; };
             
             // Taylor series approximation
             float result = x,
@@ -461,7 +461,7 @@ namespace standard
             
             for (i32 i = 1; i <= 5; i++)
             {
-                term = -term * x2 / (float)((2 * i) * (2 * i + 1));
+                term = -term * x2 / float((2 * i) * (2 * i + 1));
                 result += term;
             };
             
@@ -471,7 +471,7 @@ namespace standard
         def cos(float x) -> float
         {
             // cos(x) = sin(π/2 - x)
-            return sin((float)PIF / 2.0 - x);
+            return sin(PIF / 2.0 - x);
         };
  
         def tan(float x) -> float
@@ -505,7 +505,7 @@ namespace standard
                 - x2 * (0.111111
                 - x2 *  0.090909)))));
 
-            if (recip) { r = (float)PIF * 0.5 - r; };
+            if (recip) { r = PIF * 0.5 - r; };
             if (neg)   { r = 0.0 - r; };
 
             return r;
@@ -524,14 +524,14 @@ namespace standard
             {
                 if (y >= 0.0)
                 {
-                    return atan(y / x) + (float)PIF;
+                    return atan(y / x) + PIF;
                 };
-                return atan(y / x) - (float)PIF;
+                return atan(y / x) - PIF;
             };
 
             // x == 0
-            if (y > 0.0) { return  (float)PIF * 0.5; };
-            if (y < 0.0) { return (0.0 - (float)PIF) * 0.5; };
+            if (y > 0.0) { return  PIF * 0.5; };
+            if (y < 0.0) { return (0.0 - PIF) * 0.5; };
 
             // Both zero - undefined, return 0
             return 0.0;
@@ -546,7 +546,7 @@ namespace standard
             
             for (i32 i = 1; i <= 10; i++)
             {
-                term = term * x / (float)i;
+                term = term * x / float(i);
                 result += term;
             };
             
@@ -558,15 +558,15 @@ namespace standard
             if (x <= 0.0) {return 0.0;};
             
             // Simple approximation using series
-            float y = (x - 1.0) / (x + 1.0),
-                  y2 = y * y,
+            float y = (x - 1.0) / (x + 1.0);
+            float y2 = y * y,
                   result = 2.0 * y,
                   term = y;
             
             for (i32 i = 1; i <= 10; i += 2)
             {
                 term = term * y2;
-                result += (2.0 / (float)(2 * i + 1)) * term;
+                result += (2.0 / float(2 * i + 1)) * term;
             };
             
             return result;
@@ -579,8 +579,10 @@ namespace standard
 
             // Reduce x = m * 2^e so that m is in [1, 2)
             // then ln(x) = ln(m) + e * ln(2)
-            double m = x;
-            i32 e = 0;
+            double m = x,
+                   t, t2,
+                   term, result, contrib;
+            i32 e;
 
             while (m >= 2.0)
             {
@@ -593,7 +595,6 @@ namespace standard
                 e = e - 1;
             };
 
-            double t, t2, term, result, contrib;
 
             // Now m in [1, 2); let t = (m-1)/(m+1), ln(m) via Artanh series:
             // ln(m) = 2 * (t + t^3/3 + t^5/5 + ...)  converges fast for |t| < 0.18
@@ -634,22 +635,22 @@ namespace standard
         // Additional math utilities with overloads
         def lerp(i8 a, i8 b, float t) -> i8
         {
-            return (i8)((float)a + (float)(b - a) * t);
+            return (i8)(float(a) + float(b - a) * t);
         };
         
         def lerp(i16 a, i16 b, float t) -> i16
         {
-            return (i16)((float)a + (float)(b - a) * t);
+            return (i16)(float(a) + float(b - a) * t);
         };
         
         def lerp(i32 a, i32 b, float t) -> i32
         {
-            return (i32)((float)a + (float)(b - a) * t);
+            return (i32)(float(a) + float(b - a) * t);
         };
 
         def lerp(i64 a, i64 b, float t) -> i64
         {
-            return (i64)((float)a + (float)(b - a) * t);
+            return (i64)(float(a) + float(b - a) * t);
         };
         
         def lerp(float a, float b, float t) -> float
@@ -696,7 +697,7 @@ namespace standard
         // Signed
         def popcount(i8 x) -> i8
         {
-            i8 count = 0;
+            i8 count;
             while (x != 0)
             {
                 if (count == 8) { break; }; // Handle all 1s
@@ -708,7 +709,7 @@ namespace standard
         
         def popcount(i16 x) -> i16
         {
-            i16 count = 0;
+            i16 count;
             while (x != 0)
             {
                 if (count == 16) { break; }; // Handle all 1s
@@ -720,7 +721,7 @@ namespace standard
         
         def popcount(i32 x) -> i32
         {
-            i32 count = 0;
+            i32 count;
             while (x != 0)
             {
                 if (count == 32) { break; }; // Handle all 1s
@@ -732,7 +733,7 @@ namespace standard
         
         def popcount(i64 x) -> i64
         {
-            i64 count = 0;
+            i64 count;
             while (x != 0)
             {
                 if (count == 64) { break; }; // Handle all 1s
@@ -745,7 +746,7 @@ namespace standard
         // Unsigned
         def popcount(byte x) -> byte
         {
-            byte count = 0;
+            byte count;
             while (x != 0)
             {
                 if (count == 8) { break; }; // Handle all 1s
@@ -757,7 +758,7 @@ namespace standard
         
         def popcount(u16 x) -> u16
         {
-            u16 count = 0;
+            u16 count;
             while (x != 0)
             {
                 if (count == 16) { break; }; // Handle all 1s
@@ -769,7 +770,7 @@ namespace standard
         
         def popcount(u32 x) -> u32
         {
-            u32 count = 0;
+            u32 count;
             while (x != 0)
             {
                 if (count == 32) { break; }; // Handle all 1s
@@ -781,7 +782,7 @@ namespace standard
 
         def popcount(u64 x) -> u64
         {
-            u64 count = 0;
+            u64 count;
             while (x != 0)
             {
                 if (count == 64) { break; }; // Handle all 1s
@@ -793,8 +794,8 @@ namespace standard
 
         def reverse_bits(byte x) -> byte
         {
-            byte result = 0;
-            for (byte i = 0; i < 8; i++)
+            byte result;
+            for (byte i; i < 8; i++)
             {
                 result = (result << 1) | (x & 1);
                 x >>= 1;
@@ -804,8 +805,8 @@ namespace standard
 
         def reverse_bits(i8 x) -> i8
         {
-            i8 result = 0;
-            for (i8 i = 0; i < 8; i++)
+            i8 result;
+            for (i8 i; i < 8; i++)
             {
                 result = (result << 1) | (x & 1);
                 x >>= 1;
@@ -815,8 +816,8 @@ namespace standard
         
         def reverse_bits(i16 x) -> i16
         {
-            i16 result = 0;
-            for (i16 i = 0; i < 16; i++)
+            i16 result;
+            for (i16 i; i < 16; i++)
             {
                 result = (result << 1) | (x & 1);
                 x >>= 1;
@@ -826,8 +827,8 @@ namespace standard
         
         def reverse_bits(i32 x) -> i32
         {
-            i32 result = 0;
-            for (i32 i = 0; i < 32; i++)
+            i32 result;
+            for (i32 i; i < 32; i++)
             {
                 result = (result << 1) | (x & 1);
                 x >>= 1;
@@ -837,8 +838,8 @@ namespace standard
         
         def reverse_bits(i64 x) -> i64
         {
-            i64 result = 0;
-            for (i64 i = 0; i < 64; i++)
+            i64 result;
+            for (i64 i; i < 64; i++)
             {
                 result = (result << 1) | (x & 1);
                 x >>= 1;

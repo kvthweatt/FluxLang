@@ -173,8 +173,8 @@ namespace standard
             out.owner = 1;
 
             #ifdef __WINDOWS__
-            u32 hi = (u32)((u64)size >> 32);
-            u32 lo = (u32)size;
+            u32 hi = int((u64)size >> 32),
+                lo = int(size);
             void* h = CreateFileMappingA(
                 (void*)(i64)-1,     // INVALID_HANDLE_VALUE - pagefile-backed
                 (void*)0,           // default security
@@ -283,7 +283,7 @@ namespace standard
             void* view = MapViewOfFile(
                 (void*)shm.handle,
                 win_access,
-                (u32)0, (u32)0,
+                0, 0,
                 shm.size
             );
             if ((u64)view == (u64)0)
@@ -305,8 +305,8 @@ namespace standard
                 shm.size,
                 prot,
                 POSIX_MAP_SHARED,
-                (int)shm.handle,
-                (i64)0
+                shm.handle,
+                0
             );
             if ((u64)view == (u64)(void*)(i64)-1)
             {
@@ -327,8 +327,8 @@ namespace standard
                 shm.size,
                 prot,
                 POSIX_MAP_SHARED,
-                (int)shm.handle,
-                (i64)0
+                shm.handle,
+                0
             );
             if ((u64)view == (u64)(void*)(i64)-1)
             {
