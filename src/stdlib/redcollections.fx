@@ -62,7 +62,7 @@ namespace standard
                 this.elem_size = elem_size;
                 this.len       = 0;
                 this.capacity  = (size_t)ARRAY_INITIAL_CAPACITY;
-                this.buf       = fmalloc(this.capacity * elem_size);
+                this.buf       = malloc(this.capacity * elem_size);
                 return this;
             };
 
@@ -1529,7 +1529,7 @@ namespace standard
                 {
                     return STDLIB_GVP;
                 };
-                return this.buf[this.head];
+                return (void*)this.buf[this.head];
             };
 
             def dq_peek_back() -> void*
@@ -1539,7 +1539,7 @@ namespace standard
                     return STDLIB_GVP;
                 };
                 size_t idx = (this.tail + this.cap - 1) % this.cap;
-                return this.buf[idx];
+                return (void*)this.buf[idx];
             };
 
             def dq_len() -> size_t
