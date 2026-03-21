@@ -879,12 +879,20 @@ class FluxParser:
         
         # Validate <~ recursive function constraints
         if is_recursive:
-            if len(real_parameters) != 1:
-                self.error(f"Recursive function '{name}' declared with '<~' must have exactly one parameter")
-            param_ts_str = str(real_parameters[0].type_spec)
-            ret_ts_str = str(return_type)
-            if param_ts_str != ret_ts_str:
-                self.error(f"Recursive function '{name}': return type '{ret_ts_str}' must match parameter type '{param_ts_str}'")
+            _ret_is_void = (
+                (hasattr(return_type, 'base_type') and return_type.base_type == DataType.VOID)
+                or repr(return_type) == 'void'
+                or str(return_type) == 'void'
+            )
+            is_void_form = (len(real_parameters) == 0 and _ret_is_void)
+            is_single_param_form = (len(real_parameters) == 1 and repr(real_parameters[0].type_spec) == repr(return_type))
+            if not is_void_form and not is_single_param_form:
+                if len(real_parameters) == 0:
+                    self.error(f"Recursive function '{name}' with no parameters must return void")
+                elif len(real_parameters) == 1:
+                    self.error(f"Recursive function '{name}': return type must match parameter type")
+                else:
+                    self.error(f"Recursive function '{name}' declared with '<~' must have exactly one parameter, or no parameters with void return")
         
         if self.expect(TokenType.SEMICOLON):
             is_prototype = True

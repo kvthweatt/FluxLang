@@ -4870,6 +4870,11 @@ class ReturnStatement(Statement):
             return None
 
         if self.value is None:
+            # <~ void recursive function: rewrite return; as musttail call self(); ret void
+            if getattr(builder, '_flux_is_recursive_func', False):
+                func = builder.block.function
+                call_instr = builder.call(func, [])
+                call_instr.tail = "musttail"
             builder.ret_void()
             return None
 
@@ -5750,6 +5755,10 @@ class FunctionDef(ASTNode):
         # Add implicit return if needed
         if not builder.block.is_terminated:
             if isinstance(ret_type, ir.VoidType):
+                # <~ void recursive function: implicit fall-off emits musttail self-call
+                if self.is_recursive:
+                    call_instr = builder.call(func, [])
+                    call_instr.tail = "musttail"
                 builder.ret_void()
             else:
                 raise RuntimeError("Function must end with return statement")
