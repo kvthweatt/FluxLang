@@ -2145,7 +2145,11 @@ class FunctionCall(Expression):
         # This allows the compiler to optimize recursive functions without affecting other calls
         current_func = builder.function
         if current_func is not None and func.name == current_func.name:
-            call_instr.tail = "tail"
+            # <~ recursive functions request guaranteed tail-call elimination
+            if getattr(builder, '_flux_is_recursive_func', False):
+                call_instr.tail = "musttail"
+            else:
+                call_instr.tail = "tail"
         
         return call_instr
 
@@ -4344,6 +4348,9 @@ class TernaryOp(Expression):
     condition: Expression
     true_expr: Expression
     false_expr: Expression
+
+    def __repr__(self) -> str:
+        return f"{self.condition} ? {self.true_expr} : {self.false_expr}"
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """
@@ -4402,6 +4409,33 @@ class TernaryOp(Expression):
                     false_val = builder.sext(false_val, true_val.type)
                     builder.branch(merge_block)
                     builder.position_at_start(merge_block)
+            elif (isinstance(true_val.type, ir.PointerType) and
+                  isinstance(false_val.type, ir.PointerType)):
+                # Both are pointers — decay array pointers to their element pointer type
+                # so that e.g. [260 x i8]* and [9 x i8]* both become i8*
+                # Insert bitcasts before the existing terminator in each end block.
+                def _decay_inplace(val, end_block):
+                    pt = val.type.pointee
+                    if isinstance(pt, ir.ArrayType):
+                        elem_ptr = ir.PointerType(pt.element)
+                        term = end_block.terminator
+                        if term is not None:
+                            builder.position_before(term)
+                        else:
+                            builder.position_at_end(end_block)
+                        return builder.bitcast(val, elem_ptr, name='ternary_decay')
+                    return val
+                true_val  = _decay_inplace(true_val,  true_end_block)
+                false_val = _decay_inplace(false_val, false_end_block)
+                # If still mismatched after decay, bitcast false to true's type
+                if true_val.type != false_val.type:
+                    term = false_end_block.terminator
+                    if term is not None:
+                        builder.position_before(term)
+                    else:
+                        builder.position_at_end(false_end_block)
+                    false_val = builder.bitcast(false_val, true_val.type, name='ternary_cast')
+                builder.position_at_start(merge_block)
             else:
                 raise TypeError(
                     f"Ternary operator branches have incompatible types: "
@@ -4871,6 +4905,14 @@ class ReturnStatement(Statement):
 
         # Rework to use lowering context.
         ret_val = CoercionContext.coerce_return_value(builder, ret_val, expected)
+
+        # <~ recursive function: rewrite return <expr> as musttail call self(<expr>)
+        if getattr(builder, '_flux_is_recursive_func', False):
+            func = builder.block.function
+            call_instr = builder.call(func, [ret_val])
+            call_instr.tail = "musttail"
+            builder.ret(call_instr)
+            return None
 
         builder.ret(ret_val)
         return None
@@ -5503,6 +5545,7 @@ class FunctionDef(ASTNode):
     no_mangle: bool = False
     is_variadic: bool = False
     calling_conv: Optional[str] = None  # LLVM calling convention string, e.g. 'fastcc'
+    is_recursive: bool = False
 
     # Map Flux calling-convention keywords to LLVM CC strings
     _CALLING_CONV_MAP: ClassVar[dict] = {
@@ -5631,6 +5674,9 @@ class FunctionDef(ASTNode):
         # Create entry block
         entry_block = func.append_basic_block('entry')
         builder.position_at_start(entry_block)
+
+        # Mark builder so self-calls inside a <~ recursive function use musttail
+        builder._flux_is_recursive_func = self.is_recursive
 
         # Pre-pass: collect all LabelStatement names in the function body and
         # pre-create their basic blocks so forward gotos resolve correctly.

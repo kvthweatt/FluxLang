@@ -816,7 +816,12 @@ class FluxParser:
             parameters = self.parameter_list()
         self.consume(TokenType.RIGHT_PAREN)
         
-        self.consume(TokenType.RETURN_ARROW)
+        is_recursive = False
+        if self.expect(TokenType.RECURSE_ARROW):
+            is_recursive = True
+            self.advance()
+        else:
+            self.consume(TokenType.RETURN_ARROW)
         return_type = self.type_spec()
         # Pattern: def foo() -> int, foo() -> bool, foo(int) -> void;
         if self.expect(TokenType.COMMA):
@@ -872,6 +877,15 @@ class FluxParser:
         is_variadic = any(getattr(p, '_is_variadic_sentinel', False) for p in parameters)
         real_parameters = [p for p in parameters if not getattr(p, '_is_variadic_sentinel', False)]
         
+        # Validate <~ recursive function constraints
+        if is_recursive:
+            if len(real_parameters) != 1:
+                self.error(f"Recursive function '{name}' declared with '<~' must have exactly one parameter")
+            param_ts_str = str(real_parameters[0].type_spec)
+            ret_ts_str = str(return_type)
+            if param_ts_str != ret_ts_str:
+                self.error(f"Recursive function '{name}': return type '{ret_ts_str}' must match parameter type '{param_ts_str}'")
+        
         if self.expect(TokenType.SEMICOLON):
             is_prototype = True
             self.advance()
@@ -896,12 +910,14 @@ class FluxParser:
         # If this is a template function, store it and return None (no immediate codegen)
         if template_params:
             func_def = FunctionDef(name, real_parameters, return_type, body, is_const,
-                                   is_volatile, is_prototype, no_mangle, is_variadic, calling_conv)
+                                   is_volatile, is_prototype, no_mangle, is_variadic, calling_conv,
+                                   is_recursive)
             self._template_functions[name] = (template_params, func_def)
             return None
 
         return FunctionDef(name, real_parameters, return_type, body, is_const, 
-                          is_volatile, is_prototype, no_mangle, is_variadic, calling_conv)
+                          is_volatile, is_prototype, no_mangle, is_variadic, calling_conv,
+                          is_recursive)
 
     def _is_function_pointer_declaration(self) -> bool:
         """

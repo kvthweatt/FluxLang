@@ -577,6 +577,7 @@ class FluxCompiler:
                                 "-luser32 "
                                 "-lgdi32 "
                                 "-lopengl32 "
+                                "-lcomdlg32 "
                                 #"-lgdiplus "
                                 #"-ld2d1 "
                                 #"-ldwrite "

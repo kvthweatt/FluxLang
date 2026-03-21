@@ -5,7 +5,7 @@
 #ifndef FLUX_STANDARD_OPERATORS
 #def FLUX_STANDARD_OPERATORS 1;
 
-        
+
 namespace standard
 {
     namespace operators
@@ -17,9 +17,9 @@ namespace standard
         ///
         operator (int* a, int* b)[<>] -> void
         {
-            *a `^^= *b;
-            *b `^^= *a;
-            *a `^^= *b;
+            a `^^= b;
+            b `^^= a;
+            a `^^= b;
         };
     };
 };
