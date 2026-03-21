@@ -221,7 +221,7 @@ namespace standard
                 {
                     return 0;
                 };
-                return char(this.value[index]);
+                return (char)this.value[index];
             };
 
             def setat(int index, char ch) -> bool
@@ -290,7 +290,7 @@ namespace standard
                         return false;
                     };
                     this.value = newval;
-                    this.length = (i32)standard::strings::strlen(newval);
+                    this.length = standard::strings::strlen(newval);
                     return true;
                 }
                 catch()
@@ -310,7 +310,7 @@ namespace standard
                         return false;
                     };
                     this.value = newval;
-                    this.length = (i32)standard::strings::strlen(newval);
+                    this.length = standard::strings::strlen(newval);
                     return true;
                 }
                 catch()
@@ -501,13 +501,13 @@ namespace standard
             def trim() -> bool
             {
                 int start, end, newlen;
-                while (start < this.length & helpers::is_whitespace(this.value[start])
+                while (start < this.length & helpers::is_whitespace(this.value[start]))
                 {
                     start = start + 1;
                 };
 
                 end = this.length - 1;
-                while (end >= start & helpers::is_whitespace(this.value[end])
+                while (end >= start & helpers::is_whitespace(this.value[end]))
                 {
                     end = end - 1;
                 };
@@ -664,10 +664,10 @@ namespace standard
                 for (int i; i < this.length; i = i + 1)
                 {
                     ch = this.value[i];
-                    if (is_alpha(ch))
+                    if (helpers::is_alpha(ch))
                     {
                         has_alpha = true;
-                        if (!is_upper(ch))
+                        if (!helpers::is_upper(ch))
                         {
                             return false;
                         };
@@ -687,10 +687,10 @@ namespace standard
                 for (int i = 0; i < this.length; i = i + 1)
                 {
                     ch = this.value[i];
-                    if (is_alpha(ch))
+                    if (helpers::is_alpha(ch))
                     {
                         has_alpha = true;
-                        if (!is_lower(ch))
+                        if (!helpers::is_lower(ch))
                         {
                             return false;
                         };

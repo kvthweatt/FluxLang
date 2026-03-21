@@ -21,8 +21,14 @@
 //   9. Call bad_compute() again - now routed through the fix
 //  10. Send ACK to server
 
-#import "standard.fx", "rednet_windows.fx";
-#import "..\\..\\examples\\hotpatch_protocol2.fx";
+#import "standard.fx";
+#ifdef __WINDOWS__
+#import "rednet_windows.fx";
+#endif;
+#ifdef __LINUX__
+#import "rednet_linux.fx";
+#endif;
+#import "../../examples/hotpatch_protocol2.fx";
 
 using standard::io::console,
       standard::net;
@@ -35,7 +41,7 @@ def bad_compute(ulong x) -> ulong
 {
     // BUG: writes to address 0 - instant segfault
     ulong* null_ptr = (@)0;
-    *null_ptr = x;
+    *null_ptr = x; // Write, segfault, OS says no
     return x * 3;
 };
 
@@ -72,7 +78,7 @@ def write_addr64(ulong dst, ulong addr) -> void
 // Stamp a 14-byte absolute indirect JMP at target_addr pointing to patch_addr
 def install_patch(ulong target_addr, ulong patch_addr) -> void
 {
-    u32 old_protect = 0;
+    u32 old_protect;
     VirtualProtect(target_addr, PATCH_BYTES, 0x40, @old_protect);
 
     write_jmp_indirect(target_addr);
@@ -271,13 +277,13 @@ def main() -> int
 
     // --- Now call bad_compute - routed to the fix ---
     print("\n[client] calling bad_compute(7) via hotpatch...\n\0");
-    ulong result = bad_compute(7);
+    ulong result = bad_compute(7),
+          result2 = bad_compute(10);
     print("[client] result = \0");
     print(result);
     print("\n\0");
 
     print("\n[client] calling bad_compute(10) via hotpatch...\n\0");
-    ulong result2 = bad_compute(10);
     print("[client] result2 = \0");
     print(result2);
     print("\n\0");

@@ -10,8 +10,8 @@
 //       u32  patch_size;   // number of bytes in the payload
 //       u64  target_rva;   // RVA from client image base to patch site
 //                          // (0 = use target_addr directly, for demo)
-//       byte payload[];    // raw machine code bytes, patch_size long
-//       byte sig[32];      // HMAC-SHA256 over payload bytes
+//       byte[] payload;    // raw machine code bytes, patch_size long
+//       byte[32] sig;      // HMAC-SHA256 over payload bytes
 //   };
 //
 // The client reads the header first (16 bytes), allocates a page,
@@ -36,20 +36,20 @@ using standard::crypto::hashing::SHA256;
 // Magic bytes: "HPTX"
 const uint PATCH_MAGIC = 0x48505458,
 // Response codes sent server -> client after delivery
-           PATCH_ACK  = 0x00000001,   // patch received and applied
-           PATCH_NACK = 0x000000FF;   // something went wrong
+           PATCH_ACK   = 0x00000001,   // patch received and applied
+           PATCH_NACK  = 0x000000FF;   // something went wrong
 
 // Fixed header size: magic(4) + patch_size(4) + target_rva(8) = 16 bytes
 const int PATCH_HEADER_SIZE = 16,
 
 // Maximum payload we'll accept (1 page)
-          PATCH_MAX_SIZE = 4096,
+          PATCH_MAX_SIZE    = 4096,
 
 // HMAC-SHA256 signature size in bytes
-          HMAC_SIG_SIZE = 32;
+          HMAC_SIG_SIZE     = 32;
 
 // Hotpatch server port
-const u16 HOTPATCH_PORT = 9900;
+const u16 HOTPATCH_PORT     = 9900;
 
 // Pre-shared HMAC key — both server and client must agree on this value.
 // In production this would be loaded from a secure key store or derived
@@ -79,26 +79,26 @@ def hmac_sha256(byte* key, int key_len, byte* xdata, int xdata_len, byte* out) -
 {
     // Build padded inner and outer keys (64-byte SHA-256 block size)
     byte[64] ipad_key, opad_key;
+    byte[32] inner_hash;
     int i;
+    SHA256_CTX inner_ctx, outer_ctx;
+    byte k;
 
     // Zero-pad key into the 64-byte blocks, XOR with ipad/opad constants
     for (i = 0; i < 64; i++)
     {
-        byte k = (i < key_len) ? key[i] : (byte)0;
+        k = (i < key_len) ? key[i] : (byte)0;
         ipad_key[i] = k ^^ (byte)0x36;
         opad_key[i] = k ^^ (byte)0x5C;
     };
 
     // inner = SHA256(ipad_key || xdata)
-    byte[32] inner_hash;
-    SHA256_CTX inner_ctx;
     sha256_init(@inner_ctx);
     sha256_update(@inner_ctx, @ipad_key[0], (u64)64);
     sha256_update(@inner_ctx, xdata, (u64)xdata_len);
     sha256_final(@inner_ctx, @inner_hash[0]);
 
     // out = SHA256(opad_key || inner)
-    SHA256_CTX outer_ctx;
     sha256_init(@outer_ctx);
     sha256_update(@outer_ctx, @opad_key[0], (u64)64);
     sha256_update(@outer_ctx, @inner_hash[0], (u64)32);

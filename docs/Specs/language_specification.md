@@ -1905,8 +1905,8 @@ auto result = calculate_something();  // Infers return type
 
 # Keyword list:
 ```
-alignof, and, as, asm, assert, auto, break, bool, case, catch, cdecl, const, continue, data, def, default,
-do, double, elif, else, enum, false, fastcall, float, for, global, goto, heap, if, in, is, int, label, local, long, namespace, new, noinit, not, object, or,
+alignof, and, as, asm, assert, auto, break, bool, byte, case, catch, cdecl, const, continue, data, def, default,
+do, double, elif, else, enum, false, fastcall, float, for, global, goto, heap, if, in, is, int, label, local, long, namespace, new, noinit, noreturn, not, object, or,
 private, public, register, return, signed, singinit, sizeof, stack, stdcall, struct, switch, this, thiscall, throw, true, try, typeof, uint, ulong,
 union, unsigned, vectorcall, void, volatile, while, xor
 ```
@@ -1997,11 +1997,11 @@ ADDRESS_CAST = "(@)"
 
 ## Primitive types:
 
-bool, int `5`, float `3.14159`, double `3.1415926585`, char `"B"` == `66` - `65` == `'A'`, data
+bool, byte `0xFF`, int `5`, float `3.14159`, double `3.1415926585`, char `"B"` == `66` - `65` == `'A'`, data
 
 ## All types:
 
-bool, int, uint, long, ulong, float, double, char, data, void, object, struct, union, enum
+bool, byte, int, uint, long, ulong, float, double, char, data, void, object, struct, union, enum
 
 ## Preprocesor directives:
 `#import`, `#dir`, `#def`, `#ifdef`, `#ifndef`, `#else`, `#warn`, `#stop`

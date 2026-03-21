@@ -1,6 +1,14 @@
 // File I/O Library using C FFI
 // Simple wrapper around C's stdio.h functions
 
+#ifndef FLUX_STANDARD_TYPES
+#import "redtypes.fx";
+#endif;
+
+#ifndef FLUX_STANDARD_IO_FILE
+#import "redio.fx";
+#endif;
+
 #ifndef FLUX_STANDARD_FFI_FIO
 #def FLUX_STANDARD_FFI_FIO 1;
 #endif;
@@ -42,9 +50,9 @@ namespace standard
             // "ab" - append binary
             
             // SEEK constants for fseek
-            global int SEEK_SET = 0;  // Beginning of file
-            global int SEEK_CUR = 1;  // Current position
-            global int SEEK_END = 2;  // End of file
+            global int SEEK_SET = 0,  // Beginning of file
+                       SEEK_CUR = 1,  // Current position
+                       SEEK_END = 2;  // End of file
             
             
             // ===== HIGH-LEVEL HELPER FUNCTIONS =====

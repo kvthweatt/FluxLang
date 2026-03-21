@@ -1116,7 +1116,7 @@ class FluxParser:
             if self.expect(TokenType.ASSIGN):
                 self.advance()
                 # Parse the integer value
-                value_token = self.consume(TokenType.INTEGER)
+                value_token = self.consume(TokenType.SINT_LITERAL)
                 current_value = int(value_token.value, 0)
             
             values[item_name] = current_value
@@ -1624,6 +1624,12 @@ class FluxParser:
                     qualified_name = f"{current_namespace}__{enum.name}"
                     self.symbol_table.define(qualified_name, SymbolKind.TYPE)
                     self.symbol_table.define(enum.name, SymbolKind.TYPE)
+            elif self.expect(TokenType.OPERATOR):
+                op_func = self.operator_def()
+                functions.append(op_func)
+                qualified_name = f"{current_namespace}__{op_func.name}"
+                self.symbol_table.define(qualified_name, SymbolKind.FUNCTION)
+                self.symbol_table.define(op_func.name, SymbolKind.FUNCTION)
             elif self.expect(TokenType.EXTERN):
                 extern = self.extern_statement()
                 extern_blocks.append(extern)
@@ -1912,7 +1918,7 @@ class FluxParser:
             return DataType.DOUBLE
         elif self.expect(TokenType.SLONG):
             self.advance()
-            return DataType.LONG
+            return DataType.SLONG
         elif self.expect(TokenType.ULONG):
             self.advance()
             return DataType.ULONG
@@ -1943,8 +1949,16 @@ class FluxParser:
             self.error("Objects cannot be used as types in struct members.")
         elif self.expect(TokenType.IDENTIFIER):
             # Custom type - return [DataType.DATA, typename]
+            # Consume namespace-qualified names: A::B::C
             custom_typename = self.current_token.value
             self.advance()
+            while self.expect(TokenType.SCOPE):
+                self.advance()  # consume ::
+                if self.expect(TokenType.IDENTIFIER):
+                    custom_typename = custom_typename + "::" + self.current_token.value
+                    self.advance()
+                else:
+                    break
             return [DataType.DATA, custom_typename]
         else:
             self.error("Expected type specifier")
@@ -1976,6 +1990,14 @@ class FluxParser:
                 return False
             
             self.advance()
+            
+            # Handle namespace-qualified type names: A::B::C
+            while self.expect(TokenType.SCOPE):
+                self.advance()  # consume ::
+                if self.expect(TokenType.IDENTIFIER):
+                    self.advance()
+                else:
+                    break
             
             # Handle optional bit-width/alignment specification {width:alignment}
             if self.expect(TokenType.LEFT_BRACE):
@@ -3682,7 +3704,7 @@ class FluxParser:
                 TokenType.CHAR:      DataType.CHAR,
                 TokenType.BYTE:      DataType.BYTE,
                 TokenType.BOOL_KW:   DataType.BOOL,
-                TokenType.SLONG:      DataType.LONG,
+                TokenType.SLONG:      DataType.SLONG,
                 TokenType.ULONG:     DataType.ULONG,
             }
             target_data_type = kw_map[kw_token.type]

@@ -36,6 +36,7 @@ namespace standard
                                  DWORD,
                                  WORD,
                                  BYTE;
+
             signed data{32} as LONG;
 
             // Pointer-sized types - must be 64-bit on x64
@@ -94,11 +95,11 @@ namespace standard
             struct PAINTSTRUCT
             {
                 HDC hdc;              // 8 bytes, offset 0
-                LONG fErase;          // 4 bytes, offset 8
-                LONG _pad;            // 4 bytes padding, offset 12 -> RECT at 16
+                LONG fErase,          // 4 bytes, offset 8
+                     _pad;            // 4 bytes padding, offset 12 -> RECT at 16
                 RECT rcPaint;         // 16 bytes, offset 16
-                LONG fRestore;        // 4 bytes, offset 32
-                LONG fIncUpdate;      // 4 bytes, offset 36
+                LONG fRestore,        // 4 bytes, offset 32
+                     fIncUpdate;      // 4 bytes, offset 36
                 BYTE[32] rgbReserved; // 32 bytes, offset 40
             };            // total = 72 bytes
 
@@ -372,17 +373,8 @@ namespace standard
                     this.instance = GetModuleHandleA((LPCSTR)0);
                     
                     // Generate unique class name
-                    this.class_name[0] = 'F';
-                    this.class_name[1] = 'l';
-                    this.class_name[2] = 'u';
-                    this.class_name[3] = 'x';
-                    this.class_name[4] = 'W';
-                    this.class_name[5] = 'i';
-                    this.class_name[6] = 'n';
-                    this.class_name[7] = 'd';
-                    this.class_name[8] = 'o';
-                    this.class_name[9] = 'w';
-                    this.class_name[10] = '\0';
+                    noopstr fwindow = "Flux Window\0";
+                    this.class_name = fwindow;
                     
                     // Set up window class
                     WNDCLASSEXA wc;
@@ -486,9 +478,9 @@ namespace standard
             object Canvas
             {
                 HWND  hwnd;
-                HDC   hdc;
-                HDC   back_dc;
-                HDC   back_bmp;
+                HDC   hdc,
+                      back_dc,
+                      back_bmp;
                 RECT  bounds;
                 HDC   active_pen;
 

@@ -99,7 +99,7 @@ class Operator(Enum):
 class DataType(Enum):
     SINT = "int"
     UINT = "uint"
-    LONG = "long"
+    SLONG = "long"
     ULONG = "ulong"
     FLOAT = "float"
     DOUBLE = "double"
@@ -161,7 +161,7 @@ class PrimitiveType(BaseType):
             return ir.IntType(self.width or 32)
         elif self.kind == DataType.UINT:
             return ir.IntType(self.width or 32)
-        elif self.kind == DataType.LONG:
+        elif self.kind == DataType.SLONG:
             return ir.IntType(64)
         elif self.kind == DataType.ULONG:
             return ir.IntType(64)
@@ -613,6 +613,12 @@ class SymbolTable:
         return self._lookup_with_kinds(name, (SymbolKind.FUNCTION,), current_namespace)
     
     def _resolve_with_namespaces(self, name: str, current_namespace: str) -> Optional[SymbolEntry]:
+        # 0. If name contains '::' it is already fully qualified - mangle and look up directly
+        if '::' in name:
+            mangled = name.replace('::', '__')
+            if mangled in self._global_symbols:
+                return self._global_symbols[mangled]
+
         # 1. Exact match
         if name in self._global_symbols:
             return self._global_symbols[name]
@@ -794,6 +800,15 @@ class TypeResolver:
     
     @staticmethod
     def resolve_type(module: ir.Module, typename: str, current_namespace: str = "") -> Optional[ir.Type]:
+        # 0. Fully qualified name with '::' - mangle and look up directly
+        if '::' in typename:
+            mangled = typename.replace('::', '__')
+            for storage_name in ['_struct_types', '_type_aliases', '_union_types', '_enum_types']:
+                if hasattr(module, storage_name):
+                    storage = getattr(module, storage_name)
+                    if mangled in storage:
+                        return storage[mangled]
+
         # 1. SYMBOL TABLE - HIGHEST PRIORITY (PRIMARY SOURCE)
         if hasattr(module, 'symbol_table'):
             entry = module.symbol_table.lookup_any(typename, current_namespace)
@@ -1278,6 +1293,8 @@ class TypeChecker:
                 return True
             if source.kind in (DataType.SINT, DataType.UINT) and target.kind in (DataType.SINT, DataType.UINT):
                 return True
+            if source.kind in (DataType.SLONG, DataType.ULONG) and target.kind in (DataType.SLONG, DataType.ULONG):
+                return True
         
         if isinstance(source, PointerType) and isinstance(target, PointerType):
             return TypeChecker.is_compatible(source.pointee, target.pointee)
@@ -1381,7 +1398,7 @@ class TypeSystem:
                 return ir.FloatType()
             elif type_spec == DataType.DOUBLE:
                 return ir.DoubleType()
-            elif type_spec in (DataType.LONG, DataType.ULONG):
+            elif type_spec in (DataType.SLONG, DataType.ULONG):
                 return ir.IntType(64)
             elif type_spec == DataType.BOOL:
                 return ir.IntType(1)
@@ -1450,7 +1467,7 @@ class TypeSystem:
             base_type = ir.FloatType()
         elif type_spec.base_type == DataType.DOUBLE:
             base_type = ir.DoubleType()
-        elif type_spec.base_type in (DataType.LONG, DataType.ULONG):
+        elif type_spec.base_type in (DataType.SLONG, DataType.ULONG):
             base_type = ir.IntType(64)
         elif type_spec.base_type == DataType.BOOL:
             base_type = ir.IntType(1)
@@ -1618,10 +1635,9 @@ class TypeSystem:
                             is_unsigned_type = not alias_spec.is_signed
                         elif hasattr(alias_spec, 'base_type') and alias_spec.base_type == DataType.UINT:
                             is_unsigned_type = True
-                    else:
-                        # Fallback to name-based heuristic
-                        is_unsigned_type = alias_name.startswith('u') or alias_name == 'byte'
-                    
+                        elif hasattr(alias_spec, 'base_type') and alias_spec.base_type == DataType.ULONG:
+                            is_unsigned_type = True
+
                     # Create type spec with appropriate signedness
                     type_spec = TypeSystem(
                         base_type=DataType.UINT if is_unsigned_type else DataType.SINT,
@@ -2267,6 +2283,21 @@ class VariableTypeHandler:
         
         # Handle type mismatch
         if init_val.type != llvm_type:
+            # Array-widening assignment: smaller array pointer -> larger array local.
+            # e.g. noopstr [12 x i8]* -> byte[256] ([256 x i8]) — zero-fill the rest.
+            if (isinstance(init_val.type, ir.PointerType) and
+                    isinstance(init_val.type.pointee, ir.ArrayType) and
+                    isinstance(llvm_type, ir.ArrayType) and
+                    init_val.type.pointee.element == llvm_type.element and
+                    init_val.type.pointee.count <= llvm_type.count):
+                src_count = init_val.type.pointee.count
+                dst_count = llvm_type.count
+                elem_bits = llvm_type.element.width if isinstance(llvm_type.element, ir.IntType) else 8
+                elem_bytes = max(elem_bits // 8, 1)
+                ArrayTypeHandler.emit_memset(builder, module, alloca, 0, dst_count * elem_bytes)
+                ArrayTypeHandler.emit_memcpy(builder, module, alloca, init_val, src_count * elem_bytes)
+                return
+
             # Special case: array concatenation result to array variable
             # e.g., int[2] b = [a[0]] + [1];
             # init_val.type is [2 x i32]* (pointer), llvm_type is [2 x i32] (value)
@@ -3732,7 +3763,7 @@ class CoercionContext:
 
 
 def infer_int_width(value: int, data_type: DataType) -> int:
-    if data_type not in (DataType.SINT, DataType.UINT):
+    if data_type not in (DataType.SINT, DataType.UINT, DataType.SLONG, DataType.ULONG):
         raise ValueError("Not an integer literal")
     
     # Default to 32-bit - only use 64-bit if value doesn't fit in 32-bit
@@ -3765,9 +3796,7 @@ def infer_int_width(value: int, data_type: DataType) -> int:
             else:
                 # This requires 64-bit
                 return 64
-    elif data_type == DataType.LONG:
-        return 64
-    elif data_type == DataType.ULONG:
+    elif data_type == DataType.SLONG or data_type == DataType.ULONG:
         return 64
 
 def is_unsigned(val: ir.Value) -> bool:
@@ -3782,7 +3811,7 @@ def is_unsigned(val: ir.Value) -> bool:
 def get_builtin_bit_width(base_type: DataType) -> int:
     if base_type in (DataType.SINT, DataType.UINT):
         return 32  # Default integer width
-    elif base_type in (DataType.LONG, DataType.ULONG):
+    elif base_type in (DataType.SLONG, DataType.ULONG):
         return 64
     elif base_type == DataType.FLOAT:
         return 32  # Single precision float
@@ -4627,6 +4656,23 @@ class AssignmentTypeHandler:
                 )
                 # Convert value type to match target member type if needed
                 member_type = member_ptr.type.pointee
+                # Array-widening assignment: assigning a smaller array (or noopstr pointer) into
+                # a larger array field.  Zero the destination, then memcpy the source bytes in.
+                # e.g. noopstr [12 x i8]* -> byte[256] ([256 x i8]) widens with zero-fill.
+                if (isinstance(val.type, ir.PointerType) and
+                        isinstance(val.type.pointee, ir.ArrayType) and
+                        isinstance(member_type, ir.ArrayType) and
+                        val.type.pointee.element == member_type.element and
+                        val.type.pointee.count <= member_type.count):
+                    src_count = val.type.pointee.count
+                    dst_count = member_type.count
+                    elem_bits = member_type.element.width if isinstance(member_type.element, ir.IntType) else 8
+                    elem_bytes = max(elem_bits // 8, 1)
+                    # Zero the entire destination array first
+                    ArrayTypeHandler.emit_memset(builder, module, member_ptr, 0, dst_count * elem_bytes)
+                    # Copy the source bytes
+                    ArrayTypeHandler.emit_memcpy(builder, module, member_ptr, val, src_count * elem_bytes)
+                    return val
                 # If assigning a pointer-to-struct into a value-typed struct member
                 # (e.g. `this.deck = Deck(@this.rng)` where deck is `Deck` not `Deck*`),
                 # load the pointer to get the struct value before storing.

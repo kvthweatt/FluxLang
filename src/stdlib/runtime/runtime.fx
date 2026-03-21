@@ -46,13 +46,13 @@ using standard::memory::allocators::stdheap;
 // ---------------------------
 //
 // Import runtime helpers
-//#import "ffifio.fx";             // FFI-based File Input/Output (CRT)
+#import "ffifio.fx";             // FFI-based File Input/Output (CRT)
 //
 // ---------------------------
 //
 // Import raw functions & builtins
-//#import "string_object_raw.fx";  // Deprecated from direct use in runtime
-//#import "file_object_raw.fx";    // "
+#import "string_object_raw.fx";  // Deprecated from direct use in runtime
+#import "file_object_raw.fx";    // "
 //#import "socket_object_raw.fx";  // "
 //
 
@@ -126,9 +126,7 @@ def !!abort() -> void
 
 def !!atexit(void* fn) -> int
 {
-    int r;
-    r = 0;
-    return r;
+    return 0;
 };
 #endif;
 
@@ -164,6 +162,7 @@ def !!FRTStartup() -> int
 {
     int return_code, argc, argi, pos, start, len, j, k;
     byte* arg;
+    byte** argv;
     bool quoted;
     wchar* cmdLine;
 
@@ -217,7 +216,7 @@ def !!FRTStartup() -> int
             };
 
             // Allocate argv
-            byte** argv = (byte**)fmalloc((u64)argc * (u64)8);
+            argv = (byte**)fmalloc((u64)argc * (u64)8);
 
             // Fill argv
             argi = 0;
@@ -300,7 +299,7 @@ def !!FRTStartup() -> int
     if (return_code != 0)
     {
         // Handle error
-        if (return_code == 3221225477)
+        if (return_code == -1073741819)
         {
             standard::io::console::print("SEGFAULT\n\0");
         };
@@ -312,12 +311,14 @@ def !!FRTStartup() -> int
 #ifdef __LINUX__
 def !!FRTStartup() -> int
 {
-    int return_code;
-    return_code = main();
+    // Initialize the Flux standard heap allocator
+    // For reference, see runtime/redallocators.fx
+    standard::memory::allocators::stdheap::table_init();
+    int return_code = main();
     if (return_code != 0)
     {
         // Handle error
-        if (return_code == 3221225477)
+        if (return_code == -1073741819)
         {
             standard::io::console::print("SEGFAULT\n\0");
         };
@@ -329,12 +330,11 @@ def !!FRTStartup() -> int
 #ifdef __MACOS__
 def !!FRTStartup() -> int
 {
-    int return_code;
-    return_code = main();
+    int return_code = main();
     if (return_code != 0)
     {
         // Handle error
-        if (return_code == 3221225477)
+        if (return_code == -1073741819)
         {
             standard::io::console::print("SEGFAULT\n\0");
         };

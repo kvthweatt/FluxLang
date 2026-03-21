@@ -53,7 +53,7 @@ class Literal(ASTNode):
         elif self.type == DataType.DOUBLE:
             llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
             return ir.Constant(llvm_type, float(self.value))
-        elif self.type in (DataType.LONG, DataType.ULONG):
+        elif self.type in (DataType.SLONG, DataType.ULONG):
             llvm_type = ir.IntType(64)
             normalized_val = LiteralTypeHandler.normalize_int_value(self.value, self.type, 64)
             return TypeSystem.attach_type_metadata(ir.Constant(llvm_type, normalized_val), self.type)
@@ -860,14 +860,24 @@ class BinaryOp(Expression):
                 offset = rhs
                 if self.operator is Operator.SUB:
                     offset = builder.sub(ir.Constant(rhs.type, 0), rhs)
-                result = builder.gep(lhs, [offset])
+                # Flatten array pointer to element pointer before offsetting
+                base = lhs
+                if isinstance(lhs.type.pointee, ir.ArrayType):
+                    zero = ir.Constant(ir.IntType(32), 0)
+                    base = builder.gep(lhs, [zero, zero], name="arr_base")
+                result = builder.gep(base, [offset])
                 # Preserve Flux type metadata from the pointer operand
                 if hasattr(lhs, '_flux_type_spec'):
                     result._flux_type_spec = lhs._flux_type_spec
                 return result
 
             if rhs_ptr and lhs_int and self.operator is Operator.ADD:
-                result = builder.gep(rhs, [lhs])
+                # Flatten array pointer to element pointer before offsetting
+                base = rhs
+                if isinstance(rhs.type.pointee, ir.ArrayType):
+                    zero = ir.Constant(ir.IntType(32), 0)
+                    base = builder.gep(rhs, [zero, zero], name="arr_base")
+                result = builder.gep(base, [lhs])
                 # Preserve Flux type metadata from the pointer operand
                 if hasattr(rhs, '_flux_type_spec'):
                     result._flux_type_spec = rhs._flux_type_spec
@@ -1898,7 +1908,7 @@ class FStringLiteral(Expression):
                 return float(expr.value)
             elif expr.type == DataType.DOUBLE:
                 return float(expr.value)
-            elif expr.type in (DataType.LONG, DataType.ULONG):
+            elif expr.type in (DataType.SLONG, DataType.ULONG):
                 return int(expr.value)
             elif expr.type == DataType.BOOL:
                 return bool(expr.value)
@@ -2210,6 +2220,19 @@ class MemberAccess(Expression):
             if MemberAccessTypeHandler.is_enum_type(type_name, module):
                 enum_value = MemberAccessTypeHandler.get_enum_value(type_name, self.member, module)
                 return ir.Constant(ir.IntType(32), enum_value)
+            # Try namespace-mangled name (e.g. ClockId -> standard__system__linux__ClockId)
+            mangled_type_name = IdentifierTypeHandler.resolve_namespace_mangled_name(type_name, module)
+            if mangled_type_name and MemberAccessTypeHandler.is_enum_type(mangled_type_name, module):
+                enum_value = MemberAccessTypeHandler.get_enum_value(mangled_type_name, self.member, module)
+                return ir.Constant(ir.IntType(32), enum_value)
+            # resolve_namespace_mangled_name only searches globals/type_aliases, not _enum_types.
+            # Fall back: scan _enum_types for any key ending with __{type_name}
+            if not mangled_type_name and hasattr(module, '_enum_types'):
+                suffix = f"__{type_name}"
+                for key in module._enum_types:
+                    if key == type_name or key.endswith(suffix):
+                        enum_value = MemberAccessTypeHandler.get_enum_value(key, self.member, module)
+                        return ir.Constant(ir.IntType(32), enum_value)
         
         # Check if this is a struct type
         if hasattr(module, '_struct_types'):
@@ -3112,7 +3135,7 @@ class TypeOf(Expression):
     KIND_BOOL      = 5
     KIND_CHAR      = 6
     KIND_BYTE      = 7
-    KIND_LONG      = 8
+    KIND_SLONG     = 8
     KIND_ULONG     = 9
     KIND_POINTER   = 10
     KIND_ARRAY     = 11
@@ -3208,7 +3231,7 @@ class TypeOf(Expression):
             DT.BOOL:    self.KIND_BOOL,
             DT.CHAR:    self.KIND_CHAR,
             DT.DATA:    self.KIND_BYTE,
-            DT.LONG:    self.KIND_LONG,
+            DT.SLONG:   self.KIND_SLONG,
             DT.ULONG:   self.KIND_ULONG,
             DT.STRUCT:  self.KIND_STRUCT,
             DT.OBJECT:  self.KIND_OBJECT,

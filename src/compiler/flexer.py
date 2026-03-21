@@ -25,6 +25,8 @@ class TokenType(Enum):
     # Literals
     SINT_LITERAL = auto()
     UINT_LITERAL = auto() # Unsigned integer literal support `123u`
+    SLONG_LITERAL = auto() # l
+    ULONG_LITERAL = auto() # ul
     FLOAT = auto()  # Support for 1f == float type == 1.0
     DOUBLE = auto() # Support for 64 bit floating point types
     CHAR = auto()

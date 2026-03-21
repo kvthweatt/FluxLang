@@ -629,6 +629,11 @@ class FluxCompiler:
                     "-dynamic-linker", "/lib64/ld-linux-x86-64.so.2",
                     "-e", "_start",                         # Entry point
                     str(obj_file),
+                    # Library search paths
+                    "-L/usr/lib/x86_64-linux-gnu",
+                    "-L/usr/lib",
+                    "-L/lib/x86_64-linux-gnu",
+                    "-L/lib",
                     # Runtime dependencies -- Enable if you want them in your code.
                     #"/usr/lib/x86_64-linux-gnu/Scrt1.o",        # Startup code
                     #"/usr/lib/x86_64-linux-gnu/crti.o",         # C runtime init
@@ -636,8 +641,9 @@ class FluxCompiler:
                     #"/usr/lib/x86_64-linux-gnu/crtn.o",        # C runtime term
                     #"-lgcc",                                   # GCC runtime
                     #"-lgcc_eh",                                # GCC exception handling
+                    "-lwayland-client",
                     "--start-group",
-                    "/lib/x86_64-linux-gnu/libc.so.6",
+                    "-lc",
                     "--end-group",
                     "-o", f"build/{output_dir}/{output_bin}"
                 ]

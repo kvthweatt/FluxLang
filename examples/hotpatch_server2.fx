@@ -20,8 +20,14 @@
 // machine code, verifies the HMAC-SHA256 signature, and only then
 // executes it directly — no interpretation, no JIT.
 
-#import "standard.fx", "rednet_windows.fx";
-#import "..\\..\\examples\\hotpatch_protocol2.fx";
+#import "standard.fx";
+#ifdef __WINDOWS__
+#import "rednet_windows.fx";
+#endif;
+#ifdef __LINUX__
+#import "rednet_linux.fx";
+#endif;
+#import "../../examples/hotpatch_protocol2.fx";
 
 using standard::io::console,
       standard::net;

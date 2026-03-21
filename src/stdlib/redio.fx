@@ -376,7 +376,8 @@ namespace standard
             };
 
             // GENERIC
-            def print(noopstr, int) -> void,
+            def print() -> void,
+                print(noopstr, int) -> void,
                 print(noopstr) -> void,
                 print(byte) -> void, // print single character
                 print(bool) -> void,
@@ -398,7 +399,8 @@ namespace standard
                 print(float) -> void,
                 print(float,int) -> void,
                 print(double) -> void,
-                print(double,int) -> void;
+                print(double,int) -> void,
+                println(noopstr) -> void;
 
             def print(bool b) -> void
             {
@@ -503,6 +505,13 @@ namespace standard
                 print(buffer);
                 return;
             };
+            // Newline print versions
+            def println(noopstr s) -> void
+            {
+                standard::io::console::print(s);
+                standard::io::console::print();
+            };
+
             def print_hex_byte(byte b) -> void
             {
                 byte high = (b >> 4) & 0x0F;
@@ -540,6 +549,8 @@ namespace standard
                 print_hex_byte(b);
                 return;
             };
+
+            // GENERIC
             def print() -> void
             {
                 // No params = newline printed

@@ -796,6 +796,16 @@ namespace standard
             {
                 return (c >= 'a' & c <= 'z') | (c >= 'A' & c <= 'Z');
             };
+
+            def is_upper(char c) -> bool
+            {
+                return c >= 'A' & c <= 'Z';
+            };
+
+            def is_lower(char c) -> bool
+            {
+                return c >= 'a' & c <= 'z';
+            };
             
             def is_alnum(char c) -> bool
             {
