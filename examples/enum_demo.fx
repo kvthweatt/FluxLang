@@ -1,5 +1,7 @@
 #import "standard.fx";
 
+using standard::io::console;
+
 enum my_enum
 {
 	GOOD_RETURN,

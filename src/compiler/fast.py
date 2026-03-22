@@ -4908,6 +4908,12 @@ class ReturnStatement(Statement):
             builder.ret_void()
             return None
 
+        # If ret_val is a pointer to the expected struct/union type, load it first
+        if (isinstance(ret_val.type, ir.PointerType) and
+                isinstance(ret_val.type.pointee, ir.LiteralStructType) and
+                ret_val.type.pointee == expected):
+            ret_val = builder.load(ret_val, name="ret_load")
+
         # Rework to use lowering context.
         ret_val = CoercionContext.coerce_return_value(builder, ret_val, expected)
 
@@ -6046,11 +6052,40 @@ class UnionDef(ASTNode):
             member_types.append(member_type)
             member_names.append(member.name)
             
-            # Calculate size
-            if hasattr(member_type, 'width'):  # For integer types
-                size = (member_type.width + 7) // 8  # Convert bits to bytes
+            # Calculate size (llvmlite module.data_layout is a plain string, not a DataLayout object)
+            if hasattr(member_type, 'width'):  # IntType
+                size = (member_type.width + 7) // 8
+            elif isinstance(member_type, ir.FloatType):
+                size = 4
+            elif isinstance(member_type, ir.DoubleType):
+                size = 8
+            elif isinstance(member_type, ir.PointerType):
+                size = 8  # Pointer size (target assumed 64-bit)
+            elif isinstance(member_type, ir.ArrayType):
+                elem = member_type.element
+                if hasattr(elem, 'width'):
+                    elem_size = (elem.width + 7) // 8
+                elif isinstance(elem, ir.FloatType):
+                    elem_size = 4
+                elif isinstance(elem, ir.DoubleType):
+                    elem_size = 8
+                else:
+                    elem_size = 8
+                size = elem_size * member_type.count
+            elif isinstance(member_type, ir.LiteralStructType):
+                total = 0
+                for elem in member_type.elements:
+                    if hasattr(elem, 'width'):
+                        total += (elem.width + 7) // 8
+                    elif isinstance(elem, ir.FloatType):
+                        total += 4
+                    elif isinstance(elem, ir.DoubleType):
+                        total += 8
+                    else:
+                        total += 8
+                size = total
             else:
-                size = module.data_layout.get_type_size(member_type)
+                size = 8  # Conservative fallback
                 
             if size > max_size:
                 max_size = size
