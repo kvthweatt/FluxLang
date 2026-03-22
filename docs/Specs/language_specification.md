@@ -521,11 +521,6 @@ int* p_idata = @idata;
 *p_idata += 3;
 print(idata);  // 3
 
-
-// Pointers to functions:
-def add(int x, int y) -> int { return x + y; };
-def sub(int x, int y) -> int { return x - y; };
-
 // Function pointer declarations
 def{}* p_add(int,int)->int = @add;
 def{}* p_sub(int,int)->int = @sub;
@@ -1475,6 +1470,792 @@ unsigned data{17} as u17 b = (u17)a;  // Zero-extend
 signed data{13} as s13 c = (s13)a;    // Reinterpret bits
 ```
 
+## **Function Pointers:**
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+def foo(int x) -> int
+{
+    print("Inside foo!\n\0");
+    return 0;   
+};
+
+
+def main() -> int
+{
+    def{}* pfoo(int)->int = @foo;
+    print("Function pointer created.\n\0");
+    print();
+
+    pfoo(0); // Compiler auto dereferences
+
+    return 0;
+};
+```
+
+## **Detouring and assigning function pointers to raw bytes:**
+`examples\detour.fx`
+```
+#import "standard.fx", "detour.fx";
+
+using standard::io::console;
+
+// ============================================================================
+// Demo
+// ============================================================================
+
+// The function we will hook
+def compute(ulong x) -> ulong
+{
+    return x * (ulong)3;
+};
+
+// Global detour instance so the hook can reach call_original
+Detour g_detour;
+
+// The hook — intercepts compute(), logs, calls original, modifies result
+def hook_compute(ulong x) -> ulong
+{
+    print("  [hook] intercepted compute(\0");
+    print(x);
+    print(")\n\0");
+
+    ulong original_result = g_detour.call_original(x);
+
+    print("  [hook] original returned \0");
+    print(original_result);
+    print(", adding 1\n\0");
+
+    return original_result + (ulong)1;
+};
+
+def main() -> int
+{
+    print("=== Flux Detour Hook Demo ===\n\0");
+
+    // --- Baseline: call compute() before any hook ---
+    print("\n[pre-hook]\n\0");
+    ulong r1 = compute((ulong)7);
+    print("  compute(7) = \0");
+    print(r1);
+    print("\n\0");
+
+    // --- Install the detour ---
+    print("\n[installing detour]\n\0");
+    bool ok = g_detour.install((ulong)@compute, (ulong)@hook_compute);
+    if (!ok)
+    {
+        print("  install failed\n\0");
+        return 1;
+    };
+    print("  installed\n\0");
+
+    // --- Call through the hook ---
+    print("\n[hooked call]\n\0");
+    ulong r2 = compute((ulong)7);
+    print("  compute(7) via hook = \0");
+    print(r2);
+    print("\n\0");
+
+    // --- Second hooked call with different input ---
+    print("\n[hooked call 2]\n\0");
+    ulong r3 = compute((ulong)10);
+    print("  compute(10) via hook = \0");
+    print(r3);
+    print("\n\0");
+
+    // --- Remove the hook ---
+    print("\n[uninstalling detour]\n\0");
+    g_detour.uninstall();
+    print("  uninstalled\n\0");
+
+    // --- Confirm original is restored ---
+    print("\n[post-uninstall]\n\0");
+    ulong r4 = compute((ulong)7);
+    print("  compute(7) = \0");
+    print(r4);
+    print("\n\0");
+
+    print("\n=== Done ===\n\0");
+    return 0;
+};
+```
+
+## **Hotpatching over TCP with HMAC SHA256 verification:**
+`examples\hotpatch_protocol2.fx`
+```
+// hotpatch_protocol.fx
+//
+// Shared protocol definitions for the hotpatch server/client demo.
+//
+// Wire format (all fields little-endian):
+//
+//   struct PatchPacket
+//   {
+//       u32  magic;        // 0x48505458 "HPTX" — sanity check
+//       u32  patch_size;   // number of bytes in the payload
+//       u64  target_rva;   // RVA from client image base to patch site
+//                          // (0 = use target_addr directly, for demo)
+//       byte[] payload;    // raw machine code bytes, patch_size long
+//       byte[32] sig;      // HMAC-SHA256 over payload bytes
+//   };
+//
+// The client reads the header first (16 bytes), allocates a page,
+// receives exactly patch_size bytes into it, then receives the 32-byte
+// HMAC-SHA256 signature and verifies it before installing the detour.
+//
+// Signing uses HMAC-SHA256 with a pre-shared 32-byte key known to both
+// server and client.  Any tampered or replayed payload will fail the
+// MAC check and be rejected before a single byte is executed.
+
+#ifndef HOTPATCH_PROTOCOL
+#def HOTPATCH_PROTOCOL 1;
+
+#ifndef FLUX_STANDARD_TYPES
+#import "redtypes.fx";
+#endif;
+
+#import "redcrypto.fx";
+
+using standard::crypto::hashing::SHA256;
+
+// Magic bytes: "HPTX"
+const uint PATCH_MAGIC = 0x48505458,
+// Response codes sent server -> client after delivery
+           PATCH_ACK   = 0x00000001,   // patch received and applied
+           PATCH_NACK  = 0x000000FF;   // something went wrong
+
+// Fixed header size: magic(4) + patch_size(4) + target_rva(8) = 16 bytes
+const int PATCH_HEADER_SIZE = 16,
+
+// Maximum payload we'll accept (1 page)
+          PATCH_MAX_SIZE    = 4096,
+
+// HMAC-SHA256 signature size in bytes
+          HMAC_SIG_SIZE     = 32;
+
+// Hotpatch server port
+const u16 HOTPATCH_PORT     = 9900;
+
+// Pre-shared HMAC key — both server and client must agree on this value.
+// In production this would be loaded from a secure key store or derived
+// via a key-exchange protocol.  For the demo it is embedded at compile time.
+const byte[32] HMAC_KEY = [
+    0x4B, 0x65, 0x79, 0x46, 0x6C, 0x75, 0x78, 0x48,
+    0x6F, 0x74, 0x70, 0x61, 0x74, 0x63, 0x68, 0x53,
+    0x69, 0x67, 0x6E, 0x69, 0x6E, 0x67, 0x4B, 0x65,
+    0x79, 0x21, 0x40, 0x23, 0x24, 0x25, 0x5E, 0x26
+];
+
+
+struct PatchHeader
+{
+    u32 magic,
+        patch_size;
+    u64 target_rva;
+};
+
+// Compute HMAC-SHA256(key, xdata) into out[32].
+//
+// HMAC construction:
+//   ipad = key XOR 0x36 repeated
+//   opad = key XOR 0x5C repeated
+//   HMAC = SHA256(opad || SHA256(ipad || xdata))
+def hmac_sha256(byte* key, int key_len, byte* xdata, int xdata_len, byte* out) -> void
+{
+    // Build padded inner and outer keys (64-byte SHA-256 block size)
+    byte[64] ipad_key, opad_key;
+    byte[32] inner_hash;
+    int i;
+    SHA256_CTX inner_ctx, outer_ctx;
+    byte k;
+
+    // Zero-pad key into the 64-byte blocks, XOR with ipad/opad constants
+    for (i = 0; i < 64; i++)
+    {
+        k = (i < key_len) ? key[i] : (byte)0;
+        ipad_key[i] = k ^^ (byte)0x36;
+        opad_key[i] = k ^^ (byte)0x5C;
+    };
+
+    // inner = SHA256(ipad_key || xdata)
+    sha256_init(@inner_ctx);
+    sha256_update(@inner_ctx, @ipad_key[0], (u64)64);
+    sha256_update(@inner_ctx, xdata, (u64)xdata_len);
+    sha256_final(@inner_ctx, @inner_hash[0]);
+
+    // out = SHA256(opad_key || inner)
+    sha256_init(@outer_ctx);
+    sha256_update(@outer_ctx, @opad_key[0], (u64)64);
+    sha256_update(@outer_ctx, @inner_hash[0], (u64)32);
+    sha256_final(@outer_ctx, out);
+};
+
+// Constant-time comparison of two 32-byte buffers.
+// Returns true if they are identical, false otherwise.
+// Constant-time prevents timing side-channels on the signature check.
+def sig_equal(byte* a, byte* b) -> bool
+{
+    byte diff;
+    int i;
+    for (i = 0; i < 32; i++)
+    {
+        diff = diff | (a[i] ^^ b[i]);
+    };
+    return diff == 0;
+};
+
+#endif;
+```
+
+`examples\hotpatch_client2.fx`
+```
+// hotpatch_client.fx
+//
+// Hotpatch client demo.
+//
+// Ships with a deliberately broken function (bad_compute) that will
+// segfault when called.  Connects to the hotpatch server, receives a
+// replacement function as raw bytes, verifies its HMAC-SHA256 signature,
+// writes the bytes into an executable page, installs a detour over
+// bad_compute, then calls it successfully.
+//
+// Flow:
+//   1. Call bad_compute() - crashes intentionally (writes to null)
+//      (we skip the first call and just show what WOULD happen)
+//   2. Connect to hotpatch server on HOTPATCH_PORT
+//   3. Receive PatchHeader  (16 bytes)
+//   4. Validate magic
+//   5. Receive payload      (patch_size bytes) into RWX page
+//   6. Receive signature    (32 bytes) HMAC-SHA256 over payload
+//   7. Verify signature — reject and abort if invalid
+//   8. Install detour:  bad_compute -> patch page
+//   9. Call bad_compute() again - now routed through the fix
+//  10. Send ACK to server
+
+#import "standard.fx";
+#ifdef __WINDOWS__
+#import "rednet_windows.fx";
+#endif;
+#ifdef __LINUX__
+#import "rednet_linux.fx";
+#endif;
+#import "../../examples/hotpatch_protocol2.fx";
+
+using standard::io::console,
+      standard::net;
+
+// ============================================================================
+// The broken function - intentional null-write segfault
+// ============================================================================
+
+def bad_compute(ulong x) -> ulong
+{
+    // BUG: writes to address 0 - instant segfault
+    ulong* null_ptr = (@)0;
+    *null_ptr = x; // Write, segfault, OS says no
+    return x * 3;
+};
+
+// ============================================================================
+// Detour helpers  (same primitives as detour.fx)
+// ============================================================================
+
+global int PATCH_BYTES = 14;
+
+def write_jmp_indirect(ulong dst) -> void
+{
+    byte* p = (byte*)dst;
+    p[0] = 0xFF;
+    p[1] = 0x25;
+    p[2] = 0x00;
+    p[3] = 0x00;
+    p[4] = 0x00;
+    p[5] = 0x00;
+};
+
+def write_addr64(ulong dst, ulong addr) -> void
+{
+    byte* p = (byte*)dst;
+    p[0] = (addr & 0xFF);
+    p[1] = ((addr >> 8)  & 0xFF);
+    p[2] = ((addr >> 16) & 0xFF);
+    p[3] = ((addr >> 24) & 0xFF);
+    p[4] = ((addr >> 32) & 0xFF);
+    p[5] = ((addr >> 40) & 0xFF);
+    p[6] = ((addr >> 48) & 0xFF);
+    p[7] = ((addr >> 56) & 0xFF);
+};
+
+// Stamp a 14-byte absolute indirect JMP at target_addr pointing to patch_addr
+def install_patch(ulong target_addr, ulong patch_addr) -> void
+{
+    u32 old_protect;
+    VirtualProtect(target_addr, PATCH_BYTES, 0x40, @old_protect);
+
+    write_jmp_indirect(target_addr);
+    write_addr64(target_addr + 6, patch_addr);
+
+    FlushInstructionCache(0xFFFFFFFFFFFFFFFF, target_addr, PATCH_BYTES);
+};
+
+// ============================================================================
+// Receive helpers
+// ============================================================================
+
+// Receive exactly `n` bytes from `sockfd` into `buf`.
+def recv_exact(int sockfd, byte* buf, int n) -> bool
+{
+    int total, got;
+    while (total < n)
+    {
+        got = recv(sockfd, (void*)(buf + total), n - total, 0);
+        if (got <= 0)
+        {
+            return false;
+        };
+        total = total + got;
+    };
+    return true;
+};
+
+// ============================================================================
+// Main
+// ============================================================================
+
+def main() -> int
+{
+    print("=== Hotpatch Client ===\n\0");
+
+    // --- Show what bad_compute would do ---
+    print("\n[bad_compute is BROKEN - calling it would segfault]\n\0");
+    print("  bad_compute writes to address 0x0 - instant crash\n\0");
+    print("  Skipping direct call, waiting for hotpatch...\n\0");
+
+    // --- Init Winsock ---
+    if (init() != 0)
+    {
+        print("[client] WSAStartup failed\n\0");
+        return 1;
+    };
+
+    // --- Connect to hotpatch server ---
+    print("\n[client] connecting to 127.0.0.1:\0");
+    print(HOTPATCH_PORT);
+    print("...\n\0");
+
+    // Build sockaddr_in manually - inet_addr already returns network byte order,
+    // so we must NOT call htonl on it.  tcp_client_connect goes through
+    // init_sockaddr_str which double-swaps the address, so we bypass it here.
+    int sockfd = tcp_socket();
+    if (sockfd < 0)
+    {
+        print("[client] socket() failed\n\0");
+        cleanup();
+        return 1;
+    };
+
+    sockaddr_in server_addr;
+    server_addr.sin_family  = (u16)AF_INET;
+    server_addr.sin_port    = htons(HOTPATCH_PORT);
+    server_addr.sin_addr    = inet_addr("127.0.0.1\0");
+    server_addr.sin_zero[0] = 0;
+    server_addr.sin_zero[1] = 0;
+    server_addr.sin_zero[2] = 0;
+    server_addr.sin_zero[3] = 0;
+    server_addr.sin_zero[4] = 0;
+    server_addr.sin_zero[5] = 0;
+    server_addr.sin_zero[6] = 0;
+    server_addr.sin_zero[7] = 0;
+
+    int conn_result = connect(sockfd, @server_addr, 16);
+    if (conn_result < 0)
+    {
+        print("[client] connect() failed, WSA error: \0");
+        print(get_last_error());
+        print("\n\0");
+        closesocket(sockfd);
+        cleanup();
+        return 1;
+    };
+    print("[client] connected\n\0");
+
+    // --- Receive patch header (16 bytes) ---
+    print("[client] receiving patch header...\n\0");
+
+    PatchHeader header;
+    byte* hdr_ptr = (byte*)@header;
+
+    if (!recv_exact(sockfd, hdr_ptr, PATCH_HEADER_SIZE))
+    {
+        print("[client] failed to receive header\n\0");
+        closesocket(sockfd);
+        cleanup();
+        return 1;
+    };
+
+    // --- Validate magic ---
+    if (header.magic != PATCH_MAGIC)
+    {
+        print("[client] bad magic - rejecting packet\n\0");
+        closesocket(sockfd);
+        cleanup();
+        return 1;
+    };
+
+    print("[client] magic OK, payload size = \0");
+    print(header.patch_size);
+    print(" bytes\n\0");
+
+    if (header.patch_size > PATCH_MAX_SIZE)
+    {
+        print("[client] payload too large - rejecting\n\0");
+        closesocket(sockfd);
+        cleanup();
+        return 1;
+    };
+
+    // --- Allocate RWX page for incoming code ---
+    ulong patch_page = VirtualAlloc(0, 4096, 0x3000, 0x40);
+
+    if (patch_page == 0)
+    {
+        print("[client] VirtualAlloc failed\n\0");
+        closesocket(sockfd);
+        cleanup();
+        return 1;
+    };
+
+    // --- Receive payload bytes directly into executable page ---
+    print("[client] receiving patch payload...\n\0");
+
+    byte* payload_ptr = (byte*)patch_page;
+
+    if (!recv_exact(sockfd, payload_ptr, (int)header.patch_size))
+    {
+        print("[client] failed to receive payload\n\0");
+        VirtualFree(patch_page, 0, 0x8000);
+        closesocket(sockfd);
+        cleanup();
+        return 1;
+    };
+
+    print("[client] payload received\n\0");
+
+    // --- Receive HMAC-SHA256 signature (32 bytes) ---
+    print("[client] receiving signature...\n\0");
+
+    byte[32] recv_sig;
+    if (!recv_exact(sockfd, @recv_sig[0], HMAC_SIG_SIZE))
+    {
+        print("[client] failed to receive signature\n\0");
+        VirtualFree(patch_page, 0, 0x8000);
+        closesocket(sockfd);
+        cleanup();
+        return 1;
+    };
+
+    // --- Verify signature before executing a single byte ---
+    print("[client] verifying HMAC-SHA256 signature...\n\0");
+
+    byte[32] expected_sig;
+    byte* key_ptr = (byte*)@HMAC_KEY[0];
+    hmac_sha256(key_ptr, 32, payload_ptr, header.patch_size, @expected_sig[0]);
+
+    if (!sig_equal(@recv_sig[0], @expected_sig[0]))
+    {
+        print("[client] SIGNATURE INVALID - rejecting patch, possible tampering!\n\0");
+        VirtualFree(patch_page, 0, 0x8000);
+        closesocket(sockfd);
+        cleanup();
+        return 1;
+    };
+
+    print("[client] signature OK - patch is authentic\n\0");
+
+    // --- Flush cache on the newly written page ---
+    FlushInstructionCache(0xFFFFFFFFFFFFFFFF, patch_page, header.patch_size);
+
+    // --- Install detour: bad_compute -> patch_page ---
+    print("[client] installing patch over bad_compute...\n\0");
+    install_patch((ulong)@bad_compute, patch_page);
+    print("[client] patch installed\n\0");
+
+    // --- Send ACK ---
+    u32 ack = PATCH_ACK;
+    send(sockfd, (void*)@ack, 4, 0);
+
+    closesocket(sockfd);
+
+    // --- Now call bad_compute - routed to the fix ---
+    print("\n[client] calling bad_compute(7) via hotpatch...\n\0");
+    ulong result = bad_compute(7),
+          result2 = bad_compute(10);
+    print("[client] result = \0");
+    print(result);
+    print("\n\0");
+
+    print("\n[client] calling bad_compute(10) via hotpatch...\n\0");
+    print("[client] result2 = \0");
+    print(result2);
+    print("\n\0");
+
+    // --- Cleanup ---
+    VirtualFree(patch_page, 0, 0x8000);
+    cleanup();
+
+    print("\n=== Client Done ===\n\0");
+    return 0;
+};
+```
+
+`examples\hotpatch_server2.fx`
+```
+// hotpatch_server.fx
+//
+// Hotpatch server demo.
+//
+// Holds the CORRECT implementation of compute() as compiled Flux.
+// When a client connects, the server:
+//   1. Serializes the fix function's machine code bytes by reading
+//      from its own text segment via a function pointer
+//   2. Computes HMAC-SHA256(HMAC_KEY, payload) as a 32-byte signature
+//   3. Sends a PatchHeader followed by the raw bytes, then the signature
+//   4. Waits for the client ACK
+//
+// The "fix" is just good_compute — the same logic bad_compute was
+// supposed to implement but without the null-write bug:
+//
+//   good_compute(x) = x * 3
+//
+// The server reads its OWN compiled good_compute bytes out of memory
+// and ships them to the client.  The client receives real, already-compiled
+// machine code, verifies the HMAC-SHA256 signature, and only then
+// executes it directly — no interpretation, no JIT.
+
+#import "standard.fx";
+#ifdef __WINDOWS__
+#import "rednet_windows.fx";
+#endif;
+#ifdef __LINUX__
+#import "rednet_linux.fx";
+#endif;
+#import "../../examples/hotpatch_protocol2.fx";
+
+using standard::io::console,
+      standard::net;
+
+// ============================================================================
+// The fix — what bad_compute should have been
+// ============================================================================
+
+def good_compute(ulong x) -> ulong
+{
+    return x * 3;
+};
+
+// ============================================================================
+// Send helpers
+// ============================================================================
+
+def send_exact(int sockfd, byte* buf, int n) -> bool
+{
+    int total, sent;
+    while (total < n)
+    {
+        sent = send(sockfd, (void*)(buf + total), n - total, 0);
+        if (sent <= 0)
+        {
+            return false;
+        };
+        total = total + sent;
+    };
+    return true;
+};
+
+// ============================================================================
+// Measure function body size by scanning for a RET byte (0xC3) or
+// RET imm16 (0xC2) from the function entry point.
+// This is intentionally simple — production code would use a length
+// disassembler.  For a leaf function with no branches this is reliable.
+// We cap at 256 bytes for safety.
+// ============================================================================
+
+def measure_fn(ulong fn_addr) -> int
+{
+    byte* p = (byte*)fn_addr;
+    int i = 0;
+    while (i < 256)
+    {
+        // 0xC3 = RET, 0xC2 = RET imm16
+        if (p[i] == 0xC3 | p[i] == 0xC2)
+        {
+            return i + 1;
+        };
+        i = i + 1;
+    };
+    // Fallback: send 64 bytes
+    return 64;
+};
+
+// ============================================================================
+// Main
+// ============================================================================
+
+def main() -> int
+{
+    print("=== Hotpatch Server ===\n\0");
+
+    // --- Init Winsock ---
+    if (init() != 0)
+    {
+        print("[server] WSAStartup failed\n\0");
+        return 1;
+    };
+
+    // --- Measure good_compute's compiled body ---
+    ulong fix_addr = @good_compute;
+    int   fix_size = measure_fn(fix_addr);
+
+    print("[server] good_compute at 0x\0");
+    print(fix_addr);
+    print(", measured size = \0");
+    print(fix_size);
+    print(" bytes\n\0");
+
+    // --- Print the bytes we'll be sending (debug) ---
+    print("[server] patch bytes: \0");
+    byte* fix_bytes = (byte*)fix_addr;
+    for (int i = 0; i < fix_size; i++)
+    {
+        print((int)fix_bytes[i]);
+        print(" \0");
+    };
+    print("\n\0");
+
+    // --- Create server socket ---
+    print("\n[server] listening on port \0");
+    print(HOTPATCH_PORT);
+    print("...\n\0");
+
+    int server_sock = tcp_server_create(HOTPATCH_PORT, 1);
+    if (server_sock < 0)
+    {
+        print("[server] failed to create server socket\n\0");
+        cleanup();
+        return 1;
+    };
+
+    print("[server] waiting for client...\n\0");
+
+    // --- Accept one client ---
+    sockaddr_in client_addr;
+    int client_sock = tcp_server_accept(server_sock, @client_addr);
+    if (client_sock < 0)
+    {
+        print("[server] accept failed\n\0");
+        tcp_close(server_sock);
+        cleanup();
+        return 1;
+    };
+
+    print("[server] client connected\n\0");
+
+    // --- Build and send patch header ---
+    PatchHeader header;
+    header.magic       = PATCH_MAGIC;
+    header.patch_size  = fix_size;
+    header.target_rva  = 0;   // client resolves target directly via @bad_compute
+
+    byte* hdr_ptr = (byte*)@header;
+
+    print("[server] sending header (\0");
+    print(PATCH_HEADER_SIZE);
+    print(" bytes)...\n\0");
+
+    if (!send_exact(client_sock, hdr_ptr, PATCH_HEADER_SIZE))
+    {
+        print("[server] failed to send header\n\0");
+        tcp_close(client_sock);
+        tcp_close(server_sock);
+        cleanup();
+        return 1;
+    };
+
+    // --- Send raw machine code payload ---
+    print("[server] sending payload (\0");
+    print(fix_size);
+    print(" bytes)...\n\0");
+
+    if (!send_exact(client_sock, fix_bytes, fix_size))
+    {
+        print("[server] failed to send payload\n\0");
+        tcp_close(client_sock);
+        tcp_close(server_sock);
+        cleanup();
+        return 1;
+    };
+
+    print("[server] patch sent\n\0");
+
+    // --- Compute and send HMAC-SHA256 signature ---
+    print("[server] computing HMAC-SHA256 signature...\n\0");
+
+    byte[32] sig;
+    byte* key_ptr = (byte*)@HMAC_KEY[0];
+    hmac_sha256(key_ptr, 32, fix_bytes, fix_size, @sig[0]);
+
+    print("[server] signature: \0");
+    for (int si = 0; si < 32; si++)
+    {
+        byte hi = (sig[si] >> 4) & 0x0F;
+        byte lo = sig[si] & 0x0F;
+        if (hi < 10) { print('0' + hi); } else { print(('a' + (hi - 10))); };
+        if (lo < 10) { print('0' + lo); } else { print(('a' + (lo - 10))); };
+    };
+    print("\n\0");
+
+    if (!send_exact(client_sock, @sig[0], HMAC_SIG_SIZE))
+    {
+        print("[server] failed to send signature\n\0");
+        tcp_close(client_sock);
+        tcp_close(server_sock);
+        cleanup();
+        return 1;
+    };
+
+    print("[server] signature sent\n\0");
+
+    // --- Wait for ACK ---
+    print("[server] waiting for ACK...\n\0");
+
+    u32 ack = 0;
+    byte* ack_ptr = (byte*)@ack;
+    int got = recv(client_sock, ack_ptr, 4, 0);
+
+    if (got == 4 & ack == PATCH_ACK)
+    {
+        print("[server] ACK received - client patched successfully\n\0");
+    };
+
+    if (got != 4 | ack != PATCH_ACK)
+    {
+        print("[server] no ACK or NACK received\n\0");
+    };
+
+    tcp_close(client_sock);
+    tcp_close(server_sock);
+    cleanup();
+
+    print("\n=== Server Done ===\n\0");
+    return 0;
+};
+```
+
+---
+
 ### Mixing Signed/Unsigned in Expressions
 ```
 signed data{32} as i32;
@@ -1636,90 +2417,6 @@ def wait_for_ready(int* status_reg) -> void
     }
     while (timeout > 0 & !(*status_reg & 0x80));  // Not error bit
 };
-```
-
----
-
-## **Function Pointer Patterns**
-
-### Callback Systems
-
-```
-// Function pointer type for callbacks
-def{}* callback(int)->void = eventHandler;
-
-object EventSystem
-{
-    EventHandler[10] handlers;
-    int handler_count;
-    
-    def __init() -> this
-    {
-        this.handler_count = 0;
-        return this;
-    };
-    
-    def register(EventHandler handler) -> void
-    {
-        if (this.handler_count < 10)
-        {
-            this.handlers[this.handler_count] = handler;
-            this.handler_count++;
-        };
-    };
-    
-    def trigger(int event_code) -> void
-    {
-        for (int i = 0; i < this.handler_count; i++)
-        {
-            *this.handlers[i](event_code);  // Call each handler
-        };
-    };
-};
-
-// Handler functions
-def on_error(int code) -> void
-{
-    print(f"Error: {code}\0");
-};
-
-def on_warning(int code) -> void
-{
-    print(f"Warning: {code}\0");
-};
-
-// Usage
-EventSystem events = EventSystem();
-events.register(@on_error);
-events.register(@on_warning);
-events.trigger(404);  // Calls both handlers
-```
-
-### Function Pointer Arrays (Jump Tables)
-```
-int* operations[4](int, int) as OpTable;
-
-def op_add(int a, int b) -> int { return a + b; };
-def op_sub(int a, int b) -> int { return a - b; };
-def op_mul(int a, int b) -> int { return a * b; };
-def op_div(int a, int b) -> int { return b != 0 ? a / b : 0; };
-
-OpTable ops = [@op_add, @op_sub, @op_mul, @op_div];
-
-def calculate(int opcode, int a, int b) -> int
-{
-    if (opcode >= 0 & opcode < 4)
-    {
-        return *ops[opcode](a, b);  // Jump table dispatch
-    };
-    return 0;
-};
-
-// Usage
-print(calculate(0, 10, 5));  // 15 (add)
-print(calculate(1, 10, 5));  // 5  (sub)
-print(calculate(2, 10, 5));  // 50 (mul)
-print(calculate(3, 10, 5));  // 2  (div)
 ```
 
 ---
