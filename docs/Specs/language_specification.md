@@ -53,16 +53,6 @@ def myAdd(float x, float y) -> float
 };
 ```
 
-Recursion example:
-```
-def rsub(int x, int y) -> int
-{
-    if (x == 0 | y == 0) { return 0; };
-
-    rsub(--x,--y);
-};
-```
-
 Ternary logic:
 ```
 #import "standard.fx";
@@ -944,7 +934,17 @@ while (condition)
 
 ---
 
-## **Single-initialized variables:**
+## Recursion:
+```
+def rsub(int x, int y) -> int
+{
+    if (x == 0 | y == 0) { return 0; };
+
+    rsub(--x,--y);
+};
+```
+
+## **Single-initialized variables with `singinit`:**
 ```
 #import "standard.fx";
 
@@ -967,6 +967,38 @@ def call(int y) -> void
 def main() -> int
 {
     call(10);
+    return 0;
+};
+```
+
+## Strict Recursion with `<~`:
+Functions that have the recurse return operator will always return to themselves. Their stack frame never grows because they become tail calls, and get optimized as such.
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+noopstr m1 = "[recurse \0",
+        m2 = "]\0";
+
+def recurse1(int x) <~ int
+{
+    singinit int y;
+    print(m1); print(y); println(m2);
+    return ++y;
+};
+
+
+def recurse2() <~ void
+{
+    singinit int z;
+    print(m1); print(++z); println(m2);
+};
+
+
+def main() -> int
+{
+    recurse2(); // Step into tail function
     return 0;
 };
 ```
@@ -1986,7 +2018,7 @@ STRINGIFY = "$"
 LAMBDA_ARROW = "<:-"
 RETURN_ARROW = "->"
 CHAIN_ARROW = "<-"
-RECURSE_ARROW = "<~"
+RECURSE_ARROW = "<~" // def foo() <~ void;  // Emits musttail, 0 stack growth
 NULL_COALESCE = "??"
 NO_MANGLE = "!!"
 FUNCTION_POINTER = "{}*"
