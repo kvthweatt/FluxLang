@@ -3203,13 +3203,22 @@ class FluxParser:
             operand = self.unary_expression()
             return TieExpression(operand)
         elif self.expect(TokenType.STRINGIFY):
-            # Stringify operator: $x produces the name of x as a compile-time string
+            # Stringify operator: $x or $x.member produces the name/value as a string
             self.advance()
             if not self.expect(TokenType.IDENTIFIER):
                 raise SyntaxError(f"Expected identifier after '$'")
             name = self.current_token.value
             self.advance()
-            return Stringify(name)
+            member = None
+            if self.expect(TokenType.DOT):
+                self.advance()
+                # Accept any identifier including the special '_' tag accessor
+                if self.expect(TokenType.IDENTIFIER):
+                    member = self.current_token.value
+                    self.advance()
+                else:
+                    raise SyntaxError(f"Expected member name after '.' in stringify expression")
+            return Stringify(name, member)
         else:
             return self.postfix_expression()
     

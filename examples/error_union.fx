@@ -68,5 +68,8 @@ def main() -> int
 
         default { print("No active tag set!\n\0"); };
     };
+
+    print($e._);
+
 	return 0;
 };

@@ -3074,31 +3074,99 @@ class AddressOf(Expression):
 
 @dataclass
 class Stringify(Expression):
-    """$x  -- produce the name of x as a compile-time string literal (byte*)"""
+    """$x or $x.member -- produce the name/value as a compile-time string literal (byte*)"""
     name: str
+    member: Optional[str] = None
 
     def __repr__(self) -> str:
+        if self.member:
+            return f"${self.name}.{self.member}"
         return f"${self.name}"
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        """Emit the identifier name as a null-terminated i8* global constant."""
-        # Validate that the identifier actually exists
-        current_ns = getattr(module, '_current_namespace', '') or module.symbol_table.current_namespace
-        if (module.symbol_table.get_llvm_value(self.name) is None and
-                self.name not in module.globals and
-                module.symbol_table.lookup_variable(self.name, current_ns) is None and
-                module.symbol_table.lookup_function(self.name, current_ns) is None):
-            raise ComptimeError(f"Cannot stringify undefined identifier '{self.name}'")
-        string_bytes = bytearray(self.name.encode('ascii')) + bytearray(1)  # null terminator
+    def _emit_string(self, builder: ir.IRBuilder, module: ir.Module, text: str) -> ir.Value:
+        """Emit a null-terminated string constant and return a pointer to it."""
+        string_bytes = bytearray(text.encode('ascii')) + bytearray(1)
         str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
         str_val = ir.Constant(str_array_ty, string_bytes)
-        str_name = f".stringify.{self.name}.{id(self)}"
+        str_name = f".stringify.{text}.{id(self)}"
         gv = ir.GlobalVariable(module, str_val.type, name=str_name)
         gv.linkage = 'internal'
         gv.global_constant = True
         gv.initializer = str_val
         zero = ir.Constant(ir.IntType(32), 0)
-        return builder.gep(gv, [zero, zero], inbounds=True, name=f"str_{self.name}")
+        return builder.gep(gv, [zero, zero], inbounds=True, name=f"str_{text}")
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        """Emit the identifier (and optional member) name as a null-terminated i8* global constant."""
+        current_ns = getattr(module, '_current_namespace', '') or module.symbol_table.current_namespace
+
+        if self.member is None:
+            # Simple $x — validate and emit the identifier name
+            if (module.symbol_table.get_llvm_value(self.name) is None and
+                    self.name not in module.globals and
+                    module.symbol_table.lookup_variable(self.name, current_ns) is None and
+                    module.symbol_table.lookup_function(self.name, current_ns) is None):
+                raise ComptimeError(f"Cannot stringify undefined identifier '{self.name}'")
+            return self._emit_string(builder, module, self.name)
+
+        # $x._ — resolve the tag value to its enum member name at runtime
+        if self.member == '_':
+            # Look up the variable to find its union type
+            var_entry = module.symbol_table.lookup_variable(self.name, current_ns)
+            if var_entry is None:
+                raise ComptimeError(f"Cannot stringify: '{self.name}' is not a defined variable")
+            union_name = var_entry.type_spec.custom_typename if var_entry.type_spec else None
+            if union_name is None or not hasattr(module, '_union_member_info') or union_name not in module._union_member_info:
+                raise ComptimeError(f"Cannot stringify '._': '{self.name}' is not a tagged union variable")
+            union_info = module._union_member_info[union_name]
+            if not union_info.get('is_tagged'):
+                raise ComptimeError(f"Cannot stringify '._': union '{union_name}' has no tag")
+            tag_enum_name = union_info['tag_name']
+            if not hasattr(module, '_enum_types') or tag_enum_name not in module._enum_types:
+                raise ComptimeError(f"Cannot stringify '._': enum '{tag_enum_name}' not found")
+            enum_values = module._enum_types[tag_enum_name]  # dict: name -> int value
+
+            # Load the tag value from the variable
+            var_llvm = module.symbol_table.get_llvm_value(self.name)
+            if var_llvm is None:
+                raise ComptimeError(f"Cannot stringify '._': no LLVM value for '{self.name}'")
+            tag_ptr = builder.gep(var_llvm, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)], inbounds=True, name="tag_ptr")
+            tag_val = builder.load(tag_ptr, name="tag_val")
+
+            # Build a result pointer slot
+            i8ptr = ir.PointerType(ir.IntType(8))
+            result_slot = builder.alloca(i8ptr, name="stringify_result")
+
+            # Emit: varname.<enum_member_name> strings and select by value
+            # Format matches the example: "e.BOOL_ACTIVE"
+            after_bb = builder.append_basic_block("stringify_after")
+
+            sorted_members = sorted(enum_values.items(), key=lambda kv: kv[1])
+            for enum_member, enum_int in sorted_members:
+                match_bb = builder.append_basic_block(f"stringify_{enum_member}")
+                next_bb = builder.append_basic_block(f"stringify_next_{enum_member}")
+                cmp = builder.icmp_signed('==', tag_val, ir.Constant(ir.IntType(32), enum_int))
+                builder.cbranch(cmp, match_bb, next_bb)
+
+                builder.position_at_end(match_bb)
+                label = f"{self.name}.{enum_member}"
+                str_ptr = self._emit_string(builder, module, label)
+                builder.store(str_ptr, result_slot)
+                builder.branch(after_bb)
+
+                builder.position_at_end(next_bb)
+
+            # Fallback: emit "unknown"
+            unknown_ptr = self._emit_string(builder, module, f"{self.name}.<unknown>")
+            builder.store(unknown_ptr, result_slot)
+            builder.branch(after_bb)
+
+            builder.position_at_end(after_bb)
+            return builder.load(result_slot, name="stringify_tag")
+
+        # $x.member — emit "x.member" as a compile-time string
+        label = f"{self.name}.{self.member}"
+        return self._emit_string(builder, module, label)
 
 @dataclass
 class AlignOf(Expression):
