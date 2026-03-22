@@ -1000,7 +1000,7 @@ def main() -> int
 
 ---
 
-## **Error handling with try/throw/catch:**
+## **Error handling with `try`/`throw`/`catch`:**
 ```
 unsigned data{8}[] as string;  // Basic string implementation with no functionality (non-OOP string)
 
@@ -1067,6 +1067,83 @@ def main() -> int
     catch (string x)
     {
         error = x;  // "Thrown from nested try-catch block."
+    };
+
+    return 0;
+};
+```
+
+## **Tagged unions:**
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+enum ErrorUnionEnum
+{
+    INACTIVE,
+    INT_ACTIVE,
+    LONG_ACTIVE,
+    BOOL_ACTIVE,
+    CHAR_ACTIVE,
+    FLOAT_ACTIVE,
+    DOUBLE_ACTIVE   
+};
+
+union ErrorUnion
+{
+    int  iRval;
+    long lRval;
+    bool bRval;
+    char cRval;
+    float fRval;
+    double dRval;
+} ErrorUnionEnum;
+
+
+def foo() -> ErrorUnion
+{
+    ErrorUnion err;
+
+    err.bRval = false; // Set bool to active element
+    err._ = ErrorUnionEnum.BOOL_ACTIVE;
+
+    return err;
+};
+
+
+def main() -> int
+{
+    ErrorUnion e = foo();
+
+    switch (e._)
+    {
+        case (ErrorUnionEnum.INT_ACTIVE)
+        {
+            print("Integer active in error union!\n\0");
+        }
+        case (ErrorUnionEnum.LONG_ACTIVE)
+        {
+            print("Long active in error union!\n\0");
+        }
+        case (ErrorUnionEnum.BOOL_ACTIVE)
+        {
+            print("Bool active in error union!\n\0");
+        }
+        case (ErrorUnionEnum.CHAR_ACTIVE)
+        {
+            print("Char active in error union!\n\0");
+        }
+        case (ErrorUnionEnum.FLOAT_ACTIVE)
+        {
+            print("Float active in error union!\n\0");
+        }
+        case (ErrorUnionEnum.DOUBLE_ACTIVE)
+        {
+            print("Double active in error union!\n\0");
+        }
+
+        default { print("No active tag set!\n\0"); };
     };
 
     return 0;
@@ -2421,52 +2498,6 @@ def wait_for_ready(int* status_reg) -> void
 
 ---
 
-## **Array Comprehension Advanced Examples**
-
-### Multi-dimensional Comprehension
-```
-// Generate 2D grid
-int[10][10] grid = [
-    [x * y for (int y = 0; y < 10; y++)]
-    for (int x = 0; x < 10; x++)
-];
-
-print(grid[5][5]);  // 25
-
-// Conditional 2D comprehension
-int[10][10] chess_pattern = [
-    [(x + y) % 2 for (int y = 0; y < 10; y++)]
-    for (int x = 0; x < 10; x++)
-];
-```
-
-### Comprehension with Complex Expressions
-```
-// Fibonacci sequence
-int[20] fib = [
-    x == 0 ? 0 : (x == 1 ? 1 : fib[x-1] + fib[x-2])
-    for (int x = 0; x < 20; x++)
-];
-
-// Prime number sieve (simplified)
-bool[100] is_prime = [
-    x < 2 ? false : (x == 2 ? true : x % 2 != 0)
-    for (int x = 0; x < 100; x++)
-];
-
-// Transformation with filtering
-int[] source = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-int[5] evens_squared = [
-    x * x 
-    for (int x in source) 
-    if (x % 2 == 0)
-];  // [4, 16, 36, 64, 100]
-```
-
----
-
-## **Practical Real-World Examples**
-
 ### Simple Packet Parser
 ```
 
@@ -2534,60 +2565,10 @@ def fixed_div(fixed16_16 a, fixed16_16 b) -> fixed16_16
 };
 
 // Usage
-fixed16_16 a = to_fixed(3.14159);
-fixed16_16 b = to_fixed(2.0);
+fixed16_16 a = to_fixed(3.14159),
+           b = to_fixed(2.0);
 fixed16_16 result = fixed_mul(a, b);
 print(from_fixed(result));  // approx 6.28318
-```
-
-### Circular Buffer
-```
-object CircularBuffer
-{
-    unsigned data{8}[256] as byte buffer;
-    int read_pos;
-    int write_pos;
-    int count;
-    
-    def __init() -> this
-    {
-        this.read_pos = 0;
-        this.write_pos = 0;
-        this.count = 0;
-        return this;
-    };
-    
-    def write(unsigned data{8} value) -> bool
-    {
-        if (this.count >= 256)
-        {
-            return false;  // Buffer full
-        };
-        
-        this.buffer[this.write_pos] = value;
-        this.write_pos = (this.write_pos + 1) % 256;
-        this.count++;
-        return true;
-    };
-    
-    def read() -> unsigned data{8}
-    {
-        if (this.count == 0)
-        {
-            return 0;  // Buffer empty
-        };
-        
-        unsigned data{8} value = this.buffer[this.read_pos];
-        this.read_pos = (this.read_pos + 1) % 256;
-        this.count--;
-        return value;
-    };
-    
-    def available() -> int
-    {
-        return this.count;
-    };
-};
 ```
 
 ---
@@ -2623,11 +2604,6 @@ def get_nullable() -> int*
     };
     return @some_value;
 };
-```
-
-### Auto Type Inference
-```
-auto result = calculate_something();  // Infers return type
 ```
 
 ---

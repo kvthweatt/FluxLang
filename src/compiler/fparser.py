@@ -604,6 +604,8 @@ class FluxParser:
             return self.assert_statement()
         elif self.expect(TokenType.DEFER):
             return self.defer_statement()
+        elif self.expect(TokenType.DEPRECATE):
+            return self.deprecate_statement()
         elif self.expect(TokenType.NORET):
             return self.noreturn_statement()
         elif self.expect(TokenType.LEFT_BRACE):
@@ -679,7 +681,21 @@ class FluxParser:
         if len(paths) == 1:
             return NotUsingStatement(paths[0])
         return [NotUsingStatement(p) for p in paths]
-    
+
+    def deprecate_statement(self) -> DeprecateStatement:
+        """
+        deprecate_statement -> 'deprecate' namespace_path ';'
+        namespace_path -> IDENTIFIER ('::' IDENTIFIER)*
+        Statically checks at compile time that no references to the namespace exist.
+        """
+        self.consume(TokenType.DEPRECATE)
+        path = self.consume(TokenType.IDENTIFIER).value
+        while self.expect(TokenType.SCOPE):
+            self.advance()
+            path += "::" + self.consume(TokenType.IDENTIFIER).value
+        self.consume(TokenType.SEMICOLON)
+        return DeprecateStatement(path)
+
     def extern_statement(self) -> ExternBlock:
         """
         extern_statement -> 'extern' '{' extern_function_def* '}' ';'

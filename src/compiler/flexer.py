@@ -64,6 +64,7 @@ class TokenType(Enum):
     DEF = auto()          # "        def
     DEFER = auto()        # "        defer
     DEFAULT = auto()      # "        default
+    DEPRECATE = auto()    # "        deprecate
     DO = auto()           # "        do
     DOUBLE_KW = auto()    # "        double
     ELIF = auto()         # "        elif | else if
@@ -368,6 +369,7 @@ class FluxLexer:
             'def': TokenType.DEF,
             'defer': TokenType.DEFER,
             'default': TokenType.DEFAULT,
+            'deprecate': TokenType.DEPRECATE,
             'do': TokenType.DO,
             'double': TokenType.DOUBLE_KW,
             'elif': TokenType.ELIF,

@@ -5611,6 +5611,50 @@ def _collect_label_names(stmts) -> list:
             names.extend(_collect_label_names(stmt.else_block.statements))
     return names
 
+# Deprecate statement — compile-time check that no references to a namespace exist
+@dataclass
+class DeprecateStatement(Statement):
+    namespace_path: str  # e.g., "standard::io::some::deprecated::namespace"
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
+        mangled = self.namespace_path.replace("::", "__")
+
+        # Walk all AST nodes in the program looking for references to the deprecated namespace
+        statements = getattr(module, '_program_statements', [])
+        references = []
+
+        def walk(node, path="<top>"):
+            if node is None:
+                return
+            # Check Identifier and FunctionCall names
+            if isinstance(node, Identifier):
+                if node.name == mangled or node.name.startswith(mangled + "__"):
+                    references.append(f"  identifier '{node.name}' in {path}")
+            elif isinstance(node, FunctionCall):
+                if node.name == mangled or node.name.startswith(mangled + "__"):
+                    references.append(f"  call '{node.name}' in {path}")
+                for i, arg in enumerate(node.arguments):
+                    walk(arg, f"{path} -> call arg {i}")
+            # Recurse into dataclass fields
+            if hasattr(node, '__dataclass_fields__'):
+                for field_name in node.__dataclass_fields__:
+                    child = getattr(node, field_name, None)
+                    child_path = f"{path}.{field_name}"
+                    if isinstance(child, list):
+                        for item in child:
+                            walk(item, child_path)
+                    elif isinstance(child, ASTNode):
+                        walk(child, child_path)
+
+        for stmt in statements:
+            walk(stmt, type(stmt).__name__)
+
+        if references:
+            ref_list = "\n".join(references)
+            raise ComptimeError(
+                f"Deprecated namespace '{self.namespace_path}' is still referenced:\n{ref_list}"
+            )
+
 # Function definition
 @dataclass
 class FunctionDef(ASTNode):
@@ -7257,6 +7301,7 @@ class Program(ASTNode):
             self.symbol_table = SymbolTable()
         
         module.symbol_table = self.symbol_table
+        module._program_statements = self.statements
         
         # Create global builder with no function context
         builder = ir.IRBuilder()

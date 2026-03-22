@@ -44,7 +44,7 @@ namespace standard
 
                 def __init(byte* path, byte* mode) -> this
                 {
-                    print("object instance init()\n\0");
+                    standard::io::console::print("object instance init()\n\0");
                     this.handle = fopen(path, mode);
                     this.size = this.get_size();
                     if (this.is_open()) { this.error_state = 0; }

@@ -51,7 +51,7 @@ contexts:
         2: punctuation.accessor.double-colon.flux
 
     # Primitive types (MUST come before keywords)
-    - match: '\b(int|uint|long|ulong|float|double|void|bool|char|data)\b'
+    - match: '\b(int|uint|long|ulong|float|double|void|bool|byte|char|data)\b'
       scope: storage.type.primitive.flux
 
     # Storage types
@@ -59,7 +59,7 @@ contexts:
       scope: storage.type.flux
 
     # Keywords (but NOT types)
-    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|contract|compt|const|continue|def|defer|default|do|elif|else|extern|false|for|from|goto|global|heap|if|in|is|label|local|namespace|not|operator|or|private|public|register|return|signed|sizeof|stack|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|volatile|while|xor)\b'
+    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|contract|compt|const|continue|def|defer|default|deprecate|do|elif|else|extern|false|for|from|goto|global|heap|if|in|is|label|local|namespace|noreturn|not|operator|or|private|public|register|return|signed|sizeof|stack|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|volatile|while|xor)\b'
       scope: keyword.control.flux
 
     # Type modifiers

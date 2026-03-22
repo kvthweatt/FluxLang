@@ -825,13 +825,13 @@ namespace standard
 
             def printval() -> void
             {
-                print(this.value);
+                standard::io::console::print(this.value);
             };
 
             def println() -> void
             {
-                print(this.value);
-                print("\n\0");
+                standard::io::console::print(this.value);
+                standard::io::console::print("\n\0");
             };
         };
     };
