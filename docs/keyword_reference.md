@@ -145,15 +145,15 @@ switch (x) { case (1) { ... } default { ... }; };
 Marks a namespace, object member, or function signature as deprecated. Emits an error on use.  
 Applied to the declaration, not the definition.
 ```
-deprecate def oldFunc() -> void;
-deprecate namespace oldLib;
-deprecate int oldMember;
+deprecate oldFunc() -> void;
+deprecate oldLib;    // Namespace will be identified
+deprecate oldMember; // Type will be identified by definition
 ```
 
 ---
 
 **`do`**
-Begins a do loop.
+Enter a `do` loop.
 ```
 do { x++; };
 ```
@@ -181,7 +181,7 @@ if (x == 1) { ... } elif (x == 2) { ... } else { ... };
 ---
 
 **`else`**
-Fallback branch of an if statement.
+Fallback branch of an `if` statement.
 ```
 if (x > 0) { ... } else { ... };
 ```
