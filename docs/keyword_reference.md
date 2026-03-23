@@ -1,5 +1,8 @@
 # Flux Keyword Reference
 
+Flux keywords are reserved, and cnanot be used as identifiers.  
+This means you cannot do `int data;`, this is illegal.
+
 ---
 
 **`alignof`**
@@ -299,7 +302,7 @@ if (x is 5) { ... };
 ---
 
 **`label`**
-Declares a jump target for `goto`. Cannot be used as an identifier.
+Declares a jump target for `goto`.
 ```
 label myLabel;
 ```

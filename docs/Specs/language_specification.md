@@ -13,6 +13,8 @@ If you like Flux, please consider contributing to the project or joining the [Fl
 
 ## **Functions:**
 
+You cannot define a function within a function. They must be module, namespace, or object level.
+
 Prototype:
 ```
 // Single declaration
