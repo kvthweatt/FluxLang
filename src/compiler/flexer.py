@@ -70,6 +70,7 @@ class TokenType(Enum):
     ELIF = auto()         # "        elif | else if
     ELSE = auto()         # "        else
     ENUM = auto()         # "        enum
+    ESCAPE_KW = auto()    # "        escape
     EXTERN = auto()       # "        extern
     FALSE = auto()        # "        false
     FLOAT_KW = auto()     # "        float
@@ -376,6 +377,7 @@ class FluxLexer:
             'else': TokenType.ELSE,
             'endianof': TokenType.ENDIANOF,
             'enum': TokenType.ENUM,
+            'escape': TokenType.ESCAPE_KW,
             'extern': TokenType.EXTERN,
             'false': TokenType.FALSE,
             'float': TokenType.FLOAT_KW,

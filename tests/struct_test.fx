@@ -1,5 +1,7 @@
 #import "standard.fx";
 
+using standard::io::console;
+
 struct myStru
 {
 	int x,y,z;

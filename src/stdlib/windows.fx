@@ -1,11 +1,11 @@
 // Flux Windows GUI Library
 // Provides clean wrapper around Win32 API for window creation and management
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_MATH
-#import "redmath.fx";
+#import "math.fx";
 #endif;
 
 #ifndef __WIN32_INTERFACE__

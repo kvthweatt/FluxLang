@@ -2,7 +2,7 @@
 // Provides object-oriented interface to C stdio file operations
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_FFI_FIO

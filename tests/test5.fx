@@ -1,7 +1,8 @@
 #import "redstandard.fx";
 #import "redcrypto.fx";
 
-using standard::crypto::hashing::SHA256;
+using standard::crypto::hashing::SHA256,
+      standard::io::console;
 
 def byte_to_hex(byte b, byte* out) -> void
 {

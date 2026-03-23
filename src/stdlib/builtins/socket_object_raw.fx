@@ -1,9 +1,9 @@
 #ifndef FLUX_STANDARD_IO
-#import "redio.fx";
+#import "io.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_NET
-#import "rednet_windows.fx";
+#import "net_windows.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_SOCKETS

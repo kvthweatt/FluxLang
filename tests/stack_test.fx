@@ -1,6 +1,7 @@
 #import "standard.fx", "redallocators.fx";
 
-using standard::memory::allocators::stdstack;
+using standard::memory::allocators::stdstack,
+      standard::io::console;
 
 // ============================================================================
 // Helpers

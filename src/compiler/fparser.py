@@ -604,6 +604,8 @@ class FluxParser:
             return self.assert_statement()
         elif self.expect(TokenType.DEFER):
             return self.defer_statement()
+        elif self.expect(TokenType.ESCAPE_KW):
+            return self.escape_statement()
         elif self.expect(TokenType.DEPRECATE):
             return self.deprecate_statement()
         elif self.expect(TokenType.NORET):
@@ -2743,6 +2745,16 @@ class FluxParser:
         expr = self.expression()
         self.consume(TokenType.SEMICOLON)
         return DeferStatement(expr)
+
+    def escape_statement(self) -> EscapeStatement:
+        """
+        escape_statement -> 'escape' call_expression ';'
+        Only valid inside a <~ recursive function.
+        """
+        self.consume(TokenType.ESCAPE_KW)
+        expr = self.expression()
+        self.consume(TokenType.SEMICOLON)
+        return EscapeStatement(expr)
 
     def noreturn_statement(self) -> 'NoreturnStatement':
         """

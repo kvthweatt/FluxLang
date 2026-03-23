@@ -1,23 +1,23 @@
-#import "standard.fx", "redmath.fx", "redwindows.fx", "redopengl.fx";
+#import "standard.fx", "math.fx", "windows.fx", "opengl.fx";
 
-using standard::system::windows;
-using standard::math;
+using standard::system::windows,
+      standard::math;
 
 // ============================================================================
 // Window size
 // ============================================================================
 
-const int WIN_W = 900;
-const int WIN_H = 600;
+const int WIN_W = 900,
+          WIN_H = 600,
 
 // ============================================================================
 // Virtual key codes for WASD
 // ============================================================================
 
-const int VK_W = 0x57;
-const int VK_A = 0x41;
-const int VK_S = 0x53;
-const int VK_D = 0x44;
+          VK_W = 0x57,
+          VK_A = 0x41,
+          VK_S = 0x53,
+          VK_D = 0x44;
 
 // ============================================================================
 // Draw the ground plane as a grid of lines at Y = 0
@@ -25,13 +25,14 @@ const int VK_D = 0x44;
 
 def draw_ground(int grid_half, int step) -> void
 {
-    float extent = (float)grid_half;
-    float fs     = (float)step;
+    float extent = float(grid_half),
+          fs     = float(step),
+          x, z;
 
     glColor3f(0.25, 0.55, 0.25);
     glBegin(GL_LINES);
 
-    float x = (0.0 - extent);
+    x -= extent;
     while (x <= extent)
     {
         glVertex3f(x, 0.0,  extent);
@@ -39,7 +40,7 @@ def draw_ground(int grid_half, int step) -> void
         x = x + fs;
     };
 
-    float z = (0.0 - extent);
+    z -= extent;
     while (z <= extent)
     {
         glVertex3f( extent, 0.0, z);
@@ -67,17 +68,20 @@ def main() -> int
     glDepthFunc(GL_LESS);
 
     // ---- Camera state ----
-    float cam_x   = 0.0;   // world position
-    float cam_y   = 1.7;   // eye height
-    float cam_z   = 5.0;
-    float cam_yaw = 0.0;   // radians, rotation around Y axis
-    float move_speed = 0.5;
-    float turn_speed = 0.03;
-    float aspect;
-    float fwd_x, fwd_z, str_x, str_z;
+    float cam_x   = 0.0,   // world position
+          cam_y   = 1.7,   // eye height
+          cam_z   = 5.0,
+          cam_yaw = 0.0,   // radians, rotation around Y axis
+          move_speed = 0.5,
+          turn_speed = 0.03,
+          aspect,
+          fwd_x, fwd_z, str_x, str_z;
     RECT client_rect;
 
     int cur_w, cur_h;
+
+    GLVec3 eye, target, up;
+    Matrix4 proj, view;
 
     while (win.process_messages())
     {
@@ -133,7 +137,6 @@ def main() -> int
         // ---- Projection ----
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
-        Matrix4 proj;
         mat4_perspective(1.0472, aspect, 0.1, 500.0, @proj);  // 60 deg FOV
         glLoadMatrixf(@proj.m[0]);
 
@@ -141,22 +144,18 @@ def main() -> int
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
 
-        GLVec3 eye;
         eye.x = cam_x;
         eye.y = cam_y;
         eye.z = cam_z;
 
-        GLVec3 target;
         target.x = cam_x + fwd_x;
         target.y = cam_y;
         target.z = cam_z + fwd_z;
 
-        GLVec3 up;
         up.x = 0.0;
         up.y = 1.0;
         up.z = 0.0;
 
-        Matrix4 view;
         mat4_lookat(@eye, @target, @up, @view);
         glLoadMatrixf(@view.m[0]);
 

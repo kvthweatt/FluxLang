@@ -10,11 +10,11 @@
 #def FLUX_STANDARD_TIME 1;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_SYSTEM
-#import "redsys.fx";
+#import "sys.fx";
 #endif;
 
 // ============ PLATFORM FFI ============
@@ -129,7 +129,7 @@ namespace standard
         def nix_sleep_ms(u32 ms) -> void
         {
             timespec req;
-            req.tv_sec  = (ms / (1000;
+            req.tv_sec  = ms / 1000;
             req.tv_nsec = (ms % (1000) * TIME_NS_PER_MS;
             nanosleep(@req, (void*)0);
         };

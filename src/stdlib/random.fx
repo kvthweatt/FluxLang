@@ -9,17 +9,16 @@
 #def FLUX_STANDARD_RANDOM 1;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 struct PCG32
 {
-    u64 state;
-    u64 inc;
+    u64 state, inc;
 };
 
-global PCG32 global_rng;
-global bool global_rng_initialized = false;
+PCG32 global_rng;
+bool global_rng_initialized = false;
 
 namespace standard
 {
@@ -56,9 +55,9 @@ namespace standard
         // Get entropy from multiple sources
         def get_entropy() -> u64
         {
-            u64 t1 = get_rdtsc();
-            u64 t2 = get_rdtsc();
-            u64 t3 = get_rdtsc();
+            u64 t1 = get_rdtsc(),
+                t2 = get_rdtsc(),
+                t3 = get_rdtsc();
             
             // Mix the entropy sources
             return t1 ^^ (t2 << 21) ^^ (t3 >> 17);
@@ -127,15 +126,15 @@ namespace standard
         
         def xorshift128_init(XorShift128* rng) -> void
         {
-            u64 seed1 = get_entropy();
-            u64 seed2 = get_entropy();
+            u64 seed1 = get_entropy(),
+                seed2 = get_entropy();
             xorshift128_seed(rng, seed1, seed2);
         };
         
         def xorshift128_next(XorShift128* rng) -> u64
         {
-            u64 s1 = rng.state[0];
-            u64 s0 = rng.state[1];
+            u64 s1 = rng.state[0],
+                s0 = rng.state[1];
             
             rng.state[0] = s0;
             s1 = s1 ^^ (s1 << 23);
@@ -164,8 +163,8 @@ namespace standard
         
         def pcg32_init(PCG32* rng) -> void
         {
-            u64 seed = get_entropy();
-            u64 seq = get_entropy();
+            u64 seed = get_entropy(),
+                seq = get_entropy();
             pcg32_seed(rng, seed, seq);
         };
         
@@ -177,8 +176,8 @@ namespace standard
             rng.state = oldstate * (u64)6364136223846793005 + rng.inc;
             
             // Calculate output function (XSH RR)
-            u32 xorshifted = (u32)(((oldstate >> 18) ^^ oldstate) >> 27);
-            u32 rot = (u32)(oldstate >> 59);
+            u32 xorshifted = (u32)(((oldstate >> 18) ^^ oldstate) >> 27),
+                rot = (u32)(oldstate >> 59);
             
             return (xorshifted >> rot) | (xorshifted << ((u32)0 - rot));
         };

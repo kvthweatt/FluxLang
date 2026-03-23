@@ -1,8 +1,7 @@
-#import "redstandard.fx";
-#import "redmath.fx";
-#import "redformat.fx";
+#import "standard.fx", "math.fx", "format.fx";
 
-using standard::format;
+using standard::format,
+      standard::io::console;
 
 def sieve(u64 limit) -> void
 {

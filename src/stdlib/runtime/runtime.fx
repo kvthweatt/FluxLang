@@ -20,7 +20,7 @@ global const unsigned data{64} U64MAXVAL = 0xFFFFFFFFFFFFFFFFu;
 #endif;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 #ifdef __WINDOWS__
@@ -28,19 +28,19 @@ global i64 WIN_STDOUT_HANDLE;
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "redmemory.fx";
+#import "memory.fx";
 #endif;
 
 using standard::memory::allocators::stdheap;
 
-#import "red_string_utilities.fx";
+#import "string_utilities.fx";
 
 #ifndef FLUX_STANDARD_SYSTEM
-#import "redsys.fx";
+#import "sys.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_IO
-#import "redio.fx";
+#import "io.fx";
 #endif;
 
 // ---------------------------

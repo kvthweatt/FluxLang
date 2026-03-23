@@ -25,11 +25,7 @@
 #ifndef HOTPATCH_PROTOCOL
 #def HOTPATCH_PROTOCOL 1;
 
-#ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
-#endif;
-
-#import "redcrypto.fx";
+#import "cryptography.fx";
 
 using standard::crypto::hashing::SHA256;
 

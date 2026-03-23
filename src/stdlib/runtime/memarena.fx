@@ -14,11 +14,11 @@
 //
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_ALLOCATORS
-#import "redallocators.fx";
+#import "allocators.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_ARENA
@@ -34,8 +34,7 @@
 struct ArenaSlab
 {
     u64        base;
-    size_t     capacity;
-    size_t     frontier;
+    size_t     capacity, frontier;
     ArenaSlab* next;
 };
 

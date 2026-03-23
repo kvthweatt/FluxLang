@@ -1,5 +1,5 @@
 #ifndef FLUX_STANDARD_IO
-#import "redio.fx";
+#import "io.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_STRINGS
@@ -825,13 +825,13 @@ namespace standard
 
             def printval() -> void
             {
-                standard::io::console::print(this.value);
+                standard::io::console::print(this.value, this.length);
             };
 
             def println() -> void
             {
-                standard::io::console::print(this.value);
-                standard::io::console::print("\n\0");
+                standard::io::console::print(this.value, this.length);
+                standard::io::console::print("\n\0",2);
             };
         };
     };

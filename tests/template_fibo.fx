@@ -2,7 +2,8 @@
 #import "redformat.fx";
 #import "redmath.fx";
 
-using standard::format;
+using standard::io::console,
+      standard::format;
 
 def fibonacci<T>(T n) -> T
 {

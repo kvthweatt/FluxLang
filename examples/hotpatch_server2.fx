@@ -22,10 +22,10 @@
 
 #import "standard.fx";
 #ifdef __WINDOWS__
-#import "rednet_windows.fx";
+#import "net_windows.fx";
 #endif;
 #ifdef __LINUX__
-#import "rednet_linux.fx";
+#import "net_linux.fx";
 #endif;
 #import "../../examples/hotpatch_protocol2.fx";
 

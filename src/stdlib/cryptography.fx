@@ -1,7 +1,7 @@
 // redcrypto.fx - Cryptography Library
 
-#ifndef FLUX_STANDARD
-#def FLUX_STANDARD 1;
+#ifndef FLUX_STANDARD_TYPES
+#import "types.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_CRYPTO

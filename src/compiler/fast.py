@@ -28,6 +28,15 @@ class ComptimeError(Exception):
 @dataclass
 class ASTNode:
     """Base class for all AST nodes"""
+    source_line: int = field(default=0, init=False, repr=False, compare=False)
+    source_col:  int = field(default=0, init=False, repr=False, compare=False)
+
+    def set_location(self, line: int, col: int) -> 'ASTNode':
+        """Stamp source location onto this node. Returns self for chaining."""
+        self.source_line = line
+        self.source_col  = col
+        return self
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Any:
         raise NotImplementedError(f"codegen not implemented for {self.__class__.__name__}")
 
@@ -4031,10 +4040,15 @@ class Block(Statement):
                     caller_frame = current_frame.f_back
                     caller_name = caller_frame.f_code.co_name
                     stack = inspect.stack()
+                    stmt_i = i
                     #print("Full call stack (from current to outermost):")
                     for i, frame_info in enumerate(reversed(stack)):
                         print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
-                    raise ValueError(f"Block{{}} Debug: Error in statement {i} ({type(stmt).__name__}): {e} \n\n {stmt} \n\n {module.name}")
+                    # Emit a clean diagnostic with source location if available
+                    loc = ""
+                    if hasattr(stmt, 'source_line') and stmt.source_line:
+                        loc = f" [{module.name}:{stmt.source_line}:{stmt.source_col}]"
+                    raise ValueError(f"Block{{}} Debug: Error in statement {stmt_i} ({type(stmt).__name__}){loc}: {e} \n\n {stmt} \n\n {module.name}")
 
         # Flush this scope's deferred expressions in LIFO order at natural block exit
         if builder._flux_defer_stack and not builder.block.is_terminated:
@@ -5055,6 +5069,32 @@ class NoreturnStatement(Statement):
         return None
 
 @dataclass
+class EscapeStatement(Statement):
+    call: 'Expression'
+
+    def __repr__(self) -> str:
+        return f"escape {self.call};"
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        if builder.block.is_terminated:
+            return None
+        if not getattr(builder, '_flux_is_recursive_func', False):
+            raise SyntaxError("'escape' is only valid inside a <~ recursive function")
+        # Perform the escape call as a plain (non-tail) call, then ret
+        result = self.call.codegen(builder, module)
+        func = builder.block.function
+        ret_type = func.type.return_type if hasattr(func.type, 'return_type') else func.type.pointee.return_type
+        if isinstance(ret_type, ir.VoidType):
+            builder.ret_void()
+        else:
+            if result is None:
+                builder.ret(ir.Constant(ret_type, 0))
+            else:
+                result = CoercionContext.coerce_return_value(builder, result, ret_type)
+                builder.ret(result)
+        return None
+
+@dataclass
 class LabelStatement(Statement):
     name: str
 
@@ -5629,10 +5669,10 @@ class DeprecateStatement(Statement):
             # Check Identifier and FunctionCall names
             if isinstance(node, Identifier):
                 if node.name == mangled or node.name.startswith(mangled + "__"):
-                    references.append(f"  identifier '{node.name}' in {path}")
+                    references.append(f"Identifier {node.name}")
             elif isinstance(node, FunctionCall):
                 if node.name == mangled or node.name.startswith(mangled + "__"):
-                    references.append(f"  call '{node.name}' in {path}")
+                    references.append(f"Function call {node.name}()")
                 for i, arg in enumerate(node.arguments):
                     walk(arg, f"{path} -> call arg {i}")
             # Recurse into dataclass fields

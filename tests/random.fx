@@ -2,9 +2,10 @@
 #import "redformat.fx";
 #import "redrandom.fx";
 
-using standard::format;
-using standard::format::colors;
-using standard::random;
+using standard::format,
+      standard::format::colors,
+      standard::random,
+      standard::io::console;
 
 def main() -> int
 {

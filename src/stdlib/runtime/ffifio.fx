@@ -2,11 +2,11 @@
 // Simple wrapper around C's stdio.h functions
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_IO_FILE
-#import "redio.fx";
+#import "io.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_FFI_FIO

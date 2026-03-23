@@ -1,5 +1,8 @@
 #import "standard.fx";
 
+using standard::io::console,
+      standard::strings;
+
 def main() -> int
 {
     byte[24] buf1;

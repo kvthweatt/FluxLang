@@ -1,5 +1,8 @@
 #import "standard.fx";
 
+using standard::io::console,
+      standard::strings;
+
 def main() -> int
 {
     // Test with explicit large 64-bit constants

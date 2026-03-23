@@ -3,14 +3,14 @@
 #def FLUX_STANDARD 1;
 #endif;
 
-#import "redsys.fx";
+#import "sys.fx";
 
 
 #ifndef FLUX_STANDARD_IO
 #def FLUX_STANDARD_IO;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 namespace standard
@@ -155,7 +155,8 @@ namespace standard
                     movq %r9, 32(%rsp)      // *(rsp+32) = lpOverlapped = NULL
                     call WriteFile
                     addq $$40, %rsp
-                } : : "r"(msg), "r"(x), "r"(WIN_STDOUT_HANDLE) : "rax","rcx","rdx","r8","r9","r10","r11","memory";
+                } : : "r"(msg), "r"(x), "r"(WIN_STDOUT_HANDLE)
+                    : "rax","rcx","rdx","r8","r9","r10","r11","memory";
                 return;
             };
 

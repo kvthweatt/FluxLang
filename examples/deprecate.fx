@@ -8,7 +8,6 @@ namespace test1
 	};
 };
 
-
 deprecate test1::test2;
 
 def main() -> int
@@ -17,4 +16,3 @@ def main() -> int
 
 	return 0;
 };
-

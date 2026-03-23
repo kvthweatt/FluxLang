@@ -5,7 +5,7 @@
 #endif;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 #ifdef __WINDOWS__
@@ -442,7 +442,7 @@ namespace standard
 };
 
 /// DO NOT CHANGE THIS LINE ///
-#import "redallocators.fx"; /// DO NOT CHANGE THIS LINE ///
+#import "allocators.fx"; /// DO NOT CHANGE THIS LINE ///
 /// DO NOT CHANGE THIS LINE ///
 
 //using standard::memory;

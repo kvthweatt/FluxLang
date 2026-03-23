@@ -1,12 +1,10 @@
-#import "redstandard.fx";
-#import "redformat.fx";
-#import "redrandom.fx";
-#import "reduuid.fx";
+#import "standard.fx", "format.fx", "random.fx", "uuid.fx";
 
-using standard::format;
-using standard::format::colors;
-using standard::random;
-using standard::uuid;
+using standard::format,
+      standard::format::colors,
+      standard::io::console,
+      standard::random,
+      standard::uuid;
 
 def main() -> int
 {
@@ -19,7 +17,8 @@ def main() -> int
     pcg32_init(@rng);
     
     byte[37] uuid_str;
-    UUID uuid;
+    UUID uuid, uuid1, uuid2, nil_uuid, quick_uuid,
+         uuid_copy_dest;
     
     // ============ DEMO 1: UUID Version 4 (Random) ============
     print_banner("UUID VERSION 4 (RANDOM)\0", 70);
@@ -108,10 +107,6 @@ def main() -> int
     print_banner("UUID OPERATIONS\0", 70);
     print("\n\0");
     
-    UUID uuid1;
-    UUID uuid2;
-    UUID uuid_copy_dest;
-    
     uuid_v4(@uuid1, @rng);
     uuid_v4(@uuid2, @rng);
     
@@ -151,7 +146,6 @@ def main() -> int
     print_banner("NIL UUID\0", 70);
     print("\n\0");
     
-    UUID nil_uuid;
     uuid_nil(@nil_uuid);
     
     uuid_to_string(@nil_uuid, uuid_str);
@@ -193,10 +187,10 @@ def main() -> int
     
     print("RFC 4122 defines standard namespace UUIDs:\n\n\0");
     
-    UUID ns_dns = UUID_NAMESPACE_DNS;
-    UUID ns_url = UUID_NAMESPACE_URL;
-    UUID ns_oid = UUID_NAMESPACE_OID;
-    UUID ns_x500 = UUID_NAMESPACE_X500;
+    UUID ns_dns = UUID_NAMESPACE_DNS,
+         ns_url = UUID_NAMESPACE_URL,
+         ns_oid = UUID_NAMESPACE_OID,
+         ns_x500 = UUID_NAMESPACE_X500;
     
     uuid_to_string(@ns_dns, uuid_str);
     print("  DNS:  \0");
@@ -223,9 +217,7 @@ def main() -> int
     print("\n\0");
     
     print("Using quick functions with global RNG:\n\n\0");
-    
-    UUID quick_uuid;
-    
+
     print("Quick v4: \0");
     uuid_v4_quick(@quick_uuid);
     uuid_to_string(@quick_uuid, uuid_str);

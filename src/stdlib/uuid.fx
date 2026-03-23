@@ -16,10 +16,10 @@
 #import "redrandom.fx";
 #endif;
 
-        struct UUID
-        {
-            byte[16] bytes;
-        };
+struct UUID
+{
+    byte[16] bytes;
+};
 
 
 namespace standard
@@ -36,12 +36,13 @@ namespace standard
                 '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
             ];
             
-            int pos = 0;
+            int pos;
+            byte b;
             
             // Format: 8-4-4-4-12
             for (int i = 0; i < 16; i++)
             {
-                byte b = uuid.bytes[i];
+                b = uuid.bytes[i];
                 buffer[pos] = hex_chars[(b >> 4) & 0x0F];
                 pos++;
                 buffer[pos] = hex_chars[b & 0x0F];
@@ -66,12 +67,13 @@ namespace standard
                 '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'
             ];
             
-            int pos = 0;
+            int pos;
+            byte b;
             
             // Format: 8-4-4-4-12
             for (int i = 0; i < 16; i++)
             {
-                byte b = uuid.bytes[i];
+                b = uuid.bytes[i];
                 buffer[pos] = hex_chars[(b >> 4) & 0x0F];
                 pos++;
                 buffer[pos] = hex_chars[b & 0x0F];
@@ -96,11 +98,12 @@ namespace standard
                 '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
             ];
             
-            int pos = 0;
+            int pos;
+            byte b;
             
             for (int i = 0; i < 16; i++)
             {
-                byte b = uuid.bytes[i];
+                b = uuid.bytes[i];
                 buffer[pos] = hex_chars[(b >> 4) & 0x0F];
                 pos++;
                 buffer[pos] = hex_chars[b & 0x0F];
@@ -116,7 +119,7 @@ namespace standard
         def uuid_v4(UUID* uuid, PCG32* rng) -> void
         {
             // Generate 16 random bytes
-            random_bytes(rng, uuid.bytes, (u64)16);
+            standard::random::random_bytes(rng, uuid.bytes, (u64)16);
             
             // Set version to 4 (bits 12-15 of time_hi_and_version)
             uuid.bytes[6] = (uuid.bytes[6] & (byte)0x0F) | (byte)0x40;
@@ -131,7 +134,7 @@ namespace standard
             // Ensure global RNG is initialized
             if (!global_rng_initialized)
             {
-                init_random();
+                standard::random::init_random();
             };
             
             uuid_v4(uuid, @global_rng);
@@ -143,7 +146,7 @@ namespace standard
         def uuid_v7(UUID* uuid, PCG32* rng) -> void
         {
             // Get current timestamp from RDTSC
-            u64 timestamp = get_rdtsc();
+            u64 timestamp = standard::random::get_rdtsc();
             
             // Use top 48 bits for timestamp (milliseconds would be better but we use RDTSC)
             // In a real implementation, you'd use actual Unix time in milliseconds
@@ -157,19 +160,19 @@ namespace standard
             uuid.bytes[5] = (byte)(timestamp & 0xFF);
             
             // Version and random bytes (bytes 6-7)
-            u32 rand1 = pcg32_next(rng);
+            u32 rand1 = standard::random::pcg32_next(rng);
             uuid.bytes[6] = (byte)((rand1 >> 8) & 0x0F) | (byte)0x70;  // Version 7
             uuid.bytes[7] = (byte)(rand1 & 0xFF);
             
             // Variant and random bytes (bytes 8-15)
-            u32 rand2 = pcg32_next(rng);
+            u32 rand2 = standard::random::pcg32_next(rng);
             uuid.bytes[8] = (byte)((rand2 >> 24) & 0x3F) | (byte)0x80;  // Variant
             uuid.bytes[9] = (byte)((rand2 >> 16) & 0xFF);
             uuid.bytes[10] = (byte)((rand2 >> 8) & 0xFF);
             uuid.bytes[11] = (byte)(rand2 & 0xFF);
             
             // More random bytes
-            u32 rand3 = pcg32_next(rng);
+            u32 rand3 = standard::random::pcg32_next(rng);
             uuid.bytes[12] = (byte)((rand3 >> 24) & 0xFF);
             uuid.bytes[13] = (byte)((rand3 >> 16) & 0xFF);
             uuid.bytes[14] = (byte)((rand3 >> 8) & 0xFF);
@@ -181,7 +184,7 @@ namespace standard
         {
             if (!global_rng_initialized)
             {
-                init_random();
+                standard::random::init_random();
             };
             
             uuid_v7(uuid, @global_rng);
@@ -193,7 +196,7 @@ namespace standard
         def uuid_v1(UUID* uuid, PCG32* rng) -> void
         {
             // Get timestamp
-            u64 timestamp = get_rdtsc();
+            u64 timestamp = standard::random::get_rdtsc();
             
             // UUID v1 uses 60-bit timestamp + 100-nanosecond intervals since Oct 15, 1582
             // We'll use RDTSC as a proxy for timestamp
@@ -213,15 +216,15 @@ namespace standard
             uuid.bytes[7] = (byte)((timestamp >> 48) & 0xFF);
             
             // clock_seq_hi_and_reserved (1 byte)
-            u32 clock_seq = pcg32_next(rng);
+            u32 clock_seq = standard::random::pcg32_next(rng);
             uuid.bytes[8] = (byte)(((clock_seq >> 8) & 0x3F) | 0x80);  // Variant
             
             // clock_seq_low (1 byte)
             uuid.bytes[9] = (byte)(clock_seq & 0xFF);
             
             // node (6 bytes) - normally MAC address, we use random
-            u32 node1 = pcg32_next(rng);
-            u32 node2 = pcg32_next(rng);
+            u32 node1 = standard::random::pcg32_next(rng);
+            u32 node2 = standard::random::pcg32_next(rng);
             uuid.bytes[10] = (byte)((node1 >> 24) & 0xFF);
             uuid.bytes[11] = (byte)((node1 >> 16) & 0xFF);
             uuid.bytes[12] = (byte)((node1 >> 8) & 0xFF);
@@ -235,7 +238,7 @@ namespace standard
         {
             if (!global_rng_initialized)
             {
-                init_random();
+                standard::random::init_random();
             };
             
             uuid_v1(uuid, @global_rng);

@@ -1,5 +1,7 @@
 #import "standard.fx";
 
+using standard::io::console;
+
 def main() -> int
 {
     uint x = 10;

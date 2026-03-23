@@ -3,7 +3,9 @@
 
 #import "standard.fx";
 #import "socket_object_raw.fx";
-using standard::strings;
+
+using standard::io::console,
+      standard::strings;
 
 def main() -> int
 {

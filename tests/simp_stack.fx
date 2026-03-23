@@ -2,7 +2,8 @@
 #import "redallocators.fx";
 #import "redformat.fx";
 
-using standard::format;
+using standard::format,
+      standard::io::console;
 
 object Stack
 {

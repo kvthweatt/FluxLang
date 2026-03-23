@@ -570,20 +570,40 @@ def main() -> int
 ---
 
 ## You can also use in-line assembly directly:
-
+Assembly in Flux is done AT&T style.  
+The constraints follow the block in the pattern `outputs : inputs : clobbers`
+Here's an example:
 ```
-asm
+def _exchange64(i64* ptr, i64 value, i64* out) -> void
 {
-mov eax, 1
-mov ebx, 0
-int 0x80
+    #ifdef __ARCH_X86_64__
+    volatile asm
+    {
+        movq $0, %rsi
+        movq $2, %rdi
+        movq $1, %rax
+        xchgq %rax, (%rsi)
+        movq %rax, (%rdi)
+    } : : "r"(ptr), "r"(value), "r"(out) : "rax", "rsi", "rdi", "memory";
+    #endif;
+    #ifdef __ARCH_ARM64__
+    volatile asm
+    {
+    .retry_xchg64:
+        ldaxr x0, [$0]
+        stlxr w3, x1, [$0]
+        cbnz  w3, .retry_xchg64
+        str   x0, [$2]
+    } : : "r"(ptr), "r"(value), "r"(out) : "x0", "w3", "memory";
+    #endif;
 };
 ```
+Here, the clobber list is `"r"(ptr), "r"(value), "r"(out) : "x0", "w3", "memory";`  
+Using `volatile` tags the assembly block for the compiler, saying do not touch this for any reason.
 
 ---
 
 ## **Logic with if/elif/else:**
-
 ```
 if (condition1)
 {
@@ -608,6 +628,8 @@ You can also do `if` expressions:
 int x = 0;
 int y = x if (x > 5) else noinit;
 ```
+Alternatively, you can use a ternary `?:`
+`int y = x ?  (x > 5) :   noinit;`
 
 ---
 
@@ -642,15 +664,16 @@ def main() -> int
 
 ## **The `data` keyword:**
 
-Data is a variable bit width, primitive binary data type. Anything can cast to it, and it can cast to any primitive like char, int, float.  
-It is intended to allow Flux programmers to build complex flexible custom types to fit their needs.  
-Data types use little-endian byte order by default. Manipulate bits as needed.  
+Data is a variable bit width, primitive binary data-type creation keyword.  
+Anything can cast to it, and it can cast to any primitive like char, int, float.  
+It is intended to allow Flux programmers to build any basic integer type to fit their needs.  
+Data types use big-endian byte order by default. Manipulate bits as needed.  
 Bit-width bust always be specified.
 
 Syntax for declaring a datatype:
 
 ```
-    (const) (signed | unsigned) data {bit-width:alignment} as your_new_type
+(const) (signed | unsigned) data {bit-width:alignment} (as) your_new_type
 
 //    Example of a non-OOP string:
 
@@ -660,7 +683,7 @@ Syntax for declaring a datatype:
 This allows the creation of primitive, non-OOP types that can construct other types.  
 `data` creates user-defined types.
 
-For example, you can just keep type-chaining:
+For example, you can just keep type-punning:
 `unsigned data{16} as dbyte;`  
 `dbyte as xbyte;`  
 `xbyte as ybyte;`  
@@ -689,7 +712,6 @@ newstring = somestring xor anotherstring;     // 01000000b  // XOR two or more v
 ```
 
 Casting objects or structs to `data` results in a new data variable with bit width equal to the size of the object/struct's length.  
-If the object took up 1KB of memory, the resulting `data` variable will be 1024 bits wide.  
 You cannot do the reverse with objects or structs unless **ALL** of their member types are explicitly aligned, otherwise you risk corrupting your resulting object/struct.
 
 **Minimal specification:**
@@ -708,32 +730,11 @@ Casting in Flux is C-like
 float x = 3.14;                  // 01000000010010001111010111000010b   binary representation of 3.14
 i32 y = (i32)x;                  // 01000000010010001111010111000010b   but now treated as an integer  1078523330 == 0x4048F5C2
 ```
+There are only two types. Integers, and floating point decimals. `float` and `double` are floating point types. All other types are integer types.
 
-Casting anything to `void` is the functional equivalent of freeing the memory occupied by that thing.
-If the width of the data type is 512 bits, that many bits will be freed.
-This is dangerous on purpose, it is equivalent to free(ptr) in C. This syntax is considered explicit in Flux once you understand the convention.
-
-This goes for functions which return void. If you declare a function's return type as void, you're explicitly saying "this function frees its return value".
-
-Example:
-
-```
-def foo() -> void
-{
-    return 5;     // Imagine you wrote `return;` here instead. You could also imagine `return (void)5;` as well.
-};
-
-// This means a return type is syntactic sugar for casting the return value automatically,
-// thereby guaranteeing the return value's type. Example:
-
-def bar() -> float
-{
-    return 5 / 3;    // Math performed with integers, float 1.6666666666... returned.
-};
-```
-
-If you try to return data with the `return` statement and the function definition declares the return type as `void`, nothing is returned.  
-The compiler will ignore the return value and treat it as if only `return;` were present.
+Casting anything to `void` is the functional equivalent of freeing the memory occupied by that thing.  
+This is dangerous on purpose, it is equivalent to free(ptr) in C. This syntax is considered explicit in Flux once you understand the convention.  
+It calls `ffree()` under the hood, which uses the standard heap allocator. You should not `void` cast free anything unless it was allocated with `fmalloc()`
 
 **Void casting in relation to the stack and heap:**
 ```
@@ -747,7 +748,7 @@ def example() -> void {
 ```
 
 In either place, the stack or the heap, the memory is freed.
-(void) is essentially a "free this memory now" no matter where it is or how it got there.
+`(void)` is essentially a "free this memory now" no matter where it is or how it got there.
 If you want to free something early, you can, but if you attempt to use it later you'll get a use-after-free bug.
 If you're not familiar with a use-after-free, it is something that shows up in runtime, not comptime.
 However in Flux, they can show up in comptime as well.
@@ -772,7 +773,8 @@ def main() -> int
 
 ---
 
-## Direct type conversion
+## Direct type conversion:
+You can do function-like conversion only with built-in types like `int`, `long`, `double`, `bool`, etc.
 ```
 #import "standard.fx";
 
@@ -786,30 +788,6 @@ def main() -> int
     int i = int(d);
     return 0;
 };
-```
-
----
-
-## **Array and pointer operations based on data types:**
-```
-unsigned data{16::0}[] as larray3 little_array[3] = {0x1234, 0x5678, 0x9ABC};
-// Memory: [34 12] [78 56] [BC 9A]
-
-unsigned data{16::0}* as ptr myptr = @little_array;
-*myptr;     // 0x1234 (correct little-endian interpretation)
-myptr++;    // Advances 2 bytes
-*myptr;     // 0x5678 (correct little-endian interpretation)
-
-// But if you reinterpret...
-unsigned data{16::1}* as big_ptr mybigptr = (unsigned data{16::1}*)myptr;
-*mybigptr; // 0x7856 (raw bytes [78 56] interpreted as big-endian)
-
-// Reading network data (big-endian protocol)
-unsigned data{16::1} as word network_port = {0x1F90};
-// Gets 0x1F90 from network bytes [1F 90]
-
-// Need to store in little-endian local format?
-word local_port = (unsigned data{16::0})((network_port >> 8) | (network_port << 8)); // Explicit byte swap - you write exactly what you want
 ```
 
 ---
@@ -831,33 +809,36 @@ unsigned data{64} as ui64;
 ## **Namespace elimination with `!using` or `not using`:**
 ```
 !using standard::io::file;
-!using some::specific::namespace;
+not using some::specific::namespace;
 ```
 
 ---
 
-## **The `sizeof`, `typeof`, and `alignof` keywords:**
+## **The `sizeof`, `typeof`, `alignof`, and `endianof` built-ins:**
 ```
 unsigned data{8:8}[] as string;
 signed data{13:16} as strange;
 
-sizeof(string);   // 8
-alignof(string);  // 8
-typeof(string);   // unsigned data{8:8}*
+sizeof(string);    // 8
+alignof(string);   // 8
+typeof(string);    // unsigned data{8:8}*
+endianof(string);  // 1
 
-sizeof(strange);  // 13
-alignof(strange); // 16
-typeof(strange);  // signed data{13:16}
+sizeof(strange);   // 13
+alignof(strange);  // 16
+typeof(strange);   // signed data{13:16}
+endianof(strange); // 1
 ```
 
 ---
 
-## **`void` as a literal and a keyword:**
+## **`void` as a literal:**
 ```
 if (x == void) {...code...};    // If it's nothing, do something
 void x;
 if (x == !void) {...code...};   // If it's not nothing, do something
 ```
+In literal context, `void` is `0`. `false` is also `0`, which means `void == false;`. Therefore, anything can be `void`-checked. 
 
 ---
 
@@ -876,7 +857,7 @@ def len(int[] array) -> int
 };
 ```
 
-**Array comprehension:**
+**Static array comprehension:**
 ```
 // Python-style comprehension
 int[10] squares = [x ^ 2 for (int x in 1..10)];
@@ -892,6 +873,15 @@ int[10] squares = [x ^ 2 for (int x = 1; x <= 10; x++)];
 
 // With condition
 int[20] events = [x for (int x= 1; x <= 20; x++) if (x % 2 == 0)];
+```
+
+**Static array comprehension using a dynamic type:**
+```
+#import "standard.fx";
+
+using standard::collections; // For the dynamic array 'Array'
+
+Array[] myArr = [x.name for (Array x in oldArr) if (x.name.len() > 5)];
 ```
 
 ---
@@ -995,6 +985,18 @@ def main() -> int
 {
     recurse2(); // Step into tail function
     return 0;
+};
+```
+
+## **Escaping strict recursion with `escape`:**
+`escape` can only be used inside a strictly-recursive function defined with a recurse arrow `<~`. Example:
+```
+def recurse2() <~ void
+{
+    if (!entered_flag) {entered_flag = true;};
+    singinit int z;
+    print(m1); print(++z); println(m2);
+    if (z >= 10) { escape main(); }; // or any other function
 };
 ```
 
@@ -1174,7 +1176,36 @@ switch (e)
 
 ---
 
-## **Assertion:**
+## **Deprecation with `deprecate`:**
+```
+#import "standard.fx";
+
+namespace test1
+{
+    namespace test2
+    {
+        def foo() -> void {};
+    };
+};
+
+deprecate test1::test2;
+
+def main() -> int
+{
+    test1::test2::foo();
+
+    return 0;
+};
+```
+Compiling gives this output:
+```
+✗ Compilation failed: Deprecated namespace 'test1::test2' is still referenced:
+Function call test1__test2__foo()
+```
+
+---
+
+## **Assertion with `assert()`:**
 `assert` automatically performs `throw` if the condition is false if it's inside a try/catch block,
 otherwise it automatically writes to standard error output.
 ```
@@ -1196,16 +1227,6 @@ def main() -> int
 
 ---
 
-## **Runtime type-checking:**
-```
-Animal* pet = @Dog();
-if (typeof(pet) == Dog) { /* Legal */ };
-// or
-if (pet is Dog) { /* Legal, syntactic sugar for `typeof(pet) == Dog` */ };
-```
-
----
-
 ## **Constant Expressions:**
 ```
 const def myconstexpr(int x, int y) -> int {return x * y;};  // Basic syntax
@@ -1216,10 +1237,11 @@ const def myconstexpr(int x, int y) -> int {return x * y;};  // Basic syntax
 ## **Heap allocation:**
 ```
 heap int x = 5;      // Allocate
-(void)ptr;           // Deallocate
+(void)x;             // Deallocate
 ```
 
-(void) casting works on both stack and heap allocated items. It can be used like `delete` or `free()`.
+`(void)` casting works on both stack and heap allocated items.  
+If you do this to a stack element, it is nulled, and all references invalidated. You will need to redeclare `x`.
 
 ---
 
@@ -1250,7 +1272,7 @@ def main() -> int
 
 ---
 
-## **Custom Infix Operators and Overloading**
+## **Custom infix operators and overloading**
 - Custom:
 ```
 operator (int L, int R) [+++] -> int
@@ -1282,7 +1304,7 @@ operator (int L, BigInt R) [+] -> bool
 
 ---
 
-## **Variadic Functions**
+## **Variadic functions**
 Variadics in Flux are very straightforward, and use the `...` elipse operator.  
 You can index the elipse operator to yield the arguments passed, example:
 ```
@@ -1317,9 +1339,9 @@ Result:
 
 ---
 
-## **Advanced Pointer Manipulation**
+## **Advanced pointer manipulation**
 
-### Taking Address of Literals
+### Taking address of literals
 ```
 // You can take the address of a literal value
 int* p = @42;
@@ -1337,9 +1359,12 @@ int* offset = base + 5;
 *offset = 200;  // Writing to calculated memory location
 ```
 
-### Pointer-Integer Conversions
+### Pointer to integer conversions
 ```
 #import "standard.fx";
+
+using standard::io::console;
+
 def main() -> int
 {
     uint x, y = 10, 0;
@@ -1378,9 +1403,9 @@ def main() -> int
 ```
 struct Vector3
 {
-    float x;
-    float y;
-    float z;
+    float x,
+          y,
+          z;
 };
 
 def get_y_ptr(Vector3* vec) -> float*
@@ -1424,7 +1449,7 @@ traverse_as_bytes(@data[0], 4);
 
 ## **Memory Layout and Alignment Tricks**
 
-### Struct Packing with Custom Alignment
+### Struct packing with  ustom alignment
 ```
 // Tightly packed struct (no padding)
 struct PackedRGB
@@ -1499,8 +1524,8 @@ def extract_bits(uint32 value, int start, int length) -> uint32
     return (value & mask) >> start;
 };
 
-uint32 nibble0 = extract_bits(packed, 0, 4);   // 0x8
-uint32 nibble3 = extract_bits(packed, 12, 4);  // 0x5
+uint32 nibble0 = extract_bits(packed, 0, 4);   // 0x80
+uint32 nibble3 = extract_bits(packed, 12, 4);  // 0x50
 uint32 byte1 = extract_bits(packed, 8, 8);     // 0x56
 ```
 
@@ -2575,7 +2600,7 @@ print(from_fixed(result));  // approx 6.28318
 
 ## **Type System Edge Cases**
 
-### Void Semantics
+### `void` semantics
 ```
 // Void as a value
 void x = void;
@@ -2608,10 +2633,25 @@ def get_nullable() -> int*
 
 ---
 
+# **Calling Conventions:**
+Flux allows you to use different calling conventions at the language level.
+```
+stdcall foobar() -> void;
+```
+`def` is `fastcall` by default. You may change this in the configuration.
+You may also create function pointers of different calling conventions:
+```
+vectorcall{}* someSIMDfunc() -> u64*;
+```
+
+---
+
+---
+
 # Keyword list:
 ```
-alignof, and, as, asm, assert, auto, break, bool, byte, case, catch, cdecl, const, continue, data, def, default,
-do, double, elif, else, enum, false, fastcall, float, for, global, goto, heap, if, in, is, int, label, local, long, namespace, new, noinit, noreturn, not, object, or,
+alignof, and, as, asm, assert, auto, break, bool, byte, case, catch, cdecl, const, continue, data, def, default, deprecate, 
+do, double, elif, else, enum, false, fastcall, float, for, global, goto, heap, if, in, is, int, label, local, long, namespace, noinit, noreturn, not, object, or,
 private, public, register, return, signed, singinit, sizeof, stack, stdcall, struct, switch, this, thiscall, throw, true, try, typeof, uint, ulong,
 union, unsigned, vectorcall, void, volatile, while, xor
 ```
