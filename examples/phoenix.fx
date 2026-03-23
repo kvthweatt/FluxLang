@@ -1,7 +1,7 @@
-#import "standard.fx", "redmath.fx", "redwindows.fx", "redopengl.fx";
+#import "standard.fx", "math.fx", "windows.fx", "opengl.fx";
 
-using standard::system::windows;
-using standard::math;
+using standard::system::windows,
+      standard::math;
 
 // ============================================================================
 // Phoenix Fractal - OpenGL Viewer

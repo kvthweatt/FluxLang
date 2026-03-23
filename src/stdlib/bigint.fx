@@ -1,5 +1,5 @@
 #ifndef FLUX_STANDARD_MATH
-#import "redmath.fx";
+#import "math.fx";
 #endif;
 
 #ifndef FLUX_BIG_INTEGERS

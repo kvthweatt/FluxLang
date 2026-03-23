@@ -44,7 +44,7 @@
 //   d.uninstall();                 // restores the original bytes
 
 #ifndef __FLUX_STANDARD_TYPES__
-#import "redtypes.fx", "datautils.fx";
+#import "types.fx", "datautils.fx";
 #endif;
 
 // ============================================================================

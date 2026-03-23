@@ -2,11 +2,11 @@
 // Provides dynamic, generic collection types for the reduced specification.
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "redmemory.fx";
+#import "memory.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_COLLECTIONS

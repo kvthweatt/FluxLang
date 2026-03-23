@@ -1,10 +1,10 @@
 // SHA-256 Implementation in Flux
 // Based on FIPS 180-4 specification
-#import "standard.fx", "redcrypto.fx";
+#import "standard.fx", "cryptography.fx";
 
-using standard::io::console;
-using standard::strings;
-using standard::crypto::hashing::SHA256;
+using standard::io::console,
+      standard::strings,
+      standard::crypto::hashing::SHA256;
 
 def main() -> int
 {

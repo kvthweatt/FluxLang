@@ -9,7 +9,7 @@
 #def FLUX_STANDARD_FORMAT 1;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 namespace standard

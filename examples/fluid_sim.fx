@@ -1,17 +1,19 @@
-// fluid_sim.fx
-// Fluid simulation - click and hold to spill fluid
-// OpenGL texture pipeline, fmalloc/ffree, double-precision Navier-Stokes
-// Optimizations:
-//   - Persistent thread pool with semaphore dispatch + memory fences
-//   - Red-black Gauss-Seidel (fully parallel per color pass)
-//   - Parallel project (divergence + gradient loops threaded)
-//   - Concurrent vx/vy diffuse (dispatched together, not sequentially)
-//   - Fused decay+pixel pass
-//   - Row ranges computed once at startup
-//   - Division replaced with multiply where possible
-//   - set_bnd deferred to end of lin_solve iteration loop
+///
+ fluid_sim.fx
+ Fluid simulation - click and hold to spill fluid
+ OpenGL texture pipeline, fmalloc/ffree, double-precision Navier-Stokes
+ Optimizations:
+   - Persistent thread pool with semaphore dispatch + memory fences
+   - Red-black Gauss-Seidel (fully parallel per color pass)
+   - Parallel project (divergence + gradient loops threaded)
+   - Concurrent vx/vy diffuse (dispatched together, not sequentially)
+   - Fused decay+pixel pass
+   - Row ranges computed once at startup
+   - Division replaced with multiply where possible
+   - set_bnd deferred to end of lin_solve iteration loop
+///
 
-#import "standard.fx", "redmath.fx", "redwindows.fx", "redopengl.fx", "threading.fx";
+#import "standard.fx", "math.fx", "windows.fx", "opengl.fx", "threading.fx";
 
 using standard::system::windows,
       standard::math,
@@ -57,7 +59,7 @@ heap float*  g_dens_tex = (float*)0,
 // PARTICLE SYSTEM
 // ============================================================================
 
-#def NUM_PARTICLES 300;
+#def MAX_PARTICLES 7500;
 
 heap float* g_part_x = (float*)0,   // particle x in grid coords [0, SIM_W)
             g_part_y = (float*)0;   // particle y in grid coords [0, SIM_H)
@@ -428,7 +430,7 @@ def fast_rand() -> int
 def particles_init() -> void
 {
     int i;
-    for (i = 0; i < NUM_PARTICLES; i++)
+    for (i = 0; i < MAX_PARTICLES; i++)
     {
         g_rand_seed = g_rand_seed * 1664525 + 1013904223;
         g_part_x[i] = (float)(g_rand_seed & 0x7FFFFFFF) / (float)0x7FFFFFFF * (float)SIM_W;
@@ -446,7 +448,7 @@ def particles_update() -> void
           vx,
           vy;
 
-    for (i = 0; i < NUM_PARTICLES; i++)
+    for (i = 0; i < MAX_PARTICLES; i++)
     {
         px = g_part_x[i];
         py = g_part_y[i];
@@ -1085,47 +1087,6 @@ void main() {
 \0";
 
 // ============================================================================
-// GL EXTENSION FUNCTION POINTERS
-// ============================================================================
-
-def{}* glCreateShader_fp(int)                 -> int;
-def{}* glShaderSource_fp(int,int,byte**,int*) -> void;
-def{}* glCompileShader_fp(int)                -> void;
-def{}* glCreateProgram_fp()                   -> int;
-def{}* glAttachShader_fp(int,int)             -> void;
-def{}* glLinkProgram_fp(int)                  -> void;
-def{}* glUseProgram_fp(int)                   -> void;
-def{}* glGetUniformLocation_fp(int,byte*)     -> int;
-def{}* glUniform1i_fp(int,int)                -> void;
-def{}* glUniform2f_fp(int,float,float)        -> void;
-def{}* glActiveTexture_fp(int)                -> void;
-def{}* glDeleteShader_fp(int)                 -> void;
-def{}* glDeleteProgram_fp(int)                -> void;
-
-def compile_shader(int shader_type, byte* src) -> int
-{
-    int shader;
-    byte[1]* src_arr;
-    int[1]   len_arr;
-    shader       = glCreateShader_fp(shader_type);
-    src_arr      = [src];
-    len_arr[0]   = -1;
-    glShaderSource_fp(shader, 1, @src_arr[0], @len_arr[0]);
-    glCompileShader_fp(shader);
-    return shader;
-};
-
-def link_program(int vert, int frag) -> int
-{
-    int prog;
-    prog = glCreateProgram_fp();
-    glAttachShader_fp(prog, vert);
-    glAttachShader_fp(prog, frag);
-    glLinkProgram_fp(prog);
-    return prog;
-};
-
-// ============================================================================
 // SYSTEM_INFO for core count
 // ============================================================================
 
@@ -1142,8 +1103,6 @@ struct SYSTEM_INFO_PARTIAL
     u16   wProcessorLevel,
           wProcessorRevision;
 };
-
-extern def !! GetSystemInfo(void*) -> void;
 
 // ============================================================================
 // MAIN
@@ -1187,8 +1146,18 @@ def main() -> int
     g_vy_prev   = (double*)fmalloc(field_bytes);
     g_dens_tex  = (float*)fmalloc(dens_tex_bytes);
     g_vel_tex   = (float*)fmalloc(vel_tex_bytes);
-    g_part_x    = (float*)fmalloc((size_t)(NUM_PARTICLES * 4));
-    g_part_y    = (float*)fmalloc((size_t)(NUM_PARTICLES * 4));
+    g_part_x    = (float*)fmalloc((size_t)(MAX_PARTICLES * 4));
+    g_part_y    = (float*)fmalloc((size_t)(MAX_PARTICLES * 4));
+    defer ffree((u64)g_dens);
+    defer ffree((u64)g_dens_prev);
+    defer ffree((u64)g_vx);
+    defer ffree((u64)g_vy);
+    defer ffree((u64)g_vx_prev);
+    defer ffree((u64)g_vy_prev);
+    defer ffree((u64)g_dens_tex);
+    defer ffree((u64)g_vel_tex);
+    defer ffree((u64)g_part_x);
+    defer ffree((u64)g_part_y);
 
     particles_init();
 
@@ -1382,7 +1351,7 @@ def main() -> int
         glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 
         glBegin(GL_POINTS);
-        for (i = 0; i < NUM_PARTICLES; i++)
+        for (i = 0; i < MAX_PARTICLES; i++)
         {
             px = g_part_x[i];
             py = g_part_y[i];
@@ -1427,16 +1396,6 @@ def main() -> int
     glDeleteTextures(1, @tex_vel);
     gl.__exit();
 
-    ffree((u64)g_dens);
-    ffree((u64)g_dens_prev);
-    ffree((u64)g_vx);
-    ffree((u64)g_vy);
-    ffree((u64)g_vx_prev);
-    ffree((u64)g_vy_prev);
-    ffree((u64)g_dens_tex);
-    ffree((u64)g_vel_tex);
-    ffree((u64)g_part_x);
-    ffree((u64)g_part_y);
 
     ReleaseDC(hwnd, hdc);
     UnregisterClassA((LPCSTR)class_name, hInstance);

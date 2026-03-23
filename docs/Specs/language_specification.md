@@ -1,16 +1,13 @@
 # Flux
 
-Flux is a systems programming language resembling C++ and Python.  
-This is the _reduced_ language specification.  
-The purpose of this reduced specification is to make Flux easier to write an AST and parser for, and less work to integrate with LLVM.  
-The goal is to create a version 1 of Flux which can be used to rewrite itself.  
-- This goal has been achieved as of 1/30/2026
+Flux is a compiled, general purpose programming language.
 
-Python makes dealing with arrays simplistic, but doesn't have pointers natively. Flux solves this problem.  
+It provides power with ease of writing.
+
 If you like Flux, please consider contributing to the project or joining the [Flux Discord server](https://discord.gg/RAHjbYuNUc) where you can ask questions, provide feedback, and talk with other Flux enjoyers!
 
 **Creator note:** Everything in Flux is **stack allocated** unless specified.  
-This means you are likely to introduce stack overflows if you perform allocations inside loops.
+- This means you are likely to introduce stack overflows if you perform stack allocations inside loops such as declaring a new variable each time a loop passes.
 
 ---
 

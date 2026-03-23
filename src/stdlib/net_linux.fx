@@ -10,15 +10,15 @@
 #def FLUX_STANDARD_NET_LINUX 1;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "redmemory.fx";
+#import "memory.fx";
 #endif;
 
 #ifndef __LINUX_INTERFACE__
-#import "redlinux.fx";
+#import "linux.fx";
 #endif;
 
 // ============================================================================

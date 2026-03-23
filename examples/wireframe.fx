@@ -1,8 +1,4 @@
-#import "standard.fx";
-#import "redmath.fx";
-#import "redwindows.fx";
-#import "redopengl.fx";
-#import "redallocators.fx";
+#import "standard.fx", "math.fx", "windows.fx", "opengl.fx", "allocators.fx";
 
 using standard::memory::allocators::stdheap;
 using standard::system::windows;

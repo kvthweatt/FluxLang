@@ -11,13 +11,11 @@
 //   [8..71]  byte[64]    - null-terminated message string
 //   [72..]   i32[8]      - array of integers
 
-#import "standard.fx";
-#import "atomics.fx";
-#import "sharedmemory.fx";
+#import "standard.fx", "atomics.fx", "sharedmemory.fx";
 
-using standard::io::console;
-using standard::atomic;
-using standard::sharedmemory;
+using standard::io::console,
+      standard::atomic,
+      standard::sharedmemory;
 
 const byte[] SHM_NAME  = "flux_shm_demo\0";
 const int    SHM_SIZE  = 4096,

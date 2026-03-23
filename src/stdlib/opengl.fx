@@ -1,7 +1,7 @@
 // Flux OpenGL Library
 // Provides OpenGL context setup and rendering helpers via Win32 WGL
 #ifndef __WIN32_INTERFACE__
-#import "redwindows.fx";
+#import "windows.fx";
 #endif;
 
 #ifndef __REDOPENGL__
@@ -112,40 +112,77 @@ namespace standard
 };
 
 // ============================================================================
+// GL EXTENSION FUNCTION POINTERS
+// ============================================================================
+
+def{}* glCreateShader_fp(int)                 -> int;
+def{}* glShaderSource_fp(int,int,byte**,int*) -> void;
+def{}* glCompileShader_fp(int)                -> void;
+def{}* glCreateProgram_fp()                   -> int;
+def{}* glAttachShader_fp(int,int)             -> void;
+def{}* glLinkProgram_fp(int)                  -> void;
+def{}* glUseProgram_fp(int)                   -> void;
+def{}* glGetUniformLocation_fp(int,byte*)     -> int;
+def{}* glUniform1i_fp(int,int)                -> void;
+def{}* glUniform2f_fp(int,float,float)        -> void;
+def{}* glActiveTexture_fp(int)                -> void;
+def{}* glDeleteShader_fp(int)                 -> void;
+def{}* glDeleteProgram_fp(int)                -> void;
+
+def compile_shader(int shader_type, byte* src) -> int
+{
+    int shader = glCreateShader_fp(shader_type);
+    byte[1]* src_arr = [src];
+    int[1]   len_arr = [-1];
+    glShaderSource_fp(shader, 1, @src_arr[0], @len_arr[0]);
+    glCompileShader_fp(shader);
+    return shader;
+};
+
+def link_program(int vert, int frag) -> int
+{
+    int prog = glCreateProgram_fp();
+    glAttachShader_fp(prog, vert);
+    glAttachShader_fp(prog, frag);
+    glLinkProgram_fp(prog);
+    return prog;
+};
+
+// ============================================================================
 // OPENGL TYPES
 // ============================================================================
 
 // OpenGL base types
-unsigned data{8}  as GLenum;     // Enumeration values (GL_*)
-unsigned data{8}  as GLboolean;  // Boolean (GL_TRUE / GL_FALSE)
-unsigned data{32} as GLbitfield; // Bitfield for glClear etc.
-signed   data{8}  as GLbyte;     // Signed 8-bit
-unsigned data{8}  as GLubyte;    // Unsigned 8-bit
-signed   data{16} as GLshort;    // Signed 16-bit
-unsigned data{16} as GLushort;   // Unsigned 16-bit
-signed   data{32} as GLint;      // Signed 32-bit
-unsigned data{32} as GLuint;     // Unsigned 32-bit (handles: textures, VBOs, VAOs, shaders, programs)
-signed   data{32} as GLsizei;    // Size parameter (non-negative)
-float            as GLfloat;     // 32-bit float (mapped via u64 placeholder like redtypes.fx)
-u64              as GLdouble;    // 64-bit double
-u64              as GLclampf;    // float clamped [0,1]
+byte              as GLenum;     // Enumeration values (GL_*)
+byte              as GLboolean;  // Boolean (GL_TRUE / GL_FALSE)
+uint              as GLbitfield; // Bitfield for glClear etc.
+signed byte       as GLbyte;     // Signed 8-bit
+byte              as GLubyte;    // Unsigned 8-bit
+i16               as GLshort;    // Signed 16-bit
+u16               as GLushort;   // Unsigned 16-bit
+int               as GLint;      // Signed 32-bit
+uint              as GLuint;     // Unsigned 32-bit (handles: textures, VBOs, VAOs, shaders, programs)
+int               as GLsizei;    // Size parameter (non-negative)
+float             as GLfloat;     // 32-bit float (mapped via u64 placeholder like redtypes.fx)
+u64               as GLdouble;    // 64-bit double
+u64               as GLclampf;    // float clamped [0,1]
 
 // ============================================================================
 // OPENGL CONSTANTS
 // ============================================================================
 
 // Boolean
-global GLboolean GL_FALSE = 0,
+GLboolean GL_FALSE = 0,
                  GL_TRUE  = 1;
 
 // Error codes
-global GLenum GL_NO_ERROR          = 0x00,
+GLenum GL_NO_ERROR          = 0x00,
               GL_INVALID_ENUM      = 0x00,
               GL_INVALID_VALUE     = 0x00,
               GL_INVALID_OPERATION = 0x00,
               GL_OUT_OF_MEMORY     = 0x00;
 
-global int GL_NO_ERROR_INT          = 0x0000,
+int GL_NO_ERROR_INT          = 0x0000,
            GL_INVALID_ENUM_INT      = 0x0500,
            GL_INVALID_VALUE_INT     = 0x0501,
            GL_INVALID_OPERATION_INT = 0x0502,
@@ -154,13 +191,13 @@ global int GL_NO_ERROR_INT          = 0x0000,
            GL_OUT_OF_MEMORY_INT     = 0x0505;
 
 // Clear buffer bits
-global int GL_COLOR_BUFFER_BIT   = 0x00004000,
+int GL_COLOR_BUFFER_BIT   = 0x00004000,
            GL_DEPTH_BUFFER_BIT   = 0x00000100,
            GL_STENCIL_BUFFER_BIT = 0x00000400,
            GL_ACCUM_BUFFER_BIT   = 0x00000200;
 
 // Primitives
-global int GL_POINTS         = 0x0000,
+int GL_POINTS         = 0x0000,
            GL_LINES          = 0x0001,
            GL_LINE_LOOP      = 0x0002,
            GL_LINE_STRIP     = 0x0003,
@@ -172,7 +209,7 @@ global int GL_POINTS         = 0x0000,
            GL_POLYGON        = 0x0009;
 
 // Data types
-global int GL_BYTE           = 0x1400,
+int GL_BYTE           = 0x1400,
            GL_UNSIGNED_BYTE  = 0x1401,
            GL_SHORT          = 0x1402,
            GL_UNSIGNED_SHORT = 0x1403,
@@ -182,12 +219,12 @@ global int GL_BYTE           = 0x1400,
            GL_DOUBLE         = 0x140A;
 
 // Matrix modes
-global int GL_MODELVIEW  = 0x1700,
+int GL_MODELVIEW  = 0x1700,
            GL_PROJECTION = 0x1701,
            GL_TEXTURE    = 0x1702;
 
 // Depth / comparison functions
-global int GL_NEVER    = 0x0200,
+int GL_NEVER    = 0x0200,
            GL_LESS      = 0x0201,
            GL_EQUAL     = 0x0202,
            GL_LEQUAL    = 0x0203,
@@ -197,7 +234,7 @@ global int GL_NEVER    = 0x0200,
            GL_ALWAYS    = 0x0207;
 
 // Blend factors
-global int GL_ZERO                 = 0x0000,
+int GL_ZERO                 = 0x0000,
            GL_ONE                  = 0x0001,
            GL_SRC_COLOR            = 0x0300,
            GL_ONE_MINUS_SRC_COLOR  = 0x0301,
@@ -209,7 +246,7 @@ global int GL_ZERO                 = 0x0000,
            GL_ONE_MINUS_DST_COLOR  = 0x0307;
 
 // Capability flags (for glEnable / glDisable)
-global int GL_DEPTH_TEST           = 0x0B71,
+int GL_DEPTH_TEST           = 0x0B71,
            GL_BLEND                = 0x0BE2,
            GL_CULL_FACE            = 0x0B44,
            GL_LIGHTING             = 0x0B50,
@@ -226,23 +263,23 @@ global int GL_DEPTH_TEST           = 0x0B71,
            GL_MULTISAMPLE          = 0x809D;
 
 // Cull face / winding
-global int GL_FRONT          = 0x0404,
+int GL_FRONT          = 0x0404,
            GL_BACK           = 0x0405,
            GL_FRONT_AND_BACK = 0x0408,
            GL_CW             = 0x0900,
            GL_CCW            = 0x0901;
 
 // Polygon fill mode
-global int GL_POINT = 0x1B00,
+int GL_POINT = 0x1B00,
            GL_LINE  = 0x1B01,
            GL_FILL  = 0x1B02;
 
 // Shade model
-global int GL_FLAT   = 0x1D00,
+int GL_FLAT   = 0x1D00,
            GL_SMOOTH = 0x1D01;
 
 // Texture parameters
-global int GL_TEXTURE_MAG_FILTER      = 0x2800,
+int GL_TEXTURE_MAG_FILTER      = 0x2800,
            GL_TEXTURE_MIN_FILTER      = 0x2801,
            GL_TEXTURE_WRAP_S          = 0x2802,
            GL_TEXTURE_WRAP_T          = 0x2803,
@@ -257,7 +294,7 @@ global int GL_TEXTURE_MAG_FILTER      = 0x2800,
            GL_CLAMP_TO_EDGE           = 0x812F;
 
 // Texture formats / internal formats
-global int GL_RGB             = 0x1907,
+int GL_RGB             = 0x1907,
            GL_RGBA            = 0x1908,
            GL_LUMINANCE       = 0x1909,
            GL_LUMINANCE_ALPHA = 0x190A,
@@ -269,12 +306,12 @@ global int GL_RGB             = 0x1907,
            GL_DEPTH_COMPONENT24 = 0x81A6;
 
 // Buffer object targets
-global int GL_ARRAY_BUFFER         = 0x8892,
+int GL_ARRAY_BUFFER         = 0x8892,
            GL_ELEMENT_ARRAY_BUFFER = 0x8893,
            GL_UNIFORM_BUFFER       = 0x8A11;
 
 // Buffer usage hints
-global int GL_STREAM_DRAW  = 0x88E0,
+int GL_STREAM_DRAW  = 0x88E0,
            GL_STREAM_READ  = 0x88E1,
            GL_STATIC_DRAW  = 0x88E4,
            GL_STATIC_READ  = 0x88E5,
@@ -282,19 +319,19 @@ global int GL_STREAM_DRAW  = 0x88E0,
            GL_DYNAMIC_READ = 0x88E9;
 
 // Shader types
-global int GL_FRAGMENT_SHADER = 0x8B30,
+int GL_FRAGMENT_SHADER = 0x8B30,
            GL_VERTEX_SHADER   = 0x8B31,
            GL_GEOMETRY_SHADER = 0x8DD9;
 
 // Shader / program status query tokens
-global int GL_COMPILE_STATUS  = 0x8B81,
+int GL_COMPILE_STATUS  = 0x8B81,
            GL_LINK_STATUS     = 0x8B82,
            GL_INFO_LOG_LENGTH = 0x8B84,
            GL_SHADER_TYPE     = 0x8B4F,
            GL_DELETE_STATUS   = 0x8B80;
 
 // Framebuffer targets and attachment points
-global int GL_FRAMEBUFFER              = 0x8D40,
+int GL_FRAMEBUFFER              = 0x8D40,
            GL_RENDERBUFFER             = 0x8D41,
            GL_COLOR_ATTACHMENT0        = 0x8CE0,
            GL_DEPTH_ATTACHMENT         = 0x8D00,
@@ -305,13 +342,13 @@ global int GL_FRAMEBUFFER              = 0x8D40,
            GL_FRAMEBUFFER_UNSUPPORTED  = 0x8CDD;
 
 // String query tokens
-global int GL_VENDOR     = 0x1F00,
+int GL_VENDOR     = 0x1F00,
            GL_RENDERER   = 0x1F01,
            GL_VERSION    = 0x1F02,
            GL_EXTENSIONS = 0x1F03;
 
 // Active texture units
-global int GL_TEXTURE0  = 0x84C0,
+int GL_TEXTURE0  = 0x84C0,
            GL_TEXTURE1  = 0x84C1,
            GL_TEXTURE2  = 0x84C2,
            GL_TEXTURE3  = 0x84C3,
@@ -321,7 +358,7 @@ global int GL_TEXTURE0  = 0x84C0,
            GL_TEXTURE7  = 0x84C7;
 
 // Fixed-function lighting constants
-global int GL_LIGHT0     = 0x4000,
+int GL_LIGHT0     = 0x4000,
            GL_LIGHT1     = 0x4001,
            GL_LIGHT2     = 0x4002,
            GL_LIGHT3     = 0x4003,
@@ -333,7 +370,7 @@ global int GL_LIGHT0     = 0x4000,
            GL_EMISSION   = 0x1600;
 
 // Misc get tokens
-global int GL_VIEWPORT          = 0x0BA2,
+int GL_VIEWPORT          = 0x0BA2,
            GL_MAX_TEXTURE_SIZE  = 0x0D33,
            GL_MAX_VIEWPORT_DIMS = 0x0D3A;
 

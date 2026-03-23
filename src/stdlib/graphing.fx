@@ -44,11 +44,11 @@
 //   };
 
 #ifndef FLUX_STANDARD_MATH
-#import "redmath.fx";
+#import "math.fx";
 #endif
 
 #ifndef __WIN32_INTERFACE__
-#import "redwindows.fx";
+#import "windows.fx";
 #endif
 
 #ifndef FLUX_STANDARD_GRAPHING

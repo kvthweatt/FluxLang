@@ -10,10 +10,10 @@
 #def FLUX_STANDARD_NET 1;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 #ifndef FLUX_STANDARD_MEMORY
-#import "redmemory.fx";
+#import "memory.fx";
 #endif;
 
 // ============ WINSOCK FFI DECLARATIONS ============

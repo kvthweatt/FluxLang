@@ -1,7 +1,7 @@
 // Basic HTTP Server in Flux - Debug Version
 // Demonstrates TCP server handling simple HTTP GET requests
 
-#import "standard.fx", "rednet_windows.fx";
+#import "standard.fx", "net_windows.fx";
 
 // HTTP response helper
 def build_http_response(byte* content, int content_len, byte* buffer) -> int

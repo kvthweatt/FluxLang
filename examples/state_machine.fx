@@ -4,8 +4,8 @@
 
 #import "standard.fx";
 
-using standard::io::console;
-using standard::strings;
+using standard::io::console,
+      standard::strings;
 
 // ---------------------------------------------------------------
 // Token kind enum.

@@ -3,7 +3,7 @@
 // No X11. GUI is in redwayland.fx.
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 #ifndef __LINUX_INTERFACE__

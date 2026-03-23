@@ -1,7 +1,4 @@
-#import "standard.fx";
-#import "redmath.fx";
-#import "redwindows.fx";
-#import "redopengl.fx";
+#import "standard.fx", "math.fx", "windows.fx", "opengl.fx";
 
 using standard::system::windows;
 using standard::math;
@@ -14,12 +11,12 @@ struct Shape
 {
     Vec3* verts;
     Edge* edges;
-    int   vert_count;
-    int   edge_count;
-    float world_x;
-    float world_y;
-    float world_z;
-    float spin;
+    int   vert_count,
+          edge_count;
+    float world_x,
+          world_y,
+          world_z,
+          spin;
 };
 
 // ============================================================================

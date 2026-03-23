@@ -1,5 +1,4 @@
-#import "standard.fx";
-#import "redwindows.fx";
+#import "standard.fx", "windows.fx";
 
 using standard::system::windows;
 

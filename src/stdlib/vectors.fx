@@ -5,11 +5,11 @@
 #endif;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "redtypes.fx";
+#import "types.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_MATH
-#import "redmath.fx";
+#import "math.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_VECTORS

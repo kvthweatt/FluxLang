@@ -2,6 +2,8 @@
 
 #import "standard.fx";
 
+using standard::io::console;
+
 struct Packet
 {
     unsigned data{8} type;
