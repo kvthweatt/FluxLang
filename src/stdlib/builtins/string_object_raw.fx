@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 #ifndef FLUX_STANDARD_IO
 #import "io.fx";
 #endif;

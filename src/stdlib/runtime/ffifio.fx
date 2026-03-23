@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // File I/O Library using C FFI
 // Simple wrapper around C's stdio.h functions
 

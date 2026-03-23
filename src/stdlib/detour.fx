@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // detour.fx
 //
 // Detour / inline hook library for Flux (x86-64, Windows).

@@ -48,8 +48,11 @@ assert(x > 0);
 **`auto`**
 Infers the type of a variable from its initializer.
 ```
-auto x = 5;   // x is int, if greater than int max value, it is a long. Not recommended.
+auto x = 5;   // x is a char, if greater than char it promotes to uint, if greater than int max value, it is a ulong. Not recommended.
 ```
+`auto` will attempt within reason, to infer the integer or floating type, and will be a built-in dependent on its value.
+- It will always attempt to coerce to the smallest width type.
+The example `auto x = 5;` makes `x` a `char`.
 
 ---
 
@@ -99,6 +102,14 @@ try { ... } catch (int e) { ... };
 Declares a function using the cdecl calling convention. Used in place of `def`.
 ```
 cdecl foo(int x) -> int { return x; };
+```
+
+---
+
+**`char`**
+Character type. Guaranteed 8 bits.
+```
+char c = 'H';
 ```
 
 ---
@@ -196,6 +207,12 @@ Declares an enumeration of named integer constants.
 ```
 enum Color { RED, GREEN, BLUE };
 ```
+
+---
+
+**`extern`**:
+External FFI
+TODO
 
 ---
 
@@ -369,6 +386,13 @@ object Point { int x, y; def __init(int x, int y) -> this { ... }; ...; };
 
 ---
 
+**`operator`**:
+Define a custom infix operator. Can use symbols or an identifier as the operator.  
+To overload a built-in operator, one of the operands **must not** be a built-in type, ie `int`, `float`, `byte`, etc.
+TODO
+
+---
+
 **`or`**
 Logical OR operator. Equivalent to `|`.
 ```
@@ -513,14 +537,6 @@ bool flag = true;
 Begins a block that can throw exceptions.
 ```
 try { ... } catch (int e) { ... };
-```
-
----
-
-**`typeof`**
-Resolves a type name to its kind constant at compile time.
-```
-if (typeof(x) == typeof(int)) { ... };
 ```
 
 ---

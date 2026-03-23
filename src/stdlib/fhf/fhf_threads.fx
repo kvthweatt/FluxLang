@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // fhf_threads.fx
 //
 // Flux Hotpatch Framework (FHF) — Thread Suspension Layer

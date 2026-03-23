@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // rednet_linux.fx - Flux Linux Networking Library
 // Linux socket API: TCP, UDP, Unix domain sockets, epoll, SCM_RIGHTS fd passing.
 // Socket externs come from redlinux.fx.

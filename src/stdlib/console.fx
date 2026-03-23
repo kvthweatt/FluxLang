@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redconsole.fx - Flux Console Control Library
 //
 //
@@ -440,22 +442,22 @@ namespace standard
                 //
                 // Draws a progress bar pinned to `row`, spanning the full console width.
                 // `done` and `total` are arbitrary units; bar fills proportionally.
-                // `label` is a short null-terminated prefix shown before the bar.
+                // `labelx` is a short null-terminated prefix shown before the bar.
                 //
-                // Example output (width=60, label="Build"):
+                // Example output (width=60, labelx="Build"):
                 //   Build [####################          ] 50%
                 // ====================================================================
 
-                def progress_bar(i16 row, byte* label, i32 done, i32 total) -> void
+                def progress_bar(i16 row, byte* labelx, i32 done, i32 total) -> void
                 {
                     // Clamp
                     switch (total <= (i32)0) { case (1) { total = (i32)1; } default {}; };
                     switch (done > total)    { case (1) { done  = total;  } default {}; };
                     switch (done < (i32)0)   { case (1) { done  = (i32)0; } default {}; };
 
-                    // Measure label length
+                    // Measure labelx length
                     int llen = 0;
-                    while (label[llen] != (byte)0) { llen = llen + 1; };
+                    while (labelx[llen] != (byte)0) { llen = llen + 1; };
 
                     // Bar area: " [" + bar + "] NNN%" = width - llen - 8 min
                     int bar_width = (int)this.width - llen - 8;
@@ -467,11 +469,11 @@ namespace standard
                     byte[512] buf;
                     int bi = 0;
 
-                    // Copy label
+                    // Copy labelx
                     int li = 0;
                     while (li < llen & bi < 510)
                     {
-                        buf[bi] = label[li];
+                        buf[bi] = labelx[li];
                         bi = bi + 1;
                         li = li + 1;
                     };

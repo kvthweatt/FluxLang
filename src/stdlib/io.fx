@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // Input/Output Operations
 #ifndef FLUX_STANDARD
 #def FLUX_STANDARD 1;

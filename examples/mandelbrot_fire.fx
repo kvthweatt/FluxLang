@@ -1,10 +1,10 @@
-#import "standard.fx", "redmath.fx", "redwindows.fx", "redopengl.fx", "threading.fx";
+#import "standard.fx", "math.fx", "windows.fx", "opengl.fx", "threading.fx";
 
-using standard::io::console;
-using standard::system::windows;
-using standard::math;
-using standard::atomic;
-using standard::threading;
+using standard::io::console,
+      standard::system::windows,
+      standard::math,
+      standard::atomic,
+      standard::threading;
 
 // ============================================================================
 // Mandelbrot Set - OpenGL Viewer
@@ -42,10 +42,6 @@ def mandelbrot(double x0, double y0, int max_iter) -> int
     // Period-2 bulb: (x+1)^2 + y^2 < 1/16
     cx = x0 + 1.0;
     if (cx * cx + cy * cy < 0.0625) { return max_iter; };
-
-    x    = 0.0;
-    y    = 0.0;
-    iter = 0;
 
     while (iter < max_iter)
     {

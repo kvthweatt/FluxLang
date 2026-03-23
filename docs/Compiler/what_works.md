@@ -1,15 +1,15 @@
 # Working Keyword & Feature Checklist
 
-- alignof ⚠️ Incomplete, requires full RTTI
 - and ✅ 
 - as ✅
 - asm ✅
-- assert ✅
 - auto ✅
 - bool ✅
 - break ✅
+- byte ✅
 - case ✅
 - catch ✅
+- cdecl ✅
 - char ✅
 - compt ❌ Deferred for bootsrap
 - const ✅
@@ -18,51 +18,70 @@
 - data ✅
 - def ✅
 - default ✅
+- deprecate ✅
 - do ✅
+- double ✅
 - elif ✅
 - else ✅
+- enum ✅
 - extern ✅
+- escape ✅
 - false ✅
+- fastcall ✅
 - float ✅
 - for ✅
-- from ⚠️ Incomplete, implementation unfinished
+- from ✅
 - global ✅
+- goto ✅
 - heap ✅
 - if ✅
-- import ✅
 - in ✅
 - int ✅
 - is ✅
 - lext ❌ Deferred for bootsrap
-- local ⚠️ Incomplete, implementation unfinished
+- label ✅
+- local ✅
+- long ✅
 - namespace ✅
+- noinit ✅
+- noreturn ✅
 - not ✅
 - object ✅
-- operator ❌ Deferred for bootsrap
+- operator ✅
 - or ✅
-- private ⚠️ Potentially incomplete, untested
-- public ⚠️ Potentially incomplete, untested
-- register ✅ Implemented, unverified
+- private ✅
+- public ✅
+- register ✅
 - return ✅
 - signed ✅
-- sizeof ✅
+- singinit ✅
 - stack ✅
+- stdcall ✅
 - struct ✅
 - super ❌ Deferred for bootsrap
 - switch ✅
 - this  ✅
+- thiscall ✅
 - throw ✅
-- trait ❌ Deferred for bootsrap
+- trait ✅
 - true ✅
 - try ✅
-- typeof ⚠️ Incomplete, requires full RTTI
+- uint ✅
+- ulong ✅
 - union ✅
 - unsigned ✅
 - using ✅
+- vectorcall ✅
 - void ✅
 - volatile ✅
 - while ✅
 - xor ✅
+
+## Built-in functions:
+- `typeof()` ✅
+- `sizeof()` ✅
+- `alignof()` ✅
+- `endianof()` ✅
 
 ## Operators:
 - ADD = "+" ✅ 
@@ -107,13 +126,17 @@
 - ADDRESS_OF = "@" ✅
 - RANGE = ".." ✅
 - SCOPE = "::" ✅
-- TERMARY = "?:" ✅
+- TERMARY = "expr ? true_cond : false_cond" ✅
+- TERNARY_ASSIGN = "?="
 - NULL COALESCE = "??" ✅
 - ADDRESS_CAST = "(@)" ✅
+- FUNCTION_POINTER = "{}\*" ✅
 - NO_MANGLE = "!!" ✅
+- VARIADIC = "..." ✅
+- STRINGIFY = "$" ✅
 
 ## Directionals
 - RETURN_ARROW = "->" ✅
 - CHAIN_ARROW = "<-" ✅
-- RECURSE_ARROW = "<~"  ⚠️ Not implemented, can be done in reduced spec
+- RECURSE_ARROW = "<~"  ✅
 - TIE = "~" ✅ (Ownership)

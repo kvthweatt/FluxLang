@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redvectors.fx - 3D and 4D Vector Mathematics Library
 
 #ifndef FLUX_STANDARD

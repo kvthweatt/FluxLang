@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // Flux Vulkan Library
 // Provides Vulkan instance/device setup, swapchain, and compute pipeline helpers
 // Windows-only: loads vulkan-1.dll at runtime via LoadLibraryA / GetProcAddress

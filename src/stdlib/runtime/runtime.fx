@@ -1,5 +1,27 @@
-global const void* STDLIB_GVP = (void*)@void;
-global const unsigned data{64} U64MAXVAL = 0xFFFFFFFFFFFFFFFFu;
+// Author: Karac V. Thweatt
+
+///
+Flux Standard Runtime
+
+Minimal runtime. Standard heap allocator is lazy initialized.
+No allocation until first fmalloc().
+
+The STDLIB_GVP is the standard library global void pointer.
+It is provided so you do not need to allocate it during checks,
+such as:
+if (ptr == 0); // This allocates 0 on the stack momentarily.
+Using this pointer solves this allocation.
+
+NULL is an alternative which is easier to type.
+
+By default, the standard types and memory libraries are pulled in.
+This is simply for the heap allocator.
+
+Also, standard input/output is pulled in, and is minimal.
+///
+
+const void* STDLIB_GVP = (void*)@void;
+const data{64} U64MAXVAL = 0xFFFFFFFFFFFFFFFFu;
 
 #def NULL STDLIB_GVP;
 
@@ -33,7 +55,9 @@ global i64 WIN_STDOUT_HANDLE;
 
 using standard::memory::allocators::stdheap;
 
+// DO NOT MODIFY THIS LINE
 #import "string_utilities.fx";
+// DO NOT MODIFY THIS LINE
 
 #ifndef FLUX_STANDARD_SYSTEM
 #import "sys.fx";

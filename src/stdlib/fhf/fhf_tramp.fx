@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // fhf_tramp.fx
 //
 // Flux Hotpatch Framework (FHF) — Trampoline Manager

@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // Flux Exception Handling Runtime
 
 #ifndef FLUX_STANDARD_EXCEPTIONS

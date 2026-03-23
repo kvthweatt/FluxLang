@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redjson.fx - JSON Parser Library
 // Parse JSON strings into navigable structures
 

@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redmemarena.fx - Flux Memory Arena Allocator
 //
 //

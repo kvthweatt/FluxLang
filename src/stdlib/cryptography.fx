@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redcrypto.fx - Cryptography Library
 
 #ifndef FLUX_STANDARD_TYPES
@@ -103,8 +105,7 @@ namespace standard
                 def sha256_transform(SHA256_CTX* ctx, byte* datax) -> void
                 {
                     u32[64] W;
-                    u32 a, b, c, d, e, f, g, h, t1, t2;
-                    u32 i;
+                    u32 a, b, c, d, e, f, g, h, t1, t2, i;
                     
                     // Prepare message schedule
                     for (i = 0; i < 16; i++)
@@ -187,7 +188,7 @@ namespace standard
                     u32 i = ctx.buflen;
 
                     // Pad with 0x80
-                    ctx.buffer[i] = (byte)0x80;
+                    ctx.buffer[i] = 0x80;
                     i++;
                     
                     // Pad with zeros, leaving room for length

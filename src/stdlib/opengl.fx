@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // Flux OpenGL Library
 // Provides OpenGL context setup and rendering helpers via Win32 WGL
 #ifndef __WIN32_INTERFACE__

@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // fhf_cli.fx
 //
 // Flux Hotpatch Framework (FHF) — CLI Tooling

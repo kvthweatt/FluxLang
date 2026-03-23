@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // Reduced Specification Standard Library `dostypes.fx`
 // DOS LIBRARY
 #ifndef FLUX_STANDARD

@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // OS Detection Library
 #ifndef FLUX_STANDARD
 #def FLUX_STANDARD 1;

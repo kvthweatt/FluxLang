@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redregex.fx - Flux Regular Expression Library
 //
 // Full NFA-based regex engine.

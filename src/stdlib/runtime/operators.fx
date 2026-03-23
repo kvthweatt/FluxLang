@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 #ifndef FLUX_STANDARD_TYPES
 #import "types.fx";
 #endif;

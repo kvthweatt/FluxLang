@@ -1,6 +1,6 @@
 // AES-128 Implementation in Flux
 // Based on FIPS 197 specification
-#import "standard.fx", "redcrypto.fx";
+#import "standard.fx", "cryptography.fx";
 
 using standard::io::console;
 using standard::strings;

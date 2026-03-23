@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redthreading.fx - Threading Library
 // Provides platform-level thread creation, synchronization primitives,
 // and thread-local utilities built on top of redatomics.fx.

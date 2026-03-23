@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // Flux Direct2D Library
 // Provides Direct2D context setup and rendering helpers via COM vtable dispatch
 #ifndef __WIN32_INTERFACE__

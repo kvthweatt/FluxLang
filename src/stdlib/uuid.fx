@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // reduuid.fx - UUID Generation Library
 // Supports UUID versions 1, 4, and 7
 

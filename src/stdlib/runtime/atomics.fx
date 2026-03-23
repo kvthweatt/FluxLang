@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redatomics.fx - Atomic Operations Library
 // Provides lock-free atomic primitives for safe multi-threaded access.
 // Uses inline assembly for x86/x64 and ARM64 hardware atomics.

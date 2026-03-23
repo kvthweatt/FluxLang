@@ -1,5 +1,7 @@
 #import "standard.fx";
 
+using standard::io::console;
+
 def foo(int x) -> int
 {
 	return x - 1;
@@ -12,7 +14,7 @@ def bar() -> int
 
 def main() -> int
 {
-	if ((foo()<-bar()) == 0)
+	if (foo()<-bar() == 0)
 	{
 		print("Success!\0");
 	};

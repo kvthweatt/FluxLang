@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 #ifdef __DOS__
 // WE'RE IN DOS MODE!
 #ifdef __MSDOS__

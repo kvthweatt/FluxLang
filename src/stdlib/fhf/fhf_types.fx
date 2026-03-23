@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // fhf_types.fx
 //
 // Flux Hotpatch Framework (FHF) — Core Types, Error Codes, and Constants

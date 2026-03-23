@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // fhf_bundle.fx
 //
 // Flux Hotpatch Framework (FHF) — Bundle Builder

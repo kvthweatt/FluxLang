@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // fhf_remote.fx
 //
 // Flux Hotpatch Framework (FHF) — Remote Patching Layer

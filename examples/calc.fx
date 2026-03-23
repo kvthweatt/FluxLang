@@ -1,6 +1,8 @@
 // Simple Calculator Program
 #import "standard.fx";
 
+using standard::io::console;
+
 def parse_int(byte* buffer) -> int
 {
     int num = 0;

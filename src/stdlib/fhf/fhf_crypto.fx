@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // fhf_crypto.fx
 //
 // Flux Hotpatch Framework (FHF) — Cryptographic Signing Layer

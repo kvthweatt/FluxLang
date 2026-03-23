@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // Additional String Manipulation Utilities
 // Fresh snippet - pick and choose what you want
 

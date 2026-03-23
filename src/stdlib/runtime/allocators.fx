@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redallocators.fx - Flux Custom Memory Allocators
 //
 //

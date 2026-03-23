@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redmath.fx - Comprehensive mathematical functions with overloads
 #ifndef FLUX_STANDARD
 #def FLUX_STANDARD 1;

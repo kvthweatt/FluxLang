@@ -11,7 +11,7 @@
 //   - Screen save/restore (like old DOS programs)
 
 #import "standard.fx";
-#import "redconsole.fx";
+#import "console.fx";
 
 using standard::io::console;
 
@@ -38,7 +38,7 @@ def main() -> int
         h = con.get_height();
     
     // Calculate total cells
-    i32 total_cells = (i32)w * (i32)h;
+    i32 total_cells = w * h;
     
     // Allocate buffers for screen capture
     // We need to store both characters and attributes
@@ -47,7 +47,7 @@ def main() -> int
     
     // Read the entire screen buffer
     i32 written = 0,
-        start_coord = make_coord((i16)0, (i16)0);
+        start_coord = make_coord(0, 0);
     
     // Read characters
     ReadConsoleOutputCharacterA(
@@ -81,156 +81,156 @@ def main() -> int
     // 2. Title bar -- white on dark blue
     // BG_DARK_BLUE | FG_WHITE = 0x0010 | 0x000F = 0x001F
     // ------------------------------------------------------------------
-    con.clear_line_attr((i16)0, (i16)0x001F);
+    con.clear_line_attr(0, 0x001F);
     con.write_at_colored(
-    (i16)2, (i16)0, (i16)0x001F,
+    2, 0, 0x001F,
     "  redconsole.fx  --  Feature Demo\0"
     );
 
     // ------------------------------------------------------------------
     // 3. Foreground color palette
     // ------------------------------------------------------------------
-    con.write_at_colored((i16)2, (i16)2, (i16)0x000E,
+    con.write_at_colored(2, 2, 0x000E,
                          "[ Foreground Colors ]\0");
 
-    i16 col = (i16)2;
-    con.write_at_colored(col, (i16)3, (i16)0x0008, "DARK_GRAY   \0"); col = (i16)(col + (i16)13);
-    con.write_at_colored(col, (i16)3, (i16)0x0009, "BLUE        \0"); col = (i16)(col + (i16)13);
-    con.write_at_colored(col, (i16)3, (i16)0x000A, "GREEN       \0"); col = (i16)(col + (i16)13);
-    con.write_at_colored(col, (i16)3, (i16)0x000B, "CYAN        \0");
+    i16 col = 2;
+    con.write_at_colored(col, 3, 0x0008, "DARK_GRAY   \0"); col = (col + 13);
+    con.write_at_colored(col, 3, 0x0009, "BLUE        \0"); col = (col + 13);
+    con.write_at_colored(col, 3, 0x000A, "GREEN       \0"); col = (col + 13);
+    con.write_at_colored(col, 3, 0x000B, "CYAN        \0");
 
-    col = (i16)2;
-    con.write_at_colored(col, (i16)4, (i16)0x000C, "RED         \0"); col = (i16)(col + (i16)13);
-    con.write_at_colored(col, (i16)4, (i16)0x000D, "MAGENTA     \0"); col = (i16)(col + (i16)13);
-    con.write_at_colored(col, (i16)4, (i16)0x000E, "YELLOW      \0"); col = (i16)(col + (i16)13);
-    con.write_at_colored(col, (i16)4, (i16)0x000F, "WHITE       \0");
+    col = 2;
+    con.write_at_colored(col, 4, 0x000C, "RED         \0"); col = (col + 13);
+    con.write_at_colored(col, 4, 0x000D, "MAGENTA     \0"); col = (col + 13);
+    con.write_at_colored(col, 4, 0x000E, "YELLOW      \0"); col = (col + 13);
+    con.write_at_colored(col, 4, 0x000F, "WHITE       \0");
 
     // ------------------------------------------------------------------
     // 4. Background color palette
     // ------------------------------------------------------------------
-    con.write_at_colored((i16)2, (i16)6, (i16)0x000E,
+    con.write_at_colored(2, 6, 0x000E,
                          "[ Background Colors ]\0");
 
-    col = (i16)2;
-    con.write_at_colored(col, (i16)7, (i16)0x001F, " DARK_BLUE   \0"); col = (i16)(col + (i16)14);
-    con.write_at_colored(col, (i16)7, (i16)0x002F, " DARK_GREEN  \0"); col = (i16)(col + (i16)14);
-    con.write_at_colored(col, (i16)7, (i16)0x004F, " DARK_RED    \0"); col = (i16)(col + (i16)14);
-    con.write_at_colored(col, (i16)7, (i16)0x005F, " DARK_MAG    \0");
+    col = 2;
+    con.write_at_colored(col, 7, 0x001F, " DARK_BLUE   \0"); col = (col + 14);
+    con.write_at_colored(col, 7, 0x002F, " DARK_GREEN  \0"); col = (col + 14);
+    con.write_at_colored(col, 7, 0x004F, " DARK_RED    \0"); col = (col + 14);
+    con.write_at_colored(col, 7, 0x005F, " DARK_MAG    \0");
 
-    col = (i16)2;
-    con.write_at_colored(col, (i16)8, (i16)0x0030, " DARK_CYAN   \0"); col = (i16)(col + (i16)14);
-    con.write_at_colored(col, (i16)8, (i16)0x0060, " DARK_YELLOW \0"); col = (i16)(col + (i16)14);
-    con.write_at_colored(col, (i16)8, (i16)0x0070, " GRAY        \0"); col = (i16)(col + (i16)14);
-    con.write_at_colored(col, (i16)8, (i16)0x00F0, " WHITE       \0");
+    col = 2;
+    con.write_at_colored(col, 8, 0x0030, " DARK_CYAN   \0"); col = (col + 14);
+    con.write_at_colored(col, 8, 0x0060, " DARK_YELLOW \0"); col = (col + 14);
+    con.write_at_colored(col, 8, 0x0070, " GRAY        \0"); col = (col + 14);
+    con.write_at_colored(col, 8, 0x00F0, " WHITE       \0");
 
     // ------------------------------------------------------------------
     // 5. Console dimensions
     // ------------------------------------------------------------------
-    con.write_at_colored((i16)2, (i16)10, (i16)0x000E,
+    con.write_at_colored(2, 10, 0x000E,
                          "[ Console Info ]\0");
 
-    con.write_at_colored((i16)2, (i16)11, (i16)0x000B, "Width:  \0");
+    con.write_at_colored(2, 11, 0x000B, "Width:  \0");
     byte[16] numbuf;
     i16 ww = w;
-    numbuf[0] = (byte)('0' + (int)(ww / (i16)10));
-    numbuf[1] = (byte)('0' + (int)(ww % (i16)10));
+    numbuf[0] = (byte)('0' + (int)(ww / 10));
+    numbuf[1] = (byte)('0' + (int)(ww % 10));
     numbuf[2] = (byte)0;
-    con.write_at_colored((i16)10, (i16)11, (i16)0x000F, @numbuf[0]);
+    con.write_at_colored(10, 11, 0x000F, @numbuf[0]);
 
-    con.write_at_colored((i16)2, (i16)12, (i16)0x000B, "Height: \0");
+    con.write_at_colored(2, 12, 0x000B, "Height: \0");
     i16 hh = h;
-    numbuf[0] = (byte)('0' + (int)(hh / (i16)10));
-    numbuf[1] = (byte)('0' + (int)(hh % (i16)10));
+    numbuf[0] = (byte)('0' + (int)(hh / 10));
+    numbuf[1] = (byte)('0' + (int)(hh % 10));
     numbuf[2] = (byte)0;
-    con.write_at_colored((i16)10, (i16)12, (i16)0x000F, @numbuf[0]);
+    con.write_at_colored(10, 12, 0x000F, @numbuf[0]);
 
     // ------------------------------------------------------------------
     // 6. clear_region demo
     // ------------------------------------------------------------------
-    con.write_at_colored((i16)2, (i16)14, (i16)0x000E,
+    con.write_at_colored(2, 14, 0x000E,
                          "[ clear_region demo ]\0");
 
-    con.write_at_colored((i16)2, (i16)15, (i16)0x000C, "XXXXXXXXXXXXXXXXXX\0");
-    con.write_at_colored((i16)2, (i16)16, (i16)0x000C, "XXXXXXXXXXXXXXXXXX\0");
-    con.write_at_colored((i16)2, (i16)17, (i16)0x000C, "XXXXXXXXXXXXXXXXXX\0");
+    con.write_at_colored(2, 15, 0x000C, "XXXXXXXXXXXXXXXXXX\0");
+    con.write_at_colored(2, 16, 0x000C, "XXXXXXXXXXXXXXXXXX\0");
+    con.write_at_colored(2, 17, 0x000C, "XXXXXXXXXXXXXXXXXX\0");
 
     Sleep(600);
 
-    con.clear_region((i16)6, (i16)15, (i16)10, (i16)3);
+    con.clear_region(6, 15, 10, 3);
 
-    con.write_at_colored((i16)2, (i16)17, (i16)0x0008,
+    con.write_at_colored(2, 17, 0x0008,
                          "  (cols 6-15 cleared)\0");
 
     // ------------------------------------------------------------------
     // 7. Progress bar animation
     // ------------------------------------------------------------------
-    con.write_at_colored((i16)2, (i16)19, (i16)0x000E,
+    con.write_at_colored(2, 19, 0x000E,
                          "[ Progress Bar ]\0");
 
-    i32 step = (i32)0;
-    while (step <= (i32)20)
+    i32 step = 0;
+    while (step <= 20)
     {
-        con.progress_bar((i16)20, "Loading\0", step, (i32)20);
+        con.progress_bar(20, "Loading\0", step, 20);
         Sleep(80);
-        step = step + (i32)1;
+        step = step + 1;
     };
     // progress_bar uses CON_FG_GREEN|CON_BG_BLACK internally which resolves
     // to 0 (black on black) due to zero-init globals. Repaint the finished
     // bar with a visible color.
-    con.write_at_colored((i16)0, (i16)20, (i16)0x000A,
+    con.write_at_colored(0, 20, 0x000A,
                          "Loading [####################] 100%           \0");
 
     // ------------------------------------------------------------------
     // 8. Spinner animation
     // ------------------------------------------------------------------
-    con.write_at_colored((i16)2, (i16)22, (i16)0x000E,
+    con.write_at_colored(2, 22, 0x000E,
                          "[ Spinner ] Working...\0");
 
-    i32 tick = (i32)0;
-    while (tick < (i32)24)
+    i32 tick = 0;
+    while (tick < 24)
     {
-        con.spinner((i16)12, (i16)22, tick);
+        con.spinner(12, 22, tick);
         Sleep(100);
-        tick = tick + (i32)1;
+        tick = tick + 1;
     };
-    con.write_at_colored((i16)12, (i16)22, (i16)0x000A, "Done!           \0");
+    con.write_at_colored(12, 22, 0x000A, "Done!           \0");
 
     // ------------------------------------------------------------------
     // 9. cursor_save / cursor_restore demo
     // ------------------------------------------------------------------
-    con.write_at_colored((i16)2, (i16)24, (i16)0x000E,
+    con.write_at_colored(2, 24, 0x000E,
                          "[ Cursor Save/Restore ]\0");
 
-    con.cursor_set((i16)2, (i16)25);
-    con.set_attr((i16)0x000B);
+    con.cursor_set(2, 25);
+    con.set_attr(0x000B);
     con.cursor_save();
 
-    con.write_at_colored((i16)2, (i16)26, (i16)0x0008,
+    con.write_at_colored(2, 26, 0x0008,
                          "(cursor jumped away and came back)\0");
 
-    con.cursor_set((i16)30, (i16)0);
+    con.cursor_set(30, 0);
     Sleep(500);
     con.cursor_restore();
 
-    con.write_at_colored((i16)2, (i16)25, (i16)0x000B,
+    con.write_at_colored(2, 25, 0x000B,
                          "Saved here -> Restored here!\0");
-    con.set_attr((i16)0x0007);
+    con.set_attr(0x0007);
 
     // ------------------------------------------------------------------
     // 10. Status bar at the bottom
     // BG_DARK_GREEN | FG_BLACK = 0x0020
     // ------------------------------------------------------------------
-    i16 last_row = (i16)(h - (i16)1);
-    con.clear_line_attr(last_row, (i16)0x0020);
-    con.write_at_colored((i16)2, last_row, (i16)0x0020,
+    i16 last_row = (h - 1);
+    con.clear_line_attr(last_row, 0x0020);
+    con.write_at_colored(2, last_row, 0x0020,
                          "  redconsole.fx demo complete. Press Enter to exit.  \0");
 
     // ------------------------------------------------------------------
     // Wait for user input
     // ------------------------------------------------------------------
-    con.cursor_set((i16)0, last_row);
+    con.cursor_set(0, last_row);
     con.cursor_visible(true);
-    con.set_attr((i16)0x0007);
+    con.set_attr(0x0007);
 
     Sleep(100);
     system("pause\0");
@@ -242,16 +242,16 @@ def main() -> int
     con.cursor_visible(false);
     
     // Restore characters and attributes
-    for (i16 y = 0; y < h; y = y + (i16)1)
+    for (i16 y = 0; y < h; y = y + 1)
     {
-        i32 line_coord = make_coord((i16)0, y);
-        i32 line_start = (i32)y * (i32)w;
+        i32 line_coord = make_coord(0, y);
+        i32 line_start = y * w;
         
         // Write characters for this line
         WriteConsoleOutputCharacterA(
             con.out_handle,
             @saved_chars[line_start],
-            (i32)w,
+            w,
             line_coord,
             @written
         );
@@ -260,7 +260,7 @@ def main() -> int
         WriteConsoleOutputAttribute(
             con.out_handle,
             @saved_attrs[line_start],
-            (i32)w,
+            w,
             line_coord,
             @written
         );

@@ -2,8 +2,14 @@
 
 ## Compilation Pipeline
 
+Generally,
 ```
 .fx source → Preprocessor → Lexer → Parser → AST → IR Generator → .ll → Clang → .o → Linker → Binary
+```
+
+Target in future post-bootstrap:
+```
+.fx source → Preprocessor → Lexer → Parser → AST → .o → Linker → Binary
 ```
 
 ---
@@ -12,10 +18,12 @@
 
 ### Preprocessor (`fpreprocess.py`)
 
-- Resolves `#import`, `#ifdef`, `#ifndef`, `#else`, `#endif`
+- Resolves `#import`, `#dir`, `#ifdef`, `#ifndef`, `#else`, `#endif`, `#warn`, `#stop`
 - Expands `#def` macros (value 0 = undefined)
-- Searches: relative path, `src/stdlib/`, custom includes
+- Searches: relative path, `src/stdlib`
 - Output: `build/tmp.fx`
+- `#dir "path\\to\\fx\\libraries";` adds a path to the preprocesor, allowing imports from that directory.
+
 
 ### Lexer (`flexer.py`)
 
@@ -83,7 +91,7 @@ build/
   <program>/
     <program>.ll         # LLVM IR
     <program>.o          # Object file
-    <program>            # Binary
+    <program>            # Binary (Windows .exe appended)
 
 config/
   flux_configuration.cfg # INI format
@@ -101,8 +109,10 @@ src/
     futilities.py        # Utilities
   stdlib/
     runtime/
+    builtins/
+    functions/
 
-fc.py                    # Entrypoint
+fxc.py                    # Entrypoint at language root
 ```
 
 ---

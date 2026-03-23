@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redlinux.fx - Flux Linux System Primitives
 // Linux-specific syscall wrappers, file I/O, signals, epoll, process control.
 // No X11. GUI is in redwayland.fx.

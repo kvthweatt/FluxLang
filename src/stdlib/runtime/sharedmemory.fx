@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redsharedmem.fx - Shared Memory Library
 // Provides named shared memory regions visible across processes.
 //

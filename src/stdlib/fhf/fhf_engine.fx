@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // fhf_engine.fx
 //
 // Flux Hotpatch Framework (FHF) — Patch Engine

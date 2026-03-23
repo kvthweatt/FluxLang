@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 #ifndef FLUX_STANDARD_MATH
 #import "math.fx";
 #endif;

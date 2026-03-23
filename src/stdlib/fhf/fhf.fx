@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // fhf.fx
 //
 // Flux Hotpatch Framework (FHF) — Umbrella Header

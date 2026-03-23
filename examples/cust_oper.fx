@@ -1,5 +1,7 @@
 #import "standard.fx";
 
+using standard::io::console;
+
 // Custom operator +++
 operator (int L, int R) [+++] -> int
 {

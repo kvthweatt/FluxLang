@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redgraphing.fx - Flux Graphing Library
 // Provides 2D line graphs, bar charts, scatter plots, and axes/grid rendering,
 // plus a full 3D graphing system with parametric data generators.

@@ -66,10 +66,12 @@ The standard library is the current focus.
 - Clear syntax and semantics
 
 **What's being built:**
-- Compiler implementation
-- Standard library
+- Compiler Implementation ✅
+- Standard library (In-progress)
 - Build tooling
-- Package manager
+- IDE (In-progress)
+- Package manager (In-progress)
+- LSP (In-progress)
 
 ## Getting Involved
 

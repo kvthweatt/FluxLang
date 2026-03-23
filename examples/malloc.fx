@@ -1,5 +1,7 @@
 #import "standard.fx";
-#import "redallocators.fx";
+
+using standard::io::console,
+      standard::files;
 
 def main() -> int
 {

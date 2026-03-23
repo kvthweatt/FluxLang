@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redformat.fx - Text Formatting and Color Printing Library
 // Provides ANSI color codes, text formatting, borders, and separators
 

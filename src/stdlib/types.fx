@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // Reduced Specification Standard Library `types.fx` -> `redtypes.fx`
 #ifndef FLUX_STANDARD
 #def FLUX_STANDARD 1;

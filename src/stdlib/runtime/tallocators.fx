@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // ================================================================
 // stdtheap - Thread-Safe Heap Allocator
 //

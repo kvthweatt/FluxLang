@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // Networking Library - Windows Sockets API (Winsock2)
 // Provides minimal TCP/UDP socket functionality for Windows
 // No object usage - structs and functions only

@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redrandom.fx - Random Number Generation Library
 // Provides multiple RNG algorithms and utilities
 

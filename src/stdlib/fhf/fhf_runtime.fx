@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // fhf_runtime.fx
 //
 // Flux Hotpatch Framework (FHF) — Patch Manager Runtime

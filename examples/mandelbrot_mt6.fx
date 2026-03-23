@@ -13,7 +13,7 @@ using standard::io::console,
 // A/D = pan X,  Up/Down = pan Y
 //
 // Hybrid arbitrary-precision + perturbation theory renderer:
-//   - cx, cy, zoom held as 28-digit Decimal - no precision loss at any depth
+//   - cx, cy, zoom held as 32-digit Decimal - no precision loss at any depth
 //   - One reference orbit computed in Decimal at the screen centre each frame,
 //     stored as double pairs (sufficient once converted from the exact value)
 //   - Every other pixel runs as a double delta dz from that orbit:
@@ -350,8 +350,7 @@ struct WorkSlice
 {
     int    row_start,
            row_end,
-           cols,
-           rows,
+           cols, rows,
            dyn_max_iter,
            tile,
            recolor_only,
@@ -359,8 +358,7 @@ struct WorkSlice
            need_decimal;    // 1 = pixel coords need Decimal, 0 = double is sufficient
     Decimal x_min,
             y_min,
-            x_range,
-            y_range;
+            x_range, y_range;
     double  ref_cr,         // Reference centre as double (for dc computation)
             ref_ci,
             // Double equivalents of view bounds - used when need_decimal == 0
@@ -485,7 +483,7 @@ def main() -> int
     print("Logical cores: \0");
     print(num_threads);
     print("\n\0");
-    print("Decimal precision: 32 digits\n\0");
+    print("Decimal precision: \0"); print(precision); print(" digits\n\0");
 
     Window win("Mandelbrot Set [Decimal 32 + Perturbation] - W/S: Zoom  A/D: Pan X  Up/Down: Pan Y\0", 100, 100, WIN_W, WIN_H);
     GLContext gl(win.device_context);
@@ -532,33 +530,34 @@ def main() -> int
 
 
     float zoom_speed, pan_speed, dt;
-    double palette_time, palette_offset,
+    double palette_time,
+           palette_offset,
            ref_cr, ref_ci,
            x_min_d, y_min_d, x_range_d, y_range_d;
-    int tile, dyn_max_iter, prev_dyn_max_iter,
+    int tile,
+        dyn_max_iter,
+        prev_dyn_max_iter,
         cols, rows,
         cur_w, cur_h,
-        rows_per_thread, t;
+        rows_per_thread, t,
+        use_perturb;
     bool moving, recolor_only,
-         ref_dirty, need_decimal, was_decimal;
-    DWORD t_now, t_last;
+         ref_dirty,
+         need_decimal, was_decimal;
+    DWORD t_now,
+          t_last;
     RECT client_rect;
-    WORD w_state, s_state, a_state, d_state, up_state, dn_state;
+    WORD w_state, s_state, a_state, d_state,
+         up_state, dn_state;
 
     i32 zoom_exp, zoom_digits, depth;
-
-    int use_perturb;
 
     Thread[64] threads;
 
     ref_dirty = true;
-    prev_dyn_max_iter = 0;
 
     zoom_speed = 0.3;
     pan_speed  = 0.05;
-    palette_time = 0.0;
-    ref_cr = 0.0;
-    ref_ci = 0.0;
 
     t_last = GetTickCount();
 
@@ -726,10 +725,10 @@ def main() -> int
         // ── Reallocate pixel buffer if tile count changed ─
         if (cols != g_cols | rows != g_rows)
         {
-            if ((u64)g_pixels != (u64)0) { ffree((u64)g_pixels); };
-            if ((u64)g_iters  != (u64)0) { ffree((u64)g_iters);  };
-            g_pixels = (float*)fmalloc((size_t)(cols * rows * 3 * 4));
-            g_iters  = (int*)fmalloc((size_t)(cols * rows * 4));
+            if (g_pixels != 0) { ffree((u64)g_pixels); };
+            if (g_iters  != 0) { ffree((u64)g_iters);  };
+            g_pixels = (float*)fmalloc((cols * rows * 3 * 4));
+            g_iters  = (int*)fmalloc((cols * rows * 4));
             g_cols   = cols;
             g_rows   = rows;
             recolor_only = false;
@@ -881,10 +880,10 @@ def main() -> int
     };
 
     // ── Cleanup ───────────────────────────────────────────
-    if ((u64)g_pixels != (u64)0) { ffree((u64)g_pixels); };
-    if ((u64)g_iters  != (u64)0) { ffree((u64)g_iters);  };
-    if ((u64)g_ref_zr != (u64)0) { ffree((u64)g_ref_zr); };
-    if ((u64)g_ref_zi != (u64)0) { ffree((u64)g_ref_zi); };
+    if (g_pixels != 0) { ffree((u64)g_pixels); };
+    if (g_iters  != 0) { ffree((u64)g_iters);  };
+    if (g_ref_zr != 0) { ffree((u64)g_ref_zr); };
+    if (g_ref_zi != 0) { ffree((u64)g_ref_zi); };
 
     glDeleteTextures(1, @tex_id);
 

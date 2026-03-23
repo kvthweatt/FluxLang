@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // Flux Collections Library
 // Provides dynamic, generic collection types for the reduced specification.
 

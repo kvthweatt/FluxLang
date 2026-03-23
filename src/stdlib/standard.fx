@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // Flux Standard Library
 //
 // Do not modify.

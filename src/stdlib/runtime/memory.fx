@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redmemory.fx - Memory Management Library
 
 #ifndef FLUX_STANDARD

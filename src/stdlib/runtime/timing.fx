@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // redtime.fx - Timing & Benchmarking Library
 // Provides high-resolution timestamps, timers, and benchmarking utilities.
 // Basic usage: t1 = time_now(); ... t2 = time_now(); elapsed_ns = t2 - t1;

@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // fhf_sym.fx
 //
 // Flux Hotpatch Framework (FHF) — Symbol Resolver

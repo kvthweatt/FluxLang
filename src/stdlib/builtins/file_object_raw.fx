@@ -1,3 +1,5 @@
+// Author: Karac V. Thweatt
+
 // File Object Primitive
 // Provides object-oriented interface to C stdio file operations
 
