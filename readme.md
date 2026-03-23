@@ -22,59 +22,6 @@ Flux is a systems language that combines the performance of C with the readabili
 - Opt-in ownership without a borrow checker
 
 
-## Core Features
-
-### A very simple preprocessor
-```
-#import "standard.fx";
-
-#ifdef __WINDOWS__
-def some_win_generic() -> LPCSTR*;
-#else
-#ifdef __LINUX__
-def some_nix_generic() -> void*;
-#endif;
-#endif;
-```
-Macro definitions must have a value, 0 included. Example:
-```
-// Defined:
-#def MY_MACRO 1;     // Considered defined.
-#def NOT_DEFINED 0;  // Considered undefined.
-
-#ifdef NOT_DEFINED   // False
-#ifndef MY_MACRO     // False
-```
-
-### Bit-precise data types:
-
-Define types with exact bit widths and alignment:
-
-```flux
-unsigned data{1} as bit;           // 1-bit type
-unsigned data{13:16} as custom;    // 13 bits, 16-bit aligned
-unsigned data{32} as u32;          // Standard 32-bit unsigned
-```
-
-### Bit-level field access
-
-Extract individual bits from bytes as named fields:
-
-```flux
-struct Flags {
-    unsigned data{1} enabled,
-                     error,
-                     ready,
-                     busy;
-    unsigned data{4} mode;
-};
-
-byte status = 0b10110001;
-Flags f from status;
-if (f.enabled & !f.error) { /* ... */ };
-```
-
-
 ## Design Philosophy
 
 Flux follows a "high-trust" model:
@@ -88,6 +35,7 @@ This means:
 - No borrow checker (you manage lifetimes)
 - Direct hardware access when needed
 - Full compile-time programming capabilities
+
 
 ## Ideal Use Cases
 
@@ -107,11 +55,14 @@ Flux may not be the best choice for:
 
 ## Current Status
 
-Flux is in active development. The language specification is complete, but implementation is ongoing.
+Flux is in active development. The language specification is complete, but implementation is ongoing.  
+The standard library is the current focus.
 
 **What exists:**
-- Complete language specification (reduced and full versions)
-- Comprehensive tutorial documentation
+- [Complete language specification](https://github.com/kvthweatt/FluxLang/blob/main/docs/Specs/language_specification.md)
+- [Keyword Reference](https://github.com/kvthweatt/FluxLang/blob/main/docs/keyword_reference.md)
+- A Flux [style guide](https://github.com/kvthweatt/FluxLang/blob/main/docs/style_guide.md)
+- Tutorials for [beginner](https://github.com/kvthweatt/FluxLang/blob/main/docs/style_guide.md) and [adept](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_adept.md) programmers
 - Clear syntax and semantics
 
 **What's being built:**
