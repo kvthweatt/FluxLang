@@ -6,99 +6,9 @@ using standard::io::console,
       standard::strings,
       standard::system::windows;
 
-// ============================================================================
-// ADDITIONAL EXTERN DECLARATIONS
-// ============================================================================
-
-extern
-{
-    def !!
-        CreateMenu() -> HMENU,
-        CreatePopupMenu() -> HMENU,
-        AppendMenuA(HMENU, UINT, UINT_PTR, LPCSTR) -> bool,
-        SetMenu(HWND, HMENU) -> bool,
-        SendMessageA(HWND, UINT, WPARAM, LPARAM) -> LRESULT,
-        GetWindowTextLengthA(HWND) -> int,
-        MoveWindow(HWND, int, int, int, int, bool) -> bool,
-        MessageBoxA(HWND, LPCSTR, LPCSTR, UINT) -> int,
-        GetOpenFileNameA(void*) -> bool,
-        GetSaveFileNameA(void*) -> bool,
-        CreateFileA(LPCSTR, DWORD, DWORD, void*, DWORD, DWORD, HWND) -> HWND,
-        ReadFile(HWND, void*, DWORD, DWORD*, void*) -> bool,
-        WriteFile(HWND, void*, DWORD, DWORD*, void*) -> bool,
-        CloseHandle(HWND) -> bool,
-        GetFileSizeEx(HWND, i64*) -> bool,
-        GetSystemMetrics(int) -> int;
-};
-
-// ============================================================================
-// CONSTANTS
-// ============================================================================
-
-global DWORD ES_MULTILINE         = 0x0004,
-             ES_AUTOVSCROLL       = 0x0040,
-             ES_AUTOHSCROLL       = 0x0080,
-             ES_NOHIDESEL         = 0x0100,
-             ES_WANTRETURN        = 0x1000,
-             ///
-             GENERIC_READ         = 0x80000000,
-             GENERIC_WRITE        = 0x40000000,
-             FILE_SHARE_READ      = 0x00000001,
-             CREATE_ALWAYS        = 2,
-             OPEN_EXISTING        = 3,
-             FILE_ATTRIBUTE_NORMAL = 0x00000080,
-             ///
-             OFN_FILEMUSTEXIST    = 0x00001000,
-             OFN_PATHMUSTEXIST    = 0x00000800,
-             OFN_OVERWRITEPROMPT  = 0x00000002,
-             OFN_HIDEREADONLY     = 0x00000004;
-
-global UINT WM_COMMAND    = 0x0111,
-            WM_CUT        = 0x0300,
-            WM_COPY       = 0x0301,
-            WM_PASTE      = 0x0302,
-            WM_UNDO       = 0x0304,
-            EM_SETSEL     = 0x00B1,
-            MF_STRING     = 0x0000,
-            MF_SEPARATOR  = 0x0800,
-            MF_POPUP      = 0x0010,
-            MB_YESNOCANCEL  = 0x0003,
-            MB_ICONQUESTION = 0x0020;
-
-global int IDM_NEW = 1001, IDM_OPEN    = 1002, IDM_SAVE  = 1003,
-           IDM_SAVEAS = 1004, IDM_EXIT = 1005, IDM_UNDO  = 2001,
-           IDM_CUT  = 2002, IDM_COPY   = 2003, IDM_PASTE = 2004,
-           IDM_SELECTALL = 2005, IDM_ABOUT = 3001,
-           IDYES = 6, IDNO = 7, IDCANCEL = 2;
-
-global HWND      g_hwnd_edit;
-global byte[260] g_filename;
-global bool      g_modified;
-
-// ============================================================================
-// OPENFILENAME STRUCT
-// ============================================================================
-
-struct OPENFILENAMEA
-{
-    DWORD  lStructSize;
-    HWND   hwndOwner, hInstance;
-    LPCSTR lpstrFilter;
-    LPSTR  lpstrCustomFilter;
-    DWORD  nMaxCustFilter, nFilterIndex;
-    LPSTR  lpstrFile;
-    DWORD  nMaxFile;
-    LPSTR  lpstrFileTitle;
-    DWORD  nMaxFileTitle;
-    LPCSTR lpstrInitialDir, lpstrTitle;
-    DWORD  Flags, nFileOffset, nFileExtension;
-    LPCSTR lpstrDefExt;
-    LPARAM lCustData;
-    HWND   lpfnHook;
-    LPCSTR lpTemplateName;
-    void*  pvReserved;
-    DWORD  dwReserved, FlagsEx;
-};
+HWND      g_hwnd_edit;
+byte[260] g_filename;
+bool      g_modified;
 
 // ============================================================================
 // HELPERS
@@ -107,7 +17,7 @@ struct OPENFILENAMEA
 def update_title(HWND hwnd) -> void
 {
     byte[300] title;
-    noopstr base = "Flux Notepad - \0",
+    noopstr base = "Notepad - \0",
             untitled = "Untitled\0",
             star = " *\0";
 
@@ -121,7 +31,7 @@ def update_title(HWND hwnd) -> void
 def ask_save(HWND hwnd) -> int
 {
     noopstr msg = "Do you want to save changes?\0",
-            cap = "Flux Notepad\0";
+            cap = "Notepad\0";
     return MessageBoxA(hwnd, (LPCSTR)msg, (LPCSTR)cap, MB_YESNOCANCEL | MB_ICONQUESTION);
 };
 
@@ -221,7 +131,7 @@ def do_new(HWND hwnd) -> void
         if (r == IDCANCEL) { return; };
         if (r == IDYES)    { do_save(hwnd, false); };
     };
-    SetWindowTextA(g_hwnd_edit, (LPCSTR)"");
+    SetWindowTextA(g_hwnd_edit, (LPCSTR)"\0");
     g_filename[0] = (byte)0;
     g_modified    = false;
     update_title(hwnd);
@@ -278,7 +188,7 @@ def NotepadWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT
             WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_HSCROLL |
             ES_MULTILINE | ES_AUTOVSCROLL | ES_AUTOHSCROLL | ES_NOHIDESEL | ES_WANTRETURN,
             0, 0, rc.right - rc.left, rc.bottom - rc.top,
-            hwnd, (HMENU)0, GetModuleHandleA((LPCSTR)0), STDLIB_GVP);
+            hwnd, (HMENU)IDM_EDIT_CTRL, GetModuleHandleA((LPCSTR)0), STDLIB_GVP);
 
         SetFocus(g_hwnd_edit);
         return 0;
@@ -294,6 +204,12 @@ def NotepadWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT
     if (msg == WM_COMMAND)
     {
         lo = (int)(wParam & 0xFFFF);
+        if (lo == IDM_EDIT_CTRL & (int)((wParam >> 16) & 0xFFFF) == (int)EN_CHANGE)
+        {
+            g_modified = true;
+            update_title(hwnd);
+            return 0;
+        };
         if (lo == IDM_NEW)       { do_new(hwnd);                                     return 0; };
         if (lo == IDM_SAVE)      { do_save(hwnd, false);                             return 0; };
         if (lo == IDM_SAVEAS)    { do_save(hwnd, true);                              return 0; };
@@ -304,7 +220,7 @@ def NotepadWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT
         if (lo == IDM_SELECTALL) { SendMessageA(g_hwnd_edit, EM_SETSEL, 0, -1);      return 0; };
         if (lo == IDM_ABOUT)
         {
-            noopstr amsg = "Flux Notepad\nWritten in Flux.\0", acap = "About\0";
+            noopstr amsg = "Notepad\nWritten in Flux.\nAuthor: Karac V. Thweatt\n\nModeled after Microslop Bloatpad.\0", acap = "About\0";
             MessageBoxA(hwnd, (LPCSTR)amsg, (LPCSTR)acap, 0);
             return 0;
         };
@@ -355,9 +271,10 @@ def NotepadWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) -> LRESULT
 
 def main() -> int
 {
+    FreeConsole();
     HINSTANCE hinstance = GetModuleHandleA((LPCSTR)0);
     noopstr cls = "FluxNotepad\0",
-            ttl = "Flux Notepad - Untitled\0";
+            ttl = "Notepad - Untitled\0";
 
     WNDCLASSEXA wc;
     wc.cbSize        = (UINT)(sizeof(WNDCLASSEXA) / 8);

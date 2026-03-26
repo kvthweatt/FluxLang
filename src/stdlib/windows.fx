@@ -36,8 +36,9 @@ namespace standard
             // Basic Win32 types
             unsigned data{32} as UINT,
                                  DWORD,
-                                 WORD,
                                  BYTE;
+
+            unsigned data{16} as WORD;
 
             signed data{32} as LONG;
 
@@ -307,7 +308,97 @@ namespace standard
                 // Cursor and Icon
                     LoadCursorA(HINSTANCE, LPCSTR) -> HCURSOR,
                     LoadIconA(HINSTANCE, LPCSTR) -> HICON,
-                    GetAsyncKeyState(int) -> WORD;
+                    GetAsyncKeyState(int) -> WORD,
+
+                // Menu GUI
+                    CreateMenu() -> HMENU,
+                    CreatePopupMenu() -> HMENU,
+                    AppendMenuA(HMENU, UINT, UINT_PTR, LPCSTR) -> bool,
+                    SetMenu(HWND, HMENU) -> bool,
+                    SendMessageA(HWND, UINT, WPARAM, LPARAM) -> LRESULT,
+                    GetWindowTextLengthA(HWND) -> int,
+                    MoveWindow(HWND, int, int, int, int, bool) -> bool,
+                    MessageBoxA(HWND, LPCSTR, LPCSTR, UINT) -> int,
+                    GetOpenFileNameA(void*) -> bool,
+                    GetSaveFileNameA(void*) -> bool,
+                    CreateFileA(LPCSTR, DWORD, DWORD, void*, DWORD, DWORD, HWND) -> HWND,
+                    ReadFile(HWND, void*, DWORD, DWORD*, void*) -> bool,
+                    WriteFile(HWND, void*, DWORD, DWORD*, void*) -> bool,
+                    CloseHandle(HWND) -> bool,
+                    GetFileSizeEx(HWND, i64*) -> bool,
+                    GetSystemMetrics(int) -> int,
+                    FreeConsole() -> bool;
+            };
+
+            // ============================================================================
+            // CONSTANTS
+            // ============================================================================
+
+            global DWORD ES_MULTILINE         = 0x0004,
+                         ES_AUTOVSCROLL       = 0x0040,
+                         ES_AUTOHSCROLL       = 0x0080,
+                         ES_NOHIDESEL         = 0x0100,
+                         ES_WANTRETURN        = 0x1000,
+                         ///
+                         GENERIC_READ         = 0x80000000,
+                         GENERIC_WRITE        = 0x40000000,
+                         FILE_SHARE_READ      = 0x00000001,
+                         CREATE_ALWAYS        = 2,
+                         OPEN_EXISTING        = 3,
+                         FILE_ATTRIBUTE_NORMAL = 0x00000080,
+                         ///
+                         OFN_FILEMUSTEXIST    = 0x00001000,
+                         OFN_PATHMUSTEXIST    = 0x00000800,
+                         OFN_OVERWRITEPROMPT  = 0x00000002,
+                         OFN_HIDEREADONLY     = 0x00000004;
+
+            global UINT WM_COMMAND    = 0x0111,
+                        WM_CUT        = 0x0300,
+                        WM_COPY       = 0x0301,
+                        WM_PASTE      = 0x0302,
+                        WM_UNDO       = 0x0304,
+                        EN_CHANGE     = 0x0300,
+                        EM_SETSEL     = 0x00B1,
+                        MF_STRING     = 0x0000,
+                        MF_SEPARATOR  = 0x0800,
+                        MF_POPUP      = 0x0010,
+                        MB_YESNOCANCEL  = 0x0003,
+                        MB_ICONQUESTION = 0x0020;
+
+            global int IDM_NEW = 1001, IDM_OPEN    = 1002, IDM_SAVE  = 1003,
+                       IDM_SAVEAS = 1004, IDM_EXIT = 1005, IDM_UNDO  = 2001,
+                       IDM_CUT  = 2002, IDM_COPY   = 2003, IDM_PASTE = 2004,
+                       IDM_SELECTALL = 2005, IDM_ABOUT = 3001,
+                       IDM_EDIT_CTRL = 100,
+                       IDYES = 6, IDNO = 7, IDCANCEL = 2;
+
+            // ============================================================================
+            // OPENFILENAME STRUCT
+            // ============================================================================
+
+            struct OPENFILENAMEA
+            {
+                DWORD  lStructSize;
+                DWORD  _pad0;
+                HWND   hwndOwner, hInstance;
+                LPCSTR lpstrFilter;
+                LPSTR  lpstrCustomFilter;
+                DWORD  nMaxCustFilter, nFilterIndex;
+                LPSTR  lpstrFile;
+                DWORD  nMaxFile;
+                DWORD  _pad1;
+                LPSTR  lpstrFileTitle;
+                DWORD  nMaxFileTitle;
+                DWORD  _pad2;
+                LPCSTR lpstrInitialDir, lpstrTitle;
+                DWORD  Flags;
+                WORD   nFileOffset, nFileExtension;
+                LPCSTR lpstrDefExt;
+                LPARAM lCustData;
+                HWND   lpfnHook;
+                LPCSTR lpTemplateName;
+                void*  pvReserved;
+                DWORD  dwReserved, FlagsEx;
             };
 
             // ============================================================================
