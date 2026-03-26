@@ -1,6 +1,6 @@
 // Author: Karac V. Thweatt
 
-// redthreading.fx - Threading Library
+// threading.fx - Threading Library
 // Provides platform-level thread creation, synchronization primitives,
 // and thread-local utilities built on top of redatomics.fx.
 //
@@ -141,7 +141,12 @@ extern
         pthread_setspecific(u64, void*) -> int,
 
         // Sleep
-        nanosleep(void*, void*) -> int;
+        nanosleep(void*, void*) -> int,
+
+        // Thread attributes (for stack size control)
+        pthread_attr_init(void*) -> int,
+        pthread_attr_destroy(void*) -> int,
+        pthread_attr_setstacksize(void*, size_t) -> int;
 };
 
 #endif; // __LINUX__
@@ -193,7 +198,12 @@ extern
         pthread_setspecific(u64, void*) -> int,
 
         // Sleep
-        nanosleep(void*, void*) -> int;
+        nanosleep(void*, void*) -> int,
+
+        // Thread attributes (for stack size control)
+        pthread_attr_init(void*) -> int,
+        pthread_attr_destroy(void*) -> int,
+        pthread_attr_setstacksize(void*, size_t) -> int;
 };
 
 #endif; // __MACOS__
@@ -355,6 +365,67 @@ namespace standard
             #ifdef __MACOS__
             void* tid_storage = (void*)@out.handle[0];
             int rc = pthread_create(tid_storage, (void*)0, (void*)fn, arg);
+            if (rc != 0)
+            {
+                store32(@out.alive, 0);
+                return THREAD_ERROR;
+            };
+            return THREAD_OK;
+            #endif;
+        };
+
+        // Spawn a new thread with an explicit stack size.
+        //   fn         - function pointer with signature: def fn(void*) -> void*
+        //   arg        - opaque argument forwarded to fn
+        //   out        - Thread struct to fill
+        //   stack_size - stack reserve size in bytes
+        // Returns THREAD_OK on success, THREAD_ERROR on failure.
+        def thread_create_stack(void* fn, void* arg, Thread* out, size_t stack_size) -> int
+        {
+            store32(@out.alive, 1);
+
+            #ifdef __WINDOWS__
+            void* h = CreateThread(
+                (void*)0,         // default security
+                stack_size,       // explicit stack size
+                (void*)fn,        // thread function
+                arg,              // argument
+                0,                // run immediately
+                (u32*)0           // don't need thread ID
+            );
+            if ((u64)h == (u64)0)
+            {
+                store32(@out.alive, 0);
+                return THREAD_ERROR;
+            };
+            _store_ptr(@out.handle[0], h);
+            return THREAD_OK;
+            #endif;
+
+            #ifdef __LINUX__
+            byte[64] attr_buf;
+            void* attr = (void*)@attr_buf[0];
+            pthread_attr_init(attr);
+            pthread_attr_setstacksize(attr, stack_size);
+            void* tid_storage = (void*)@out.handle[0];
+            int rc = pthread_create(tid_storage, attr, (void*)fn, arg);
+            pthread_attr_destroy(attr);
+            if (rc != 0)
+            {
+                store32(@out.alive, 0);
+                return THREAD_ERROR;
+            };
+            return THREAD_OK;
+            #endif;
+
+            #ifdef __MACOS__
+            byte[64] attr_buf;
+            void* attr = (void*)@attr_buf[0];
+            pthread_attr_init(attr);
+            pthread_attr_setstacksize(attr, stack_size);
+            void* tid_storage = (void*)@out.handle[0];
+            int rc = pthread_create(tid_storage, attr, (void*)fn, arg);
+            pthread_attr_destroy(attr);
             if (rc != 0)
             {
                 store32(@out.alive, 0);

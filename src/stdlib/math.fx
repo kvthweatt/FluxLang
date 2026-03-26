@@ -22,19 +22,28 @@ namespace standard
         const i16 PI16 = 3;
         const i32 PI32 = 3;
         const i64 PI64 = 3;
-        const float PIF = 3.14159265358979323846;
+        const float PIF = 3.14159;
+        const float PID = 3.14159265358979323846;
         
         const i8 E8 = 2;
         const i16 E16 = 2;
         const i32 E32 = 2;
         const i64 E64 = 2;
-        const float EF = 2.71828182845904523536;
+        const float EF = 2.71828;
+        const float ED = 2.71828182845904523536;
 
         struct Vec3  { float x, y, z;    };
         struct Vec4  { float w, x, y, z; };
         struct Face  { int   a, b, c;    };
         struct Edge  { int   a, b;       };
         struct POINT { int   x, y;       };
+
+        // Complex number in rectangular form
+        struct Complex
+        {
+            double re,
+                   im;
+        };
         
         // Absolute value overloads
         def abs(i8 x) -> i8

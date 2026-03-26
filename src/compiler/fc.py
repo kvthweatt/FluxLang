@@ -500,7 +500,7 @@ class FluxCompiler:
                     f"C:\\Program Files\\LLVM\\bin\\{config['linker']}.exe",
                     "/entry:" + config.get('entrypoint', 'main'),                 # TODO -> f"/entry:{entrypoint}"
                                                    # Custom entrypoint support, default main if unspecified
-                    "/stack:33554432",
+                    "/stack:67108864",
                     "/nodefaultlib" if int(config['no_default_libraries']) == 1 else "",
                     "/subsystem:" + config['subsystem'],
                     "/opt:ref" if int(config['remove_unused_funcs']) == 1 else "",                    # Remove unused functions/data
@@ -531,6 +531,9 @@ class FluxCompiler:
                     "opengl32.lib",
                     "Ws2_32.lib",
                     "shell32.lib",
+                    "freetype.lib",
+                    "ole32.lib",
+                    "mmdevapi.lib",
                     #"libsynchronization.lib",
                     #"libcmt.lib",
                     #"msvcrt.lib",   # Optional, link with C runtime
@@ -578,6 +581,9 @@ class FluxCompiler:
                                 "-lgdi32 "
                                 "-lopengl32 "
                                 "-lcomdlg32 "
+                                "-lole32 "
+                                "-lmmdevapi "
+                                #"-lfreetype "
                                 #"-lgdiplus "
                                 #"-ld2d1 "
                                 #"-ldwrite "

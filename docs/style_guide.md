@@ -267,8 +267,34 @@ def advect_band(int row_start, int row_end,
         base, base00, base01;
 
     // executable code starts here
+
+    int some_unused;
+    if (cond) { return; } // early return
+
+    // some_unused is a wasted allocation, which is wasted cycles.
+    // Try to not allocate something if it is unused before a return point.
 };
 ```
+
+Why This Matters for Performance
+Stack allocation is cheap — but not free.
+
+Every declaration:
+- adjusts RSP,
+- reserves space,
+- may require alignment padding, and affects the function’s prologue/epilogue.
+
+If you scatter declarations:
+- the compiler must emit multiple stack adjustments,
+- the frame becomes fragmented,
+- early returns waste allocations, and the generated code becomes harder to reason about.
+
+By forcing all locals to the top, Flux guarantees:
+- one contiguous frame
+- one prologue
+- no mid‑function stack mutations
+- predictable layout
+- zero wasted allocations
 
 Do not declare variables inside loops or conditional blocks.
 The compiler does not hoist them, and in-loop declarations

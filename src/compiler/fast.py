@@ -4242,6 +4242,8 @@ class IfStatement(Statement):
         else_block = func.append_basic_block('else')
         merge_block = func.append_basic_block('ifcont')
         
+        if isinstance(cond_val.type, ir.IntType) and cond_val.type.width != 1:
+            cond_val = builder.icmp_signed('!=', cond_val, ir.Constant(cond_val.type, 0))
         builder.cbranch(cond_val, then_block, else_block)
         
         # Emit then block
@@ -4640,6 +4642,8 @@ class WhileLoop(Statement):
         # Emit condition block
         builder.position_at_start(cond_block)
         cond_val = self.condition.codegen(builder, module)
+        if isinstance(cond_val.type, ir.IntType) and cond_val.type.width != 1:
+            cond_val = builder.icmp_signed('!=', cond_val, ir.Constant(cond_val.type, 0))
         builder.cbranch(cond_val, body_block, end_block)
         
         # Emit body block
