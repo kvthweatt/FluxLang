@@ -4892,33 +4892,57 @@ class ForInLoop(Statement):
             builder.store(elem_val, var_ptr)
             module.symbol_table.define(self.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
             
-        elif isinstance(collection.type, ir.PointerType) and isinstance(collection.type.pointee, ir.IntType(8)):
-            # String iteration (char*)
-            zero = ir.Constant(ir.IntType(32), 0)
-            current_ptr = builder.alloca(collection.type, name='char.ptr')
-            builder.store(collection, current_ptr)
-            
+        elif (isinstance(coll_type, ir.PointerType) and
+              isinstance(coll_type.pointee, ir.PointerType)):
+            # Pointer-to-pointer iteration (e.g. byte**): null-terminated array of pointers
+            # Each element is a pointer (byte*); walk until *cursor == NULL
+            elem_ptr_type = coll_type.pointee  # the inner pointer type (e.g. i8*)
+            cursor_ptr = builder.alloca(coll_type, name='forin.cursor')
+            builder.store(collection, cursor_ptr)
+
             builder.branch(cond_block)
-            
+
+            # Condition block: load current slot, compare to null
+            builder.position_at_start(cond_block)
+            cursor_val = builder.load(cursor_ptr, name='cursor')
+            slot_val = builder.load(cursor_val, name='slot')
+            null_ptr = ir.Constant(elem_ptr_type, None)
+            # Compare as integers to handle any pointer width
+            slot_int = builder.ptrtoint(slot_val, ir.IntType(64), name='slot.int')
+            null_int = ir.Constant(ir.IntType(64), 0)
+            cmp = builder.icmp_unsigned('!=', slot_int, null_int, name='loop.cond')
+            builder.cbranch(cmp, body_block, end_block)
+
+            # Body block: bind loop variable to current element pointer
+            builder.position_at_start(body_block)
+            var_ptr = builder.alloca(elem_ptr_type, name=self.variables[0])
+            builder.store(slot_val, var_ptr)
+            module.symbol_table.define(self.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
+
+        elif (isinstance(coll_type, ir.PointerType) and
+              isinstance(coll_type.pointee, ir.IntType) and
+              coll_type.pointee.width == 8):
+            # String iteration (char*): null-terminated byte sequence
+            current_ptr = builder.alloca(coll_type, name='char.ptr')
+            builder.store(collection, current_ptr)
+
+            builder.branch(cond_block)
+
             # Condition block
             builder.position_at_start(cond_block)
             ptr_val = builder.load(current_ptr, name='ptr')
             char_val = builder.load(ptr_val, name='char')
-            cmp = builder.icmp_unsigned('!=', char_val, 
-                                       ir.Constant(ir.IntType(8), 0), 
+            cmp = builder.icmp_unsigned('!=', char_val,
+                                       ir.Constant(ir.IntType(8), 0),
                                        name='loop.cond')
             builder.cbranch(cmp, body_block, end_block)
-            
+
             # Body block
             builder.position_at_start(body_block)
             var_ptr = builder.alloca(ir.IntType(8), name=self.variables[0])
             builder.store(char_val, var_ptr)
             module.symbol_table.define(self.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
-            
-            # Increment pointer
-            next_ptr = builder.gep(ptr_val, [ir.Constant(ir.IntType(32), 1)], name='next.ptr')
-            builder.store(next_ptr, current_ptr)
-            
+
         else:
             raise ValueError(f"Cannot iterate over type {coll_type}")
 
@@ -4931,11 +4955,25 @@ class ForInLoop(Statement):
         self.body.codegen(builder, module)
         
         if not builder.block.is_terminated:
-            # For arrays: increment index
+            # Latch: advance iterator for each collection type
             if isinstance(coll_type, ir.PointerType) and isinstance(coll_type.pointee, ir.ArrayType):
+                # Array: increment integer index
                 current_idx = builder.load(index_ptr, name='idx')
                 next_idx = builder.add(current_idx, ir.Constant(ir.IntType(32), 1), name='next.idx')
                 builder.store(next_idx, index_ptr)
+            elif (isinstance(coll_type, ir.PointerType) and
+                  isinstance(coll_type.pointee, ir.PointerType)):
+                # Pointer-to-pointer: advance cursor by one slot
+                cur = builder.load(cursor_ptr, name='cursor.latch')
+                nxt = builder.gep(cur, [ir.Constant(ir.IntType(32), 1)], name='cursor.next')
+                builder.store(nxt, cursor_ptr)
+            elif (isinstance(coll_type, ir.PointerType) and
+                  isinstance(coll_type.pointee, ir.IntType) and
+                  coll_type.pointee.width == 8):
+                # char*: advance character pointer by one byte
+                pv = builder.load(current_ptr, name='ptr.latch')
+                nxt = builder.gep(pv, [ir.Constant(ir.IntType(32), 1)], name='ptr.next')
+                builder.store(nxt, current_ptr)
             builder.branch(cond_block)
 
         # Clean up

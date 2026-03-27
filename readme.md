@@ -34,7 +34,7 @@ This means:
 - Manual memory management (no garbage collection)
 - No borrow checker (you manage lifetimes)
 - Direct hardware access when needed
-- Full compile-time programming capabilities
+- Full compile-time programming capabilities* (coming soon)
 
 
 ## Ideal Use Cases
@@ -46,12 +46,6 @@ Flux is well-suited for:
 - **Game engines** - Memory-efficient entity systems
 - **Device drivers** - Memory-mapped I/O
 - **Performance-critical code** - When you need C-level control
-
-Flux may not be the best choice for:
-- Applications where memory safety is critical
-- Projects requiring a mature ecosystem
-- Teams new to systems programming
-- Rapid prototyping of business logic
 
 ## Current Status
 
@@ -75,7 +69,7 @@ The standard library is the current focus.
 
 ## Getting Involved
 
-- **Discord:** [Join the Flux community](https://discord.gg/RAHjbYuNUc)
+- **Discord:** [Join the Flux community](https://discord.gg/wVAm2E6ymf)
 - **Contribute:** The project welcomes contributors
 - **Feedback:** Share your thoughts on language design
 
@@ -125,10 +119,10 @@ def main() -> int
 
 ## 🤝 **Contributing**
 
-Flux is actively developed and approaching self-hosting. We're building the future of systems programming.
+Flux is actively developed and approaching self-hosting.  
 
-**Current Status:** 100% of reduced specification complete, working compiler, real programs running.  
-Bug fixing and refactoring are currently the names of the games. There are still some small issues here and there, as well as minor missing functionality. More features may end up being added before the bootstrap.
+**Current Status:** Working compiler, real programs running.  
+There are still some small compiler issues here and there.
 
 ## ⚖️ **License**
 

@@ -47,11 +47,11 @@
 
 #ifndef FLUX_STANDARD_MATH
 #import "math.fx";
-#endif
+#endif;
 
 #ifndef __WIN32_INTERFACE__
 #import "windows.fx";
-#endif
+#endif;
 
 #ifndef FLUX_STANDARD_GRAPHING
 #def FLUX_STANDARD_GRAPHING 1;
@@ -497,7 +497,7 @@ namespace standard
         // label_len      : character count (excluding null terminator)
         // text_color     : DWORD color for the text
         // ============================================================================
-        def draw_data_point_label(Canvas* c, Graph* g, float data_x, float data_y, byte* label, int label_len, DWORD text_color) -> void
+        def draw_data_point_label(Canvas* c, Graph* g, float data_x, float data_y, byte* xlabel, int label_len, DWORD text_color) -> void
         {
             int px = data_to_screen_x(g, data_x),
                 py = data_to_screen_y(g, data_y);
@@ -510,7 +510,7 @@ namespace standard
             // Render label text offset slightly above-right of the point
             SetBkMode(c.back_dc, TRANSPARENT);
             SetTextColor(c.back_dc, text_color);
-            TextOutA(c.back_dc, px + 5, py - 14, (LPCSTR)label, label_len);
+            TextOutA(c.back_dc, px + 5, py - 14, (LPCSTR)xlabel, label_len);
         };
 
         // ============================================================================
@@ -539,15 +539,15 @@ namespace standard
         // label_len : character count (excluding null terminator)
         // color     : DWORD text color
         // ============================================================================
-        def draw_x_label(Canvas* c, Graph* g, byte* label, DWORD color) -> void
+        def draw_x_label(Canvas* c, Graph* g, byte* xlabel, DWORD color) -> void
         {
-            int label_len = strlen(label),
+            int label_len = strlen(xlabel),
                 center_x = g.x + g.width / 2 - (label_len * 4),
                 label_y  = g.y + g.height;
 
             SetBkMode(c.back_dc, TRANSPARENT);
             SetTextColor(c.back_dc, color);
-            TextOutA(c.back_dc, center_x, label_y, (LPCSTR)label, label_len);
+            TextOutA(c.back_dc, center_x, label_y, (LPCSTR)xlabel, label_len);
         };
 
         // ============================================================================
@@ -557,16 +557,16 @@ namespace standard
         // label_len : character count (excluding null terminator)
         // color     : DWORD text color
         // ============================================================================
-        def draw_y_label(Canvas* c, Graph* g, byte* label, DWORD color) -> void
+        def draw_y_label(Canvas* c, Graph* g, byte* xlabel, DWORD color) -> void
         {
-            int label_len = strlen(label),
+            int label_len = strlen(xlabel),
                 label_x = g.x - (label_len * 8) - 8;
             if (label_x < 0) { label_x = 2; };
             int label_y = g.y + g.height / 2 - 8;
 
             SetBkMode(c.back_dc, TRANSPARENT);
             SetTextColor(c.back_dc, color);
-            TextOutA(c.back_dc, label_x, label_y, (LPCSTR)label, label_len);
+            TextOutA(c.back_dc, label_x, label_y, (LPCSTR)xlabel, label_len);
         };
 
         // ============================================================================

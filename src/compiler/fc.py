@@ -535,6 +535,8 @@ class FluxCompiler:
                     "ole32.lib",
                     "mmdevapi.lib",
                     "comdlg32.lib",
+                    "d2d1.lib",
+                    "dwrite.lib",
                     #"libsynchronization.lib",
                     #"libcmt.lib",
                     #"msvcrt.lib",   # Optional, link with C runtime
@@ -585,6 +587,8 @@ class FluxCompiler:
                                 "-lole32 "
                                 "-lmmdevapi "
                                 "-lcomdlg32 "
+                                "-ld2d1 "
+                                "-ldwrite "
                                 #"-lfreetype "
                                 #"-lgdiplus "
                                 #"-ld2d1 "

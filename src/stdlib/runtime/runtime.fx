@@ -190,136 +190,128 @@ def !!FRTStartup() -> int
     bool quoted;
     wchar* cmdLine;
 
-    switch (CURRENT_OS)
+
+    // Initialize stdout handle for win_print
+    WIN_STDOUT_HANDLE = GetStdHandle(-11);
+    //print("STDOUT: \0"); print(WIN_STDOUT_HANDLE); print();
+
+    // Initialize the Flux standard heap allocator
+    // For reference, see runtime/redallocators.fx
+    standard::memory::allocators::stdheap::table_init();
+
+    // Parse command line manually from GetCommandLineW
+    cmdLine = GetCommandLineW();
+
+    while (cmdLine[pos] != (wchar)0)
     {
-        case (1)
+        // Skip whitespace
+        while (cmdLine[pos] == (wchar)32 | cmdLine[pos] == (wchar)9)
         {
-            // Initialize stdout handle for win_print
-            WIN_STDOUT_HANDLE = GetStdHandle(-11);
-            //print("STDOUT: \0"); print(WIN_STDOUT_HANDLE); print();
-
-            // Initialize the Flux standard heap allocator
-            // For reference, see runtime/redallocators.fx
-            standard::memory::allocators::stdheap::table_init();
-
-            // Parse command line manually from GetCommandLineW
-            cmdLine = GetCommandLineW();
-
-            while (cmdLine[pos] != (wchar)0)
-            {
-                // Skip whitespace
-                while (cmdLine[pos] == (wchar)32 | cmdLine[pos] == (wchar)9)
-                {
-                    pos = pos + 1;
-                };
-                if (cmdLine[pos] == (wchar)0)
-                {
-                    break;
-                };
-                // Skip quoted or unquoted token
-                if (cmdLine[pos] == (wchar)34)
-                {
-                    pos = pos + 1;
-                    while (cmdLine[pos] != (wchar)0 & cmdLine[pos] != (wchar)34)
-                    {
-                        pos = pos + 1;
-                    };
-                    if (cmdLine[pos] == (wchar)34)
-                    {
-                        pos = pos + 1;
-                    };
-                }
-                else
-                {
-                    while (cmdLine[pos] != (wchar)0 & cmdLine[pos] != (wchar)32 & cmdLine[pos] != (wchar)9)
-                    {
-                        pos = pos + 1;
-                    };
-                };
-                argc = argc + 1;
-            };
-
-            // Allocate argv
-            argv = (byte**)fmalloc((u64)argc * (u64)8);
-
-            // Fill argv
-            argi = 0;
-            pos = 0;
-            while (cmdLine[pos] != (wchar)0)
-            {
-                // Skip whitespace
-                while (cmdLine[pos] == (wchar)32 | cmdLine[pos] == (wchar)9)
-                {
-                    pos = pos + 1;
-                };
-                if (cmdLine[pos] == (wchar)0)
-                {
-                    break;
-                };
-
-                // Measure token length
-                start = pos;
-                len = 0;
-                if (cmdLine[pos] == (wchar)34)
-                {
-                    quoted = true;
-                    pos = pos + 1;
-                    start = pos;
-                    while (cmdLine[pos] != (wchar)0 & cmdLine[pos] != (wchar)34)
-                    {
-                        len = len + 1;
-                        pos = pos + 1;
-                    };
-                    if (cmdLine[pos] == (wchar)34)
-                    {
-                        pos = pos + 1;
-                    };
-                }
-                else
-                {
-                    while (cmdLine[pos] != (wchar)0 & cmdLine[pos] != (wchar)32 & cmdLine[pos] != (wchar)9)
-                    {
-                        len = len + 1;
-                        pos = pos + 1;
-                    };
-                };
-
-                // Copy low byte of each wchar into byte buffer
-                arg = (byte*)fmalloc((u64)len + (u64)1);
-                j = 0;
-                while (j < len)
-                {
-                    arg[j] = (byte)cmdLine[start + j];
-                    j = j + 1;
-                };
-                arg[len] = (byte)0;
-                argv[argi] = arg;
-                argi = argi + 1;
-            };
-
-            // Call the appropriate main overload
-            if (argc > 1)
-            {
-                return_code = main__2__int__byte_ptr2__ret_int(argc, argv);
-            }
-            else
-            {
-                return_code = main();
-            };
-
-            // Free converted argv
-            while (k < argc)
-            {
-                ffree((u64)argv[k]);
-                k = k + 1;
-            };
-            ffree(long(argv));
-        }
-        default
-        {
-            return return_code;
+            pos = pos + 1;
         };
+        if (cmdLine[pos] == (wchar)0)
+        {
+            break;
+        };
+        // Skip quoted or unquoted token
+        if (cmdLine[pos] == (wchar)34)
+        {
+            pos = pos + 1;
+            while (cmdLine[pos] != (wchar)0 & cmdLine[pos] != (wchar)34)
+            {
+                pos = pos + 1;
+            };
+            if (cmdLine[pos] == (wchar)34)
+            {
+                pos = pos + 1;
+            };
+        }
+        else
+        {
+            while (cmdLine[pos] != (wchar)0 & cmdLine[pos] != (wchar)32 & cmdLine[pos] != (wchar)9)
+            {
+                pos = pos + 1;
+            };
+        };
+        argc = argc + 1;
     };
+
+    // Allocate argv
+    argv = (byte**)fmalloc((u64)argc * (u64)8);
+
+    // Fill argv
+    argi = 0;
+    pos = 0;
+    while (cmdLine[pos] != (wchar)0)
+    {
+        // Skip whitespace
+        while (cmdLine[pos] == (wchar)32 | cmdLine[pos] == (wchar)9)
+        {
+            pos = pos + 1;
+        };
+        if (cmdLine[pos] == (wchar)0)
+        {
+            break;
+        };
+
+        // Measure token length
+        start = pos;
+        len = 0;
+        if (cmdLine[pos] == (wchar)34)
+        {
+            quoted = true;
+            pos = pos + 1;
+            start = pos;
+            while (cmdLine[pos] != (wchar)0 & cmdLine[pos] != (wchar)34)
+            {
+                len = len + 1;
+                pos = pos + 1;
+            };
+            if (cmdLine[pos] == (wchar)34)
+            {
+                pos = pos + 1;
+            };
+        }
+        else
+        {
+            while (cmdLine[pos] != (wchar)0 & cmdLine[pos] != (wchar)32 & cmdLine[pos] != (wchar)9)
+            {
+                len = len + 1;
+                pos = pos + 1;
+            };
+        };
+
+        // Copy low byte of each wchar into byte buffer
+        arg = (byte*)fmalloc((u64)len + (u64)1);
+        j = 0;
+        while (j < len)
+        {
+            arg[j] = (byte)cmdLine[start + j];
+            j = j + 1;
+        };
+        arg[len] = (byte)0;
+        argv[argi] = arg;
+        argi = argi + 1;
+    };
+
+    // Call the appropriate main overload
+    if (argc > 1)
+    {
+        return_code = main__2__int__byte_ptr2__ret_int(argc, argv);
+    }
+    else
+    {
+        return_code = main();
+    };
+
+    // Free converted argv
+    while (k < argc)
+    {
+        ffree((u64)argv[k]);
+        k = k + 1;
+    };
+    ffree(long(argv));
+
     if (return_code != 0)
     {
         // Handle error

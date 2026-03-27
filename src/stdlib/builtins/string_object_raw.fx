@@ -36,7 +36,8 @@ namespace standard
                 indexof_char(char) -> int,
                 lastindexof_char(char) -> int,
                 count_occurrences(byte*) -> int,
-                //count_spaces() -> int, // count_occurances(" \0")
+                count_spaces() -> int, // count_occurances(" \0")
+                count_lines() -> int, // count_occurances("\n\0");
                 
                 // Character access
                 charat(int) -> char,
@@ -79,8 +80,8 @@ namespace standard
                 isalpha() -> bool,
                 isdigit() -> bool,
                 isalnum() -> bool,
-                //isupper() -> bool,
-                //islower() -> bool,
+                isupper() -> bool,
+                islower() -> bool,
                 
                 // Conversion
                 toint() -> int,
@@ -107,13 +108,16 @@ namespace standard
         object string             // readable for many traits
         {
             noopstr value;
-            int length;
+            byte** lines;
+            int length, line_count;
 
             // ===== CONSTRUCTOR & DESTRUCTOR =====
             def __init(byte* x) -> this
             {
                 this.value = x;
                 this.length = standard::strings::strlen(x);
+                this.lines = this.split_lines();
+                this.line_count = this.count_lines();
                 return this;
             };
 
@@ -214,6 +218,16 @@ namespace standard
             def count_occurrences(byte* substr) -> int
             {
                 return count_substring(this.value, substr);
+            };
+
+            def count_spaces() -> int
+            {
+                return this.count_occurrences(" \0");
+            };
+
+            def count_lines() -> int
+            {
+                return this.count_occurrences("\n\0");
             };
 
             // ===== CHARACTER ACCESS =====
@@ -383,8 +397,8 @@ namespace standard
                     return false;
                 };
 
-                byte* before = manip::copy_n(this.value, pos);
-                byte* after = manip::copy_string(this.value + pos);
+                byte* before = manip::copy_n(this.value, pos),
+                      after = manip::copy_string(this.value + pos);
                 
                 if (before == 0 | after == 0)
                 {
@@ -800,9 +814,10 @@ namespace standard
             // ===== OTHER =====
             def reverse() -> bool
             {
+                byte temp;
                 for (int i; i < this.length / 2; i = i + 1)
                 {
-                    byte temp = this.value[i];
+                    temp = this.value[i];
                     this.value[i] = this.value[this.length - 1 - i];
                     this.value[this.length - 1 - i] = temp;
                 };

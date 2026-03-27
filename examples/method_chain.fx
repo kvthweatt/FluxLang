@@ -1,6 +1,7 @@
 #import "standard.fx";
 
-using standard::io::console;
+using standard::io::console,
+      standard::strings;
 
 object testobj
 {
