@@ -15,8 +15,8 @@
 
 #import "standard.fx", "math.fx", "windows.fx", "opengl.fx", "threading.fx";
 
-using standard::system::windows,
-      standard::math,
+using standard::math,
+      standard::system::windows,
       standard::threading,
       standard::atomic;
 

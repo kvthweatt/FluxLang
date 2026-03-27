@@ -925,8 +925,8 @@ class TypeResolver:
                 if matching_count is not None:
                     return matching_count
             
-            # If no arg_vals or type resolution failed, check if there's only one overload
-            if len(overloads) == 1:
+            # If no arg_vals or type resolution failed, return the first available overload
+            if overloads:
                 return overloads[0]['function']
         
         # Step 3: Try symbol table lookup
@@ -1740,6 +1740,28 @@ class NamespaceTypeHandler:
             module._current_namespace = original_module_namespace
             module.symbol_table.set_namespace(original_st_namespace)
     
+    @staticmethod
+    def process_namespace_object_type_only(namespace: str, obj_def: 'ObjectDef', module: 'ir.Module'):
+        """Pre-pass: register the struct type for a namespace object without emitting method bodies.
+        This allows namespace-level functions compiled afterward to resolve the object type."""
+        original_name = obj_def.name
+        obj_def.name = f"{namespace.replace('::', '__')}__{obj_def.name}"
+
+        original_module_namespace = getattr(module, '_current_namespace', '')
+        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
+
+        module._current_namespace = namespace
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.set_namespace(namespace)
+
+        try:
+            obj_def.codegen_type_only(module)
+        finally:
+            obj_def.name = original_name
+            module._current_namespace = original_module_namespace
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.set_namespace(original_st_namespace)
+
     @staticmethod
     def process_namespace_object(namespace: str, obj_def: 'ObjectDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
         original_name = obj_def.name

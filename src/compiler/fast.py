@@ -838,10 +838,16 @@ class BinaryOp(Expression):
                 if not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType)):
                     rhs = builder.load(rhs, name="auto_deref_rhs")
         else:
-            # For potential pointer arithmetic, only dereference pointer-to-pointer to get the actual pointer
-            if lhs_is_ptr_to_ptr and isinstance(lhs.type.pointee.pointee, ir.IntType):
+            # For potential pointer arithmetic, only dereference pointer-to-pointer when
+            # BOTH sides are pointers (ptr-ptr subtraction). When one side is an integer
+            # (ptr + int or ptr - int), the GEP will correctly stride by the pointee size;
+            # loading through the pointer would be a double-dereference and produce the
+            # wrong base address (and wrong stride via byte-granularity GEP).
+            lhs_is_int_type = isinstance(lhs.type, ir.IntType)
+            rhs_is_int_type = isinstance(rhs.type, ir.IntType)
+            if lhs_is_ptr_to_ptr and isinstance(lhs.type.pointee.pointee, ir.IntType) and not rhs_is_int_type:
                 lhs = builder.load(lhs, name="deref_ptr_for_arithmetic")
-            if rhs_is_ptr_to_ptr and isinstance(rhs.type.pointee.pointee, ir.IntType):
+            if rhs_is_ptr_to_ptr and isinstance(rhs.type.pointee.pointee, ir.IntType) and not lhs_is_int_type:
                 rhs = builder.load(rhs, name="deref_ptr_for_arithmetic")
 
         # --------------------------------------------------
@@ -3715,6 +3721,12 @@ class VariableDeclaration(ASTNode):
         
         # Handle constructor calls
         if isinstance(self.initial_value, FunctionCall) and self.initial_value.name.endswith('.__init'):
+            # Zero-initialize the alloca before calling the constructor so that embedded
+            # sub-object fields (e.g. arr.len, arr.cap inside JSONNode) start at zero per
+            # Flux semantics. Constructors that are empty (just return this) rely on this.
+            if isinstance(alloca.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                zero = TypeSystem.get_default_initializer(alloca.type.pointee)
+                builder.store(zero, alloca)
             self._call_constructor(builder, module, alloca)
             return
         
@@ -3737,15 +3749,15 @@ class VariableDeclaration(ASTNode):
         func_call = self.initial_value  # This is a FunctionCall with name like "string.__init"
         
         #print(f"[CONSTRUCTOR] Looking for constructor: {func_call.name}", file=sys.stdout)
-        #print(f"[CONSTRUCTOR] Available globals matching pattern:", file=sys.stdout)
+        #print(f"[CONSTRUCTOR] current_namespace={getattr(module, '_current_namespace', '<none>')}", file=sys.stdout)
+        #print(f"[CONSTRUCTOR] Globals with __init:", file=sys.stdout)
         #for name in module.globals:
         #    if '__init' in name:
         #        print(f"  - {name}", file=sys.stdout)
-        
         #if hasattr(module, '_function_overloads'):
-        #    print(f"[CONSTRUCTOR] Available overloads:", file=sys.stdout)
+        #    print(f"[CONSTRUCTOR] Overload keys with __init:", file=sys.stdout)
         #    for base_name in module._function_overloads:
-        #        if '__init' in base_name or 'string' in base_name:
+        #        if '__init' in base_name:
         #            print(f"  - {base_name}: {len(module._function_overloads[base_name])} overload(s)", file=sys.stdout)
         
         # Try to resolve the constructor using the same multi-step resolution as regular calls
@@ -3789,9 +3801,47 @@ class VariableDeclaration(ASTNode):
                             #print(f"[CONSTRUCTOR] Found via namespace overload resolution: {mangled_name}", file=sys.stdout)
                             break
         
+        # Step 4: Try all registered namespaces (catches types in non-using namespaces)
+        if func is None and hasattr(module, '_namespaces'):
+            for namespace in module._namespaces:
+                mangled_prefix = namespace.replace("::", "__") + "__"
+                mangled_name = mangled_prefix + func_call.name
+
+                func = module.globals.get(mangled_name, None)
+                if func and isinstance(func, ir.Function):
+                    break
+
+                if hasattr(module, '_function_overloads') and mangled_name in module._function_overloads:
+                    func = TypeResolver.resolve_function(module, mangled_name)
+                    if func:
+                        break
+
+        # Step 5: Scan all overload keys for a suffix match (handles cross-namespace constructor calls
+        # where the target namespace was registered after the caller's namespace was first processed)
+        if func is None and hasattr(module, '_function_overloads'):
+            suffix = "__" + func_call.name
+            for key, overloads in module._function_overloads.items():
+                if key.endswith(suffix) or key == func_call.name:
+                    func = TypeResolver.resolve_function(module, key)
+                    if func:
+                        break
+
+        # Step 6: Scan module.globals directly for a function whose name ends with the constructor pattern
+        if func is None:
+            # func_call.name is e.g. "JSONNode.__init"; look for "*__JSONNode.__init*" in globals
+            base = func_call.name  # e.g. "JSONNode.__init"
+            dot = base.find(".")
+            if dot != -1:
+                obj_part = base[:dot]   # e.g. "JSONNode"
+                meth_part = base[dot:]  # e.g. ".__init"
+                needle = "__" + obj_part + meth_part  # e.g. "__JSONNode.__init"
+                for gname, gval in module.globals.items():
+                    if isinstance(gval, ir.Function) and needle in gname:
+                        func = gval
+                        break
+
         if func is None:
             raise NameError(f"Constructor not found: {func_call.name}")
-        
         # Build arguments: 'this' pointer first, then constructor arguments
         args = [alloca]
 
@@ -3940,9 +3990,14 @@ class Assignment(Statement):
         elif isinstance(self.target, PointerDeref):
             # Pointer dereference assignment - delegate to type handler
             ptr = self.target.pointer.codegen(builder, module)
-            if (isinstance(ptr.type, ir.PointerType) and 
-                isinstance(ptr.type.pointee, ir.PointerType)):
-                # Load the pointer value
+            # Only load through the pointer when it is a triple-indirection (ptr-to-ptr-to-ptr).
+            # A double-indirection (ptr-to-ptr) is already the correct store address: the
+            # alloca for the variable has already been resolved by Identifier.codegen, so
+            # loading again here would dereference one level too many (reading the slot
+            # contents as a pointer and storing INTO that instead of INTO the slot).
+            if (isinstance(ptr.type, ir.PointerType) and
+                isinstance(ptr.type.pointee, ir.PointerType) and
+                isinstance(ptr.type.pointee.pointee, ir.PointerType)):
                 ptr = builder.load(ptr, name="deref_ptr_loaded")
             return AssignmentTypeHandler.handle_pointer_deref_assignment(builder, ptr, val)
                 
@@ -5185,27 +5240,55 @@ class SwitchStatement(Statement):
         default_block = None
         case_blocks = []
         
-        # Create blocks for all cases
+        def _fold_case_const(val_expr, switch_val, builder, module):
+            """Resolve a case expression to an ir.Constant before the switch terminator is emitted.
+            Reads global initializers directly so no load instructions are produced."""
+            # Fast path: integer literal — codegen is already a constant, no emission needed
+            if isinstance(val_expr, Literal):
+                c = val_expr.codegen(builder, module)
+                if isinstance(c, ir.Constant):
+                    return ir.Constant(switch_val.type, c.constant)
+            # For identifiers (named constants), look up the global initializer directly
+            # without emitting a load instruction.
+            name = getattr(val_expr, 'name', None)
+            if name:
+                # Try exact match then namespace-prefixed match
+                for gname, gval in module.globals.items():
+                    if (gname == name or gname.endswith('__' + name)) and hasattr(gval, 'initializer'):
+                        init = gval.initializer
+                        if isinstance(init, ir.Constant) and isinstance(init.type, ir.IntType):
+                            return ir.Constant(switch_val.type, init.constant)
+            # Fallback: emit codegen and fold from the resulting instruction if possible
+            case_val = val_expr.codegen(builder, module)
+            if isinstance(case_val, ir.Constant):
+                return ir.Constant(switch_val.type, case_val.constant)
+            src = getattr(case_val, 'operands', [None])
+            if src and len(src) > 0:
+                init = getattr(src[0], 'initializer', None)
+                if isinstance(init, ir.Constant) and isinstance(init.type, ir.IntType):
+                    return ir.Constant(switch_val.type, init.constant)
+            raise ValueError(f"Switch case value is not a constant integer: {val_expr}")
+
+        # Create blocks for all cases, resolving constants BEFORE the switch terminator
         for i, case in enumerate(self.cases):
             if case.value is None:  # Default case
                 default_block = func.append_basic_block("switch_default")
                 case_blocks.append((None, default_block))
             else:
                 case_block = func.append_basic_block(f"switch_case_{i}")
-                case_blocks.append((case.value, case_block))
-        
+                # Resolve to ir.Constant now, while the current block is still open
+                case_const = _fold_case_const(case.value, switch_val, builder, module)
+                case_blocks.append((case_const, case_block))
+
         # If no default block was specified, use merge block as default
         if default_block is None:
             default_block = merge_block
-        
-        # Create the switch instruction
+
+        # Create the switch instruction and add all non-default cases
         switch = builder.switch(switch_val, default_block)
-        
-        # Add all non-default cases to the switch
-        for value, block in case_blocks:
-            if value is not None:
-                case_const = value.codegen(builder, module)
-                # Ensure case constant type matches switch value type
+        for case_const, block in case_blocks:
+            if case_const is not None:
+                # Ensure width matches switch value
                 if isinstance(case_const.type, ir.IntType) and isinstance(switch_val.type, ir.IntType):
                     if case_const.type.width != switch_val.type.width:
                         case_const = ir.Constant(switch_val.type, case_const.constant)
@@ -6566,9 +6649,9 @@ class StructDef(ASTNode):
             if not self.members:
                 return existing_struct
             # If existing struct has no body and this has members, we'll set the body below
-            # If both have bodies, that's an error
+            # Already fully defined (e.g. by the pre-pass) - nothing more to do
             if existing_struct.elements:
-                raise ValueError(f"Struct '{self.name}' already defined")
+                return existing_struct
             # Use existing opaque struct
             opaque_struct = existing_struct
         else:
@@ -7012,58 +7095,61 @@ class ObjectDef(ASTNode):
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Type:
         # Initialize object storage
         ObjectTypeHandler.initialize_object_storage(module)
-        
-        # Check if object already exists (for forward declarations)
+
+        # Check if object already exists (e.g. pre-registered by type-only pass or forward declaration)
+        type_already_registered = False
         if hasattr(module, '_struct_types') and self.name in module._struct_types:
             existing_type = module._struct_types[self.name]
             # If this is a forward declaration (no members/methods) and object exists, just return it
             if not self.members and not self.methods:
                 return existing_type
-            # If existing object has body and this has body, that's an error
+            # If the type was fully registered by the type-only pre-pass, skip to method body emission
             if existing_type.elements:
-                raise ValueError(f"Object '{self.name}' already defined")
-            # Existing was forward declaration, this is full definition - continue below
-        
-        # If this is a forward declaration (no members/methods), create opaque type and return
-        if not self.members and not self.methods:
-            opaque_struct = ir.global_context.get_identified_type(self.name)
-            opaque_struct.names = []
-            if not hasattr(module, '_struct_types'):
-                module._struct_types = {}
-            module._struct_types[self.name] = opaque_struct
-            # Register in symbol table
+                struct_type = existing_type
+                type_already_registered = True
+            # Existing was opaque forward declaration, this is full definition - continue below
+
+        if not type_already_registered:
+            # If this is a forward declaration (no members/methods), create opaque type and return
+            if not self.members and not self.methods:
+                opaque_struct = ir.global_context.get_identified_type(self.name)
+                opaque_struct.names = []
+                if not hasattr(module, '_struct_types'):
+                    module._struct_types = {}
+                module._struct_types[self.name] = opaque_struct
+                # Register in symbol table
+                if hasattr(module, 'symbol_table'):
+                    module.symbol_table.define(
+                        self.name,
+                        SymbolKind.STRUCT,
+                        type_spec=None,
+                        llvm_type=opaque_struct,
+                        llvm_value=None
+                    )
+                return opaque_struct
+
+            # Create member types
+            member_types, member_names = ObjectTypeHandler.create_member_types(self.members, module)
+
+            # Create struct type
+            struct_type = ObjectTypeHandler.create_struct_type(self.name, member_types, member_names, module)
+
+            # Calculate field layout
+            fields = ObjectTypeHandler.calculate_field_layout(self.members, member_types)
+
+            # Create vtable
+            ObjectTypeHandler.create_vtable(self.name, fields, module)
+
+            # Register object in symbol table
             if hasattr(module, 'symbol_table'):
+                #print(f"[OBJECT] Registering object '{self.name}' in symbol table", file=sys.stdout)
                 module.symbol_table.define(
                     self.name,
-                    SymbolKind.STRUCT,
+                    SymbolKind.STRUCT,  # Objects are treated like structs for type purposes
                     type_spec=None,
-                    llvm_type=opaque_struct,
+                    llvm_type=struct_type,
                     llvm_value=None
                 )
-            return opaque_struct
-        
-        # Create member types
-        member_types, member_names = ObjectTypeHandler.create_member_types(self.members, module)
-        
-        # Create struct type
-        struct_type = ObjectTypeHandler.create_struct_type(self.name, member_types, member_names, module)
-        
-        # Calculate field layout
-        fields = ObjectTypeHandler.calculate_field_layout(self.members, member_types)
-        
-        # Create vtable
-        ObjectTypeHandler.create_vtable(self.name, fields, module)
-        
-        # Register object in symbol table
-        if hasattr(module, 'symbol_table'):
-            #print(f"[OBJECT] Registering object '{self.name}' in symbol table", file=sys.stdout)
-            module.symbol_table.define(
-                self.name,
-                SymbolKind.STRUCT,  # Objects are treated like structs for type purposes
-                type_spec=None,
-                llvm_type=struct_type,
-                llvm_value=None
-            )
         
         # PASS 1: Predeclare all methods
         method_funcs = {}
@@ -7103,7 +7189,53 @@ class ObjectDef(ASTNode):
         
         return struct_type
 
-# Extern declaration
+    def codegen_type_only(self, module: ir.Module) -> ir.Type:
+        """Register the struct type and symbol table entry for this object without emitting method bodies.
+        Called as a pre-pass so namespace-level functions can reference object types."""
+        ObjectTypeHandler.initialize_object_storage(module)
+
+        # Already registered (e.g. forward declaration processed earlier) - skip
+        if hasattr(module, '_struct_types') and self.name in module._struct_types:
+            existing_type = module._struct_types[self.name]
+            if existing_type.elements:
+                # Full definition already registered - nothing to do
+                return existing_type
+            # Opaque forward-decl exists; fill it in now if we have members
+            if not self.members:
+                return existing_type
+
+        # Forward declaration with no members - create opaque type
+        if not self.members and not self.methods:
+            opaque_struct = ir.global_context.get_identified_type(self.name)
+            opaque_struct.names = []
+            if not hasattr(module, '_struct_types'):
+                module._struct_types = {}
+            module._struct_types[self.name] = opaque_struct
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.define(
+                    self.name, SymbolKind.STRUCT,
+                    type_spec=None, llvm_type=opaque_struct, llvm_value=None)
+            return opaque_struct
+
+        # Create member types and register struct
+        member_types, member_names = ObjectTypeHandler.create_member_types(self.members, module)
+        struct_type = ObjectTypeHandler.create_struct_type(self.name, member_types, member_names, module)
+        fields = ObjectTypeHandler.calculate_field_layout(self.members, member_types)
+        ObjectTypeHandler.create_vtable(self.name, fields, module)
+
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.define(
+                self.name, SymbolKind.STRUCT,
+                type_spec=None, llvm_type=struct_type, llvm_value=None)
+
+        # Predeclare methods so they are in module.globals for cross-references
+        for method in self.methods:
+            func_type, func_name = ObjectTypeHandler.create_method_signature(
+                self.name, method.name, method, struct_type, module)
+            ObjectTypeHandler.predeclare_method(func_type, func_name, method, module)
+
+        return struct_type
+
 @dataclass
 class ExternBlock(Statement):
     """
@@ -7182,6 +7314,61 @@ class NamespaceDef(ASTNode):
     nested_namespaces: List['NamespaceDef'] = field(default_factory=list)
     base_namespaces: List[str] = field(default_factory=list)  # inheritance
 
+    @staticmethod
+    def _collect_all_ns_objects(ns: 'NamespaceDef', excluded: set, parent_path: str = '') -> list:
+        """Return a flat list of (kind, namespace_name, item) tuples for the entire tree.
+        kind is 'struct' or 'object'. namespace_name uses the fully-mangled path so that
+        pre-registered types match the names produced by process_namespace_object/struct."""
+        result = []
+        # Build the full mangled namespace name for this level
+        full_name = f"{parent_path}__{ns.name}" if parent_path else ns.name
+        if full_name in excluded:
+            return result
+        for excl in excluded:
+            if full_name.startswith(excl + "__"):
+                return result
+        for s in ns.structs:
+            result.append(('struct', full_name, s))
+        for obj in ns.objects:
+            if not isinstance(obj, TraitDef):
+                result.append(('object', full_name, obj))
+        for nested in ns.nested_namespaces:
+            result.extend(NamespaceDef._collect_all_ns_objects(nested, excluded, full_name))
+        return result
+
+    @staticmethod
+    def preregister_all_types(ns: 'NamespaceDef', module: ir.Module, excluded: set = None) -> None:
+        """Recursively walk the namespace tree and pre-register every object struct type
+        before any method bodies are emitted.  Uses a retry loop so forward references
+        between objects (e.g. FreeNode* inside another object) resolve in dependency order."""
+        if excluded is None:
+            excluded = getattr(module, '_excluded_namespaces', set())
+        pending = NamespaceDef._collect_all_ns_objects(ns, excluded)
+        max_passes = len(pending) + 1
+        for _ in range(max_passes):
+            if not pending:
+                break
+            still_pending = []
+            for entry in pending:
+                kind, ns_name, item = entry
+                try:
+                    if kind == 'struct':
+                        NamespaceTypeHandler.process_namespace_struct(ns_name, item, None, module)
+                    else:
+                        NamespaceTypeHandler.process_namespace_object_type_only(ns_name, item, module)
+                except Exception:
+                    still_pending.append(entry)
+            if len(still_pending) == len(pending):
+                # No progress made - run once more without catching to surface the real error
+                for entry in still_pending:
+                    kind, ns_name, item = entry
+                    if kind == 'struct':
+                        NamespaceTypeHandler.process_namespace_struct(ns_name, item, None, module)
+                    else:
+                        NamespaceTypeHandler.process_namespace_object_type_only(ns_name, item, module)
+                break
+            pending = still_pending
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
         """Generate LLVM IR for a namespace definition."""
         # Check if this namespace or any parent namespace is excluded via !using
@@ -7250,6 +7437,11 @@ class NamespaceDef(ASTNode):
         # Process extern blocks after structs but before objects/functions that call them
         for extern_block in self.extern_blocks:
             extern_block.codegen(work_builder, module)
+
+        # Pre-pass: register all object struct types so function bodies can reference them
+        for obj in self.objects:
+            if not isinstance(obj, TraitDef):
+                NamespaceTypeHandler.process_namespace_object_type_only(self.name, obj, module)
 
         # Process functions (which may reference types and externs defined above)
         for func in self.functions:
@@ -7406,6 +7598,24 @@ class Program(ASTNode):
         for stmt in self.statements:
             if isinstance(stmt, NotUsingStatement):
                 stmt.codegen(builder, module)
+
+        # Pre-pass: register all object struct types across the entire namespace tree before
+        # any method bodies are emitted, so cross-namespace type references always resolve.
+        print("[AST] Pre-pass: Registering all object types...")
+        # Step 1: process top-level structs and objects first (they have no namespace
+        # dependencies and may be referenced by namespace objects, e.g. FreeNode).
+        for stmt in self.statements:
+            if isinstance(stmt, (StructDef, StructDefStatement, ObjectDef, ObjectDefStatement)):
+                stmt.codegen(builder, module)
+        # Step 2: walk all namespace trees and pre-register every struct/object type.
+        for stmt in self.statements:
+            ns = None
+            if isinstance(stmt, NamespaceDef):
+                ns = stmt
+            elif isinstance(stmt, NamespaceDefStatement):
+                ns = stmt.namespace_def
+            if ns is not None:
+                NamespaceDef.preregister_all_types(ns, module)
 
         # Pass 3: Process all other statements
         print("[AST] Pass 4: Processing all other statements...")
