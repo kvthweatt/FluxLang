@@ -3586,14 +3586,22 @@ class CoercionContext:
             return False
         # Be defensive: older code sometimes attached raw DataType enums.
         if isinstance(spec, DataType):
-            return spec == DataType.UINT
+            return spec in (DataType.UINT, DataType.DATA)
         if not hasattr(spec, 'base_type'):
             return False
-        # A type is unsigned only when its base type is explicitly UINT.
-        # is_signed=False is the default for ALL types (including int/SINT),
-        # so we cannot use `not spec.is_signed` as the unsigned test — that
-        # would incorrectly treat plain `int` variables as unsigned.
-        return spec.base_type == DataType.UINT
+        # DataType.UINT  -- uint keyword, always unsigned
+        # DataType.DATA  -- explicit-width types: u8/u16/u32/u64/byte (unsigned)
+        #                   but also i32/i64 etc. (signed) -- check is_signed
+        # DataType.SINT  -- int / signed integers -- never unsigned
+        # Note: is_signed=False is the default for ALL types (including SINT),
+        # so we must check base_type first, not just is_signed.
+        if spec.base_type == DataType.UINT:
+            return True
+        if spec.base_type == DataType.DATA:
+            # DATA covers both signed (i32, i64) and unsigned (u32, u64, byte)
+            # Use is_signed to disambiguate: unsigned only when not signed
+            return not getattr(spec, 'is_signed', False)
+        return False
 
     @staticmethod
     def comparison_is_unsigned(a: ir.Value, b: ir.Value) -> bool:
@@ -3825,7 +3833,11 @@ def is_unsigned(val: ir.Value) -> bool:
     if hasattr(val, '_flux_type_spec'):
         type_spec = val._flux_type_spec
         if hasattr(type_spec, 'base_type'):
-            return type_spec.base_type == DataType.UINT
+            if type_spec.base_type == DataType.UINT:
+                return True
+            if type_spec.base_type == DataType.DATA:
+                return not getattr(type_spec, 'is_signed', False)
+            return False
         if hasattr(type_spec, 'is_signed'):
             return not type_spec.is_signed
     return False

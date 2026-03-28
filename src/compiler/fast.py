@@ -6816,6 +6816,16 @@ class StructFieldAccess(Expression):
                     struct_name = type_spec.custom_typename
                 is_pointer_hint = bool(getattr(type_spec, "is_pointer", False))
 
+            # If instance_val is a loaded struct value (not a pointer), try to get
+            # the alloca pointer directly so we can GEP into it.
+            if (not isinstance(instance_val.type, ir.PointerType) and
+                    isinstance(instance_val.type, (ir.LiteralStructType, ir.IdentifiedStructType))):
+                alloca_ptr = module.symbol_table.get_llvm_value(var_name)
+                if alloca_ptr is not None and isinstance(alloca_ptr.type, ir.PointerType):
+                    pointee = alloca_ptr.type.pointee
+                    if isinstance(pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                        instance_val = alloca_ptr
+
         # Resolve namespace-mangled struct name (using/imports) for vtables/types
         def _resolve_struct_name(name: Optional[str]) -> Optional[str]:
             if not name:

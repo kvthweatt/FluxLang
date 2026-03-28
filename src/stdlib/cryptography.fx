@@ -97,8 +97,6 @@ namespace standard
                     
                     ctx.bitlen = (u64)0;
                     ctx.buflen = 0;
-                    
-                    print("SHA256 initialized\n\0");
                 };
                 
                 // Process a single 512-bit block
@@ -155,12 +153,6 @@ namespace standard
                     ctx.state[5] += f;
                     ctx.state[6] += g;
                     ctx.state[7] += h;
-                    
-                    ///
-                    print("After transform, state[0] = \0");
-                    print((int)ctx.state[0]);
-                    print("\n\0");
-                    ///
                 };
                 
                 // Update SHA-256 with data
@@ -857,5 +849,317 @@ namespace standard
         };
     };
 };
+
+        namespace X25519
+        {
+            // =========================================================================
+            // X25519 Elliptic Curve Diffie-Hellman
+            //
+            // Curve: y² = x³ + 486662x² + x  over  GF(p),  p = 2^255 - 19
+            //
+            // Field elements: 5 x u64 limbs in radix-2^51 (51-bit limbs).
+            // Each limb holds at most 51 bits; products fit in u64 without overflow
+            // before reduction. Total: 40 bytes per field element.
+            //
+            // Public API:
+            //   x25519(out[32], scalar[32], point[32])  -- DH shared secret
+            //   x25519_pubkey(out[32], scalar[32])       -- scalar x base point
+            // =========================================================================
+
+            #def FE_MASK51 (u64)0x7FFFFFFFFFFFF;
+
+            struct Fe25519
+            {
+                u64[5] v;
+            };
+
+            // Carry-propagate so each limb is < 2^52.
+            def fe_reduce(Fe25519* h) -> void
+            {
+                u64 c0, c1, c2, c3, c4;
+                c0 = h.v[0] >> 51; h.v[0] = h.v[0] & FE_MASK51;
+                c1 = h.v[1] >> 51; h.v[1] = (h.v[1] & FE_MASK51) + c0;
+                c2 = h.v[2] >> 51; h.v[2] = (h.v[2] & FE_MASK51) + c1;
+                c3 = h.v[3] >> 51; h.v[3] = (h.v[3] & FE_MASK51) + c2;
+                c4 = h.v[4] >> 51; h.v[4] = (h.v[4] & FE_MASK51) + c3;
+                h.v[0] = h.v[0] + c4 * (u64)19;
+                c0     = h.v[0] >> 51; h.v[0] = h.v[0] & FE_MASK51;
+                h.v[1] = h.v[1] + c0;
+                return;
+            };
+
+            def fe_add(Fe25519* out, Fe25519* a, Fe25519* b) -> void
+            {
+                out.v[0] = a.v[0] + b.v[0];
+                out.v[1] = a.v[1] + b.v[1];
+                out.v[2] = a.v[2] + b.v[2];
+                out.v[3] = a.v[3] + b.v[3];
+                out.v[4] = a.v[4] + b.v[4];
+                return;
+            };
+
+            // Subtraction: add 2p to stay positive.
+            def fe_sub(Fe25519* out, Fe25519* a, Fe25519* b) -> void
+            {
+                out.v[0] = a.v[0] + (u64)0xFFFFFFFFFFFDA - b.v[0];
+                out.v[1] = a.v[1] + (u64)0xFFFFFFFFFFFFE - b.v[1];
+                out.v[2] = a.v[2] + (u64)0xFFFFFFFFFFFFE - b.v[2];
+                out.v[3] = a.v[3] + (u64)0xFFFFFFFFFFFFE - b.v[3];
+                out.v[4] = a.v[4] + (u64)0xFFFFFFFFFFFFE - b.v[4];
+                return;
+            };
+
+            // Multiply two field elements. 51-bit limbs keep products in u64.
+            def fe_mul(Fe25519* out, Fe25519* a, Fe25519* b) -> void
+            {
+                u64 a0, a1, a2, a3, a4;
+                u64 b0, b1, b2, b3, b4;
+                u64 b1_19, b2_19, b3_19, b4_19;
+                u64 r0, r1, r2, r3, r4, c;
+                a0 = a.v[0]; a1 = a.v[1]; a2 = a.v[2]; a3 = a.v[3]; a4 = a.v[4];
+                b0 = b.v[0]; b1 = b.v[1]; b2 = b.v[2]; b3 = b.v[3]; b4 = b.v[4];
+                b1_19 = b1 * (u64)19;
+                b2_19 = b2 * (u64)19;
+                b3_19 = b3 * (u64)19;
+                b4_19 = b4 * (u64)19;
+                r0 = a0*b0    + a1*b4_19 + a2*b3_19 + a3*b2_19 + a4*b1_19;
+                r1 = a0*b1    + a1*b0    + a2*b4_19 + a3*b3_19 + a4*b2_19;
+                r2 = a0*b2    + a1*b1    + a2*b0    + a3*b4_19 + a4*b3_19;
+                r3 = a0*b3    + a1*b2    + a2*b1    + a3*b0    + a4*b4_19;
+                r4 = a0*b4    + a1*b3    + a2*b2    + a3*b1    + a4*b0;
+                c  = r0 >> 51; r0 = r0 & FE_MASK51; r1 = r1 + c;
+                c  = r1 >> 51; r1 = r1 & FE_MASK51; r2 = r2 + c;
+                c  = r2 >> 51; r2 = r2 & FE_MASK51; r3 = r3 + c;
+                c  = r3 >> 51; r3 = r3 & FE_MASK51; r4 = r4 + c;
+                c  = r4 >> 51; r4 = r4 & FE_MASK51; r0 = r0 + c * (u64)19;
+                c  = r0 >> 51; r0 = r0 & FE_MASK51; r1 = r1 + c;
+                out.v[0] = r0; out.v[1] = r1; out.v[2] = r2;
+                out.v[3] = r3; out.v[4] = r4;
+                return;
+            };
+
+            def fe_sq(Fe25519* out, Fe25519* a) -> void
+            {
+                fe_mul(out, a, a);
+                return;
+            };
+
+            // Constant-time conditional swap.
+            def fe_cswap(Fe25519* a, Fe25519* b, u64 cond) -> void
+            {
+                u64 mask, t;
+                u32 i;
+                mask = (u64)0 - cond;
+                while (i < (u32)5)
+                {
+                    t      = mask & (a.v[i] `^^ b.v[i]);
+                    a.v[i] = a.v[i] `^^ t;
+                    b.v[i] = b.v[i] `^^ t;
+                    i++;
+                };
+                return;
+            };
+
+            // Invert via Fermat: a^(p-2) mod p, p-2 = 2^255 - 21.
+            def fe_invert(Fe25519* out, Fe25519* z) -> void
+            {
+                Fe25519 t0, t1, t2, t3;
+                u32     i;
+                fe_sq(@t0, z);
+                fe_sq(@t1, @t0); fe_sq(@t1, @t1);
+                fe_mul(@t1, @t1, z);
+                fe_mul(@t0, @t0, @t1);
+                fe_sq(@t2, @t0);
+                fe_mul(@t1, @t2, @t1);
+                fe_sq(@t2, @t1);
+                i = 1; while (i < (u32)5)  { fe_sq(@t2, @t2); i++; };
+                fe_mul(@t1, @t2, @t1);
+                fe_sq(@t2, @t1);
+                i = 1; while (i < (u32)10) { fe_sq(@t2, @t2); i++; };
+                fe_mul(@t2, @t2, @t1);
+                fe_sq(@t3, @t2);
+                i = 1; while (i < (u32)20) { fe_sq(@t3, @t3); i++; };
+                fe_mul(@t2, @t3, @t2);
+                i = 0; while (i < (u32)10) { fe_sq(@t2, @t2); i++; };
+                fe_mul(@t1, @t2, @t1);
+                fe_sq(@t2, @t1);
+                i = 1; while (i < (u32)50) { fe_sq(@t2, @t2); i++; };
+                fe_mul(@t2, @t2, @t1);
+                fe_sq(@t3, @t2);
+                i = 1; while (i < (u32)100) { fe_sq(@t3, @t3); i++; };
+                fe_mul(@t2, @t3, @t2);
+                i = 0; while (i < (u32)50) { fe_sq(@t2, @t2); i++; };
+                fe_mul(@t1, @t2, @t1);
+                fe_sq(@t1, @t1); fe_sq(@t1, @t1); fe_sq(@t1, @t1);
+                fe_sq(@t1, @t1); fe_sq(@t1, @t1);
+                fe_mul(out, @t1, @t0);
+                return;
+            };
+
+            // Decode 32 little-endian bytes into a field element.
+            def fe_from_bytes(Fe25519* out, byte* src) -> void
+            {
+                u64 t0, t1, t2, t3, t4;
+                t0 = ((u64)src[0])       | ((u64)src[1] << 8)  | ((u64)src[2] << 16) |
+                     ((u64)src[3] << 24) | ((u64)src[4] << 32) | ((u64)src[5] << 40) |
+                     ((u64)src[6] << 48);
+                t0 = t0 & FE_MASK51;
+                t1 = ((u64)src[6]  >> 3)  | ((u64)src[7]  << 5)  | ((u64)src[8]  << 13) |
+                     ((u64)src[9]  << 21) | ((u64)src[10] << 29) | ((u64)src[11] << 37) |
+                     ((u64)src[12] << 45);
+                t1 = t1 & FE_MASK51;
+                t2 = ((u64)src[12] >> 6)  | ((u64)src[13] << 2)  | ((u64)src[14] << 10) |
+                     ((u64)src[15] << 18) | ((u64)src[16] << 26) | ((u64)src[17] << 34) |
+                     ((u64)src[18] << 42) | ((u64)src[19] << 50);
+                t2 = t2 & FE_MASK51;
+                t3 = ((u64)src[19] >> 1)  | ((u64)src[20] << 7)  | ((u64)src[21] << 15) |
+                     ((u64)src[22] << 23) | ((u64)src[23] << 31) | ((u64)src[24] << 39) |
+                     ((u64)src[25] << 47);
+                t3 = t3 & FE_MASK51;
+                t4 = ((u64)src[25] >> 4)  | ((u64)src[26] << 4)  | ((u64)src[27] << 12) |
+                     ((u64)src[28] << 20) | ((u64)src[29] << 28) | ((u64)src[30] << 36) |
+                     ((u64)src[31] << 44);
+                t4 = t4 & (u64)0x7FFFFFFFFFFFF;
+                out.v[0] = t0; out.v[1] = t1; out.v[2] = t2;
+                out.v[3] = t3; out.v[4] = t4;
+                return;
+            };
+
+            // Encode a field element to 32 little-endian bytes.
+            def fe_to_bytes(byte* dst, Fe25519* h) -> void
+            {
+                Fe25519 t;
+                u64     q, r0, r1, r2, r3, r4;
+                t.v[0] = h.v[0]; t.v[1] = h.v[1]; t.v[2] = h.v[2];
+                t.v[3] = h.v[3]; t.v[4] = h.v[4];
+                fe_reduce(@t); fe_reduce(@t);
+                q    = (t.v[0] + (u64)19) >> 51;
+                q    = (t.v[1] + q)        >> 51;
+                q    = (t.v[2] + q)        >> 51;
+                q    = (t.v[3] + q)        >> 51;
+                q    = (t.v[4] + q)        >> 51;
+                t.v[0] = t.v[0] + (u64)19 * q;
+                r0 = t.v[0] & FE_MASK51; t.v[1] = t.v[1] + (t.v[0] >> 51);
+                r1 = t.v[1] & FE_MASK51; t.v[2] = t.v[2] + (t.v[1] >> 51);
+                r2 = t.v[2] & FE_MASK51; t.v[3] = t.v[3] + (t.v[2] >> 51);
+                r3 = t.v[3] & FE_MASK51; t.v[4] = t.v[4] + (t.v[3] >> 51);
+                r4 = t.v[4] & (u64)0x7FFFFFFFFFFFF;
+                dst[0]  = (byte)(r0);        dst[1]  = (byte)(r0 >> 8);
+                dst[2]  = (byte)(r0 >> 16);  dst[3]  = (byte)(r0 >> 24);
+                dst[4]  = (byte)(r0 >> 32);  dst[5]  = (byte)(r0 >> 40);
+                dst[6]  = (byte)((r0 >> 48) | (r1 << 3));
+                dst[7]  = (byte)(r1 >> 5);   dst[8]  = (byte)(r1 >> 13);
+                dst[9]  = (byte)(r1 >> 21);  dst[10] = (byte)(r1 >> 29);
+                dst[11] = (byte)(r1 >> 37);
+                dst[12] = (byte)((r1 >> 45) | (r2 << 6));
+                dst[13] = (byte)(r2 >> 2);   dst[14] = (byte)(r2 >> 10);
+                dst[15] = (byte)(r2 >> 18);  dst[16] = (byte)(r2 >> 26);
+                dst[17] = (byte)(r2 >> 34);  dst[18] = (byte)(r2 >> 42);
+                dst[19] = (byte)((r2 >> 50) | (r3 << 1));
+                dst[20] = (byte)(r3 >> 7);   dst[21] = (byte)(r3 >> 15);
+                dst[22] = (byte)(r3 >> 23);  dst[23] = (byte)(r3 >> 31);
+                dst[24] = (byte)(r3 >> 39);
+                dst[25] = (byte)((r3 >> 47) | (r4 << 4));
+                dst[26] = (byte)(r4 >> 4);   dst[27] = (byte)(r4 >> 12);
+                dst[28] = (byte)(r4 >> 20);  dst[29] = (byte)(r4 >> 28);
+                dst[30] = (byte)(r4 >> 36);  dst[31] = (byte)(r4 >> 44);
+                return;
+            };
+
+            // ---- Montgomery ladder ----
+            //
+            // Constant-time scalar multiplication on Curve25519.
+            // Processes 255 bits of the clamped scalar from bit 254 down to 0.
+            //
+            // out[32]    : output u-coordinate (little-endian)
+            // scalar[32] : private scalar (will be clamped per RFC 7748)
+            // point[32]  : input u-coordinate (little-endian)
+
+            def x25519(byte* out, byte* scalar, byte* point) -> void
+            {
+                Fe25519 x1, x2, x3, z2, z3, A, AA, B, BB, E, C, D, DA, CB;
+                byte[32] e;
+                u32      i;
+                u64      bit, swap;
+
+                // Clamp scalar per RFC 7748 section 5
+                i = 0;
+                while (i < (u32)32) { e[i] = scalar[i]; i++; };
+                e[0]  = e[0]  & (byte)248;
+                e[31] = e[31] & (byte)127;
+                e[31] = e[31] | (byte)64;
+
+                // Decode u-coordinate of base point
+                fe_from_bytes(@x1, point);
+
+                // Initialize projective coordinates:
+                // (x2:z2) = (1:0)  -- neutral element
+                // (x3:z3) = (x1:1) -- copy of input point
+                x2.v[0] = 1; x2.v[1] = 0; x2.v[2] = 0; x2.v[3] = 0; x2.v[4] = 0;
+                z2.v[0] = 0; z2.v[1] = 0; z2.v[2] = 0; z2.v[3] = 0; z2.v[4] = 0;
+                x3.v[0] = x1.v[0]; x3.v[1] = x1.v[1]; x3.v[2] = x1.v[2];
+                x3.v[3] = x1.v[3]; x3.v[4] = x1.v[4];
+                z3.v[0] = 1; z3.v[1] = 0; z3.v[2] = 0; z3.v[3] = 0; z3.v[4] = 0;
+
+                swap = 0;
+
+                // Process bits 254 down to 0
+                i = 254;
+                while (i <= (u32)254)
+                {
+                    bit  = (u64)((e[i >> 3] >> (i & 7)) & 1);
+                    swap = swap `^^ bit;
+                    fe_cswap(@x2, @x3, swap);
+                    fe_cswap(@z2, @z3, swap);
+                    swap = bit;
+
+                    // RFC 7748 differential addition and doubling formulas
+                    fe_add(@A,  @x2, @z2);  fe_sq(@AA, @A);
+                    fe_sub(@B,  @x2, @z2);  fe_sq(@BB, @B);
+                    fe_sub(@E,  @AA, @BB);
+                    fe_add(@C,  @x3, @z3);
+                    fe_sub(@D,  @x3, @z3);
+                    fe_mul(@DA, @D,  @A);
+                    fe_mul(@CB, @C,  @B);
+                    fe_add(@x3, @DA, @CB);  fe_sq(@x3, @x3);
+                    fe_sub(@z3, @DA, @CB);  fe_sq(@z3, @z3);
+                    fe_mul(@z3, @x1, @z3);
+                    fe_mul(@x2, @AA, @BB);
+                    // a24 = 121665; z2 = E*(AA + a24*E)
+                    A.v[0] = (u64)121665;
+                    A.v[1] = 0; A.v[2] = 0; A.v[3] = 0; A.v[4] = 0;
+                    fe_mul(@A, @A, @E);
+                    fe_add(@A, @AA, @A);
+                    fe_mul(@z2, @E, @A);
+
+                    switch (i == (u32)0) { case (1) { break; } default {}; };
+                    i--;
+                };
+
+                // Final conditional swap to undo the last bit's swap
+                fe_cswap(@x2, @x3, swap);
+                fe_cswap(@z2, @z3, swap);
+
+                // Affine x = X/Z via inversion
+                fe_invert(@z2, @z2);
+                fe_mul(@x2, @x2, @z2);
+                fe_to_bytes(out, @x2);
+                return;
+            };
+
+            // Compute public key: scalar * base point (u=9).
+            def x25519_pubkey(byte* out, byte* scalar) -> void
+            {
+                byte[32] base;
+                u32      i;
+                i = 0;
+                while (i < (u32)32) { base[i] = (byte)0; i++; };
+                base[0] = (byte)9;
+                x25519(out, scalar, @base[0]);
+                return;
+            };
+
+        };  // namespace X25519
+
 
 #endif;
