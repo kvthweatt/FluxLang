@@ -15,6 +15,10 @@
 #import "standard.fx";
 #endif;
 
+#ifndef FLUX_STANDARD_ALLOCATORS
+#import "allocators.fx";
+#endif;
+
 #ifndef FLUX_JSON
 #def FLUX_JSON 1;
 
@@ -65,6 +69,41 @@ namespace json
 			ffree((u64)this.buf);
 			this.buf = nb;
 			this.cap = new_cap;
+			return true;
+		};
+
+		// Arena-backed init: allocates buf from arena, no ffree needed.
+		def _init_arena(standard::memory::allocators::stdarena::Arena* a) -> void
+		{
+			this.cap = 8;
+			this.buf = (@)standard::memory::allocators::stdarena::alloc(a, this.cap * 8);
+			return;
+		};
+
+		// Arena-backed grow: old buf is abandoned in arena, new buf allocated.
+		def _grow_arena(standard::memory::allocators::stdarena::Arena* a) -> bool
+		{
+			void*  nb;
+			size_t new_cap;
+			new_cap = this.cap * 2;
+			nb      = (@)standard::memory::allocators::stdarena::alloc(a, new_cap * 8);
+			if ((u64)nb == 0) { return false; };
+			memcpy(nb, this.buf, this.cap * 8);
+			this.buf = nb;
+			this.cap = new_cap;
+			return true;
+		};
+
+		def push_arena(void* node, standard::memory::allocators::stdarena::Arena* a) -> bool
+		{
+			void** slot;
+			if (this.len >= this.cap)
+			{
+				if (!this._grow_arena(a)) { return false; };
+			};
+			slot  = (void**)this.buf + this.len;
+			*slot = node;
+			this.len++;
 			return true;
 		};
 
@@ -143,6 +182,33 @@ namespace json
 			memcpy(nv, this.vals, this.cap * 8);
 			ffree((u64)this.keys);
 			ffree((u64)this.vals);
+			this.keys = nk;
+			this.vals = nv;
+			this.cap  = new_cap;
+			return true;
+		};
+
+		// Arena-backed init: keys and vals slabs from arena.
+		def _init_arena(standard::memory::allocators::stdarena::Arena* a) -> void
+		{
+			this.cap  = 8;
+			this.keys = (@)standard::memory::allocators::stdarena::alloc(a, this.cap * 8);
+			this.vals = (@)standard::memory::allocators::stdarena::alloc(a, this.cap * 8);
+			return;
+		};
+
+		// Arena-backed grow: old slabs abandoned in arena.
+		def _grow_arena(standard::memory::allocators::stdarena::Arena* a) -> bool
+		{
+			void*  nk, nv;
+			size_t new_cap;
+			new_cap = this.cap * 2;
+			nk      = (@)standard::memory::allocators::stdarena::alloc(a, new_cap * 8);
+			if ((u64)nk == 0) { return false; };
+			nv = (@)standard::memory::allocators::stdarena::alloc(a, new_cap * 8);
+			if ((u64)nv == 0) { return false; };
+			memcpy(nk, this.keys, this.cap * 8);
+			memcpy(nv, this.vals, this.cap * 8);
 			this.keys = nk;
 			this.vals = nv;
 			this.cap  = new_cap;
@@ -362,6 +428,20 @@ namespace json
 			return;
 		};
 
+		def set_array_arena(standard::memory::allocators::stdarena::Arena* a) -> void
+		{
+			this.type = JSON_ARRAY;
+			this.arr._init_arena(a);
+			return;
+		};
+
+		def set_object_arena(standard::memory::allocators::stdarena::Arena* a) -> void
+		{
+			this.type = JSON_OBJECT;
+			this.obj._init_arena(a);
+			return;
+		};
+
 		def as_bool() -> bool
 		{
 			if (this.type == JSON_BOOL) { return this.b; };
@@ -473,6 +553,288 @@ namespace json
 		n.__exit();
 		ffree((u64)p);
 		return;
+	};
+
+	// =========================================================================
+	// JSONParserFast - arena-backed parser; no per-node fmalloc
+	//
+	// Backed by standard::memory::allocators::stdarena::Arena.
+	// One arena covers both JSONNode structs and string data.
+	// arena_destroy frees everything in two OS calls regardless of node count.
+	// =========================================================================
+
+	object JSONParserFast
+	{
+		byte*                                       src;
+		int                                         pos, len, error;
+		standard::memory::allocators::stdarena::Arena* arena;
+
+		// text_len must be the byte length of text (e.g. bytes_read from fread).
+		// No strlen call -- caller provides the length.
+		def __init(byte* text, int text_len, standard::memory::allocators::stdarena::Arena* a) -> this
+		{
+			this.src   = text;
+			this.len   = text_len;
+			this.arena = a;
+			return this;
+		};
+
+		def __exit() -> void
+		{
+			return;
+		};
+
+		def ok() -> bool
+		{
+			return this.error == 0;
+		};
+
+		def _skip_ws() -> void
+		{
+			char c;
+			while (this.pos < this.len)
+			{
+				c = (char)this.src[this.pos];
+				if (c == ' ' | c == '\t' | c == '\n' | c == '\r')
+				{
+					this.pos = this.pos + 1;
+				}
+				else { break; };
+			};
+			return;
+		};
+
+		def _peek() -> char
+		{
+			if (this.pos >= this.len) { return '\x00'; };
+			return (char)this.src[this.pos];
+		};
+
+		def _adv() -> char
+		{
+			char c;
+			if (this.pos >= this.len) { return '\x00'; };
+			c        = (char)this.src[this.pos];
+			this.pos = this.pos + 1;
+			return c;
+		};
+
+		def _parse_string(JSONNode* node) -> bool
+		{
+			byte* s;
+			int   start, slen, j;
+			char  c;
+			this._adv();
+			start = this.pos;
+			while (this.pos < this.len)
+			{
+				c = (char)this.src[this.pos];
+				if (c == '"') { break; };
+				if (c == '\\') { this.pos = this.pos + 1; };
+				this.pos = this.pos + 1;
+				slen     = slen + 1;
+			};
+			if (this._peek() != '"') { this.error = 1; return false; };
+			s = (byte*)standard::memory::allocators::stdarena::alloc(this.arena, (size_t)(slen + 1));
+			if ((u64)s == 0) { this.error = 2; return false; };
+			this.pos = start;
+			while (j < slen)
+			{
+				c = (char)this.src[this.pos];
+				if (c == '\\')
+				{
+					this.pos = this.pos + 1;
+					c = (char)this.src[this.pos];
+					if      (c == '"')  { s[j] = '"';  }
+					elif    (c == '\\') { s[j] = '\\'; }
+					elif    (c == 'n')  { s[j] = '\n'; }
+					elif    (c == 'r')  { s[j] = '\r'; }
+					elif    (c == 't')  { s[j] = '\t'; }
+					else                { s[j] = (byte)c; };
+				}
+				else { s[j] = (byte)c; };
+				this.pos = this.pos + 1;
+				j = j + 1;
+			};
+			s[slen]   = '\x00';
+			this._adv();
+			// arena strings are not individually freed — skip the old free check
+			node.s    = s;
+			node.type = JSON_STRING;
+			return true;
+		};
+
+		def _parse_number(JSONNode* node) -> bool
+		{
+			bool   is_float, neg;
+			i64    iv;
+			double fv, fdiv;
+			char   c;
+			c = this._peek();
+			if (c == '-') { neg = true; this._adv(); };
+			while (this.pos < this.len)
+			{
+				c = (char)this.src[this.pos];
+				if (c >= '0' & c <= '9')
+				{
+					iv = iv * 10 + (c - '0');
+					this.pos = this.pos + 1;
+				}
+				else { break; };
+			};
+			if (this._peek() == '.')
+			{
+				is_float = true;
+				fdiv     = 1.0;
+				fv       = (double)iv;
+				this._adv();
+				while (this.pos < this.len)
+				{
+					c = (char)this.src[this.pos];
+					if (c >= '0' & c <= '9')
+					{
+						fdiv = fdiv * 10.0;
+						fv   = fv + (double)(c - '0') / fdiv;
+						this.pos = this.pos + 1;
+					}
+					else { break; };
+				};
+			};
+			if (is_float) { node.set_float(neg ? -fv : fv); }
+			else          { node.set_int(neg ? -iv : iv);   };
+			return true;
+		};
+
+		def _parse_value(JSONNode* node) -> bool;
+
+		def _alloc_child() -> JSONNode*
+		{
+			JSONNode* child;
+			size_t    sz;
+			sz    = sizeof(JSONNode) / sizeof(byte);
+			child = (JSONNode*)standard::memory::allocators::stdarena::alloc(this.arena, sz);
+			if ((u64)child == 0) { this.error = 2; return (JSONNode*)0; };
+			// Zero-initialize — arena memory is uninitialized
+			child.type    = JSON_NULL;
+			child.b       = false;
+			child.i       = 0;
+			child.f       = 0.0;
+			child.s       = (byte*)0;
+			child.arr.buf = (@)0;
+			child.arr.len = 0;
+			child.arr.cap = 0;
+			child.obj.keys = (@)0;
+			child.obj.vals = (@)0;
+			child.obj.len  = 0;
+			child.obj.cap  = 0;
+			return child;
+		};
+
+		def _parse_array(JSONNode* node) -> bool
+		{
+			JSONNode* child;
+			node.set_array_arena(this.arena);
+			this._adv();
+			this._skip_ws();
+			if (this._peek() == ']') { this._adv(); return true; };
+			while (this.pos < this.len)
+			{
+				child = this._alloc_child();
+				if ((u64)child == 0) { return false; };
+				if (!node.arr.push_arena((void*)child, this.arena)) { this.error = 2; return false; };
+				if (!this._parse_value(child)) { return false; };
+				this._skip_ws();
+				if (this._peek() == ']') { this._adv(); return true; };
+				if (this._peek() != ',') { this.error = 1; return false; };
+				this._adv();
+				this._skip_ws();
+			};
+			this.error = 1;
+			return false;
+		};
+
+		def _parse_object(JSONNode* node) -> bool
+		{
+			byte[256] key_buf;
+			JSONNode* child;
+			byte*     kc;
+			byte**    ks;
+			void**    vs;
+			int       ki, kl;
+			char      c;
+			node.set_object_arena(this.arena);
+			this._adv();
+			this._skip_ws();
+			if (this._peek() == '}') { this._adv(); return true; };
+			while (this.pos < this.len)
+			{
+				this._skip_ws();
+				if (this._peek() != '"') { this.error = 1; return false; };
+				this._adv();
+				ki = 0;
+				while (this.pos < this.len)
+				{
+					c = (char)this.src[this.pos];
+					if (c == '"') { break; };
+					if (c == '\\') { this.pos = this.pos + 1; c = (char)this.src[this.pos]; };
+					if (ki < 255) { key_buf[ki] = (byte)c; ki = ki + 1; };
+					this.pos = this.pos + 1;
+				};
+				key_buf[ki] = '\x00';
+				if (this._peek() != '"') { this.error = 1; return false; };
+				this._adv();
+				this._skip_ws();
+				if (this._peek() != ':') { this.error = 1; return false; };
+				this._adv();
+				this._skip_ws();
+				child = this._alloc_child();
+				if ((u64)child == 0) { return false; };
+				// Copy key into arena string slab
+				kl = ki;
+				kc = (byte*)standard::memory::allocators::stdarena::alloc(this.arena, (size_t)(kl + 1));
+				if ((u64)kc == 0) { this.error = 2; return false; };
+				ki = 0;
+				while (ki <= kl) { kc[ki] = key_buf[ki]; ki = ki + 1; };
+				// Push directly into obj — arena-backed grow, no ffree
+				if (node.obj.len >= node.obj.cap)
+				{
+					if (!node.obj._grow_arena(this.arena)) { this.error = 2; return false; };
+				};
+				ks = (byte**)node.obj.keys;
+				vs = (void**)node.obj.vals;
+				ks[node.obj.len] = kc;
+				vs[node.obj.len] = (void*)child;
+				node.obj.len++;
+				if (!this._parse_value(child)) { return false; };
+				this._skip_ws();
+				if (this._peek() == '}') { this._adv(); return true; };
+				if (this._peek() != ',') { this.error = 1; return false; };
+				this._adv();
+			};
+			this.error = 1;
+			return false;
+		};
+
+		def _parse_value(JSONNode* node) -> bool
+		{
+			char c;
+			this._skip_ws();
+			c = this._peek();
+			if      (c == '"')                          { return this._parse_string(node); }
+			elif    (c == '[')                          { return this._parse_array(node);  }
+			elif    (c == '{')                          { return this._parse_object(node); }
+			elif    (c == 't') { this.pos = this.pos + 4; node.set_bool(true);  return true; }
+			elif    (c == 'f') { this.pos = this.pos + 5; node.set_bool(false); return true; }
+			elif    (c == 'n') { this.pos = this.pos + 4; node.set_null();      return true; }
+			elif    (c == '-' | (c >= '0' & c <= '9')) { return this._parse_number(node); };
+			this.error = 1;
+			return false;
+		};
+
+		def parse(JSONNode* node) -> bool
+		{
+			return this._parse_value(node);
+		};
 	};
 
 	// =========================================================================

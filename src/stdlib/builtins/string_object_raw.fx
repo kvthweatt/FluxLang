@@ -121,6 +121,15 @@ namespace standard
                 return this;
             };
 
+            def __init(byte* x, int len) -> this
+            {
+                this.value = x;
+                this.length = len;
+                this.lines = this.split_lines();
+                this.line_count = this.count_lines();
+                return this;
+            };
+
             def __exit() -> void
             {
                 return;

@@ -1246,6 +1246,275 @@ namespace standard
                 };
             };
 
+            namespace stdarena
+            {
+                // ===== ARENA ALLOCATOR =====
+                //
+                // Bump-pointer allocator over a linked chain of OS-backed chunks.
+                // Designed to match the aggression of stdheap:
+                //
+                //   alloc  : aligned bump -- _align8 inlined, flat single-level
+                //            switch, no per-alloc accounting write.
+                //   free   : no-op -- individual frees are unsupported by design.
+                //   reset  : walk chunk chain, reset all offsets to ARENA_HDR.
+                //   destroy: walk chunk chain, stdheap::ffree each chunk base.
+                //   mark   : snapshot current chunk + offset for cheap scope rewind.
+                //   rewind : restore to a previously saved mark, bulk-freeing any
+                //            chunks allocated after the mark.
+                //
+                // Chunk growth mirrors the heap slab schedule:
+                //   default_chunk: 1 MB initial
+                //   cap          : 64 MB per chunk maximum
+                //   growth       : doubles each new chunk until cap
+                //
+                // All allocations are 8-byte aligned via (size + 7) & ~7, inlined.
+                // No per-alloc accounting -- total_allocated removed entirely.
+                // Zero OS memory consumed until first alloc call.
+                // Backed entirely by stdheap::fmalloc / stdheap::ffree.
+
+                // Chunk header -- lives at the base of each chunk allocation.
+                // User data follows immediately after the header.
+
+                struct ArenaChunk
+                {
+                    ArenaChunk* next;
+                    size_t      capacity;
+                    size_t      offset;
+                };
+
+                // sizeof(ArenaChunk) = 24 bytes; padded to 32 for alignment.
+                #def ARENA_HDR (size_t)32;
+
+                // Saved position -- used by arena_mark / arena_rewind.
+                struct ArenaMark
+                {
+                    ArenaChunk* chunk;
+                    size_t      offset;
+                };
+
+                // Top-level arena descriptor.
+                // total_allocated removed -- no hot-path accounting write.
+                struct Arena
+                {
+                    ArenaChunk* head;
+                    size_t      next_chunk_size;
+                    size_t      chunk_size_cap;
+                };
+
+                #def ARENA_DEFAULT_CHUNK  (size_t)1048576;
+                #def ARENA_CHUNK_SIZE_CAP (size_t)67108864;
+
+                // Allocate a new chunk of at least min_bytes usable space.
+                // Cold path only -- called when the current chunk is full.
+                def _new_chunk(Arena* a, size_t min_bytes) -> bool
+                {
+                    size_t      need, sz;
+                    ArenaChunk* chunk;
+                    u64         raw;
+                    need = min_bytes + ARENA_HDR;
+                    sz   = a.next_chunk_size;
+                    switch (need > sz) { case (1) { sz = need; } default {}; };
+                    raw = stdheap::fmalloc(sz);
+                    switch (raw == (u64)0) { case (1) { return false; } default {}; };
+                    chunk          = (ArenaChunk*)raw;
+                    chunk.next     = a.head;
+                    chunk.capacity = sz;
+                    chunk.offset   = ARENA_HDR;
+                    a.head         = chunk;
+                    sz = a.next_chunk_size * (size_t)2;
+                    switch (sz > a.chunk_size_cap) { case (1) { sz = a.chunk_size_cap; } default {}; };
+                    a.next_chunk_size = sz;
+                    return true;
+                };
+
+                // Initialise an arena. No memory consumed until first alloc.
+                def arena_init(Arena* a) -> void
+                {
+                    a.head            = (ArenaChunk*)0;
+                    a.next_chunk_size = ARENA_DEFAULT_CHUNK;
+                    a.chunk_size_cap  = ARENA_CHUNK_SIZE_CAP;
+                };
+
+                // Initialise with a custom first chunk size.
+                def arena_init_sized(Arena* a, size_t first_chunk) -> void
+                {
+                    a.head            = (ArenaChunk*)0;
+                    a.next_chunk_size = first_chunk;
+                    a.chunk_size_cap  = ARENA_CHUNK_SIZE_CAP;
+                };
+
+                // Allocate sz bytes. Always 8-byte aligned. Returns null on OOM.
+                // _align8 inlined. No tracking write.
+                // Outer switch guards null head; inner switch is the bounds check.
+                def alloc(Arena* a, size_t sz) -> void*
+                {
+                    size_t      aligned, new_offset;
+                    ArenaChunk* c;
+                    u64         ptr;
+                    aligned = (sz + (size_t)7) & (`!7);
+                    c       = a.head;
+                    switch ((u64)c != (u64)0)
+                    {
+                        case (1)
+                        {
+                            new_offset = c.offset + aligned;
+                            switch (new_offset <= c.capacity)
+                            {
+                                case (1)
+                                {
+                                    ptr      = (u64)c + (u64)c.offset;
+                                    c.offset = new_offset;
+                                    return (void*)ptr;
+                                }
+                                default {};
+                            };
+                        }
+                        default {};
+                    };
+                    switch (!_new_chunk(a, aligned)) { case (1) { return (void*)0; } default {}; };
+                    c        = a.head;
+                    ptr      = (u64)c + (u64)c.offset;
+                    c.offset = c.offset + aligned;
+                    return (void*)ptr;
+                };
+
+                // Allocate sz bytes, zero before returning.
+                def alloc_zero(Arena* a, size_t sz) -> void*
+                {
+                    void*  p;
+                    byte*  b;
+                    size_t i;
+                    p = alloc(a, sz);
+                    switch ((u64)p == (u64)0) { case (1) { return (void*)0; } default {}; };
+                    b = (byte*)p;
+                    while (i < sz) { b[i] = (byte)0; i++; };
+                    return p;
+                };
+
+                // Copy sz bytes from src into arena memory.
+                def alloc_copy(Arena* a, void* src, size_t sz) -> void*
+                {
+                    void*  p;
+                    byte*  d;
+                    byte*  s;
+                    size_t i;
+                    p = alloc(a, sz);
+                    switch ((u64)p == (u64)0) { case (1) { return (void*)0; } default {}; };
+                    d = (byte*)p;
+                    s = (byte*)src;
+                    while (i < sz) { d[i] = s[i]; i++; };
+                    return p;
+                };
+
+                // Copy a null-terminated string into the arena (including the null).
+                def alloc_str(Arena* a, byte* src) -> byte*
+                {
+                    size_t n;
+                    byte*  p;
+                    n = (size_t)0;
+                    while (src[n] != (byte)0) { n++; };
+                    n++;
+                    p = (byte*)alloc(a, n);
+                    switch ((u64)p == (u64)0) { case (1) { return (byte*)0; } default {}; };
+                    n = (size_t)0;
+                    while (src[n] != (byte)0) { p[n] = src[n]; n++; };
+                    p[n] = (byte)0;
+                    return p;
+                };
+
+                // Save the current bump position.
+                def arena_mark(Arena* a) -> ArenaMark
+                {
+                    ArenaMark   m;
+                    ArenaChunk* h;
+                    h        = a.head;
+                    m.chunk  = h;
+                    switch ((u64)h != (u64)0)
+                    {
+                        case (1) { m.offset = h.offset; }
+                        default  { m.offset = (size_t)0; };
+                    };
+                    return m;
+                };
+
+                // Rewind to a saved mark. Frees any chunks allocated after it.
+                def arena_rewind(Arena* a, ArenaMark* m) -> void
+                {
+                    ArenaChunk* c;
+                    ArenaChunk* target;
+                    ArenaChunk* next;
+                    target = m.chunk;
+                    c      = a.head;
+                    while ((u64)c != (u64)target & (u64)c != (u64)0)
+                    {
+                        next = c.next;
+                        stdheap::ffree((u64)c);
+                        c = next;
+                    };
+                    a.head = target;
+                    switch ((u64)target != (u64)0) { case (1) { target.offset = m.offset; } default {}; };
+                };
+
+                // Reset all chunks to empty. Keeps OS memory for reuse.
+                def arena_reset(Arena* a) -> void
+                {
+                    ArenaChunk* c;
+                    c = a.head;
+                    while ((u64)c != (u64)0)
+                    {
+                        c.offset = ARENA_HDR;
+                        c = c.next;
+                    };
+                };
+
+                // Release all chunks back to stdheap. Arena is empty after this.
+                def arena_destroy(Arena* a) -> void
+                {
+                    ArenaChunk* c;
+                    ArenaChunk* next;
+                    c = a.head;
+                    while ((u64)c != (u64)0)
+                    {
+                        next = c.next;
+                        stdheap::ffree((u64)c);
+                        c = next;
+                    };
+                    a.head = (ArenaChunk*)0;
+                };
+
+                // Total bytes consumed across all live chunks (excluding headers).
+                // Computes used as committed minus remaining free space in head chunk.
+                def arena_used(Arena* a) -> size_t
+                {
+                    ArenaChunk* c;
+                    size_t      total;
+                    c     = a.head;
+                    total = (size_t)0;
+                    while ((u64)c != (u64)0)
+                    {
+                        total = total + c.offset - ARENA_HDR;
+                        c     = c.next;
+                    };
+                    return total;
+                };
+
+                // Total bytes committed across all live chunks (excluding headers).
+                def arena_committed(Arena* a) -> size_t
+                {
+                    ArenaChunk* c;
+                    size_t      total;
+                    c     = a.head;
+                    total = (size_t)0;
+                    while ((u64)c != (u64)0)
+                    {
+                        total = total + c.capacity - ARENA_HDR;
+                        c     = c.next;
+                    };
+                    return total;
+                };
+
+            };
+
             namespace stdring
             {
                 // ===== RING (CIRCULAR) ALLOCATOR =====
