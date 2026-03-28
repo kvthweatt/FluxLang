@@ -6,6 +6,7 @@
 #import "json.fx";
 
 using standard::io::console,
+	standard::strings,
       json;
 
 global int g_pass, g_fail;
@@ -351,10 +352,10 @@ def main() -> int
 	test_roundtrip();
 
 	print("\n\0");
-	standard::strings::i32str(g_pass, @num_buf[0]);
+	i32str(g_pass, @num_buf[0]);
 	print(@num_buf[0]);
 	print(" passed, \0");
-	standard::strings::i32str(g_fail, @num_buf[0]);
+	i32str(g_fail, @num_buf[0]);
 	print(@num_buf[0]);
 	print(" failed\n\0");
 

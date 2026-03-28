@@ -26,9 +26,10 @@ namespace standard
         def strlen(byte* ps) -> int
         {
             int c = 0;
+            byte* ch;
             while (true)
             {
-                byte* ch = ps++;
+                ch = ps++;
 
                 if (*ch == 0)
                 {
