@@ -26,7 +26,7 @@ namespace standard
                 };
 
                 // SHA-256 constants (first 32 bits of the fractional parts of the cube roots of the first 64 primes)
-                const u32[64] K = [
+                global u32[64] K = [
                     0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5,
                     0x3956C25B, 0x59F111F1, 0x923F82A4, 0xAB1C5ED5,
                     0xD807AA98, 0x12835B01, 0x243185BE, 0x550C7DC3,
@@ -235,6 +235,289 @@ namespace standard
                 };
             }; // SHA256
 
+            namespace SHA384
+            {
+                struct SHA384_CTX
+                {
+                    u64[8] state;           // Hash state (8 x 64-bit words)
+                    byte[128] buffer;       // Message block buffer (1024-bit block)
+                    u64 bitlen_lo;          // Message bit length low 64 bits
+                    u64 bitlen_hi;          // Message bit length high 64 bits (for >2^64 bit messages)
+                    u32 buflen;             // Current bytes in buffer
+                };
+
+                // SHA-512/384 round constants
+                // First 64 bits of the fractional parts of the cube roots of the first 80 primes
+                const u64[80] K384 = [
+                    0x428A2F98D728AE22u, 0x7137449123EF65CDu,
+                    0xB5C0FBCFEC4D3B2Fu, 0xE9B5DBA58189DBBCu,
+                    0x3956C25BF348B538u, 0x59F111F1B605D019u,
+                    0x923F82A4AF194F9Bu, 0xAB1C5ED5DA6D8118u,
+                    0xD807AA98A3030242u, 0x12835B0145706FBEu,
+                    0x243185BE4EE4B28Cu, 0x550C7DC3D5FFB4E2u,
+                    0x72BE5D74F27B896Fu, 0x80DEB1FE3B1696B1u,
+                    0x9BDC06A725C71235u, 0xC19BF174CF692694u,
+                    0xE49B69C19EF14AD2u, 0xEFBE4786384F25E3u,
+                    0x0FC19DC68B8CD5B5u, 0x240CA1CC77AC9C65u,
+                    0x2DE92C6F592B0275u, 0x4A7484AA6EA6E483u,
+                    0x5CB0A9DCBD41FBD4u, 0x76F988DA831153B5u,
+                    0x983E5152EE66DFABu, 0xA831C66D2DB43210u,
+                    0xB00327C898FB213Fu, 0xBF597FC7BEEF0EE4u,
+                    0xC6E00BF33DA88FC2u, 0xD5A79147930AA725u,
+                    0x06CA6351E003826Fu, 0x142929670A0E6E70u,
+                    0x27B70A8546D22FFCu, 0x2E1B21385C26C926u,
+                    0x4D2C6DFC5AC42AEDu, 0x53380D139D95B3DFu,
+                    0x650A73548BAF63DEu, 0x766A0ABB3C77B2A8u,
+                    0x81C2C92E47EDAEE6u, 0x92722C851482353Bu,
+                    0xA2BFE8A14CF10364u, 0xA81A664BBC423001u,
+                    0xC24B8B70D0F89791u, 0xC76C51A30654BE30u,
+                    0xD192E819D6EF5218u, 0xD69906245565A910u,
+                    0xF40E35855771202Au, 0x106AA07032BBD1B8u,
+                    0x19A4C116B8D2D0C8u, 0x1E376C085141AB53u,
+                    0x2748774CDF8EEB99u, 0x34B0BCB5E19B48A8u,
+                    0x391C0CB3C5C95A63u, 0x4ED8AA4AE3418ACBu,
+                    0x5B9CCA4F7763E373u, 0x682E6FF3D6B2B8A3u,
+                    0x748F82EE5DEFB2FCu, 0x78A5636F43172F60u,
+                    0x84C87814A1F0AB72u, 0x8CC702081A6439ECu,
+                    0x90BEFFFA23631E28u, 0xA4506CEBDE82BDE9u,
+                    0xBEF9A3F7B2C67915u, 0xC67178F2E372532Bu,
+                    0xCA273ECEEA26619Cu, 0xD186B8C721C0C207u,
+                    0xEADA7DD6CDE0EB1Eu, 0xF57D4F7FEE6ED178u,
+                    0x06F067AA72176FBAu, 0x0A637DC5A2C898A6u,
+                    0x113F9804BEF90DAEu, 0x1B710B35131C471Bu,
+                    0x28DB77F523047D84u, 0x32CAAB7B40C72493u,
+                    0x3C9EBE0A15C9BEBCu, 0x431D67C49C100D4Cu,
+                    0x4CC5D4BECB3E42B6u, 0x597F299CFC657E2Au,
+                    0x5FCB6FAB3AD6FAECu, 0x6C44198C4A475817u
+                ];
+
+                // 64-bit right rotate
+                def rotr64(u64 value, u64 n) -> u64
+                {
+                    return (value >> n) `| (value << (64u - n));
+                };
+
+                // SHA-512/384 logical functions
+                def ch64(u64 x, u64 y, u64 z) -> u64
+                {
+                    return (x `& y) `^^ (`!x `& z);
+                };
+
+                def maj64(u64 x, u64 y, u64 z) -> u64
+                {
+                    return (x `& y) `^^ (x `& z) `^^ (y `& z);
+                };
+
+                // Capital-Sigma functions
+                def Sigma0(u64 x) -> u64
+                {
+                    return rotr64(x, 28u) `^^ rotr64(x, 34u) `^^ rotr64(x, 39u);
+                };
+
+                def Sigma1(u64 x) -> u64
+                {
+                    return rotr64(x, 14u) `^^ rotr64(x, 18u) `^^ rotr64(x, 41u);
+                };
+
+                // Lower-sigma (message schedule) functions
+                def sigma0_64(u64 x) -> u64
+                {
+                    return rotr64(x, 1u) `^^ rotr64(x, 8u) `^^ (x >> 7u);
+                };
+
+                def sigma1_64(u64 x) -> u64
+                {
+                    return rotr64(x, 19u) `^^ rotr64(x, 61u) `^^ (x >> 6u);
+                };
+
+                // Initialize SHA-384 context
+                // IV differs from SHA-512 — these are the SHA-384-specific initial values
+                def sha384_init(SHA384_CTX* ctx) -> void
+                {
+                    ctx.state[0] = 0xCBBB9D5DC1059ED8u;
+                    ctx.state[1] = 0x629A292A367CD507u;
+                    ctx.state[2] = 0x9159015A3070DD17u;
+                    ctx.state[3] = 0x152FECD8F70E5939u;
+                    ctx.state[4] = 0x67332667FFC00B31u;
+                    ctx.state[5] = 0x8EB44A8768581511u;
+                    ctx.state[6] = 0xDB0C2E0D64F98FA7u;
+                    ctx.state[7] = 0x47B5481DBEFA4FA4u;
+                    ctx.bitlen_lo = 0u;
+                    ctx.bitlen_hi = 0u;
+                    ctx.buflen = 0u;
+                };
+
+                // Process one 1024-bit (128-byte) block
+                def sha384_transform(SHA384_CTX* ctx, byte* datax) -> void
+                {
+                    u64[80] W;
+                    u64 a, b, c, d, e, f, g, h, t1, t2;
+                    u32 i;
+
+                    // Load message schedule from block (big-endian 64-bit words)
+                    for (i = 0; i < 16; i++)
+                    {
+                        W[i] = ((u64)(datax[i * 8]     & 0xFF) << 56u) |
+                               ((u64)(datax[i * 8 + 1] & 0xFF) << 48u) |
+                               ((u64)(datax[i * 8 + 2] & 0xFF) << 40u) |
+                               ((u64)(datax[i * 8 + 3] & 0xFF) << 32u) |
+                               ((u64)(datax[i * 8 + 4] & 0xFF) << 24u) |
+                               ((u64)(datax[i * 8 + 5] & 0xFF) << 16u) |
+                               ((u64)(datax[i * 8 + 6] & 0xFF) << 8u)  |
+                                (u64)(datax[i * 8 + 7] & 0xFF);
+                    };
+
+                    for (i = 16; i < 80; i++)
+                    {
+                        W[i] = sigma1_64(W[i - 2]) + W[i - 7] + sigma0_64(W[i - 15]) + W[i - 16];
+                    };
+
+                    a = ctx.state[0];
+                    b = ctx.state[1];
+                    c = ctx.state[2];
+                    d = ctx.state[3];
+                    e = ctx.state[4];
+                    f = ctx.state[5];
+                    g = ctx.state[6];
+                    h = ctx.state[7];
+
+                    for (i = 0; i < 80; i++)
+                    {
+                        t1 = h + Sigma1(e) + ch64(e, f, g) + K384[i] + W[i];
+                        t2 = Sigma0(a) + maj64(a, b, c);
+                        h = g;
+                        g = f;
+                        f = e;
+                        e = d + t1;
+                        d = c;
+                        c = b;
+                        b = a;
+                        a = t1 + t2;
+                    };
+
+                    ctx.state[0] += a;
+                    ctx.state[1] += b;
+                    ctx.state[2] += c;
+                    ctx.state[3] += d;
+                    ctx.state[4] += e;
+                    ctx.state[5] += f;
+                    ctx.state[6] += g;
+                    ctx.state[7] += h;
+                };
+
+                // Feed data into the SHA-384 context
+                def sha384_update(SHA384_CTX* ctx, byte* datax, u64 len) -> void
+                {
+                    u64 i;
+
+                    for (i = 0; i < len; i++)
+                    {
+                        ctx.buffer[ctx.buflen] = datax[i];
+                        ctx.buflen = ctx.buflen + 1u;
+
+                        if (ctx.buflen == 128u)
+                        {
+                            sha384_transform(ctx, ctx.buffer);
+                            // Add 1024 bits to the running length
+                            ctx.bitlen_lo += 1024u;
+                            if (ctx.bitlen_lo == 0u)
+                            {
+                                ctx.bitlen_hi += 1u;
+                            };
+                            ctx.buflen = 0u;
+                        };
+                    };
+                };
+
+                // Finalize and write 48-byte digest to hash
+                def sha384_final(SHA384_CTX* ctx, byte* hash) -> void
+                {
+                    u32 i;
+                    u64 total_bits_lo, total_bits_hi;
+
+                    i = ctx.buflen;
+
+                    // Append 0x80 padding byte
+                    ctx.buffer[i] = (byte)0x80;
+                    i++;
+
+                    // SHA-384/512 reserves the last 16 bytes of the block for the
+                    // 128-bit message length. Pad to byte 112 (block size 128 - 16).
+                    if (ctx.buflen < 112u)
+                    {
+                        while (i < 112u)
+                        {
+                            ctx.buffer[i] = (byte)0;
+                            i++;
+                        };
+                    }
+                    else
+                    {
+                        while (i < 128u)
+                        {
+                            ctx.buffer[i] = (byte)0;
+                            i++;
+                        };
+                        sha384_transform(ctx, ctx.buffer);
+                        for (i = 0; i < 112; i++)
+                        {
+                            ctx.buffer[i] = (byte)0;
+                        };
+                    };
+
+                    // Accumulate remaining buffered bytes into bit length
+                    total_bits_lo = ctx.bitlen_lo + ((u64)ctx.buflen * 8u);
+                    total_bits_hi = ctx.bitlen_hi;
+                    if (total_bits_lo < ctx.bitlen_lo)
+                    {
+                        total_bits_hi += 1u;
+                    };
+
+                    // Append 128-bit big-endian length (high 64 bits first)
+                    ctx.buffer[112] = (byte)(total_bits_hi >> 56u);
+                    ctx.buffer[113] = (byte)(total_bits_hi >> 48u);
+                    ctx.buffer[114] = (byte)(total_bits_hi >> 40u);
+                    ctx.buffer[115] = (byte)(total_bits_hi >> 32u);
+                    ctx.buffer[116] = (byte)(total_bits_hi >> 24u);
+                    ctx.buffer[117] = (byte)(total_bits_hi >> 16u);
+                    ctx.buffer[118] = (byte)(total_bits_hi >> 8u);
+                    ctx.buffer[119] = (byte)(total_bits_hi);
+                    ctx.buffer[120] = (byte)(total_bits_lo >> 56u);
+                    ctx.buffer[121] = (byte)(total_bits_lo >> 48u);
+                    ctx.buffer[122] = (byte)(total_bits_lo >> 40u);
+                    ctx.buffer[123] = (byte)(total_bits_lo >> 32u);
+                    ctx.buffer[124] = (byte)(total_bits_lo >> 24u);
+                    ctx.buffer[125] = (byte)(total_bits_lo >> 16u);
+                    ctx.buffer[126] = (byte)(total_bits_lo >> 8u);
+                    ctx.buffer[127] = (byte)(total_bits_lo);
+
+                    sha384_transform(ctx, ctx.buffer);
+
+                    // Write first 6 state words as big-endian bytes (48 bytes total)
+                    // State words 6 and 7 are discarded — this is what makes it SHA-384
+                    // rather than SHA-512.
+                    for (i = 0; i < 8; i++)
+                    {
+                        hash[i]      = (byte)(ctx.state[0] >> (56u - (u64)i * 8u));
+                        hash[i + 8]  = (byte)(ctx.state[1] >> (56u - (u64)i * 8u));
+                        hash[i + 16] = (byte)(ctx.state[2] >> (56u - (u64)i * 8u));
+                        hash[i + 24] = (byte)(ctx.state[3] >> (56u - (u64)i * 8u));
+                        hash[i + 32] = (byte)(ctx.state[4] >> (56u - (u64)i * 8u));
+                        hash[i + 40] = (byte)(ctx.state[5] >> (56u - (u64)i * 8u));
+                    };
+                };
+
+                // Convenience: hash a single buffer in one call
+                def sha384(byte* datax, u64 len, byte* hash) -> void
+                {
+                    SHA384_CTX ctx;
+                    sha384_init(@ctx);
+                    sha384_update(@ctx, datax, len);
+                    sha384_final(@ctx, hash);
+                };
+
+            }; // SHA384
+
             namespace MD5
             {
                 struct MD5_CTX
@@ -245,7 +528,7 @@ namespace standard
                 };
 
                 // MD5 constants - sine-based values
-                const u32[64] K = [
+                global u32[64] MD5_K = [
                     0xD76AA478, 0xE8C7B756, 0x242070DB, 0xC1BDCEEE,
                     0xF57C0FAF, 0x4787C62A, 0xA8304613, 0xFD469501,
                     0x698098D8, 0x8B44F7AF, 0xFFFF5BB1, 0x895CD7BE,
@@ -265,7 +548,7 @@ namespace standard
                 ];
                 
                 // Shift amounts for each round
-                const u32[64] S = [
+                global u32[64] MD5_S = [
                     7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,
                     5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,
                     4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,
@@ -363,11 +646,11 @@ namespace standard
                             };
                         };
                         
-                        f_val = f_val + A + K[i] + M[g];
+                        f_val = f_val + A + MD5_K[i] + M[g];
                         A = D;
                         D = C;
                         C = B;
-                        B = B + rotl(f_val, S[i]);
+                        B = B + rotl(f_val, MD5_S[i]);
                     };
                     
                     // Add this chunk's hash to result so far
@@ -847,8 +1130,6 @@ namespace standard
                 };
             };
         };
-    };
-};
 
         namespace X25519
         {
@@ -857,84 +1138,120 @@ namespace standard
             //
             // Curve: y² = x³ + 486662x² + x  over  GF(p),  p = 2^255 - 19
             //
-            // Field elements: 5 x u64 limbs in radix-2^51 (51-bit limbs).
-            // Each limb holds at most 51 bits; products fit in u64 without overflow
-            // before reduction. Total: 40 bytes per field element.
+            // Field elements: 10 x i64 limbs in radix-2^25.5
+            //   Odd  limbs (1,3,5,7,9) hold up to 25 bits each.
+            //   Even limbs (0,2,4,6,8) hold up to 26 bits each.
+            //
+            // With 26-bit limbs, a_i*b_j <= 2^52 and sums of up to 5 such products
+            // times 19 stay well below 2^64, so all intermediate arithmetic fits in
+            // signed 64-bit integers without overflow.
+            //
+            // This is the standard "ref10" representation used by NaCl/libsodium.
             //
             // Public API:
             //   x25519(out[32], scalar[32], point[32])  -- DH shared secret
             //   x25519_pubkey(out[32], scalar[32])       -- scalar x base point
             // =========================================================================
 
-            #def FE_MASK51 (u64)0x7FFFFFFFFFFFF;
-
             struct Fe25519
             {
-                u64[5] v;
+                i64[10] v;
             };
 
-            // Carry-propagate so each limb is < 2^52.
-            def fe_reduce(Fe25519* h) -> void
+            // ---- Field arithmetic ----
+            //
+            // Carry propagation: after addition/subtraction, propagate carries
+            // to keep limbs in their expected ranges.
+            def fe_carry(Fe25519* h) -> void
             {
-                u64 c0, c1, c2, c3, c4;
-                c0 = h.v[0] >> 51; h.v[0] = h.v[0] & FE_MASK51;
-                c1 = h.v[1] >> 51; h.v[1] = (h.v[1] & FE_MASK51) + c0;
-                c2 = h.v[2] >> 51; h.v[2] = (h.v[2] & FE_MASK51) + c1;
-                c3 = h.v[3] >> 51; h.v[3] = (h.v[3] & FE_MASK51) + c2;
-                c4 = h.v[4] >> 51; h.v[4] = (h.v[4] & FE_MASK51) + c3;
-                h.v[0] = h.v[0] + c4 * (u64)19;
-                c0     = h.v[0] >> 51; h.v[0] = h.v[0] & FE_MASK51;
-                h.v[1] = h.v[1] + c0;
+                i64 c0, c1, c2, c3, c4, c5, c6, c7, c8, c9;
+                c0 = (h.v[0] + (i64)33554432) >> 26; h.v[0] -= c0 * (i64)67108864; h.v[1] += c0;
+                c4 = (h.v[4] + (i64)33554432) >> 26; h.v[4] -= c4 * (i64)67108864; h.v[5] += c4;
+                c1 = (h.v[1] + (i64)16777216) >> 25; h.v[1] -= c1 * (i64)33554432; h.v[2] += c1;
+                c5 = (h.v[5] + (i64)16777216) >> 25; h.v[5] -= c5 * (i64)33554432; h.v[6] += c5;
+                c2 = (h.v[2] + (i64)33554432) >> 26; h.v[2] -= c2 * (i64)67108864; h.v[3] += c2;
+                c6 = (h.v[6] + (i64)33554432) >> 26; h.v[6] -= c6 * (i64)67108864; h.v[7] += c6;
+                c3 = (h.v[3] + (i64)16777216) >> 25; h.v[3] -= c3 * (i64)33554432; h.v[4] += c3;
+                c7 = (h.v[7] + (i64)16777216) >> 25; h.v[7] -= c7 * (i64)33554432; h.v[8] += c7;
+                c4 = (h.v[4] + (i64)33554432) >> 26; h.v[4] -= c4 * (i64)67108864; h.v[5] += c4;
+                c8 = (h.v[8] + (i64)33554432) >> 26; h.v[8] -= c8 * (i64)67108864; h.v[9] += c8;
+                c9 = (h.v[9] + (i64)16777216) >> 25; h.v[9] -= c9 * (i64)33554432; h.v[0] += c9 * (i64)19;
+                c0 = (h.v[0] + (i64)33554432) >> 26; h.v[0] -= c0 * (i64)67108864; h.v[1] += c0;
                 return;
             };
 
             def fe_add(Fe25519* out, Fe25519* a, Fe25519* b) -> void
             {
-                out.v[0] = a.v[0] + b.v[0];
-                out.v[1] = a.v[1] + b.v[1];
-                out.v[2] = a.v[2] + b.v[2];
-                out.v[3] = a.v[3] + b.v[3];
-                out.v[4] = a.v[4] + b.v[4];
+                out.v[0] = a.v[0] + b.v[0]; out.v[1] = a.v[1] + b.v[1];
+                out.v[2] = a.v[2] + b.v[2]; out.v[3] = a.v[3] + b.v[3];
+                out.v[4] = a.v[4] + b.v[4]; out.v[5] = a.v[5] + b.v[5];
+                out.v[6] = a.v[6] + b.v[6]; out.v[7] = a.v[7] + b.v[7];
+                out.v[8] = a.v[8] + b.v[8]; out.v[9] = a.v[9] + b.v[9];
                 return;
             };
 
-            // Subtraction: add 2p to stay positive.
             def fe_sub(Fe25519* out, Fe25519* a, Fe25519* b) -> void
             {
-                out.v[0] = a.v[0] + (u64)0xFFFFFFFFFFFDA - b.v[0];
-                out.v[1] = a.v[1] + (u64)0xFFFFFFFFFFFFE - b.v[1];
-                out.v[2] = a.v[2] + (u64)0xFFFFFFFFFFFFE - b.v[2];
-                out.v[3] = a.v[3] + (u64)0xFFFFFFFFFFFFE - b.v[3];
-                out.v[4] = a.v[4] + (u64)0xFFFFFFFFFFFFE - b.v[4];
+                out.v[0] = a.v[0] - b.v[0]; out.v[1] = a.v[1] - b.v[1];
+                out.v[2] = a.v[2] - b.v[2]; out.v[3] = a.v[3] - b.v[3];
+                out.v[4] = a.v[4] - b.v[4]; out.v[5] = a.v[5] - b.v[5];
+                out.v[6] = a.v[6] - b.v[6]; out.v[7] = a.v[7] - b.v[7];
+                out.v[8] = a.v[8] - b.v[8]; out.v[9] = a.v[9] - b.v[9];
                 return;
             };
 
-            // Multiply two field elements. 51-bit limbs keep products in u64.
-            def fe_mul(Fe25519* out, Fe25519* a, Fe25519* b) -> void
+            // Multiply two field elements.
+            // All products are at most 26*26=52 bits; with up to 5 summed terms *19,
+            // totals stay below 2^59 — safe in signed i64.
+            def fe_mul(Fe25519* out, Fe25519* f, Fe25519* g) -> void
             {
-                u64 a0, a1, a2, a3, a4;
-                u64 b0, b1, b2, b3, b4;
-                u64 b1_19, b2_19, b3_19, b4_19;
-                u64 r0, r1, r2, r3, r4, c;
-                a0 = a.v[0]; a1 = a.v[1]; a2 = a.v[2]; a3 = a.v[3]; a4 = a.v[4];
-                b0 = b.v[0]; b1 = b.v[1]; b2 = b.v[2]; b3 = b.v[3]; b4 = b.v[4];
-                b1_19 = b1 * (u64)19;
-                b2_19 = b2 * (u64)19;
-                b3_19 = b3 * (u64)19;
-                b4_19 = b4 * (u64)19;
-                r0 = a0*b0    + a1*b4_19 + a2*b3_19 + a3*b2_19 + a4*b1_19;
-                r1 = a0*b1    + a1*b0    + a2*b4_19 + a3*b3_19 + a4*b2_19;
-                r2 = a0*b2    + a1*b1    + a2*b0    + a3*b4_19 + a4*b3_19;
-                r3 = a0*b3    + a1*b2    + a2*b1    + a3*b0    + a4*b4_19;
-                r4 = a0*b4    + a1*b3    + a2*b2    + a3*b1    + a4*b0;
-                c  = r0 >> 51; r0 = r0 & FE_MASK51; r1 = r1 + c;
-                c  = r1 >> 51; r1 = r1 & FE_MASK51; r2 = r2 + c;
-                c  = r2 >> 51; r2 = r2 & FE_MASK51; r3 = r3 + c;
-                c  = r3 >> 51; r3 = r3 & FE_MASK51; r4 = r4 + c;
-                c  = r4 >> 51; r4 = r4 & FE_MASK51; r0 = r0 + c * (u64)19;
-                c  = r0 >> 51; r0 = r0 & FE_MASK51; r1 = r1 + c;
-                out.v[0] = r0; out.v[1] = r1; out.v[2] = r2;
-                out.v[3] = r3; out.v[4] = r4;
+                i64 f0, f1, f2, f3, f4, f5, f6, f7, f8, f9;
+                i64 g0, g1, g2, g3, g4, g5, g6, g7, g8, g9;
+                i64 g1_19, g2_19, g3_19, g4_19, g5_19, g6_19, g7_19, g8_19, g9_19;
+                i64 h0, h1, h2, h3, h4, h5, h6, h7, h8, h9;
+                i64 c0, c1, c2, c3, c4, c5, c6, c7, c8, c9;
+                f0 = f.v[0]; f1 = f.v[1]; f2 = f.v[2]; f3 = f.v[3]; f4 = f.v[4];
+                f5 = f.v[5]; f6 = f.v[6]; f7 = f.v[7]; f8 = f.v[8]; f9 = f.v[9];
+                g0 = g.v[0]; g1 = g.v[1]; g2 = g.v[2]; g3 = g.v[3]; g4 = g.v[4];
+                g5 = g.v[5]; g6 = g.v[6]; g7 = g.v[7]; g8 = g.v[8]; g9 = g.v[9];
+                g1_19 = g1 * (i64)19; g2_19 = g2 * (i64)19; g3_19 = g3 * (i64)19;
+                g4_19 = g4 * (i64)19; g5_19 = g5 * (i64)19; g6_19 = g6 * (i64)19;
+                g7_19 = g7 * (i64)19; g8_19 = g8 * (i64)19; g9_19 = g9 * (i64)19;
+                h0 = f0*g0    + f1*g9_19 + f2*g8_19 + f3*g7_19 + f4*g6_19
+                              + f5*g5_19 + f6*g4_19 + f7*g3_19 + f8*g2_19 + f9*g1_19;
+                h1 = f0*g1    + f1*g0    + f2*g9_19 + f3*g8_19 + f4*g7_19
+                              + f5*g6_19 + f6*g5_19 + f7*g4_19 + f8*g3_19 + f9*g2_19;
+                h2 = f0*g2    + f1*g1    + f2*g0    + f3*g9_19 + f4*g8_19
+                              + f5*g7_19 + f6*g6_19 + f7*g5_19 + f8*g4_19 + f9*g3_19;
+                h3 = f0*g3    + f1*g2    + f2*g1    + f3*g0    + f4*g9_19
+                              + f5*g8_19 + f6*g7_19 + f7*g6_19 + f8*g5_19 + f9*g4_19;
+                h4 = f0*g4    + f1*g3    + f2*g2    + f3*g1    + f4*g0
+                              + f5*g9_19 + f6*g8_19 + f7*g7_19 + f8*g6_19 + f9*g5_19;
+                h5 = f0*g5    + f1*g4    + f2*g3    + f3*g2    + f4*g1
+                              + f5*g0    + f6*g9_19 + f7*g8_19 + f8*g7_19 + f9*g6_19;
+                h6 = f0*g6    + f1*g5    + f2*g4    + f3*g3    + f4*g2
+                              + f5*g1    + f6*g0    + f7*g9_19 + f8*g8_19 + f9*g7_19;
+                h7 = f0*g7    + f1*g6    + f2*g5    + f3*g4    + f4*g3
+                              + f5*g2    + f6*g1    + f7*g0    + f8*g9_19 + f9*g8_19;
+                h8 = f0*g8    + f1*g7    + f2*g6    + f3*g5    + f4*g4
+                              + f5*g3    + f6*g2    + f7*g1    + f8*g0    + f9*g9_19;
+                h9 = f0*g9    + f1*g8    + f2*g7    + f3*g6    + f4*g5
+                              + f5*g4    + f6*g3    + f7*g2    + f8*g1    + f9*g0;
+                // Carry propagation
+                c0 = (h0 + (i64)33554432) >> 26; h0 -= c0 * (i64)67108864; h1 += c0;
+                c4 = (h4 + (i64)33554432) >> 26; h4 -= c4 * (i64)67108864; h5 += c4;
+                c1 = (h1 + (i64)16777216) >> 25; h1 -= c1 * (i64)33554432; h2 += c1;
+                c5 = (h5 + (i64)16777216) >> 25; h5 -= c5 * (i64)33554432; h6 += c5;
+                c2 = (h2 + (i64)33554432) >> 26; h2 -= c2 * (i64)67108864; h3 += c2;
+                c6 = (h6 + (i64)33554432) >> 26; h6 -= c6 * (i64)67108864; h7 += c6;
+                c3 = (h3 + (i64)16777216) >> 25; h3 -= c3 * (i64)33554432; h4 += c3;
+                c7 = (h7 + (i64)16777216) >> 25; h7 -= c7 * (i64)33554432; h8 += c7;
+                c4 = (h4 + (i64)33554432) >> 26; h4 -= c4 * (i64)67108864; h5 += c4;
+                c8 = (h8 + (i64)33554432) >> 26; h8 -= c8 * (i64)67108864; h9 += c8;
+                c9 = (h9 + (i64)16777216) >> 25; h9 -= c9 * (i64)33554432; h0 += c9 * (i64)19;
+                c0 = (h0 + (i64)33554432) >> 26; h0 -= c0 * (i64)67108864; h1 += c0;
+                out.v[0] = h0; out.v[1] = h1; out.v[2] = h2; out.v[3] = h3; out.v[4] = h4;
+                out.v[5] = h5; out.v[6] = h6; out.v[7] = h7; out.v[8] = h8; out.v[9] = h9;
                 return;
             };
 
@@ -945,12 +1262,12 @@ namespace standard
             };
 
             // Constant-time conditional swap.
-            def fe_cswap(Fe25519* a, Fe25519* b, u64 cond) -> void
+            def fe_cswap(Fe25519* a, Fe25519* b, i64 cond) -> void
             {
-                u64 mask, t;
+                i64 mask, t;
                 u32 i;
-                mask = (u64)0 - cond;
-                while (i < (u32)5)
+                mask = (i64)0 - cond;
+                while (i < (u32)10)
                 {
                     t      = mask & (a.v[i] `^^ b.v[i]);
                     a.v[i] = a.v[i] `^^ t;
@@ -997,31 +1314,52 @@ namespace standard
             };
 
             // Decode 32 little-endian bytes into a field element.
+            // Uses u64 intermediates to avoid sign-extension of byte values.
+            // Limb boundaries (bit offsets):
+            //   h0: bits   0-25  (26 bits)
+            //   h1: bits  26-50  (25 bits)
+            //   h2: bits  51-76  (26 bits)
+            //   h3: bits  77-101 (25 bits)
+            //   h4: bits 102-127 (26 bits)
+            //   h5: bits 128-152 (25 bits)
+            //   h6: bits 153-178 (26 bits)
+            //   h7: bits 179-203 (25 bits)
+            //   h8: bits 204-229 (26 bits)
+            //   h9: bits 230-254 (25 bits)
             def fe_from_bytes(Fe25519* out, byte* src) -> void
             {
-                u64 t0, t1, t2, t3, t4;
-                t0 = ((u64)src[0])       | ((u64)src[1] << 8)  | ((u64)src[2] << 16) |
-                     ((u64)src[3] << 24) | ((u64)src[4] << 32) | ((u64)src[5] << 40) |
-                     ((u64)src[6] << 48);
-                t0 = t0 & FE_MASK51;
-                t1 = ((u64)src[6]  >> 3)  | ((u64)src[7]  << 5)  | ((u64)src[8]  << 13) |
-                     ((u64)src[9]  << 21) | ((u64)src[10] << 29) | ((u64)src[11] << 37) |
-                     ((u64)src[12] << 45);
-                t1 = t1 & FE_MASK51;
-                t2 = ((u64)src[12] >> 6)  | ((u64)src[13] << 2)  | ((u64)src[14] << 10) |
-                     ((u64)src[15] << 18) | ((u64)src[16] << 26) | ((u64)src[17] << 34) |
-                     ((u64)src[18] << 42) | ((u64)src[19] << 50);
-                t2 = t2 & FE_MASK51;
-                t3 = ((u64)src[19] >> 1)  | ((u64)src[20] << 7)  | ((u64)src[21] << 15) |
-                     ((u64)src[22] << 23) | ((u64)src[23] << 31) | ((u64)src[24] << 39) |
-                     ((u64)src[25] << 47);
-                t3 = t3 & FE_MASK51;
-                t4 = ((u64)src[25] >> 4)  | ((u64)src[26] << 4)  | ((u64)src[27] << 12) |
-                     ((u64)src[28] << 20) | ((u64)src[29] << 28) | ((u64)src[30] << 36) |
-                     ((u64)src[31] << 44);
-                t4 = t4 & (u64)0x7FFFFFFFFFFFF;
-                out.v[0] = t0; out.v[1] = t1; out.v[2] = t2;
-                out.v[3] = t3; out.v[4] = t4;
+                u64 b0, b1, b2, b3, b4, b5, b6, b7, b8, b9,
+                    b10, b11, b12, b13, b14, b15, b16, b17, b18, b19,
+                    b20, b21, b22, b23, b24, b25, b26, b27, b28, b29,
+                    b30, b31;
+                // Load all bytes as unsigned
+                b0  = (u64)src[0]  & (u64)0xFF; b1  = (u64)src[1]  & (u64)0xFF;
+                b2  = (u64)src[2]  & (u64)0xFF; b3  = (u64)src[3]  & (u64)0xFF;
+                b4  = (u64)src[4]  & (u64)0xFF; b5  = (u64)src[5]  & (u64)0xFF;
+                b6  = (u64)src[6]  & (u64)0xFF; b7  = (u64)src[7]  & (u64)0xFF;
+                b8  = (u64)src[8]  & (u64)0xFF; b9  = (u64)src[9]  & (u64)0xFF;
+                b10 = (u64)src[10] & (u64)0xFF; b11 = (u64)src[11] & (u64)0xFF;
+                b12 = (u64)src[12] & (u64)0xFF; b13 = (u64)src[13] & (u64)0xFF;
+                b14 = (u64)src[14] & (u64)0xFF; b15 = (u64)src[15] & (u64)0xFF;
+                b16 = (u64)src[16] & (u64)0xFF; b17 = (u64)src[17] & (u64)0xFF;
+                b18 = (u64)src[18] & (u64)0xFF; b19 = (u64)src[19] & (u64)0xFF;
+                b20 = (u64)src[20] & (u64)0xFF; b21 = (u64)src[21] & (u64)0xFF;
+                b22 = (u64)src[22] & (u64)0xFF; b23 = (u64)src[23] & (u64)0xFF;
+                b24 = (u64)src[24] & (u64)0xFF; b25 = (u64)src[25] & (u64)0xFF;
+                b26 = (u64)src[26] & (u64)0xFF; b27 = (u64)src[27] & (u64)0xFF;
+                b28 = (u64)src[28] & (u64)0xFF; b29 = (u64)src[29] & (u64)0xFF;
+                b30 = (u64)src[30] & (u64)0xFF; b31 = (u64)src[31] & (u64)0xFF;
+                // Assemble limbs
+                out.v[0] = (i64)(  b0         | (b1 << 8)  | (b2 << 16)  | ((b3  & (u64)0x03) << 24));
+                out.v[1] = (i64)( (b3  >> 2)  | (b4 << 6)  | (b5 << 14)  | ((b6  & (u64)0x07) << 22));
+                out.v[2] = (i64)( (b6  >> 3)  | (b7 << 5)  | (b8 << 13)  | ((b9  & (u64)0x1F) << 21));
+                out.v[3] = (i64)( (b9  >> 5)  | (b10 << 3) | (b11 << 11) | ((b12 & (u64)0x3F) << 19));
+                out.v[4] = (i64)( (b12 >> 6)  | (b13 << 2) | (b14 << 10) |  (b15 << 18));
+                out.v[5] = (i64)(  b16         | (b17 << 8) | (b18 << 16) | ((b19 & (u64)0x01) << 24));
+                out.v[6] = (i64)( (b19 >> 1)  | (b20 << 7) | (b21 << 15) | ((b22 & (u64)0x07) << 23));
+                out.v[7] = (i64)( (b22 >> 3)  | (b23 << 5) | (b24 << 13) | ((b25 & (u64)0x0F) << 21));
+                out.v[8] = (i64)( (b25 >> 4)  | (b26 << 4) | (b27 << 12) | ((b28 & (u64)0x3F) << 20));
+                out.v[9] = (i64)( (b28 >> 6)  | (b29 << 2) | (b30 << 10) | ((b31 & (u64)0x7F) << 18));
                 return;
             };
 
@@ -1029,40 +1367,68 @@ namespace standard
             def fe_to_bytes(byte* dst, Fe25519* h) -> void
             {
                 Fe25519 t;
-                u64     q, r0, r1, r2, r3, r4;
-                t.v[0] = h.v[0]; t.v[1] = h.v[1]; t.v[2] = h.v[2];
-                t.v[3] = h.v[3]; t.v[4] = h.v[4];
-                fe_reduce(@t); fe_reduce(@t);
-                q    = (t.v[0] + (u64)19) >> 51;
-                q    = (t.v[1] + q)        >> 51;
-                q    = (t.v[2] + q)        >> 51;
-                q    = (t.v[3] + q)        >> 51;
-                q    = (t.v[4] + q)        >> 51;
-                t.v[0] = t.v[0] + (u64)19 * q;
-                r0 = t.v[0] & FE_MASK51; t.v[1] = t.v[1] + (t.v[0] >> 51);
-                r1 = t.v[1] & FE_MASK51; t.v[2] = t.v[2] + (t.v[1] >> 51);
-                r2 = t.v[2] & FE_MASK51; t.v[3] = t.v[3] + (t.v[2] >> 51);
-                r3 = t.v[3] & FE_MASK51; t.v[4] = t.v[4] + (t.v[3] >> 51);
-                r4 = t.v[4] & (u64)0x7FFFFFFFFFFFF;
-                dst[0]  = (byte)(r0);        dst[1]  = (byte)(r0 >> 8);
-                dst[2]  = (byte)(r0 >> 16);  dst[3]  = (byte)(r0 >> 24);
-                dst[4]  = (byte)(r0 >> 32);  dst[5]  = (byte)(r0 >> 40);
-                dst[6]  = (byte)((r0 >> 48) | (r1 << 3));
-                dst[7]  = (byte)(r1 >> 5);   dst[8]  = (byte)(r1 >> 13);
-                dst[9]  = (byte)(r1 >> 21);  dst[10] = (byte)(r1 >> 29);
-                dst[11] = (byte)(r1 >> 37);
-                dst[12] = (byte)((r1 >> 45) | (r2 << 6));
-                dst[13] = (byte)(r2 >> 2);   dst[14] = (byte)(r2 >> 10);
-                dst[15] = (byte)(r2 >> 18);  dst[16] = (byte)(r2 >> 26);
-                dst[17] = (byte)(r2 >> 34);  dst[18] = (byte)(r2 >> 42);
-                dst[19] = (byte)((r2 >> 50) | (r3 << 1));
-                dst[20] = (byte)(r3 >> 7);   dst[21] = (byte)(r3 >> 15);
-                dst[22] = (byte)(r3 >> 23);  dst[23] = (byte)(r3 >> 31);
-                dst[24] = (byte)(r3 >> 39);
-                dst[25] = (byte)((r3 >> 47) | (r4 << 4));
-                dst[26] = (byte)(r4 >> 4);   dst[27] = (byte)(r4 >> 12);
-                dst[28] = (byte)(r4 >> 20);  dst[29] = (byte)(r4 >> 28);
-                dst[30] = (byte)(r4 >> 36);  dst[31] = (byte)(r4 >> 44);
+                i64 h0, h1, h2, h3, h4, h5, h6, h7, h8, h9, q, carry;
+                u32 i;
+                i = 0;
+                while (i < (u32)10) { t.v[i] = h.v[i]; i++; };
+                fe_carry(@t);
+                fe_carry(@t);
+                h0 = t.v[0]; h1 = t.v[1]; h2 = t.v[2]; h3 = t.v[3]; h4 = t.v[4];
+                h5 = t.v[5]; h6 = t.v[6]; h7 = t.v[7]; h8 = t.v[8]; h9 = t.v[9];
+                // Reduce once more to canonical form: subtract p if >= p
+                q = (h0 + (i64)19) >> 26;
+                q = (h1 + q) >> 25;
+                q = (h2 + q) >> 26;
+                q = (h3 + q) >> 25;
+                q = (h4 + q) >> 26;
+                q = (h5 + q) >> 25;
+                q = (h6 + q) >> 26;
+                q = (h7 + q) >> 25;
+                q = (h8 + q) >> 26;
+                q = (h9 + q) >> 25;
+                h0 += (i64)19 * q;
+                carry = h0 >> 26; h0 = h0 `& (i64)0x3FFFFFF; h1 += carry;
+                carry = h1 >> 25; h1 = h1 `& (i64)0x1FFFFFF; h2 += carry;
+                carry = h2 >> 26; h2 = h2 `& (i64)0x3FFFFFF; h3 += carry;
+                carry = h3 >> 25; h3 = h3 `& (i64)0x1FFFFFF; h4 += carry;
+                carry = h4 >> 26; h4 = h4 `& (i64)0x3FFFFFF; h5 += carry;
+                carry = h5 >> 25; h5 = h5 `& (i64)0x1FFFFFF; h6 += carry;
+                carry = h6 >> 26; h6 = h6 `& (i64)0x3FFFFFF; h7 += carry;
+                carry = h7 >> 25; h7 = h7 `& (i64)0x1FFFFFF; h8 += carry;
+                carry = h8 >> 26; h8 = h8 `& (i64)0x3FFFFFF; h9 += carry;
+                carry = h9 >> 25; h9 = h9 `& (i64)0x1FFFFFF;
+                dst[0]  = (byte)(h0);
+                dst[1]  = (byte)(h0 >> 8);
+                dst[2]  = (byte)(h0 >> 16);
+                dst[3]  = (byte)((h0 >> 24) | (h1 << 2));
+                dst[4]  = (byte)(h1 >> 6);
+                dst[5]  = (byte)(h1 >> 14);
+                dst[6]  = (byte)((h1 >> 22) | (h2 << 3));
+                dst[7]  = (byte)(h2 >> 5);
+                dst[8]  = (byte)(h2 >> 13);
+                dst[9]  = (byte)((h2 >> 21) | (h3 << 5));
+                dst[10] = (byte)(h3 >> 3);
+                dst[11] = (byte)(h3 >> 11);
+                dst[12] = (byte)((h3 >> 19) | (h4 << 6));
+                dst[13] = (byte)(h4 >> 2);
+                dst[14] = (byte)(h4 >> 10);
+                dst[15] = (byte)(h4 >> 18);
+                dst[16] = (byte)(h5);
+                dst[17] = (byte)(h5 >> 8);
+                dst[18] = (byte)(h5 >> 16);
+                dst[19] = (byte)((h5 >> 24) | (h6 << 1));
+                dst[20] = (byte)(h6 >> 7);
+                dst[21] = (byte)(h6 >> 15);
+                dst[22] = (byte)((h6 >> 23) | (h7 << 3));
+                dst[23] = (byte)(h7 >> 5);
+                dst[24] = (byte)(h7 >> 13);
+                dst[25] = (byte)((h7 >> 21) | (h8 << 4));
+                dst[26] = (byte)(h8 >> 4);
+                dst[27] = (byte)(h8 >> 12);
+                dst[28] = (byte)((h8 >> 20) | (h9 << 6));
+                dst[29] = (byte)(h9 >> 2);
+                dst[30] = (byte)(h9 >> 10);
+                dst[31] = (byte)(h9 >> 18);
                 return;
             };
 
@@ -1074,32 +1440,36 @@ namespace standard
             // out[32]    : output u-coordinate (little-endian)
             // scalar[32] : private scalar (will be clamped per RFC 7748)
             // point[32]  : input u-coordinate (little-endian)
-
             def x25519(byte* out, byte* scalar, byte* point) -> void
             {
-                Fe25519 x1, x2, x3, z2, z3, A, AA, B, BB, E, C, D, DA, CB;
-                byte[32] e;
-                u32      i;
-                u64      bit, swap;
+                Fe25519 x1, x2, x3, z2, z3, A, AA, B, BB, E, C, D, DA, CB, a24;
+                byte[32] e, p_clamped;
+                u32      i, j;
+                i64      bit, swap;
 
                 // Clamp scalar per RFC 7748 section 5
-                i = 0;
-                while (i < (u32)32) { e[i] = scalar[i]; i++; };
+                j = 0;
+                while (j < (u32)32) { e[j] = scalar[j]; j++; };
                 e[0]  = e[0]  & (byte)248;
                 e[31] = e[31] & (byte)127;
                 e[31] = e[31] | (byte)64;
 
-                // Decode u-coordinate of base point
-                fe_from_bytes(@x1, point);
+                // Decode u-coordinate of base point; clear high bit per RFC 7748
+                j = 0; while (j < (u32)32) { p_clamped[j] = point[j]; j++; };
+                p_clamped[31] = p_clamped[31] & (byte)127;
+                fe_from_bytes(@x1, @p_clamped[0]);
 
-                // Initialize projective coordinates:
-                // (x2:z2) = (1:0)  -- neutral element
-                // (x3:z3) = (x1:1) -- copy of input point
-                x2.v[0] = 1; x2.v[1] = 0; x2.v[2] = 0; x2.v[3] = 0; x2.v[4] = 0;
-                z2.v[0] = 0; z2.v[1] = 0; z2.v[2] = 0; z2.v[3] = 0; z2.v[4] = 0;
-                x3.v[0] = x1.v[0]; x3.v[1] = x1.v[1]; x3.v[2] = x1.v[2];
-                x3.v[3] = x1.v[3]; x3.v[4] = x1.v[4];
-                z3.v[0] = 1; z3.v[1] = 0; z3.v[2] = 0; z3.v[3] = 0; z3.v[4] = 0;
+                // (x2:z2) = (1:0)
+                j = 0; while (j < (u32)10) { x2.v[j] = 0; z2.v[j] = 0; j++; };
+                x2.v[0] = 1;
+
+                // (x3:z3) = (x1:1)
+                j = 0; while (j < (u32)10) { x3.v[j] = x1.v[j]; z3.v[j] = 0; j++; };
+                z3.v[0] = 1;
+
+                // a24 = 121665
+                j = 0; while (j < (u32)10) { a24.v[j] = 0; j++; };
+                a24.v[0] = 121665;
 
                 swap = 0;
 
@@ -1107,13 +1477,12 @@ namespace standard
                 i = 254;
                 while (i <= (u32)254)
                 {
-                    bit  = (u64)((e[i >> 3] >> (i & 7)) & 1);
+                    bit  = (i64)((e[i >> 3] >> (i & 7)) & 1);
                     swap = swap `^^ bit;
                     fe_cswap(@x2, @x3, swap);
                     fe_cswap(@z2, @z3, swap);
                     swap = bit;
 
-                    // RFC 7748 differential addition and doubling formulas
                     fe_add(@A,  @x2, @z2);  fe_sq(@AA, @A);
                     fe_sub(@B,  @x2, @z2);  fe_sq(@BB, @B);
                     fe_sub(@E,  @AA, @BB);
@@ -1125,22 +1494,17 @@ namespace standard
                     fe_sub(@z3, @DA, @CB);  fe_sq(@z3, @z3);
                     fe_mul(@z3, @x1, @z3);
                     fe_mul(@x2, @AA, @BB);
-                    // a24 = 121665; z2 = E*(AA + a24*E)
-                    A.v[0] = (u64)121665;
-                    A.v[1] = 0; A.v[2] = 0; A.v[3] = 0; A.v[4] = 0;
-                    fe_mul(@A, @A, @E);
-                    fe_add(@A, @AA, @A);
-                    fe_mul(@z2, @E, @A);
+                    fe_mul(@A,  @a24, @E);
+                    fe_add(@A,  @AA, @A);
+                    fe_mul(@z2, @E,  @A);
 
                     switch (i == (u32)0) { case (1) { break; } default {}; };
                     i--;
                 };
 
-                // Final conditional swap to undo the last bit's swap
                 fe_cswap(@x2, @x3, swap);
                 fe_cswap(@z2, @z3, swap);
 
-                // Affine x = X/Z via inversion
                 fe_invert(@z2, @z2);
                 fe_mul(@x2, @x2, @z2);
                 fe_to_bytes(out, @x2);
@@ -1160,6 +1524,215 @@ namespace standard
             };
 
         };  // namespace X25519
+
+        namespace kdf
+        {
+            namespace HKDF
+            {
+
+                #def HKDF_HASHLEN 32;
+                #def HKDF_BLOCKLEN 64;
+
+                // ------------------------------------------------------------------
+                // Internal: HMAC-SHA256(key[key_len], msg[msg_len]) -> out[32]
+                //
+                // Laid out inline here so HKDF has no external dependency beyond
+                // the SHA-256 primitives already in cryptography.fx.
+                // ------------------------------------------------------------------
+                def hmac_sha256(byte* key, int key_len,
+                                byte* msg, int msg_len,
+                                byte* out) -> void
+                {
+                    byte[64] ipad_key, opad_key;
+                    byte[32] inner_hash, hashed_key;
+                    SHA256_CTX inner_ctx, outer_ctx, key_ctx;
+                    byte* effective_key;
+                    int effective_key_len, i;
+                    byte k;
+
+                    // RFC 2104 §2: if key is longer than block size, hash it first
+                    if (key_len > 64)
+                    {
+                        SHA256::sha256_init(@key_ctx);
+                        SHA256::sha256_update(@key_ctx, key, (u64)key_len);
+                        SHA256::sha256_final(@key_ctx, @hashed_key[0]);
+                        effective_key = @hashed_key[0];
+                        effective_key_len = 32;
+                    }
+                    else
+                    {
+                        effective_key = key;
+                        effective_key_len = key_len;
+                    };
+
+                    for (i = 0; i < 64; i++)
+                    {
+                        k = (i < effective_key_len) ? effective_key[i] : (byte)0;
+                        ipad_key[i] = k ^^ (byte)0x36;
+                        opad_key[i] = k ^^ (byte)0x5C;
+                    };
+
+                    SHA256::sha256_init(@inner_ctx);
+                    SHA256::sha256_update(@inner_ctx, @ipad_key[0], (u64)64);
+                    SHA256::sha256_update(@inner_ctx, msg, (u64)msg_len);
+                    SHA256::sha256_final(@inner_ctx, @inner_hash[0]);
+
+                    SHA256::sha256_init(@outer_ctx);
+                    SHA256::sha256_update(@outer_ctx, @opad_key[0], (u64)64);
+                    SHA256::sha256_update(@outer_ctx, @inner_hash[0], (u64)32);
+                    SHA256::sha256_final(@outer_ctx, out);
+                };
+
+                // ------------------------------------------------------------------
+                // HKDF-Extract
+                //
+                //   PRK = HMAC-SHA256(salt, ikm)
+                //
+                //   salt     : pointer to salt bytes; may be null
+                //   salt_len : byte length of salt; ignored when salt is null
+                //   ikm      : input keying material
+                //   ikm_len  : byte length of ikm
+                //   prk      : output buffer, must be >= 32 bytes
+                // ------------------------------------------------------------------
+                def hkdf_extract(byte* salt, int salt_len,
+                                 byte* ikm,  int ikm_len,
+                                 byte* prk) -> void
+                {
+                    // RFC 5869 §2.2: if salt is not provided, set to HashLen zero bytes
+                    byte[32] zero_salt;
+                    byte* effective_salt;
+                    int effective_salt_len;
+
+                    if (salt == (byte*)0)
+                    {
+                        effective_salt = @zero_salt[0];
+                        effective_salt_len = 32;
+                    }
+                    else
+                    {
+                        effective_salt = salt;
+                        effective_salt_len = salt_len;
+                    };
+
+                    hmac_sha256(effective_salt, effective_salt_len, ikm, ikm_len, prk);
+                };
+
+                // ------------------------------------------------------------------
+                // HKDF-Expand
+                //
+                //   OKM = T(1) || T(2) || ... truncated to L bytes
+                //   T(i) = HMAC-SHA256(PRK, T(i-1) || info || i)
+                //
+                //   prk      : pseudorandom key from hkdf_extract (32 bytes)
+                //   info     : context-specific info string; may be null
+                //   info_len : byte length of info; ignored when info is null
+                //   okm      : output key material buffer
+                //   okm_len  : requested output length in bytes (<= 8160)
+                //
+                // Returns 1 on success, 0 if okm_len > 255 * HKDF_HASHLEN.
+                // ------------------------------------------------------------------
+                def hkdf_expand(byte* prk,
+                                byte* info,  int info_len,
+                                byte* okm,   int okm_len) -> int
+                {
+                    // T(i-1): starts empty, then holds the previous 32-byte block
+                    byte[32] t_prev, t_cur;
+                    // HMAC input: T(i-1) || info || counter_byte
+                    // Max size: 32 + info_len + 1 — but info_len is caller-controlled.
+                    // We build it on the heap to handle arbitrary info lengths safely.
+                    // For TLS 1.3 labels the info is always small (<= ~255 bytes),
+                    // so a 320-byte stack buffer is enough and avoids fmalloc.
+                    byte[320] hmac_in;
+                    int n, i, j, offset, prev_len, copy_len, built;
+                    byte counter;
+
+                    if (okm_len > (255 * 32))
+                    {
+                        return 0;
+                    };
+
+                    // n = ceil(okm_len / HashLen)
+                    n = (okm_len + 31) / 32;
+
+                    offset = 0;
+
+                    for (i = 1; i <= n; i++)
+                    {
+                        // Build HMAC input: T(i-1) || info || i
+                        built = 0;
+                        prev_len = (i == 1) ? 0 : 32;
+
+                        for (j = 0; j < prev_len; j++)
+                        {
+                            hmac_in[built] = t_prev[j];
+                            built = built + 1;
+                        };
+
+                        if (info != (byte*)0)
+                        {
+                            for (j = 0; j < info_len; j++)
+                            {
+                                hmac_in[built] = info[j];
+                                built = built + 1;
+                            };
+                        };
+
+                        counter = (byte)i;
+                        hmac_in[built] = counter;
+                        built = built + 1;
+
+                        hmac_sha256(prk, 32, @hmac_in[0], built, @t_cur[0]);
+
+                        // Copy min(32, okm_len - offset) bytes to output
+                        copy_len = okm_len - offset;
+                        if (copy_len > 32)
+                        {
+                            copy_len = 32;
+                        };
+
+                        for (j = 0; j < copy_len; j++)
+                        {
+                            okm[offset + j] = t_cur[j];
+                        };
+                        offset = offset + copy_len;
+
+                        // Promote t_cur -> t_prev for next iteration
+                        for (j = 0; j < 32; j++)
+                        {
+                            t_prev[j] = t_cur[j];
+                        };
+                    };
+
+                    return 1;
+                };
+
+                // ------------------------------------------------------------------
+                // Convenience: full HKDF in one call
+                //
+                //   Combines Extract + Expand.
+                //
+                //   salt / salt_len : may pass null / 0 to use zero-byte salt
+                //   ikm  / ikm_len  : input keying material
+                //   info / info_len : context label; may pass null / 0
+                //   okm  / okm_len  : output buffer and requested byte count
+                //
+                // Returns 1 on success, 0 on length violation.
+                // ------------------------------------------------------------------
+                def hkdf(byte* salt, int salt_len,
+                         byte* ikm,  int ikm_len,
+                         byte* info, int info_len,
+                         byte* okm,  int okm_len) -> int
+                {
+                    byte[32] prk;
+
+                    hkdf_extract(salt, salt_len, ikm, ikm_len, @prk[0]);
+                    return hkdf_expand(@prk[0], info, info_len, okm, okm_len);
+                };
+
+            }; // HKDF
+        }; // kdf
+    };
+};
 
 
 #endif;

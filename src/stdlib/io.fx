@@ -553,6 +553,19 @@ namespace standard
                 return;
             };
 
+            def print_hex(byte* buf, int len) -> void
+            {
+                int i;
+                byte hi, lo;
+                for (i = 0; i < len; i++)
+                {
+                    hi = (buf[i] >> 4) & (byte)0x0F;
+                    lo = buf[i] & (byte)0x0F;
+                    if (hi < (byte)10) { print('0' + hi); } else { print('A' + (hi - (byte)10)); };
+                    if (lo < (byte)10) { print('0' + lo); } else { print('A' + (lo - (byte)10)); };
+                };
+            };
+
             // GENERIC
             def print() -> void
             {

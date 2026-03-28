@@ -38,3 +38,27 @@ def copy_bytes(ulong dst, ulong src, int n) -> void
         d[i] = s[i];
     };
 };
+
+// Compare two byte arrays. Returns 1 if equal, 0 otherwise.
+def bytes_eq(byte* a, byte* b, int len) -> int
+{
+    int i;
+    for (i = 0; i < len; i++)
+    {
+        if (a[i] != b[i])
+        {
+            return 0;
+        };
+    };
+    return 1;
+};
+
+// Fill a buffer with a repeating byte value.
+def fill_buf(byte* buf, int len, byte val) -> void
+{
+    int i;
+    for (i = 0; i < len; i++)
+    {
+        buf[i] = val;
+    };
+};
