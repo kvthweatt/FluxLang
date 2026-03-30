@@ -26,6 +26,28 @@ extern
         GetProcAddress(void*, byte*) -> void*,
         GetSystemInfo(void*) -> void;
 };
+
+
+// SYSTEM_INFO layout on x64 Windows:
+//   0  DWORD  dwOemId
+//   4  DWORD  dwPageSize
+//   8  void*  lpMinimumApplicationAddress
+//  16  void*  lpMaximumApplicationAddress
+//  24  u64    dwActiveProcessorMask
+//  32  DWORD  dwNumberOfProcessors
+struct SYSTEM_INFO_PARTIAL
+{
+    u32   dwOemId,
+          dwPageSize;
+    void* lpMin,
+          lpMax;
+    u64   dwActiveProcessorMask;
+    u32   dwNumberOfProcessors,
+          dwProcessorType,
+          dwAllocationGranularity;
+    u16   wProcessorLevel,
+          wProcessorRevision;
+};
 #endif;
 
 #ifdef __LINUX__

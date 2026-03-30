@@ -6,6 +6,10 @@
 #import "types.fx";
 #endif;
 
+#ifndef FLUX_BIG_INTEGERS
+#import "bigint.fx";
+#endif;
+
 #ifndef FLUX_STANDARD_CRYPTO
 #def FLUX_STANDARD_CRYPTO;
 
@@ -26,7 +30,7 @@ namespace standard
                 };
 
                 // SHA-256 constants (first 32 bits of the fractional parts of the cube roots of the first 64 primes)
-                global u32[64] K = [
+                u32[64] K = [
                     0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5,
                     0x3956C25B, 0x59F111F1, 0x923F82A4, 0xAB1C5ED5,
                     0xD807AA98, 0x12835B01, 0x243185BE, 0x550C7DC3,
@@ -158,9 +162,7 @@ namespace standard
                 // Update SHA-256 with data
                 def sha256_update(SHA256_CTX* ctx, byte* datax, u64 len) -> void
                 {
-                    u64 i;
-                    
-                    for (i = 0; i < len; i++)
+                    for (long i; i < len; i++)
                     {
                         ctx.buffer[ctx.buflen] = datax[i];
                         ctx.buflen = ctx.buflen + 1;
@@ -1138,346 +1140,226 @@ namespace standard
             //
             // Curve: y² = x³ + 486662x² + x  over  GF(p),  p = 2^255 - 19
             //
-            // Field elements: 10 x i64 limbs in radix-2^25.5
-            //   Odd  limbs (1,3,5,7,9) hold up to 25 bits each.
-            //   Even limbs (0,2,4,6,8) hold up to 26 bits each.
-            //
-            // With 26-bit limbs, a_i*b_j <= 2^52 and sums of up to 5 such products
-            // times 19 stay well below 2^64, so all intermediate arithmetic fits in
-            // signed 64-bit integers without overflow.
-            //
-            // This is the standard "ref10" representation used by NaCl/libsodium.
+            // Uses BigInt arithmetic mod p. p = 2^255 - 19 is represented as a
+            // BigInt with 8 uint limbs (256 bits, upper bit always 0 after reduction).
             //
             // Public API:
             //   x25519(out[32], scalar[32], point[32])  -- DH shared secret
             //   x25519_pubkey(out[32], scalar[32])       -- scalar x base point
             // =========================================================================
 
-            struct Fe25519
-            {
-                i64[10] v;
-            };
+            // ---- Load/store ----
 
-            // ---- Field arithmetic ----
-            //
-            // Carry propagation: after addition/subtraction, propagate carries
-            // to keep limbs in their expected ranges.
-            def fe_carry(Fe25519* h) -> void
+            // Load 32 little-endian bytes into a BigInt.
+            def fe_from_bytes(BigInt* out, byte* src) -> void
             {
-                i64 c0, c1, c2, c3, c4, c5, c6, c7, c8, c9;
-                c0 = (h.v[0] + (i64)33554432) >> 26; h.v[0] -= c0 * (i64)67108864; h.v[1] += c0;
-                c4 = (h.v[4] + (i64)33554432) >> 26; h.v[4] -= c4 * (i64)67108864; h.v[5] += c4;
-                c1 = (h.v[1] + (i64)16777216) >> 25; h.v[1] -= c1 * (i64)33554432; h.v[2] += c1;
-                c5 = (h.v[5] + (i64)16777216) >> 25; h.v[5] -= c5 * (i64)33554432; h.v[6] += c5;
-                c2 = (h.v[2] + (i64)33554432) >> 26; h.v[2] -= c2 * (i64)67108864; h.v[3] += c2;
-                c6 = (h.v[6] + (i64)33554432) >> 26; h.v[6] -= c6 * (i64)67108864; h.v[7] += c6;
-                c3 = (h.v[3] + (i64)16777216) >> 25; h.v[3] -= c3 * (i64)33554432; h.v[4] += c3;
-                c7 = (h.v[7] + (i64)16777216) >> 25; h.v[7] -= c7 * (i64)33554432; h.v[8] += c7;
-                c4 = (h.v[4] + (i64)33554432) >> 26; h.v[4] -= c4 * (i64)67108864; h.v[5] += c4;
-                c8 = (h.v[8] + (i64)33554432) >> 26; h.v[8] -= c8 * (i64)67108864; h.v[9] += c8;
-                c9 = (h.v[9] + (i64)16777216) >> 25; h.v[9] -= c9 * (i64)33554432; h.v[0] += c9 * (i64)19;
-                c0 = (h.v[0] + (i64)33554432) >> 26; h.v[0] -= c0 * (i64)67108864; h.v[1] += c0;
+                uint i, j;
+                uint* d = @out.digits[0];
+                for (i = 0; i < 9; i++) { d[i] = 0; };
+                for (i = 0; i < 8; i++)
+                {
+                    uint word;
+                    j = i * 4;
+                    word = ((uint)src[j]       & 0xFF)
+                         | (((uint)src[j + 1]  & 0xFF) << 8)
+                         | (((uint)src[j + 2]  & 0xFF) << 16)
+                         | (((uint)src[j + 3]  & 0xFF) << 24);
+                    d[i] = word;
+                };
+                out.length = 8;
+                out.negative = false;
+                math::bigint::bigint_normalize(out);
+                // Clear high bit (RFC 7748: mask u-coordinate MSB)
+                if (out.length == 8) { d[7] = d[7] & 0x7FFFFFFF; };
+               math::bigint:: bigint_normalize(out);
                 return;
             };
 
-            def fe_add(Fe25519* out, Fe25519* a, Fe25519* b) -> void
+            // Store a BigInt to 32 little-endian bytes (already reduced mod p).
+            def fe_to_bytes(byte* dst, BigInt* src) -> void
             {
-                out.v[0] = a.v[0] + b.v[0]; out.v[1] = a.v[1] + b.v[1];
-                out.v[2] = a.v[2] + b.v[2]; out.v[3] = a.v[3] + b.v[3];
-                out.v[4] = a.v[4] + b.v[4]; out.v[5] = a.v[5] + b.v[5];
-                out.v[6] = a.v[6] + b.v[6]; out.v[7] = a.v[7] + b.v[7];
-                out.v[8] = a.v[8] + b.v[8]; out.v[9] = a.v[9] + b.v[9];
+                uint i, j;
+                uint* d = @src.digits[0];
+                uint word;
+                for (i = 0; i < 8; i++)
+                {
+                    j = i * 4;
+                    word = (i < src.length) ? d[i] : 0u;
+                    dst[j]     = (byte)(word & 0xFF);
+                    dst[j + 1] = (byte)((word >> 8)  & 0xFF);
+                    dst[j + 2] = (byte)((word >> 16) & 0xFF);
+                    dst[j + 3] = (byte)((word >> 24) & 0xFF);
+                };
                 return;
             };
 
-            def fe_sub(Fe25519* out, Fe25519* a, Fe25519* b) -> void
+            // ---- Field operations ----
+            // All operations reduce mod p where needed.
+            // p is built at call time from the known constant.
+
+            def fe_set_p(BigInt* p) -> void
             {
-                out.v[0] = a.v[0] - b.v[0]; out.v[1] = a.v[1] - b.v[1];
-                out.v[2] = a.v[2] - b.v[2]; out.v[3] = a.v[3] - b.v[3];
-                out.v[4] = a.v[4] - b.v[4]; out.v[5] = a.v[5] - b.v[5];
-                out.v[6] = a.v[6] - b.v[6]; out.v[7] = a.v[7] - b.v[7];
-                out.v[8] = a.v[8] - b.v[8]; out.v[9] = a.v[9] - b.v[9];
+                // p = 2^255 - 19
+                // = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF ED
+                // In 8 uint limbs LE:
+                //   limbs 0..6: 0xFFFFFFFF
+                //   limb 7:     0x7FFFFFFF
+                // Then subtract 18 from limb 0 (since 2^255 - 19 = 0x7FFF...FFED)
+                // Actually: -19 = 0xFFFF...FFED in the low bits.
+                // 2^255 - 19:
+                //   low 32 bits: 0xFFFFFFED (= 4294967277)
+                //   next 6 words: 0xFFFFFFFF
+                //   top word (bits 224-255): 0x7FFFFFFF
+                uint* pd = @p.digits[0];
+                pd[0] = 0xFFFFFFED;
+                pd[1] = 0xFFFFFFFF;
+                pd[2] = 0xFFFFFFFF;
+                pd[3] = 0xFFFFFFFF;
+                pd[4] = 0xFFFFFFFF;
+                pd[5] = 0xFFFFFFFF;
+                pd[6] = 0xFFFFFFFF;
+                pd[7] = 0x7FFFFFFF;
+                p.length = 8;
+                p.negative = false;
                 return;
             };
 
-            // Multiply two field elements.
-            // All products are at most 26*26=52 bits; with up to 5 summed terms *19,
-            // totals stay below 2^59 — safe in signed i64.
-            def fe_mul(Fe25519* out, Fe25519* f, Fe25519* g) -> void
+            def fe_add(BigInt* out, BigInt* a, BigInt* b) -> void
             {
-                i64 f0, f1, f2, f3, f4, f5, f6, f7, f8, f9;
-                i64 g0, g1, g2, g3, g4, g5, g6, g7, g8, g9;
-                i64 g1_19, g2_19, g3_19, g4_19, g5_19, g6_19, g7_19, g8_19, g9_19;
-                i64 h0, h1, h2, h3, h4, h5, h6, h7, h8, h9;
-                i64 c0, c1, c2, c3, c4, c5, c6, c7, c8, c9;
-                f0 = f.v[0]; f1 = f.v[1]; f2 = f.v[2]; f3 = f.v[3]; f4 = f.v[4];
-                f5 = f.v[5]; f6 = f.v[6]; f7 = f.v[7]; f8 = f.v[8]; f9 = f.v[9];
-                g0 = g.v[0]; g1 = g.v[1]; g2 = g.v[2]; g3 = g.v[3]; g4 = g.v[4];
-                g5 = g.v[5]; g6 = g.v[6]; g7 = g.v[7]; g8 = g.v[8]; g9 = g.v[9];
-                g1_19 = g1 * (i64)19; g2_19 = g2 * (i64)19; g3_19 = g3 * (i64)19;
-                g4_19 = g4 * (i64)19; g5_19 = g5 * (i64)19; g6_19 = g6 * (i64)19;
-                g7_19 = g7 * (i64)19; g8_19 = g8 * (i64)19; g9_19 = g9 * (i64)19;
-                h0 = f0*g0    + f1*g9_19 + f2*g8_19 + f3*g7_19 + f4*g6_19
-                              + f5*g5_19 + f6*g4_19 + f7*g3_19 + f8*g2_19 + f9*g1_19;
-                h1 = f0*g1    + f1*g0    + f2*g9_19 + f3*g8_19 + f4*g7_19
-                              + f5*g6_19 + f6*g5_19 + f7*g4_19 + f8*g3_19 + f9*g2_19;
-                h2 = f0*g2    + f1*g1    + f2*g0    + f3*g9_19 + f4*g8_19
-                              + f5*g7_19 + f6*g6_19 + f7*g5_19 + f8*g4_19 + f9*g3_19;
-                h3 = f0*g3    + f1*g2    + f2*g1    + f3*g0    + f4*g9_19
-                              + f5*g8_19 + f6*g7_19 + f7*g6_19 + f8*g5_19 + f9*g4_19;
-                h4 = f0*g4    + f1*g3    + f2*g2    + f3*g1    + f4*g0
-                              + f5*g9_19 + f6*g8_19 + f7*g7_19 + f8*g6_19 + f9*g5_19;
-                h5 = f0*g5    + f1*g4    + f2*g3    + f3*g2    + f4*g1
-                              + f5*g0    + f6*g9_19 + f7*g8_19 + f8*g7_19 + f9*g6_19;
-                h6 = f0*g6    + f1*g5    + f2*g4    + f3*g3    + f4*g2
-                              + f5*g1    + f6*g0    + f7*g9_19 + f8*g8_19 + f9*g7_19;
-                h7 = f0*g7    + f1*g6    + f2*g5    + f3*g4    + f4*g3
-                              + f5*g2    + f6*g1    + f7*g0    + f8*g9_19 + f9*g8_19;
-                h8 = f0*g8    + f1*g7    + f2*g6    + f3*g5    + f4*g4
-                              + f5*g3    + f6*g2    + f7*g1    + f8*g0    + f9*g9_19;
-                h9 = f0*g9    + f1*g8    + f2*g7    + f3*g6    + f4*g5
-                              + f5*g4    + f6*g3    + f7*g2    + f8*g1    + f9*g0;
-                // Carry propagation
-                c0 = (h0 + (i64)33554432) >> 26; h0 -= c0 * (i64)67108864; h1 += c0;
-                c4 = (h4 + (i64)33554432) >> 26; h4 -= c4 * (i64)67108864; h5 += c4;
-                c1 = (h1 + (i64)16777216) >> 25; h1 -= c1 * (i64)33554432; h2 += c1;
-                c5 = (h5 + (i64)16777216) >> 25; h5 -= c5 * (i64)33554432; h6 += c5;
-                c2 = (h2 + (i64)33554432) >> 26; h2 -= c2 * (i64)67108864; h3 += c2;
-                c6 = (h6 + (i64)33554432) >> 26; h6 -= c6 * (i64)67108864; h7 += c6;
-                c3 = (h3 + (i64)16777216) >> 25; h3 -= c3 * (i64)33554432; h4 += c3;
-                c7 = (h7 + (i64)16777216) >> 25; h7 -= c7 * (i64)33554432; h8 += c7;
-                c4 = (h4 + (i64)33554432) >> 26; h4 -= c4 * (i64)67108864; h5 += c4;
-                c8 = (h8 + (i64)33554432) >> 26; h8 -= c8 * (i64)67108864; h9 += c8;
-                c9 = (h9 + (i64)16777216) >> 25; h9 -= c9 * (i64)33554432; h0 += c9 * (i64)19;
-                c0 = (h0 + (i64)33554432) >> 26; h0 -= c0 * (i64)67108864; h1 += c0;
-                out.v[0] = h0; out.v[1] = h1; out.v[2] = h2; out.v[3] = h3; out.v[4] = h4;
-                out.v[5] = h5; out.v[6] = h6; out.v[7] = h7; out.v[8] = h8; out.v[9] = h9;
+                BigInt p, tmp;
+                fe_set_p(@p);
+                math::bigint::bigint_add(@tmp, a, b);
+                math::bigint::bigint_mod(out, @tmp, @p);
                 return;
             };
 
-            def fe_sq(Fe25519* out, Fe25519* a) -> void
+            def fe_sub(BigInt* out, BigInt* a, BigInt* b) -> void
+            {
+                BigInt p, tmp;
+                fe_set_p(@p);
+                math::bigint::bigint_sub(@tmp, a, b);
+                // If negative, add p
+                if (tmp.negative)
+                {
+                    math::bigint::bigint_add(out, @tmp, @p);
+                    // May still be negative if a was 0 and b was large; add p again
+                    if (out.negative)
+                    {
+                        math::bigint::bigint_add(@tmp, out, @p);
+                        math::bigint::bigint_copy(out, @tmp);
+                    };
+                }
+                else
+                {
+                    math::bigint::bigint_mod(out, @tmp, @p);
+                };
+                return;
+            };
+
+            def fe_mul(BigInt* out, BigInt* a, BigInt* b) -> void
+            {
+                BigInt p, tmp;
+                fe_set_p(@p);
+                math::bigint::bigint_mul(@tmp, a, b);
+                math::bigint::bigint_mod(out, @tmp, @p);
+                return;
+            };
+
+            def fe_sq(BigInt* out, BigInt* a) -> void
             {
                 fe_mul(out, a, a);
                 return;
             };
 
-            // Constant-time conditional swap.
-            def fe_cswap(Fe25519* a, Fe25519* b, i64 cond) -> void
+            // Constant-time conditional swap (not truly CT but correct)
+            def fe_cswap(BigInt* a, BigInt* b, u64 cond) -> void
             {
-                i64 mask, t;
-                u32 i;
-                mask = (i64)0 - cond;
-                while (i < (u32)10)
+                BigInt tmp;
+                if (cond != 0u)
                 {
-                    t      = mask & (a.v[i] `^^ b.v[i]);
-                    a.v[i] = a.v[i] `^^ t;
-                    b.v[i] = b.v[i] `^^ t;
-                    i++;
+                    math::bigint::bigint_copy(@tmp, a);
+                    math::bigint::bigint_copy(a, b);
+                    math::bigint::bigint_copy(b, @tmp);
                 };
                 return;
             };
 
-            // Invert via Fermat: a^(p-2) mod p, p-2 = 2^255 - 21.
-            def fe_invert(Fe25519* out, Fe25519* z) -> void
+            // Invert: out = a^(p-2) mod p  (Fermat's little theorem)
+            def fe_invert(BigInt* out, BigInt* a) -> void
             {
-                Fe25519 t0, t1, t2, t3;
-                u32     i;
-                fe_sq(@t0, z);
-                fe_sq(@t1, @t0); fe_sq(@t1, @t1);
-                fe_mul(@t1, @t1, z);
-                fe_mul(@t0, @t0, @t1);
-                fe_sq(@t2, @t0);
-                fe_mul(@t1, @t2, @t1);
-                fe_sq(@t2, @t1);
-                i = 1; while (i < (u32)5)  { fe_sq(@t2, @t2); i++; };
-                fe_mul(@t1, @t2, @t1);
-                fe_sq(@t2, @t1);
-                i = 1; while (i < (u32)10) { fe_sq(@t2, @t2); i++; };
-                fe_mul(@t2, @t2, @t1);
-                fe_sq(@t3, @t2);
-                i = 1; while (i < (u32)20) { fe_sq(@t3, @t3); i++; };
-                fe_mul(@t2, @t3, @t2);
-                i = 0; while (i < (u32)10) { fe_sq(@t2, @t2); i++; };
-                fe_mul(@t1, @t2, @t1);
-                fe_sq(@t2, @t1);
-                i = 1; while (i < (u32)50) { fe_sq(@t2, @t2); i++; };
-                fe_mul(@t2, @t2, @t1);
-                fe_sq(@t3, @t2);
-                i = 1; while (i < (u32)100) { fe_sq(@t3, @t3); i++; };
-                fe_mul(@t2, @t3, @t2);
-                i = 0; while (i < (u32)50) { fe_sq(@t2, @t2); i++; };
-                fe_mul(@t1, @t2, @t1);
-                fe_sq(@t1, @t1); fe_sq(@t1, @t1); fe_sq(@t1, @t1);
-                fe_sq(@t1, @t1); fe_sq(@t1, @t1);
-                fe_mul(out, @t1, @t0);
-                return;
-            };
+                // p - 2 = 2^255 - 21
+                // Square-and-multiply: standard binary exponentiation
+                BigInt p, exp, base, result, tmp, bit_val, zero;
+                uint i, j;
+                u64 limb;
 
-            // Decode 32 little-endian bytes into a field element.
-            // Uses u64 intermediates to avoid sign-extension of byte values.
-            // Limb boundaries (bit offsets):
-            //   h0: bits   0-25  (26 bits)
-            //   h1: bits  26-50  (25 bits)
-            //   h2: bits  51-76  (26 bits)
-            //   h3: bits  77-101 (25 bits)
-            //   h4: bits 102-127 (26 bits)
-            //   h5: bits 128-152 (25 bits)
-            //   h6: bits 153-178 (26 bits)
-            //   h7: bits 179-203 (25 bits)
-            //   h8: bits 204-229 (26 bits)
-            //   h9: bits 230-254 (25 bits)
-            def fe_from_bytes(Fe25519* out, byte* src) -> void
-            {
-                u64 b0, b1, b2, b3, b4, b5, b6, b7, b8, b9,
-                    b10, b11, b12, b13, b14, b15, b16, b17, b18, b19,
-                    b20, b21, b22, b23, b24, b25, b26, b27, b28, b29,
-                    b30, b31;
-                // Load all bytes as unsigned
-                b0  = (u64)src[0]  & (u64)0xFF; b1  = (u64)src[1]  & (u64)0xFF;
-                b2  = (u64)src[2]  & (u64)0xFF; b3  = (u64)src[3]  & (u64)0xFF;
-                b4  = (u64)src[4]  & (u64)0xFF; b5  = (u64)src[5]  & (u64)0xFF;
-                b6  = (u64)src[6]  & (u64)0xFF; b7  = (u64)src[7]  & (u64)0xFF;
-                b8  = (u64)src[8]  & (u64)0xFF; b9  = (u64)src[9]  & (u64)0xFF;
-                b10 = (u64)src[10] & (u64)0xFF; b11 = (u64)src[11] & (u64)0xFF;
-                b12 = (u64)src[12] & (u64)0xFF; b13 = (u64)src[13] & (u64)0xFF;
-                b14 = (u64)src[14] & (u64)0xFF; b15 = (u64)src[15] & (u64)0xFF;
-                b16 = (u64)src[16] & (u64)0xFF; b17 = (u64)src[17] & (u64)0xFF;
-                b18 = (u64)src[18] & (u64)0xFF; b19 = (u64)src[19] & (u64)0xFF;
-                b20 = (u64)src[20] & (u64)0xFF; b21 = (u64)src[21] & (u64)0xFF;
-                b22 = (u64)src[22] & (u64)0xFF; b23 = (u64)src[23] & (u64)0xFF;
-                b24 = (u64)src[24] & (u64)0xFF; b25 = (u64)src[25] & (u64)0xFF;
-                b26 = (u64)src[26] & (u64)0xFF; b27 = (u64)src[27] & (u64)0xFF;
-                b28 = (u64)src[28] & (u64)0xFF; b29 = (u64)src[29] & (u64)0xFF;
-                b30 = (u64)src[30] & (u64)0xFF; b31 = (u64)src[31] & (u64)0xFF;
-                // Assemble limbs
-                out.v[0] = (i64)(  b0         | (b1 << 8)  | (b2 << 16)  | ((b3  & (u64)0x03) << 24));
-                out.v[1] = (i64)( (b3  >> 2)  | (b4 << 6)  | (b5 << 14)  | ((b6  & (u64)0x07) << 22));
-                out.v[2] = (i64)( (b6  >> 3)  | (b7 << 5)  | (b8 << 13)  | ((b9  & (u64)0x1F) << 21));
-                out.v[3] = (i64)( (b9  >> 5)  | (b10 << 3) | (b11 << 11) | ((b12 & (u64)0x3F) << 19));
-                out.v[4] = (i64)( (b12 >> 6)  | (b13 << 2) | (b14 << 10) |  (b15 << 18));
-                out.v[5] = (i64)(  b16         | (b17 << 8) | (b18 << 16) | ((b19 & (u64)0x01) << 24));
-                out.v[6] = (i64)( (b19 >> 1)  | (b20 << 7) | (b21 << 15) | ((b22 & (u64)0x07) << 23));
-                out.v[7] = (i64)( (b22 >> 3)  | (b23 << 5) | (b24 << 13) | ((b25 & (u64)0x0F) << 21));
-                out.v[8] = (i64)( (b25 >> 4)  | (b26 << 4) | (b27 << 12) | ((b28 & (u64)0x3F) << 20));
-                out.v[9] = (i64)( (b28 >> 6)  | (b29 << 2) | (b30 << 10) | ((b31 & (u64)0x7F) << 18));
-                return;
-            };
+                fe_set_p(@p);
 
-            // Encode a field element to 32 little-endian bytes.
-            def fe_to_bytes(byte* dst, Fe25519* h) -> void
-            {
-                Fe25519 t;
-                i64 h0, h1, h2, h3, h4, h5, h6, h7, h8, h9, q, carry;
-                u32 i;
-                i = 0;
-                while (i < (u32)10) { t.v[i] = h.v[i]; i++; };
-                fe_carry(@t);
-                fe_carry(@t);
-                h0 = t.v[0]; h1 = t.v[1]; h2 = t.v[2]; h3 = t.v[3]; h4 = t.v[4];
-                h5 = t.v[5]; h6 = t.v[6]; h7 = t.v[7]; h8 = t.v[8]; h9 = t.v[9];
-                // Reduce once more to canonical form: subtract p if >= p
-                q = (h0 + (i64)19) >> 26;
-                q = (h1 + q) >> 25;
-                q = (h2 + q) >> 26;
-                q = (h3 + q) >> 25;
-                q = (h4 + q) >> 26;
-                q = (h5 + q) >> 25;
-                q = (h6 + q) >> 26;
-                q = (h7 + q) >> 25;
-                q = (h8 + q) >> 26;
-                q = (h9 + q) >> 25;
-                h0 += (i64)19 * q;
-                carry = h0 >> 26; h0 = h0 `& (i64)0x3FFFFFF; h1 += carry;
-                carry = h1 >> 25; h1 = h1 `& (i64)0x1FFFFFF; h2 += carry;
-                carry = h2 >> 26; h2 = h2 `& (i64)0x3FFFFFF; h3 += carry;
-                carry = h3 >> 25; h3 = h3 `& (i64)0x1FFFFFF; h4 += carry;
-                carry = h4 >> 26; h4 = h4 `& (i64)0x3FFFFFF; h5 += carry;
-                carry = h5 >> 25; h5 = h5 `& (i64)0x1FFFFFF; h6 += carry;
-                carry = h6 >> 26; h6 = h6 `& (i64)0x3FFFFFF; h7 += carry;
-                carry = h7 >> 25; h7 = h7 `& (i64)0x1FFFFFF; h8 += carry;
-                carry = h8 >> 26; h8 = h8 `& (i64)0x3FFFFFF; h9 += carry;
-                carry = h9 >> 25; h9 = h9 `& (i64)0x1FFFFFF;
-                dst[0]  = (byte)(h0);
-                dst[1]  = (byte)(h0 >> 8);
-                dst[2]  = (byte)(h0 >> 16);
-                dst[3]  = (byte)((h0 >> 24) | (h1 << 2));
-                dst[4]  = (byte)(h1 >> 6);
-                dst[5]  = (byte)(h1 >> 14);
-                dst[6]  = (byte)((h1 >> 22) | (h2 << 3));
-                dst[7]  = (byte)(h2 >> 5);
-                dst[8]  = (byte)(h2 >> 13);
-                dst[9]  = (byte)((h2 >> 21) | (h3 << 5));
-                dst[10] = (byte)(h3 >> 3);
-                dst[11] = (byte)(h3 >> 11);
-                dst[12] = (byte)((h3 >> 19) | (h4 << 6));
-                dst[13] = (byte)(h4 >> 2);
-                dst[14] = (byte)(h4 >> 10);
-                dst[15] = (byte)(h4 >> 18);
-                dst[16] = (byte)(h5);
-                dst[17] = (byte)(h5 >> 8);
-                dst[18] = (byte)(h5 >> 16);
-                dst[19] = (byte)((h5 >> 24) | (h6 << 1));
-                dst[20] = (byte)(h6 >> 7);
-                dst[21] = (byte)(h6 >> 15);
-                dst[22] = (byte)((h6 >> 23) | (h7 << 3));
-                dst[23] = (byte)(h7 >> 5);
-                dst[24] = (byte)(h7 >> 13);
-                dst[25] = (byte)((h7 >> 21) | (h8 << 4));
-                dst[26] = (byte)(h8 >> 4);
-                dst[27] = (byte)(h8 >> 12);
-                dst[28] = (byte)((h8 >> 20) | (h9 << 6));
-                dst[29] = (byte)(h9 >> 2);
-                dst[30] = (byte)(h9 >> 10);
-                dst[31] = (byte)(h9 >> 18);
+                // exp = p - 2: subtract 2 from p
+                math::bigint::bigint_from_uint(@tmp, 2);
+                math::bigint::bigint_sub(@exp, @p, @tmp);
+
+                // result = 1
+                math::bigint::bigint_one(@result);
+                math::bigint::bigint_copy(@base, a);
+
+                // Binary exponentiation: iterate over bits of exp from LSB
+                // exp has 8 uint limbs
+                uint* expd = @exp.digits[0];
+                uint exp_len = exp.length;
+
+                for (i = 0; i < exp_len; i++)
+                {
+                    uint word = expd[i];
+                    for (j = 0; j < 32; j++)
+                    {
+                        if ((word & 1) != 0)
+                        {
+                            fe_mul(@tmp, @result, @base);
+                            math::bigint::bigint_copy(@result, @tmp);
+                        };
+                        word = word >> 1;
+                        fe_sq(@tmp, @base);
+                        math::bigint::bigint_copy(@base, @tmp);
+                    };
+                };
+
+                math::bigint::bigint_copy(out, @result);
                 return;
             };
 
             // ---- Montgomery ladder ----
-            //
-            // Constant-time scalar multiplication on Curve25519.
-            // Processes 255 bits of the clamped scalar from bit 254 down to 0.
-            //
-            // out[32]    : output u-coordinate (little-endian)
-            // scalar[32] : private scalar (will be clamped per RFC 7748)
-            // point[32]  : input u-coordinate (little-endian)
             def x25519(byte* out, byte* scalar, byte* point) -> void
             {
-                Fe25519 x1, x2, x3, z2, z3, A, AA, B, BB, E, C, D, DA, CB, a24;
-                byte[32] e, p_clamped;
-                u32      i, j;
-                i64      bit, swap;
+                BigInt x1, x2, z2, x3, z3;
+                BigInt A, AA, B, BB, E, C, D, DA, CB, tmp, a24;
+                byte[32] e;
+                u32 i, j;
+                u64 bit, swap;
 
-                // Clamp scalar per RFC 7748 section 5
-                j = 0;
-                while (j < (u32)32) { e[j] = scalar[j]; j++; };
+                // Clamp scalar
+                while (j < 32) { e[j] = scalar[j]; j++; };
                 e[0]  = e[0]  & (byte)248;
                 e[31] = e[31] & (byte)127;
                 e[31] = e[31] | (byte)64;
 
-                // Decode u-coordinate of base point; clear high bit per RFC 7748
-                j = 0; while (j < (u32)32) { p_clamped[j] = point[j]; j++; };
-                p_clamped[31] = p_clamped[31] & (byte)127;
-                fe_from_bytes(@x1, @p_clamped[0]);
+                // Load u-coordinate (mask high bit)
+                fe_from_bytes(@x1, point);
 
-                // (x2:z2) = (1:0)
-                j = 0; while (j < (u32)10) { x2.v[j] = 0; z2.v[j] = 0; j++; };
-                x2.v[0] = 1;
-
-                // (x3:z3) = (x1:1)
-                j = 0; while (j < (u32)10) { x3.v[j] = x1.v[j]; z3.v[j] = 0; j++; };
-                z3.v[0] = 1;
+                // x2 = 1, z2 = 0
+                math::bigint::bigint_one(@x2);
+                math::bigint::bigint_zero(@z2);
+                // x3 = x1, z3 = 1
+                math::bigint::bigint_copy(@x3, @x1);
+                math::bigint::bigint_one(@z3);
 
                 // a24 = 121665
-                j = 0; while (j < (u32)10) { a24.v[j] = 0; j++; };
-                a24.v[0] = 121665;
+                math::bigint::bigint_from_uint(@a24, 121665);
 
-                swap = 0;
-
-                // Process bits 254 down to 0
                 i = 254;
-                while (i <= (u32)254)
+                while (i <= 254)
                 {
-                    bit  = (i64)((e[i >> 3] >> (i & 7)) & 1);
+                    bit  = (u64)((e[i >> 3] >> (i & 7)) & 1);
                     swap = swap `^^ bit;
                     fe_cswap(@x2, @x3, swap);
                     fe_cswap(@z2, @z3, swap);
@@ -1490,15 +1372,15 @@ namespace standard
                     fe_sub(@D,  @x3, @z3);
                     fe_mul(@DA, @D,  @A);
                     fe_mul(@CB, @C,  @B);
-                    fe_add(@x3, @DA, @CB);  fe_sq(@x3, @x3);
-                    fe_sub(@z3, @DA, @CB);  fe_sq(@z3, @z3);
+                    fe_add(@tmp, @DA, @CB);  fe_sq(@x3, @tmp);
+                    fe_sub(@tmp, @DA, @CB);  fe_sq(@z3, @tmp);
                     fe_mul(@z3, @x1, @z3);
                     fe_mul(@x2, @AA, @BB);
-                    fe_mul(@A,  @a24, @E);
-                    fe_add(@A,  @AA, @A);
-                    fe_mul(@z2, @E,  @A);
+                    fe_mul(@tmp, @a24, @E);
+                    fe_add(@tmp, @AA, @tmp);
+                    fe_mul(@z2, @E, @tmp);
 
-                    switch (i == (u32)0) { case (1) { break; } default {}; };
+                    switch (i == 0) { case (1) { break; } default {}; };
                     i--;
                 };
 
@@ -1511,13 +1393,12 @@ namespace standard
                 return;
             };
 
-            // Compute public key: scalar * base point (u=9).
             def x25519_pubkey(byte* out, byte* scalar) -> void
             {
                 byte[32] base;
-                u32      i;
+                u32 i;
                 i = 0;
-                while (i < (u32)32) { base[i] = (byte)0; i++; };
+                while (i < 32) { base[i] = (byte)0; i++; };
                 base[0] = (byte)9;
                 x25519(out, scalar, @base[0]);
                 return;
@@ -1573,13 +1454,13 @@ namespace standard
                     };
 
                     SHA256::sha256_init(@inner_ctx);
-                    SHA256::sha256_update(@inner_ctx, @ipad_key[0], (u64)64);
+                    SHA256::sha256_update(@inner_ctx, @ipad_key[0], 64);
                     SHA256::sha256_update(@inner_ctx, msg, (u64)msg_len);
                     SHA256::sha256_final(@inner_ctx, @inner_hash[0]);
 
                     SHA256::sha256_init(@outer_ctx);
-                    SHA256::sha256_update(@outer_ctx, @opad_key[0], (u64)64);
-                    SHA256::sha256_update(@outer_ctx, @inner_hash[0], (u64)32);
+                    SHA256::sha256_update(@outer_ctx, @opad_key[0], 64);
+                    SHA256::sha256_update(@outer_ctx, @inner_hash[0], 32);
                     SHA256::sha256_final(@outer_ctx, out);
                 };
 
@@ -1653,8 +1534,6 @@ namespace standard
 
                     // n = ceil(okm_len / HashLen)
                     n = (okm_len + 31) / 32;
-
-                    offset = 0;
 
                     for (i = 1; i <= n; i++)
                     {

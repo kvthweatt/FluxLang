@@ -2,14 +2,17 @@
 
 // json.fx - JSON parse, build, and serialize library.
 //
-// JSONNode   - tagged value node (null/bool/int/float/string/array/object)
-// JSONArray  - growable array of void* node pointers
-// JSONObject - ordered key/value store
-// JSONParser - tokenizing recursive-descent parser
+// JSONNode      - tagged value node (null/bool/int/float/string/array/object)
+// JSONArray     - growable array of void* node pointers
+// JSONObject    - ordered key/value store with cached key lengths
+// JSONParser    - arena-backed zero-copy recursive descent parser
+// SerializeBuf / serialize_arena - arena-backed serializer
 //
 // All locals declared at function top. All variables zero-initialized.
 // node_free() is used inside JSONNode.__exit() to avoid self-reference.
 // Methods that return child nodes return void*; caller casts to JSONNode*.
+// Zero-copy strings: use as_string_view() for parsed data; as_string() only
+// valid for strings set via set_string() or set_string_arena().
 
 #ifndef FLUX_STANDARD
 #import "standard.fx";
@@ -135,14 +138,15 @@ namespace json
 
 	object JSONObject
 	{
-		void*  keys, vals;
+		void*  keys, vals, klens;
 		size_t len, cap;
 
 		def __init() -> this
 		{
-			this.cap  = 8;
-			this.keys = (@)fmalloc(this.cap * 8);
-			this.vals = (@)fmalloc(this.cap * 8);
+			this.cap   = 8;
+			this.keys  = (@)fmalloc(this.cap * 8);
+			this.vals  = (@)fmalloc(this.cap * 8);
+			this.klens = (@)fmalloc(this.cap * (sizeof(size_t) / 8));
 			return this;
 		};
 
@@ -166,73 +170,136 @@ namespace json
 				ffree((u64)this.vals);
 				this.vals = (@)0;
 			};
+			if ((u64)this.klens != 0)
+			{
+				ffree((u64)this.klens);
+				this.klens = (@)0;
+			};
 			return;
 		};
 
 		def _grow() -> bool
 		{
-			void*  nk, nv;
+			void*  nk, nv, nl;
 			size_t new_cap;
 			new_cap = this.cap * 2;
 			nk      = (@)fmalloc(new_cap * 8);
 			if ((u64)nk == 0) { return false; };
 			nv = (@)fmalloc(new_cap * 8);
 			if ((u64)nv == 0) { ffree((u64)nk); return false; };
-			memcpy(nk, this.keys, this.cap * 8);
-			memcpy(nv, this.vals, this.cap * 8);
+			nl = (@)fmalloc(new_cap * (sizeof(size_t) / 8));
+			if ((u64)nl == 0) { ffree((u64)nk); ffree((u64)nv); return false; };
+			memcpy(nk, this.keys,  this.cap * 8);
+			memcpy(nv, this.vals,  this.cap * 8);
+			memcpy(nl, this.klens, this.cap * (sizeof(size_t) / 8));
 			ffree((u64)this.keys);
 			ffree((u64)this.vals);
-			this.keys = nk;
-			this.vals = nv;
-			this.cap  = new_cap;
+			ffree((u64)this.klens);
+			this.keys  = nk;
+			this.vals  = nv;
+			this.klens = nl;
+			this.cap   = new_cap;
 			return true;
 		};
 
-		// Arena-backed init: keys and vals slabs from arena.
+		// Arena-backed init: keys, vals, and klens slabs from arena.
 		def _init_arena(standard::memory::allocators::stdarena::Arena* a) -> void
 		{
-			this.cap  = 8;
-			this.keys = (@)standard::memory::allocators::stdarena::alloc(a, this.cap * 8);
-			this.vals = (@)standard::memory::allocators::stdarena::alloc(a, this.cap * 8);
+			this.cap   = 8;
+			this.keys  = (@)standard::memory::allocators::stdarena::alloc(a, this.cap * 8);
+			this.vals  = (@)standard::memory::allocators::stdarena::alloc(a, this.cap * 8);
+			this.klens = (@)standard::memory::allocators::stdarena::alloc(a, this.cap * (sizeof(size_t) / 8));
 			return;
 		};
 
 		// Arena-backed grow: old slabs abandoned in arena.
 		def _grow_arena(standard::memory::allocators::stdarena::Arena* a) -> bool
 		{
-			void*  nk, nv;
+			void*  nk, nv, nl;
 			size_t new_cap;
 			new_cap = this.cap * 2;
 			nk      = (@)standard::memory::allocators::stdarena::alloc(a, new_cap * 8);
 			if ((u64)nk == 0) { return false; };
 			nv = (@)standard::memory::allocators::stdarena::alloc(a, new_cap * 8);
 			if ((u64)nv == 0) { return false; };
-			memcpy(nk, this.keys, this.cap * 8);
-			memcpy(nv, this.vals, this.cap * 8);
-			this.keys = nk;
-			this.vals = nv;
-			this.cap  = new_cap;
+			nl = (@)standard::memory::allocators::stdarena::alloc(a, new_cap * (sizeof(size_t) / 8));
+			if ((u64)nl == 0) { return false; };
+			memcpy(nk, this.keys,  this.cap * 8);
+			memcpy(nv, this.vals,  this.cap * 8);
+			memcpy(nl, this.klens, this.cap * (sizeof(size_t) / 8));
+			this.keys  = nk;
+			this.vals  = nv;
+			this.klens = nl;
+			this.cap   = new_cap;
+			return true;
+		};
+
+		// Arena-backed set: key is copied into arena memory, no ffree on key.
+		// Duplicate key check uses stored klens — no strlen on existing keys.
+		def arena_set(byte* key, void* val, standard::memory::allocators::stdarena::Arena* a) -> bool
+		{
+			byte**   ks;
+			void**   vs;
+			size_t*  kl_slab;
+			byte*    kc;
+			size_t   i, kl;
+			int      j;
+			bool     match;
+			ks      = (byte**)this.keys;
+			vs      = (void**)this.vals;
+			kl_slab = (size_t*)this.klens;
+			kl      = (size_t)standard::strings::strlen(key);
+			while (i < this.len)
+			{
+				match = kl_slab[i] == kl;
+				if (match)
+				{
+					while (j < (int)kl)
+					{
+						if (ks[i][j] != key[j]) { match = false; break; };
+						j = j + 1;
+					};
+				};
+				if (match) { vs[i] = val; return true; };
+				i++;
+			};
+			if (this.len >= this.cap)
+			{
+				if (!this._grow_arena(a)) { return false; };
+				ks      = (byte**)this.keys;
+				vs      = (void**)this.vals;
+				kl_slab = (size_t*)this.klens;
+			};
+			kc = (byte*)standard::memory::allocators::stdarena::alloc(a, kl + (size_t)1);
+			if ((u64)kc == 0) { return false; };
+			j = 0;
+			while (j <= (int)kl) { kc[j] = key[j]; j = j + 1; };
+			ks[this.len]      = kc;
+			vs[this.len]      = val;
+			kl_slab[this.len] = kl;
+			this.len++;
 			return true;
 		};
 
 		def set(byte* key, void* val) -> bool
 		{
-			byte** ks;
-			void** vs;
-			byte*  kc;
-			size_t i;
-			int    kl, el, j;
-			bool   match;
-			ks = (byte**)this.keys;
-			vs = (void**)this.vals;
-			kl = standard::strings::strlen(key);
+			byte**  ks;
+			void**  vs;
+			size_t* kl_slab;
+			byte*   kc;
+			size_t  i, kl;
+			int     j;
+			bool    match;
+			ks      = (byte**)this.keys;
+			vs      = (void**)this.vals;
+			kl_slab = (size_t*)this.klens;
+			kl      = (size_t)standard::strings::strlen(key);
 			while (i < this.len)
 			{
-				el    = standard::strings::strlen(ks[i]);
-				match = el == kl;
+				match = kl_slab[i] == kl;
 				if (match)
 				{
-					while (j < kl)
+					while (j < (int)kl)
 					{
 						if (ks[i][j] != key[j]) { match = false; break; };
 						j = j + 1;
@@ -244,35 +311,39 @@ namespace json
 			if (this.len >= this.cap)
 			{
 				if (!this._grow()) { return false; };
-				ks = (byte**)this.keys;
-				vs = (void**)this.vals;
+				ks      = (byte**)this.keys;
+				vs      = (void**)this.vals;
+				kl_slab = (size_t*)this.klens;
 			};
-			kc = (byte*)fmalloc((u64)(kl + 1));
+			kc = (byte*)fmalloc((u64)(kl + (size_t)1));
 			if ((u64)kc == 0) { return false; };
-			while (j <= kl) { kc[j] = key[j]; j = j + 1; };
-			ks[this.len] = kc;
-			vs[this.len] = val;
+			j = 0;
+			while (j <= (int)kl) { kc[j] = key[j]; j = j + 1; };
+			ks[this.len]      = kc;
+			vs[this.len]      = val;
+			kl_slab[this.len] = kl;
 			this.len++;
 			return true;
 		};
 
 		def get(byte* key) -> void*
 		{
-			byte** ks;
-			void** vs;
-			size_t i;
-			int    kl, el, j;
-			bool   match;
-			ks = (byte**)this.keys;
-			vs = (void**)this.vals;
-			kl = standard::strings::strlen(key);
+			byte**  ks;
+			void**  vs;
+			size_t* kl_slab;
+			size_t  i, kl;
+			int     j;
+			bool    match;
+			ks      = (byte**)this.keys;
+			vs      = (void**)this.vals;
+			kl_slab = (size_t*)this.klens;
+			kl      = (size_t)standard::strings::strlen(key);
 			while (i < this.len)
 			{
-				el    = standard::strings::strlen(ks[i]);
-				match = el == kl;
+				match = kl_slab[i] == kl;
 				if (match)
 				{
-					while (j < kl)
+					while (j < (int)kl)
 					{
 						if (ks[i][j] != key[j]) { match = false; break; };
 						j = j + 1;
@@ -316,10 +387,11 @@ namespace json
 	object JSONNode
 	{
 		int    type;
-		bool   b;
+		bool   b, s_owned;
 		i64    i;
 		double f;
 		byte*  s;
+		int    slen;
 		JSONArray  arr;
 		JSONObject obj;
 
@@ -334,7 +406,7 @@ namespace json
 			size_t k, n;
 			if (this.type == JSON_STRING)
 			{
-				if ((u64)this.s != 0)
+				if (this.s_owned & (u64)this.s != 0)
 				{
 					ffree((u64)this.s);
 					this.s = (byte*)0;
@@ -408,9 +480,27 @@ namespace json
 			kc = (byte*)fmalloc((u64)(n + 1));
 			if ((u64)kc == 0) { return false; };
 			while (j <= n) { kc[j] = src[j]; j = j + 1; };
-			if ((u64)this.s != 0) { ffree((u64)this.s); };
-			this.s    = kc;
-			this.type = JSON_STRING;
+			if (this.s_owned & (u64)this.s != 0) { ffree((u64)this.s); };
+			this.s       = kc;
+			this.slen    = n;
+			this.s_owned = true;
+			this.type    = JSON_STRING;
+			return true;
+		};
+
+		def set_string_arena(byte* src, standard::memory::allocators::stdarena::Arena* a) -> bool
+		{
+			byte* kc;
+			int   n, j;
+			n  = standard::strings::strlen(src);
+			kc = (byte*)standard::memory::allocators::stdarena::alloc(a, (size_t)(n + 1));
+			if ((u64)kc == 0) { return false; };
+			while (j <= n) { kc[j] = src[j]; j = j + 1; };
+			// arena strings are not individually freed — skip the old free check
+			this.s       = kc;
+			this.slen    = n;
+			this.s_owned = false;
+			this.type    = JSON_STRING;
 			return true;
 		};
 
@@ -470,6 +560,16 @@ namespace json
 			return (byte*)0;
 		};
 
+		// Returns pointer and byte length for both owned and zero-copy strings.
+		// Use this in preference to as_string() when working with parsed data.
+		def as_string_view(byte** out, int* out_len) -> bool
+		{
+			if (this.type != JSON_STRING) { return false; };
+			*out     = this.s;
+			*out_len = this.slen;
+			return true;
+		};
+
 		def array_push_new() -> void*
 		{
 			void* child;
@@ -484,6 +584,19 @@ namespace json
 				return (@)0;
 			};
 			return child;
+		};
+
+		def array_push_new_arena(standard::memory::allocators::stdarena::Arena* a) -> void*
+		{
+			JSONNode* child;
+			size_t    sz;
+			if (this.type != JSON_ARRAY) { return (@)0; };
+			sz    = sizeof(JSONNode) / sizeof(byte);
+			child = (JSONNode*)standard::memory::allocators::stdarena::alloc(a, sz);
+			if ((u64)child == 0) { return (@)0; };
+			child.__init();
+			if (!this.arr.push_arena((void*)child, a)) { return (@)0; };
+			return (void*)child;
 		};
 
 		def array_len() -> size_t
@@ -512,6 +625,19 @@ namespace json
 				return (@)0;
 			};
 			return child;
+		};
+
+		def object_set_new_arena(byte* key, standard::memory::allocators::stdarena::Arena* a) -> void*
+		{
+			JSONNode* child;
+			size_t    sz;
+			if (this.type != JSON_OBJECT) { return (@)0; };
+			sz    = sizeof(JSONNode) / sizeof(byte);
+			child = (JSONNode*)standard::memory::allocators::stdarena::alloc(a, sz);
+			if ((u64)child == 0) { return (@)0; };
+			child.__init();
+			if (!this.obj.arena_set(key, (void*)child, a)) { return (@)0; };
+			return (void*)child;
 		};
 
 		def object_get(byte* key) -> void*
@@ -556,18 +682,24 @@ namespace json
 	};
 
 	// =========================================================================
-	// JSONParserFast - arena-backed parser; no per-node fmalloc
+	// JSONParser - arena-backed, zero-copy recursive descent parser
 	//
 	// Backed by standard::memory::allocators::stdarena::Arena.
-	// One arena covers both JSONNode structs and string data.
-	// arena_destroy frees everything in two OS calls regardless of node count.
+	// One arena covers both JSONNode structs and escaped string data.
+	// Escape-free strings and keys point directly into the source buffer —
+	// no allocation, no copy. arena_destroy frees everything in O(chunks)
+	// regardless of node count.
 	// =========================================================================
 
-	object JSONParserFast
+	#def NODE_SLAB_SIZE 64;
+
+	object JSONParser
 	{
 		byte*                                       src;
 		int                                         pos, len, error;
 		standard::memory::allocators::stdarena::Arena* arena;
+		JSONNode*                                   node_slab;
+		int                                         slab_remaining;
 
 		// text_len must be the byte length of text (e.g. bytes_read from fread).
 		// No strlen call -- caller provides the length.
@@ -623,24 +755,38 @@ namespace json
 		{
 			byte* s;
 			int   start, slen, j;
+			bool  has_escape;
 			char  c;
 			this._adv();
 			start = this.pos;
+			// Scan to find end and whether escapes are present.
 			while (this.pos < this.len)
 			{
 				c = (char)this.src[this.pos];
 				if (c == '"') { break; };
-				if (c == '\\') { this.pos = this.pos + 1; };
+				if (c == '\\') { has_escape = true; this.pos = this.pos + 1; };
 				this.pos = this.pos + 1;
 				slen     = slen + 1;
 			};
 			if (this._peek() != '"') { this.error = 1; return false; };
+			this._adv();
+			if (!has_escape)
+			{
+				// Zero-copy: point directly into source buffer.
+				node.s       = @this.src[start];
+				node.slen    = slen;
+				node.s_owned = false;
+				node.type    = JSON_STRING;
+				return true;
+			};
+			// Has escapes: allocate into arena and decode.
 			s = (byte*)standard::memory::allocators::stdarena::alloc(this.arena, (size_t)(slen + 1));
 			if ((u64)s == 0) { this.error = 2; return false; };
 			this.pos = start;
-			while (j < slen)
+			while (this.pos < this.len)
 			{
 				c = (char)this.src[this.pos];
+				if (c == '"') { break; };
 				if (c == '\\')
 				{
 					this.pos = this.pos + 1;
@@ -656,11 +802,12 @@ namespace json
 				this.pos = this.pos + 1;
 				j = j + 1;
 			};
-			s[slen]   = '\x00';
+			s[j]         = '\x00';
 			this._adv();
-			// arena strings are not individually freed — skip the old free check
-			node.s    = s;
-			node.type = JSON_STRING;
+			node.s       = s;
+			node.slen    = j;
+			node.s_owned = false;
+			node.type    = JSON_STRING;
 			return true;
 		};
 
@@ -711,22 +858,32 @@ namespace json
 		{
 			JSONNode* child;
 			size_t    sz;
-			sz    = sizeof(JSONNode) / sizeof(byte);
-			child = (JSONNode*)standard::memory::allocators::stdarena::alloc(this.arena, sz);
-			if ((u64)child == 0) { this.error = 2; return (JSONNode*)0; };
+			if (this.slab_remaining == 0)
+			{
+				sz             = (sizeof(JSONNode) / sizeof(byte)) * (size_t)NODE_SLAB_SIZE;
+				this.node_slab = (JSONNode*)standard::memory::allocators::stdarena::alloc(this.arena, sz);
+				if ((u64)this.node_slab == 0) { this.error = 2; return (JSONNode*)0; };
+				this.slab_remaining = NODE_SLAB_SIZE;
+			};
+			child               = this.node_slab;
+			this.node_slab      = (JSONNode*)((u64)this.node_slab + sizeof(JSONNode) / sizeof(byte));
+			this.slab_remaining = this.slab_remaining - 1;
 			// Zero-initialize — arena memory is uninitialized
-			child.type    = JSON_NULL;
-			child.b       = false;
-			child.i       = 0;
-			child.f       = 0.0;
-			child.s       = (byte*)0;
-			child.arr.buf = (@)0;
-			child.arr.len = 0;
-			child.arr.cap = 0;
-			child.obj.keys = (@)0;
-			child.obj.vals = (@)0;
-			child.obj.len  = 0;
-			child.obj.cap  = 0;
+			child.type      = JSON_NULL;
+			child.b         = false;
+			child.s_owned   = false;
+			child.i         = 0;
+			child.f         = 0.0;
+			child.s         = (byte*)0;
+			child.slen      = 0;
+			child.arr.buf   = (@)0;
+			child.arr.len   = 0;
+			child.arr.cap   = 0;
+			child.obj.keys  = (@)0;
+			child.obj.vals  = (@)0;
+			child.obj.klens = (@)0;
+			child.obj.len   = 0;
+			child.obj.cap   = 0;
 			return child;
 		};
 
@@ -755,12 +912,13 @@ namespace json
 
 		def _parse_object(JSONNode* node) -> bool
 		{
-			byte[256] key_buf;
 			JSONNode* child;
 			byte*     kc;
 			byte**    ks;
 			void**    vs;
-			int       ki, kl;
+			size_t*   kl_slab;
+			int       key_start, kl, j, resume_pos;
+			bool      key_escape;
 			char      c;
 			node.set_object_arena(this.arena);
 			this._adv();
@@ -771,39 +929,74 @@ namespace json
 				this._skip_ws();
 				if (this._peek() != '"') { this.error = 1; return false; };
 				this._adv();
-				ki = 0;
+				key_start  = this.pos;
+				kl         = 0;
+				key_escape = false;
 				while (this.pos < this.len)
 				{
 					c = (char)this.src[this.pos];
 					if (c == '"') { break; };
-					if (c == '\\') { this.pos = this.pos + 1; c = (char)this.src[this.pos]; };
-					if (ki < 255) { key_buf[ki] = (byte)c; ki = ki + 1; };
+					if (c == '\\') { key_escape = true; this.pos = this.pos + 1; };
 					this.pos = this.pos + 1;
+					kl       = kl + 1;
 				};
-				key_buf[ki] = '\x00';
 				if (this._peek() != '"') { this.error = 1; return false; };
 				this._adv();
 				this._skip_ws();
 				if (this._peek() != ':') { this.error = 1; return false; };
 				this._adv();
 				this._skip_ws();
+				// Save position — value parse starts here.
+				resume_pos = this.pos;
 				child = this._alloc_child();
 				if ((u64)child == 0) { return false; };
-				// Copy key into arena string slab
-				kl = ki;
-				kc = (byte*)standard::memory::allocators::stdarena::alloc(this.arena, (size_t)(kl + 1));
-				if ((u64)kc == 0) { this.error = 2; return false; };
-				ki = 0;
-				while (ki <= kl) { kc[ki] = key_buf[ki]; ki = ki + 1; };
+				if (!key_escape)
+				{
+					// Zero-copy key: point directly into source.
+					kc = @this.src[key_start];
+				}
+				else
+				{
+					// Key has escapes: decode into arena buffer.
+					kc = (byte*)standard::memory::allocators::stdarena::alloc(this.arena, (size_t)(kl + 1));
+					if ((u64)kc == 0) { this.error = 2; return false; };
+					this.pos = key_start;
+					j = 0;
+					while (this.pos < this.len)
+					{
+						c = (char)this.src[this.pos];
+						if (c == '"') { break; };
+						if (c == '\\')
+						{
+							this.pos = this.pos + 1;
+							c = (char)this.src[this.pos];
+							if      (c == '"')  { kc[j] = '"';  }
+							elif    (c == '\\') { kc[j] = '\\'; }
+							elif    (c == 'n')  { kc[j] = '\n'; }
+							elif    (c == 'r')  { kc[j] = '\r'; }
+							elif    (c == 't')  { kc[j] = '\t'; }
+							else                { kc[j] = (byte)c; };
+						}
+						else { kc[j] = (byte)c; };
+						this.pos = this.pos + 1;
+						j = j + 1;
+					};
+					kc[j] = '\x00';
+					kl     = j;
+					// Restore position to after ':' for value parse.
+					this.pos = resume_pos;
+				};
 				// Push directly into obj — arena-backed grow, no ffree
 				if (node.obj.len >= node.obj.cap)
 				{
 					if (!node.obj._grow_arena(this.arena)) { this.error = 2; return false; };
 				};
-				ks = (byte**)node.obj.keys;
-				vs = (void**)node.obj.vals;
-				ks[node.obj.len] = kc;
-				vs[node.obj.len] = (void*)child;
+				ks      = (byte**)node.obj.keys;
+				vs      = (void**)node.obj.vals;
+				kl_slab = (size_t*)node.obj.klens;
+				ks[node.obj.len]      = kc;
+				vs[node.obj.len]      = (void*)child;
+				kl_slab[node.obj.len] = (size_t)kl;
 				node.obj.len++;
 				if (!this._parse_value(child)) { return false; };
 				this._skip_ws();
@@ -948,235 +1141,164 @@ namespace json
 	};
 
 	// =========================================================================
-	// JSONParser
+	// Arena serializer - grows as needed, no caller pre-sizing required.
+	//
+	// serialize_arena writes node into an arena-backed buffer that doubles
+	// when full. Returns a null-terminated byte* owned by the arena, or
+	// null on OOM. The caller does not free the result — arena_destroy
+	// releases it along with all other parse/build allocations.
 	// =========================================================================
 
-	object JSONParser
+	struct SerializeBuf
 	{
-		byte* src;
-		int   pos, len, error;
-
-		def __init(byte* text) -> this
-		{
-			this.src = text;
-			this.len = standard::strings::strlen(text);
-			return this;
-		};
-
-		def __exit() -> void
-		{
-			return;
-		};
-
-		def ok() -> bool
-		{
-			return this.error == 0;
-		};
-
-		def _skip_ws() -> void
-		{
-			char c;
-			while (this.pos < this.len)
-			{
-				c = (char)this.src[this.pos];
-				if (c == ' ' | c == '\t' | c == '\n' | c == '\r')
-				{
-					this.pos = this.pos + 1;
-				}
-				else { break; };
-			};
-			return;
-		};
-
-		def _peek() -> char
-		{
-			if (this.pos >= this.len) { return '\x00'; };
-			return (char)this.src[this.pos];
-		};
-
-		def _adv() -> char
-		{
-			char c;
-			if (this.pos >= this.len) { return '\x00'; };
-			c        = (char)this.src[this.pos];
-			this.pos = this.pos + 1;
-			return c;
-		};
-
-		def _parse_string(JSONNode* node) -> bool
-		{
-			byte* s;
-			int   start, slen, j;
-			char  c;
-			this._adv();
-			start = this.pos;
-			while (this.pos < this.len)
-			{
-				c = (char)this.src[this.pos];
-				if (c == '"') { break; };
-				if (c == '\\') { this.pos = this.pos + 1; };
-				this.pos = this.pos + 1;
-				slen     = slen + 1;
-			};
-			if (this._peek() != '"') { this.error = 1; return false; };
-			s = (byte*)fmalloc((u64)(slen + 1));
-			if ((u64)s == 0) { this.error = 2; return false; };
-			this.pos = start;
-			while (j < slen)
-			{
-				c = (char)this.src[this.pos];
-				if (c == '\\')
-				{
-					this.pos = this.pos + 1;
-					c = (char)this.src[this.pos];
-					if      (c == '"')  { s[j] = '"';  }
-					elif    (c == '\\') { s[j] = '\\'; }
-					elif    (c == 'n')  { s[j] = '\n'; }
-					elif    (c == 'r')  { s[j] = '\r'; }
-					elif    (c == 't')  { s[j] = '\t'; }
-					else                { s[j] = (byte)c; };
-				}
-				else { s[j] = (byte)c; };
-				this.pos = this.pos + 1;
-				j = j + 1;
-			};
-			s[slen] = '\x00';
-			this._adv();
-			if ((u64)node.s != 0) { ffree((u64)node.s); };
-			node.s    = s;
-			node.type = JSON_STRING;
-			return true;
-		};
-
-		def _parse_number(JSONNode* node) -> bool
-		{
-			bool   is_float, neg;
-			i64    iv;
-			double fv, fdiv;
-			char   c;
-			c = this._peek();
-			if (c == '-') { neg = true; this._adv(); };
-			while (this.pos < this.len)
-			{
-				c = (char)this.src[this.pos];
-				if (c >= '0' & c <= '9')
-				{
-					iv = iv * 10 + (c - '0');
-					this.pos = this.pos + 1;
-				}
-				else { break; };
-			};
-			if (this._peek() == '.')
-			{
-				is_float = true;
-				fdiv     = 1.0;
-				fv       = (double)iv;
-				this._adv();
-				while (this.pos < this.len)
-				{
-					c = (char)this.src[this.pos];
-					if (c >= '0' & c <= '9')
-					{
-						fdiv = fdiv * 10.0;
-						fv   = fv + (double)(c - '0') / fdiv;
-						this.pos = this.pos + 1;
-					}
-					else { break; };
-				};
-			};
-			if (is_float) { node.set_float(neg ? -fv : fv); }
-			else          { node.set_int(neg ? -iv : iv);   };
-			return true;
-		};
-
-		def _parse_value(JSONNode* node) -> bool;
-
-		def _parse_array(JSONNode* node) -> bool
-		{
-			void* child;
-			node.set_array();
-			this._adv();
-			this._skip_ws();
-			if (this._peek() == ']') { this._adv(); return true; };
-			while (this.pos < this.len)
-			{
-				child = node.array_push_new();
-				if ((u64)child == 0) { this.error = 2; return false; };
-				if (!this._parse_value((JSONNode*)child)) { return false; };
-				this._skip_ws();
-				if (this._peek() == ']') { this._adv(); return true; };
-				if (this._peek() != ',') { this.error = 1; return false; };
-				this._adv();
-				this._skip_ws();
-			};
-			this.error = 1;
-			return false;
-		};
-
-		def _parse_object(JSONNode* node) -> bool
-		{
-			byte[256] key_buf;
-			void*     child;
-			int       ki;
-			char      c;
-			node.set_object();
-			this._adv();
-			this._skip_ws();
-			if (this._peek() == '}') { this._adv(); return true; };
-			while (this.pos < this.len)
-			{
-				this._skip_ws();
-				if (this._peek() != '"') { this.error = 1; return false; };
-				this._adv();
-				ki = 0;
-				while (this.pos < this.len)
-				{
-					c = (char)this.src[this.pos];
-					if (c == '"') { break; };
-					if (c == '\\') { this.pos = this.pos + 1; c = (char)this.src[this.pos]; };
-					if (ki < 255) { key_buf[ki] = (byte)c; ki = ki + 1; };
-					this.pos = this.pos + 1;
-				};
-				key_buf[ki] = '\x00';
-				if (this._peek() != '"') { this.error = 1; return false; };
-				this._adv();
-				this._skip_ws();
-				if (this._peek() != ':') { this.error = 1; return false; };
-				this._adv();
-				this._skip_ws();
-				child = node.object_set_new(@key_buf[0]);
-				if ((u64)child == 0) { this.error = 2; return false; };
-				if (!this._parse_value((JSONNode*)child)) { return false; };
-				this._skip_ws();
-				if (this._peek() == '}') { this._adv(); return true; };
-				if (this._peek() != ',') { this.error = 1; return false; };
-				this._adv();
-			};
-			this.error = 1;
-			return false;
-		};
-
-		def _parse_value(JSONNode* node) -> bool
-		{
-			char c;
-			this._skip_ws();
-			c = this._peek();
-			if      (c == '"')                          { return this._parse_string(node); }
-			elif    (c == '[')                          { return this._parse_array(node);  }
-			elif    (c == '{')                          { return this._parse_object(node); }
-			elif    (c == 't') { this.pos = this.pos + 4; node.set_bool(true);  return true; }
-			elif    (c == 'f') { this.pos = this.pos + 5; node.set_bool(false); return true; }
-			elif    (c == 'n') { this.pos = this.pos + 4; node.set_null();      return true; }
-			elif    (c == '-' | (c >= '0' & c <= '9')) { return this._parse_number(node); };
-			this.error = 1;
-			return false;
-		};
-
-		def parse(JSONNode* node) -> bool
-		{
-			return this._parse_value(node);
-		};
+		byte*                                       buf;
+		int                                         pos, cap;
+		standard::memory::allocators::stdarena::Arena* arena;
 	};
+
+	def _sb_init(SerializeBuf* sb, standard::memory::allocators::stdarena::Arena* a, int init_cap) -> bool
+	{
+		sb.buf   = (byte*)standard::memory::allocators::stdarena::alloc(a, (size_t)init_cap);
+		sb.cap   = init_cap;
+		sb.arena = a;
+		return (u64)sb.buf != 0;
+	};
+
+	def _sb_grow(SerializeBuf* sb) -> bool
+	{
+		byte*  nb;
+		int    new_cap, i;
+		new_cap = sb.cap * 2;
+		nb      = (byte*)standard::memory::allocators::stdarena::alloc(sb.arena, (size_t)new_cap);
+		if ((u64)nb == 0) { return false; };
+		while (i < sb.pos) { nb[i] = sb.buf[i]; i = i + 1; };
+		sb.buf = nb;
+		sb.cap = new_cap;
+		return true;
+	};
+
+	def _sb_wc(SerializeBuf* sb, char c) -> bool
+	{
+		if (sb.pos >= sb.cap - 1)
+		{
+			if (!_sb_grow(sb)) { return false; };
+		};
+		sb.buf[sb.pos] = (byte)c;
+		sb.pos = sb.pos + 1;
+		return true;
+	};
+
+	def _sb_ws(SerializeBuf* sb, byte* src) -> bool
+	{
+		int i;
+		while (src[i] != '\x00')
+		{
+			if (!_sb_wc(sb, (char)src[i])) { return false; };
+			i = i + 1;
+		};
+		return true;
+	};
+
+	def _sb_we(SerializeBuf* sb, byte* src) -> bool
+	{
+		int  i;
+		char c;
+		while (src[i] != '\x00')
+		{
+			c = (char)src[i];
+			if      (c == '"')  { if (!_sb_wc(sb, '\\')) { return false; }; if (!_sb_wc(sb, '"'))  { return false; }; }
+			elif    (c == '\\') { if (!_sb_wc(sb, '\\')) { return false; }; if (!_sb_wc(sb, '\\')) { return false; }; }
+			elif    (c == '\n') { if (!_sb_wc(sb, '\\')) { return false; }; if (!_sb_wc(sb, 'n'))  { return false; }; }
+			elif    (c == '\r') { if (!_sb_wc(sb, '\\')) { return false; }; if (!_sb_wc(sb, 'r'))  { return false; }; }
+			elif    (c == '\t') { if (!_sb_wc(sb, '\\')) { return false; }; if (!_sb_wc(sb, 't'))  { return false; }; }
+			else                { if (!_sb_wc(sb, c))    { return false; }; };
+			i = i + 1;
+		};
+		return true;
+	};
+
+	def _serialize_arena_node(JSONNode* node, SerializeBuf* sb) -> bool;
+
+	def _serialize_arena_node(JSONNode* node, SerializeBuf* sb) -> bool
+	{
+		byte[32]  num_buf;
+		size_t    k, n;
+		JSONNode* child;
+
+		if ((u64)node == 0) { return _sb_ws(sb, "null\0"); };
+
+		switch (node.type)
+		{
+			case (JSON_NULL) { if (!_sb_ws(sb, "null\0"))  { return false; }; }
+			case (JSON_BOOL)
+			{
+				if (node.b) { if (!_sb_ws(sb, "true\0"))  { return false; }; }
+				else        { if (!_sb_ws(sb, "false\0")) { return false; }; };
+			}
+			case (JSON_INT)
+			{
+				standard::strings::i64str(node.i, @num_buf[0]);
+				if (!_sb_ws(sb, @num_buf[0])) { return false; };
+			}
+			case (JSON_FLOAT)
+			{
+				standard::strings::dbl2str(node.f, @num_buf[0], 6);
+				if (!_sb_ws(sb, @num_buf[0])) { return false; };
+			}
+			case (JSON_STRING)
+			{
+				if (!_sb_wc(sb, '"'))         { return false; };
+				if (!_sb_we(sb, node.s))      { return false; };
+				if (!_sb_wc(sb, '"'))         { return false; };
+			}
+			case (JSON_ARRAY)
+			{
+				n = node.arr.len;
+				if (!_sb_wc(sb, '[')) { return false; };
+				while (k < n)
+				{
+					if (k > 0) { if (!_sb_wc(sb, ',')) { return false; }; };
+					child = (JSONNode*)node.arr.get(k);
+					if (!_serialize_arena_node(child, sb)) { return false; };
+					k++;
+				};
+				if (!_sb_wc(sb, ']')) { return false; };
+			}
+			case (JSON_OBJECT)
+			{
+				n = node.obj.len;
+				if (!_sb_wc(sb, '{')) { return false; };
+				while (k < n)
+				{
+					if (k > 0) { if (!_sb_wc(sb, ',')) { return false; }; };
+					if (!_sb_wc(sb, '"'))                    { return false; };
+					if (!_sb_we(sb, node.obj.key_at(k)))     { return false; };
+					if (!_sb_wc(sb, '"'))                    { return false; };
+					if (!_sb_wc(sb, ':'))                    { return false; };
+					child = (JSONNode*)node.obj.val_at(k);
+					if (!_serialize_arena_node(child, sb)) { return false; };
+					k++;
+				};
+				if (!_sb_wc(sb, '}')) { return false; };
+			}
+			default {};
+		};
+
+		return true;
+	};
+
+	// Serialize node into arena memory. Returns null-terminated string on
+	// success, null on OOM. init_cap is the initial buffer guess in bytes;
+	// 256 is a reasonable default for most documents.
+	def serialize_arena(JSONNode* node, standard::memory::allocators::stdarena::Arena* a, int init_cap) -> byte*
+	{
+		SerializeBuf sb;
+		if (!_sb_init(@sb, a, init_cap)) { return (byte*)0; };
+		if (!_serialize_arena_node(node, @sb)) { return (byte*)0; };
+		sb.buf[sb.pos] = '\x00';
+		return sb.buf;
+	};
+
 };
 
 #endif;

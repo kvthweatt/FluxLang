@@ -12,6 +12,7 @@ using standard::io::console,
       standard::strings,
       standard::time,
       standard::memory::allocators::stdarena,
+      standard::threading,
       json;
 
 def print_ms(i64 ns) -> void
@@ -54,7 +55,7 @@ def parse_and_report(byte* buf, int buf_len) -> int
 {
     JSONNode       root();
     Arena          arena;
-    JSONParserFast p(buf, buf_len, @arena);
+    JSONParser p(buf, buf_len, @arena);
     byte[64]       num_buf;
     size_t         node_cap;
 

@@ -116,8 +116,6 @@ namespace standard
             {
                 this.value = x;
                 this.length = standard::strings::strlen(x);
-                this.lines = this.split_lines();
-                this.line_count = this.count_lines();
                 return this;
             };
 
