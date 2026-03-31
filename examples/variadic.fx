@@ -2,12 +2,12 @@
 
 using standard::io::console;
 
-def variadic(...) -> void
+def variadic(int x, ...) -> void
 {
-	print(double(...[0])); print();
+	print(double(x)); print();
+	print(...[0]); print();
 	print(...[1]); print();
 	print(...[2]); print();
-	print(...[3]); print();
 };
 
 

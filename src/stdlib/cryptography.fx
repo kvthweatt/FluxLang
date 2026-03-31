@@ -733,10 +733,7 @@ namespace standard
                     // Store state in digest (little-endian)
                     for (i = 0; i < 4; i++)
                     {
-                        digest[i * 4] = (byte)(ctx.state[i] & 0xFF);
-                        digest[i * 4 + 1] = (byte)((ctx.state[i] >> 8) & 0xFF);
-                        digest[i * 4 + 2] = (byte)((ctx.state[i] >> 16) & 0xFF);
-                        digest[i * 4 + 3] = (byte)((ctx.state[i] >> 24) & 0xFF);
+                        digest[i * 4 .. i * 4 + 3] = (byte[4])(le32)ctx.state[i];
                     };
                     return;
                 };
@@ -911,10 +908,7 @@ namespace standard
                     for (col = 0; col < 4; col++)
                     {
                         u32 base = col * 4;
-                        temp[0] = state[base + 0];
-                        temp[1] = state[base + 1];
-                        temp[2] = state[base + 2];
-                        temp[3] = state[base + 3];
+                        temp[0..3] = [state[base + 0], state[base + 1], state[base + 2], state[base + 3]];
                         
                         state[base + 0] = gmul2(temp[0]) ^^ gmul3(temp[1]) ^^ temp[2] ^^ temp[3];
                         state[base + 1] = temp[0] ^^ gmul2(temp[1]) ^^ gmul3(temp[2]) ^^ temp[3];
@@ -934,11 +928,8 @@ namespace standard
                     for (col = 0; col < 4; col++)
                     {
                         u32 base = col * 4;
-                        temp[0] = state[base + 0];
-                        temp[1] = state[base + 1];
-                        temp[2] = state[base + 2];
-                        temp[3] = state[base + 3];
-                        
+                        temp[0..3] = [state[base + 0], state[base + 1], state[base + 2], state[base + 3]];
+
                         // Multiply by inverse matrix in GF(2^8)
                         // 0x0E, 0x0B, 0x0D, 0x09
                         state[base + 0] = (byte)(
@@ -1318,10 +1309,7 @@ namespace standard
                     {
                         J0[i] = iv[i];
                     };
-                    J0[12] = '\0';
-                    J0[13] = '\0';
-                    J0[14] = '\0';
-                    J0[15] = (byte)0x01;
+                    J0[12..15] = "\x00\x00\x00\x01";
 
                     // ctr = J0 incremented once for the first keystream block
                     for (i = 0; i < 16; i++)
@@ -1375,24 +1363,10 @@ namespace standard
 
                     // GHASH over lengths: len(AAD) || len(ciphertext) in bits, big-endian 64-bit each
                     aad_bits   = (u64)aad_len   * 8u;
-                    plain_bits = (u64)plain_len  * 8u;
+                    plain_bits = (u64)plain_len * 8u;
 
-                    len_block[0]  = (byte)((aad_bits   >> 56) & 0xFF);
-                    len_block[1]  = (byte)((aad_bits   >> 48) & 0xFF);
-                    len_block[2]  = (byte)((aad_bits   >> 40) & 0xFF);
-                    len_block[3]  = (byte)((aad_bits   >> 32) & 0xFF);
-                    len_block[4]  = (byte)((aad_bits   >> 24) & 0xFF);
-                    len_block[5]  = (byte)((aad_bits   >> 16) & 0xFF);
-                    len_block[6]  = (byte)((aad_bits   >>  8) & 0xFF);
-                    len_block[7]  = (byte)( aad_bits          & 0xFF);
-                    len_block[8]  = (byte)((plain_bits  >> 56) & 0xFF);
-                    len_block[9]  = (byte)((plain_bits  >> 48) & 0xFF);
-                    len_block[10] = (byte)((plain_bits  >> 40) & 0xFF);
-                    len_block[11] = (byte)((plain_bits  >> 32) & 0xFF);
-                    len_block[12] = (byte)((plain_bits  >> 24) & 0xFF);
-                    len_block[13] = (byte)((plain_bits  >> 16) & 0xFF);
-                    len_block[14] = (byte)((plain_bits  >>  8) & 0xFF);
-                    len_block[15] = (byte)( plain_bits         & 0xFF);
+                    len_block[0..7]  = (byte[8])(be64)aad_bits;
+                    len_block[8..15] = (byte[8])(be64)plain_bits;
 
                     for (i = 0; i < 16; i++)
                     {
@@ -1441,10 +1415,7 @@ namespace standard
                     {
                         J0[i] = iv[i];
                     };
-                    J0[12] = '\0';
-                    J0[13] = '\0';
-                    J0[14] = '\0';
-                    J0[15] = (byte)0x01;
+                    J0[12..15] = "\x00\x00\x00\x01";
 
                     // ctr starts at J0+1
                     for (i = 0; i < 16; i++)
@@ -1472,24 +1443,10 @@ namespace standard
 
                     // GHASH over lengths
                     aad_bits    = (u64)aad_len    * 8u;
-                    cipher_bits = (u64)cipher_len  * 8u;
+                    cipher_bits = (u64)cipher_len * 8u;
 
-                    len_block[0]  = (byte)((aad_bits    >> 56) & 0xFF);
-                    len_block[1]  = (byte)((aad_bits    >> 48) & 0xFF);
-                    len_block[2]  = (byte)((aad_bits    >> 40) & 0xFF);
-                    len_block[3]  = (byte)((aad_bits    >> 32) & 0xFF);
-                    len_block[4]  = (byte)((aad_bits    >> 24) & 0xFF);
-                    len_block[5]  = (byte)((aad_bits    >> 16) & 0xFF);
-                    len_block[6]  = (byte)((aad_bits    >>  8) & 0xFF);
-                    len_block[7]  = (byte)( aad_bits           & 0xFF);
-                    len_block[8]  = (byte)((cipher_bits >> 56) & 0xFF);
-                    len_block[9]  = (byte)((cipher_bits >> 48) & 0xFF);
-                    len_block[10] = (byte)((cipher_bits >> 40) & 0xFF);
-                    len_block[11] = (byte)((cipher_bits >> 32) & 0xFF);
-                    len_block[12] = (byte)((cipher_bits >> 24) & 0xFF);
-                    len_block[13] = (byte)((cipher_bits >> 16) & 0xFF);
-                    len_block[14] = (byte)((cipher_bits >>  8) & 0xFF);
-                    len_block[15] = (byte)( cipher_bits        & 0xFF);
+                    len_block[0..7]  = (byte[8])(be64)aad_bits;
+                    len_block[8..15] = (byte[8])(be64)cipher_bits;
 
                     for (i = 0; i < 16; i++)
                     {
@@ -1581,7 +1538,7 @@ namespace standard
                     math::bigint::bigint_normalize(out);
                     // Clear high bit (RFC 7748: mask u-coordinate MSB)
                     if (out.length == 8) { d[7] = d[7] & 0x7FFFFFFF; };
-                   math::bigint:: bigint_normalize(out);
+                    math::bigint::bigint_normalize(out);
                     return;
                 };
 
@@ -1621,14 +1578,10 @@ namespace standard
                     //   next 6 words: 0xFFFFFFFF
                     //   top word (bits 224-255): 0x7FFFFFFF
                     uint* pd = @p.digits[0];
-                    pd[0] = 0xFFFFFFED;
-                    pd[1] = 0xFFFFFFFF;
-                    pd[2] = 0xFFFFFFFF;
-                    pd[3] = 0xFFFFFFFF;
-                    pd[4] = 0xFFFFFFFF;
-                    pd[5] = 0xFFFFFFFF;
-                    pd[6] = 0xFFFFFFFF;
-                    pd[7] = 0x7FFFFFFF;
+                    
+                    pd = [0xFFFFFFEDu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+                          0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x7FFFFFFF];
+
                     p.length = 8;
                     p.negative = false;
                     return;

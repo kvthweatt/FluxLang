@@ -1528,6 +1528,51 @@ uint32 nibble3 = extract_bits(packed, 12, 4);  // 0x50
 uint32 byte1 = extract_bits(packed, 8, 8);     // 0x56
 ```
 
+### ***Advanced data manipulation techniques:***
+***C***:
+```
+len_block[0]  = (byte)((aad_bits    >> 56) & 0xFF);
+len_block[1]  = (byte)((aad_bits    >> 48) & 0xFF);
+len_block[2]  = (byte)((aad_bits    >> 40) & 0xFF);
+len_block[3]  = (byte)((aad_bits    >> 32) & 0xFF);
+len_block[4]  = (byte)((aad_bits    >> 24) & 0xFF);
+len_block[5]  = (byte)((aad_bits    >> 16) & 0xFF);
+len_block[6]  = (byte)((aad_bits    >>  8) & 0xFF);
+len_block[7]  = (byte)( aad_bits           & 0xFF);
+len_block[8]  = (byte)((cipher_bits >> 56) & 0xFF);
+len_block[9]  = (byte)((cipher_bits >> 48) & 0xFF);
+len_block[10] = (byte)((cipher_bits >> 40) & 0xFF);
+len_block[11] = (byte)((cipher_bits >> 32) & 0xFF);
+len_block[12] = (byte)((cipher_bits >> 24) & 0xFF);
+len_block[13] = (byte)((cipher_bits >> 16) & 0xFF);
+len_block[14] = (byte)((cipher_bits >>  8) & 0xFF);
+len_block[15] = (byte)( cipher_bits        & 0xFF);
+```
+
+***Flux equivalent:***
+```
+len_block[0..7]  = (byte[8])(u64)aad_bits;
+len_block[8..15] = (byte[8])(u64)cipher_bits;
+```
+
+```
+uint* pd = @p.digits[0];
+
+// Proper Flux
+pd = [0xFFFFFFEDu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+      0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu];
+
+/// C-like
+pd[0] = 0xFFFFFFED;
+pd[1] = 0xFFFFFFFF;
+pd[2] = 0xFFFFFFFF;
+pd[3] = 0xFFFFFFFF;
+pd[4] = 0xFFFFFFFF;
+pd[5] = 0xFFFFFFFF;
+pd[6] = 0xFFFFFFFF;
+pd[7] = 0x7FFFFFFF;
+///
+
 ---
 
 ## **Raw bytecode functions**

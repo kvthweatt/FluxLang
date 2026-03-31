@@ -382,7 +382,6 @@ namespace standard
             def print() -> void,
                 print(noopstr, int) -> void,
                 print(noopstr) -> void,
-                print(byte) -> void, // print single character
                 print(bool) -> void,
                 printchar(noopstr) -> void,
                 print(byte) -> void,
@@ -403,7 +402,21 @@ namespace standard
                 print(float,int) -> void,
                 print(double) -> void,
                 print(double,int) -> void,
-                println(noopstr) -> void;
+                println(noopstr) -> void,   // newline print overloads
+                println(byte) -> void,
+                println(bool) -> void,
+                println(i8) -> void,
+                println(i16) -> void,
+                println(u16) -> void,
+                println(int) -> void,
+                println(uint) -> void,
+                printhbline(byte) -> void,
+                println(long) -> void,
+                println(ulong) -> void,
+                println(float) -> void,
+                println(float,int) -> void,
+                println(double) -> void,
+                println(double,int) -> void;
 
             def print(bool b) -> void
             {
@@ -514,7 +527,77 @@ namespace standard
                 standard::io::console::print(s);
                 standard::io::console::print();
             };
-
+            def println(byte s) -> void
+            {
+                standard::io::console::print(s);
+                standard::io::console::print();
+            };
+            def println(bool x) -> void
+            {
+                standard::io::console::print(x);
+                standard::io::console::print();
+            };
+            def println(i8 x) -> void
+            {
+                standard::io::console::print(x);
+                standard::io::console::print();
+            };
+            def println(i16 x) -> void
+            {
+                standard::io::console::print(x);
+                standard::io::console::print();
+            };
+            def println(u16 x) -> void
+            {
+                standard::io::console::print(x);
+                standard::io::console::print();
+            };
+            def println(int x) -> void
+            {
+                standard::io::console::print(x);
+                standard::io::console::print();
+            };
+            def println(uint x) -> void
+            {
+                standard::io::console::print(x);
+                standard::io::console::print();
+            };
+            def printhbline(byte s) -> void
+            {
+                standard::io::console::print(s);
+                standard::io::console::print();
+            };
+            def println(long x) -> void
+            {
+                standard::io::console::print(x);
+                standard::io::console::print();
+            };
+            def println(ulong x) -> void
+            {
+                standard::io::console::print(x);
+                standard::io::console::print();
+            };
+            def println(float x) -> void
+            {
+                standard::io::console::print(x);
+                standard::io::console::print();
+            };
+            def println(float x, int y) -> void
+            {
+                standard::io::console::print(x, y);
+                standard::io::console::print();
+            };
+            def println(double x) -> void
+            {
+                standard::io::console::print(x);
+                standard::io::console::print();
+            };
+            def println(double x, int y) -> void
+            {
+                standard::io::console::print(x, y);
+                standard::io::console::print();
+            };
+            
             def print_hex_byte(byte b) -> void
             {
                 byte high = (b >> 4) & 0x0F;

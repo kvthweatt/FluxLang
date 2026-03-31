@@ -535,6 +535,15 @@ class ArrayLiteral(Expression):
                     elem_val = elem.codegen(builder, module)
             else:
                 elem_val = elem.codegen(builder, module)
+
+            # Coerce to target element type if known (prevents i64 promotion of large u32 literals)
+            if self.element_type is not None:
+                target_elem_llvm = TypeSystem.get_llvm_type(self.element_type, module)
+                if isinstance(target_elem_llvm, ir.IntType) and isinstance(elem_val.type, ir.IntType):
+                    if elem_val.type.width > target_elem_llvm.width:
+                        elem_val = ir.Constant(target_elem_llvm, elem_val.constant & ((1 << target_elem_llvm.width) - 1)) if isinstance(elem_val, ir.Constant) else builder.trunc(elem_val, target_elem_llvm, name="elem_trunc")
+                    elif elem_val.type.width < target_elem_llvm.width:
+                        elem_val = ir.Constant(target_elem_llvm, elem_val.constant) if isinstance(elem_val, ir.Constant) else builder.zext(elem_val, target_elem_llvm, name="elem_zext")
             
             element_values.append(elem_val)
             element_types.add(elem_val.type)
@@ -2796,22 +2805,22 @@ class ArraySlice(Expression):
         # Literal case
         if isinstance(self.start, Literal) and isinstance(self.end, Literal):
             if isinstance(self.start.value, int) and isinstance(self.end.value, int):
-                return self.end.value - self.start.value
+                return self.end.value - self.start.value + 1
 
         # i : i + K  or  i : K + i
         if isinstance(self.end, BinaryOp) and self.end.operator == Operator.ADD:
             lhs, rhs = self.end.left, self.end.right
             # start matches lhs
             if repr(lhs) == repr(self.start) and isinstance(rhs, Literal) and isinstance(rhs.value, int):
-                return rhs.value
+                return rhs.value + 1
             # start matches rhs
             if repr(rhs) == repr(self.start) and isinstance(lhs, Literal) and isinstance(lhs.value, int):
-                return lhs.value
+                return lhs.value + 1
 
         # 0 : K
         if isinstance(self.start, Literal) and isinstance(self.start.value, int) and self.start.value == 0:
             if isinstance(self.end, Literal) and isinstance(self.end.value, int):
-                return self.end.value
+                return self.end.value + 1
 
         return None
 
@@ -3943,7 +3952,20 @@ class Assignment(Statement):
         return f"{self.target} = {self.value};"
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        
+
+        # When assigning an ArrayLiteral to a known array variable, seed element_type
+        # from the target so large unsigned literals (e.g. 0xFFFFFFED) are not
+        # promoted to i64 when the target is u32[N].
+        if isinstance(self.value, ArrayLiteral) and self.value.element_type is None:
+            target_name = self.target.name if isinstance(self.target, Identifier) else None
+            if target_name is not None:
+                entry = module.symbol_table.lookup_any(target_name)
+                if entry and entry.type_spec is not None:
+                    import dataclasses
+                    ts = entry.type_spec
+                    elem_ts = dataclasses.replace(ts, is_array=False, array_size=None, array_dimensions=None)
+                    self.value.element_type = elem_ts
+                            
         # Generate code for the value to be assigned
         val = self.value.codegen(builder, module)
         

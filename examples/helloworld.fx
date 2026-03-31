@@ -4,7 +4,6 @@ using standard::io::console;
 
 def main() -> int
 {
-    print("Hello World!\n\0");
-
+    println("Hello World!\0");
     return 0;
 };

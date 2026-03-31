@@ -4499,6 +4499,25 @@ class AssignmentTypeHandler:
                 array_ptr = builder.gep(val, [zero, zero], name="array_to_ptr")
                 builder.store(array_ptr, ptr)
                 return array_ptr
+
+        # When assigning an array literal to a plain pointer variable (e.g. i32**),
+        # the intent is to copy the data through the pointer, not rebind the pointer.
+        # Detect: ptr is T** (pointer var) and val is [N x T]* (array literal alloca).
+        from fast import ArrayLiteral
+        if (isinstance(value_expr, ArrayLiteral) and
+                isinstance(ptr.type, ir.PointerType) and
+                isinstance(ptr.type.pointee, ir.PointerType) and
+                isinstance(val.type, ir.PointerType) and
+                isinstance(val.type.pointee, ir.ArrayType)):
+            dest = builder.load(ptr, name="ptr_dest")
+            i8ptr = ir.IntType(8).as_pointer()
+            dst_i8 = builder.bitcast(dest, i8ptr, name="memcpy_dst")
+            src_i8 = builder.bitcast(val, i8ptr, name="memcpy_src")
+            elem_ty = val.type.pointee.element
+            count   = val.type.pointee.count
+            elem_bytes = (elem_ty.width // 8) if isinstance(elem_ty, ir.IntType) else 8
+            emit_memcpy(builder, module, dst_i8, src_i8, count * elem_bytes)
+            return dest
         
         # Endianness swap: emit bswap if source and target endianness differ
         val = EndianSwapHandler.maybe_swap(builder, module, val, ptr)
@@ -4895,6 +4914,73 @@ class AssignmentTypeHandler:
                 #print(f"[LOAD DEBUG] BEFORE load: array.type = {array.type}", file=sys.stdout)
                 array = builder.load(array, name="ptr_loaded_for_indexing")
                 #print(f"[LOAD DEBUG] AFTER load: array.type = {array.type}", file=sys.stdout)
+        # Handle slice assignment: arr[start..end] = value
+        # Copies bytes from the source value into the destination slice.
+        from fast import RangeExpression, Literal, BinaryOp, Operator
+        if isinstance(index_expr, RangeExpression):
+            start_val = index_expr.start.codegen(builder, module)
+            end_val   = index_expr.end.codegen(builder, module)
+
+            def as_i32(v):
+                if v.type == ir.IntType(32):
+                    return v
+                if isinstance(v.type, ir.IntType):
+                    return builder.trunc(v, ir.IntType(32), name="sidx_trunc") if v.type.width > 32 else builder.sext(v, ir.IntType(32), name="sidx_ext")
+                raise ValueError("Slice indices must be integers")
+
+            start_i32 = as_i32(start_val)
+            zero      = ir.Constant(ir.IntType(32), 0)
+
+            # Infer const_len from AST so we know how many bytes to copy (end-inclusive).
+            # Mirrors ArraySlice._try_const_len in fast.py.
+            from fast import Literal as _Lit, BinaryOp as _BinOp, Operator as _Op
+            def _slice_const_len(s, e):
+                if isinstance(s, _Lit) and isinstance(e, _Lit):
+                    if isinstance(s.value, int) and isinstance(e.value, int):
+                        return e.value - s.value + 1
+                if isinstance(e, _BinOp) and e.operator == _Op.ADD:
+                    lhs, rhs = e.left, e.right
+                    if repr(lhs) == repr(s) and isinstance(rhs, _Lit) and isinstance(rhs.value, int):
+                        return rhs.value + 1
+                    if repr(rhs) == repr(s) and isinstance(lhs, _Lit) and isinstance(lhs.value, int):
+                        return lhs.value + 1
+                if isinstance(s, _Lit) and isinstance(s.value, int) and s.value == 0:
+                    if isinstance(e, _Lit) and isinstance(e.value, int):
+                        return e.value + 1
+                return None
+
+            const_len = _slice_const_len(index_expr.start, index_expr.end)
+            if const_len is None:
+                raise ValueError("Array slice assignment length must be statically known")
+            if const_len <= 0:
+                raise ValueError("Array slice assignment must be forward and non-empty")
+
+            # Get pointer to array[start]
+            if isinstance(array, ir.GlobalVariable) and isinstance(array.type.pointee, ir.ArrayType):
+                dst_ptr = builder.gep(array, [zero, start_i32], inbounds=True, name="slicewr_dst")
+            elif isinstance(array.type, ir.PointerType) and isinstance(array.type.pointee, ir.ArrayType):
+                dst_ptr = builder.gep(array, [zero, start_i32], inbounds=True, name="slicewr_dst")
+            elif isinstance(array.type, ir.PointerType):
+                dst_ptr = builder.gep(array, [start_i32], inbounds=True, name="slicewr_dst")
+            else:
+                raise ValueError(f"Cannot slice-assign into type: {array.type}")
+
+            # Cast dst to i8* for memcpy
+            i8_ptr = ir.IntType(8).as_pointer()
+            dst_i8 = builder.bitcast(dst_ptr, i8_ptr, name="slicewr_dst_i8")
+
+            # Get a pointer to the source bytes.
+            # If val is already a pointer (e.g. from unpack_integer_to_array returning an alloca),
+            # bitcast it directly to i8*.  Otherwise alloca a slot, store val, and bitcast that.
+            if isinstance(val.type, ir.PointerType):
+                src_i8 = builder.bitcast(val, i8_ptr, name="slicewr_src_i8")
+            else:
+                src_alloca = builder.alloca(val.type, name="slicewr_src")
+                builder.store(val, src_alloca)
+                src_i8 = builder.bitcast(src_alloca, i8_ptr, name="slicewr_src_i8")
+
+            emit_memcpy(builder, module, dst_i8, src_i8, const_len)
+            return val
         index = index_expr.codegen(builder, module)
         
         #print(f"[ARRAY ASSIGN] array.type: {array.type}", file=sys.stdout)
