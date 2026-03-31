@@ -18,7 +18,7 @@
 #import "standard.fx", "cryptography.fx", "timing.fx", "datautils.fx";
 
 using standard::io::console,
-      standard::crypto::kdf::HKDF,
+      standard::crypto::KDF::HKDF,
       standard::time;
 
 // ---------------------------------------------------------------------------

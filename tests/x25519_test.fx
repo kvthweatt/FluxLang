@@ -1,11 +1,10 @@
 // x25519_test.fx - X25519 ECDH test using RFC 7748 vectors
 
-#import "standard.fx";
-#import "cryptography.fx";
+#import "standard.fx", "cryptography.fx";
 
 using standard::io::console,
       standard::strings,
-      standard::crypto::X25519;
+      standard::crypto::ECDH::X25519;
 
 def print_bytes_hex(byte* buf, int len) -> void
 {
@@ -107,7 +106,7 @@ def main() -> int
     print("==== X25519 ECDH TEST ====\n\0");
 
     // Test 1: Alice public key
-    x25519_pubkey(@pub_a[0], @priv_a[0]);
+    X25519::x25519_pubkey(@pub_a[0], @priv_a[0]);
     print("Alice pubkey:  \0"); print_bytes_hex(@pub_a[0], 32); print("\n\0");
     if (eq32(@pub_a[0], @expected_pub_a[0]))
     {
@@ -122,7 +121,7 @@ def main() -> int
     };
 
     // Test 2: Bob public key
-    x25519_pubkey(@pub_b[0], @priv_b[0]);
+    X25519::x25519_pubkey(@pub_b[0], @priv_b[0]);
     print("Bob   pubkey:  \0"); print_bytes_hex(@pub_b[0], 32); print("\n\0");
     if (eq32(@pub_b[0], @expected_pub_b[0]))
     {
@@ -137,7 +136,7 @@ def main() -> int
     };
 
     // Test 3: Alice computes shared secret using Bob's public key
-    x25519(@shared_a[0], @priv_a[0], @pub_b[0]);
+    X25519::x25519(@shared_a[0], @priv_a[0], @pub_b[0]);
     print("Shared (A):    \0"); print_bytes_hex(@shared_a[0], 32); print("\n\0");
     if (eq32(@shared_a[0], @expected_shared[0]))
     {
@@ -152,7 +151,7 @@ def main() -> int
     };
 
     // Test 4: Bob computes shared secret using Alice's public key
-    x25519(@shared_b[0], @priv_b[0], @pub_a[0]);
+    X25519::x25519(@shared_b[0], @priv_b[0], @pub_a[0]);
     print("Shared (B):    \0"); print_bytes_hex(@shared_b[0], 32); print("\n\0");
     if (eq32(@shared_b[0], @expected_shared[0]))
     {
@@ -182,7 +181,7 @@ def main() -> int
     while (i < 32) { scalar_k[i] = (byte)0; scalar_u[i] = (byte)0; i++; };
     scalar_k[0] = (byte)9;
     scalar_u[0] = (byte)9;
-    x25519(@iter_result[0], @scalar_k[0], @scalar_u[0]);
+    X25519::x25519(@iter_result[0], @scalar_k[0], @scalar_u[0]);
     print("Iter 1:        \0"); print_bytes_hex(@iter_result[0], 32); print("\n\0");
     if (eq32(@iter_result[0], @expected_iter1[0]))
     {

@@ -1130,283 +1130,714 @@ namespace standard
                     };
                     return;
                 };
+
+                // =====================================================================
+                // AES-GCM  (Galois/Counter Mode)
+                //
+                // Provides authenticated encryption with associated data (AEAD).
+                // Supports AES-128 only (matches the AES_CTX key schedule above).
+                //
+                // GCM builds on two primitives:
+                //   CTR mode  -- stream cipher using AES-ECB on an incrementing counter
+                //   GHASH     -- polynomial authentication over GF(2^128)
+                //
+                // The GF(2^128) field uses the reduction polynomial:
+                //   x^128 + x^7 + x^2 + x + 1   (0xE1 in the "reflected" representation)
+                //
+                // Public API:
+                //   gcm_init(GCM_CTX*, key[16])
+                //   gcm_encrypt(GCM_CTX*, iv[12], aad, aad_len, plain, plain_len, cipher, tag[16])
+                //   gcm_decrypt(GCM_CTX*, iv[12], aad, aad_len, cipher, cipher_len, plain, tag[16]) -> int
+                //     returns 1 if tag verifies, 0 if tampered
+                // =====================================================================
+
+                // GCM context — stores expanded key and the GHASH subkey H
+                struct GCM_CTX
+                {
+                    AES_CTX aes;        // AES-128 key schedule
+                    byte[16] H;         // GHASH subkey: AES_K(0^128)
+                };
+
+                // ------------------------------------------------------------------
+                // ghash_mul: X = X * Y  in GF(2^128)
+                //
+                // Uses the standard "shift-and-XOR" algorithm with the GCM
+                // reduction polynomial 0xE1000000_00000000_00000000_00000000
+                // (MSB-first bit ordering as per NIST SP 800-38D).
+                //
+                // Both X and Y are 16-byte big-endian blocks.
+                // Result is written back into X.
+                // ------------------------------------------------------------------
+                def ghash_mul(byte* X, byte* Y) -> void
+                {
+                    byte[16] Z, V;
+                    int i, j, k;
+                    byte lsb;
+
+                    // Z = 0 (result accumulator), V = Y
+                    for (i = 0; i < 16; i++)
+                    {
+                        Z[i] = '\0';
+                        V[i] = Y[i];
+                    };
+
+                    // Process each bit of X, MSB first
+                    for (i = 0; i < 16; i++)
+                    {
+                        for (j = 7; j >= 0; j--)
+                        {
+                            // If bit (i*8 + (7-j)) of X is set, Z ^= V
+                            if ((((u32)(X[i] & 0xFF) >> j) & 1) != 0)
+                            {
+                                for (k = 0; k < 16; k++)
+                                {
+                                    Z[k] = Z[k] ^^ V[k];
+                                };
+                            };
+
+                            // V = V >> 1 in GF(2^128), then reduce if LSB(V) was 1
+                            lsb = V[15] & 1;
+
+                            // Shift V right by one bit (big-endian: byte[0] is MSB)
+                            for (k = 15; k > 0; k--)
+                            {
+                                V[k] = (byte)(((u32)(V[k] & 0xFF) >> 1) | ((u32)(V[k - 1] & 1) << 7));
+                            };
+                            V[0] = (byte)((u32)(V[0] & 0xFF) >> 1);
+
+                            // If the bit shifted out was 1, XOR with reduction polynomial
+                            if (lsb != 0)
+                            {
+                                V[0] = V[0] ^^ (byte)0xE1;
+                            };
+                        };
+                    };
+
+                    for (i = 0; i < 16; i++)
+                    {
+                        X[i] = Z[i];
+                    };
+                    return;
+                };
+
+                // ------------------------------------------------------------------
+                // ghash: Compute GHASH_H(A) over a sequence of blocks.
+                //
+                //   H    : 16-byte GHASH subkey
+                //   input: byte stream (need not be block-aligned)
+                //   len  : byte length of input
+                //   tag  : running 16-byte accumulator (in/out)
+                //
+                // Pads the final partial block with zeros before hashing.
+                // ------------------------------------------------------------------
+                def ghash_update(byte* H, byte* input, int len, byte* tag) -> void
+                {
+                    byte[16] block;
+                    int i, blocks, rem, b, offset;
+
+                    blocks = len / 16;
+                    rem    = len - (blocks * 16);
+
+                    // Full blocks
+                    for (b = 0; b < blocks; b++)
+                    {
+                        offset = b * 16;
+                        for (i = 0; i < 16; i++)
+                        {
+                            tag[i] = tag[i] ^^ input[offset + i];
+                        };
+                        ghash_mul(tag, H);
+                    };
+
+                    // Final partial block (zero-padded)
+                    if (rem > 0)
+                    {
+                        for (i = 0; i < 16; i++)
+                        {
+                            block[i] = '\0';
+                        };
+                        offset = blocks * 16;
+                        for (i = 0; i < rem; i++)
+                        {
+                            block[i] = input[offset + i];
+                        };
+                        for (i = 0; i < 16; i++)
+                        {
+                            tag[i] = tag[i] ^^ block[i];
+                        };
+                        ghash_mul(tag, H);
+                    };
+                    return;
+                };
+
+                // ------------------------------------------------------------------
+                // gcm_inc32: increment the 32-bit counter in bytes [12..15]
+                //            of a 16-byte counter block (big-endian).
+                // ------------------------------------------------------------------
+                def gcm_inc32(byte* ctr) -> void
+                {
+                    int i;
+                    for (i = 15; i >= 12; i--)
+                    {
+                        ctr[i] = (byte)(ctr[i] + 1);
+                        if (ctr[i] != '\0')
+                        {
+                            return;
+                        };
+                    };
+                    return;
+                };
+
+                // ------------------------------------------------------------------
+                // gcm_init: Prepare a GCM_CTX from a 16-byte AES-128 key.
+                //
+                //   Expands the key schedule and computes H = AES_K(0^128).
+                // ------------------------------------------------------------------
+                def gcm_init(GCM_CTX* ctx, byte* key) -> void
+                {
+                    byte[16] zero_block;
+                    int i;
+
+                    aes_key_expansion(@ctx.aes, key);
+
+                    for (i = 0; i < 16; i++)
+                    {
+                        zero_block[i] = '\0';
+                    };
+
+                    aes_encrypt_block(@ctx.aes, @zero_block[0], @ctx.H[0]);
+                    return;
+                };
+
+                // ------------------------------------------------------------------
+                // gcm_encrypt: Encrypt and authenticate with AES-128-GCM.
+                //
+                //   ctx      : initialised GCM_CTX
+                //   iv       : 12-byte IV (96-bit nonce, per NIST recommendation)
+                //   aad      : additional authenticated data (may be null if aad_len==0)
+                //   aad_len  : byte length of aad
+                //   plain    : plaintext input
+                //   plain_len: byte length of plaintext
+                //   cipher   : output buffer for ciphertext (same length as plaintext)
+                //   tag      : output buffer for 16-byte authentication tag
+                // ------------------------------------------------------------------
+                def gcm_encrypt(GCM_CTX* ctx,
+                                byte* iv,
+                                byte* aad,      int aad_len,
+                                byte* plain,    int plain_len,
+                                byte* cipher,
+                                byte* tag) -> void
+                {
+                    byte[16] J0, ctr, ks, auth_tag;
+                    byte[16] len_block;
+                    int i, full_blocks, rem, b, offset;
+                    u64 aad_bits, plain_bits;
+
+                    // Build J0 = IV || 0x00000001  (96-bit IV + 32-bit counter = 1)
+                    for (i = 0; i < 12; i++)
+                    {
+                        J0[i] = iv[i];
+                    };
+                    J0[12] = '\0';
+                    J0[13] = '\0';
+                    J0[14] = '\0';
+                    J0[15] = (byte)0x01;
+
+                    // ctr = J0 incremented once for the first keystream block
+                    for (i = 0; i < 16; i++)
+                    {
+                        ctr[i] = J0[i];
+                    };
+                    gcm_inc32(@ctr[0]);
+
+                    // auth_tag accumulator starts at zero
+                    for (i = 0; i < 16; i++)
+                    {
+                        auth_tag[i] = '\0';
+                    };
+
+                    // GHASH over AAD
+                    if (aad_len > 0)
+                    {
+                        ghash_update(@ctx.H[0], aad, aad_len, @auth_tag[0]);
+                    };
+
+                    // CTR encryption + GHASH over ciphertext
+                    full_blocks = plain_len / 16;
+                    rem         = plain_len - (full_blocks * 16);
+
+                    for (b = 0; b < full_blocks; b++)
+                    {
+                        offset = b * 16;
+                        aes_encrypt_block(@ctx.aes, @ctr[0], @ks[0]);
+                        gcm_inc32(@ctr[0]);
+                        for (i = 0; i < 16; i++)
+                        {
+                            cipher[offset + i] = plain[offset + i] ^^ ks[i];
+                        };
+                    };
+
+                    if (rem > 0)
+                    {
+                        offset = full_blocks * 16;
+                        aes_encrypt_block(@ctx.aes, @ctr[0], @ks[0]);
+                        for (i = 0; i < rem; i++)
+                        {
+                            cipher[offset + i] = plain[offset + i] ^^ ks[i];
+                        };
+                    };
+
+                    // GHASH over ciphertext
+                    if (plain_len > 0)
+                    {
+                        ghash_update(@ctx.H[0], cipher, plain_len, @auth_tag[0]);
+                    };
+
+                    // GHASH over lengths: len(AAD) || len(ciphertext) in bits, big-endian 64-bit each
+                    aad_bits   = (u64)aad_len   * 8u;
+                    plain_bits = (u64)plain_len  * 8u;
+
+                    len_block[0]  = (byte)((aad_bits   >> 56) & 0xFF);
+                    len_block[1]  = (byte)((aad_bits   >> 48) & 0xFF);
+                    len_block[2]  = (byte)((aad_bits   >> 40) & 0xFF);
+                    len_block[3]  = (byte)((aad_bits   >> 32) & 0xFF);
+                    len_block[4]  = (byte)((aad_bits   >> 24) & 0xFF);
+                    len_block[5]  = (byte)((aad_bits   >> 16) & 0xFF);
+                    len_block[6]  = (byte)((aad_bits   >>  8) & 0xFF);
+                    len_block[7]  = (byte)( aad_bits          & 0xFF);
+                    len_block[8]  = (byte)((plain_bits  >> 56) & 0xFF);
+                    len_block[9]  = (byte)((plain_bits  >> 48) & 0xFF);
+                    len_block[10] = (byte)((plain_bits  >> 40) & 0xFF);
+                    len_block[11] = (byte)((plain_bits  >> 32) & 0xFF);
+                    len_block[12] = (byte)((plain_bits  >> 24) & 0xFF);
+                    len_block[13] = (byte)((plain_bits  >> 16) & 0xFF);
+                    len_block[14] = (byte)((plain_bits  >>  8) & 0xFF);
+                    len_block[15] = (byte)( plain_bits         & 0xFF);
+
+                    for (i = 0; i < 16; i++)
+                    {
+                        auth_tag[i] = auth_tag[i] ^^ len_block[i];
+                    };
+                    ghash_mul(@auth_tag[0], @ctx.H[0]);
+
+                    // tag = GCTR(K, J0, auth_tag) = AES_K(J0) XOR auth_tag
+                    aes_encrypt_block(@ctx.aes, @J0[0], @ks[0]);
+                    for (i = 0; i < 16; i++)
+                    {
+                        tag[i] = auth_tag[i] ^^ ks[i];
+                    };
+                    return;
+                };
+
+                // ------------------------------------------------------------------
+                // gcm_decrypt: Decrypt and verify with AES-128-GCM.
+                //
+                //   ctx       : initialised GCM_CTX
+                //   iv        : 12-byte IV used during encryption
+                //   aad       : additional authenticated data
+                //   aad_len   : byte length of aad
+                //   cipher    : ciphertext input
+                //   cipher_len: byte length of ciphertext
+                //   plain     : output buffer for plaintext (same length as ciphertext)
+                //   tag       : 16-byte tag to verify against
+                //
+                // Returns 1 if the tag is valid, 0 if the message has been tampered.
+                // The plaintext output is always written; caller must discard it on failure.
+                // ------------------------------------------------------------------
+                def gcm_decrypt(GCM_CTX* ctx,
+                                byte* iv,
+                                byte* aad,       int aad_len,
+                                byte* cipher,    int cipher_len,
+                                byte* plain,
+                                byte* tag) -> int
+                {
+                    byte[16] J0, ctr, ks, auth_tag, expected_tag;
+                    byte[16] len_block;
+                    int i, full_blocks, rem, b, offset, diff;
+                    u64 aad_bits, cipher_bits;
+
+                    // Build J0 = IV || 0x00000001
+                    for (i = 0; i < 12; i++)
+                    {
+                        J0[i] = iv[i];
+                    };
+                    J0[12] = '\0';
+                    J0[13] = '\0';
+                    J0[14] = '\0';
+                    J0[15] = (byte)0x01;
+
+                    // ctr starts at J0+1
+                    for (i = 0; i < 16; i++)
+                    {
+                        ctr[i] = J0[i];
+                    };
+                    gcm_inc32(@ctr[0]);
+
+                    for (i = 0; i < 16; i++)
+                    {
+                        auth_tag[i] = '\0';
+                    };
+
+                    // GHASH over AAD
+                    if (aad_len > 0)
+                    {
+                        ghash_update(@ctx.H[0], aad, aad_len, @auth_tag[0]);
+                    };
+
+                    // GHASH over ciphertext (before decryption)
+                    if (cipher_len > 0)
+                    {
+                        ghash_update(@ctx.H[0], cipher, cipher_len, @auth_tag[0]);
+                    };
+
+                    // GHASH over lengths
+                    aad_bits    = (u64)aad_len    * 8u;
+                    cipher_bits = (u64)cipher_len  * 8u;
+
+                    len_block[0]  = (byte)((aad_bits    >> 56) & 0xFF);
+                    len_block[1]  = (byte)((aad_bits    >> 48) & 0xFF);
+                    len_block[2]  = (byte)((aad_bits    >> 40) & 0xFF);
+                    len_block[3]  = (byte)((aad_bits    >> 32) & 0xFF);
+                    len_block[4]  = (byte)((aad_bits    >> 24) & 0xFF);
+                    len_block[5]  = (byte)((aad_bits    >> 16) & 0xFF);
+                    len_block[6]  = (byte)((aad_bits    >>  8) & 0xFF);
+                    len_block[7]  = (byte)( aad_bits           & 0xFF);
+                    len_block[8]  = (byte)((cipher_bits >> 56) & 0xFF);
+                    len_block[9]  = (byte)((cipher_bits >> 48) & 0xFF);
+                    len_block[10] = (byte)((cipher_bits >> 40) & 0xFF);
+                    len_block[11] = (byte)((cipher_bits >> 32) & 0xFF);
+                    len_block[12] = (byte)((cipher_bits >> 24) & 0xFF);
+                    len_block[13] = (byte)((cipher_bits >> 16) & 0xFF);
+                    len_block[14] = (byte)((cipher_bits >>  8) & 0xFF);
+                    len_block[15] = (byte)( cipher_bits        & 0xFF);
+
+                    for (i = 0; i < 16; i++)
+                    {
+                        auth_tag[i] = auth_tag[i] ^^ len_block[i];
+                    };
+                    ghash_mul(@auth_tag[0], @ctx.H[0]);
+
+                    // expected_tag = AES_K(J0) XOR auth_tag
+                    aes_encrypt_block(@ctx.aes, @J0[0], @ks[0]);
+                    for (i = 0; i < 16; i++)
+                    {
+                        expected_tag[i] = auth_tag[i] ^^ ks[i];
+                    };
+
+                    // Constant-time tag comparison (prevent timing side-channels)
+                    diff = 0;
+                    for (i = 0; i < 16; i++)
+                    {
+                        diff = diff | ((int)(expected_tag[i] ^^ tag[i]));
+                    };
+
+                    // CTR decryption (always performed; caller discards on diff != 0)
+                    full_blocks = cipher_len / 16;
+                    rem         = cipher_len - (full_blocks * 16);
+
+                    for (b = 0; b < full_blocks; b++)
+                    {
+                        offset = b * 16;
+                        aes_encrypt_block(@ctx.aes, @ctr[0], @ks[0]);
+                        gcm_inc32(@ctr[0]);
+                        for (i = 0; i < 16; i++)
+                        {
+                            plain[offset + i] = cipher[offset + i] ^^ ks[i];
+                        };
+                    };
+
+                    if (rem > 0)
+                    {
+                        offset = full_blocks * 16;
+                        aes_encrypt_block(@ctx.aes, @ctr[0], @ks[0]);
+                        for (i = 0; i < rem; i++)
+                        {
+                            plain[offset + i] = cipher[offset + i] ^^ ks[i];
+                        };
+                    };
+
+                    return (diff == 0) ? 1 : 0;
+                };
             };
         };
 
-        namespace X25519
+        namespace ECDH
         {
-            // =========================================================================
-            // X25519 Elliptic Curve Diffie-Hellman
-            //
-            // Curve: y² = x³ + 486662x² + x  over  GF(p),  p = 2^255 - 19
-            //
-            // Uses BigInt arithmetic mod p. p = 2^255 - 19 is represented as a
-            // BigInt with 8 uint limbs (256 bits, upper bit always 0 after reduction).
-            //
-            // Public API:
-            //   x25519(out[32], scalar[32], point[32])  -- DH shared secret
-            //   x25519_pubkey(out[32], scalar[32])       -- scalar x base point
-            // =========================================================================
-
-            // ---- Load/store ----
-
-            // Load 32 little-endian bytes into a BigInt.
-            def fe_from_bytes(BigInt* out, byte* src) -> void
+            namespace X25519
             {
-                uint i, j;
-                uint* d = @out.digits[0];
-                for (i = 0; i < 9; i++) { d[i] = 0; };
-                for (i = 0; i < 8; i++)
+                // =========================================================================
+                // X25519 Elliptic Curve Diffie-Hellman
+                //
+                // Curve: y² = x³ + 486662x² + x  over  GF(p),  p = 2^255 - 19
+                //
+                // Uses BigInt arithmetic mod p. p = 2^255 - 19 is represented as a
+                // BigInt with 8 uint limbs (256 bits, upper bit always 0 after reduction).
+                //
+                // Public API:
+                //   x25519(out[32], scalar[32], point[32])  -- DH shared secret
+                //   x25519_pubkey(out[32], scalar[32])       -- scalar x base point
+                // =========================================================================
+
+                // ---- Load/store ----
+
+                // Load 32 little-endian bytes into a BigInt.
+                def fe_from_bytes(BigInt* out, byte* src) -> void
                 {
+                    uint i, j;
+                    uint* d = @out.digits[0];
+                    for (i = 0; i < 9; i++) { d[i] = 0; };
+                    for (i = 0; i < 8; i++)
+                    {
+                        uint word;
+                        j = i * 4;
+                        word = ((uint)src[j]       & 0xFF)
+                             | (((uint)src[j + 1]  & 0xFF) << 8)
+                             | (((uint)src[j + 2]  & 0xFF) << 16)
+                             | (((uint)src[j + 3]  & 0xFF) << 24);
+                        d[i] = word;
+                    };
+                    out.length = 8;
+                    out.negative = false;
+                    math::bigint::bigint_normalize(out);
+                    // Clear high bit (RFC 7748: mask u-coordinate MSB)
+                    if (out.length == 8) { d[7] = d[7] & 0x7FFFFFFF; };
+                   math::bigint:: bigint_normalize(out);
+                    return;
+                };
+
+                // Store a BigInt to 32 little-endian bytes (already reduced mod p).
+                def fe_to_bytes(byte* dst, BigInt* src) -> void
+                {
+                    uint i, j;
+                    uint* d = @src.digits[0];
                     uint word;
-                    j = i * 4;
-                    word = ((uint)src[j]       & 0xFF)
-                         | (((uint)src[j + 1]  & 0xFF) << 8)
-                         | (((uint)src[j + 2]  & 0xFF) << 16)
-                         | (((uint)src[j + 3]  & 0xFF) << 24);
-                    d[i] = word;
-                };
-                out.length = 8;
-                out.negative = false;
-                math::bigint::bigint_normalize(out);
-                // Clear high bit (RFC 7748: mask u-coordinate MSB)
-                if (out.length == 8) { d[7] = d[7] & 0x7FFFFFFF; };
-               math::bigint:: bigint_normalize(out);
-                return;
-            };
-
-            // Store a BigInt to 32 little-endian bytes (already reduced mod p).
-            def fe_to_bytes(byte* dst, BigInt* src) -> void
-            {
-                uint i, j;
-                uint* d = @src.digits[0];
-                uint word;
-                for (i = 0; i < 8; i++)
-                {
-                    j = i * 4;
-                    word = (i < src.length) ? d[i] : 0u;
-                    dst[j]     = (byte)(word & 0xFF);
-                    dst[j + 1] = (byte)((word >> 8)  & 0xFF);
-                    dst[j + 2] = (byte)((word >> 16) & 0xFF);
-                    dst[j + 3] = (byte)((word >> 24) & 0xFF);
-                };
-                return;
-            };
-
-            // ---- Field operations ----
-            // All operations reduce mod p where needed.
-            // p is built at call time from the known constant.
-
-            def fe_set_p(BigInt* p) -> void
-            {
-                // p = 2^255 - 19
-                // = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF ED
-                // In 8 uint limbs LE:
-                //   limbs 0..6: 0xFFFFFFFF
-                //   limb 7:     0x7FFFFFFF
-                // Then subtract 18 from limb 0 (since 2^255 - 19 = 0x7FFF...FFED)
-                // Actually: -19 = 0xFFFF...FFED in the low bits.
-                // 2^255 - 19:
-                //   low 32 bits: 0xFFFFFFED (= 4294967277)
-                //   next 6 words: 0xFFFFFFFF
-                //   top word (bits 224-255): 0x7FFFFFFF
-                uint* pd = @p.digits[0];
-                pd[0] = 0xFFFFFFED;
-                pd[1] = 0xFFFFFFFF;
-                pd[2] = 0xFFFFFFFF;
-                pd[3] = 0xFFFFFFFF;
-                pd[4] = 0xFFFFFFFF;
-                pd[5] = 0xFFFFFFFF;
-                pd[6] = 0xFFFFFFFF;
-                pd[7] = 0x7FFFFFFF;
-                p.length = 8;
-                p.negative = false;
-                return;
-            };
-
-            def fe_add(BigInt* out, BigInt* a, BigInt* b) -> void
-            {
-                BigInt p, tmp;
-                fe_set_p(@p);
-                math::bigint::bigint_add(@tmp, a, b);
-                math::bigint::bigint_mod(out, @tmp, @p);
-                return;
-            };
-
-            def fe_sub(BigInt* out, BigInt* a, BigInt* b) -> void
-            {
-                BigInt p, tmp;
-                fe_set_p(@p);
-                math::bigint::bigint_sub(@tmp, a, b);
-                // If negative, add p
-                if (tmp.negative)
-                {
-                    math::bigint::bigint_add(out, @tmp, @p);
-                    // May still be negative if a was 0 and b was large; add p again
-                    if (out.negative)
+                    for (i = 0; i < 8; i++)
                     {
-                        math::bigint::bigint_add(@tmp, out, @p);
-                        math::bigint::bigint_copy(out, @tmp);
+                        j = i * 4;
+                        word = (i < src.length) ? d[i] : 0u;
+                        dst[j]     = (byte)(word & 0xFF);
+                        dst[j + 1] = (byte)((word >> 8)  & 0xFF);
+                        dst[j + 2] = (byte)((word >> 16) & 0xFF);
+                        dst[j + 3] = (byte)((word >> 24) & 0xFF);
                     };
-                }
-                else
+                    return;
+                };
+
+                // ---- Field operations ----
+                // All operations reduce mod p where needed.
+                // p is built at call time from the known constant.
+
+                def fe_set_p(BigInt* p) -> void
                 {
+                    // p = 2^255 - 19
+                    // = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF ED
+                    // In 8 uint limbs LE:
+                    //   limbs 0..6: 0xFFFFFFFF
+                    //   limb 7:     0x7FFFFFFF
+                    // Then subtract 18 from limb 0 (since 2^255 - 19 = 0x7FFF...FFED)
+                    // Actually: -19 = 0xFFFF...FFED in the low bits.
+                    // 2^255 - 19:
+                    //   low 32 bits: 0xFFFFFFED (= 4294967277)
+                    //   next 6 words: 0xFFFFFFFF
+                    //   top word (bits 224-255): 0x7FFFFFFF
+                    uint* pd = @p.digits[0];
+                    pd[0] = 0xFFFFFFED;
+                    pd[1] = 0xFFFFFFFF;
+                    pd[2] = 0xFFFFFFFF;
+                    pd[3] = 0xFFFFFFFF;
+                    pd[4] = 0xFFFFFFFF;
+                    pd[5] = 0xFFFFFFFF;
+                    pd[6] = 0xFFFFFFFF;
+                    pd[7] = 0x7FFFFFFF;
+                    p.length = 8;
+                    p.negative = false;
+                    return;
+                };
+
+                def fe_add(BigInt* out, BigInt* a, BigInt* b) -> void
+                {
+                    BigInt p, tmp;
+                    fe_set_p(@p);
+                    math::bigint::bigint_add(@tmp, a, b);
                     math::bigint::bigint_mod(out, @tmp, @p);
+                    return;
                 };
-                return;
-            };
 
-            def fe_mul(BigInt* out, BigInt* a, BigInt* b) -> void
-            {
-                BigInt p, tmp;
-                fe_set_p(@p);
-                math::bigint::bigint_mul(@tmp, a, b);
-                math::bigint::bigint_mod(out, @tmp, @p);
-                return;
-            };
-
-            def fe_sq(BigInt* out, BigInt* a) -> void
-            {
-                fe_mul(out, a, a);
-                return;
-            };
-
-            // Constant-time conditional swap (not truly CT but correct)
-            def fe_cswap(BigInt* a, BigInt* b, u64 cond) -> void
-            {
-                BigInt tmp;
-                if (cond != 0u)
+                def fe_sub(BigInt* out, BigInt* a, BigInt* b) -> void
                 {
-                    math::bigint::bigint_copy(@tmp, a);
-                    math::bigint::bigint_copy(a, b);
-                    math::bigint::bigint_copy(b, @tmp);
-                };
-                return;
-            };
-
-            // Invert: out = a^(p-2) mod p  (Fermat's little theorem)
-            def fe_invert(BigInt* out, BigInt* a) -> void
-            {
-                // p - 2 = 2^255 - 21
-                // Square-and-multiply: standard binary exponentiation
-                BigInt p, exp, base, result, tmp, bit_val, zero;
-                uint i, j;
-                u64 limb;
-
-                fe_set_p(@p);
-
-                // exp = p - 2: subtract 2 from p
-                math::bigint::bigint_from_uint(@tmp, 2);
-                math::bigint::bigint_sub(@exp, @p, @tmp);
-
-                // result = 1
-                math::bigint::bigint_one(@result);
-                math::bigint::bigint_copy(@base, a);
-
-                // Binary exponentiation: iterate over bits of exp from LSB
-                // exp has 8 uint limbs
-                uint* expd = @exp.digits[0];
-                uint exp_len = exp.length;
-
-                for (i = 0; i < exp_len; i++)
-                {
-                    uint word = expd[i];
-                    for (j = 0; j < 32; j++)
+                    BigInt p, tmp;
+                    fe_set_p(@p);
+                    math::bigint::bigint_sub(@tmp, a, b);
+                    // If negative, add p
+                    if (tmp.negative)
                     {
-                        if ((word & 1) != 0)
+                        math::bigint::bigint_add(out, @tmp, @p);
+                        // May still be negative if a was 0 and b was large; add p again
+                        if (out.negative)
                         {
-                            fe_mul(@tmp, @result, @base);
-                            math::bigint::bigint_copy(@result, @tmp);
+                            math::bigint::bigint_add(@tmp, out, @p);
+                            math::bigint::bigint_copy(out, @tmp);
                         };
-                        word = word >> 1;
-                        fe_sq(@tmp, @base);
-                        math::bigint::bigint_copy(@base, @tmp);
+                    }
+                    else
+                    {
+                        math::bigint::bigint_mod(out, @tmp, @p);
                     };
+                    return;
                 };
 
-                math::bigint::bigint_copy(out, @result);
-                return;
-            };
-
-            // ---- Montgomery ladder ----
-            def x25519(byte* out, byte* scalar, byte* point) -> void
-            {
-                BigInt x1, x2, z2, x3, z3;
-                BigInt A, AA, B, BB, E, C, D, DA, CB, tmp, a24;
-                byte[32] e;
-                u32 i, j;
-                u64 bit, swap;
-
-                // Clamp scalar
-                while (j < 32) { e[j] = scalar[j]; j++; };
-                e[0]  = e[0]  & (byte)248;
-                e[31] = e[31] & (byte)127;
-                e[31] = e[31] | (byte)64;
-
-                // Load u-coordinate (mask high bit)
-                fe_from_bytes(@x1, point);
-
-                // x2 = 1, z2 = 0
-                math::bigint::bigint_one(@x2);
-                math::bigint::bigint_zero(@z2);
-                // x3 = x1, z3 = 1
-                math::bigint::bigint_copy(@x3, @x1);
-                math::bigint::bigint_one(@z3);
-
-                // a24 = 121665
-                math::bigint::bigint_from_uint(@a24, 121665);
-
-                i = 254;
-                while (i <= 254)
+                def fe_mul(BigInt* out, BigInt* a, BigInt* b) -> void
                 {
-                    bit  = (u64)((e[i >> 3] >> (i & 7)) & 1);
-                    swap = swap `^^ bit;
+                    BigInt p, tmp;
+                    fe_set_p(@p);
+                    math::bigint::bigint_mul(@tmp, a, b);
+                    math::bigint::bigint_mod(out, @tmp, @p);
+                    return;
+                };
+
+                def fe_sq(BigInt* out, BigInt* a) -> void
+                {
+                    fe_mul(out, a, a);
+                    return;
+                };
+
+                // Constant-time conditional swap (not truly CT but correct)
+                def fe_cswap(BigInt* a, BigInt* b, u64 cond) -> void
+                {
+                    BigInt tmp;
+                    if (cond != 0u)
+                    {
+                        math::bigint::bigint_copy(@tmp, a);
+                        math::bigint::bigint_copy(a, b);
+                        math::bigint::bigint_copy(b, @tmp);
+                    };
+                    return;
+                };
+
+                // Invert: out = a^(p-2) mod p  (Fermat's little theorem)
+                def fe_invert(BigInt* out, BigInt* a) -> void
+                {
+                    // p - 2 = 2^255 - 21
+                    // Square-and-multiply: standard binary exponentiation
+                    BigInt p, exp, base, result, tmp, bit_val, zero;
+                    uint i, j;
+                    u64 limb;
+
+                    fe_set_p(@p);
+
+                    // exp = p - 2: subtract 2 from p
+                    math::bigint::bigint_from_uint(@tmp, 2);
+                    math::bigint::bigint_sub(@exp, @p, @tmp);
+
+                    // result = 1
+                    math::bigint::bigint_one(@result);
+                    math::bigint::bigint_copy(@base, a);
+
+                    // Binary exponentiation: iterate over bits of exp from LSB
+                    // exp has 8 uint limbs
+                    uint* expd = @exp.digits[0];
+                    uint exp_len = exp.length;
+
+                    for (i = 0; i < exp_len; i++)
+                    {
+                        uint word = expd[i];
+                        for (j = 0; j < 32; j++)
+                        {
+                            if ((word & 1) != 0)
+                            {
+                                fe_mul(@tmp, @result, @base);
+                                math::bigint::bigint_copy(@result, @tmp);
+                            };
+                            word = word >> 1;
+                            fe_sq(@tmp, @base);
+                            math::bigint::bigint_copy(@base, @tmp);
+                        };
+                    };
+
+                    math::bigint::bigint_copy(out, @result);
+                    return;
+                };
+
+                // ---- Montgomery ladder ----
+                def x25519(byte* out, byte* scalar, byte* point) -> void
+                {
+                    BigInt x1, x2, z2, x3, z3;
+                    BigInt A, AA, B, BB, E, C, D, DA, CB, tmp, a24;
+                    byte[32] e;
+                    u32 i, j;
+                    u64 bit, swap;
+
+                    // Clamp scalar
+                    while (j < 32) { e[j] = scalar[j]; j++; };
+                    e[0]  = e[0]  & (byte)248;
+                    e[31] = e[31] & (byte)127;
+                    e[31] = e[31] | (byte)64;
+
+                    // Load u-coordinate (mask high bit)
+                    fe_from_bytes(@x1, point);
+
+                    // x2 = 1, z2 = 0
+                    math::bigint::bigint_one(@x2);
+                    math::bigint::bigint_zero(@z2);
+                    // x3 = x1, z3 = 1
+                    math::bigint::bigint_copy(@x3, @x1);
+                    math::bigint::bigint_one(@z3);
+
+                    // a24 = 121665
+                    math::bigint::bigint_from_uint(@a24, 121665);
+
+                    i = 254;
+                    while (i <= 254)
+                    {
+                        bit  = (u64)((e[i >> 3] >> (i & 7)) & 1);
+                        swap = swap `^^ bit;
+                        fe_cswap(@x2, @x3, swap);
+                        fe_cswap(@z2, @z3, swap);
+                        swap = bit;
+
+                        fe_add(@A,  @x2, @z2);  fe_sq(@AA, @A);
+                        fe_sub(@B,  @x2, @z2);  fe_sq(@BB, @B);
+                        fe_sub(@E,  @AA, @BB);
+                        fe_add(@C,  @x3, @z3);
+                        fe_sub(@D,  @x3, @z3);
+                        fe_mul(@DA, @D,  @A);
+                        fe_mul(@CB, @C,  @B);
+                        fe_add(@tmp, @DA, @CB);  fe_sq(@x3, @tmp);
+                        fe_sub(@tmp, @DA, @CB);  fe_sq(@z3, @tmp);
+                        fe_mul(@z3, @x1, @z3);
+                        fe_mul(@x2, @AA, @BB);
+                        fe_mul(@tmp, @a24, @E);
+                        fe_add(@tmp, @AA, @tmp);
+                        fe_mul(@z2, @E, @tmp);
+
+                        switch (i == 0) { case (1) { break; } default {}; };
+                        i--;
+                    };
+
                     fe_cswap(@x2, @x3, swap);
                     fe_cswap(@z2, @z3, swap);
-                    swap = bit;
 
-                    fe_add(@A,  @x2, @z2);  fe_sq(@AA, @A);
-                    fe_sub(@B,  @x2, @z2);  fe_sq(@BB, @B);
-                    fe_sub(@E,  @AA, @BB);
-                    fe_add(@C,  @x3, @z3);
-                    fe_sub(@D,  @x3, @z3);
-                    fe_mul(@DA, @D,  @A);
-                    fe_mul(@CB, @C,  @B);
-                    fe_add(@tmp, @DA, @CB);  fe_sq(@x3, @tmp);
-                    fe_sub(@tmp, @DA, @CB);  fe_sq(@z3, @tmp);
-                    fe_mul(@z3, @x1, @z3);
-                    fe_mul(@x2, @AA, @BB);
-                    fe_mul(@tmp, @a24, @E);
-                    fe_add(@tmp, @AA, @tmp);
-                    fe_mul(@z2, @E, @tmp);
-
-                    switch (i == 0) { case (1) { break; } default {}; };
-                    i--;
+                    fe_invert(@z2, @z2);
+                    fe_mul(@x2, @x2, @z2);
+                    fe_to_bytes(out, @x2);
+                    return;
                 };
 
-                fe_cswap(@x2, @x3, swap);
-                fe_cswap(@z2, @z3, swap);
+                def x25519_pubkey(byte* out, byte* scalar) -> void
+                {
+                    byte[32] base;
+                    u32 i;
+                    i = 0;
+                    while (i < 32) { base[i] = (byte)0; i++; };
+                    base[0] = (byte)9;
+                    x25519(out, scalar, @base[0]);
+                    return;
+                };
 
-                fe_invert(@z2, @z2);
-                fe_mul(@x2, @x2, @z2);
-                fe_to_bytes(out, @x2);
-                return;
-            };
+            };  // namespace X25519
+        };
 
-            def x25519_pubkey(byte* out, byte* scalar) -> void
-            {
-                byte[32] base;
-                u32 i;
-                i = 0;
-                while (i < 32) { base[i] = (byte)0; i++; };
-                base[0] = (byte)9;
-                x25519(out, scalar, @base[0]);
-                return;
-            };
-
-        };  // namespace X25519
-
-        namespace kdf
+        namespace KDF
         {
             namespace HKDF
             {

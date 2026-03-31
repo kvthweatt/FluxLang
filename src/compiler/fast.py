@@ -7487,6 +7487,8 @@ class UsingStatement(Statement):
             module._using_namespaces = []
         self.namespace_path = self.namespace_path.replace("::","__")
         module._using_namespaces.append(self.namespace_path)
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.add_using_namespace(self.namespace_path)
         #print(f"[USING] Registered namespace: {self.namespace_path}", file=sys.stdout)
 
 

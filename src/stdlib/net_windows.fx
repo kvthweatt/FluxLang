@@ -215,17 +215,6 @@ namespace standard
             addr.sin_port = htons(port);
             addr.sin_addr = htonl(inet_addr(ip_str));
             
-            print("After init_sockaddr_str:\n\0");
-            print("  sin_family = \0");
-            print((int)addr.sin_family);
-            print("\n\0");
-            print("  sin_port = \0");
-            print((int)addr.sin_port);
-            print("\n\0");
-            print("  sin_addr = \0");
-            print((int)addr.sin_addr);
-            print("\n\0");
-            
             // Zero out padding
             int i;
             while (i < 8)
@@ -274,11 +263,10 @@ namespace standard
         // Returns socket fd on success, -1 on error
         def tcp_server_create(u16 port, int backlog) -> int
         {
-            print("In tcp_server_create(\0"); print((u32)port); print(", \0"); print(backlog); print(")\n\0");
             int sockfd = tcp_socket();
             if (sockfd < 0)
             {
-                print("Failed at sockfd < 0\n\0");
+                standard::io::console::print("Failed at sockfd < 0\n\0");
                 return -1;
             };
             
@@ -289,9 +277,6 @@ namespace standard
             sockaddr_in addr;
 
             u16 port_network = htons(8080);
-            print("Port in network order (u16): \0");
-            print((int)port_network);
-            print("\n\0");
 
             addr.sin_family = 2;
             addr.sin_port = port_network;
@@ -301,8 +286,12 @@ namespace standard
             int bind_result = bind(sockfd, @addr, 16);
             if (bind_result < 0)
             {
-                print("Failed to bind socket. Result: \0"); print(bind_result); print("\n\0");
-                print("get_last_error() = \0"); print(get_last_error()); print("\n\0");
+                standard::io::console::print("Failed to bind socket. Result: \0");
+                standard::io::console::print(bind_result);
+                standard::io::console::print();
+                standard::io::console::print("get_last_error() = \0");
+                standard::io::console::print(get_last_error());
+                standard::io::console::print();
                 closesocket(sockfd);
                 return -1;
             };
@@ -338,22 +327,14 @@ namespace standard
             sockaddr_in addr;
             init_sockaddr_str(@addr, ip_addr, port);
 
-            print("About to call connect. sockfd = \0");
-            print(sockfd);
-            print("\n\0");
-
             int connect_result = connect(sockfd, @addr, 16);
-
-            print("connect returned: \0");
-            print(connect_result);
-            print("\n\0");
 
             if (connect_result < 0)
             {
                 int err = get_last_error();  // Call it RIGHT HERE
-                print("connect failed. WSA Error: \0");
-                print(err);
-                print("\n\0");
+                standard::io::console::print("connect failed. WSA Error: \0");
+                standard::io::console::print(err);
+                standard::io::console::print();
                 closesocket(sockfd);
                 return -1;
             };

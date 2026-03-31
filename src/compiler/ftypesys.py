@@ -4562,6 +4562,12 @@ class AssignmentTypeHandler:
             # Target is the array type itself (not a pointer) — load the aggregate value
             if target_type == val.type.pointee or str(target_type) == str(val.type.pointee):
                 return builder.load(val, name="array_load")
+
+        # Handle struct* -> struct assignment (struct member returned as pointer, assigned to local)
+        if (isinstance(val.type, ir.PointerType) and
+                not isinstance(target_type, ir.PointerType) and
+                (str(val.type.pointee) == str(target_type) or val.type.pointee == target_type)):
+            return builder.load(val, name="struct_copy_load")
         
         # Handle void* to typed pointer assignment (e.g., py = (@)pxk where pxk is int)
         if (isinstance(val.type, ir.PointerType) and 

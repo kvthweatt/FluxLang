@@ -135,11 +135,11 @@ namespace math
         {
             if (digit < 10)
             {
-                print((byte)('0' + digit));
+                standard::io::console::print((byte)('0' + digit));
             }
             else
             {
-                print((byte)('a' + (digit - 10)));
+                standard::io::console::print((byte)('a' + (digit - 10)));
             };
             return;
         };
@@ -150,10 +150,10 @@ namespace math
             uint* nd = @num.digits[0];
             if (num.negative)
             {
-                print("-\0");
+                standard::io::console::print("-\0");
             };
             
-            print("0x\0");
+            standard::io::console::print("0x\0");
             
             // Print from most significant to least significant
             uint digit, j, nibble;
@@ -174,7 +174,7 @@ namespace math
                 // Add separator between digits for readability
                 if (i > 0)
                 {
-                    print("_\0");
+                    standard::io::console::print("_\0");
                 };
             };
             
@@ -188,13 +188,13 @@ namespace math
         {
             if (num.negative)
             {
-                print("-\0");
+                standard::io::console::print("-\0");
             };
             
             // For now, only handle numbers that fit in u64
             if (num.length > 2)
             {
-                print("[Large number - use hex print]\0");
+                standard::io::console::print("[Large number - use hex print]\0");
                 return;
             };
             
@@ -977,7 +977,7 @@ namespace math
         {
             if (value == 0)
             {
-                print("0\0");
+                standard::io::console::print("0\0");
                 return;
             };
 
@@ -1019,7 +1019,7 @@ namespace math
             while (pos > 0)
             {
                 pos--;
-                print(buf[pos]);
+                standard::io::console::print(buf[pos]);
             };
             return;
         };
@@ -1035,12 +1035,12 @@ namespace math
 
             if (num.negative)
             {
-                print("-\0");
+                standard::io::console::print("-\0");
             };
 
             if (bigint_is_zero(num))
             {
-                print("0\0");
+                standard::io::console::print("0\0");
                 return;
             };
 
@@ -1090,7 +1090,7 @@ namespace math
                     for (d = 0; d < digits_needed; d++)
                     {
                         digit_val = chunk_val / power;
-                        print((byte)('0' + digit_val));
+                        standard::io::console::print((byte)('0' + digit_val));
                         chunk_val = chunk_val % power;
                         power = power / 10;
                     };

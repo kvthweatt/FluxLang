@@ -132,7 +132,7 @@ namespace standard
         {
             timespec req;
             req.tv_sec  = ms / 1000;
-            req.tv_nsec = (ms % (1000) * TIME_NS_PER_MS;
+            req.tv_nsec = (ms % 1000) * TIME_NS_PER_MS;
             nanosleep(@req, (void*)0);
         };
 

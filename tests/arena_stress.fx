@@ -1,10 +1,7 @@
 // Author: Karac V. Thweatt
 // arena_stress.fx - Stress test for standard::memory::allocators::stdarena
 
-#import "standard.fx";
-#import "allocators.fx";
-#import "random.fx";
-#import "timing.fx";
+#import "standard.fx", "allocators.fx", "random.fx", "timing.fx";
 
 using standard::io::console,
       standard::strings,
