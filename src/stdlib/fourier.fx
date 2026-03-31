@@ -21,8 +21,6 @@
 #def FLUX_FOURIER 1;
 #endif;
 
-using standard::memory::allocators::stdheap;
-
 namespace standard
 {
     namespace math
@@ -58,20 +56,20 @@ namespace standard
             // complex_mag: |c| = sqrt(re^2 + im^2)
             def complex_mag(Complex* c) -> double
             {
-                return standard::math::sqrt(c.re * c.re + c.im * c.im);
+                return sqrt(c.re * c.re + c.im * c.im);
             };
 
             // complex_phase: angle in radians via atan2
             def complex_phase(Complex* c) -> double
             {
-                return standard::math::atan2(c.im, c.re);
+                return atan2(c.im, c.re);
             };
 
             // complex_from_polar: result = mag * e^(i*phase)
             def complex_from_polar(Complex* result, double mag, double phase) -> void
             {
-                result.re = mag * standard::math::cos((float)phase);
-                result.im = mag * standard::math::sin((float)phase);
+                result.re = mag * cos((float)phase);
+                result.im = mag * sin((float)phase);
                 return;
             };
 
@@ -83,7 +81,7 @@ namespace standard
             // ============================================================
             def dft(Complex* out, Complex* xin, i32 n) -> void
             {
-                double two_pi_over_n = 2.0f * (double)standard::math::PIF / (double)n,
+                double two_pi_over_n = 2.0f * (double)PIF / (double)n,
                        angle,
                        re_sum,
                        im_sum;
@@ -98,10 +96,10 @@ namespace standard
                     for (j = 0; j < n; j++)
                     {
                         angle  = two_pi_over_n * (double)k * (double)j;
-                        re_sum = re_sum + xin[j].re * standard::math::cos((float)angle)
-                                       + xin[j].im * standard::math::sin((float)angle);
-                        im_sum = im_sum + xin[j].im * standard::math::cos((float)angle)
-                                       - xin[j].re * standard::math::sin((float)angle);
+                        re_sum = re_sum + xin[j].re * cos((float)angle)
+                                       + xin[j].im * sin((float)angle);
+                        im_sum = im_sum + xin[j].im * cos((float)angle)
+                                       - xin[j].re * sin((float)angle);
                     };
 
                     out[k].re = re_sum;
@@ -118,7 +116,7 @@ namespace standard
             // ============================================================
             def idft(Complex* out, Complex* xin, i32 n) -> void
             {
-                double two_pi_over_n = 2.0f * (double)standard::math::PIF / (double)n,
+                double two_pi_over_n = 2.0f * (double)PIF / (double)n,
                        inv_n        = 1.0f / (double)n,
                        angle,
                        re_sum,
@@ -135,10 +133,10 @@ namespace standard
                     {
                         // IDFT uses +angle (positive exponent) and divides by N
                         angle  = two_pi_over_n * (double)k * (double)j;
-                        re_sum = re_sum + xin[j].re * standard::math::cos((float)angle)
-                                       - xin[j].im * standard::math::sin((float)angle);
-                        im_sum = im_sum + xin[j].im * standard::math::cos((float)angle)
-                                       + xin[j].re * standard::math::sin((float)angle);
+                        re_sum = re_sum + xin[j].re * cos((float)angle)
+                                       - xin[j].im * sin((float)angle);
+                        im_sum = im_sum + xin[j].im * cos((float)angle)
+                                       + xin[j].re * sin((float)angle);
                     };
 
                     out[k].re = re_sum * inv_n;
@@ -198,11 +196,11 @@ namespace standard
                     // Forward: -2*pi/len   Inverse: +2*pi/len
                     if (inverse)
                     {
-                        angle = 2.0f * (double)standard::math::PIF / (double)len;
+                        angle = 2.0f * (double)PIF / (double)len;
                     }
                     else
                     {
-                        angle = 0.0f - (2.0f * (double)standard::math::PIF / (double)len);
+                        angle = 0.0f - (2.0f * (double)PIF / (double)len);
                     };
 
                     for (i = 0; i < n; i = i + len)
@@ -211,8 +209,8 @@ namespace standard
                         while (j < len / 2)
                         {
                             // twiddle = e^(i * angle * j)
-                            twiddle.re = standard::math::cos((float)(angle * (double)j));
-                            twiddle.im = standard::math::sin((float)(angle * (double)j));
+                            twiddle.re = cos((float)(angle * (double)j));
+                            twiddle.im = sin((float)(angle * (double)j));
 
                             even_val.re = buf[i + j].re;
                             even_val.im = buf[i + j].im;

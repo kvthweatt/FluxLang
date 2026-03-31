@@ -82,9 +82,9 @@ global int cur_w       = WIN_W,
 struct FFTSlice
 {
     int      phase;
-    float*   out_mag;
-    float*   hann;
-    float*   ring;
+    float*   out_mag,
+             hann,
+             ring;
     int*     ring_read;
     Complex* fft_buf;
 };

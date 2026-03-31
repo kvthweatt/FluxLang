@@ -164,7 +164,8 @@ namespace standard
                                                         gcm_read;  // For inbound records
 
             // State flags
-            int  handshake_done;           // 1 once application keys are active
+            int  handshake_done,           // 1 once application keys are active
+                 is_server;
         };
 
         // ============================================================
@@ -284,7 +285,12 @@ namespace standard
 
             // Nonce: base_iv XOR seq (big-endian, right-aligned in 12 bytes)
             seq = ctx.client_hs.seq;
-            if (ctx.handshake_done != 0) { seq = ctx.client_app.seq; };
+            if (ctx.is_server != 0)   { seq = ctx.server_hs.seq; };
+            if (ctx.handshake_done != 0)
+            {
+                seq = ctx.client_app.seq;
+                if (ctx.is_server != 0) { seq = ctx.server_app.seq; };
+            };
             for (i = 0; i < 12; i++) { nonce[i] = '\0'; };
             // Write seq into bytes 4..11 (big-endian u64)
             nonce[4]  = (byte)((seq >> 56) & 0xFF);
@@ -298,11 +304,25 @@ namespace standard
             // XOR with base IV
             if (ctx.handshake_done != 0)
             {
-                for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.client_app.iv[i]; };
+                if (ctx.is_server != 0)
+                {
+                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.server_app.iv[i]; };
+                }
+                else
+                {
+                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.client_app.iv[i]; };
+                };
             }
             else
             {
-                for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.client_hs.iv[i]; };
+                if (ctx.is_server != 0)
+                {
+                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.server_hs.iv[i]; };
+                }
+                else
+                {
+                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.client_hs.iv[i]; };
+                };
             };
 
             standard::crypto::encryption::AES::gcm_encrypt(@ctx.gcm_write, @nonce[0],
@@ -314,8 +334,16 @@ namespace standard
             for (i = 0; i < TLS13_TAG_LEN; i++) { ct_buf[total_inner + i] = tag[i]; };
 
             // Increment sequence
-            if (ctx.handshake_done != 0) { ctx.client_app.seq = ctx.client_app.seq + 1u; }
-            else                         { ctx.client_hs.seq  = ctx.client_hs.seq  + 1u; };
+            if (ctx.handshake_done != 0)
+            {
+                if (ctx.is_server != 0) { ctx.server_app.seq = ctx.server_app.seq + 1u; }
+                else                    { ctx.client_app.seq = ctx.client_app.seq + 1u; };
+            }
+            else
+            {
+                if (ctx.is_server != 0) { ctx.server_hs.seq  = ctx.server_hs.seq  + 1u; }
+                else                    { ctx.client_hs.seq  = ctx.client_hs.seq  + 1u; };
+            };
 
             if (!tls_send_exact(ctx.sockfd, @hdr[0], 5)) { return 0; };
             if (!tls_send_exact(ctx.sockfd, @ct_buf[0], ct_len)) { return 0; };
@@ -363,7 +391,12 @@ namespace standard
 
             // Build nonce
             seq = ctx.server_hs.seq;
-            if (ctx.handshake_done != 0) { seq = ctx.server_app.seq; };
+            if (ctx.is_server != 0)   { seq = ctx.client_hs.seq; };
+            if (ctx.handshake_done != 0)
+            {
+                seq = ctx.server_app.seq;
+                if (ctx.is_server != 0) { seq = ctx.client_app.seq; };
+            };
             for (i = 0; i < 12; i++) { nonce[i] = '\0'; };
             nonce[4]  = (byte)((seq >> 56) & 0xFF);
             nonce[5]  = (byte)((seq >> 48) & 0xFF);
@@ -375,11 +408,25 @@ namespace standard
             nonce[11] = (byte)( seq        & 0xFF);
             if (ctx.handshake_done != 0)
             {
-                for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.server_app.iv[i]; };
+                if (ctx.is_server != 0)
+                {
+                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.client_app.iv[i]; };
+                }
+                else
+                {
+                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.server_app.iv[i]; };
+                };
             }
             else
             {
-                for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.server_hs.iv[i]; };
+                if (ctx.is_server != 0)
+                {
+                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.client_hs.iv[i]; };
+                }
+                else
+                {
+                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.server_hs.iv[i]; };
+                };
             };
 
             result = standard::crypto::encryption::AES::gcm_decrypt(@ctx.gcm_read, @nonce[0],
@@ -389,8 +436,16 @@ namespace standard
             if (result == 0) { return -1; };
 
             // Increment read sequence
-            if (ctx.handshake_done != 0) { ctx.server_app.seq = ctx.server_app.seq + 1u; }
-            else                         { ctx.server_hs.seq  = ctx.server_hs.seq  + 1u; };
+            if (ctx.handshake_done != 0)
+            {
+                if (ctx.is_server != 0) { ctx.client_app.seq = ctx.client_app.seq + 1u; }
+                else                    { ctx.server_app.seq = ctx.server_app.seq + 1u; };
+            }
+            else
+            {
+                if (ctx.is_server != 0) { ctx.client_hs.seq  = ctx.client_hs.seq  + 1u; }
+                else                    { ctx.server_hs.seq  = ctx.server_hs.seq  + 1u; };
+            };
 
             // Copy plaintext back (excluding inner content type byte at end)
             for (i = 0; i < inner_len; i++) { buf[i] = plain[i]; };
@@ -1299,6 +1354,7 @@ namespace standard
 
             ctx.sockfd         = sockfd;
             ctx.handshake_done = 0;
+            ctx.is_server      = 1;
 
             // --------------------------------------------------
             // 1. Receive ClientHello

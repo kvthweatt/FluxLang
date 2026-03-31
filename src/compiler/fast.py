@@ -7614,12 +7614,13 @@ class Program(ASTNode):
         # Pre-pass: register all object struct types across the entire namespace tree before
         # any method bodies are emitted, so cross-namespace type references always resolve.
         print("[AST] Pre-pass: Registering all object types...")
-        # Step 1: process top-level structs and objects first (they have no namespace
-        # dependencies and may be referenced by namespace objects, e.g. FreeNode).
-        for stmt in self.statements:
-            if isinstance(stmt, (StructDef, StructDefStatement, ObjectDef, ObjectDefStatement)):
-                stmt.codegen(builder, module)
-        # Step 2: walk all namespace trees and pre-register every struct/object type.
+        # Collect all namespace pre-registration work and top-level struct/object codegen
+        # into a single unified retry loop.  This handles mutual dependencies in either
+        # direction: a top-level struct referencing a namespace type (e.g. Complex*) and a
+        # namespace object referencing a top-level struct (e.g. FreeNode*).
+        pending_toplevel = [stmt for stmt in self.statements
+                            if isinstance(stmt, (StructDef, StructDefStatement, ObjectDef, ObjectDefStatement))]
+        pending_ns = []
         for stmt in self.statements:
             ns = None
             if isinstance(stmt, NamespaceDef):
@@ -7627,7 +7628,42 @@ class Program(ASTNode):
             elif isinstance(stmt, NamespaceDefStatement):
                 ns = stmt.namespace_def
             if ns is not None:
+                pending_ns.append(ns)
+
+        # Pre-register namespace types using the existing retry helper first (best-effort).
+        for ns in pending_ns:
+            try:
                 NamespaceDef.preregister_all_types(ns, module)
+            except Exception:
+                pass  # will be retried in the unified loop below
+
+        # Now retry top-level structs/objects, and any still-failing namespace registrations,
+        # together until no further progress is possible.
+        max_passes = len(pending_toplevel) + len(pending_ns) + 1
+        pending_tl = list(pending_toplevel)
+        pending_ns_retry = list(pending_ns)
+        for _ in range(max_passes):
+            if not pending_tl and not pending_ns_retry:
+                break
+            still_tl, still_ns = [], []
+            for stmt in pending_tl:
+                try:
+                    stmt.codegen(builder, module)
+                except Exception:
+                    still_tl.append(stmt)
+            for ns in pending_ns_retry:
+                try:
+                    NamespaceDef.preregister_all_types(ns, module)
+                except Exception:
+                    still_ns.append(ns)
+            if len(still_tl) == len(pending_tl) and len(still_ns) == len(pending_ns_retry):
+                # No progress — surface the real errors
+                for stmt in still_tl:
+                    stmt.codegen(builder, module)
+                for ns in still_ns:
+                    NamespaceDef.preregister_all_types(ns, module)
+                break
+            pending_tl, pending_ns_retry = still_tl, still_ns
 
         # Pass 3: Process all other statements
         print("[AST] Pass 4: Processing all other statements...")
