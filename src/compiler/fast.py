@@ -5641,14 +5641,13 @@ class AssertStatement(Statement):
                     puts_fn.linkage = 'external'
                 builder.call(puts_fn, [msg_ptr])
 
-        # Call abort
-        abort = module.globals.get('abort')
-        if abort is None:
-            abort_type = ir.FunctionType(ir.VoidType(), [])
-            abort = ir.Function(module, abort_type, 'abort')
-            abort.linkage = 'external'
-        
-        builder.call(abort, [])
+        # Call ExitProcess(1) for clean termination
+        exit_proc = module.globals.get('ExitProcess')
+        if exit_proc is None:
+            exit_proc_type = ir.FunctionType(ir.VoidType(), [ir.IntType(32)])
+            exit_proc = ir.Function(module, exit_proc_type, 'ExitProcess')
+            exit_proc.linkage = 'external'
+        builder.call(exit_proc, [ir.Constant(ir.IntType(32), 1)])
         builder.unreachable()
 
         # Success block
