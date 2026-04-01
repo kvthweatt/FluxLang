@@ -1467,6 +1467,33 @@ class CastExpression(Expression):
 
         # Handle integer/float to array cast: unpack bits into array elements
         elif isinstance(target_llvm_type, ir.ArrayType):
+            # Array pointer to smaller array: (byte[2])a — copy first N elements
+            if (isinstance(source_val.type, ir.PointerType) and
+                    isinstance(source_val.type.pointee, ir.ArrayType) and
+                    source_val.type.pointee.element == target_llvm_type.element):
+                count = target_llvm_type.count
+                # Allocate one extra byte for null terminator
+                null_term_type = ir.ArrayType(target_llvm_type.element, count + 1)
+                alloca = builder.alloca(null_term_type, name="arr_trunc")
+                zero = ir.Constant(ir.IntType(32), 0)
+                for i in range(count):
+                    idx = ir.Constant(ir.IntType(32), i)
+                    src_ptr = builder.gep(source_val, [zero, idx], inbounds=True, name=f"src_{i}")
+                    src_val = builder.load(src_ptr, name=f"val_{i}")
+                    dst_ptr = builder.gep(alloca, [zero, idx], inbounds=True, name=f"dst_{i}")
+                    builder.store(src_val, dst_ptr)
+                # Null terminate
+                null_idx = ir.Constant(ir.IntType(32), count)
+                null_ptr = builder.gep(alloca, [zero, null_idx], inbounds=True, name="null_term")
+                builder.store(ir.Constant(target_llvm_type.element, 0), null_ptr)
+                zero = ir.Constant(ir.IntType(32), 0)
+                for i in range(count):
+                    idx = ir.Constant(ir.IntType(32), i)
+                    src_ptr = builder.gep(source_val, [zero, idx], inbounds=True, name=f"src_{i}")
+                    src_val = builder.load(src_ptr, name=f"val_{i}")
+                    dst_ptr = builder.gep(alloca, [zero, idx], inbounds=True, name=f"dst_{i}")
+                    builder.store(src_val, dst_ptr)
+                return alloca
             return ArrayTypeHandler.unpack_integer_to_array(builder, module, source_val, target_llvm_type)
 
         else:

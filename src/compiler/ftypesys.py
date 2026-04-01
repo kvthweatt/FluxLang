@@ -4902,10 +4902,8 @@ class AssignmentTypeHandler:
         # For array assignment, generate the array expression normally
         # This handles all the loading logic correctly through Identifier codegen
         array = array_expr.codegen(builder, module)
-        
-        #print(f"[ARRAY ASSIGN DEBUG] INITIAL array.type: {array.type}", file=sys.stdout)
-        #if hasattr(array, '_flux_type_spec'):
-        #    print(f"[ARRAY ASSIGN DEBUG] array has _flux_type_spec: {array._flux_type_spec}", file=sys.stdout)
+
+        print(f"[ARRAY ASSIGN DEBUG] array.type: {array.type}, val.type: {val.type}", file=sys.stdout)
         
         if (isinstance(array.type, ir.PointerType) and 
             isinstance(array.type.pointee, ir.PointerType) and
@@ -4922,7 +4920,10 @@ class AssignmentTypeHandler:
                 # These are used for dynamic arrays and should NOT be loaded
                 elif hasattr(type_spec, 'pointer_depth') and type_spec.pointer_depth >= 2:
                     should_load = False
-            
+            # Case 3: array.type is T** where T is itself a pointer (e.g. void** i8**).
+            # Codegen already loaded the field value; indexing T** gives T* elements directly.
+            if isinstance(array.type.pointee, ir.PointerType):
+                should_load = False
             if should_load:
                 # This is T* stored as T** - load to get T*
                 #print(f"[LOAD DEBUG] BEFORE load: array.type = {array.type}", file=sys.stdout)

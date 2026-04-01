@@ -9,7 +9,7 @@
 //   6. Re-insert after full clear
 //   7. Collision/probe stress: sequential integer keys
 
-#import "standard.fx", "redcollections.fx";
+#import "standard.fx", "collections.fx";
 
 using standard::io::console,
       standard::collections;

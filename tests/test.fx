@@ -10,18 +10,9 @@ def foo() -> int
 
 def main() -> int
 {
-    int x = 5,
-        y = 2;
+    byte[4] a = [65, 66, 67, 68];
 
-    string a("Test!");
-
-    noopstr z = "STRING???";
-
-    noopstr s = f"{x} is a double.";
-
-    noopstr o = i"Test {} {} istring {}": {x + foo(); y; z;};
-
-    println(o);
+    println((byte[2])a[1..3]);
 
     return 0;
 };
