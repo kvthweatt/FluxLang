@@ -7,7 +7,7 @@
 
 ## What is Flux?
 
-Flux is a systems language that combines the performance of C with the readability of Python. It's for everyone, designed to have all the bells and whistles you could want in one place. Gone now are the days of writing your performance critical code in one language and calling it from another.
+Flux is a new language that combines the performance and power of C with the readability of Python. It is neither C or Python, nor a true C derivative. It's for everyone, designed for first-class data manipulation, and a growing standard library.
 
 **Characteristics:**
 - Manual memory management

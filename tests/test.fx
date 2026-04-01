@@ -10,8 +10,9 @@ def foo() -> int
 
 def main() -> int
 {
-    int a = 1;
-    assert(a != 1, "TEST!\0");
+    byte[4] a = [65, 66, 67, 68];
+
+    println((byte[2])a[1..3]);
 
     return 0;
 };
