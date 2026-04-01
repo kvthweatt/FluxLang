@@ -632,35 +632,6 @@ Alternatively, you can use a ternary `?:`
 
 ---
 
-## **Single initialization with `singinit`:**
-```
-#import "standard.fx";
-
-using standard::io::console;
-
-def foo() -> void
-{
-    singinit int x;
-    x += 1;
-    print(x); print();
-};
-
-def call(int y) -> void
-{
-    if (y == 0) { return; };
-    foo();
-    call(--y);
-};
-
-def main() -> int
-{
-    call(10);
-    return 0;
-};
-```
-
----
-
 ## **The `data` keyword:**
 
 Data is a variable bit width, primitive binary data-type creation keyword.  
@@ -1572,6 +1543,33 @@ pd[5] = 0xFFFFFFFF;
 pd[6] = 0xFFFFFFFF;
 pd[7] = 0x7FFFFFFF;
 ///
+```
+
+### **Reworking a loop:**
+```
+for (i = 0; i < 4; i++)
+{
+    hash[i] = (byte)((ctx.state[0] >> (24 - i * 8)) & 0xFF);
+    hash[i + 4] = (byte)((ctx.state[1] >> (24 - i * 8)) & 0xFF);
+    hash[i + 8] = (byte)((ctx.state[2] >> (24 - i * 8)) & 0xFF);
+    hash[i + 12] = (byte)((ctx.state[3] >> (24 - i * 8)) & 0xFF);
+    hash[i + 16] = (byte)((ctx.state[4] >> (24 - i * 8)) & 0xFF);
+    hash[i + 20] = (byte)((ctx.state[5] >> (24 - i * 8)) & 0xFF);
+    hash[i + 24] = (byte)((ctx.state[6] >> (24 - i * 8)) & 0xFF);
+    hash[i + 28] = (byte)((ctx.state[7] >> (24 - i * 8)) & 0xFF);
+};
+```
+Turns into:
+```
+hash[0..3]   = (byte[4])(be32)ctx.state[0];
+hash[4..7]   = (byte[4])(be32)ctx.state[1];
+hash[8..11]  = (byte[4])(be32)ctx.state[2];
+hash[12..15] = (byte[4])(be32)ctx.state[3];
+hash[16..19] = (byte[4])(be32)ctx.state[4];
+hash[20..23] = (byte[4])(be32)ctx.state[5];
+hash[24..27] = (byte[4])(be32)ctx.state[6];
+hash[28..31] = (byte[4])(be32)ctx.state[7];
+```
 
 ---
 

@@ -2,7 +2,8 @@
 // Based on RFC 1321 specification
 #import "standard.fx", "cryptography.fx";
 
-using standard::crypto::hashing::MD5;
+using standard::io::console,
+      standard::crypto::hashing::MD5;
 
 def main() -> int
 {

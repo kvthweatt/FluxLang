@@ -614,7 +614,12 @@ class StringLiteral(Expression):
         return f"\"{self.value.replace('\n','\\n').replace('\0','\\0')}\""
     
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        string_bytes = self.value.encode('ascii')
+        import fconfig as _fconfig
+        _null_terminate = _fconfig.config.get('null_terminate_strings', '0').strip() == '1'
+        value = self.value
+        if _null_terminate and (not value or value[-1] != '\0'):
+            value += '\0'
+        string_bytes = value.encode('ascii')
         
         # Create array type for the string (no null terminator - Flux strings are not null-terminated)
         str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
@@ -1887,11 +1892,23 @@ class FStringLiteral(Expression):
                     fmt_str = "%llu" if is_unsigned(val) else "%lld"
                 elif isinstance(val.type, (ir.FloatType, ir.DoubleType)):
                     fmt_str = "%f"
+                elif (isinstance(val.type, ir.PointerType) and
+                      isinstance(val.type.pointee, ir.IntType) and
+                      val.type.pointee.width == 8):
+                    fmt_str = "%s"
+                elif (isinstance(val.type, ir.PointerType) and
+                      isinstance(val.type.pointee, ir.ArrayType) and
+                      isinstance(val.type.pointee.element, ir.IntType) and
+                      val.type.pointee.element.width == 8):
+                    # [N x i8]* — decay to i8* for %s
+                    fmt_str = "%s"
+                    zero = ir.Constant(ir.IntType(32), 0)
+                    val = builder.gep(val, [zero, zero], name="str_decay")
                 else:
                     fmt_str = "%p"
                 
                 # Create format string global
-                fmt_bytes = (fmt_str + "\\0").encode('ascii')
+                fmt_bytes = (fmt_str + "\x00").encode('ascii')
                 fmt_array_ty = ir.ArrayType(ir.IntType(8), len(fmt_bytes))
                 fmt_val = ir.Constant(fmt_array_ty, bytearray(fmt_bytes))
                 
@@ -1904,9 +1921,12 @@ class FStringLiteral(Expression):
                 zero = ir.Constant(ir.IntType(32), 0)
                 fmt_ptr = builder.gep(fmt_gv, [zero, zero])
                 
-                # Extend value to 64-bit for variadic args if needed
+                # Extend value for variadic args per C ABI rules
                 if isinstance(val.type, ir.IntType) and val.type.width < 64:
                     val = builder.zext(val, ir.IntType(64)) if is_unsigned(val) else builder.sext(val, ir.IntType(64))
+                elif isinstance(val.type, ir.FloatType):
+                    # float must be promoted to double when passed to variadic functions
+                    val = builder.fpext(val, ir.DoubleType())
                 
                 chars_written = builder.call(sprintf_fn, [dest_ptr, fmt_ptr, val])
                 new_pos = builder.add(pos, chars_written)
@@ -3965,7 +3985,7 @@ class Assignment(Statement):
                     ts = entry.type_spec
                     elem_ts = dataclasses.replace(ts, is_array=False, array_size=None, array_dimensions=None)
                     self.value.element_type = elem_ts
-                            
+
         # Generate code for the value to be assigned
         val = self.value.codegen(builder, module)
         
@@ -3987,6 +4007,29 @@ class Assignment(Statement):
                 member_ptr = self.target.array._get_member_ptr(builder, module)
                 if (isinstance(member_ptr.type, ir.PointerType) and
                         isinstance(member_ptr.type.pointee, ir.ArrayType)):
+                    # Slice assignment: struct_var.array_member[start..end] = val
+                    if isinstance(self.target.index, RangeExpression):
+                        from ftypesys import emit_memcpy
+                        rng = self.target.index
+                        from fast import Literal as _Lit
+                        s = rng.start.value if isinstance(rng.start, _Lit) else None
+                        e = rng.end.value if isinstance(rng.end, _Lit) else None
+                        if s is None or e is None:
+                            raise ValueError("Struct member slice assignment indices must be literals")
+                        const_len = e - s + 1
+                        zero = ir.Constant(ir.IntType(32), 0)
+                        start_i32 = ir.Constant(ir.IntType(32), s)
+                        dst_ptr = builder.gep(member_ptr, [zero, start_i32], inbounds=True, name="slicewr_dst")
+                        i8ptr = ir.IntType(8).as_pointer()
+                        dst_i8 = builder.bitcast(dst_ptr, i8ptr, name="slicewr_dst_i8")
+                        if isinstance(val.type, ir.PointerType):
+                            src_i8 = builder.bitcast(val, i8ptr, name="slicewr_src_i8")
+                        else:
+                            src_alloca = builder.alloca(val.type, name="slicewr_src")
+                            builder.store(val, src_alloca)
+                            src_i8 = builder.bitcast(src_alloca, i8ptr, name="slicewr_src_i8")
+                        emit_memcpy(builder, module, dst_i8, src_i8, const_len)
+                        return val
                     index = self.target.index.codegen(builder, module)
                     if index.type != ir.IntType(32):
                         if isinstance(index.type, ir.IntType):

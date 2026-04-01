@@ -211,6 +211,8 @@ namespace standard
                     // Append length in bits as 64-bit big-endian
                     ctx.bitlen += ctx.buflen * 8;
 
+                    ctx.buffer[56..63] = (byte[8])(be64)ctx.bitlen;
+                    ///
                     ctx.buffer[63] = (byte)(ctx.bitlen);
                     ctx.buffer[62] = (byte)(ctx.bitlen >> 8);
                     ctx.buffer[61] = (byte)(ctx.bitlen >> 16);
@@ -219,21 +221,18 @@ namespace standard
                     ctx.buffer[58] = (byte)(ctx.bitlen >> 40);
                     ctx.buffer[57] = (byte)(ctx.bitlen >> 48);
                     ctx.buffer[56] = (byte)(ctx.bitlen >> 56);
-                    
+                    ///
                     sha256_transform(ctx, ctx.buffer);
                     
                     // Convert state to byte array (big-endian)
-                    for (i = 0; i < 4; i++)
-                    {
-                        hash[i] = (byte)((ctx.state[0] >> (24 - i * 8)) & 0xFF);
-                        hash[i + 4] = (byte)((ctx.state[1] >> (24 - i * 8)) & 0xFF);
-                        hash[i + 8] = (byte)((ctx.state[2] >> (24 - i * 8)) & 0xFF);
-                        hash[i + 12] = (byte)((ctx.state[3] >> (24 - i * 8)) & 0xFF);
-                        hash[i + 16] = (byte)((ctx.state[4] >> (24 - i * 8)) & 0xFF);
-                        hash[i + 20] = (byte)((ctx.state[5] >> (24 - i * 8)) & 0xFF);
-                        hash[i + 24] = (byte)((ctx.state[6] >> (24 - i * 8)) & 0xFF);
-                        hash[i + 28] = (byte)((ctx.state[7] >> (24 - i * 8)) & 0xFF);
-                    };
+                    hash[0..3]   = (byte[4])(be32)ctx.state[0];
+                    hash[4..7]   = (byte[4])(be32)ctx.state[1];
+                    hash[8..11]  = (byte[4])(be32)ctx.state[2];
+                    hash[12..15] = (byte[4])(be32)ctx.state[3];
+                    hash[16..19] = (byte[4])(be32)ctx.state[4];
+                    hash[20..23] = (byte[4])(be32)ctx.state[5];
+                    hash[24..27] = (byte[4])(be32)ctx.state[6];
+                    hash[28..31] = (byte[4])(be32)ctx.state[7];
                 };
             }; // SHA256
 
@@ -316,14 +315,15 @@ namespace standard
                 // IV differs from SHA-512 — these are the SHA-384-specific initial values
                 def sha384_init(SHA384_CTX* ctx) -> void
                 {
-                    ctx.state[0] = 0xCBBB9D5DC1059ED8u;
-                    ctx.state[1] = 0x629A292A367CD507u;
-                    ctx.state[2] = 0x9159015A3070DD17u;
-                    ctx.state[3] = 0x152FECD8F70E5939u;
-                    ctx.state[4] = 0x67332667FFC00B31u;
-                    ctx.state[5] = 0x8EB44A8768581511u;
-                    ctx.state[6] = 0xDB0C2E0D64F98FA7u;
-                    ctx.state[7] = 0x47B5481DBEFA4FA4u;
+                    ctx.state = [0xCBBB9D5DC1059ED8u,
+                                 0x629A292A367CD507u,
+                                 0x9159015A3070DD17u,
+                                 0x152FECD8F70E5939u,
+                                 0x67332667FFC00B31u,
+                                 0x8EB44A8768581511u,
+                                 0xDB0C2E0D64F98FA7u,
+                                 0x47B5481DBEFA4FA4u];
+
                     ctx.bitlen_lo = 0u;
                     ctx.bitlen_hi = 0u;
                     ctx.buflen = 0u;
@@ -456,37 +456,20 @@ namespace standard
                     };
 
                     // Append 128-bit big-endian length (high 64 bits first)
-                    ctx.buffer[112] = (byte)(total_bits_hi >> 56u);
-                    ctx.buffer[113] = (byte)(total_bits_hi >> 48u);
-                    ctx.buffer[114] = (byte)(total_bits_hi >> 40u);
-                    ctx.buffer[115] = (byte)(total_bits_hi >> 32u);
-                    ctx.buffer[116] = (byte)(total_bits_hi >> 24u);
-                    ctx.buffer[117] = (byte)(total_bits_hi >> 16u);
-                    ctx.buffer[118] = (byte)(total_bits_hi >> 8u);
-                    ctx.buffer[119] = (byte)(total_bits_hi);
-                    ctx.buffer[120] = (byte)(total_bits_lo >> 56u);
-                    ctx.buffer[121] = (byte)(total_bits_lo >> 48u);
-                    ctx.buffer[122] = (byte)(total_bits_lo >> 40u);
-                    ctx.buffer[123] = (byte)(total_bits_lo >> 32u);
-                    ctx.buffer[124] = (byte)(total_bits_lo >> 24u);
-                    ctx.buffer[125] = (byte)(total_bits_lo >> 16u);
-                    ctx.buffer[126] = (byte)(total_bits_lo >> 8u);
-                    ctx.buffer[127] = (byte)(total_bits_lo);
+                    ctx.buffer[112..119] = (byte[8])(be64)total_bits_hi;
+                    ctx.buffer[120..127] = (byte[8])(be64)total_bits_lo;
 
                     sha384_transform(ctx, ctx.buffer);
 
                     // Write first 6 state words as big-endian bytes (48 bytes total)
                     // State words 6 and 7 are discarded — this is what makes it SHA-384
                     // rather than SHA-512.
-                    for (i = 0; i < 8; i++)
-                    {
-                        hash[i]      = (byte)(ctx.state[0] >> (56u - (u64)i * 8u));
-                        hash[i + 8]  = (byte)(ctx.state[1] >> (56u - (u64)i * 8u));
-                        hash[i + 16] = (byte)(ctx.state[2] >> (56u - (u64)i * 8u));
-                        hash[i + 24] = (byte)(ctx.state[3] >> (56u - (u64)i * 8u));
-                        hash[i + 32] = (byte)(ctx.state[4] >> (56u - (u64)i * 8u));
-                        hash[i + 40] = (byte)(ctx.state[5] >> (56u - (u64)i * 8u));
-                    };
+                    hash[0..7]   = (byte[8])(be64)ctx.state[0];
+                    hash[8..15]  = (byte[8])(be64)ctx.state[1];
+                    hash[16..23] = (byte[8])(be64)ctx.state[2];
+                    hash[24..31] = (byte[8])(be64)ctx.state[3];
+                    hash[32..39] = (byte[8])(be64)ctx.state[4];
+                    hash[40..47] = (byte[8])(be64)ctx.state[5];
                 };
 
                 // Convenience: hash a single buffer in one call
@@ -1525,13 +1508,8 @@ namespace standard
                     for (i = 0; i < 9; i++) { d[i] = 0; };
                     for (i = 0; i < 8; i++)
                     {
-                        uint word;
                         j = i * 4;
-                        word = ((uint)src[j]       & 0xFF)
-                             | (((uint)src[j + 1]  & 0xFF) << 8)
-                             | (((uint)src[j + 2]  & 0xFF) << 16)
-                             | (((uint)src[j + 3]  & 0xFF) << 24);
-                        d[i] = word;
+                        d[i] = *(le32*)@src[j];
                     };
                     out.length = 8;
                     out.negative = false;
@@ -1578,7 +1556,7 @@ namespace standard
                     //   next 6 words: 0xFFFFFFFF
                     //   top word (bits 224-255): 0x7FFFFFFF
                     uint* pd = @p.digits[0];
-                    
+
                     pd = [0xFFFFFFEDu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
                           0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x7FFFFFFF];
 

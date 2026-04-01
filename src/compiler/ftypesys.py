@@ -1966,6 +1966,12 @@ class VariableTypeHandler:
         
         # Direct array type check
         if type_spec.is_array and type_spec.array_size is None:
+            import fconfig as _fconfig
+            _null_terminate = _fconfig.config.get('null_terminate_strings', '0').strip() == '1'
+            str_val = initial_value.value
+            inferred_size = len(str_val)
+            if _null_terminate and (not str_val or str_val[-1] != '\0'):
+                inferred_size += 1
             return TypeSystem(
                 base_type=type_spec.base_type,
                 is_signed=type_spec.is_signed,
@@ -1975,7 +1981,7 @@ class VariableTypeHandler:
                 bit_width=type_spec.bit_width or 8,
                 alignment=type_spec.alignment,
                 is_array=True,
-                array_size=len(initial_value.value),
+                array_size=inferred_size,
                 is_pointer=type_spec.is_pointer,
                 custom_typename=type_spec.custom_typename)
         
@@ -3348,7 +3354,11 @@ class ArrayTypeHandler:
     @staticmethod
     def initialize_local_string(builder: ir.IRBuilder, module: ir.Module, alloca: ir.Value, llvm_type: ir.Type, string_literal) -> None:
         """Initialize a local variable with a string literal."""
+        import fconfig as _fconfig
+        _null_terminate = _fconfig.config.get('null_terminate_strings', '0').strip() == '1'
         string_val = string_literal.value
+        if _null_terminate and (not string_val or string_val[-1] != '\0'):
+            string_val += '\0'
         
         # Case 1: Pointer to i8 (char*)
         if isinstance(llvm_type, ir.PointerType) and isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8:
@@ -3379,6 +3389,10 @@ class ArrayTypeHandler:
     @staticmethod
     def create_local_string_for_arg(builder: ir.IRBuilder, module: ir.Module, string_value: str, name_hint: str) -> ir.Value:
         """Create a local string on the stack for passing as an argument."""
+        import fconfig as _fconfig
+        _null_terminate = _fconfig.config.get('null_terminate_strings', '0').strip() == '1'
+        if _null_terminate and (not string_value or string_value[-1] != '\0'):
+            string_value += '\0'
         string_bytes = string_value.encode('ascii')
         str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
         str_alloca = builder.alloca(str_array_ty, name=f"{name_hint}_str_data")

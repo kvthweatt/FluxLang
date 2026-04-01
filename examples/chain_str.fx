@@ -4,8 +4,8 @@ using standard::io::console;
 
 def main() -> int
 {
-	print() <- "Testing examples\\chain_str.fx!\n\0";
+	println() <- "Testing examples\\chain_str.fx!";
 
-	system() <- "pause\0";
+	system() <- "pause";
 	return 0;
 };

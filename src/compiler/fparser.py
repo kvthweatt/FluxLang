@@ -3624,7 +3624,68 @@ class FluxParser:
                 i += 1
         
         return FStringLiteral(parts)
-    
+
+    def parse_i_string(self, token_value: str) -> 'FStringLiteral':
+        """Parse i-string token into FStringLiteral.
+
+        Token value format: i"<template>":{<expr>;<expr>;...}
+        Each {} in the template is replaced positionally by the corresponding expression.
+        """
+        from flexer import FluxLexer
+
+        # Strip leading i"
+        rest = token_value[2:]  # strip i"
+
+        # Find the closing quote of the template
+        template = ""
+        idx = 0
+        while idx < len(rest):
+            if rest[idx] == '\\' and idx + 1 < len(rest):
+                template += rest[idx:idx+2]
+                idx += 2
+            elif rest[idx] == '"':
+                idx += 1
+                break
+            else:
+                template += rest[idx]
+                idx += 1
+
+        # Parse expression list from :{...} block
+        expressions = []
+        remainder = rest[idx:].lstrip()
+        if remainder.startswith(':'):
+            remainder = remainder[1:].lstrip()
+        if remainder.startswith('{') and remainder.endswith('}'):
+            exprs_text = remainder[1:-1]
+            for expr_text in exprs_text.split(';'):
+                expr_text = expr_text.strip()
+                if not expr_text:
+                    continue
+                lexer = FluxLexer(expr_text)
+                tokens = lexer.tokenize()
+                expr_parser = FluxParser(tokens)
+                expressions.append(expr_parser.expression())
+
+        # Build FStringLiteral parts, substituting {} placeholders positionally
+        parts = []
+        expr_index = 0
+        i = 0
+        n = len(template)
+        while i < n:
+            if template[i] == '{' and i + 1 < n and template[i+1] == '}':
+                if expr_index < len(expressions):
+                    parts.append(expressions[expr_index])
+                    expr_index += 1
+                i += 2
+            else:
+                if not parts or not isinstance(parts[-1], str):
+                    parts.append(template[i])
+                else:
+                    parts[-1] += template[i]
+                i += 1
+
+        return FStringLiteral(parts)
+
     def primary_expression(self) -> Expression:
         """
         primary_expression -> IDENTIFIER
@@ -3696,8 +3757,9 @@ class FluxParser:
             self.advance()
             return self.parse_f_string(f_string_content)
         elif self.expect(TokenType.I_STRING):
-            #print("GOT I-STRING")
-            return
+            token_value = self.current_token.value
+            self.advance()
+            return self.parse_i_string(token_value)
         elif self.expect(TokenType.TRUE):
             self.advance()
             return Literal(True, DataType.BOOL)

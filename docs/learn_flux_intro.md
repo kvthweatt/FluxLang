@@ -371,7 +371,7 @@ def main() -> int
     };
 
     return 0;
-}
+};
 ```
 
 `if` statements evaluate truth. All that is really happening is the expression inside of the parenthesis is evaluated, and if it's true, we do the code inside the `if` block.
@@ -396,7 +396,7 @@ def main() -> int
     };
 
     return 0;
-}
+};
 ```
 #### f2.5
 ```
@@ -416,32 +416,9 @@ def main() -> int
     };
 
     return 0;
-}
+};
 ```
-- **Figures 2.4 and 2.5 are identical as far as their result, but their execution is  different, and the assembly (machine code) resulting from these figures also differs.**
-
-Our goal is to make `a` equal to `b`. Here's how we do that:
-#### f2.6
-```
-int a = 0;
-int b = 100;
-int c = 1000;
-
-def main() -> int
-{
-    if (a < b)               // Condition 1 (true) (completely true)
-    {
-        a = b;
-    }
-    elif (a >= b and a < c)  // Condition 2 (false and true) (not completely true)
-    {
-        a = c;
-    };
-
-    return 0;
-}
-```
-Now execution won't continue into the `elif` block, because only one of the two conditions are completely true.
+- **Figures 2.4 and 2.5 appear identical as far as their code, but their execution is different, and the assembly (machine code) resulting from these figures also differs.**
 
 ---
 
@@ -523,9 +500,9 @@ That's better. Here we see a string `"\nHello, {s}!"` but it is prefixed with an
 We will now learn different ways we can play with strings, starting by slicing them up.
 #### f4.1 Slices
 ```
-import "io.fx", "types.fx";
+import "standard.fx";
 
-using io::output::print;
+using standard::io::console;
 using types::string;
 
 def main() -> int
@@ -549,7 +526,7 @@ It translates to "start at position 0, end at position 3". That totals 4 bytes, 
 ```
 import "io.fx", "types.fx";
 
-using io::output::print;
+using standard::io::console;
 using types::string;
 
 def main() -> int
@@ -581,7 +558,7 @@ This means we must be aware of the bit length of our types.
 ```
 import "io.fx", "types.fx";
 
-using io::output::print, io::input::input;
+using standard::io::console, io::input::input;
 using types::string;
 
 def main() -> int
@@ -637,7 +614,7 @@ We'll expand more about `data` after you learn about structures.
 ```
 import "io.fx", "types.fx";
 
-using io::output::print, types::string;
+using standard::io::console, types::string;
 
 struct Point
 {
@@ -667,7 +644,7 @@ Struct sizes cannot be modified, meaning once we declare the struct we cannot ad
 ```
 import "io.fx", "types.fx";
 
-using io::output::print, types::string;
+using standard::io::console, types::string;
 
 struct Point
 {
@@ -715,7 +692,7 @@ Using this schematic we will capture the header of a `.bmp` image but not the co
 import "types.fx", "io.fx", "fio.fx";
 
 using fio::File, fio::input::open;
-using io::output::print;
+using standard::io::console;
 using types::string;
 
 struct Header
@@ -775,7 +752,7 @@ In this case, casting data to a structure results in the data aligning to the st
 ```
 import "types.fx", "io.fx";
 
-using io::output::print;
+using standard::io::console;
 using types::string;
 
 struct Values32
@@ -888,7 +865,7 @@ Say we use `Values16` to create a new instance called `v3`, and we swap the orde
 ```
 import "types.fx", "io.fx";
 
-using io::output::print;
+using standard::io::console;
 using types::string;
 
 struct Values32
@@ -934,7 +911,7 @@ Every condition is known at compile time, so a more optimized jump table can be 
 ```
 import "types.fx", "io.fx", "random.fx";
 
-using io::input::input, io::output::print;
+using io::input::input, standard::io::console;
 using types::string;
 using random::rand_int;
 
@@ -997,7 +974,7 @@ A `do`-`while` loop will execute its block before checking the condition. Here's
 import "types.fx", "io.fx";
 
 using types::string;
-using io::output::print;
+using standard::io::console;
 
 def main() -> int
 {
@@ -1032,7 +1009,7 @@ You fell off the cliff!
 import "types.fx", "io.fx";
 
 using types::string;
-using io::output::print;
+using standard::io::console;
 
 def main() -> int
 {
@@ -1071,7 +1048,7 @@ A `while`-only loop may not execute at all in some circumstances.
 import "types.fx", "io.fx";
 
 using types::string;
-using io::output::print;
+using standard::io::console;
 
 def main() -> int
 {
@@ -1094,7 +1071,7 @@ All you're base are belong to us.
 import "types.fx", "io.fx";
 
 using types::string;
-using io::output::print;
+using standard::io::console;
 
 def main() -> int
 {
@@ -1175,7 +1152,7 @@ Now that we see what objects look like, let's try doing something with them.
 import "standard.fx";
 
 // using statements for commonly used modules/components are performed in standard.fx's global space.
-// No need to do `using standard::io::output::print;` if you imported standard.fx
+// No need to do `using standard::standard::io::console;` if you imported standard.fx
 
 object Lock
 {
