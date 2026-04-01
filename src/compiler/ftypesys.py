@@ -4903,7 +4903,7 @@ class AssignmentTypeHandler:
         # This handles all the loading logic correctly through Identifier codegen
         array = array_expr.codegen(builder, module)
 
-        print(f"[ARRAY ASSIGN DEBUG] array.type: {array.type}, val.type: {val.type}", file=sys.stdout)
+        #print(f"[ARRAY ASSIGN DEBUG] array.type: {array.type}, val.type: {val.type}", file=sys.stdout)
         
         if (isinstance(array.type, ir.PointerType) and 
             isinstance(array.type.pointee, ir.PointerType) and
