@@ -5563,8 +5563,14 @@ class StructTypeHandler:
                     # Generate the field value
                     field_value_expr = field_values[field_name]
                     field_value = field_value_expr.codegen(builder, module)
-                    # For constants, we can use them directly
+                    # For constants, byteswap integers for big-endian layout, then append
                     if isinstance(field_value, ir.Constant):
+                        if isinstance(field_value.type, ir.IntType) and field_value.type.width > 8:
+                            w = field_value.type.width
+                            nbytes = w // 8
+                            v = int(field_value.constant) & ((1 << w) - 1)
+                            swapped = int.from_bytes(v.to_bytes(nbytes, "big"), "little")
+                            field_value = ir.Constant(field_value.type, swapped)
                         field_constants.append(field_value)
                     else:
                         # Non-constant value - we need to use insertvalue instructions

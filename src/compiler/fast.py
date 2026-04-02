@@ -141,6 +141,13 @@ class Literal(ASTNode):
                     else:
                         # Normal field initialization
                         field_value = field_expr.codegen(builder, module)
+                        # Byteswap integer fields so struct memory layout is big-endian (MSB first)
+                        if isinstance(field_value, ir.Constant) and isinstance(field_value.type, ir.IntType) and field_value.type.width > 8:
+                            w = field_value.type.width
+                            nbytes = w // 8
+                            v = int(field_value.constant) & ((1 << w) - 1)
+                            swapped = int.from_bytes(v.to_bytes(nbytes, "big"), "little")
+                            field_value = ir.Constant(field_value.type, swapped)
                         field_values.append(field_value)
                 else:
                     # Field not specified, use zero initialization
@@ -208,7 +215,18 @@ class Literal(ASTNode):
                         elif isinstance(field_value.type, (ir.FloatType, ir.DoubleType)) and isinstance(expected_type, ir.IntType):
                             field_value = builder.fptosi(field_value, expected_type)
                 
-                builder.store(field_value, field_ptr)
+                # Store integer fields big-endian (MSB first) by writing bytes individually
+                if isinstance(field_value.type, ir.IntType) and field_value.type.width > 8:
+                    nbytes = field_value.type.width // 8
+                    i8_ptr = builder.bitcast(field_ptr, ir.PointerType(ir.IntType(8)), name="be_ptr")
+                    for byte_i in range(nbytes):
+                        shift = (nbytes - 1 - byte_i) * 8
+                        shifted = builder.lshr(field_value, ir.Constant(field_value.type, shift), name=f"be_shift_{byte_i}")
+                        byte_val = builder.trunc(shifted, ir.IntType(8), name=f"be_byte_{byte_i}")
+                        byte_ptr = builder.gep(i8_ptr, [ir.Constant(ir.IntType(32), byte_i)], inbounds=True, name=f"be_byteptr_{byte_i}")
+                        builder.store(byte_val, byte_ptr)
+                else:
+                    builder.store(field_value, field_ptr)
             
             # Return the initialized struct (load it to get the value)
             return builder.load(struct_ptr, name="struct_value")
@@ -2951,8 +2969,16 @@ class BitSlice(Expression):
         # Get a pointer to the raw bytes
         if isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType):
             base_ptr = val  # already [N x i8]*
+        elif isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
+            # Pointer-to-struct: bitcast directly to i8* for raw byte access
+            base_ptr = builder.bitcast(val, ir.PointerType(ir.IntType(8)), name="bs_struct_raw")
         elif isinstance(val.type, ir.PointerType):
             base_ptr = val  # i8* or similar
+        elif isinstance(val.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
+            # Struct value: store to alloca, bitcast to i8* for raw byte access
+            tmp = builder.alloca(val.type, name="bs_tmp")
+            builder.store(val, tmp)
+            base_ptr = builder.bitcast(tmp, ir.PointerType(ir.IntType(8)), name="bs_struct_raw")
         elif isinstance(val.type, ir.ArrayType):
             tmp = builder.alloca(val.type, name="bs_tmp")
             builder.store(val, tmp)
