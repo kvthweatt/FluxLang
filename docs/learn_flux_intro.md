@@ -502,13 +502,12 @@ We will now learn different ways we can play with strings, starting by slicing t
 ```
 import "standard.fx";
 
-using standard::io::console;
-using types::string;
+using standard::io::console
+      standard::strings;
 
 def main() -> int
 {
-    string s();
-    s = "Testing!";
+    string s("Testing!\0";
     print(s[0:3]);
     return 0;
 };
@@ -524,15 +523,14 @@ It translates to "start at position 0, end at position 3". That totals 4 bytes, 
 
 #### f4.2 Reverse a String
 ```
-import "io.fx", "types.fx";
+import "standard.fx";
 
-using standard::io::console;
-using types::string;
+using standard::io::console,
+      standard::string;
 
 def main() -> int
 {
-    string s();
-    s = "Testing!";
+    string s("Testing!\0");
     int len = (sizeof(s) / 8) - 1;
     print(s[len:0]);
     return 0;

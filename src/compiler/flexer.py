@@ -82,6 +82,7 @@ class TokenType(Enum):
     IF = auto()           # "        if
     IN = auto()           # "        in
     IS = auto()           # "        is
+    JUMP = auto()         # "        jump
     LABEL = auto()        # "        label
     LOCAL = auto()        # "        local
     SLONG = auto()        # "        long
@@ -383,13 +384,14 @@ class FluxLexer:
             'float': TokenType.FLOAT_KW,
             'from': TokenType.FROM,
             'for': TokenType.FOR,
-            'if': TokenType.IF,
             'global': TokenType.GLOBAL,
             'goto': TokenType.GOTO,
             'heap': TokenType.HEAP,
+            'if': TokenType.IF,
             'in': TokenType.IN,
             'is': TokenType.IS,
             'int': TokenType.SINT,
+            'jump': TokenType.JUMP,
             'label': TokenType.LABEL,
             'local': TokenType.LOCAL,
             'long': TokenType.SLONG,

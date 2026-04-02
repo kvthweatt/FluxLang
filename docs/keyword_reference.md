@@ -318,6 +318,18 @@ if (x is 5) { ... };
 
 ---
 
+**`jump`**
+Jump to a target address. Any integer value will be treated as an address.
+
+A jump to an address with no executable memory will cause a crash.
+```
+jump 0;
+
+jump @func;
+```
+
+---
+
 **`label`**
 Declares a jump target for `goto`.
 ```

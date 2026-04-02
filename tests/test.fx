@@ -10,9 +10,8 @@ def foo() -> int
 
 def main() -> int
 {
-    byte[4] a = [65, 66, 67, 68];
-
-    println((byte[2])a[1..3]);
+    println("Test!");
+    jump @main;
 
     return 0;
 };

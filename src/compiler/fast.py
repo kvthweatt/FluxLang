@@ -5310,6 +5310,29 @@ class GotoStatement(Statement):
         return None
 
 @dataclass
+class JumpStatement(Statement):
+    target: Expression  # Any expression yielding an address (AddressOf or integer)
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        if builder.block.is_terminated:
+            return None
+        addr_val = self.target.codegen(builder, module)
+        # Coerce to i64 for the asm constraint
+        i64 = ir.IntType(64)
+        if isinstance(addr_val.type, ir.PointerType):
+            addr_i64 = builder.ptrtoint(addr_val, i64, name="jump_addr")
+        elif addr_val.type != i64:
+            addr_i64 = builder.zext(addr_val, i64, name="jump_addr") if addr_val.type.width < 64 else builder.trunc(addr_val, i64, name="jump_addr")
+        else:
+            addr_i64 = addr_val
+        # Emit inline asm: mov rax, $0; jmp rax
+        ftype = ir.FunctionType(ir.VoidType(), [i64])
+        asm = ir.InlineAsm(ftype, "jmp *%rax", "{rax}", side_effect=True)
+        builder.call(asm, [addr_i64])
+        builder.unreachable()
+        return None
+
+@dataclass
 class Case(ASTNode):
     value: Optional[Expression]  # None for default case
     body: Block

@@ -598,6 +598,8 @@ class FluxParser:
             return self.label_statement()
         elif self.expect(TokenType.GOTO):
             return self.goto_statement()
+        elif self.expect(TokenType.JUMP):
+            return self.jump_statement()
         elif self.expect(TokenType.THROW):
             return self.throw_statement()
         elif self.expect(TokenType.ASSERT):
@@ -2708,6 +2710,16 @@ class FluxParser:
         name = self.consume(TokenType.IDENTIFIER).value
         self.consume(TokenType.SEMICOLON)
         return GotoStatement(name)
+
+    def jump_statement(self) -> JumpStatement:
+        """
+        jump_statement -> 'jump' expression ';'
+        The expression must evaluate to an address (pointer or integer literal).
+        """
+        self.consume(TokenType.JUMP)
+        target = self.expression()
+        self.consume(TokenType.SEMICOLON)
+        return JumpStatement(target)
 
     def throw_statement(self) -> ThrowStatement:
         """
