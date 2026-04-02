@@ -318,6 +318,7 @@ class FluxParser:
         """
         operator_def -> 'operator' '(' parameter_list ')' '[' op_tokens+ ']' '->' type_spec (';' | block ';')
         """
+        tok = self.current_token
         # Consume 'operator' keyword token
         self.consume(TokenType.OPERATOR)
         self.consume(TokenType.LEFT_PAREN)
@@ -387,7 +388,7 @@ class FluxParser:
             body=body,
             is_prototype=is_prototype,
             no_mangle=False
-        )
+        ).set_location(tok.line, tok.column)
 
     def custom_op_expression(self) -> Expression:
         """
@@ -642,6 +643,7 @@ class FluxParser:
         using_statement -> 'using' namespace_path (',' namespace_path)* ';'
         namespace_path -> IDENTIFIER ('::' IDENTIFIER)*
         """
+        tok = self.current_token
         self.consume(TokenType.USING)
 
         def parse_namespace_path() -> str:
@@ -659,14 +661,15 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
 
         if len(paths) == 1:
-            return UsingStatement(paths[0])
-        return [UsingStatement(p) for p in paths]
+            return UsingStatement(paths[0]).set_location(tok.line, tok.column)
+        return [UsingStatement(p).set_location(tok.line, tok.column) for p in paths]
 
     def not_using_statement(self) -> Union[NotUsingStatement, List[NotUsingStatement]]:
         """
         not_using_statement -> '!' 'using' namespace_path (',' namespace_path)* ';'
         namespace_path -> IDENTIFIER ('::' IDENTIFIER)*
         """
+        tok = self.current_token
         def parse_namespace_path() -> str:
             path = self.consume(TokenType.IDENTIFIER).value
             while self.expect(TokenType.SCOPE):  # ::
@@ -683,8 +686,8 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
 
         if len(paths) == 1:
-            return NotUsingStatement(paths[0])
-        return [NotUsingStatement(p) for p in paths]
+            return NotUsingStatement(paths[0]).set_location(tok.line, tok.column)
+        return [NotUsingStatement(p).set_location(tok.line, tok.column) for p in paths]
 
     def deprecate_statement(self) -> DeprecateStatement:
         """
@@ -692,19 +695,21 @@ class FluxParser:
         namespace_path -> IDENTIFIER ('::' IDENTIFIER)*
         Statically checks at compile time that no references to the namespace exist.
         """
+        tok = self.current_token
         self.consume(TokenType.DEPRECATE)
         path = self.consume(TokenType.IDENTIFIER).value
         while self.expect(TokenType.SCOPE):
             self.advance()
             path += "::" + self.consume(TokenType.IDENTIFIER).value
         self.consume(TokenType.SEMICOLON)
-        return DeprecateStatement(path)
+        return DeprecateStatement(path).set_location(tok.line, tok.column)
 
     def extern_statement(self) -> ExternBlock:
         """
         extern_statement -> 'extern' '{' extern_function_def* '}' ';'
                          | 'extern' 'def' IDENTIFIER '(' parameter_list? ')' '->' type_spec ';'
         """
+        tok = self.current_token
         self.consume(TokenType.EXTERN)
         
         declarations = []
@@ -749,7 +754,7 @@ class FluxParser:
         else:
             self.error("Expected '{' or 'def' after 'extern'")
         
-        return ExternBlock(declarations)
+        return ExternBlock(declarations).set_location(tok.line, tok.column)
     
     def function_def(self, calling_conv: Optional[str] = None) -> Union[FunctionDef, List[FunctionDef]]:
         """
@@ -765,6 +770,7 @@ class FluxParser:
         is_const = False
         is_volatile = False
         no_mangle = False
+        tok = self.current_token
         
         if self.expect(TokenType.CONST):
             is_const = True
@@ -887,9 +893,7 @@ class FluxParser:
             self.consume(TokenType.SEMICOLON)
             
             # Return the list of prototypes
-            return prototypes
-        
-        # Check if this is a single prototype by looking for semicolon vs body
+            return [fd.set_location(tok.line, tok.column) for fd in prototypes]
         is_prototype = False
         body = None
 
@@ -945,7 +949,7 @@ class FluxParser:
 
         return FunctionDef(name, real_parameters, return_type, body, is_const, 
                           is_volatile, is_prototype, no_mangle, is_variadic, calling_conv,
-                          is_recursive)
+                          is_recursive).set_location(tok.line, tok.column)
 
     def _is_function_pointer_declaration(self) -> bool:
         """
@@ -1106,6 +1110,7 @@ class FluxParser:
         parameter -> type_spec IDENTIFIER?
         Returns Parameter where name may be None.
         """
+        tok = self.current_token
         # Handle variadic ellipsis sentinel: def foo(...) -> void
         if self.expect(TokenType.ELLIPSIS):
             self.advance()
@@ -1120,13 +1125,14 @@ class FluxParser:
         if self.expect(TokenType.IDENTIFIER):
             name = self.consume(TokenType.IDENTIFIER).value
         
-        return Parameter(name, type_spec)
+        return Parameter(name, type_spec).set_location(tok.line, tok.column)
 
     def enum_def(self) -> Union[EnumDefStatement, List[EnumDefStatement]]:
         """
         enum_def -> 'enum' IDENTIFIER (',' IDENTIFIER)* (';' | '{' enum_item (',' enum_item)* '}' ';')
         enum_item -> IDENTIFIER ('=' INTEGER)?
         """
+        tok = self.current_token
         self.consume(TokenType.ENUM)
         name = self.consume(TokenType.IDENTIFIER, f"Expected: enumurated list name after enum keyword at Line {self.current_token.line:,.0f}:{self.current_token.column} in build\\tmp.fx").value
         
@@ -1141,8 +1147,8 @@ class FluxParser:
             self.advance()
             # Return multiple prototypes if comma-separated
             if len(names) > 1:
-                return [EnumDefStatement(EnumDef(n, {})) for n in names]
-            return EnumDefStatement(EnumDef(name, {}))
+                return [EnumDefStatement(EnumDef(n, {})).set_location(tok.line, tok.column) for n in names]
+            return EnumDefStatement(EnumDef(name, {})).set_location(tok.line, tok.column)
         
         # Full definition - only allowed for single name
         if len(names) > 1:
@@ -1174,7 +1180,7 @@ class FluxParser:
         
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
-        return EnumDefStatement(EnumDef(name, values))
+        return EnumDefStatement(EnumDef(name, values)).set_location(tok.line, tok.column)
 
     def union_def(self) -> UnionDefStatement:
         """
@@ -1183,13 +1189,14 @@ class FluxParser:
         Tagged union syntax: union name {} tagname;
         where tagname is an identifier that is an enum type
         """
+        tok = self.current_token
         self.consume(TokenType.UNION)
         name = self.consume(TokenType.IDENTIFIER).value
         
         # Handle forward declaration
         if self.expect(TokenType.SEMICOLON):
             self.advance()
-            return UnionDefStatement(UnionDef(name, []))
+            return UnionDefStatement(UnionDef(name, [])).set_location(tok.line, tok.column)
         
         self.consume(TokenType.LEFT_BRACE)
         members = []
@@ -1205,12 +1212,13 @@ class FluxParser:
             tag_name = self.consume(TokenType.IDENTIFIER).value
         
         self.consume(TokenType.SEMICOLON)
-        return UnionDefStatement(UnionDef(name, members, tag_name))
+        return UnionDefStatement(UnionDef(name, members, tag_name)).set_location(tok.line, tok.column)
 
     def union_member(self) -> UnionMember:
         """
         union_member -> type_spec IDENTIFIER ('=' expression)? ';'
         """
+        tok = self.current_token
         type_spec = self.type_spec()
         name = self.consume(TokenType.IDENTIFIER).value
         
@@ -1221,12 +1229,13 @@ class FluxParser:
             initial_value = self.expression()
         
         self.consume(TokenType.SEMICOLON)
-        return UnionMember(name, type_spec, initial_value)
+        return UnionMember(name, type_spec, initial_value).set_location(tok.line, tok.column)
     
     def struct_def(self) -> Union[StructDef, List[StructDef]]:
         """
         struct_def -> 'struct' IDENTIFIER (',' IDENTIFIER)* (';' | '{' struct_member* '}')
         """
+        tok = self.current_token
         self.consume(TokenType.STRUCT)
         name = self.consume(TokenType.IDENTIFIER).value
         
@@ -1245,8 +1254,8 @@ class FluxParser:
             self.advance()
             # Return multiple prototypes if comma-separated
             if len(names) > 1:
-                return [StructDef(n, [], [], []) for n in names]
-            return StructDef(name, members, base_structs, nested_structs)
+                return [StructDef(n, [], [], []).set_location(tok.line, tok.column) for n in names]
+            return StructDef(name, members, base_structs, nested_structs).set_location(tok.line, tok.column)
 
         # Full definition - only allowed for single name
         if len(names) > 1:
@@ -1321,12 +1330,13 @@ class FluxParser:
         self.consume(TokenType.RIGHT_BRACE)
         self.expect(TokenType.SEMICOLON)
         self.advance()
-        return StructDef(name, members, base_structs, nested_structs)
+        return StructDef(name, members, base_structs, nested_structs).set_location(tok.line, tok.column)
     
     def struct_member(self) -> Union[StructMember, List[StructMember]]:
         """
         struct_member -> type_spec IDENTIFIER (',' IDENTIFIER)* ('=' expression (',' expression)*)? ';'
         """
+        tok = self.current_token
         type_spec = self.type_spec()
         name = self.consume(TokenType.IDENTIFIER).value
         members = [name]
@@ -1359,16 +1369,17 @@ class FluxParser:
             for i, member_name in enumerate(members):
                 # Assign initializer if available
                 member_initial_value = initial_values[i] if i < len(initial_values) else None
-                result.append(StructMember(member_name, type_spec, member_initial_value))
+                result.append(StructMember(member_name, type_spec, member_initial_value).set_location(tok.line, tok.column))
             return result
         else:
             member_initial_value = initial_values[0] if initial_values else None
-            return StructMember(members[0], type_spec, member_initial_value)
+            return StructMember(members[0], type_spec, member_initial_value).set_location(tok.line, tok.column)
 
     def trait_def(self) -> 'TraitDef':
         """
         trait_def -> 'trait' IDENTIFIER '{' (function_prototype ';')* '}' ';'
         """
+        tok = self.current_token
         self.consume(TokenType.TRAIT)
         name = self.consume(TokenType.IDENTIFIER).value
         self.consume(TokenType.LEFT_BRACE)
@@ -1384,13 +1395,14 @@ class FluxParser:
                 self.error(f"Expected 'def' inside trait '{name}'")
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
-        return TraitDef(name, prototypes)
+        return TraitDef(name, prototypes).set_location(tok.line, tok.column)
 
     def object_def(self, trait_names: Optional[List[str]] = None) -> Union[ObjectDef, List[ObjectDef]]:
         """
         object_def -> 'object' IDENTIFIER (',' IDENTIFIER)* (';' | '{' object_body '}')
         object_body -> (object_member | access_specifier)*
         """
+        tok = self.current_token
         self.consume(TokenType.OBJECT)
         name = self.consume(TokenType.IDENTIFIER).value
         traits = trait_names if trait_names is not None else []
@@ -1421,8 +1433,8 @@ class FluxParser:
             self.advance()
             # Return multiple prototypes if comma-separated
             if len(names) > 1:
-                return [ObjectDef(n, [], [], [], [], traits=traits) for n in names]
-            return ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits)
+                return [ObjectDef(n, [], [], [], [], traits=traits).set_location(tok.line, tok.column) for n in names]
+            return ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits).set_location(tok.line, tok.column)
 
         # Full definition - only allowed for single name
         if len(names) > 1:
@@ -1541,7 +1553,7 @@ class FluxParser:
                 self._object_init_params[name] = len(explicit_params)
                 break
 
-        obj_def = ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits)
+        obj_def = ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits).set_location(tok.line, tok.column)
         self._parsed_objects[name] = obj_def
         return obj_def
     
@@ -1549,6 +1561,7 @@ class FluxParser:
         """
         namespace_def -> 'namespace' IDENTIFIER '{' namespace_body* '}' ';'
         """
+        tok = self.current_token
         self.consume(TokenType.NAMESPACE)
         name = self.consume(TokenType.IDENTIFIER).value
         
@@ -1732,7 +1745,7 @@ class FluxParser:
             variables=variables,
             nested_namespaces=nested_namespaces,
             base_namespaces=base_namespaces
-        )
+        ).set_location(tok.line, tok.column)
     
     def type_spec(self) -> TypeSystem:
         """
@@ -2108,6 +2121,7 @@ class FluxParser:
         return decl
     
     def variable_declaration(self) -> Union[VariableDeclaration, TypeDeclaration, List[VariableDeclaration]]:
+        tok = self.current_token
         # Capture the raw identifier used as a type name before alias resolution wipes custom_typename
         raw_type_identifier = None
         if self.expect(TokenType.IDENTIFIER):
@@ -2153,9 +2167,9 @@ class FluxParser:
                     
                     declarations.append(TypeDeclaration(alias_name, type_spec, alias_value))
                 
-                return declarations
+                return [d.set_location(tok.line, tok.column) for d in declarations]
             
-            return TypeDeclaration(type_name, type_spec, initial_value)
+            return TypeDeclaration(type_name, type_spec, initial_value).set_location(tok.line, tok.column)
         else:
             name = self.consume(TokenType.IDENTIFIER).value
             self.symbol_table.define(name, SymbolKind.VARIABLE, type_spec)
@@ -2178,7 +2192,7 @@ class FluxParser:
                 var_decl = VariableDeclaration(name, type_spec, constructor_call)
                 if type_spec.storage_class == StorageClass.GLOBAL:
                     var_decl.is_global = True
-                return var_decl
+                return var_decl.set_location(tok.line, tok.column)
             
             names = [name]
             initializers = []
@@ -2209,7 +2223,7 @@ class FluxParser:
                     var_decl = VariableDeclaration(name, type_spec, constructor_call)
                     if type_spec.storage_class == StorageClass.GLOBAL:
                         var_decl.is_global = True
-                    return var_decl
+                    return var_decl.set_location(tok.line, tok.column)
 
                 initializers.append(init_expr)
             else:
@@ -2267,7 +2281,7 @@ class FluxParser:
                     var_decl = VariableDeclaration(var_name, type_spec, init_val)
                     if type_spec.storage_class == StorageClass.GLOBAL:
                         var_decl.is_global = True
-                    declarations.append(var_decl)
+                    declarations.append(var_decl.set_location(tok.line, tok.column))
                 
                 return declarations
             else:
@@ -2283,7 +2297,7 @@ class FluxParser:
                 if type_spec.storage_class == StorageClass.GLOBAL:
                     var_decl.is_global = True
                 
-                return var_decl
+                return var_decl.set_location(tok.line, tok.column)
     
     def block_statement(self) -> Block:
         """
@@ -2292,6 +2306,7 @@ class FluxParser:
         return self.block()
     
     def block(self) -> Block:
+        tok = self.current_token
         self.consume(TokenType.LEFT_BRACE)
         
         statements = []
@@ -2306,12 +2321,13 @@ class FluxParser:
         
         self.consume(TokenType.RIGHT_BRACE)
         
-        return Block(statements)
+        return Block(statements).set_location(tok.line, tok.column)
 
     def asm_statement(self, is_volatile: bool = False) -> ExpressionStatement:
         """
         asm_statement -> ('volatile')? 'asm' ASM_BLOCK (':' operand_list)? (':' operand_list)? (':' clobber_list)? ';'
         """
+        tok = self.current_token
         # Check for volatile keyword if not already passed in
         if not is_volatile and self.expect(TokenType.VOLATILE):
             is_volatile = True
@@ -2374,7 +2390,7 @@ class FluxParser:
             body=asm_body,
             is_volatile=is_volatile,
             constraints=constraints
-        ))
+        )).set_location(tok.line, tok.column)
     
     def parse_operand_list(self) -> str:
         """
@@ -2446,6 +2462,7 @@ class FluxParser:
         """
         if_statement -> 'if' '(' expression ')' block (('elif' | 'else' 'if') '(' expression ')' block)* ('else' block)? ';'
         """
+        tok = self.current_token
         self.consume(TokenType.IF)
         self.consume(TokenType.LEFT_PAREN)
         condition = self.expression()
@@ -2473,12 +2490,13 @@ class FluxParser:
             else_block = self.block()
         
         self.consume(TokenType.SEMICOLON)
-        return IfStatement(condition, then_block, elif_blocks, else_block)
+        return IfStatement(condition, then_block, elif_blocks, else_block).set_location(tok.line, tok.column)
     
     def while_statement(self) -> WhileLoop:
         """
         while_statement -> 'while' '(' expression ')' block ';'
         """
+        tok = self.current_token
         self.consume(TokenType.WHILE)
         self.consume(TokenType.LEFT_PAREN)
         condition = self.expression()
@@ -2487,7 +2505,7 @@ class FluxParser:
         body = self.block()
         self._loop_depth -= 1
         self.consume(TokenType.SEMICOLON)
-        return WhileLoop(condition, body)
+        return WhileLoop(condition, body).set_location(tok.line, tok.column)
     
     def do_while_statement(self) -> Union[DoLoop, DoWhileLoop]:
         """
@@ -2497,6 +2515,7 @@ class FluxParser:
             do { ... };              # Plain do loop (executes once)
             do { ... } while (cond); # Do-while loop (repeats while condition is true)
         """
+        tok = self.current_token
         self.consume(TokenType.DO)
         self._loop_depth += 1
         body = self.block()
@@ -2510,11 +2529,11 @@ class FluxParser:
             condition = self.expression()
             self.consume(TokenType.RIGHT_PAREN)
             self.consume(TokenType.SEMICOLON)
-            return DoWhileLoop(body, condition)
+            return DoWhileLoop(body, condition).set_location(tok.line, tok.column)
         elif self.expect(TokenType.SEMICOLON):
             # Plain do loop
             self.advance()
-            return DoLoop(body)
+            return DoLoop(body).set_location(tok.line, tok.column)
         else:
             self.error("Expected 'while' or ';' after do block")
     
@@ -2522,6 +2541,7 @@ class FluxParser:
         """
         for_statement -> 'for' '(' (for_in_loop | for_c_loop) ')' block ';'
         """
+        tok = self.current_token
         self.consume(TokenType.FOR)
         self.consume(TokenType.LEFT_PAREN)
         
@@ -2558,7 +2578,7 @@ class FluxParser:
             self._loop_depth -= 1
             self.consume(TokenType.SEMICOLON)
             
-            return ForInLoop(variables, iterable, body)
+            return ForInLoop(variables, iterable, body).set_location(tok.line, tok.column)
         else:
             # C-style for loop
             init = None
@@ -2589,12 +2609,13 @@ class FluxParser:
             self._loop_depth -= 1
             self.consume(TokenType.SEMICOLON)
             
-            return ForLoop(init, condition, update, body)
+            return ForLoop(init, condition, update, body).set_location(tok.line, tok.column)
     
     def switch_statement(self) -> SwitchStatement:
         """
         switch_statement -> 'switch' '(' expression ')' '{' switch_case* '}' ';'
         """
+        tok = self.current_token
         self.consume(TokenType.SWITCH)
         self.consume(TokenType.LEFT_PAREN)
         expression = self.expression()
@@ -2608,12 +2629,13 @@ class FluxParser:
         
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
-        return SwitchStatement(expression, cases)
+        return SwitchStatement(expression, cases).set_location(tok.line, tok.column)
     
     def switch_case(self) -> Case:
         """
         switch_case -> ('case' '(' expression ')' | 'default' '{' statement* '}' ';') block
         """
+        tok = self.current_token
         value = None
         if self.expect(TokenType.CASE):
             self.advance()
@@ -2628,12 +2650,13 @@ class FluxParser:
             value = None
         else:
             self.error("Expected 'case' or 'default'")
-        return Case(value, body)
+        return Case(value, body).set_location(tok.line, tok.column)
     
     def try_statement(self) -> TryBlock:
         """
         try_statement -> 'try' block catch_block+ ';'
         """
+        tok = self.current_token
         self.consume(TokenType.TRY)
         try_body = self.block()
         
@@ -2662,80 +2685,88 @@ class FluxParser:
                 catch_blocks.append((exception_type, exception_name, catch_body))
         
         self.consume(TokenType.SEMICOLON)
-        return TryBlock(try_body, catch_blocks)
+        return TryBlock(try_body, catch_blocks).set_location(tok.line, tok.column)
     
     def return_statement(self) -> ReturnStatement:
         """
         return_statement -> 'return' expression? ';'
         """
+        tok = self.current_token
         self.consume(TokenType.RETURN)
         value = None
         if not self.expect(TokenType.SEMICOLON):
             value = self.expression()
         self.consume(TokenType.SEMICOLON)
-        return ReturnStatement(value)
+        return ReturnStatement(value).set_location(tok.line, tok.column)
     
     def break_statement(self) -> BreakStatement:
         """
         break_statement -> 'break' ';'
         """
+        tok = self.current_token
         self.consume(TokenType.BREAK)
         self.consume(TokenType.SEMICOLON)
-        return BreakStatement()
+        return BreakStatement().set_location(tok.line, tok.column)
     
     def continue_statement(self) -> ContinueStatement:
         """
         continue_statement -> 'continue' ';'
         """
+        tok = self.current_token
         self.consume(TokenType.CONTINUE)
         self.consume(TokenType.SEMICOLON)
-        return ContinueStatement()
+        return ContinueStatement().set_location(tok.line, tok.column)
 
     def label_statement(self) -> LabelStatement:
         """
         label_statement -> 'label' IDENTIFIER ':'
         """
+        tok = self.current_token
         self.consume(TokenType.LABEL)
         if self._loop_depth > 0:
             self.error("'label' is not permitted inside a loop body")
         name = self.consume(TokenType.IDENTIFIER).value
         self.consume(TokenType.COLON)
-        return LabelStatement(name)
+        return LabelStatement(name).set_location(tok.line, tok.column)
 
     def goto_statement(self) -> GotoStatement:
         """
         goto_statement -> 'goto' IDENTIFIER ';'
         """
+        tok = self.current_token
         self.consume(TokenType.GOTO)
         name = self.consume(TokenType.IDENTIFIER).value
         self.consume(TokenType.SEMICOLON)
-        return GotoStatement(name)
+        return GotoStatement(name).set_location(tok.line, tok.column)
 
     def jump_statement(self) -> JumpStatement:
         """
         jump_statement -> 'jump' expression ';'
         The expression must evaluate to an address (pointer or integer literal).
         """
+        tok = self.current_token
         self.consume(TokenType.JUMP)
         target = self.expression()
         self.consume(TokenType.SEMICOLON)
-        return JumpStatement(target)
+        return JumpStatement(target).set_location(tok.line, tok.column)
 
     def throw_statement(self) -> ThrowStatement:
         """
         throw_statement -> 'throw' '(' expression ')' ';'
         """
+        tok = self.current_token
         self.consume(TokenType.THROW)
         self.consume(TokenType.LEFT_PAREN)
         expression = self.expression()
         self.consume(TokenType.RIGHT_PAREN)
         self.consume(TokenType.SEMICOLON)
-        return ThrowStatement(expression)
+        return ThrowStatement(expression).set_location(tok.line, tok.column)
     
     def assert_statement(self) -> AssertStatement:
         """
         assert_statement -> 'assert' '(' expression (',' CHAR)? ')' ';'
         """
+        tok = self.current_token
         self.consume(TokenType.ASSERT)
         self.consume(TokenType.LEFT_PAREN)
         condition = self.expression()
@@ -2747,43 +2778,47 @@ class FluxParser:
         
         self.consume(TokenType.RIGHT_PAREN)
         self.consume(TokenType.SEMICOLON)
-        return AssertStatement(condition, message)
+        return AssertStatement(condition, message).set_location(tok.line, tok.column)
 
     def defer_statement(self) -> DeferStatement:
         """
         defer_statement -> 'defer' expression ';'
         """
+        tok = self.current_token
         self.consume(TokenType.DEFER)
         expr = self.expression()
         self.consume(TokenType.SEMICOLON)
-        return DeferStatement(expr)
+        return DeferStatement(expr).set_location(tok.line, tok.column)
 
     def escape_statement(self) -> EscapeStatement:
         """
         escape_statement -> 'escape' call_expression ';'
         Only valid inside a <~ recursive function.
         """
+        tok = self.current_token
         self.consume(TokenType.ESCAPE_KW)
         expr = self.expression()
         self.consume(TokenType.SEMICOLON)
-        return EscapeStatement(expr)
+        return EscapeStatement(expr).set_location(tok.line, tok.column)
 
     def noreturn_statement(self) -> 'NoreturnStatement':
         """
         noreturn_statement -> 'noreturn' ';'
         Emits an LLVM unreachable instruction — the program terminates here.
         """
+        tok = self.current_token
         self.consume(TokenType.NORET)
         self.consume(TokenType.SEMICOLON)
-        return NoreturnStatement()
+        return NoreturnStatement().set_location(tok.line, tok.column)
 
     def expression_statement(self) -> ExpressionStatement:
         """
         expression_statement -> expression ';'
         """
+        tok = self.current_token
         expr = self.expression()
         self.consume(TokenType.SEMICOLON)
-        return ExpressionStatement(expr)
+        return ExpressionStatement(expr).set_location(tok.line, tok.column)
     
     def expression(self) -> Expression:
         """
@@ -2798,6 +2833,7 @@ class FluxParser:
         Now handles struct field assignment:
             struct_instance.field = value
         """
+        tok = self.current_token
         expr = self.ternary_expression()
         
         if self.expect(TokenType.ASSIGN):
@@ -2809,9 +2845,9 @@ class FluxParser:
                 # This could be struct field assignment or object member assignment
                 # The codegen will determine based on type
                 # For now, use Assignment and let codegen handle it
-                return Assignment(expr, value)
+                return Assignment(expr, value).set_location(tok.line, tok.column)
             else:
-                return Assignment(expr, value)
+                return Assignment(expr, value).set_location(tok.line, tok.column)
         elif self.expect(TokenType.PLUS_ASSIGN, TokenType.MINUS_ASSIGN, TokenType.MULTIPLY_ASSIGN, 
                          TokenType.DIVIDE_ASSIGN, TokenType.MODULO_ASSIGN, TokenType.POWER_ASSIGN,
                          TokenType.XOR_ASSIGN, TokenType.BITXOR_ASSIGN, TokenType.BITXNOR_ASSIGN, TokenType.BITSHIFT_LEFT_ASSIGN, TokenType.BITSHIFT_RIGHT_ASSIGN,
@@ -2820,12 +2856,12 @@ class FluxParser:
             op_token = self.current_token.type
             self.advance()
             value = self.assignment_expression()
-            return CompoundAssignment(expr, op_token, value)
+            return CompoundAssignment(expr, op_token, value).set_location(tok.line, tok.column)
         elif self.expect(TokenType.TERNARY_ASSIGN):
             # Handle ternary assignment: x ?= value  (assign value to x only if x == 0)
             self.advance()
             value = self.assignment_expression()
-            return TernaryAssign(expr, value)
+            return TernaryAssign(expr, value).set_location(tok.line, tok.column)
 
         return expr
 
@@ -2833,6 +2869,7 @@ class FluxParser:
         """
         ternary_expression -> logical_or_expression ('?' expression ':' ternary_expression)?
         """
+        tok = self.current_token
         expr = self.null_coalesce_expression()
         
         if self.expect(TokenType.QUESTION):
@@ -2840,19 +2877,20 @@ class FluxParser:
             true_expr = self.expression()  # The value if true
             self.consume(TokenType.COLON, "Expected ':' in ternary expression")
             false_expr = self.ternary_expression()  # Right associative
-            return TernaryOp(expr, true_expr, false_expr)
+            return TernaryOp(expr, true_expr, false_expr).set_location(tok.line, tok.column)
         
         return expr
 
     def null_coalesce_expression(self) -> Expression:
         """null_coalesce_expression -> logical_or_expression ('??' null_coalesce_expression)?"""
+        tok = self.current_token
         expr = self.logical_or_expression()
         
         if self.expect(TokenType.NULL_COALESCE):
             self.advance()
             #print("GOT NULL COALESCE")
             right = self.null_coalesce_expression()  # Right associative
-            return NullCoalesce(expr, right)
+            return NullCoalesce(expr, right).set_location(tok.line, tok.column)
         
         return expr
     
@@ -2863,10 +2901,11 @@ class FluxParser:
         expr = self.logical_and_expression()
         
         while self.expect(TokenType.LOGICAL_OR, TokenType.OR):
+            op_tok = self.current_token
             operator = Operator.OR
             self.advance()
             right = self.logical_and_expression()
-            expr = BinaryOp(expr, operator, right)
+            expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
         
         return expr
     
@@ -2877,10 +2916,11 @@ class FluxParser:
         expr = self.logical_xor_expression()
         
         while self.expect(TokenType.LOGICAL_AND, TokenType.AND):
+            op_tok = self.current_token
             operator = Operator.AND
             self.advance()
             right = self.logical_xor_expression()
-            expr = BinaryOp(expr, operator, right)
+            expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
         
         return expr
 
@@ -2891,10 +2931,11 @@ class FluxParser:
         expr = self.bitwise_or_expression()
 
         while self.expect(TokenType.XOR_OP, TokenType.XOR):
+            op_tok = self.current_token
             operator = Operator.XOR
             self.advance()
             right = self.bitwise_or_expression()
-            expr = BinaryOp(expr, operator, right)
+            expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
 
         return expr
     
@@ -2905,6 +2946,7 @@ class FluxParser:
         expr = self.chain_expression()
         
         while self.expect(TokenType.IS, TokenType.EQUAL, TokenType.NOT_EQUAL):
+            op_tok = self.current_token
             if self.current_token.type == TokenType.EQUAL:
                 operator = Operator.EQUAL
             elif self.current_token.type == TokenType.IS:
@@ -2914,7 +2956,7 @@ class FluxParser:
             
             self.advance()
             right = self.chain_expression()
-            expr = BinaryOp(expr, operator, right)
+            expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
         
         return expr
 
@@ -2926,6 +2968,7 @@ class FluxParser:
         Also handles acceptor blocks:
         {expr_with_placeholders} <- N:func_call <- N:func_call ...
         """
+        tok = self.current_token
         expr = self.relational_expression()
         
         if self.expect(TokenType.CHAIN_ARROW):
@@ -2960,7 +3003,7 @@ class FluxParser:
                         labeled_inputs.append((label, input_expr))
                     
                     # Create AcceptorBlock with the expression and labeled inputs
-                    return AcceptorBlock(expr, labeled_inputs)
+                    return AcceptorBlock(expr, labeled_inputs).set_location(tok.line, tok.column)
             
             # Old-style chain arrow (function call chaining)
             self.advance()  # consume '<-'
@@ -2985,13 +3028,14 @@ class FluxParser:
         expr = self.bitwise_xor_expression()
         
         while self.expect(TokenType.BITOR_OP, TokenType.BITNOR_OP):
+            op_tok = self.current_token
             if self.current_token.type == TokenType.BITOR_OP:
                 operator = Operator.BITOR
             else:  # BITNOR_OP
                 operator = Operator.BITNOR
             self.advance()
             right = self.bitwise_xor_expression()
-            expr = BinaryOp(expr, operator, right)
+            expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
         
         return expr
 
@@ -3002,13 +3046,14 @@ class FluxParser:
         expr = self.bitwise_and_expression()
         
         while self.expect(TokenType.BITXOR_OP, TokenType.BITXNOR):
+            op_tok = self.current_token
             if self.current_token.type == TokenType.BITXOR_OP:
                 operator = Operator.BITXOR
             else:  # BITXNOR
                 operator = Operator.BITXNOR
             self.advance()
             right = self.bitwise_and_expression()
-            expr = BinaryOp(expr, operator, right)
+            expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
         
         return expr
 
@@ -3019,13 +3064,14 @@ class FluxParser:
         expr = self.equality_expression()
         
         while self.expect(TokenType.BITAND_OP, TokenType.BITNAND_OP):
+            op_tok = self.current_token
             if self.current_token.type == TokenType.BITAND_OP:
                 operator = Operator.BITAND
             else:  # BITNAND_OP
                 operator = Operator.BITNAND
             self.advance()
             right = self.equality_expression()
-            expr = BinaryOp(expr, operator, right)
+            expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
         
         return expr
     
@@ -3036,6 +3082,7 @@ class FluxParser:
         expr = self.shift_expression()
         
         while self.expect(TokenType.LESS_THAN, TokenType.LESS_EQUAL, TokenType.GREATER_THAN, TokenType.GREATER_EQUAL):
+            op_tok = self.current_token
             if self.current_token.type == TokenType.LESS_THAN:
                 operator = Operator.LESS_THAN
             elif self.current_token.type == TokenType.LESS_EQUAL:
@@ -3047,7 +3094,7 @@ class FluxParser:
             
             self.advance()
             right = self.shift_expression()
-            expr = BinaryOp(expr, operator, right)
+            expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
         
         return expr
     
@@ -3058,6 +3105,7 @@ class FluxParser:
         expr = self.additive_expression()
         
         while self.expect(TokenType.BITSHIFT_LEFT, TokenType.BITSHIFT_RIGHT):
+            op_tok = self.current_token
             if self.current_token.type == TokenType.BITSHIFT_LEFT:
                 operator = Operator.BITSHIFT_LEFT
             else:  # RIGHT_SHIFT
@@ -3065,7 +3113,7 @@ class FluxParser:
             
             self.advance()
             right = self.additive_expression()
-            expr = BinaryOp(expr, operator, right)
+            expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
         
         return expr
     
@@ -3079,12 +3127,13 @@ class FluxParser:
         """
         range_expression -> arithmetic_expression ('..' arithmetic_expression)?
         """
+        tok = self.current_token
         expr = self.arithmetic_expression()
         
         if self.expect(TokenType.RANGE):  # ..
             self.advance()
             end_expr = self.arithmetic_expression()
-            return RangeExpression(expr, end_expr)
+            return RangeExpression(expr, end_expr).set_location(tok.line, tok.column)
         
         return expr
     

@@ -4248,6 +4248,8 @@ class Block(Statement):
 
         for i, stmt in enumerate(self.statements):
             #print(f"DEBUG Block: Processing statement {i}: {type(stmt).__name__}")
+            if builder.block.is_terminated:
+                break
             if stmt is not None:  # Skip None statements
                 try:
                     stmt_result = stmt.codegen(builder, module)
@@ -5380,6 +5382,10 @@ class GotoStatement(Statement):
         builder.branch(builder._flux_label_blocks[self.target])
         return None
 
+# NOTE:
+#
+# Currently only supporting x86_64
+# IT WILL GENERATE INCORRECT ASM FOR ANY OTHER ARCH (currently)
 @dataclass
 class JumpStatement(Statement):
     target: Expression  # Any expression yielding an address (AddressOf or integer)
@@ -5396,9 +5402,10 @@ class JumpStatement(Statement):
             addr_i64 = builder.zext(addr_val, i64, name="jump_addr") if addr_val.type.width < 64 else builder.trunc(addr_val, i64, name="jump_addr")
         else:
             addr_i64 = addr_val
-        # Emit inline asm: mov rax, $0; jmp rax
+        # Emit inline asm: pop the return address pushed by the call to this asm block,
+        # then jump - making it a true tail jump with no leftover stack frame.
         ftype = ir.FunctionType(ir.VoidType(), [i64])
-        asm = ir.InlineAsm(ftype, "jmp *%rax", "{rax}", side_effect=True)
+        asm = ir.InlineAsm(ftype, "addq $$8, %rsp\njmp *%rax", "{rax}", side_effect=True)
         builder.call(asm, [addr_i64])
         builder.unreachable()
         return None
@@ -5750,7 +5757,7 @@ class AssertStatement(Statement):
 
 # Function parameter
 @dataclass
-class Parameter:
+class Parameter(ASTNode):
     name: Optional[str] # Can be none for unnamed prototype parameters
     type_spec: TypeSystem
 

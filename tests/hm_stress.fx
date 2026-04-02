@@ -49,37 +49,6 @@ def check(bool cond, noopstr name) -> void
     };
 };
 
-// Simple u64 -> printable decimal string into a fixed buffer.
-// Returns the buffer pointer.
-def u64_to_str(u64 val, byte* buf) -> byte*
-{
-    if (val == 0)
-    {
-        buf[0] = 48;
-        buf[1] = 0;
-        return buf;
-    };
-    byte[24] tmp;
-    int pos;
-    u64 v = val;
-    while (v != 0)
-    {
-        tmp[pos] = (byte)(v % 10 + 48);
-        v = v / 10;
-        pos = pos + 1;
-    };
-    int i;
-    int j = pos - 1;
-    while (j >= 0)
-    {
-        buf[i] = tmp[j];
-        i = i + 1;
-        j = j - 1;
-    };
-    buf[i] = 0;
-    return buf;
-};
-
 // -------------------------------------------------------------------------
 // Section 1 - HashMap basic operations
 // -------------------------------------------------------------------------
