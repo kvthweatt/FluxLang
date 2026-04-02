@@ -3459,9 +3459,14 @@ class FluxParser:
                 # Array access or array slice [start:end]
                 self.advance()
                 start_index = self.expression()
-                
+                # Check if this is a bit-slice operation [start``end]
+                if self.expect(TokenType.BITSLICE):
+                    self.advance()  # consume ``
+                    end_index = self.expression()
+                    self.consume(TokenType.RIGHT_BRACKET)
+                    expr = BitSlice(expr, start_index, end_index)
                 # Check if this is a slice operation [start:end]
-                if self.expect(TokenType.COLON):
+                elif self.expect(TokenType.COLON):
                     self.advance()
                     end_index = self.expression()
                     self.consume(TokenType.RIGHT_BRACKET)

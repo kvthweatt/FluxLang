@@ -210,6 +210,7 @@ class TokenType(Enum):
     FUNCTION_POINTER = auto() # {}*
     ADDRESS_CAST = auto()     # (@)
     STRINGIFY = auto()        # $
+    BITSLICE = auto()         # ``
     
     # Delimiters
     LEFT_PAREN = auto()     # (
@@ -301,7 +302,8 @@ double_char_tokens = {
     '<~': TokenType.RECURSE_ARROW,
     '..': TokenType.RANGE,
     '::': TokenType.SCOPE,
-    '?=': TokenType.TERNARY_ASSIGN
+    '?=': TokenType.TERNARY_ASSIGN,
+    '``': TokenType.BITSLICE
 } | double_binary_tokens
 
 # Single-character tokens dictionary

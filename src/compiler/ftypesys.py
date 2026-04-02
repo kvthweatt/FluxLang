@@ -3320,6 +3320,15 @@ class ArrayTypeHandler:
                 packed = builder.zext(source_val, int_type, name="unpack_zext")
         elif isinstance(source_val.type, (ir.FloatType, ir.DoubleType)):
             packed = builder.bitcast(source_val, int_type, name="float_to_bits")
+        elif isinstance(source_val.type, ir.PointerType):
+            # Pointer or function pointer — ptrtoint to a native integer, then resize
+            ptr_int = builder.ptrtoint(source_val, ir.IntType(64), name="ptr_to_int")
+            if ptr_int.type.width == total_bits:
+                packed = ptr_int
+            elif ptr_int.type.width > total_bits:
+                packed = builder.trunc(ptr_int, int_type, name="unpack_trunc")
+            else:
+                packed = builder.zext(ptr_int, int_type, name="unpack_zext")
         else:
             raise ValueError(f"Cannot unpack source type {source_val.type} into array")
 

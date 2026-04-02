@@ -2930,6 +2930,77 @@ class ArraySlice(Expression):
         return builder.load(dst_alloca, name="slice_val")
 
 @dataclass
+class BitSlice(Expression):
+    """Bit-slice expression: value[start``end]
+    
+    Extracts bits [start, end] (inclusive) from an integer value.
+    Returns an unsigned integer of width (end - start + 1).
+    Equivalent to: (value >> start) & ((1 << (end - start + 1)) - 1)
+    """
+    value: Expression
+    start: Expression
+    end: Expression
+
+    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
+        val = self.value.codegen(builder, module)
+        start_val = self.start.codegen(builder, module)
+        end_val = self.end.codegen(builder, module)
+
+        zero32 = ir.Constant(ir.IntType(32), 0)
+
+        # Get a pointer to the raw bytes
+        if isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType):
+            base_ptr = val  # already [N x i8]*
+        elif isinstance(val.type, ir.PointerType):
+            base_ptr = val  # i8* or similar
+        elif isinstance(val.type, ir.ArrayType):
+            tmp = builder.alloca(val.type, name="bs_tmp")
+            builder.store(val, tmp)
+            base_ptr = tmp
+        else:
+            raise ValueError(f"Bit-slice operator `` requires array/pointer operand, got {val.type}")
+
+        # Widen indices to i32
+        def to_i32(v, name):
+            if isinstance(v.type, ir.IntType):
+                if v.type.width < 32:
+                    return builder.zext(v, ir.IntType(32), name=name)
+                if v.type.width > 32:
+                    return builder.trunc(v, ir.IntType(32), name=name)
+                return v
+            raise ValueError(f"Bit-slice indices must be integers")
+
+        start_i32 = to_i32(start_val, "bs_start")
+        end_i32   = to_i32(end_val,   "bs_end")
+
+        eight = ir.Constant(ir.IntType(32), 8)
+
+        # Which byte contains start
+        byte_idx  = builder.sdiv(start_i32, eight, name="bs_byte_idx")
+        bit_start = builder.srem(start_i32, eight, name="bs_bit_start")  # bit within byte, MSB=0
+        bit_end   = builder.srem(end_i32,   eight, name="bs_bit_end")
+
+        # GEP to the correct byte
+        if isinstance(base_ptr.type.pointee, ir.ArrayType):
+            byte_ptr = builder.gep(base_ptr, [zero32, byte_idx], inbounds=True, name="bs_byte_ptr")
+        else:
+            byte_ptr = builder.gep(base_ptr, [byte_idx], inbounds=True, name="bs_byte_ptr")
+        byte_val = builder.load(byte_ptr, name="bs_byte")
+
+        # shift_amt = 7 - bit_end  (aligns the last bit of the slice to position 0)
+        bit_end_i8   = builder.trunc(bit_end,   ir.IntType(8), name="bs_bit_end_i8")
+        bit_start_i8 = builder.trunc(bit_start, ir.IntType(8), name="bs_bit_start_i8")
+        shift_amt = builder.sub(ir.Constant(ir.IntType(8), 7), bit_end_i8, name="bs_shift_amt")
+        shifted   = builder.lshr(byte_val, shift_amt, name="bs_shift")
+
+        # mask = (1 << (bit_end - bit_start + 1)) - 1
+        slice_w  = builder.add(builder.sub(bit_end_i8, bit_start_i8, name="bs_slen"), ir.Constant(ir.IntType(8), 1), name="bs_swidth")
+        mask_raw = builder.shl(ir.Constant(ir.IntType(8), 1), slice_w, name="bs_mask_raw")
+        mask     = builder.sub(mask_raw, ir.Constant(ir.IntType(8), 1), name="bs_mask")
+
+        return builder.and_(shifted, mask, name="bs_result")
+
+@dataclass
 class PointerDeref(Expression):
     pointer: Expression
 
