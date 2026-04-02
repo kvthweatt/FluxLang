@@ -1614,6 +1614,35 @@ unsigned data{17} as u17 b = (u17)a;  // Zero-extend
 signed data{13} as s13 c = (s13)a;    // Reinterpret bits
 ```
 
+### ***Bit slicing with [x\`\`y] syntax:***
+You can perform bit-slicing on values, like so:
+```
+#import "standard.fx";
+
+using standard::io::console,
+      standard::strings;
+
+
+def main() -> int
+{
+    noopstr x = "Testing!";
+
+    data{4} as u4;
+
+    u4 a = x[8``11];
+
+    print((int)a);
+
+    return 0;
+};
+```
+Result:
+```
+6
+```
+
+---
+
 ## **Function Pointers:**
 ```
 #import "standard.fx";

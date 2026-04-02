@@ -2957,6 +2957,21 @@ class BitSlice(Expression):
             tmp = builder.alloca(val.type, name="bs_tmp")
             builder.store(val, tmp)
             base_ptr = tmp
+        elif isinstance(val.type, ir.IntType):
+            # Integer operand (prior bitslice result) — right-aligned. Widen to i8,
+            # left-align so MSB-first byte logic works uniformly, then store.
+            i8 = ir.IntType(8)
+            if val.type.width < 8:
+                widened = builder.zext(val, i8, name="bs_widen")
+            elif val.type.width > 8:
+                widened = builder.trunc(val, i8, name="bs_widen")
+            else:
+                widened = val
+            align_amt = ir.Constant(i8, 8 - val.type.width)
+            aligned = builder.shl(widened, align_amt, name="bs_prealign")
+            tmp = builder.alloca(i8, name="bs_tmp")
+            builder.store(aligned, tmp)
+            base_ptr = tmp
         else:
             raise ValueError(f"Bit-slice operator `` requires array/pointer operand, got {val.type}")
 
@@ -2997,8 +3012,21 @@ class BitSlice(Expression):
         slice_w  = builder.add(builder.sub(bit_end_i8, bit_start_i8, name="bs_slen"), ir.Constant(ir.IntType(8), 1), name="bs_swidth")
         mask_raw = builder.shl(ir.Constant(ir.IntType(8), 1), slice_w, name="bs_mask_raw")
         mask     = builder.sub(mask_raw, ir.Constant(ir.IntType(8), 1), name="bs_mask")
+        masked   = builder.and_(shifted, mask, name="bs_result")
 
-        return builder.and_(shifted, mask, name="bs_result")
+        # Truncate to exact slice width so chained bitslices know the bit-count of this value.
+        # slice_w is an i8 runtime value; we need a compile-time width for the trunc type.
+        # Compute it from the constant indices when possible, else keep i8.
+        try:
+            s_const = int(start_i32.constant) if hasattr(start_i32, 'constant') else None
+            e_const = int(end_i32.constant)   if hasattr(end_i32,   'constant') else None
+            if s_const is not None and e_const is not None:
+                width = (e_const % 8) - (s_const % 8) + 1
+                if 1 <= width <= 8:
+                    return builder.trunc(masked, ir.IntType(width), name="bs_trunc")
+        except Exception:
+            pass
+        return masked
 
 @dataclass
 class PointerDeref(Expression):

@@ -3,18 +3,16 @@
 using standard::io::console,
       standard::strings;
 
-def foo() -> void
-{
-    println("In foo()!");
-};
 
 def main() -> int
 {
-    long x = @foo;
+    noopstr x = "Testing!";
 
-    jump x;
+    data{3} as u3;
+           //0110  //011
+    u3 a = x[8``11][0``2];
 
-    print("Test?");
+    print((int)a);
 
     return 0;
 };
