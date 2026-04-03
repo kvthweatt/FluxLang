@@ -2966,6 +2966,59 @@ class BitSlice(Expression):
 
         zero32 = ir.Constant(ir.IntType(32), 0)
 
+        # Handle reverse bit slice (start > end) — extract bits in reverse order
+        s_const = int(start_val.constant) if hasattr(start_val, 'constant') else None
+        e_const_rev = int(end_val.constant) if hasattr(end_val, 'constant') else None
+        if s_const is not None and e_const_rev is not None and s_const > e_const_rev:
+            i8 = ir.IntType(8)
+            i32 = ir.IntType(32)
+            # Build base pointer for raw byte access
+            if isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType):
+                rev_base = val
+                def rev_gep(bidx): return builder.gep(rev_base, [zero32, ir.Constant(i32, bidx)], inbounds=True)
+            elif isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                rev_base = builder.bitcast(val, ir.PointerType(i8), name="rev_struct_raw")
+                def rev_gep(bidx): return builder.gep(rev_base, [ir.Constant(i32, bidx)], inbounds=True)
+            elif isinstance(val.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                tmp = builder.alloca(val.type, name="rev_stmp")
+                builder.store(val, tmp)
+                rev_base = builder.bitcast(tmp, ir.PointerType(i8), name="rev_struct_raw")
+                def rev_gep(bidx): return builder.gep(rev_base, [ir.Constant(i32, bidx)], inbounds=True)
+            elif isinstance(val.type, ir.IntType) and val.type.width >= 8:
+                nbytes = val.type.width // 8
+                tmp = builder.alloca(ir.ArrayType(i8, nbytes), name="rev_tmp")
+                i8ptr = builder.bitcast(tmp, ir.PointerType(i8), name="rev_tmp_i8")
+                wval = builder.zext(val, i32) if val.type.width < 32 else val
+                for bi in range(nbytes):
+                    sh = (nbytes - 1 - bi) * 8
+                    bv = builder.trunc(builder.lshr(wval, ir.Constant(wval.type, sh)), i8)
+                    builder.store(bv, builder.gep(i8ptr, [ir.Constant(i32, bi)], inbounds=True))
+                rev_base = i8ptr
+                def rev_gep(bidx): return builder.gep(rev_base, [ir.Constant(i32, bidx)], inbounds=True)
+            else:
+                tmp = builder.alloca(i8, name="rev_tmp")
+                bval = val if val.type == i8 else builder.trunc(val, i8)
+                builder.store(bval, tmp)
+                rev_base = tmp
+                def rev_gep(bidx): return builder.gep(rev_base, [ir.Constant(i32, bidx)], inbounds=True)
+            # Extract bits from s_const down to e_const_rev, place in reversed order
+            num_bits = s_const - e_const_rev + 1
+            result = ir.Constant(i8, 0)
+            for i, bit_pos in enumerate(range(s_const, e_const_rev - 1, -1)):
+                byte_i = bit_pos // 8
+                bit_in_byte = bit_pos % 8  # MSB-first: 0=MSB, 7=LSB
+                bptr = rev_gep(byte_i)
+                bval = builder.load(bptr, name=f"rev_byte_{i}")
+                extracted = builder.and_(
+                    builder.lshr(bval, ir.Constant(i8, 7 - bit_in_byte), name=f"rev_ext_{i}"),
+                    ir.Constant(i8, 1), name=f"rev_bit_{i}"
+                )
+                placed = builder.shl(extracted, ir.Constant(i8, num_bits - 1 - i), name=f"rev_place_{i}")
+                result = builder.or_(result, placed, name=f"rev_acc_{i}")
+            if 1 <= num_bits < 8:
+                return builder.trunc(result, ir.IntType(num_bits), name="rev_trunc")
+            return result
+
         # Get a pointer to the raw bytes
         if isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType):
             base_ptr = val  # already [N x i8]*
@@ -2983,16 +3036,30 @@ class BitSlice(Expression):
             tmp = builder.alloca(val.type, name="bs_tmp")
             builder.store(val, tmp)
             base_ptr = tmp
+        elif isinstance(val.type, ir.IntType) and val.type.width >= 8:
+            # Full integer (i8, i16, i32, i64, etc.) — store big-endian byte-by-byte
+            nbytes = val.type.width // 8
+            i8 = ir.IntType(8)
+            tmp = builder.alloca(ir.ArrayType(i8, nbytes), name="bs_tmp")
+            i8ptr = builder.bitcast(tmp, ir.PointerType(i8), name="bs_tmp_i8")
+            wval = val
+            if val.type.width < 32:
+                wval = builder.zext(val, ir.IntType(32), name="bs_widen")
+            elif val.type.width > 64:
+                wval = builder.trunc(val, ir.IntType(64), name="bs_widen")
+            wty = wval.type
+            for byte_i in range(nbytes):
+                shift = (nbytes - 1 - byte_i) * 8
+                shifted = builder.lshr(wval, ir.Constant(wty, shift), name=f"bs_byteshift_{byte_i}")
+                bval = builder.trunc(shifted, i8, name=f"bs_byte_{byte_i}")
+                bptr = builder.gep(i8ptr, [ir.Constant(ir.IntType(32), byte_i)], inbounds=True, name=f"bs_bptr_{byte_i}")
+                builder.store(bval, bptr)
+            base_ptr = i8ptr
         elif isinstance(val.type, ir.IntType):
-            # Integer operand (prior bitslice result) — right-aligned. Widen to i8,
+            # Sub-byte integer (prior bitslice result) — right-aligned. Widen to i8,
             # left-align so MSB-first byte logic works uniformly, then store.
             i8 = ir.IntType(8)
-            if val.type.width < 8:
-                widened = builder.zext(val, i8, name="bs_widen")
-            elif val.type.width > 8:
-                widened = builder.trunc(val, i8, name="bs_widen")
-            else:
-                widened = val
+            widened = builder.zext(val, i8, name="bs_widen")
             align_amt = ir.Constant(i8, 8 - val.type.width)
             aligned = builder.shl(widened, align_amt, name="bs_prealign")
             tmp = builder.alloca(i8, name="bs_tmp")
@@ -4218,6 +4285,49 @@ class Assignment(Statement):
                 ptr = builder.load(ptr, name="deref_ptr_loaded")
             return AssignmentTypeHandler.handle_pointer_deref_assignment(builder, ptr, val)
                 
+        elif isinstance(self.target, BitSlice):
+            # Bit-slice assignment: target[start``end] = val
+            # Get the alloca pointer for the target variable
+            if not isinstance(self.target.value, Identifier):
+                raise ValueError("Bit-slice assignment target must be a simple variable")
+            var_name = self.target.value.name
+            ptr = module.symbol_table.get_llvm_value(var_name)
+            if ptr is None:
+                raise ValueError(f"Unknown variable '{var_name}'")
+            # Determine integer width from the alloca pointee type
+            int_type = ptr.type.pointee
+            if not isinstance(int_type, ir.IntType):
+                raise ValueError("Bit-slice assignment requires an integer variable")
+            w = int_type.width
+            # Evaluate constant indices
+            s_val = self.target.start.codegen(builder, module)
+            e_val = self.target.end.codegen(builder, module)
+            if not (hasattr(s_val, 'constant') and hasattr(e_val, 'constant')):
+                raise ValueError("Bit-slice assignment indices must be constants")
+            s_const = int(s_val.constant)
+            e_const = int(e_val.constant)
+            slice_width = e_const - s_const + 1
+            # MSB-first: bit s_const in a w-bit int = LSB bit (w-1-s_const)
+            # The slice occupies LSB bits (w-1-e_const) .. (w-1-s_const)
+            lsb_shift = w - 1 - e_const
+            mask = ((1 << slice_width) - 1) << lsb_shift
+            inv_mask = ((1 << w) - 1) & ~mask
+            # Load current value, clear the target bits
+            cur = builder.load(ptr, name="bsa_cur")
+            cleared = builder.and_(cur, ir.Constant(int_type, inv_mask), name="bsa_cleared")
+            # Widen/truncate rhs val to int_type
+            if isinstance(val.type, ir.IntType):
+                if val.type.width < w:
+                    val = builder.zext(val, int_type, name="bsa_widen")
+                elif val.type.width > w:
+                    val = builder.trunc(val, int_type, name="bsa_trunc")
+            # Mask rhs to slice width then shift into position
+            rhs_masked = builder.and_(val, ir.Constant(int_type, (1 << slice_width) - 1), name="bsa_rhs_mask")
+            rhs_shifted = builder.shl(rhs_masked, ir.Constant(int_type, lsb_shift), name="bsa_rhs_shift")
+            result = builder.or_(cleared, rhs_shifted, name="bsa_result")
+            builder.store(result, ptr)
+            return result
+
         else:
             raise ValueError(f"Cannot assign to {type(self.target).__name__}")
 

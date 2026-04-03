@@ -1,23 +1,16 @@
 #import "standard.fx";
 
-using standard::io::console,
-      standard::strings;
+using standard::io::console;
 
 struct xx { int a, b; };
 
-
 def main() -> int
 {
-    noopstr x = "Testing!";
-
-    data{3} as u3;
-           //0110  //011
-    u3 a = x[8``11][0``2];
-
+    data{4} as u4;
     xx yy = {5,10};
-    u3 b = yy[29``31]; // 5 because 0b101
+    u4 a = yy[59``63]; // 10 because 0b1010
 
-    print((int)b);
+    print((int)a);
 
     return 0;
 };

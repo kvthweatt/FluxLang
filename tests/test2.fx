@@ -4,10 +4,11 @@ using standard::io::console;
 
 def main() -> int
 {
-	int x = 5;
+	byte x = 55;
 
-	int* px = @x;
+	x[0``7] = x[7``0];
 
-	print(*px);
+	println(int(x));
+
 	return 0;
 };
