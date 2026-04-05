@@ -127,6 +127,7 @@ namespace standard
         // Per-direction traffic key material derived from the key schedule
         struct TLS13_TrafficKeys
         {
+            byte[32] secret;    // Raw 32-byte traffic secret (for Finished MAC)
             byte[16] key;       // AES-128 key
             byte[12] iv;        // 12-byte base IV
             u64      seq;       // Record sequence number (for nonce construction)
@@ -171,6 +172,27 @@ namespace standard
         // ============================================================
         // Internal helpers
         // ============================================================
+
+        // Debug helper: print label then hex bytes
+        def tls_debug_hex(byte* xlabel, byte* buf, int len) -> void
+        {
+            int i;
+            byte b, hi, lo;
+            print(xlabel);
+            while (i < len)
+            {
+                b  = buf[i];
+                hi = (b >> 4) & (byte)0x0F;
+                lo = b & (byte)0x0F;
+                if (hi < (byte)10) { print((byte)('0' + hi)); }
+                else               { print((byte)('A' + (hi - (byte)10))); };
+                if (lo < (byte)10) { print((byte)('0' + lo)); }
+                else               { print((byte)('A' + (lo - (byte)10))); };
+                i++;
+            };
+            print("\n\0");
+            return;
+        };
 
         // Write a big-endian u16 into buf[0..1]
         def tls_put_u16(byte* buf, int v) -> void
@@ -578,6 +600,9 @@ namespace standard
             lbl_key[0] = 'k'; lbl_key[1] = 'e'; lbl_key[2] = 'y';
             lbl_iv[0]  = 'i'; lbl_iv[1]  = 'v';
 
+            // Store the raw traffic secret for Finished MAC computation
+            for (i = 0; i < 32; i++) { tk.secret[i] = traffic_secret[i]; };
+
             tls13_expand_label(traffic_secret,
                                @lbl_key[0], 3,
                                (byte*)0, 0,
@@ -887,7 +912,7 @@ namespace standard
 
             // Skip: legacy_version(2) + random(32) + session_id_len(1) + session_id(var)
             // + cipher_suite(2) + compression(1)
-            if (len < 38) { return 0; };
+            if (len < 38) { print("[SH] fail: len<38\n\0"); return 0; };
             pos = 2 + 32; // version + random
             // session_id
             pos = pos + 1 + (int)(buf[pos] & 0xFF); // skip len + data
@@ -895,7 +920,7 @@ namespace standard
             pos = pos + 1; // compression
 
             // Extensions
-            if (pos + 2 > len) { return 0; };
+            if (pos + 2 > len) { print("[SH] fail: pos+2>len\n\0"); return 0; };
             ext_total = tls_get_u16(@buf[pos]); pos = pos + 2;
             ext_end   = pos + ext_total;
 
@@ -907,12 +932,13 @@ namespace standard
                 if (ext_type == TLS_EXT_KEY_SHARE)
                 {
                     // key_share: group(2) + key_len(2) + key_data
-                    if (ext_len < 36) { return 0; };
+                    if (ext_len < 36) { print("[SH] fail: ks ext_len<36\n\0"); return 0; };
                     ks_group   = tls_get_u16(@buf[pos]);
                     ks_key_len = tls_get_u16(@buf[pos + 2]);
                     if ((ks_group != (TLS_GROUP_X25519_HI << 8 | TLS_GROUP_X25519_LO)) |
                         (ks_key_len != 32))
                     {
+                        print("[SH] fail: bad group/keylen\n\0");
                         return 0;
                     };
                     for (i = 0; i < 32; i++) { ctx.their_pub[i] = buf[pos + 4 + i]; };
@@ -921,11 +947,9 @@ namespace standard
                 pos = pos + ext_len;
             };
 
+            print("[SH] parsed ok\n\0");
             return 1;
         };
-
-        // ============================================================
-        // tls13_connect — full TLS 1.3 handshake
         //
         // Flow:
         //   1. Generate x25519 ephemeral key pair
@@ -1006,6 +1030,7 @@ namespace standard
             // buf[0] = handshake type, buf[1..3] = length
             hs_type = (int)(buf[0] & 0xFF);
             hs_len  = tls_get_u24(@buf[1]);
+            print("[client] rec_type=\0"); print(rec_type); print(" hs_type=\0"); print(hs_type); print(" hs_len=\0"); print(hs_len); print("\n\0");
             if (hs_type != TLS_HT_SERVER_HELLO) { return 0; };
 
             // Feed ServerHello into transcript
@@ -1024,6 +1049,10 @@ namespace standard
             crypto::ECDH::X25519::x25519(@ctx.shared_secret[0],
                                          @ctx.our_priv[0],
                                          @ctx.their_pub[0]);
+
+            tls_debug_hex("[client] their_pub:      \0", @ctx.their_pub[0], 32);
+            tls_debug_hex("[client] shared_secret:  \0", @ctx.shared_secret[0], 32);
+            tls_debug_hex("[client] txhash_sh:      \0", @txhash_sh[0], 32);
 
             // --------------------------------------------------
             // 5. Derive handshake keys (we'll fill app keys after server Finished)
@@ -1076,6 +1105,9 @@ namespace standard
 
                 tls13_derive_traffic_keys(@c_hs_ts[0], @ctx.client_hs);
                 tls13_derive_traffic_keys(@s_hs_ts[0], @ctx.server_hs);
+
+                tls_debug_hex("[client] server_hs.key:  \0", @ctx.server_hs.key[0], 16);
+                tls_debug_hex("[client] server_hs.iv:   \0", @ctx.server_hs.iv[0], 12);
 
                 // Install handshake GCM contexts
                 crypto::encryption::AES::gcm_init(@ctx.gcm_write, @ctx.client_hs.key[0]);
@@ -1139,8 +1171,10 @@ namespace standard
                                     snap = ctx.transcript;
                                     crypto::hashing::SHA256::sha256_final(@snap, @txhash_sf[0]);
 
+                                    tls_debug_hex("[client] txhash_sf:      \0", @txhash_sf[0], 32);
+
                                     // Verify server Finished
-                                    tls13_compute_finished(@ctx.server_hs.key[0],
+                                    tls13_compute_finished(@ctx.server_hs.secret[0],
                                                            @txhash_sf[0],
                                                            @server_fin_verify[0]);
 
@@ -1213,7 +1247,7 @@ namespace standard
                 snap = ctx.transcript;
                 crypto::hashing::SHA256::sha256_final(@snap, @txhash_cf[0]);
 
-                tls13_compute_finished(@ctx.client_hs.key[0], @txhash_cf[0],
+                tls13_compute_finished(@ctx.client_hs.secret[0], @txhash_cf[0],
                                        @client_fin_verify[0]);
 
                 finished_msg[0] = (byte)TLS_HT_FINISHED;
@@ -1521,6 +1555,10 @@ namespace standard
                                          @ctx.our_priv[0],
                                          @ctx.their_pub[0]);
 
+            tls_debug_hex("[server] their_pub:      \0", @ctx.their_pub[0], 32);
+            tls_debug_hex("[server] shared_secret:  \0", @ctx.shared_secret[0], 32);
+            tls_debug_hex("[server] txhash_sh:      \0", @txhash_sh[0], 32);
+
             // Full key schedule (handshake + master)
             {
                 byte[32] zeros, derived, c_hs_ts, s_hs_ts;
@@ -1561,6 +1599,9 @@ namespace standard
 
                 tls13_derive_traffic_keys(@c_hs_ts[0], @ctx.client_hs);
                 tls13_derive_traffic_keys(@s_hs_ts[0], @ctx.server_hs);
+
+                tls_debug_hex("[server] server_hs.key:  \0", @ctx.server_hs.key[0], 16);
+                tls_debug_hex("[server] server_hs.iv:   \0", @ctx.server_hs.iv[0], 12);
 
                 // Server writes with server_hs, reads with client_hs
                 crypto::encryption::AES::gcm_init(@ctx.gcm_write, @ctx.server_hs.key[0]);
@@ -1623,7 +1664,7 @@ namespace standard
                 crypto::hashing::SHA256::sha256_final(@snap, @txhash_sf[0]);
             };
 
-            tls13_compute_finished(@ctx.server_hs.key[0], @txhash_sf[0], @server_fin_mac[0]);
+            tls13_compute_finished(@ctx.server_hs.secret[0], @txhash_sf[0], @server_fin_mac[0]);
 
             {
                 byte[36] fin_msg;
@@ -1708,7 +1749,9 @@ namespace standard
                                     snap = ctx.transcript;
                                     crypto::hashing::SHA256::sha256_final(@snap, @txhash_cf[0]);
 
-                                    tls13_compute_finished(@ctx.client_hs.key[0],
+                                    tls_debug_hex("[server] txhash_cf:      \0", @txhash_cf[0], 32);
+
+                                    tls13_compute_finished(@ctx.client_hs.secret[0],
                                                            @txhash_cf[0],
                                                            @client_fin_verify[0]);
 

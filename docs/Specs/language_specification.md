@@ -1571,6 +1571,45 @@ hash[24..27] = (byte[4])(be32)ctx.state[6];
 hash[28..31] = (byte[4])(be32)ctx.state[7];
 ```
 
+### ***Bit slices:***
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+def main() -> int
+{
+    byte x = 55;
+
+    x[0``7] = x[7``0]; // Reverse the bits
+
+    println(int(x)); // 236
+
+    return 0;
+};
+```
+
+### ***Taking bit slices from structs:***
+Bit slicing structs can cross member boundaries, because structs members are packed tightly in memory.
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+struct xx { int a, b; };
+
+def main() -> int
+{
+    data{4} as u4;
+    xx yy = {5,10};
+    u4 a = yy[59``63]; // 10 because 0b1010
+
+    print((int)a);
+
+    return 0;
+};
+```
+
 ---
 
 ## **Raw bytecode functions**

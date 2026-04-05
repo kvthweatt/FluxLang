@@ -3144,6 +3144,7 @@ class FluxParser:
         expr = self.custom_op_expression()
         
         while self.expect(TokenType.PLUS, TokenType.MINUS):
+            op_tok = self.current_token
             if self.current_token.type == TokenType.PLUS:
                 operator = Operator.ADD
             else:  # MINUS
@@ -3151,7 +3152,7 @@ class FluxParser:
             
             self.advance()
             right = self.custom_op_expression()
-            expr = BinaryOp(expr, operator, right)
+            expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
         
         return expr
     
@@ -3162,6 +3163,7 @@ class FluxParser:
         expr = self.cast_expression()
         
         while self.expect(TokenType.MULTIPLY, TokenType.DIVIDE, TokenType.MODULO, TokenType.POWER):
+            op_tok = self.current_token
             if self.current_token.type == TokenType.MULTIPLY:
                 operator = Operator.MUL
             elif self.current_token.type == TokenType.DIVIDE:
@@ -3174,7 +3176,7 @@ class FluxParser:
             
             self.advance()
             right = self.cast_expression()
-            expr = BinaryOp(expr, operator, right)
+            expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
         
         return expr
     
@@ -3190,6 +3192,7 @@ class FluxParser:
             # Look ahead to see if this is a cast
             saved_pos = self.position
             try:
+                tok = self.current_token
                 self.advance()  # consume '('
                 target_type = self.type_spec()
                 if self.expect(TokenType.RIGHT_PAREN):
@@ -3197,7 +3200,7 @@ class FluxParser:
                     expr = self.cast_expression()
                     
                     # ALWAYS use CastExpression - let codegen figure out if it's a struct
-                    return CastExpression(target_type, expr)
+                    return CastExpression(target_type, expr).set_location(tok.line, tok.column)
                 else:
                     # Not a cast, restore position
                     self.position = saved_pos
@@ -3215,58 +3218,69 @@ class FluxParser:
                          | postfix_expression
         """
         if self.expect(TokenType.IS):
+            tok = self.current_token
             operator = Operator.EQUAL
             self.advance()
             operand = self.unary_expression()
-            return UnaryOp(operator, operand)
+            return UnaryOp(operator, operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.NOT):
+            tok = self.current_token
             operator = Operator.NOT
             self.advance()
             operand = self.unary_expression()
-            return UnaryOp(operator, operand)
+            return UnaryOp(operator, operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.BITNOT_OP):
+            tok = self.current_token
             operator = Operator.BITNOT
             self.advance()
             operand = self.unary_expression()
-            return UnaryOp(operator, operand)
+            return UnaryOp(operator, operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.BITXNOT):
+            tok = self.current_token
             operator = Operator.BITXNOT
             self.advance()
             operand = self.unary_expression()
-            return UnaryOp(operator, operand)
+            return UnaryOp(operator, operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.BITXNAND):
+            tok = self.current_token
             operator = Operator.BITXNAND
             self.advance()
             operand = self.unary_expression()
-            return UnaryOp(operator, operand)
+            return UnaryOp(operator, operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.BITXNOR):
+            tok = self.current_token
             operator = Operator.BITXNOR
             self.advance()
             operand = self.unary_expression()
-            return UnaryOp(operator, operand)
+            return UnaryOp(operator, operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.MINUS):
+            tok = self.current_token
             operator = Operator.SUB
             self.advance()
             operand = self.unary_expression()
-            return UnaryOp(operator, operand)
+            return UnaryOp(operator, operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.PLUS):
+            tok = self.current_token
             operator = Operator.ADD
             self.advance()
             operand = self.unary_expression()
-            return UnaryOp(operator, operand)
+            return UnaryOp(operator, operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.MULTIPLY):
             # Pointer dereference operator
+            tok = self.current_token
             self.advance()
             operand = self.cast_expression()
-            return PointerDeref(operand)
+            return PointerDeref(operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.ADDRESS_OF):
             # Address-of operator
+            tok = self.current_token
             self.advance()
             operand = self.unary_expression()
-            return AddressOf(operand)
+            return AddressOf(operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.ADDRESS_CAST):
             # Address cast operator (@) - converts integer literal to pointer
             # Uses CastExpression with void* as target type
+            tok = self.current_token
             self.advance()
             operand = self.unary_expression()
             # Create a void pointer TypeSystem (i8*)
@@ -3275,24 +3289,28 @@ class FluxParser:
                 is_pointer=True,
                 pointer_depth=1
             )
-            return CastExpression(void_ptr_type, operand)
+            return CastExpression(void_ptr_type, operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.INCREMENT):
             # Prefix increment
+            tok = self.current_token
             self.advance()
             operand = self.unary_expression()
-            return UnaryOp(Operator.INCREMENT, operand)
+            return UnaryOp(Operator.INCREMENT, operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.DECREMENT):
             # Prefix decrement
+            tok = self.current_token
             self.advance()
             operand = self.unary_expression()
-            return UnaryOp(Operator.DECREMENT, operand)
+            return UnaryOp(Operator.DECREMENT, operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.TIE):
             # Ownershipt
+            tok = self.current_token
             self.advance()
             operand = self.unary_expression()
-            return TieExpression(operand)
+            return TieExpression(operand).set_location(tok.line, tok.column)
         elif self.expect(TokenType.STRINGIFY):
             # Stringify operator: $x or $x.member produces the name/value as a string
+            tok = self.current_token
             self.advance()
             if not self.expect(TokenType.IDENTIFIER):
                 raise SyntaxError(f"Expected identifier after '$'")
@@ -3307,7 +3325,7 @@ class FluxParser:
                     self.advance()
                 else:
                     raise SyntaxError(f"Expected member name after '.' in stringify expression")
-            return Stringify(name, member)
+            return Stringify(name, member).set_location(tok.line, tok.column)
         else:
             return self.postfix_expression()
     
@@ -3481,6 +3499,7 @@ class FluxParser:
                 expr.name in self._template_functions and
                 self.expect(TokenType.LESS_THAN)):
             # Parse the explicit type argument list
+            tok = self.current_token
             self.advance()  # consume '<'
             type_names = []
             type_specs = []
@@ -3501,11 +3520,12 @@ class FluxParser:
                 args = self.argument_list()
             self.consume(TokenType.RIGHT_PAREN)
             mangled = self._resolve_template_call(expr.name, type_names, type_specs)
-            expr = FunctionCall(mangled, args)
+            expr = FunctionCall(mangled, args).set_location(tok.line, tok.column)
 
         while True:
             if self.expect(TokenType.LEFT_BRACKET):
                 # Array access or array slice [start:end]
+                tok = self.current_token
                 self.advance()
                 start_index = self.expression()
                 # Check if this is a bit-slice operation [start``end]
@@ -3513,38 +3533,40 @@ class FluxParser:
                     self.advance()  # consume ``
                     end_index = self.expression()
                     self.consume(TokenType.RIGHT_BRACKET)
-                    expr = BitSlice(expr, start_index, end_index)
+                    expr = BitSlice(expr, start_index, end_index).set_location(tok.line, tok.column)
                 # Check if this is a slice operation [start:end]
                 elif self.expect(TokenType.COLON):
                     self.advance()
                     end_index = self.expression()
                     self.consume(TokenType.RIGHT_BRACKET)
                     # Create an ArraySlice node
-                    expr = ArraySlice(expr, start_index, end_index)
+                    expr = ArraySlice(expr, start_index, end_index).set_location(tok.line, tok.column)
                 else:
                     # Regular array access
                     self.consume(TokenType.RIGHT_BRACKET)
-                    expr = ArrayAccess(expr, start_index)
+                    expr = ArrayAccess(expr, start_index).set_location(tok.line, tok.column)
             elif self.expect(TokenType.LEFT_PAREN):
                 # Function call
+                tok = self.current_token
                 self.advance()
                 args = []
                 if not self.expect(TokenType.RIGHT_PAREN):
                     args = self.argument_list()
                 self.consume(TokenType.RIGHT_PAREN)
                 if isinstance(expr, Identifier):
-                    expr = FunctionCall(expr.name, args)
+                    expr = FunctionCall(expr.name, args).set_location(tok.line, tok.column)
                 elif isinstance(expr, StringLiteral):
                     # String literal function name (for targeting mangled names like "??0Widget@@QEAA@AEBV0@@Z")
-                    expr = FunctionCall(expr.value, args)
+                    expr = FunctionCall(expr.value, args).set_location(tok.line, tok.column)
                 elif isinstance(expr, MemberAccess):
                     # Method call: obj.method() -> call obj_type.method with obj as first arg
                     method_name = f"{{obj_type}}.{expr.member}"
-                    expr = MethodCall(expr.object, expr.member, args)
+                    expr = MethodCall(expr.object, expr.member, args).set_location(tok.line, tok.column)
                 else:
                     raise SyntaxError(f"Cannot call function on complex expression: {type(expr).__name__}")
             elif self.expect(TokenType.DOT):
                 # Member access - could be struct field or object method/member
+                tok = self.current_token
                 self.advance()
                 member = self.consume(TokenType.IDENTIFIER).value
 
@@ -3572,50 +3594,55 @@ class FluxParser:
                             args = self.argument_list()
                         self.consume(TokenType.RIGHT_PAREN)
                         mangled = self._resolve_template_call(qualified, type_names, type_specs)
-                        expr = FunctionCall(mangled, args)
+                        expr = FunctionCall(mangled, args).set_location(tok.line, tok.column)
                         continue
 
                 # Create MemberAccess node - codegen will determine if it's
                 # StructFieldAccess or object member based on type
-                expr = MemberAccess(expr, member)
+                expr = MemberAccess(expr, member).set_location(tok.line, tok.column)
             elif self.expect(TokenType.INCREMENT):
                 # Postfix increment - but not if ++ begins a registered custom operator
+                tok = self.current_token
                 matched_sym, _ = self._match_custom_op()
                 if matched_sym is not None:
                     break
                 self.advance()
-                expr = UnaryOp(Operator.INCREMENT, expr, is_postfix=True)
+                expr = UnaryOp(Operator.INCREMENT, expr, is_postfix=True).set_location(tok.line, tok.column)
             elif self.expect(TokenType.DECREMENT):
                 # Postfix decrement - but not if -- begins a registered custom operator
+                tok = self.current_token
                 matched_sym, _ = self._match_custom_op()
                 if matched_sym is not None:
                     break
                 self.advance()
-                expr = UnaryOp(Operator.DECREMENT, expr, is_postfix=True)
+                expr = UnaryOp(Operator.DECREMENT, expr, is_postfix=True).set_location(tok.line, tok.column)
             elif self.expect(TokenType.AS):
                 # AS cast expression (postfix) - support all type casts
+                tok = self.current_token
                 self.advance()
                 target_type = self.type_spec()
                 
                 # Check if this is a struct cast
                 if target_type.custom_typename:
-                    expr = StructRecast(target_type.custom_typename, expr)
+                    expr = StructRecast(target_type.custom_typename, expr).set_location(tok.line, tok.column)
                 else:
-                    expr = CastExpression(target_type, expr)
+                    expr = CastExpression(target_type, expr).set_location(tok.line, tok.column)
             elif self.expect(TokenType.FROM):
                 # FROM restructuring: StructType from source_expr
                 # This creates a StructRecast where expr (the identifier) is the target type
+                tok = self.current_token
                 self.advance()
                 source_expr = self.postfix_expression()
                 
                 # expr should be an Identifier representing the target struct type
                 if isinstance(expr, Identifier):
                     target_typename = expr.name
-                    expr = StructRecast(target_typename, source_expr)
+                    expr = StructRecast(target_typename, source_expr).set_location(tok.line, tok.column)
                 else:
                     self.error("Expected struct type name before 'from' keyword")
             elif self.expect(TokenType.IF):
                 # If expression: value if (condition) [else alternative]
+                tok = self.current_token
                 self.advance()
                 self.consume(TokenType.LEFT_PAREN, "Expected '(' after 'if' in if-expression")
                 condition = self.expression()
@@ -3629,7 +3656,7 @@ class FluxParser:
                     # This handles: else z, else noinit, else (noinit if (...)), etc.
                     else_expr = self.postfix_expression()
                 
-                expr = IfExpression(expr, condition, else_expr)
+                expr = IfExpression(expr, condition, else_expr).set_location(tok.line, tok.column)
             else:
                 break
         
@@ -3771,6 +3798,7 @@ class FluxParser:
         if self.expect(TokenType.IDENTIFIER):
             return self.scoped_identifier()
         elif self.expect(TokenType.SINT_LITERAL):
+            tok = self.current_token
             if self.current_token.value.startswith('0d'):
                 number_str = self.current_token.value[2:]
                 # Define the digits for base 32: 0-9, A-V
@@ -3784,9 +3812,10 @@ class FluxParser:
             else:
                 value = int(self.current_token.value, 0)
                 self.advance()
-            return Literal(value, DataType.SINT)
+            return Literal(value, DataType.SINT).set_location(tok.line, tok.column)
         elif self.expect(TokenType.UINT_LITERAL):
             #print(self.current_token.value)
+            tok = self.current_token
             if self.current_token.value.startswith('0d'):
                 number_str = self.current_token.value[2:]
                 # Define the digits for base 32: 0-9, A-V
@@ -3801,46 +3830,57 @@ class FluxParser:
                 value = int(self.current_token.value, 0)
                 self.advance()
             #print(value)
-            return Literal(value, DataType.UINT)
+            return Literal(value, DataType.UINT).set_location(tok.line, tok.column)
         elif self.expect(TokenType.FLOAT):
+            tok = self.current_token
             value = float(self.current_token.value)
             self.advance()
-            return Literal(value, DataType.FLOAT)
+            return Literal(value, DataType.FLOAT).set_location(tok.line, tok.column)
         elif self.expect(TokenType.DOUBLE):
+            tok = self.current_token
             value = float(self.current_token.value)
             self.advance()
-            return Literal(value, DataType.DOUBLE)
+            return Literal(value, DataType.DOUBLE).set_location(tok.line, tok.column)
         elif self.expect(TokenType.CHAR):
+            tok = self.current_token
             value = self.current_token.value
             self.advance()
-            return Literal(value, DataType.CHAR)
+            return Literal(value, DataType.CHAR).set_location(tok.line, tok.column)
         elif self.expect(TokenType.STRING_LITERAL):
+            tok = self.current_token
             value = self.current_token.value
             self.advance()
-            return StringLiteral(value)
+            return StringLiteral(value).set_location(tok.line, tok.column)
         elif self.expect(TokenType.F_STRING):
+            tok = self.current_token
             f_string_content = self.current_token.value
             self.advance()
-            return self.parse_f_string(f_string_content)
+            return self.parse_f_string(f_string_content).set_location(tok.line, tok.column)
         elif self.expect(TokenType.I_STRING):
+            tok = self.current_token
             token_value = self.current_token.value
             self.advance()
-            return self.parse_i_string(token_value)
+            return self.parse_i_string(token_value).set_location(tok.line, tok.column)
         elif self.expect(TokenType.TRUE):
+            tok = self.current_token
             self.advance()
-            return Literal(True, DataType.BOOL)
+            return Literal(True, DataType.BOOL).set_location(tok.line, tok.column)
         elif self.expect(TokenType.FALSE):
+            tok = self.current_token
             self.advance()
-            return Literal(False, DataType.BOOL)
+            return Literal(False, DataType.BOOL).set_location(tok.line, tok.column)
         elif self.expect(TokenType.VOID):
+            tok = self.current_token
             self.advance()
-            return Literal(0, DataType.VOID)
+            return Literal(0, DataType.VOID).set_location(tok.line, tok.column)
         elif self.expect(TokenType.THIS):
+            tok = self.current_token
             self.advance()
-            return Identifier("this")
+            return Identifier("this").set_location(tok.line, tok.column)
         elif self.expect(TokenType.NO_INIT):
+            tok = self.current_token
             self.advance()
-            return NoInit()
+            return NoInit().set_location(tok.line, tok.column)
         elif self.expect(TokenType.LEFT_PAREN):
             self.advance()
             expr = self.expression()
@@ -3850,13 +3890,15 @@ class FluxParser:
             return self.array_literal()
         elif self.expect(TokenType.ELLIPSIS):
             # Variadic access: ...[N]
+            tok = self.current_token
             self.advance()
             self.consume(TokenType.LEFT_BRACKET)
             index_expr = self.expression()
             self.consume(TokenType.RIGHT_BRACKET)
-            return VariadicAccess(index_expr)
+            return VariadicAccess(index_expr).set_location(tok.line, tok.column)
         elif self.expect(TokenType.COLON):
             # Placeholder syntax :(N)
+            tok = self.current_token
             self.advance()  # consume ':'
             self.consume(TokenType.LEFT_PAREN)
             if not self.expect(TokenType.SINT_LITERAL, TokenType.UINT_LITERAL):
@@ -3864,7 +3906,7 @@ class FluxParser:
             index = int(self.current_token.value, 0)
             self.advance()
             self.consume(TokenType.RIGHT_PAREN)
-            return AcceptorPlaceholder(index)
+            return AcceptorPlaceholder(index).set_location(tok.line, tok.column)
         elif self.expect(TokenType.LEFT_BRACE):
             return self.struct_literal()
         elif self.expect(TokenType.SIZEOF):
@@ -3876,11 +3918,13 @@ class FluxParser:
         elif self.expect(TokenType.TYPEOF):
             return self.typeof_expression()
         elif self.expect(TokenType.STRUCT):
+            tok = self.current_token
             self.advance()
-            return Literal(value=12, type=DataType.SINT)  # TypeOf.KIND_STRUCT
+            return Literal(value=12, type=DataType.SINT).set_location(tok.line, tok.column)  # TypeOf.KIND_STRUCT
         elif self.expect(TokenType.OBJECT):
+            tok = self.current_token
             self.advance()
-            return Literal(value=13, type=DataType.SINT)  # TypeOf.KIND_OBJECT
+            return Literal(value=13, type=DataType.SINT).set_location(tok.line, tok.column)  # TypeOf.KIND_OBJECT
         elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW,
                          TokenType.CHAR, TokenType.BYTE, TokenType.BOOL_KW, TokenType.SLONG, TokenType.ULONG):
             # Built-in type convert expression: float(x), int(y), char(z), etc.
@@ -3904,7 +3948,7 @@ class FluxParser:
                 inner_expr = self.expression()
                 self.consume(TokenType.RIGHT_PAREN)
                 target_type = TypeSystem(base_type=target_data_type)
-                return TypeConvertExpression(target_type, inner_expr)
+                return TypeConvertExpression(target_type, inner_expr).set_location(kw_token.line, kw_token.column)
             else:
                 # Not a type-convert expression — backtrack and fall through to error
                 self.position = saved_pos
@@ -3923,6 +3967,7 @@ class FluxParser:
         - Nested scope: namespace::subnamespace::x
         - Type member: Type::static_member
         """
+        tok = self.current_token
         parts = [self.consume(TokenType.IDENTIFIER).value]
         
         while self.expect(TokenType.SCOPE):
@@ -3933,15 +3978,16 @@ class FluxParser:
         if len(parts) > 1:
             # Join with :: to create the full scoped name
             full_name = "__".join(parts)
-            return Identifier(full_name)
+            return Identifier(full_name).set_location(tok.line, tok.column)
         else:
             # Single identifier
-            return Identifier(parts[0])
+            return Identifier(parts[0]).set_location(tok.line, tok.column)
 
     def alignof_expression(self) -> AlignOf:
         """
         alignof_expression -> 'alignof' '(' (type_spec | expression) ')'
         """
+        tok = self.current_token
         self.consume(TokenType.ALIGNOF)
         self.consume(TokenType.LEFT_PAREN)
         
@@ -3951,19 +3997,20 @@ class FluxParser:
             # Try to parse as type spec first
             target = self.type_spec()
             self.consume(TokenType.RIGHT_PAREN)
-            return AlignOf(target)
+            return AlignOf(target).set_location(tok.line, tok.column)
         except ParseError:
             # If type parsing fails, try as expression
             self.position = saved_pos
             self.current_token = self.tokens[self.position]
             expr = self.expression()
             self.consume(TokenType.RIGHT_PAREN)
-            return AlignOf(expr)
+            return AlignOf(expr).set_location(tok.line, tok.column)
 
     def sizeof_expression(self) -> SizeOf:
         """
         sizeof_expression -> 'sizeof' '(' (type_spec | expression) ')'
         """
+        tok = self.current_token
         self.consume(TokenType.SIZEOF)
         self.consume(TokenType.LEFT_PAREN)
         
@@ -3979,29 +4026,30 @@ class FluxParser:
             try:
                 target = self.type_spec()
                 self.consume(TokenType.RIGHT_PAREN)
-                return SizeOf(target)
+                return SizeOf(target).set_location(tok.line, tok.column)
             except ParseError:
                 # If type parsing fails, try as expression
                 self.position = saved_pos
                 self.current_token = self.tokens[self.position]
                 expr = self.expression()
                 self.consume(TokenType.RIGHT_PAREN)
-                return SizeOf(expr)
+                return SizeOf(expr).set_location(tok.line, tok.column)
         else:
             # Could be identifier (variable) or custom type - try expression first
             try:
                 expr = self.expression()
                 self.consume(TokenType.RIGHT_PAREN)
-                return SizeOf(expr)
+                return SizeOf(expr).set_location(tok.line, tok.column)
             except ParseError:
                 # If expression parsing fails, try as type spec
                 self.position = saved_pos
                 self.current_token = self.tokens[self.position]
                 target = self.type_spec()
                 self.consume(TokenType.RIGHT_PAREN)
-                return SizeOf(target)
+                return SizeOf(target).set_location(tok.line, tok.column)
 
     def endianof_expression(self) -> EndianOf:
+        tok = self.current_token
         self.consume(TokenType.ENDIANOF)
         self.consume(TokenType.LEFT_PAREN, "Expected '(' after endianof")
 
@@ -4016,18 +4064,19 @@ class FluxParser:
             try:
                 target = self.type_spec()
                 self.consume(TokenType.RIGHT_PAREN, "Expected ')' after expression in endianof")
-                return EndianOf(target)
+                return EndianOf(target).set_location(tok.line, tok.column)
             except ParseError:
                 self.position = saved_pos
                 self.current_token = self.tokens[self.position]
                 target = self.expression()
                 self.consume(TokenType.RIGHT_PAREN)
-                return EndianOf(target)
+                return EndianOf(target).set_location(tok.line, tok.column)
 
     def typeof_expression(self) -> TypeOf:
         """
         typeof_expression -> 'typeof' '(' (type_spec | expression) ')'
         """
+        tok = self.current_token
         self.consume(TokenType.TYPEOF)
         self.consume(TokenType.LEFT_PAREN)
 
@@ -4040,35 +4089,36 @@ class FluxParser:
             try:
                 target = self.type_spec()
                 self.consume(TokenType.RIGHT_PAREN)
-                return TypeOf(target)
+                return TypeOf(target).set_location(tok.line, tok.column)
             except ParseError:
                 self.position = saved_pos
                 self.current_token = self.tokens[self.position]
                 expr = self.expression()
                 self.consume(TokenType.RIGHT_PAREN)
-                return TypeOf(expr)
+                return TypeOf(expr).set_location(tok.line, tok.column)
         else:
             try:
                 expr = self.expression()
                 self.consume(TokenType.RIGHT_PAREN)
-                return TypeOf(expr)
+                return TypeOf(expr).set_location(tok.line, tok.column)
             except ParseError:
                 self.position = saved_pos
                 self.current_token = self.tokens[self.position]
                 target = self.type_spec()
                 self.consume(TokenType.RIGHT_PAREN)
-                return TypeOf(target)
+                return TypeOf(target).set_location(tok.line, tok.column)
 
     def array_literal(self) -> Expression:
         """
         array_literal -> '[' (array_comprehension | expression (',' expression)*)? ']'
         array_comprehension -> expression 'for' '(' type_spec IDENTIFIER 'in' expression ')'
         """
+        tok = self.current_token
         self.consume(TokenType.LEFT_BRACKET)
         
         if self.expect(TokenType.RIGHT_BRACKET):
             self.advance()
-            return ArrayLiteral([])  # Empty array literal
+            return ArrayLiteral([]).set_location(tok.line, tok.column)  # Empty array literal
         
         # Parse first expression
         first_expr = self.expression()
@@ -4097,7 +4147,7 @@ class FluxParser:
                 variable=variable_name,
                 variable_type=variable_type,
                 iterable=iterable
-            )
+            ).set_location(tok.line, tok.column)
         else:
             # Regular array literal: [expr, expr, ...]
             elements = [first_expr]
@@ -4107,13 +4157,14 @@ class FluxParser:
                 elements.append(self.expression())
             
             self.consume(TokenType.RIGHT_BRACKET)
-            return ArrayLiteral(elements)  # Array literal
+            return ArrayLiteral(elements).set_location(tok.line, tok.column)  # Array literal
     
     def expression_block(self) -> Expression:
         """
         expression_block -> '{' expression '}'
         Used for acceptor blocks that contain a single expression with placeholders.
         """
+        tok = self.current_token
         self.consume(TokenType.LEFT_BRACE)
         expr = self.expression()
         self.consume(TokenType.RIGHT_BRACE)
@@ -4130,6 +4181,7 @@ class FluxParser:
             {a = 10, b = 20}  // Named fields
             {10, 20}          // Positional (field order from struct definition)
         """
+        tok = self.current_token
         self.consume(TokenType.LEFT_BRACE)
         field_values = {}
         positional_values = []
@@ -4168,9 +4220,9 @@ class FluxParser:
         
         # Return StructLiteral with either named or positional values
         if is_positional:
-            return StructLiteral(field_values={}, positional_values=positional_values)
+            return StructLiteral(field_values={}, positional_values=positional_values).set_location(tok.line, tok.column)
         else:
-            return StructLiteral(field_values=field_values, positional_values=[])
+            return StructLiteral(field_values=field_values, positional_values=[]).set_location(tok.line, tok.column)
 
     def struct_body_item(self):
             if self.expect(TokenType.PUBLIC):
@@ -4192,6 +4244,7 @@ class FluxParser:
         """
         destructuring_assignment -> 'auto' '{' destructure_vars '}' '=' expression ('from' IDENTIFIER)?
         """
+        tok = self.current_token
         self.consume(TokenType.AUTO)
         self.consume(TokenType.LEFT_BRACE)
         
@@ -4221,7 +4274,7 @@ class FluxParser:
             source_type = Identifier(self.consume(TokenType.IDENTIFIER).value)
         
         is_explicit = any(isinstance(var, tuple) for var in variables)
-        return DestructuringAssignment(variables, source, source_type, is_explicit)
+        return DestructuringAssignment(variables, source, source_type, is_explicit).set_location(tok.line, tok.column)
 
 # Add main function for testing
 def main():

@@ -1557,8 +1557,14 @@ namespace standard
                     //   top word (bits 224-255): 0x7FFFFFFF
                     uint* pd = @p.digits[0];
 
-                    pd = [0xFFFFFFEDu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
-                          0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x7FFFFFFF];
+                    pd[0] = 0xFFFFFFEDu;
+                    pd[1] = 0xFFFFFFFFu;
+                    pd[2] = 0xFFFFFFFFu;
+                    pd[3] = 0xFFFFFFFFu;
+                    pd[4] = 0xFFFFFFFFu;
+                    pd[5] = 0xFFFFFFFFu;
+                    pd[6] = 0xFFFFFFFFu;
+                    pd[7] = 0x7FFFFFFFu;
 
                     p.length = 8;
                     p.negative = false;
