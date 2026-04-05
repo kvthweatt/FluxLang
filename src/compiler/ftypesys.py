@@ -4299,6 +4299,13 @@ class FunctionTypeHandler:
                         if converted_val.type == expected_type:
                             return converted_val
         
+        # Struct pointer to struct value: auto-load when passing a struct member by value.
+        # e.g. a.position yields Vec3* but the parameter expects Vec3 — load it.
+        if (isinstance(arg_val.type, ir.PointerType) and
+                arg_val.type.pointee == expected_type and
+                isinstance(expected_type, (ir.LiteralStructType, ir.IdentifiedStructType))):
+            return builder.load(arg_val, name=f"arg{arg_index}_load")
+
         # If we couldn't convert and types don't match, raise an error
         if arg_val.type != expected_type:
             raise TypeError(
@@ -5556,32 +5563,40 @@ class StructTypeHandler:
         
         # Pack field values
         if isinstance(llvm_struct_type, (ir.LiteralStructType, ir.IdentifiedStructType)):
-            # For proper struct types, build the constant directly with all field values
-            field_constants = []
+            # Codegen all field values first, tracking whether any are non-constant
+            field_vals = []
+            has_non_constant = False
             for i, (field_name, _, _, _) in enumerate(vtable.fields):
                 if field_name in field_values:
-                    # Generate the field value
                     field_value_expr = field_values[field_name]
                     field_value = field_value_expr.codegen(builder, module)
-                    # For constants, byteswap integers for big-endian layout, then append
-                    if isinstance(field_value, ir.Constant):
-                        if isinstance(field_value.type, ir.IntType) and field_value.type.width > 8:
-                            w = field_value.type.width
-                            nbytes = w // 8
-                            v = int(field_value.constant) & ((1 << w) - 1)
-                            swapped = int.from_bytes(v.to_bytes(nbytes, "big"), "little")
-                            field_value = ir.Constant(field_value.type, swapped)
-                        field_constants.append(field_value)
-                    else:
-                        # Non-constant value - we need to use insertvalue instructions
-                        # But for struct literals, all values should be constants
-                        raise ValueError(f"Struct literal field '{field_name}' must be a constant expression")
+                    if not isinstance(field_value, ir.Constant):
+                        has_non_constant = True
+                    field_vals.append(field_value)
                 else:
-                    # Use the zero value we created
-                    field_constants.append(instance.constant[i])
-            
-            # Create the final struct constant
-            instance = ir.Constant(llvm_struct_type, field_constants)
+                    field_vals.append(instance.constant[i])
+
+            if has_non_constant:
+                # Build from zeroed constant then insertvalue for each field
+                result = ir.Constant(llvm_struct_type, [instance.constant[i] for i in range(len(vtable.fields))])
+                for i, field_value in enumerate(field_vals):
+                    field_llvm_type = llvm_struct_type.elements[i]
+                    # Cast field value to the correct type if needed
+                    if field_value.type != field_llvm_type:
+                        if isinstance(field_value.type, ir.IntType) and isinstance(field_llvm_type, ir.IntType):
+                            if field_value.type.width < field_llvm_type.width:
+                                field_value = builder.zext(field_value, field_llvm_type)
+                            elif field_value.type.width > field_llvm_type.width:
+                                field_value = builder.trunc(field_value, field_llvm_type)
+                        elif isinstance(field_value.type, ir.FloatType) and isinstance(field_llvm_type, ir.DoubleType):
+                            field_value = builder.fpext(field_value, field_llvm_type)
+                        elif isinstance(field_value.type, ir.DoubleType) and isinstance(field_llvm_type, ir.FloatType):
+                            field_value = builder.fptrunc(field_value, field_llvm_type)
+                    result = builder.insert_value(result, field_value, i)
+                instance = result
+            else:
+                # All constants — build a constant struct directly
+                instance = ir.Constant(llvm_struct_type, field_vals)
         else:
             # For packed integer or byte array structs, use the old packing method
             for field_name, field_value_expr in field_values.items():

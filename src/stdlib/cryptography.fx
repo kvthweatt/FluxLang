@@ -1797,8 +1797,8 @@ namespace standard
                     for (i = 0; i < 64; i++)
                     {
                         k = (i < effective_key_len) ? effective_key[i] : (byte)0;
-                        ipad_key[i] = k ^^ (byte)0x36;
-                        opad_key[i] = k ^^ (byte)0x5C;
+                        ipad_key[i] = k `^^ (byte)0x36;
+                        opad_key[i] = k `^^ (byte)0x5C;
                     };
 
                     SHA256::sha256_init(@inner_ctx);

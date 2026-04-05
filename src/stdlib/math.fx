@@ -548,6 +548,22 @@ namespace standard
             return 0.0;
         };
 
+        // Arcsine - returns angle in radians in [-PI/2, PI/2]
+        // asin(x) = atan(x / sqrt(1 - x*x))
+        def asin(float x) -> float
+        {
+            if (x >= 1.0)  { return  PIF * 0.5; };
+            if (x <= -1.0) { return (0.0 - PIF) * 0.5; };
+            return atan(x / sqrt(1.0 - x * x));
+        };
+
+        // Arccosine - returns angle in radians in [0, PI]
+        // acos(x) = PI/2 - asin(x)
+        def acos(float x) -> float
+        {
+            return PIF * 0.5 - asin(x);
+        };
+
         // Exponential and logarithmic functions
         def exp(float x) -> float
         {

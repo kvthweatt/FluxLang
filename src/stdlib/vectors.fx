@@ -363,9 +363,9 @@ namespace standard
             return vec3_mul(onto, dot / len_sq);
         };
         
-        def vec3_reject(Vec3 v, Vec3 from) -> Vec3
+        def vec3_reject(Vec3 v, Vec3 xfrom) -> Vec3
         {
-            return vec3_sub(v, vec3_project(v, from));
+            return vec3_sub(v, vec3_project(v, xfrom));
         };
         
         def vec3_reflect(Vec3 v, Vec3 normal) -> Vec3
@@ -386,9 +386,9 @@ namespace standard
             return vec4_mul(onto, dot / len_sq);
         };
         
-        def vec4_reject(Vec4 v, Vec4 from) -> Vec4
+        def vec4_reject(Vec4 v, Vec4 xfrom) -> Vec4
         {
-            return vec4_sub(v, vec4_project(v, from));
+            return vec4_sub(v, vec4_project(v, xfrom));
         };
         
         def vec4_reflect(Vec4 v, Vec4 normal) -> Vec4
