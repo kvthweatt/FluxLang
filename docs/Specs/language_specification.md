@@ -1650,7 +1650,8 @@ def main() -> int
 };
 ```
 
-## **Callback:**
+## **Callbacks:**
+One of a few ways you can set up callbacks:
 ```
 #import "standard.fx";
 

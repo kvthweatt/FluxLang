@@ -23,6 +23,20 @@ namespace standard
             b `^^= a;
             a `^^= b;
         };
+
+        ///
+        Name: Null Swap
+
+        Swap if B is not null.
+        Takes two integer pointers, swaps the values at each address.
+        ///
+        operator (int* a, int* b)[<?>] -> void
+        {
+            if (*b is void) { return; };
+            a `^^= b;
+            b `^^= a;
+            a `^^= b;
+        };
     };
 };
 
