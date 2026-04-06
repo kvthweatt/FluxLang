@@ -712,8 +712,8 @@ class StringLiteral(Expression):
 _BUILTIN_OP_SYMBOL_MANGLE = {
     '%': 'pct',  '+': 'plus', '-': 'minus', '*': 'mul',
     '/': 'div',  '<': 'lt',   '>': 'gt',    '=': 'eq',
-    '&': 'amp',  '|': 'pipe', '^^': 'xor',   '!': 'not',
-    '?': 'qst',  '@': 'at',   '~': 'tilde', '^': 'exp',
+    '&': 'amp',  '|': 'pipe', '^': 'xor',   '!': 'not',
+    '?': 'qst',  '@': 'at',   '~': 'tilde',
 }
 
 def _mangle_builtin_op(symbol: str) -> str:
@@ -2159,6 +2159,40 @@ class FunctionCall(Expression):
         # Step 3: Get current namespace
         current_ns = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ""
         
+        # Step 3b: For custom operator calls, if a pointer-param overload exists
+        # and all args are identifiers with matching alloca types, pass addresses
+        # instead of loaded values so mutations write back to the caller's variables.
+        _op_overload_key = None
+        if hasattr(module, '_function_overloads'):
+            for _k in module._function_overloads:
+                if _k == self.name or _k.endswith('__' + self.name):
+                    _op_overload_key = _k
+                    break
+        if (_op_overload_key is not None and
+                len(self.arguments) == len(arg_vals)):
+            for _ov in module._function_overloads[_op_overload_key]:
+                _func = _ov['function']
+                _pts = [p.type for p in _func.args]
+                if len(_pts) != len(arg_vals):
+                    continue
+                # All params must be scalar pointer types (pass-by-ref overload)
+                if not all(isinstance(pt, ir.PointerType) and
+                           not isinstance(pt.pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType))
+                           for pt in _pts):
+                    continue
+                # All args must be Identifiers with allocas that match the param pointer types
+                _ptrs = []
+                _ok = True
+                for arg, pt in zip(self.arguments, _pts):
+                    if not isinstance(arg, Identifier):
+                        _ok = False; break
+                    _alloca = module.symbol_table.get_llvm_value(arg.name)
+                    if _alloca is None or _alloca.type != pt:
+                        _ok = False; break
+                    _ptrs.append(_alloca)
+                if _ok:
+                    return builder.call(_func, _ptrs, name="op_overload_result")
+
         # Step 4: SINGLE RESOLUTION CALL - handles everything
         func = TypeResolver.resolve_function(module, self.name, current_ns, arg_vals)
 
