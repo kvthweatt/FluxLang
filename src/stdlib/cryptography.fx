@@ -1557,14 +1557,8 @@ namespace standard
                     //   top word (bits 224-255): 0x7FFFFFFF
                     uint* pd = @p.digits[0];
 
-                    pd[0] = 0xFFFFFFEDu;
-                    pd[1] = 0xFFFFFFFFu;
-                    pd[2] = 0xFFFFFFFFu;
-                    pd[3] = 0xFFFFFFFFu;
-                    pd[4] = 0xFFFFFFFFu;
-                    pd[5] = 0xFFFFFFFFu;
-                    pd[6] = 0xFFFFFFFFu;
-                    pd[7] = 0x7FFFFFFFu;
+                    pd = [0xFFFFFFEDu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+                          0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x7FFFFFFF];
 
                     p.length = 8;
                     p.negative = false;
@@ -1797,8 +1791,8 @@ namespace standard
                     for (i = 0; i < 64; i++)
                     {
                         k = (i < effective_key_len) ? effective_key[i] : (byte)0;
-                        ipad_key[i] = k `^^ (byte)0x36;
-                        opad_key[i] = k `^^ (byte)0x5C;
+                        ipad_key[i] = k ^^ (byte)0x36;
+                        opad_key[i] = k ^^ (byte)0x5C;
                     };
 
                     SHA256::sha256_init(@inner_ctx);
@@ -1958,6 +1952,783 @@ namespace standard
 
             }; // HKDF
         }; // kdf
+
+        namespace ECDSA
+        {
+            // =========================================================================
+            // ECDSA over P-256 (secp256r1 / prime256v1)
+            //
+            // Curve:  y² = x³ - 3x + b  over  GF(p)
+            //
+            //   p  = 2^256 - 2^224 + 2^192 + 2^96 - 1
+            //   n  = FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+            //   b  = 5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
+            //   Gx = 6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296
+            //   Gy = 4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5
+            //
+            // Public API:
+            //   ecdsa_p256_load_scalar(BigInt* out, byte* src_be32)
+            //   ecdsa_p256_store_scalar(byte* dst_be32, BigInt* src)
+            //   ecdsa_p256_point_mul(BigInt* rx, BigInt* ry, BigInt* k, BigInt* px, BigInt* py)
+            //   ecdsa_p256_pubkey(byte* qx32, byte* qy32, byte* privkey32)
+            //   ecdsa_p256_sign(byte* sig_r32, byte* sig_s32, byte* privkey32,
+            //                   byte* hash32, byte* nonce32) -> bool
+            //   ecdsa_p256_verify(byte* sig_r32, byte* sig_s32, byte* pubx32, byte* puby32,
+            //                     byte* hash32) -> bool
+            //   ecdsa_p256_encode_der(byte* der_out, int* der_len, byte* r32, byte* s32)
+            //   ecdsa_p256_decode_der(byte* r32, byte* s32, byte* der_in, int der_len) -> bool
+            // =========================================================================
+
+            // ---- Curve constants (global so they are not zero-initialized away) ----
+
+            // p = FFFFFFFF 00000001 00000000 00000000 00000000 FFFFFFFF FFFFFFFF FFFFFFFF
+            global uint[8] P256_P = [
+                0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x00000000u,
+                0x00000000u, 0x00000000u, 0x00000001u, 0xFFFFFFFFu
+            ];
+
+            // n = FFFFFFFF 00000000 FFFFFFFF FFFFFFFF BCE6FAAD A7179E84 F3B9CAC2 FC632551
+            global uint[8] P256_N = [
+                0xFC632551u, 0xF3B9CAC2u, 0xA7179E84u, 0xBCE6FAADu,
+                0xFFFFFFFFu, 0xFFFFFFFFu, 0x00000000u, 0xFFFFFFFFu
+            ];
+
+            // b = 5AC635D8 AA3A93E7 B3EBBD55 769886BC 651D06B0 CC53B0F6 3BCE3C3E 27D2604B
+            global uint[8] P256_B = [
+                0x27D2604Bu, 0x3BCE3C3Eu, 0xCC53B0F6u, 0x651D06B0u,
+                0x769886BCu, 0xB3EBBD55u, 0xAA3A93E7u, 0x5AC635D8u
+            ];
+
+            // Gx = 6B17D1F2 E12C4247 F8BCE6E5 63A440F2 77037D81 2DEB33A0 F4A13945 D898C296
+            global uint[8] P256_GX = [
+                0xD898C296u, 0xF4A13945u, 0x2DEB33A0u, 0x77037D81u,
+                0x63A440F2u, 0xF8BCE6E5u, 0xE12C4247u, 0x6B17D1F2u
+            ];
+
+            // Gy = 4FE342E2 FE1A7F9B 8EE7EB4A 7C0F9E16 2BCE3357 6B315ECE CBB64068 37BF51F5
+            global uint[8] P256_GY = [
+                0x37BF51F5u, 0xCBB64068u, 0x6B315ECEu, 0x2BCE3357u,
+                0x7C0F9E16u, 0x8EE7EB4Au, 0xFE1A7F9Bu, 0x4FE342E2u
+            ];
+
+            // ---- Load / store (big-endian 32-byte scalars, per ECDSA convention) ----
+
+            def ecdsa_p256_load_scalar(BigInt* out, byte* src) -> void
+            {
+                uint i, j;
+                uint* d = @out.digits[0];
+                for (i = 0; i < 9; i++) { d[i] = 0; };
+                // 32 bytes big-endian -> 8 uint32 little-endian limbs
+                for (i = 0; i < 8; i++)
+                {
+                    j = (7 - i) * 4;
+                    d[i] = ((uint)src[j]     << 24) |
+                           ((uint)src[j + 1] << 16) |
+                           ((uint)src[j + 2] << 8)  |
+                            (uint)src[j + 3];
+                };
+                out.length = 8;
+                out.negative = false;
+                math::bigint::bigint_normalize(out);
+                return;
+            };
+
+            def ecdsa_p256_store_scalar(byte* dst, BigInt* src) -> void
+            {
+                uint i, j;
+                uint* d = @src.digits[0];
+                uint word;
+                for (i = 0; i < 8; i++)
+                {
+                    j = (7 - i) * 4;
+                    word = (i < src.length) ? d[i] : 0u;
+                    dst[j]     = (byte)((word >> 24) & 0xFF);
+                    dst[j + 1] = (byte)((word >> 16) & 0xFF);
+                    dst[j + 2] = (byte)((word >> 8)  & 0xFF);
+                    dst[j + 3] = (byte)(word & 0xFF);
+                };
+                return;
+            };
+
+            // ---- Field helpers (mod p) ----
+
+            def p256_set_p(BigInt* out) -> void
+            {
+                uint* d = @out.digits[0];
+                uint* s = @P256_P[0];
+                uint i;
+                for (i = 0; i < 8; i++) { d[i] = s[i]; };
+                out.length = 8;
+                out.negative = false;
+                math::bigint::bigint_normalize(out);
+                return;
+            };
+
+            def p256_set_n(BigInt* out) -> void
+            {
+                uint* d = @out.digits[0];
+                uint* s = @P256_N[0];
+                uint i;
+                for (i = 0; i < 8; i++) { d[i] = s[i]; };
+                out.length = 8;
+                out.negative = false;
+                math::bigint::bigint_normalize(out);
+                return;
+            };
+
+            def p256_fp_add(BigInt* out, BigInt* a, BigInt* b) -> void
+            {
+                BigInt p, tmp;
+                p256_set_p(@p);
+                math::bigint::bigint_add(@tmp, a, b);
+                math::bigint::bigint_mod(out, @tmp, @p);
+                return;
+            };
+
+            def p256_fp_sub(BigInt* out, BigInt* a, BigInt* b) -> void
+            {
+                BigInt p, tmp;
+                p256_set_p(@p);
+                math::bigint::bigint_sub(@tmp, a, b);
+                if (tmp.negative)
+                {
+                    math::bigint::bigint_add(@tmp, @tmp, @p);
+                    if (tmp.negative)
+                    {
+                        math::bigint::bigint_add(out, @tmp, @p);
+                    }
+                    else
+                    {
+                        math::bigint::bigint_copy(out, @tmp);
+                    };
+                }
+                else
+                {
+                    math::bigint::bigint_mod(out, @tmp, @p);
+                };
+                return;
+            };
+
+            def p256_fp_mul(BigInt* out, BigInt* a, BigInt* b) -> void
+            {
+                BigInt p, tmp;
+                p256_set_p(@p);
+                math::bigint::bigint_mul(@tmp, a, b);
+                math::bigint::bigint_mod(out, @tmp, @p);
+                return;
+            };
+
+            def p256_fp_sq(BigInt* out, BigInt* a) -> void
+            {
+                p256_fp_mul(out, a, a);
+                return;
+            };
+
+            // Modular inverse in GF(p): out = a^(p-2) mod p  (Fermat's little theorem)
+            def p256_fp_inv(BigInt* out, BigInt* a) -> void
+            {
+                BigInt p, exp, two, tmp;
+                uint i, j;
+                uint word;
+                uint* expd;
+
+                p256_set_p(@p);
+                math::bigint::bigint_from_uint(@two, 2);
+                math::bigint::bigint_sub(@exp, @p, @two);
+
+                math::bigint::bigint_one(out);
+                math::bigint::bigint_copy(@tmp, a);
+
+                expd = @exp.digits[0];
+                for (i = 0; i < exp.length; i++)
+                {
+                    word = expd[i];
+                    for (j = 0; j < 32; j++)
+                    {
+                        if ((word & 1) != 0)
+                        {
+                            p256_fp_mul(out, out, @tmp);
+                        };
+                        word = word >> 1;
+                        p256_fp_sq(@tmp, @tmp);
+                    };
+                };
+                return;
+            };
+
+            // ---- Projective (Jacobian) point arithmetic ----
+            //
+            // A Jacobian point (X:Y:Z) represents affine (X/Z², Y/Z³).
+            // The point at infinity is represented as Z = 0.
+
+            // Point double in Jacobian coordinates over P-256.
+            // Algorithm: standard Jacobian doubling for a = -3 curves.
+            def p256_point_dbl(BigInt* rx, BigInt* ry, BigInt* rz,
+                               BigInt* px, BigInt* py, BigInt* pz) -> void
+            {
+                // Copy inputs to locals first to handle in-place calls (rx==px etc.)
+                BigInt X, Y, Z, t1, t2, t3, t4, t5, three, two;
+
+                // If Z = 0 the point is at infinity, return as-is
+                if (math::bigint::bigint_is_zero(pz))
+                {
+                    math::bigint::bigint_copy(rx, px);
+                    math::bigint::bigint_copy(ry, py);
+                    math::bigint::bigint_copy(rz, pz);
+                    return;
+                };
+
+                math::bigint::bigint_copy(@X, px);
+                math::bigint::bigint_copy(@Y, py);
+                math::bigint::bigint_copy(@Z, pz);
+
+                // Standard Jacobian doubling for a = -3 curve (P-256)
+                // Reference: NIST SP 800-186, Appendix D, or
+                //   https://hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-3.html#doubling-dbl-2001-b
+                //
+                // delta = Z^2
+                // gamma = Y^2
+                // beta  = X * gamma
+                // alpha = 3 * (X - delta) * (X + delta)   [uses a=-3]
+                // X3    = alpha^2 - 8*beta
+                // Z3    = (Y + Z)^2 - gamma - delta
+                // Y3    = alpha * (4*beta - X3) - 8*gamma^2
+                //
+                // t1 = delta = Z^2
+                p256_fp_sq(@t1, @Z);
+                // t2 = gamma = Y^2
+                p256_fp_sq(@t2, @Y);
+                // t3 = beta = X * gamma
+                p256_fp_mul(@t3, @X, @t2);
+                // t4 = X - delta
+                p256_fp_sub(@t4, @X, @t1);
+                // t5 = X + delta
+                p256_fp_add(@t5, @X, @t1);
+                // t4 = (X - delta)(X + delta)
+                p256_fp_mul(@t4, @t4, @t5);
+                // t4 = alpha = 3 * (X - delta)(X + delta)
+                math::bigint::bigint_from_uint(@three, 3);
+                p256_fp_mul(@t4, @three, @t4);
+                // rz = Z3 = (Y + Z)^2 - gamma - delta
+                p256_fp_add(@t5, @Y, @Z);
+                p256_fp_sq(@t5, @t5);
+                p256_fp_sub(@t5, @t5, @t2);
+                p256_fp_sub(rz, @t5, @t1);
+                // t5 = 8 * beta
+                math::bigint::bigint_from_uint(@two, 8);
+                p256_fp_mul(@t5, @t3, @two);
+                // rx = X3 = alpha^2 - 8*beta
+                p256_fp_sq(@t1, @t4);
+                p256_fp_sub(rx, @t1, @t5);
+                // t3 = 4*beta - X3
+                math::bigint::bigint_from_uint(@two, 4);
+                p256_fp_mul(@t3, @t3, @two);
+                p256_fp_sub(@t3, @t3, rx);
+                // t2 = 8 * gamma^2
+                p256_fp_sq(@t2, @t2);
+                math::bigint::bigint_from_uint(@two, 8);
+                p256_fp_mul(@t2, @t2, @two);
+                // ry = Y3 = alpha * (4*beta - X3) - 8*gamma^2
+                p256_fp_mul(@t3, @t4, @t3);
+                p256_fp_sub(ry, @t3, @t2);
+                return;
+            };
+
+            // Point add in Jacobian coordinates (P + Q, both may be the point at infinity).
+            // Uses the standard Jacobian mixed / unified add formula.
+            def p256_point_add(BigInt* rx, BigInt* ry, BigInt* rz,
+                               BigInt* px, BigInt* py, BigInt* pz,
+                               BigInt* qx, BigInt* qy, BigInt* qz) -> void
+            {
+                // Copy all inputs to locals first to handle in-place calls
+                BigInt PX, PY, PZ, QX, QY, QZ;
+                BigInt u1, u2, s1, s2, h, r, h2, h3, u1h2, tmp, two;
+                BigInt dbl_t1, dbl_t2, dbl_t3, dbl_t4, dbl_three, dbl_two, dbl_t5;
+
+                // Handle infinity inputs
+                if (math::bigint::bigint_is_zero(pz))
+                {
+                    math::bigint::bigint_copy(rx, qx);
+                    math::bigint::bigint_copy(ry, qy);
+                    math::bigint::bigint_copy(rz, qz);
+                    return;
+                };
+                if (math::bigint::bigint_is_zero(qz))
+                {
+                    math::bigint::bigint_copy(rx, px);
+                    math::bigint::bigint_copy(ry, py);
+                    math::bigint::bigint_copy(rz, pz);
+                    return;
+                };
+
+                math::bigint::bigint_copy(@PX, px);
+                math::bigint::bigint_copy(@PY, py);
+                math::bigint::bigint_copy(@PZ, pz);
+                math::bigint::bigint_copy(@QX, qx);
+                math::bigint::bigint_copy(@QY, qy);
+                math::bigint::bigint_copy(@QZ, qz);
+
+                math::bigint::bigint_from_uint(@two, 2);
+
+                // u1 = px * qz²
+                p256_fp_sq(@tmp, @QZ);
+                p256_fp_mul(@u1, @PX, @tmp);
+                // u2 = qx * pz²
+                p256_fp_sq(@tmp, @PZ);
+                p256_fp_mul(@u2, @QX, @tmp);
+                // s1 = py * qz³
+                p256_fp_sq(@tmp, @QZ);
+                p256_fp_mul(@s1, @tmp, @QZ);
+                p256_fp_mul(@s1, @PY, @s1);
+                // s2 = qy * pz³
+                p256_fp_sq(@tmp, @PZ);
+                p256_fp_mul(@s2, @tmp, @PZ);
+                p256_fp_mul(@s2, @QY, @s2);
+                // h = u2 - u1
+                p256_fp_sub(@h, @u2, @u1);
+                // r = s2 - s1
+                p256_fp_sub(@r, @s2, @s1);
+
+                // If h = 0: either equal points (double inline) or P = -Q (return infinity)
+                if (math::bigint::bigint_is_zero(@h))
+                {
+                    if (math::bigint::bigint_is_zero(@r))
+                    {
+                        // P = Q: inline double (same formula as p256_point_dbl)
+                        // dbl_t1=delta, dbl_t2=gamma, dbl_t3=beta, dbl_t4=alpha
+                        p256_fp_sq(@dbl_t1, @PZ);
+                        p256_fp_sq(@dbl_t2, @PY);
+                        p256_fp_mul(@dbl_t3, @PX, @dbl_t2);
+                        p256_fp_sub(@dbl_t4, @PX, @dbl_t1);
+                        p256_fp_add(@dbl_t5, @PX, @dbl_t1);
+                        p256_fp_mul(@dbl_t4, @dbl_t4, @dbl_t5);
+                        math::bigint::bigint_from_uint(@dbl_three, 3);
+                        p256_fp_mul(@dbl_t4, @dbl_three, @dbl_t4);
+                        p256_fp_add(@dbl_t5, @PY, @PZ);
+                        p256_fp_sq(@dbl_t5, @dbl_t5);
+                        p256_fp_sub(@dbl_t5, @dbl_t5, @dbl_t2);
+                        p256_fp_sub(rz, @dbl_t5, @dbl_t1);
+                        math::bigint::bigint_from_uint(@dbl_two, 8);
+                        p256_fp_mul(@dbl_t5, @dbl_t3, @dbl_two);
+                        p256_fp_sq(@dbl_t1, @dbl_t4);
+                        p256_fp_sub(rx, @dbl_t1, @dbl_t5);
+                        math::bigint::bigint_from_uint(@dbl_two, 4);
+                        p256_fp_mul(@dbl_t3, @dbl_t3, @dbl_two);
+                        p256_fp_sub(@dbl_t3, @dbl_t3, rx);
+                        p256_fp_sq(@dbl_t2, @dbl_t2);
+                        math::bigint::bigint_from_uint(@dbl_two, 8);
+                        p256_fp_mul(@dbl_t2, @dbl_t2, @dbl_two);
+                        p256_fp_mul(@dbl_t3, @dbl_t4, @dbl_t3);
+                        p256_fp_sub(ry, @dbl_t3, @dbl_t2);
+                    }
+                    else
+                    {
+                        // P = -Q: return infinity
+                        math::bigint::bigint_zero(rx);
+                        math::bigint::bigint_zero(ry);
+                        math::bigint::bigint_zero(rz);
+                    };
+                    return;
+                };
+
+                // h2 = h²,  h3 = h³
+                p256_fp_sq(@h2, @h);
+                p256_fp_mul(@h3, @h2, @h);
+                // u1h2 = u1 * h²
+                p256_fp_mul(@u1h2, @u1, @h2);
+
+                // rz = pz * qz * h
+                p256_fp_mul(@tmp, pz, qz);
+                p256_fp_mul(rz, @tmp, @h);
+
+                // rx = r² - h³ - 2*u1h2
+                p256_fp_sq(@tmp, @r);
+                p256_fp_sub(rx, @tmp, @h3);
+                p256_fp_mul(@tmp, @u1h2, @two);
+                p256_fp_sub(rx, rx, @tmp);
+
+                // ry = r*(u1h2 - rx) - s1*h3
+                p256_fp_sub(@tmp, @u1h2, rx);
+                p256_fp_mul(ry, @r, @tmp);
+                p256_fp_mul(@tmp, @s1, @h3);
+                p256_fp_sub(ry, ry, @tmp);
+                return;
+            };
+
+            // Scalar multiplication: R = k * P  (double-and-add, left-to-right)
+            // Result returned in affine coordinates (rx, ry); returns false if result
+            // is the point at infinity.
+            def ecdsa_p256_point_mul(BigInt* rx, BigInt* ry,
+                                     BigInt* k,
+                                     BigInt* px, BigInt* py) -> bool
+            {
+                BigInt qx, qy, qz, tx, ty, tz, one, zinv, zinv2, zinv3;
+                uint i, j;
+                uint word, bit;
+                uint* kd;
+
+                math::bigint::bigint_zero(@qx);
+                math::bigint::bigint_zero(@qy);
+                math::bigint::bigint_zero(@qz);   // infinity
+
+                // tx/ty/tz = input point in Jacobian (Z = 1)
+                math::bigint::bigint_copy(@tx, px);
+                math::bigint::bigint_copy(@ty, py);
+                math::bigint::bigint_one(@tz);
+
+                kd = @k.digits[0];
+
+                // Iterate from MSB of k down to LSB
+                i = k.length;
+                while (i > 0)
+                {
+                    i--;
+                    word = kd[i];
+                    j = 32;
+                    while (j > 0)
+                    {
+                        j--;
+                        bit = (word >> j) & 1;
+
+                        // Always double
+                        p256_point_dbl(@qx, @qy, @qz, @qx, @qy, @qz);
+
+                        // Conditionally add
+                        if (bit != 0)
+                        {
+                            p256_point_add(@qx, @qy, @qz,
+                                           @qx, @qy, @qz,
+                                           @tx, @ty, @tz);
+                        };
+                    };
+                };
+
+                // Check for infinity
+                if (math::bigint::bigint_is_zero(@qz))
+                {
+                    math::bigint::bigint_zero(rx);
+                    math::bigint::bigint_zero(ry);
+                    return false;
+                };
+
+                // Convert Jacobian -> affine: x = X*Z^(-2), y = Y*Z^(-3)
+                p256_fp_inv(@zinv, @qz);
+                p256_fp_sq(@zinv2, @zinv);
+                p256_fp_mul(@zinv3, @zinv2, @zinv);
+                p256_fp_mul(rx, @qx, @zinv2);
+                p256_fp_mul(ry, @qy, @zinv3);
+                return true;
+            };
+
+            // ---- Public key derivation ----
+
+            // Compute public key Q = d*G from 32-byte big-endian private key.
+            // Writes 32-byte big-endian qx and qy.
+            def ecdsa_p256_pubkey(byte* qx32, byte* qy32, byte* privkey32) -> bool
+            {
+                BigInt d, gx, gy, rx, ry;
+                uint* gxd, gyd, pgx, pgy;
+                uint i;
+
+                ecdsa_p256_load_scalar(@d, privkey32);
+
+                // Load generator directly from little-endian limb arrays
+                gxd = @gx.digits[0];
+                gyd = @gy.digits[0];
+                pgx = @P256_GX[0];
+                pgy = @P256_GY[0];
+                for (i = 0; i < 8; i++) { gxd[i] = pgx[i]; };
+                for (i = 0; i < 8; i++) { gyd[i] = pgy[i]; };
+                gx.length = 8; gx.negative = false;
+                gy.length = 8; gy.negative = false;
+                math::bigint::bigint_normalize(@gx);
+                math::bigint::bigint_normalize(@gy);
+
+                if (!ecdsa_p256_point_mul(@rx, @ry, @d, @gx, @gy))
+                {
+                    return false;
+                };
+
+                ecdsa_p256_store_scalar(qx32, @rx);
+                ecdsa_p256_store_scalar(qy32, @ry);
+                return true;
+            };
+
+            // ---- Sign ----
+
+            // Sign a 32-byte hash with a 32-byte big-endian private key and nonce k.
+            // nonce32 must be a secret, uniformly random value in [1, n-1].
+            // Writes 32-byte big-endian r and s.
+            // Returns false if signing fails (r or s is zero — resample nonce).
+            def ecdsa_p256_sign(byte* sig_r32, byte* sig_s32,
+                                byte* privkey32,
+                                byte* hash32,
+                                byte* nonce32) -> bool
+            {
+                BigInt k, d, z, n, gx, gy, rx, ry;
+                BigInt r, s, kinv, tmp;
+                uint* gxd, gyd, pgx, pgy;
+                uint i;
+
+                ecdsa_p256_load_scalar(@k, nonce32);
+                ecdsa_p256_load_scalar(@d, privkey32);
+                ecdsa_p256_load_scalar(@z, hash32);
+                p256_set_n(@n);
+
+                // Load generator
+                gxd = @gx.digits[0];
+                gyd = @gy.digits[0];
+                pgx = @P256_GX[0];
+                pgy = @P256_GY[0];
+                for (i = 0; i < 8; i++) { gxd[i] = pgx[i]; };
+                for (i = 0; i < 8; i++) { gyd[i] = pgy[i]; };
+                gx.length = 8; gx.negative = false;
+                gy.length = 8; gy.negative = false;
+                math::bigint::bigint_normalize(@gx);
+                math::bigint::bigint_normalize(@gy);
+
+                // (rx, ry) = k * G
+                if (!ecdsa_p256_point_mul(@rx, @ry, @k, @gx, @gy))
+                {
+                    return false;
+                };
+
+                // r = rx mod n
+                math::bigint::bigint_mod(@r, @rx, @n);
+                if (math::bigint::bigint_is_zero(@r))
+                {
+                    return false;
+                };
+
+                // s = k^(-1) * (z + r*d) mod n
+                if (!math::bigint::bigint_modinv(@kinv, @k, @n))
+                {
+                    return false;
+                };
+
+                math::bigint::bigint_mul(@tmp, @r, @d);
+                math::bigint::bigint_mod(@tmp, @tmp, @n);
+                math::bigint::bigint_add(@tmp, @z, @tmp);
+                math::bigint::bigint_mod(@tmp, @tmp, @n);
+                math::bigint::bigint_mul(@s, @kinv, @tmp);
+                math::bigint::bigint_mod(@s, @s, @n);
+
+                if (math::bigint::bigint_is_zero(@s))
+                {
+                    return false;
+                };
+
+                ecdsa_p256_store_scalar(sig_r32, @r);
+                ecdsa_p256_store_scalar(sig_s32, @s);
+                return true;
+            };
+
+            // ---- Verify ----
+
+            // Verify an ECDSA-P256 signature.
+            // pubx32, puby32 : 32-byte big-endian affine public key coordinates.
+            // sig_r32, sig_s32 : 32-byte big-endian signature components.
+            // hash32 : 32-byte message hash.
+            // Returns true if the signature is valid.
+            def ecdsa_p256_verify(byte* sig_r32, byte* sig_s32,
+                                  byte* pubx32,  byte* puby32,
+                                  byte* hash32) -> bool
+            {
+                BigInt r, s, z, n, qx, qy, gx, gy;
+                BigInt sinv, u1, u2;
+                BigInt r1x, r1y, r2x, r2y, rx, ry;
+                BigInt one, ax, ay, az, bx, by, bz, outx, outy, outz, zinv, zinv2;
+                uint* gxd, gyd, pgx, pgy;
+                uint i;
+
+                ecdsa_p256_load_scalar(@r, sig_r32);
+                ecdsa_p256_load_scalar(@s, sig_s32);
+                ecdsa_p256_load_scalar(@z, hash32);
+                ecdsa_p256_load_scalar(@qx, pubx32);
+                ecdsa_p256_load_scalar(@qy, puby32);
+                p256_set_n(@n);
+
+                // Reject r or s outside [1, n-1]
+                if (math::bigint::bigint_is_zero(@r)) { return false; };
+                if (math::bigint::bigint_is_zero(@s)) { return false; };
+                if (math::bigint::bigint_cmp(@r, @n) >= 0) { return false; };
+                if (math::bigint::bigint_cmp(@s, @n) >= 0) { return false; };
+
+                // sinv = s^(-1) mod n
+                if (!math::bigint::bigint_modinv(@sinv, @s, @n))
+                {
+                    return false;
+                };
+
+                // u1 = z * sinv mod n
+                math::bigint::bigint_mul(@u1, @z, @sinv);
+                math::bigint::bigint_mod(@u1, @u1, @n);
+
+                // u2 = r * sinv mod n
+                math::bigint::bigint_mul(@u2, @r, @sinv);
+                math::bigint::bigint_mod(@u2, @u2, @n);
+
+                // Load generator
+                gxd = @gx.digits[0];
+                gyd = @gy.digits[0];
+                pgx = @P256_GX[0];
+                pgy = @P256_GY[0];
+                for (i = 0; i < 8; i++) { gxd[i] = pgx[i]; };
+                for (i = 0; i < 8; i++) { gyd[i] = pgy[i]; };
+                gx.length = 8; gx.negative = false;
+                gy.length = 8; gy.negative = false;
+                math::bigint::bigint_normalize(@gx);
+                math::bigint::bigint_normalize(@gy);
+
+                // R1 = u1 * G,  R2 = u2 * Q
+                if (!ecdsa_p256_point_mul(@r1x, @r1y, @u1, @gx, @gy)) { return false; };
+                if (!ecdsa_p256_point_mul(@r2x, @r2y, @u2, @qx, @qy)) { return false; };
+
+                // R = R1 + R2  (affine add via Jacobian with Z=1)
+                math::bigint::bigint_one(@one);
+                math::bigint::bigint_copy(@ax, @r1x);
+                math::bigint::bigint_copy(@ay, @r1y);
+                math::bigint::bigint_one(@az);
+                math::bigint::bigint_copy(@bx, @r2x);
+                math::bigint::bigint_copy(@by, @r2y);
+                math::bigint::bigint_one(@bz);
+                p256_point_add(@outx, @outy, @outz,
+                               @ax, @ay, @az,
+                               @bx, @by, @bz);
+
+                if (math::bigint::bigint_is_zero(@outz)) { return false; };
+
+                // Convert to affine
+                p256_fp_inv(@zinv, @outz);
+                p256_fp_sq(@zinv2, @zinv);
+                p256_fp_mul(@rx, @outx, @zinv2);
+
+                // rx mod n == r?
+                math::bigint::bigint_mod(@rx, @rx, @n);
+                return (math::bigint::bigint_cmp(@rx, @r) == 0);
+            };
+
+            // ---- DER encoding / decoding ----
+
+            // Encode (r, s) as a DER SEQUENCE { INTEGER r, INTEGER s }.
+            // der_out must be at least 72 bytes.
+            // der_len receives the actual encoded length.
+            def ecdsa_p256_encode_der(byte* der_out, int* der_len, byte* r32, byte* s32) -> void
+            {
+                // Each 32-byte scalar may need a leading 0x00 pad if high bit is set.
+                byte[33] rbuf, sbuf;
+                int rlen, slen, total, i;
+
+                // Copy r, inserting leading zero if MSB is set
+                rlen = 32;
+                if ((r32[0] & (byte)0x80) != (byte)0)
+                {
+                    rbuf[0] = (byte)0;
+                    for (i = 0; i < 32; i++) { rbuf[i + 1] = r32[i]; };
+                    rlen = 33;
+                }
+                else
+                {
+                    for (i = 0; i < 32; i++) { rbuf[i] = r32[i]; };
+                };
+
+                // Copy s, inserting leading zero if MSB is set
+                slen = 32;
+                if ((s32[0] & (byte)0x80) != (byte)0)
+                {
+                    sbuf[0] = (byte)0;
+                    for (i = 0; i < 32; i++) { sbuf[i + 1] = s32[i]; };
+                    slen = 33;
+                }
+                else
+                {
+                    for (i = 0; i < 32; i++) { sbuf[i] = s32[i]; };
+                };
+
+                // SEQUENCE { INTEGER(rbuf[0..rlen-1]), INTEGER(sbuf[0..slen-1]) }
+                total = 2 + rlen + 2 + slen;
+                int pos;
+                der_out[pos] = (byte)0x30;         // SEQUENCE tag
+                pos = 1;
+                der_out[pos] = (byte)total;
+                pos = 2;
+                der_out[pos] = (byte)0x02;         // INTEGER tag
+                pos = 3;
+                der_out[pos] = (byte)rlen;
+                pos = 4;
+                for (i = 0; i < rlen; i++) { der_out[pos] = rbuf[i]; pos = pos + 1; };
+                der_out[pos] = (byte)0x02;         // INTEGER tag
+                pos = pos + 1;
+                der_out[pos] = (byte)slen;
+                pos = pos + 1;
+                for (i = 0; i < slen; i++) { der_out[pos] = sbuf[i]; pos = pos + 1; };
+
+                *der_len = 2 + total;
+                return;
+            };
+
+            // Decode a DER-encoded signature into raw 32-byte big-endian r and s.
+            // Returns false if the encoding is malformed.
+            def ecdsa_p256_decode_der(byte* r32, byte* s32, byte* der_in, int der_len) -> bool
+            {
+                int pos, seq_len, tag, ilen, pad, i;
+
+                if (der_len < 8) { return false; };
+
+                // SEQUENCE tag
+                if (der_in[pos] != (byte)0x30) { return false; };
+                pos = 1;
+                seq_len = (int)der_in[pos];
+                pos = 2;
+                if (seq_len + 2 != der_len) { return false; };
+
+                // First INTEGER (r)
+                if (der_in[pos] != (byte)0x02) { return false; };
+                pos = pos + 1;
+                ilen = (int)der_in[pos];
+                pos = pos + 1;
+                if (ilen < 1 | ilen > 33) { return false; };
+
+                // Strip optional leading zero pad
+                pad = 0;
+                if (ilen == 33)
+                {
+                    if (der_in[pos] != (byte)0) { return false; };
+                    pad = 1;
+                    ilen = 32;
+                    pos = pos + 1;
+                };
+
+                // Zero-fill r32 then copy (right-aligned if fewer than 32 bytes)
+                for (i = 0; i < 32; i++) { r32[i] = (byte)0; };
+                int roff = 32 - ilen;
+                for (i = 0; i < ilen; i++) { r32[roff + i] = der_in[pos + i]; };
+                pos = pos + ilen;
+
+                // Second INTEGER (s)
+                if (der_in[pos] != (byte)0x02) { return false; };
+                pos = pos + 1;
+                ilen = (int)der_in[pos];
+                pos = pos + 1;
+                if (ilen < 1 | ilen > 33) { return false; };
+
+                pad = 0;
+                if (ilen == 33)
+                {
+                    if (der_in[pos] != (byte)0) { return false; };
+                    pad = 1;
+                    ilen = 32;
+                    pos = pos + 1;
+                };
+
+                for (i = 0; i < 32; i++) { s32[i] = (byte)0; };
+                int soff = 32 - ilen;
+                for (i = 0; i < ilen; i++) { s32[soff + i] = der_in[pos + i]; };
+
+                return true;
+            };
+
+        }; // ECDSA
     };
 };
 

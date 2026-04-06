@@ -2880,7 +2880,11 @@ class ArrayTypeHandler:
                 const_elements.append(llvm_val)
             
             else:
-                raise ValueError(f"Cannot create global initializer for element type: {type(elem)}")
+                line = getattr(array_literal, 'source_line', 0)
+                col  = getattr(array_literal, 'source_col',  0)
+                elem_line = getattr(elem, 'source_line', line)
+                elem_col  = getattr(elem, 'source_col',  col)
+                raise ValueError(f"{elem_line}:{elem_col}: Cannot create global initializer for element type: {type(elem)}")
         
         # Pad with zeros if needed
         while len(const_elements) < llvm_type.count:
@@ -5350,9 +5354,44 @@ class StructTypeHandler:
                     else:
                         # Default fallback
                         bit_width = 8 * llvm_type.count
-                        alignment = 8
+                elif isinstance(llvm_type, (ir.IdentifiedStructType, ir.LiteralStructType)):
+                    # Nested struct — recursively sum element sizes
+                    def _struct_bits(st):
+                        total = 0
+                        for elem in st.elements:
+                            if isinstance(elem, ir.IntType):
+                                total += elem.width
+                            elif isinstance(elem, ir.FloatType):
+                                total += 32
+                            elif isinstance(elem, ir.DoubleType):
+                                total += 64
+                            elif isinstance(elem, (ir.IdentifiedStructType, ir.LiteralStructType)):
+                                total += _struct_bits(elem)
+                            elif isinstance(elem, ir.ArrayType):
+                                total += _array_bits(elem)
+                            else:
+                                total += 64  # pointer
+                        return total
+                    def _array_bits(at):
+                        elem = at.element
+                        if isinstance(elem, ir.IntType):
+                            w = elem.width
+                        elif isinstance(elem, ir.FloatType):
+                            w = 32
+                        elif isinstance(elem, ir.DoubleType):
+                            w = 64
+                        elif isinstance(elem, (ir.IdentifiedStructType, ir.LiteralStructType)):
+                            w = _struct_bits(elem)
+                        else:
+                            w = 64
+                        return w * at.count
+                    bit_width = _struct_bits(llvm_type)
+                    alignment = 32  # struct fields align to at least 32-bit
+                elif isinstance(llvm_type, ir.PointerType):
+                    bit_width = 64
+                    alignment = 64
                 else:
-                    # Default fallback for other types
+                    # Unknown fallback
                     bit_width = 32
                     alignment = 32
             else:

@@ -4850,12 +4850,26 @@ class TernaryOp(Expression):
         # Generate true branch
         builder.position_at_start(true_block)
         true_val = self.true_expr.codegen(builder, module)
+        # If the value is a pointer to a non-pointer aggregate (e.g. struct field GEP),
+        # load it so both branches produce values rather than pointers.
+        if (isinstance(true_val.type, ir.PointerType) and
+                not isinstance(true_val.type.pointee, ir.PointerType)):
+            pointee = true_val.type.pointee
+            if isinstance(pointee, (ir.IdentifiedStructType, ir.LiteralStructType,
+                                    ir.IntType, ir.FloatType, ir.DoubleType)):
+                true_val = builder.load(true_val, name='ternary_true_load')
         true_end_block = builder.block  # May have changed due to nested control flow
         builder.branch(merge_block)
         
         # Generate false branch
         builder.position_at_start(false_block)
         false_val = self.false_expr.codegen(builder, module)
+        if (isinstance(false_val.type, ir.PointerType) and
+                not isinstance(false_val.type.pointee, ir.PointerType)):
+            pointee = false_val.type.pointee
+            if isinstance(pointee, (ir.IdentifiedStructType, ir.LiteralStructType,
+                                    ir.IntType, ir.FloatType, ir.DoubleType)):
+                false_val = builder.load(false_val, name='ternary_false_load')
         false_end_block = builder.block  # May have changed due to nested control flow
         builder.branch(merge_block)
         
@@ -6400,7 +6414,7 @@ class FunctionDef(ASTNode):
                     call_instr.tail = "musttail"
                 builder.ret_void()
             else:
-                raise RuntimeError("Function must end with return statement")
+                raise RuntimeError(f"Function '{self.name}' must end with return statement [{getattr(self, 'line', '?')}:{getattr(self, 'col', '?')}]")
         
         return func
 
@@ -6482,6 +6496,11 @@ class FunctionPointerDeclaration(Statement):
                     # This ensures the linker properly resolves the function address
                     func_as_int = builder.ptrtoint(init_val, ir.IntType(64))
                     init_val = builder.inttoptr(func_as_int, ptr_type)
+                elif isinstance(init_val.type, ir.IntType):
+                    # Integer (e.g. long/u64) used as function address: inttoptr
+                    if init_val.type.width != 64:
+                        init_val = builder.zext(init_val, ir.IntType(64), name="fp_addr_ext")
+                    init_val = builder.inttoptr(init_val, ptr_type, name="fp_from_int")
                 elif isinstance(init_val.type, ir.PointerType) and init_val.type != ptr_type:
                     # Byte array pointer (i8*) or other pointer assigned to function pointer:
                     # bitcast the raw pointer to the target function pointer type

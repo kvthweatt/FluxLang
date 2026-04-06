@@ -2,14 +2,20 @@
 
 using standard::io::console;
 
+def foo() -> void
+{
+    println("In foo()!");
+};
+
+def callback(long x) -> int
+{
+    def{}* cb()->void = x;
+    cb();
+    return 0;
+};
+
 def main() -> int
 {
-    uint x = 10;
-    uint y = 0;
-
-    uint* px = @x;
-    uint* py = @y;
-
-	print(*px); print();
-	return 0;
+    callback(long(@foo));
+    return 0;
 };

@@ -972,6 +972,126 @@ namespace math
             return;
         };
 
+        // Modular exponentiation: result = base ^ exp mod m
+        // Uses left-to-right binary (square-and-multiply) with reduction at each step.
+        // Handles zero exponent, zero base, and zero modulus (returns zero).
+        def bigint_modpow(BigInt* result, BigInt* base, BigInt* exp, BigInt* m) -> void
+        {
+            BigInt cur_base,
+                   tmp,
+                   rem;
+            uint i, j;
+
+            bigint_one(result);
+
+            if (bigint_is_zero(m))
+            {
+                bigint_zero(result);
+                return;
+            };
+
+            if (bigint_is_zero(exp))
+            {
+                // 0^0 = 1 by convention; any base^0 = 1
+                return;
+            };
+
+            // Reduce base mod m once upfront
+            bigint_mod(@cur_base, base, m);
+
+            uint* expd = @exp.digits[0];
+            uint exp_len = exp.length;
+
+            for (i = 0; i < exp_len; i++)
+            {
+                uint word = expd[i];
+                for (j = 0; j < 32; j++)
+                {
+                    if ((word & 1) != 0)
+                    {
+                        bigint_mul(@tmp, result, @cur_base);
+                        bigint_mod(result, @tmp, m);
+                    };
+                    word = word >> 1;
+                    bigint_mul(@tmp, @cur_base, @cur_base);
+                    bigint_mod(@cur_base, @tmp, m);
+                };
+            };
+
+            return;
+        };
+
+        // Modular inverse: result = a^(-1) mod m
+        // Uses the extended Euclidean algorithm.
+        // Returns false if the inverse does not exist (gcd(a, m) != 1), true on success.
+        // result is set to zero when inverse does not exist.
+        def bigint_modinv(BigInt* result, BigInt* a, BigInt* m) -> bool
+        {
+            BigInt old_r, r,
+                   old_s, s,
+                   quot, tmp, tmp2;
+
+            bigint_zero(result);
+
+            if (bigint_is_zero(m))
+            {
+                return false;
+            };
+
+            // Reduce a mod m first so we work with a value in [0, m)
+            bigint_mod(@old_r, a, m);
+            old_r.negative = false;
+
+            bigint_copy(@r, m);
+            r.negative = false;
+
+            // old_s = 1, s = 0
+            bigint_one(@old_s);
+            bigint_zero(@s);
+
+            while (!bigint_is_zero(@r))
+            {
+                // quot = old_r / r,  tmp = old_r % r
+                bigint_divmod(@quot, @tmp, @old_r, @r);
+
+                // (old_r, r) = (r, old_r - quot * r)
+                bigint_copy(@old_r, @r);
+                bigint_copy(@r, @tmp);
+
+                // (old_s, s) = (s, old_s - quot * s)
+                bigint_mul(@tmp2, @quot, @s);
+                bigint_sub(@tmp, @old_s, @tmp2);
+                bigint_copy(@old_s, @s);
+                bigint_copy(@s, @tmp);
+            };
+
+            // old_r now holds gcd(a, m)
+            if (!bigint_is_one(@old_r))
+            {
+                // gcd != 1, no inverse exists
+                return false;
+            };
+
+            // old_s is the Bezout coefficient; reduce into [0, m)
+            if (old_s.negative)
+            {
+                bigint_add(@tmp, @old_s, m);
+                // May still be negative if multiple additions needed
+                while (tmp.negative)
+                {
+                    bigint_add(@old_s, @tmp, m);
+                    bigint_copy(@tmp, @old_s);
+                };
+                bigint_mod(result, @tmp, m);
+            }
+            else
+            {
+                bigint_mod(result, @old_s, m);
+            };
+
+            return true;
+        };
+
         // Convert u64 to decimal string and print it
         def print_u64_decimal(u64 value) -> void
         {

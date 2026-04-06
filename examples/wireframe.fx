@@ -1,8 +1,8 @@
 #import "standard.fx", "math.fx", "windows.fx", "opengl.fx", "allocators.fx";
 
-using standard::memory::allocators::stdheap;
-using standard::system::windows;
-using standard::math;
+using standard::system::windows,
+      standard::math
+      standard::io::console;
 
 // ============================================================================
 // C runtime FFI

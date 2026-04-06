@@ -121,15 +121,8 @@ def write_stub(ulong page) -> void
 def patch_target(ulong page, ulong target_addr) -> void
 {
     byte* p = (byte*)page;
-
-    p[2] = (byte)(target_addr & (ulong)0xFF);
-    p[3] = (byte)((target_addr >> (ulong)8)  & (ulong)0xFF);
-    p[4] = (byte)((target_addr >> (ulong)16) & (ulong)0xFF);
-    p[5] = (byte)((target_addr >> (ulong)24) & (ulong)0xFF);
-    p[6] = (byte)((target_addr >> (ulong)32) & (ulong)0xFF);
-    p[7] = (byte)((target_addr >> (ulong)40) & (ulong)0xFF);
-    p[8] = (byte)((target_addr >> (ulong)48) & (ulong)0xFF);
-    p[9] = (byte)((target_addr >> (ulong)56) & (ulong)0xFF);
+    le64 addr_le = (le64)target_addr;
+    p[2..9] = (byte[8])addr_le;
 };
 
 // ============================================================================
