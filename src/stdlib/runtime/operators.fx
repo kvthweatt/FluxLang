@@ -19,23 +19,32 @@ namespace standard
         ///
         operator (int* a, int* b)[<>] -> void
         {
-            a `^^= b;
-            b `^^= a;
-            a `^^= b;
+            *a `^^= *b;
+            *b `^^= *a;
+            *a `^^= *b;
         };
 
-        ///
-        Name: Null Swap
+        operator (int a, int b)[<>] -> void
+        {
+            a ^^= b;
+            b ^^= a;
+            a ^^= b;
+        };
 
-        Swap if B is not null.
-        Takes two integer pointers, swaps the values at each address.
-        ///
         operator (int* a, int* b)[<?>] -> void
         {
-            if (*b is void) { return; };
-            a `^^= b;
-            b `^^= a;
-            a `^^= b;
+            if (b is void) { return; };
+            *a `^^= *b;
+            *b `^^= *a;
+            *a `^^= *b;
+        };
+
+        operator (int a, int b)[<?>] -> void
+        {
+            if (b is void) { return; };
+            a ^^= b;
+            b ^^= a;
+            a ^^= b;
         };
     };
 };

@@ -712,8 +712,8 @@ class StringLiteral(Expression):
 _BUILTIN_OP_SYMBOL_MANGLE = {
     '%': 'pct',  '+': 'plus', '-': 'minus', '*': 'mul',
     '/': 'div',  '<': 'lt',   '>': 'gt',    '=': 'eq',
-    '&': 'amp',  '|': 'pipe', '^': 'xor',   '!': 'not',
-    '?': 'qst',  '@': 'at',   '~': 'tilde',
+    '&': 'amp',  '|': 'pipe', '^^': 'xor',   '!': 'not',
+    '?': 'qst',  '@': 'at',   '~': 'tilde', '^': 'exp',
 }
 
 def _mangle_builtin_op(symbol: str) -> str:
@@ -752,6 +752,47 @@ class BinaryOp(Expression):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         ctx = CoercionContext(builder)
+
+        # --------------------------------------------------
+        # Before codegen'ing operands, check if a pointer-param overload exists
+        # for this operator. If so, pass raw allocas (addresses) instead of
+        # loaded values so mutations inside the operator body write back to
+        # the caller's variables.
+        # --------------------------------------------------
+        _ptr_overload_func = None
+        if hasattr(module, '_function_overloads'):
+            _op_sym = self.operator.value
+            _op_fname = f"operator__{_mangle_builtin_op(_op_sym)}"
+            if _op_fname in module._function_overloads:
+                for _ov in module._function_overloads[_op_fname]:
+                    if _ov['param_count'] != 2:
+                        continue
+                    _func = _ov['function']
+                    _pts = [p.type for p in _func.args]
+                    if len(_pts) != 2:
+                        continue
+                    # Pointer-param overload: both params must be non-void pointer types
+                    if all(isinstance(pt, ir.PointerType) and
+                           not isinstance(pt.pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType))
+                           for pt in _pts):
+                        _ptr_overload_func = _func
+                        break
+
+        if _ptr_overload_func is not None:
+            # Try to get raw allocas for identifier operands
+            def _get_alloca(node):
+                if isinstance(node, Identifier) and not module.symbol_table.is_global_scope():
+                    ptr = module.symbol_table.get_llvm_value(node.name)
+                    if ptr is not None and isinstance(ptr.type, ir.PointerType):
+                        return ptr
+                return None
+            _lhs_ptr = _get_alloca(self.left)
+            _rhs_ptr = _get_alloca(self.right)
+            _pts = [p.type for p in _ptr_overload_func.args]
+            if (_lhs_ptr is not None and _rhs_ptr is not None and
+                    _lhs_ptr.type == _pts[0] and _rhs_ptr.type == _pts[1]):
+                return builder.call(_ptr_overload_func, [_lhs_ptr, _rhs_ptr],
+                                    name="op_overload_result")
 
         lhs = self.left.codegen(builder, module)
         rhs = self.right.codegen(builder, module)
