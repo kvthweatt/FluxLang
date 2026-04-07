@@ -37,7 +37,7 @@ REGISTRY_FILE   = FPM_DIR / "fpm_registry.json"
 INSTALLED_FILE  = FPM_DIR / "installed.json"
 STDLIB_BASE_URL = "https://raw.githubusercontent.com/kvthweatt/FluxLang/main/src/stdlib"
 
-# Populated at startup from STDLIB_DIR/package.json
+# Loaded from STDLIB_DIR/package.json at startup — do not hardcode here
 STDLIB_PACKAGES = {}
 
 
@@ -157,12 +157,11 @@ def download_file(url: str, dest: Path) -> bool:
 # ─── Installed package tracking ───────────────────────────────────────────────
 
 def load_installed() -> dict:
-    """Load installed.json and always overlay stdlib packages on top."""
+    """Load installed.json and overlay stdlib packages so they are always known."""
     installed = {}
     if INSTALLED_FILE.exists():
         with open(INSTALLED_FILE) as f:
             installed = json.load(f)
-    # Stdlib is always present regardless of installed.json state
     for name in STDLIB_PACKAGES:
         installed[name] = stdlib_installed_entry(name)
     return installed
@@ -170,7 +169,7 @@ def load_installed() -> dict:
 
 def save_installed(installed: dict):
     FPM_DIR.mkdir(parents=True, exist_ok=True)
-    # Never write stdlib entries to installed.json — they're always derived from package.json
+    # Don't persist stdlib entries — they are always regenerated from package.json
     to_save = {k: v for k, v in installed.items() if v.get("source") != "stdlib"}
     with open(INSTALLED_FILE, "w") as f:
         json.dump(to_save, f, indent=2)
@@ -229,7 +228,7 @@ def resolve_dependencies(package_name: str, registry: dict, installed: dict,
 
 def install_package(package_name: str, registry: dict, installed: dict,
                     force: bool = False) -> bool:
-    """Download and register a single third-party package. Returns True on success."""
+    """Download and register a third-party package. Returns True on success."""
     if package_name not in registry:
         print(f"  ERROR: '{package_name}' not found in registry.")
         return False
@@ -264,8 +263,9 @@ def install_package(package_name: str, registry: dict, installed: dict,
 
 def update_stdlib_package(name: str, remote_pkg: dict, installed: dict) -> bool:
     """
-    Compare local vs remote version of a stdlib package.
-    Download and overwrite the local file if remote is newer.
+    Compare local vs remote version for a stdlib package.
+    Download and overwrite the file in STDLIB_DIR if remote is newer.
+    Also updates the local package.json to reflect the new version.
     """
     local_version  = STDLIB_PACKAGES.get(name, {}).get("version", "0.0.0")
     remote_version = remote_pkg.get("version", "0.0.0")
@@ -284,10 +284,19 @@ def update_stdlib_package(name: str, remote_pkg: dict, installed: dict) -> bool:
     if not download_file(url, dest):
         return False
 
-    # Update in-memory STDLIB_PACKAGES so the rest of the session reflects the new version
+    # Update in-memory STDLIB_PACKAGES
     STDLIB_PACKAGES[name] = remote_pkg
     installed[name] = stdlib_installed_entry(name)
-    installed[name]["version"] = remote_version
+
+    # Update the local package.json so the new version persists across runs
+    stdlib_json_path = STDLIB_DIR / "package.json"
+    if stdlib_json_path.exists():
+        with open(stdlib_json_path) as f:
+            data = json.load(f)
+        if name in data.get("packages", {}):
+            data["packages"][name]["version"] = remote_version
+            with open(stdlib_json_path, "w") as f:
+                json.dump(data, f, indent=2)
 
     print(f"  Updated:    {name} v{remote_version} -> {dest}")
     return True
@@ -349,44 +358,39 @@ def cmd_remove(args, registry: dict, installed: dict):
 
 
 def cmd_update(args, registry: dict, installed: dict):
-    if args.all:
-        targets = list(registry.keys())
+    if args.all or not args.package:
+        targets = list(installed.keys())
     else:
         targets = args.package
 
-    stdlib_targets     = [n for n in targets if is_stdlib_package(n)]
-    thirdparty_targets = [n for n in targets if not is_stdlib_package(n)]
-
-    success, failed = 0, 0
-
-    # Stdlib: fetch remote package.json and compare versions
+    stdlib_targets = [n for n in targets if is_stdlib_package(n)]
+    remote_stdlib  = {}
     if stdlib_targets:
         print("  Fetching remote stdlib package.json...")
         remote_stdlib = fetch_remote_stdlib_json()
         if not remote_stdlib:
             print("  WARNING: Could not fetch remote stdlib package.json.")
-            failed += len(stdlib_targets)
-        else:
-            for name in stdlib_targets:
-                if name not in remote_stdlib:
-                    print(f"  Not found:  {name} not in remote stdlib")
-                    failed += 1
-                    continue
-                if update_stdlib_package(name, remote_stdlib[name], installed):
-                    success += 1
-                else:
-                    failed += 1
 
-    # Third-party: re-download
-    for name in thirdparty_targets:
-        if name not in installed:
+    success = 0
+    failed  = 0
+    for name in targets:
+        if is_stdlib_package(name):
+            if name not in remote_stdlib:
+                print(f"  Not found:  {name} not in remote stdlib package.json")
+                failed += 1
+                continue
+            if update_stdlib_package(name, remote_stdlib[name], installed):
+                success += 1
+            else:
+                failed += 1
+        elif name not in installed:
             print(f"  Not installed: {name}  (use: fpm install {name})")
-            continue
-        print(f"  Updating {name}...")
-        if install_package(name, registry, installed, force=True):
-            success += 1
         else:
-            failed += 1
+            print(f"  Updating {name}...")
+            if install_package(name, registry, installed, force=True):
+                success += 1
+            else:
+                failed += 1
 
     save_installed(installed)
     print(f"\nUpdate complete. {success} updated, {failed} failed.")
@@ -421,9 +425,6 @@ def cmd_info(args, registry: dict, installed: dict):
         print(f"  Version:      {pkg['version']}")
         print(f"  Description:  {pkg.get('description', 'N/A')}")
         print(f"  Entry:        {pkg['entry']}")
-        sub_path = pkg.get("path", "")
-        if sub_path:
-            print(f"  Subdirectory: {sub_path}/")
         deps = pkg.get("dependencies", {})
         if deps:
             print(f"  Dependencies:")
@@ -482,7 +483,7 @@ def main():
     FPM_DIR.mkdir(parents=True, exist_ok=True)
     PACKAGES_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Load stdlib from package.json — must happen before load_registry/load_installed
+    # Load stdlib from package.json — must happen before everything else
     STDLIB_PACKAGES.update(load_stdlib_json())
 
     registry  = load_registry()
