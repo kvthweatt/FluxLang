@@ -18,7 +18,10 @@ extern
         malloc(size_t) -> void*,
         free(void*) -> void,
         calloc(size_t, size_t) -> void*,
-        realloc(void*, size_t) -> void*;
+        realloc(void*, size_t) -> void*,
+        VirtualAlloc(ulong, size_t, u32, u32)  -> ulong,
+        VirtualFree(ulong, size_t, u32)        -> bool,
+        VirtualProtect(ulong, size_t, u32, u32*) -> bool;
 };
 #endif;
 

@@ -32,19 +32,6 @@
 using standard::io::console;
 
 // ============================================================================
-// Win32 memory primitives — we need PAGE_EXECUTE_READWRITE so the stub
-// bytes we write are actually executable.  VirtualAlloc with flProtect=0x40.
-// ============================================================================
-
-extern
-{
-    def !!
-        VirtualAlloc(ulong, size_t, u32, u32)  -> ulong,
-        VirtualFree(ulong, size_t, u32)        -> bool,
-        VirtualProtect(ulong, size_t, u32, u32*) -> bool;
-};
-
-// ============================================================================
 // The real target functions — these are what the trampoline will redirect to.
 // ============================================================================
 
