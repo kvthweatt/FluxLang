@@ -110,6 +110,12 @@ class FXPreprocessor:
         # Also search any directories added via #dir
         for lib_dir in self.lib_dirs:
             locations.append(Path(lib_dir) / filepath)
+
+        # Search ~/.fpm/packages recursively for installed third-party packages
+        fpm_packages = Path.home() / "Flux" / ".fpm" / "packages"
+        if fpm_packages.exists():
+            for match in fpm_packages.rglob(filepath):
+                locations.append(match)
         
         for location in locations:
             loc_path = Path(location)

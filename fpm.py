@@ -33,8 +33,9 @@ from typing import Optional
 FPM_DIR         = Path.home() / "Flux" / ".fpm"
 STDLIB_DIR      = Path.home() / "Flux" / "src" / "stdlib"
 PACKAGES_DIR    = FPM_DIR / "packages"
-REGISTRY_FILE   = FPM_DIR / "fpm_registry.json"
+REGISTRY_FILE   = FPM_DIR / "registry.json"
 INSTALLED_FILE  = FPM_DIR / "installed.json"
+SOURCES_FILE    = FPM_DIR / "sources.json"
 STDLIB_BASE_URL = "https://raw.githubusercontent.com/kvthweatt/FluxLang/main/src/stdlib"
 
 # Loaded from STDLIB_DIR/package.json at startup — do not hardcode here
@@ -175,15 +176,91 @@ def save_installed(installed: dict):
         json.dump(to_save, f, indent=2)
 
 
+# ─── Sources ──────────────────────────────────────────────────────────────────
+
+def load_sources() -> list:
+    """Load sources.json — list of remote package.json URLs."""
+    if SOURCES_FILE.exists():
+        with open(SOURCES_FILE) as f:
+            return json.load(f)
+    return []
+
+
+def save_sources(sources: list):
+    FPM_DIR.mkdir(parents=True, exist_ok=True)
+    with open(SOURCES_FILE, "w") as f:
+        json.dump(sources, f, indent=2)
+
+
+def fetch_source(url: str) -> dict:
+    """Fetch a remote package.json from a source URL and return its packages dict."""
+    try:
+        with urllib.request.urlopen(url, timeout=15) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        packages = {}
+        for name, pkg in data.get("packages", {}).items():
+            entry = dict(pkg)
+            entry.setdefault("path", "")
+            entry["_source_url"] = url  # track which source this came from
+            packages[name] = entry
+        return packages
+    except urllib.error.HTTPError as e:
+        print(f"  ERROR: HTTP {e.code} fetching source {url}")
+        return {}
+    except urllib.error.URLError as e:
+        print(f"  ERROR: Could not reach {url} — {e.reason}")
+        return {}
+
+
+def cmd_addsource(args, sources: list):
+    url = args.url
+    if url in sources:
+        print(f"  Already added: {url}")
+        return
+    print(f"  Fetching {url}...")
+    packages = fetch_source(url)
+    if not packages:
+        print(f"  ERROR: Could not fetch or parse package.json from {url}")
+        return
+    sources.append(url)
+    save_sources(sources)
+    print(f"  Added source: {url}")
+    print(f"  Provides {len(packages)} package(s): {', '.join(sorted(packages.keys()))}")
+
+
+def cmd_removesource(args, sources: list):
+    url = args.url
+    if url not in sources:
+        print(f"  Not found: {url}")
+        return
+    sources.remove(url)
+    save_sources(sources)
+    print(f"  Removed source: {url}")
+
+
+def cmd_listsources(sources: list):
+    if not sources:
+        print("No sources configured.")
+        print("  Add one with: fpm addsource <url>")
+        return
+    print(f"Configured sources ({len(sources)}):\n")
+    for url in sources:
+        print(f"  {url}")
+
+
 # ─── Registry ─────────────────────────────────────────────────────────────────
 
 def load_registry() -> dict:
-    """Load fpm_registry.json merged with stdlib entries."""
+    """Load stdlib + fpm_registry.json + all configured sources."""
     registry = dict(STDLIB_PACKAGES)
+    # Legacy registry file
     if REGISTRY_FILE.exists():
         with open(REGISTRY_FILE) as f:
-            external = json.load(f)
-        registry.update(external)
+            registry.update(json.load(f))
+    # All configured sources
+    for url in load_sources():
+        packages = fetch_source(url)
+        registry.update(packages)
     return registry
 
 
@@ -466,6 +543,17 @@ def main():
     p_update.add_argument("package", nargs="*", help="Package name(s) to update")
     p_update.add_argument("--all", action="store_true", help="Update all installed packages")
 
+    # addsource
+    p_addsrc = subparsers.add_parser("addsource", help="Add a package source URL")
+    p_addsrc.add_argument("url", help="URL to a remote package.json")
+
+    # removesource
+    p_remsrc = subparsers.add_parser("removesource", help="Remove a package source URL")
+    p_remsrc.add_argument("url", help="URL to remove")
+
+    # sources
+    subparsers.add_parser("sources", help="List configured sources")
+
     # list
     p_list = subparsers.add_parser("list", help="List packages")
     p_list.add_argument("--available", action="store_true", help="Show all available packages")
@@ -486,6 +574,7 @@ def main():
     # Load stdlib from package.json — must happen before everything else
     STDLIB_PACKAGES.update(load_stdlib_json())
 
+    sources   = load_sources()
     registry  = load_registry()
     installed = load_installed()
 
@@ -499,6 +588,12 @@ def main():
         cmd_list(args, registry, installed)
     elif args.command == "info":
         cmd_info(args, registry, installed)
+    elif args.command == "addsource":
+        cmd_addsource(args, sources)
+    elif args.command == "removesource":
+        cmd_removesource(args, sources)
+    elif args.command == "sources":
+        cmd_listsources(sources)
 
 
 if __name__ == "__main__":
