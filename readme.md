@@ -1,5 +1,5 @@
 # Flux
-### *A general purpose, statically typed, broadly mid-level language with first-class data manipulation.*
+### *A general purpose, statically typed, compiled language with first-class data manipulation.*
 
 <p align="center">
     <img width="512" height="512" alt="image" src="https://github.com/user-attachments/assets/58da57a7-1924-48a2-ba29-c2040d9343eb" />
