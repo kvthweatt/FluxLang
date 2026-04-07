@@ -144,10 +144,10 @@ class BaseType:
     """Base type representation"""
     
     def to_llvm(self, module: ir.Module) -> ir.Type:
-        raise NotImplementedError(f"to_llvm not implemented for {self.__class__.__name__}")
+        raise NotImplementedError(f"BaseType.to_llvm: not implemented for {self.__class__.__name__}")
     
     def __str__(self) -> str:
-        raise NotImplementedError(f"__str__ not implemented for {self.__class__.__name__}")
+        raise NotImplementedError(f"BaseType.__str__: not implemented for {self.__class__.__name__}")
 
 
 @dataclass
@@ -181,10 +181,10 @@ class PrimitiveType(BaseType):
             return ir.VoidType()
         elif self.kind == DataType.DATA:
             if self.width is None:
-                raise ValueError(f"DATA type requires explicit width")
+                raise ValueError(f"PrimitiveType.to_llvm: DATA type requires explicit width")
             return ir.IntType(self.width)
         else:
-            raise ValueError(f"Unsupported primitive type: {self.kind}")
+            raise ValueError(f"PrimitiveType.to_llvm: Unsupported primitive type: {self.kind}")
     
     def __str__(self) -> str:
         if self.kind == DataType.DATA and self.width:
@@ -237,7 +237,7 @@ class NamedType(BaseType):
     def to_llvm(self, module: ir.Module) -> ir.Type:
         resolved = TypeResolver.resolve(self.name, module)
         if resolved is None:
-            raise NameError(f"Unknown type: {self.name}")
+            raise NameError(f"NamedType.to_llvm: Unknown type: {self.name}")
         return resolved
     
     def __str__(self) -> str:
@@ -251,7 +251,7 @@ class StructType(BaseType):
     def to_llvm(self, module: ir.Module) -> ir.Type:
         if hasattr(module, '_struct_types') and self.name in module._struct_types:
             return module._struct_types[self.name]
-        raise NameError(f"Unknown struct type: {self.name}")
+        raise NameError(f"StructType.to_llvm: Unknown struct type: {self.name}")
     
     def __str__(self) -> str:
         return f"struct {self.name}"
@@ -309,7 +309,7 @@ class SymbolEntry:
         if not self.namespace:
             return self.name
         if not isinstance(self.namespace, str) or not isinstance(self.name, str):
-            raise TypeError(f"namespace and name must be str, got {type(self.namespace)} and {type(self.name)}")
+            raise TypeError(f"SymbolEntry.mangled_name: namespace and name must be str, got {type(self.namespace)} and {type(self.name)}")
         return self.namespace.replace('::', '__') + '__' + self.name
     
     @property
@@ -407,7 +407,7 @@ class SymbolTable:
         """Define symbol in current scope"""
         
         if not isinstance(name, str):
-            raise TypeError(f"SymbolTable.define() requires name to be str, got {type(name)}: {name}")
+            raise TypeError(f"SymbolTable.define: requires name to be str, got {type(name)}: {name}")
 
         #print(f"[SYMBOL_TABLE] define(name='{name}', kind={kind})", file=sys.stdout)
         #print(f"[SYMBOL_TABLE]   scope_level: {self.scope_level}", file=sys.stdout)
@@ -516,7 +516,7 @@ class SymbolTable:
         for p in parameters:
             param_type = p.type_spec
             if param_type is None:
-                raise ValueError(f"Parameter '{p.name}' has no type specification (symbol lookup may have failed)")
+                raise ValueError(f"SymbolTable.register_function_overload: Parameter '{p.name}' has no type specification (symbol lookup may have failed)")
             # If this is a custom type, resolve it to get correct signedness
             if param_type.custom_typename and hasattr(module, '_type_alias_specs'):
                 alias_spec = None
@@ -1273,14 +1273,14 @@ class TypeResolver:
     def resolve_struct_type(literal_value: dict, module: ir.Module):
         """Resolve struct type for a struct literal based on its field names."""
         if not isinstance(literal_value, dict):
-            raise ValueError("Expected dictionary for struct literal")
+            raise ValueError("TypeResolver.resolve_struct_type: Expected dictionary for struct literal")
         field_names = list(literal_value.keys())
         if hasattr(module, '_struct_types'):
             for struct_name, candidate_type in module._struct_types.items():
                 if hasattr(candidate_type, 'names'):
                     if all(field in candidate_type.names for field in field_names):
                         return candidate_type
-        raise ValueError(f"No compatible struct type found for fields: {field_names}")
+        raise ValueError(f"TypeResolver.resolve_struct_type: No compatible struct type found for fields: {field_names}")
 
 
 class TypeChecker:
@@ -1417,7 +1417,7 @@ class TypeSystem:
                 if literal_value is not None:
                     # Handle array literals
                     if isinstance(literal_value, list):
-                        raise ValueError("Array literals should be handled at a higher level")
+                        raise ValueError("TypeSystem.get_llvm_type: Array literals should be handled at a higher level")
                     # Handle struct literals (dictionaries with field names -> values)
                     if isinstance(literal_value, dict):
                         struct_type = LiteralTypeHandler.resolve_struct_type(literal_value, module)
@@ -1425,17 +1425,17 @@ class TypeSystem:
                     # Handle other DATA types via type aliases
                     if hasattr(module, '_type_aliases') and str(type_spec) in module._type_aliases:
                         return module._type_aliases[str(type_spec)]
-                    raise ValueError(f"Unsupported DATA literal: {literal_value}")
-                raise ValueError(f"DATA type requires literal_value or bit_width")
+                    raise ValueError(f"TypeSystem.get_llvm_type: Unsupported DATA literal: {literal_value}")
+                raise ValueError(f"TypeSystem.get_llvm_type: DATA type requires literal_value or bit_width")
             else:
                 # Handle custom types
                 if hasattr(module, '_type_aliases') and str(type_spec) in module._type_aliases:
                     return module._type_aliases[str(type_spec)]
-                raise ValueError(f"Unsupported literal type: {type_spec}")
+                raise ValueError(f"TypeSystem.get_llvm_type: Unsupported literal type: {type_spec}")
         
         # Handle TypeSystem instance
         if not isinstance(type_spec, TypeSystem):
-            raise TypeError(f"Expected TypeSystem, FunctionPointerType, or DataType, got {type(type_spec)}")
+            raise TypeError(f"TypeSystem.get_llvm_type: Expected TypeSystem, FunctionPointerType, or DataType, got {type(type_spec)}")
         
         # Get base LLVM type
         base_type = None
@@ -1458,7 +1458,7 @@ class TypeSystem:
                 else:
                     base_type = resolved_type
             else:
-                raise NameError(f"Unknown type: {type_spec.custom_typename}")
+                raise NameError(f"TypeSystem.get_llvm_type: Unknown type: {type_spec.custom_typename}")
         elif type_spec.base_type == DataType.SINT:
             base_type = ir.IntType(32)
         elif type_spec.base_type == DataType.UINT:
@@ -1488,7 +1488,7 @@ class TypeSystem:
             base_type = ir.VoidType()
         elif type_spec.base_type == DataType.DATA:
             if type_spec.bit_width is None:
-                raise ValueError(f"DATA type missing bit_width for {type_spec}")
+                raise ValueError(f"TypeSystem.get_llvm_type: DATA type missing bit_width for {type_spec}")
             base_type = ir.IntType(type_spec.bit_width)
         elif type_spec.base_type == DataType.THIS:
             # 'this' return type — resolve to a pointer to the enclosing object's struct type.
@@ -1502,7 +1502,7 @@ class TypeSystem:
             else:
                 base_type = ir.PointerType(ir.IntType(8))
         else:
-            raise ValueError(f"Unsupported type: {type_spec.base_type}")
+            raise ValueError(f"TypeSystem.get_llvm_type: Unsupported type: {type_spec.base_type}")
         
         
         # Include array dimensions (get_llvm_type_with_array behavior)
@@ -1727,7 +1727,7 @@ class NamespaceTypeHandler:
         module._current_namespace = namespace
         
         if not hasattr(module, 'symbol_table'):
-            raise RuntimeError("Module must have symbol_table for namespace support")
+            raise RuntimeError("NamespaceTypeHandler.process_namespace_struct: Module must have symbol_table for namespace support")
 
         # SET namespace on symbol table (for symbol lookup)
         module.symbol_table.set_namespace(namespace)
@@ -1775,7 +1775,7 @@ class NamespaceTypeHandler:
         module._current_namespace = namespace
         
         if not hasattr(module, 'symbol_table'):
-            raise RuntimeError("Module must have symbol_table for namespace support")
+            raise RuntimeError("NamespaceTypeHandler.process_namespace_object: Module must have symbol_table for namespace support")
 
         # SET namespace on symbol table (for symbol lookup)
         module.symbol_table.set_namespace(namespace)
@@ -1801,7 +1801,7 @@ class NamespaceTypeHandler:
         module._current_namespace = namespace
         
         if not hasattr(module, 'symbol_table'):
-            raise RuntimeError("Module must have symbol_table for namespace support")
+            raise RuntimeError("NamespaceTypeHandler.process_namespace_enum: Module must have symbol_table for namespace support")
 
         # SET namespace on symbol table (for symbol lookup)
         module.symbol_table.set_namespace(namespace)
@@ -1851,7 +1851,7 @@ class NamespaceTypeHandler:
         
         module._current_namespace = full_nested_name
         if not hasattr(module, 'symbol_table'):
-            raise RuntimeError("Module must have symbol_table for namespace support")
+            raise RuntimeError("NamespaceTypeHandler.process_nested_namespace: Module must have symbol_table for namespace support")
 
         # Set the FULL nested namespace in symbol_table - use __ format
         module.symbol_table.set_namespace(full_nested_name)
@@ -1883,7 +1883,7 @@ class NamespaceTypeHandler:
         module._current_namespace = namespace
         
         if not hasattr(module, 'symbol_table'):
-            raise RuntimeError("Module must have symbol_table for namespace support")
+            raise RuntimeError("NamespaceTypeHandler.process_namespace_function: Module must have symbol_table for namespace support")
 
         # SET namespace on symbol table (for symbol lookup)
         module.symbol_table.set_namespace(namespace)
@@ -2120,7 +2120,7 @@ class VariableTypeHandler:
         # Verify total bits match target
         if bit_offset != target_type.width:
             raise ValueError(
-                f"Bitfield packing size mismatch: packed {bit_offset} bits into {target_type.width}-bit integer"
+                f"VariableTypeHandler._pack_array_literal_to_int_constant: Bitfield packing size mismatch: packed {bit_offset} bits into {target_type.width}-bit integer"
             )
         
         return ir.Constant(target_type, packed_value)
@@ -2445,7 +2445,7 @@ class ArrayTypeHandler:
             array_type = val.type.pointee
             return (array_type.element, array_type.count)
         else:
-            raise ValueError(f"Value is not an array or array pointer: {val.type}")
+            raise ValueError(f"ArrayTypeHandler.get_array_info: Value is not an array or array pointer: {val.type}")
 
     @staticmethod
     def preserve_array_element_type_metadata(loaded_val: ir.Value, array_val: ir.Value, module: ir.Module) -> ir.Value:
@@ -2483,7 +2483,7 @@ class ArrayTypeHandler:
             # Raw pointer (like char*): just [index]
             return builder.gep(array_val, [index], inbounds=True, name=name)
         else:
-            raise ValueError(f"Cannot get element pointer for type: {array_val.type}")
+            raise ValueError(f"ArrayTypeHandler._get_array_element_ptr: Cannot get element pointer for type: {array_val.type}")
     
     @staticmethod
     def _get_array_start_ptr(builder: ir.IRBuilder, array_ptr: ir.Value, name: str = "start") -> ir.Value:
@@ -2502,7 +2502,7 @@ class ArrayTypeHandler:
     def _cast_int_to_width(builder: ir.IRBuilder, val: ir.Value, target_type: ir.IntType) -> ir.Value:
         """Extend or truncate integer to target width."""
         if not isinstance(val.type, ir.IntType) or not isinstance(target_type, ir.IntType):
-            raise ValueError(f"Cannot cast non-integer types: {val.type} to {target_type}")
+            raise ValueError(f"ArrayTypeHandler._cast_int_to_width: Cannot cast non-integer types: {val.type} to {target_type}")
         
         if val.type.width < target_type.width:
             return builder.zext(val, target_type)
@@ -2592,7 +2592,7 @@ class ArrayTypeHandler:
         
         # Type compatibility check
         if left_elem_type != right_elem_type:
-            raise ValueError(f"Cannot {operator.value} arrays with different element types: {left_elem_type} vs {right_elem_type}")
+            raise ValueError(f"ArrayTypeHandler.concatenate: Cannot {operator.value} arrays with different element types: {left_elem_type} vs {right_elem_type}")
         
         result_len = left_len + right_len if operator == Operator.ADD else max(left_len - right_len, 0)
         result_array_type = ir.ArrayType(left_elem_type, result_len)
@@ -2678,7 +2678,7 @@ class ArrayTypeHandler:
             if isinstance(array_val.type.pointee, ir.ArrayType):
                 element_type = array_val.type.pointee.element
             else:
-                raise ValueError("Cannot slice non-array global variable")
+                raise ValueError("ArrayTypeHandler.slice_array: Cannot slice non-array global variable")
         elif isinstance(array_val.type, ir.PointerType):
             if isinstance(array_val.type.pointee, ir.ArrayType):
                 element_type = array_val.type.pointee.element
@@ -2686,7 +2686,7 @@ class ArrayTypeHandler:
                 # For pointer types like i8*, the element type is the pointee
                 element_type = array_val.type.pointee
         else:
-            raise ValueError(f"Cannot slice type: {array_val.type}")
+            raise ValueError(f"ArrayTypeHandler.slice_array: Cannot slice type: {array_val.type}")
         
         # Create fixed-size array to hold the slice
         max_slice_size = 256  # Should be enough for most string operations
@@ -2812,7 +2812,7 @@ class ArrayTypeHandler:
                             elem_val = inner_elem.value
                             elem_width = 32  # This is wrong (hardcode = bad) - need to infer from context
                         else:
-                            raise ValueError(f"Cannot pack {inner_elem.type} in global array initializer")
+                            raise ValueError(f"ArrayTypeHandler.create_global_array_initializer: Cannot pack {inner_elem.type} in global array initializer")
                     elif isinstance(inner_elem, Identifier):
                         # Look up the global constant value
                         var_name = inner_elem.name
@@ -2829,13 +2829,13 @@ class ArrayTypeHandler:
                                 if isinstance(actual_type, ir.IntType):
                                     elem_width = actual_type.width
                                 else:
-                                    raise ValueError(f"Global {var_name} is not an integer type: {actual_type}")
+                                    raise ValueError(f"ArrayTypeHandler.create_global_array_initializer: Global {var_name} is not an integer type: {actual_type}")
                             else:
-                                raise ValueError(f"Global {var_name} has no initializer")
+                                raise ValueError(f"ArrayTypeHandler.create_global_array_initializer: Global {var_name} has no initializer")
                         else:
-                            raise ValueError(f"Global {var_name} not found")
+                            raise ValueError(f"ArrayTypeHandler.create_global_array_initializer: Global {var_name} not found")
                     else:
-                        raise ValueError(f"Cannot evaluate {type(inner_elem)} at compile time for global array")
+                        raise ValueError(f"ArrayTypeHandler.create_global_array_initializer: Cannot evaluate {type(inner_elem)} at compile time for global array")
                     
                     # Pack in reverse order: last element at low bits
                     packed_value |= (elem_val << bit_offset)
@@ -2843,7 +2843,7 @@ class ArrayTypeHandler:
                 
                 # Verify we used all the bits
                 if bit_offset != llvm_type.element.width:
-                    raise ValueError(f"Array packing size mismatch: packed {bit_offset} bits into {llvm_type.element.width}-bit integer")
+                    raise ValueError(f"ArrayTypeHandler.create_global_array_initializer: Array packing size mismatch: packed {bit_offset} bits into {llvm_type.element.width}-bit integer")
                 
                 const_elements.append(ir.Constant(llvm_type.element, packed_value))
             
@@ -2873,9 +2873,9 @@ class ArrayTypeHandler:
                             else:
                                 llvm_val = ir.Constant(llvm_type.element, llvm_val.constant)
                         else:
-                            raise ValueError(f"Cannot convert non-constant literal to array element type")
+                            raise ValueError(f"ArrayTypeHandler.create_global_array_initializer: Cannot convert non-constant literal to array element type")
                     else:
-                        raise ValueError(f"Array element type mismatch: expected {llvm_type.element}, got {llvm_val.type}")
+                        raise ValueError(f"ArrayTypeHandler.create_global_array_initializer: Array element type mismatch: expected {llvm_type.element}, got {llvm_val.type}")
                 
                 const_elements.append(llvm_val)
             
@@ -2945,7 +2945,7 @@ class ArrayTypeHandler:
                     if isinstance(elem_val.type, ir.IntType) and isinstance(llvm_type.element, ir.IntType):
                         elem_val = ArrayTypeHandler._cast_int_to_width(builder, elem_val, llvm_type.element)
                     else:
-                        raise ValueError(f"Array element type mismatch: expected {llvm_type.element}, got {elem_val.type}")
+                        raise ValueError(f"ArrayTypeHandler.initialize_local_array: Array element type mismatch: expected {llvm_type.element}, got {elem_val.type}")
                 
                 index = ir.Constant(ir.IntType(32), i)
                 elem_ptr = builder.gep(alloca, [zero, ArrayTypeHandler._index(i)], name=f"elem_{i}")
@@ -3007,7 +3007,7 @@ class ArrayTypeHandler:
 
             # Must be an integer
             if not isinstance(elem_val.type, ir.IntType):
-                raise ValueError(f"Cannot pack non-integer type {elem_val.type} into integer")
+                raise ValueError(f"ArrayTypeHandler.pack_array_to_integer: Cannot pack non-integer type {elem_val.type} into integer")
 
             # Convert to runtime packing if not constant
             if not isinstance(elem_val, ir.Constant):
@@ -3018,7 +3018,7 @@ class ArrayTypeHandler:
 
         total_bits = sum(elem_widths)
         if total_bits != target_type.width:
-            raise ValueError(f"Array packing size mismatch: packed {total_bits} bits into {target_type.width}-bit integer")
+            raise ValueError(f"ArrayTypeHandler.pack_array_to_integer: Array packing size mismatch: packed {total_bits} bits into {target_type.width}-bit integer")
 
         # Element 0 is leftmost = high bits; place each element stepping down from the top
         packed_value = 0
@@ -3051,9 +3051,7 @@ class ArrayTypeHandler:
 
             # Must be an integer
             if not isinstance(elem_val.type, ir.IntType):
-                raise ValueError(f"Cannot pack non-integer type {elem_val.type} into integer")
-
-            elem_vals.append(elem_val)
+                raise ValueError(f"ArrayTypeHandler.pack_array_to_integer_runtime: Cannot pack non-integer type {elem_val.type} into integer")
             elem_widths.append(elem_val.type.width)
 
         # Element 0 is leftmost = high bits; place each element stepping down from the top
@@ -3069,10 +3067,10 @@ class ArrayTypeHandler:
     def pack_array_pointer_to_integer(builder: ir.IRBuilder, module: ir.Module, array_ptr: ir.Value, target_type: ir.IntType) -> ir.Value:
         """Pack an array (via pointer) into a single integer at runtime."""
         if not isinstance(array_ptr.type, ir.PointerType):
-            raise ValueError("Expected pointer to array")
+            raise ValueError("ArrayTypeHandler.pack_array_pointer_to_integer: Expected pointer to array")
         
         if not isinstance(array_ptr.type.pointee, ir.ArrayType):
-            raise ValueError("Expected pointer to array type")
+            raise ValueError("ArrayTypeHandler.pack_array_pointer_to_integer: Expected pointer to array type")
         
         array_type = array_ptr.type.pointee
         elem_type = array_type.element
@@ -3085,12 +3083,12 @@ class ArrayTypeHandler:
         elif isinstance(elem_type, ir.DoubleType):
             elem_bits = 64
         else:
-            raise ValueError(f"Cannot pack array of non-integer type {elem_type}")
+            raise ValueError(f"ArrayTypeHandler.pack_array_pointer_to_integer: Cannot pack array of non-integer type {elem_type}")
         
         # Calculate expected total bits
         total_bits = array_type.count * elem_bits
         if total_bits != target_type.width:
-            raise ValueError(f"Array packing size mismatch: {array_type.count} x {elem_bits} = {total_bits} bits into {target_type.width}-bit integer")
+            raise ValueError(f"ArrayTypeHandler.pack_array_pointer_to_integer: Array packing size mismatch: {array_type.count} x {elem_bits} = {total_bits} bits into {target_type.width}-bit integer")
         
         # Pack at runtime (big-endian: first element at high bits, last at low bits)
         result = ir.Constant(target_type, 0)
@@ -3120,7 +3118,7 @@ class ArrayTypeHandler:
         if isinstance(target_type, ir.FloatType):
             int_width = 32
         else:
-            raise ValueError(f"pack_array_to_float: unsupported target float type {target_type}")
+            raise ValueError(f"ArrayTypeHandler.pack_array_to_float: unsupported target float type {target_type}")
 
         int_type = ir.IntType(int_width)
 
@@ -3161,7 +3159,7 @@ class ArrayTypeHandler:
                     all_const = False
                     elem_as_int = None
             else:
-                raise ValueError(f"Cannot pack element of type {elem_val.type} into float")
+                raise ValueError(f"ArrayTypeHandler.pack_array_to_float: Cannot pack element of type {elem_val.type} into float")
 
             elem_as_ints.append(elem_as_int)
             elem_bits_list.append(elem_bits)
@@ -3169,7 +3167,7 @@ class ArrayTypeHandler:
 
         total_bits = sum(elem_bits_list)
         if total_bits != int_width:
-            raise ValueError(f"Array packing size mismatch: packed {total_bits} bits into {int_width}-bit float")
+            raise ValueError(f"ArrayTypeHandler.pack_array_to_float: Array packing size mismatch: packed {total_bits} bits into {int_width}-bit float")
 
         if all_const:
             # Element 0 is leftmost = high bits
@@ -3195,7 +3193,7 @@ class ArrayTypeHandler:
         if isinstance(target_type, ir.FloatType):
             int_width = 32
         else:
-            raise ValueError(f"pack_array_to_float_runtime: unsupported target float type {target_type}")
+            raise ValueError(f"ArrayTypeHandler.pack_array_to_float_runtime: unsupported target float type {target_type}")
 
         int_type = ir.IntType(int_width)
 
@@ -3215,7 +3213,7 @@ class ArrayTypeHandler:
                 elem_val = builder.bitcast(elem_val, ir.IntType(64), name="double_bits")
 
             if not isinstance(elem_val.type, ir.IntType):
-                raise ValueError(f"Cannot pack element of type {elem_val.type} into float")
+                raise ValueError(f"ArrayTypeHandler.pack_array_to_float_runtime: Cannot pack element of type {elem_val.type} into float")
 
             elem_vals.append(elem_val)
             elem_widths.append(elem_val.type.width)
@@ -3235,10 +3233,10 @@ class ArrayTypeHandler:
                                     array_ptr: ir.Value, target_type) -> ir.Value:
         """Pack an array (via pointer) into a single float by reinterpreting bits at runtime."""
         if not isinstance(array_ptr.type, ir.PointerType):
-            raise ValueError("Expected pointer to array")
+            raise ValueError("ArrayTypeHandler.pack_array_pointer_to_float: Expected pointer to array")
 
         if not isinstance(array_ptr.type.pointee, ir.ArrayType):
-            raise ValueError("Expected pointer to array type")
+            raise ValueError("ArrayTypeHandler.pack_array_pointer_to_float: Expected pointer to array type")
 
         array_type = array_ptr.type.pointee
         elem_type = array_type.element
@@ -3248,7 +3246,7 @@ class ArrayTypeHandler:
         elif isinstance(target_type, ir.DoubleType):
             int_width = 64
         else:
-            raise ValueError(f"pack_array_pointer_to_float: unsupported target float type {target_type}")
+            raise ValueError(f"ArrayTypeHandler.pack_array_pointer_to_float: unsupported target float type {target_type}")
 
         # Determine element bit width
         if isinstance(elem_type, ir.IntType):
@@ -3258,11 +3256,11 @@ class ArrayTypeHandler:
         elif isinstance(elem_type, ir.DoubleType):
             elem_bits = 64
         else:
-            raise ValueError(f"Cannot pack array of type {elem_type} into float")
+            raise ValueError(f"ArrayTypeHandler.pack_array_pointer_to_float: Cannot pack array of type {elem_type} into float")
 
         total_bits = array_type.count * elem_bits
         if total_bits != int_width:
-            raise ValueError(f"Array packing size mismatch: {array_type.count} x {elem_bits} = {total_bits} bits into {int_width}-bit float")
+            raise ValueError(f"ArrayTypeHandler.pack_array_pointer_to_float: Array packing size mismatch: {array_type.count} x {elem_bits} = {total_bits} bits into {int_width}-bit float")
 
         int_type = ir.IntType(int_width)
         result = ir.Constant(int_type, 0)
@@ -3309,7 +3307,7 @@ class ArrayTypeHandler:
             is_double_elem = True
             int_elem_type = ir.IntType(64)
         else:
-            raise ValueError(f"Cannot unpack into array of type {elem_type}")
+            raise ValueError(f"ArrayTypeHandler.unpack_integer_to_array: Cannot unpack into array of type {elem_type}")
 
         total_bits = count * elem_bits
 
@@ -3334,7 +3332,7 @@ class ArrayTypeHandler:
             else:
                 packed = builder.zext(ptr_int, int_type, name="unpack_zext")
         else:
-            raise ValueError(f"Cannot unpack source type {source_val.type} into array")
+            raise ValueError(f"ArrayTypeHandler.unpack_integer_to_array: Cannot unpack source type {source_val.type} into array")
 
         # Allocate array on the stack and store each extracted element.
         # Element 0 is leftmost = high bits, so element i lives at bit offset (count-1-i)*elem_bits.
@@ -3424,7 +3422,7 @@ class ArrayTypeHandler:
         # Check if it's an array type
         if not (isinstance(init_val.type, ir.PointerType) and 
                 isinstance(init_val.type.pointee, ir.ArrayType)):
-            raise ValueError(f"Cannot initialize array from non-array type: {init_val.type}")
+            raise ValueError(f"ArrayTypeHandler.copy_array_to_local: Cannot initialize array from non-array type: {init_val.type}")
         
         # Copy array element by element
         source_array_type = init_val.type.pointee
@@ -3498,7 +3496,7 @@ class LiteralTypeHandler:
             # Pointer-to-element (e.g. byte[] lowered as i8*)
             return array_val.type.pointee
         else:
-            raise ValueError(f"Cannot determine element type for: {array_val.type}")
+            raise ValueError(f"LiteralTypeHandler.get_element_type_from_array_value: Cannot determine element type for: {array_val.type}")
     
     @staticmethod
     def compute_element_size_bytes(elem_type: ir.Type) -> int:
@@ -3534,10 +3532,10 @@ class LiteralTypeHandler:
     @staticmethod
     def get_struct_field_type(struct_type, field_name: str) -> ir.Type:
         if not hasattr(struct_type, 'names'):
-            raise ValueError("Struct type does not have field names")
+            raise ValueError("LiteralTypeHandler.get_struct_field_type: Struct type does not have field names")
         
         if field_name not in struct_type.names:
-            raise ValueError(f"Field '{field_name}' not found in struct")
+            raise ValueError(f"LiteralTypeHandler.get_struct_field_type: Field '{field_name}' not found in struct")
         
         field_index = struct_type.names.index(field_name)
         return struct_type.elements[field_index]
@@ -3743,7 +3741,7 @@ class CoercionContext:
         if isinstance(src, ir.LiteralStructType) and isinstance(expected, ir.LiteralStructType):
             if src != expected:
                 raise TypeError(
-                    f"Return struct type mismatch: {src} != {expected}"
+                    f"CoercionContext.coerce_return_value: Return struct type mismatch: {src} != {expected}"
                 )
             return value
 
@@ -3775,18 +3773,18 @@ class CoercionContext:
                     return builder.load(temp_as_expected, name="array_converted")
                 else:
                     raise TypeError(
-                        f"Invalid return type: array bit width mismatch: "
+                        f"CoercionContext.coerce_return_value: Invalid return type: array bit width mismatch: "
                         f"cannot return {src} ({src_total_bits} bits) "
                         f"from function returning {expected} ({exp_total_bits} bits)"
                     )
             else:
                 raise TypeError(
-                    f"Invalid return type: can only convert between integer arrays, "
+                    f"CoercionContext.coerce_return_value: Invalid return type: can only convert between integer arrays, "
                     f"got {src} -> {expected}")
 
         # No valid conversion exists
         raise TypeError(
-            f"Type of #1 arg mismatch: {src} != {expected}\n"
+            f"CoercionContext.coerce_return_value: Type of #1 arg mismatch: {src} != {expected}\n"
             f"Cannot convert return value of type {src} to expected type {expected}"
         )
 
@@ -3821,7 +3819,7 @@ class CoercionContext:
 
 def infer_int_width(value: int, data_type: DataType) -> int:
     if data_type not in (DataType.SINT, DataType.UINT, DataType.SLONG, DataType.ULONG):
-        raise ValueError("Not an integer literal")
+        raise ValueError("infer_int_width: Not an integer literal")
     
     # Default to 32-bit - only use 64-bit if value doesn't fit in 32-bit
     if data_type == DataType.SINT:
@@ -3887,11 +3885,11 @@ def get_builtin_bit_width(base_type: DataType) -> int:
     elif base_type == DataType.VOID:
         return 64   # URGENT: Should be based on default pointer width
     else:
-        raise ValueError(f"Type {base_type} does not have a defined bit width")
+        raise ValueError(f"get_builtin_bit_width: Type {base_type} does not have a defined bit width")
 
 def find_common_type(types: List[ir.Type]) -> ir.Type:
     if not types:
-        raise ValueError("Cannot find common type of empty list")
+        raise ValueError("find_common_type: Cannot find common type of empty list")
     
     first_type = types[0]
     
@@ -4083,9 +4081,9 @@ class ObjectTypeHandler:
             func = ir.Function(module, func_type, func_name)
         else:
             if not isinstance(existing, ir.Function):
-                raise RuntimeError(f"{func_name} already exists and is not a function")
+                raise RuntimeError(f"ObjectTypeHandler.predeclare_method: {func_name} already exists and is not a function")
             if existing.function_type != func_type:
-                raise RuntimeError(f"Conflicting signatures for {func_name}")
+                raise RuntimeError(f"ObjectTypeHandler.predeclare_method: Conflicting signatures for {func_name}")
             func = existing
         
         # Name arguments
@@ -4168,7 +4166,7 @@ class ObjectTypeHandler:
             if isinstance(func.function_type.return_type, ir.VoidType):
                 method_builder.ret_void()
             else:
-                raise RuntimeError(f"Method {method.name} must end with return statement")
+                raise RuntimeError(f"ObjectTypeHandler.emit_method_body: Method {method.name} must end with return statement")
         
         module.symbol_table.exit_scope()
         
@@ -4313,7 +4311,7 @@ class FunctionTypeHandler:
         # If we couldn't convert and types don't match, raise an error
         if arg_val.type != expected_type:
             raise TypeError(
-                f"Type of #{arg_index + 1} arg mismatch: {arg_val.type} != {expected_type}\n"
+                f"FunctionTypeHandler.convert_argument_to_parameter_type: Type of #{arg_index + 1} arg mismatch: {arg_val.type} != {expected_type}\n"
                 f"Cannot convert argument type {arg_val.type} to expected parameter type {expected_type}"
             )
         
@@ -4509,14 +4507,14 @@ class AssignmentTypeHandler:
             elif mangled and mangled in module.globals:
                 ptr = module.globals[mangled]
             else:
-                raise NameError(f"Unknown variable: {target_name}")
+                raise NameError(f"AssignmentTypeHandler.handle_identifier_assignment: Unknown variable: {target_name}")
 
         # Check if variable is const - prevent modification
         symbol_entry = module.symbol_table.lookup_any(target_name)
         #print(f"[TYPESYS] symbol_entry = {symbol_entry}")
         if symbol_entry and symbol_entry.type_spec and hasattr(symbol_entry.type_spec, 'is_const'):
             if symbol_entry.type_spec.is_const:
-                raise TypeError(f"Cannot assign to const variable '{target_name}'")
+                raise TypeError(f"AssignmentTypeHandler.handle_identifier_assignment: Cannot assign to const variable '{target_name}'")
         
         # Check if this is an array concatenation assignment that requires resizing
         from fast import BinaryOp, Operator
@@ -4700,7 +4698,7 @@ class AssignmentTypeHandler:
                 if mangled_obj is not None:
                     obj = mangled_obj
                 else:
-                    raise NameError(f"Unknown variable: {var_name}")
+                    raise NameError(f"AssignmentTypeHandler.handle_member_assignment: Unknown variable: {var_name}")
         elif isinstance(target_obj_expr, MemberAccess):
             # Nested member access (e.g. foo.bar.baz = val): use _get_member_ptr
             # to obtain the GEP pointer to the intermediate struct member without
@@ -4740,7 +4738,7 @@ class AssignmentTypeHandler:
                 try:
                     idx = struct_type.names.index(member_name)
                 except ValueError:
-                    raise ValueError(f"Member '{member_name}' not found in struct")
+                    raise ValueError(f"AssignmentTypeHandler.handle_member_assignment: Member '{member_name}' not found in struct")
                 member_ptr = builder.gep(
                     obj,
                     [ir.Constant(ir.IntType(32), 0),
@@ -4786,7 +4784,7 @@ class AssignmentTypeHandler:
                 return AssignmentTypeHandler.handle_vtable_struct_assignment(
                     builder, module, obj, target_obj_expr, member_name, val)
         
-        raise ValueError(f"Cannot assign to member '{member_name}' of non-struct type: {obj.type}")
+        raise ValueError(f"AssignmentTypeHandler.handle_member_assignment: Cannot assign to member '{member_name}' of non-struct type: {obj.type}")
     
     @staticmethod
     def handle_vtable_struct_assignment(builder, module, struct_ptr, target_obj_expr, member_name: str, val):
@@ -4814,11 +4812,11 @@ class AssignmentTypeHandler:
                         struct_name = type_spec.custom_typename
         
         if struct_name is None:
-            raise ValueError(f"Cannot determine struct type for member assignment")
+            raise ValueError(f"AssignmentTypeHandler.handle_vtable_struct_assignment: Cannot determine struct type for member assignment")
         
         # Get vtable
         if not hasattr(module, '_struct_vtables') or struct_name not in module._struct_vtables:
-            raise ValueError(f"Vtable not found for struct '{struct_name}'")
+            raise ValueError(f"AssignmentTypeHandler.handle_vtable_struct_assignment: Vtable not found for struct '{struct_name}'")
         
         vtable = module._struct_vtables[struct_name]
         
@@ -4828,7 +4826,7 @@ class AssignmentTypeHandler:
             None
         )
         if not field_info:
-            raise ValueError(f"Field '{member_name}' not found in struct '{struct_name}'")
+            raise ValueError(f"AssignmentTypeHandler.handle_vtable_struct_assignment: Field '{member_name}' not found in struct '{struct_name}'")
         
         _, bit_offset, bit_width, alignment = field_info
         
@@ -4913,7 +4911,7 @@ class AssignmentTypeHandler:
             builder.store(new_struct, struct_ptr)
             return val
         else:
-            raise NotImplementedError("Unaligned field assignment in large structs not yet supported")
+            raise NotImplementedError("AssignmentTypeHandler._assign_bitfield_array: Unaligned field assignment in large structs not yet supported")
     
     @staticmethod
     def handle_array_element_assignment(builder, module, array_expr, index_expr, value_expr, val):
@@ -4961,7 +4959,7 @@ class AssignmentTypeHandler:
                     return v
                 if isinstance(v.type, ir.IntType):
                     return builder.trunc(v, ir.IntType(32), name="sidx_trunc") if v.type.width > 32 else builder.sext(v, ir.IntType(32), name="sidx_ext")
-                raise ValueError("Slice indices must be integers")
+                raise ValueError("AssignmentTypeHandler.handle_array_element_assignment: Slice indices must be integers")
 
             start_i32 = as_i32(start_val)
             zero      = ir.Constant(ir.IntType(32), 0)
@@ -4986,9 +4984,9 @@ class AssignmentTypeHandler:
 
             const_len = _slice_const_len(index_expr.start, index_expr.end)
             if const_len is None:
-                raise ValueError("Array slice assignment length must be statically known")
+                raise ValueError("AssignmentTypeHandler.handle_array_element_assignment: Array slice assignment length must be statically known")
             if const_len <= 0:
-                raise ValueError("Array slice assignment must be forward and non-empty")
+                raise ValueError("AssignmentTypeHandler.handle_array_element_assignment: Array slice assignment must be forward and non-empty")
 
             # Get pointer to array[start]
             if isinstance(array, ir.GlobalVariable) and isinstance(array.type.pointee, ir.ArrayType):
@@ -4998,7 +4996,7 @@ class AssignmentTypeHandler:
             elif isinstance(array.type, ir.PointerType):
                 dst_ptr = builder.gep(array, [start_i32], inbounds=True, name="slicewr_dst")
             else:
-                raise ValueError(f"Cannot slice-assign into type: {array.type}")
+                raise ValueError(f"AssignmentTypeHandler.handle_array_element_assignment: Cannot slice-assign into type: {array.type}")
 
             # Cast dst to i8* for memcpy
             i8_ptr = ir.IntType(8).as_pointer()
@@ -5102,7 +5100,7 @@ class AssignmentTypeHandler:
             builder.store(val, elem_ptr)
             return val
         else:
-            raise ValueError("Cannot index non-array type")
+            raise ValueError("AssignmentTypeHandler.handle_array_element_assignment: Cannot index non-array type")
     
     @staticmethod
     def handle_pointer_deref_assignment(builder, ptr, val):
@@ -5118,7 +5116,7 @@ class AssignmentTypeHandler:
             builder.store(val, ptr)
             return val
         else:
-            raise ValueError(f"Cannot dereference non-pointer type: {ptr.type}")
+            raise ValueError(f"AssignmentTypeHandler.handle_pointer_deref_assignment: Cannot dereference non-pointer type: {ptr.type}")
     
     @staticmethod
     def handle_compound_assignment(builder, module, target_expr, op_token, value_expr):
@@ -5129,7 +5127,7 @@ class AssignmentTypeHandler:
             symbol_entry = module.symbol_table.lookup_any(target_expr.name)
             if symbol_entry and symbol_entry.type_spec and hasattr(symbol_entry.type_spec, 'is_const'):
                 if symbol_entry.type_spec.is_const:
-                    raise TypeError(f"Cannot modify const variable '{target_expr.name}' with compound assignment")
+                    raise TypeError(f"AssignmentTypeHandler.handle_compound_assignment: Cannot modify const variable '{target_expr.name}' with compound assignment")
         
         # Map compound assignment tokens to binary operators
         op_map = {
@@ -5153,7 +5151,7 @@ class AssignmentTypeHandler:
         }
         
         if op_token not in op_map:
-            raise ValueError(f"Unsupported compound assignment operator: {op_token}")
+            raise ValueError(f"AssignmentTypeHandler.handle_compound_assignment: Unsupported compound assignment operator: {op_token}")
         
         binary_op = op_map[op_token]
         
@@ -5168,7 +5166,7 @@ class AssignmentTypeHandler:
             elif target_expr.name in module.globals:
                 target_ptr = module.globals[target_expr.name]
             else:
-                raise NameError(f"Unknown variable: {target_expr.name}")
+                raise NameError(f"AssignmentTypeHandler.handle_compound_assignment: Unknown variable: {target_expr.name}")
             
             # Load the current value of the target
             target_val = target_expr.codegen(builder, module)
@@ -5209,7 +5207,7 @@ class AssignmentTypeHandler:
     def handle_union_member_assignment(builder, module, union_ptr, union_name, member_name, val):
         # Get union member information
         if not hasattr(module, '_union_member_info') or union_name not in module._union_member_info:
-            raise ValueError(f"Union member info not found for '{union_name}'")
+            raise ValueError(f"AssignmentTypeHandler.handle_union_member_assignment: Union member info not found for '{union_name}'")
         
         union_info = module._union_member_info[union_name]
         member_names = union_info['member_names']
@@ -5219,7 +5217,7 @@ class AssignmentTypeHandler:
         # Handle special ._ tag assignment for tagged unions
         if member_name == '_':
             if not is_tagged:
-                raise ValueError(f"Cannot assign to tag '._' on non-tagged union '{union_name}'")
+                raise ValueError(f"AssignmentTypeHandler.handle_union_member_assignment: Cannot assign to tag '._' on non-tagged union '{union_name}'")
             
             # For tagged unions, the tag is at index 0
             tag_ptr = builder.gep(
@@ -5233,7 +5231,7 @@ class AssignmentTypeHandler:
         
         # Find the requested member
         if member_name not in member_names:
-            raise ValueError(f"Member '{member_name}' not found in union '{union_name}'")
+            raise ValueError(f"AssignmentTypeHandler.handle_union_member_assignment: Member '{member_name}' not found in union '{union_name}'")
         
         member_index = member_names.index(member_name)
         member_type = member_types[member_index]
@@ -5243,7 +5241,7 @@ class AssignmentTypeHandler:
         
         # Check if union has already been initialized (immutability check)
         if hasattr(builder, 'initialized_unions') and union_var_id in builder.initialized_unions:
-            raise RuntimeError(f"Union variable is immutable after initialization. Cannot reassign member '{member_name}' of union '{union_name}'")
+            raise RuntimeError(f"AssignmentTypeHandler.handle_union_member_assignment: Union variable is immutable after initialization. Cannot reassign member '{member_name}' of union '{union_name}'")
         
         # Mark this union as initialized
         if not hasattr(builder, 'initialized_unions'):
@@ -5305,7 +5303,7 @@ class StructTypeHandler:
                 if registered_type == struct_type:
                     return name
         
-        raise ValueError("Cannot infer struct name from instance")
+        raise ValueError("StructTypeHandler.infer_struct_name: Cannot infer struct name from instance")
     
     @staticmethod
     def calculate_vtable(members: List, module: 'ir.Module') -> 'StructVTable':
@@ -5482,7 +5480,7 @@ class StructTypeHandler:
             # For now, support only byte-aligned fields in array structs
             if bit_in_byte != 0 or bit_width % 8 != 0:
                 raise NotImplementedError(
-                    "Unaligned fields in large structs not yet supported"
+                    "StructTypeHandler.pack_field_value: Unaligned fields in large structs not yet supported"
                 )
             
             # Insert bytes at correct position
@@ -5539,9 +5537,7 @@ class StructTypeHandler:
                            field_values: dict, positional_values: list) -> 'ir.Value':
         # Get struct vtable - use namespace resolution to find the actual struct name
         if not hasattr(module, '_struct_vtables'):
-            raise ValueError(f"Struct '{struct_type}' not defined")
-        
-        # Try to resolve the struct name using namespace resolution
+            raise ValueError(f"StructTypeHandler.pack_struct_literal: Struct '{struct_type}' not defined")
         current_namespace = getattr(module, '_current_namespace', '')
         resolved_struct_name = struct_type
         
@@ -5579,7 +5575,7 @@ class StructTypeHandler:
                     break
         
         if not vtable:
-            raise ValueError(f"Struct '{struct_type}' not defined (current namespace: {current_namespace})")
+            raise ValueError(f"StructTypeHandler.pack_struct_literal: Struct '{struct_type}' not defined (current namespace: {current_namespace})")
         
         llvm_struct_type = module._struct_types[resolved_struct_name]
         
@@ -5588,7 +5584,7 @@ class StructTypeHandler:
             # Convert positional to named based on field order
             if len(positional_values) > len(vtable.fields):
                 raise ValueError(
-                    f"Too many initializers for struct '{resolved_struct_name}': "
+                    f"StructTypeHandler.pack_struct_literal: Too many initializers for struct '{resolved_struct_name}': "
                     f"got {len(positional_values)}, expected {len(vtable.fields)}"
                 )
             
@@ -5644,7 +5640,7 @@ class StructTypeHandler:
                     None
                 )
                 if not field_info:
-                    raise ValueError(f"Field '{field_name}' not found in struct '{resolved_struct_name}'")
+                    raise ValueError(f"StructTypeHandler.pack_struct_literal: Field '{field_name}' not found in struct '{resolved_struct_name}'")
                 
                 _, bit_offset, bit_width, alignment = field_info
                 
@@ -5672,7 +5668,7 @@ class StructTypeHandler:
             None
         )
         if not field_info:
-            raise ValueError(f"Field '{field_name}' not found")
+            raise ValueError(f"StructTypeHandler.assign_field_value: Field '{field_name}' not found")
         
         _, bit_offset, bit_width, alignment = field_info
         
@@ -5716,7 +5712,7 @@ class StructTypeHandler:
             return updated_instance
         else:
             raise NotImplementedError(
-                "Field assignment in large structs not yet supported"
+                "StructTypeHandler.assign_field_value: Field assignment in large structs not yet supported"
             )
     
     @staticmethod
@@ -5724,11 +5720,11 @@ class StructTypeHandler:
                              target_type: str, source_value: 'ir.Value') -> 'ir.Value':
         # Get target struct vtable
         if not hasattr(module, '_struct_vtables'):
-            raise ValueError(f"Struct '{target_type}' not defined")
+            raise ValueError(f"StructTypeHandler.perform_struct_recast: Struct '{target_type}' not defined")
         
         target_vtable = module._struct_vtables.get(target_type)
         if not target_vtable:
-            raise ValueError(f"Struct '{target_type}' not defined")
+            raise ValueError(f"StructTypeHandler.perform_struct_recast: Struct '{target_type}' not defined")
         
         llvm_target_type = module._struct_types[target_type]
         
@@ -5747,7 +5743,7 @@ class StructTypeHandler:
             source_bytes = actual_source.type.count
             if source_bytes != target_vtable.total_bytes:
                 raise ValueError(
-                    f"Size mismatch in cast to {target_type}: "
+                    f"StructTypeHandler.perform_struct_recast: Size mismatch in cast to {target_type}: "
                     f"source is {source_bytes} bytes, target requires {target_vtable.total_bytes} bytes"
                 )
         
@@ -6066,11 +6062,11 @@ class MemberAccessTypeHandler:
     def get_enum_value(enum_type_name: str, member_name: str, module: ir.Module) -> int:
         """Get the integer value of an enum member."""
         if not MemberAccessTypeHandler.is_enum_type(enum_type_name, module):
-            raise ValueError(f"'{enum_type_name}' is not an enum type")
+            raise ValueError(f"MemberAccessTypeHandler.get_enum_value: '{enum_type_name}' is not an enum type")
         
         enum_values = module._enum_types[enum_type_name]
         if member_name not in enum_values:
-            raise NameError(f"Enum value '{member_name}' not found in enum '{enum_type_name}'")
+            raise NameError(f"MemberAccessTypeHandler.get_enum_value: Enum value '{member_name}' not found in enum '{enum_type_name}'")
         
         return enum_values[member_name]
 
@@ -6115,12 +6111,12 @@ class MemberAccessTypeHandler:
     def get_member_index(struct_type: ir.Type, member_name: str) -> int:
         """Get the index of a member in a struct."""
         if not hasattr(struct_type, 'names'):
-            raise ValueError("Struct type missing member names")
+            raise ValueError("MemberAccessTypeHandler.get_member_index: Struct type missing member names")
         
         try:
             return struct_type.names.index(member_name)
         except ValueError:
-            raise ValueError(f"Member '{member_name}' not found in struct")
+            raise ValueError(f"MemberAccessTypeHandler.get_member_index: Member '{member_name}' not found in struct")
 
     @staticmethod
     def get_member_type_spec(struct_name: str, member_name: str, module: ir.Module) -> Optional:
@@ -6178,7 +6174,7 @@ class MemberAccessTypeHandler:
     def get_union_member_info(union_name: str, module: ir.Module) -> dict:
         """Get union member information."""
         if not hasattr(module, '_union_member_info') or union_name not in module._union_member_info:
-            raise ValueError(f"Union member info not found for '{union_name}'")
+            raise ValueError(f"MemberAccessTypeHandler.get_union_member_info: Union member info not found for '{union_name}'")
         
         return module._union_member_info[union_name]
 
@@ -6189,7 +6185,7 @@ class MemberAccessTypeHandler:
         member_names = union_info['member_names']
         
         if member_name not in member_names:
-            raise ValueError(f"Member '{member_name}' not found in union '{union_name}'")
+            raise ValueError(f"MemberAccessTypeHandler.validate_union_member: Member '{member_name}' not found in union '{union_name}'")
 
     @staticmethod
     def get_union_member_index(union_name: str, member_name: str, module: ir.Module) -> int:
