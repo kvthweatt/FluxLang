@@ -20,6 +20,8 @@ namespace standard
 
         signed data{8}  as i8;
         signed data{16} as i16;
+        i16 as short;
+        u16 as ushort;
         signed data{32} as i32;
         signed data{64} as i64;
 

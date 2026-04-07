@@ -52,6 +52,8 @@ namespace standard
             // HRESULT - standard COM return code
             signed data{32} as HRESULT;
 
+            unsigned data{64} as HFONT;
+
             // String types
             byte* as LPCSTR,      // Pointer to const string
                     LPSTR;        // Pointer to string
@@ -198,10 +200,19 @@ namespace standard
             // Virtual Key Codes
             global int VK_ESCAPE   = 0x1B,
                        VK_SPACE   = 0x20,
+                       VK_BACK    = 0x08,
+                       VK_TAB     = 0x09,
+                       VK_DELETE  = 0x2E,
                        VK_LEFT    = 0x25,
-                       VK_UP      = 0x26,
                        VK_RIGHT   = 0x27,
+                       VK_UP      = 0x26,
                        VK_DOWN    = 0x28,
+                       VK_HOME    = 0x24,
+                       VK_END     = 0x23,
+                       VK_PRIOR   = 0x21,
+                       VK_NEXT    = 0x22,
+                       VK_RETURN  = 0x0D,
+                       VK_SHIFT   = 0x10,
                        VK_CONTROL = 0x11;
 
             // Pen styles (CreatePen)
@@ -327,7 +338,38 @@ namespace standard
                     CloseHandle(HWND) -> bool,
                     GetFileSizeEx(HWND, i64*) -> bool,
                     GetSystemMetrics(int) -> int,
-                    FreeConsole() -> bool;
+                    FreeConsole() -> bool,
+                    CreateFontA(int, int, int, int, int, DWORD, DWORD, DWORD,
+                                DWORD, DWORD, DWORD, DWORD, DWORD, LPCSTR) -> HFONT,
+                    SetWindowTheme(HWND, LPCSTR, LPCSTR) -> HRESULT,
+                    DwmSetWindowAttribute(HWND, DWORD, void*, DWORD) -> HRESULT,
+                    GetTextMetricsA(HDC, void*) -> bool,
+                    SetScrollInfo(HWND, int, void*, bool) -> int,
+                    GetScrollInfo(HWND, int, void*) -> bool,
+                    SetCapture(HWND) -> HWND,
+                    ReleaseCapture() -> bool,
+                    ExtTextOutA(HDC, int, int, UINT, RECT*, LPCSTR, UINT, void*) -> bool,
+                    OpenClipboard(HWND) -> bool,
+                    CloseClipboard() -> bool,
+                    EmptyClipboard() -> bool,
+                    SetClipboardData(UINT, HWND) -> HWND,
+                    GetClipboardData(UINT) -> HWND,
+                    GlobalAlloc(UINT, size_t) -> HWND,
+                    GlobalLock(HWND) -> void*,
+                    GlobalUnlock(HWND) -> bool,
+                    GlobalSize(HWND) -> size_t,
+                    CreateCompatibleDC(HDC) -> HDC,
+                    CreateCompatibleBitmap(HDC, int, int) -> HDC,
+                    BitBlt(HDC, int, int, int, int, HDC, int, int, DWORD) -> bool,
+                    DeleteDC(HDC) -> bool,
+                    DeleteObject(HDC) -> bool,
+                    BeginPaint(HWND, void*) -> HDC,
+                    EndPaint(HWND, void*) -> bool,
+                    FillRect(HDC, RECT*, HBRUSH) -> int,
+                    SetTextColor(HDC, DWORD) -> DWORD,
+                    SetBkColor(HDC, DWORD) -> DWORD,
+                    SetBkMode(HDC, int) -> int,
+                    snprintf(byte*, size_t, byte*, int) -> int;
             };
 
             // ============================================================================
@@ -339,24 +381,26 @@ namespace standard
                          ES_AUTOHSCROLL       = 0x0080,
                          ES_NOHIDESEL         = 0x0100,
                          ES_WANTRETURN        = 0x1000,
-                         ///
-                         GENERIC_READ         = 0x80000000,
-                         GENERIC_WRITE        = 0x40000000,
-                         FILE_SHARE_READ      = 0x00000001,
-                         CREATE_ALWAYS        = 2,
-                         OPEN_EXISTING        = 3,
-                         FILE_ATTRIBUTE_NORMAL = 0x00000080,
-                         ///
                          OFN_FILEMUSTEXIST    = 0x00001000,
                          OFN_PATHMUSTEXIST    = 0x00000800,
                          OFN_OVERWRITEPROMPT  = 0x00000002,
                          OFN_HIDEREADONLY     = 0x00000004;
 
-            global UINT WM_COMMAND    = 0x0111,
-                        WM_CUT        = 0x0300,
-                        WM_COPY       = 0x0301,
-                        WM_PASTE      = 0x0302,
-                        WM_UNDO       = 0x0304,
+            global UINT WM_SETFOCUS        = 0x0007,
+                        WM_KILLFOCUS       = 0x0008,
+                        WM_ERASEBKGND      = 0x0014,
+                        WM_LBUTTONDOWN     = 0x0201,
+                        WM_LBUTTONUP       = 0x0202,
+                        WM_MOUSEMOVE       = 0x0200,
+                        WM_COMMAND         = 0x0111,
+                        WM_CUT             = 0x0300,
+                        WM_COPY            = 0x0301,
+                        WM_PASTE           = 0x0302,
+                        WM_UNDO            = 0x0304,
+                        WM_SETFONT         = 0x0030,
+                        WM_CHAR            = 0x0102,
+                        WM_VSCROLL         = 0x0115,
+                        WM_HSCROLL         = 0x0114,
                         EN_CHANGE     = 0x0300,
                         EM_SETSEL     = 0x00B1,
                         MF_STRING     = 0x0000,

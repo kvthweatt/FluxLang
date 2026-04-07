@@ -1,15 +1,19 @@
 # Flux
-### *A general purpose, statically typed, broadly mid-level, object-oriented compiled programming language for easy control over data.*
+### *A general purpose, statically typed, broadly mid-level language with first-class data manipulation.*
 
 <p align="center">
-    <img src="https://github.com/kvthweatt/FluxLang/blob/main/resources/logo_cropped.jpg" width="300" height="150">
+    <img width="512" height="512" alt="image" src="https://github.com/user-attachments/assets/c4a212fd-6b71-454e-85aa-4b873021c62e" />
 </p>
 
 ## What is Flux?
 
-Flux is a new language that combines the performance and power of C with the readability of Python. It is neither C or Python, nor a true C derivative. It's for everyone, designed for first-class data manipulation, and a growing standard library.
+Flux is a new language that combines the performance and power of C with the readability of Python.   
+Flux resembles the C-family of languages.  
+It is neither C, nor a derivative of C.  
+It has a fundamentally different type system while still being C ABI compatible.
 
 **Characteristics:**
+- Unique type system allowing creation of primitive integer types
 - Manual memory management
 - Compiler that does not fight you
 - First class data control features
@@ -18,8 +22,9 @@ Flux is a new language that combines the performance and power of C with the rea
 - Everything stack allocated unless otherwise specified
 - Everything is zero initialized unless otherwise specified
 - Custom infix operator support
-- Templates without SFINAE
+- Templates without SFINAE or noise
 - Opt-in ownership without a borrow checker
+- Designed so you don't need to repeat yourself so much when coding
 
 
 ## Design Philosophy

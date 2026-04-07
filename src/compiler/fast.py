@@ -712,8 +712,8 @@ class StringLiteral(Expression):
 _BUILTIN_OP_SYMBOL_MANGLE = {
     '%': 'pct',  '+': 'plus', '-': 'minus', '*': 'mul',
     '/': 'div',  '<': 'lt',   '>': 'gt',    '=': 'eq',
-    '&': 'amp',  '|': 'pipe', '^': 'xor',   '!': 'not',
-    '?': 'qst',  '@': 'at',   '~': 'tilde',
+    '&': 'amp',  '|': 'pipe', '^^': 'xor',  '!': 'not',
+    '?': 'qst',  '@': 'at',   '~': 'tilde', '^': 'exp',
 }
 
 def _mangle_builtin_op(symbol: str) -> str:
@@ -8046,28 +8046,22 @@ class Program(ASTNode):
         builder.initialized_unions = set()
 
         # 4-pass compilation
-        print("[AST] Pass 1: Processing extern blocks...")
-        for stmt in self.statements:
-            if isinstance(stmt, ExternBlock):
-                stmt.codegen(builder, module)
-
-        print("[AST] Pass 2: Processing using statements...")
+        print("[AST] Pass 1: Processing using statements...")
         for stmt in self.statements:
             if isinstance(stmt, UsingStatement):
                 stmt.codegen(builder, module)
 
-        print("[AST] Pass 3: Processing not using statements...")
+        print("[AST] Pass 2: Processing not using statements...")
         for stmt in self.statements:
             if isinstance(stmt, NotUsingStatement):
                 stmt.codegen(builder, module)
 
         # Pre-pass: register all object struct types across the entire namespace tree before
         # any method bodies are emitted, so cross-namespace type references always resolve.
-        print("[AST] Pre-pass: Registering all object types...")
-        # Collect all namespace pre-registration work and top-level struct/object codegen
-        # into a single unified retry loop.  This handles mutual dependencies in either
-        # direction: a top-level struct referencing a namespace type (e.g. Complex*) and a
-        # namespace object referencing a top-level struct (e.g. FreeNode*).
+        # Extern blocks are included in this retry loop so that extern param types that
+        # reference namespace-defined structs (e.g. RECT*) are resolved after those types
+        # are registered, rather than eagerly before them.
+        print("[AST] Pre-pass: Registering all object types and extern blocks...")
         pending_toplevel = [stmt for stmt in self.statements
                             if isinstance(stmt, (StructDef, StructDefStatement, ObjectDef, ObjectDefStatement))]
         pending_ns = []
@@ -8080,6 +8074,9 @@ class Program(ASTNode):
             if ns is not None:
                 pending_ns.append(ns)
 
+        # Collect extern blocks for deferred processing.
+        pending_extern = [stmt for stmt in self.statements if isinstance(stmt, ExternBlock)]
+
         # Pre-register namespace types using the existing retry helper first (best-effort).
         for ns in pending_ns:
             try:
@@ -8087,15 +8084,16 @@ class Program(ASTNode):
             except Exception:
                 pass  # will be retried in the unified loop below
 
-        # Now retry top-level structs/objects, and any still-failing namespace registrations,
+        # Now retry top-level structs/objects, namespace registrations, and extern blocks
         # together until no further progress is possible.
-        max_passes = len(pending_toplevel) + len(pending_ns) + 1
+        max_passes = len(pending_toplevel) + len(pending_ns) + len(pending_extern) + 1
         pending_tl = list(pending_toplevel)
         pending_ns_retry = list(pending_ns)
+        pending_ex = list(pending_extern)
         for _ in range(max_passes):
-            if not pending_tl and not pending_ns_retry:
+            if not pending_tl and not pending_ns_retry and not pending_ex:
                 break
-            still_tl, still_ns = [], []
+            still_tl, still_ns, still_ex = [], [], []
             for stmt in pending_tl:
                 try:
                     stmt.codegen(builder, module)
@@ -8106,19 +8104,28 @@ class Program(ASTNode):
                     NamespaceDef.preregister_all_types(ns, module)
                 except Exception:
                     still_ns.append(ns)
-            if len(still_tl) == len(pending_tl) and len(still_ns) == len(pending_ns_retry):
+            for ex in pending_ex:
+                try:
+                    ex.codegen(builder, module)
+                except Exception:
+                    still_ex.append(ex)
+            if (len(still_tl) == len(pending_tl) and
+                    len(still_ns) == len(pending_ns_retry) and
+                    len(still_ex) == len(pending_ex)):
                 # No progress — surface the real errors
                 for stmt in still_tl:
                     stmt.codegen(builder, module)
                 for ns in still_ns:
                     NamespaceDef.preregister_all_types(ns, module)
+                for ex in still_ex:
+                    ex.codegen(builder, module)
                 break
-            pending_tl, pending_ns_retry = still_tl, still_ns
+            pending_tl, pending_ns_retry, pending_ex = still_tl, still_ns, still_ex
 
         # Pass 3: Process all other statements
         print("[AST] Pass 4: Processing all other statements...")
         for stmt in self.statements:
-            if not isinstance(stmt, UsingStatement) and not isinstance(stmt, ExternBlock) and not isinstance(stmt, NotUsingStatement):
+            if not isinstance(stmt, (UsingStatement, NotUsingStatement, ExternBlock, StructDef, StructDefStatement, ObjectDef, ObjectDefStatement)):
                 stmt.codegen(builder, module)
         
         main_args_name = "main__2__int__byte_ptr2__ret_int"

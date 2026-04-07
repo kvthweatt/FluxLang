@@ -31,9 +31,14 @@ namespace standard
             a ^^= b;
         };
 
+        ///
+        Name: Null-Swap
+
+        Swap only if neither A or B are null.
+        ///
         operator (int* a, int* b)[<?>] -> void
         {
-            if (b is void) { return; };
+            if (a is void | b is void) { return; };
             *a `^^= *b;
             *b `^^= *a;
             *a `^^= *b;
@@ -41,7 +46,7 @@ namespace standard
 
         operator (int a, int b)[<?>] -> void
         {
-            if (b is void) { return; };
+            if (a is void | b is void) { return; };
             a ^^= b;
             b ^^= a;
             a ^^= b;

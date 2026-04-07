@@ -589,6 +589,8 @@ class FluxCompiler:
                                 "-lcomdlg32 "
                                 "-ld2d1 "
                                 "-ldwrite "
+                                "-ldwmapi "
+                                "-luxtheme "
                                 #"-lfreetype "
                                 #"-lgdiplus "
                                 #"-ld2d1 "
