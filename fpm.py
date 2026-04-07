@@ -37,8 +37,11 @@ REGISTRY_FILE   = FPM_DIR / "fpm_registry.json"
 INSTALLED_FILE  = FPM_DIR / "installed.json"
 STDLIB_BASE_URL = "https://raw.githubusercontent.com/kvthweatt/FluxLang/main/src/stdlib"
 
-STDLIB_PACKAGES = {}  # Loaded from STDLIB_DIR/package.json at startup
+# Populated at startup from STDLIB_DIR/package.json
+STDLIB_PACKAGES = {}
 
+
+# ─── Stdlib helpers ───────────────────────────────────────────────────────────
 
 def load_stdlib_json() -> dict:
     """Read STDLIB_DIR/package.json and return the packages dict."""
@@ -54,6 +57,26 @@ def load_stdlib_json() -> dict:
         entry.setdefault("path", "")
         packages[name] = entry
     return packages
+
+
+def fetch_remote_stdlib_json() -> dict:
+    """Fetch the stdlib package.json from GitHub and return the packages dict."""
+    url = f"{STDLIB_BASE_URL}/package.json"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        packages = {}
+        for name, pkg in data.get("packages", {}).items():
+            entry = dict(pkg)
+            entry.setdefault("path", "")
+            packages[name] = entry
+        return packages
+    except urllib.error.HTTPError as e:
+        print(f"  ERROR: HTTP {e.code} fetching remote stdlib package.json")
+        return {}
+    except urllib.error.URLError as e:
+        print(f"  ERROR: Could not reach GitHub — {e.reason}")
+        return {}
 
 
 def is_stdlib_package(name: str) -> bool:
@@ -77,6 +100,7 @@ def stdlib_installed_entry(name: str) -> dict:
         "file":    str(get_stdlib_file(pkg)),
         "source":  "stdlib"
     }
+
 
 # ─── Version constraint parsing ───────────────────────────────────────────────
 
@@ -107,7 +131,6 @@ def check_version_constraint(installed_version: str, constraint: str) -> bool:
         elif part.startswith("<"):
             return installed < parse_version(part[1:])
         else:
-            # Exact version
             return installed == parse_version(part)
 
     return all(evaluate(p) for p in parts)
@@ -134,13 +157,12 @@ def download_file(url: str, dest: Path) -> bool:
 # ─── Installed package tracking ───────────────────────────────────────────────
 
 def load_installed() -> dict:
-    """Load installed.json and always overlay stdlib packages on top.
-    Stdlib packages are always known regardless of installed.json state."""
+    """Load installed.json and always overlay stdlib packages on top."""
     installed = {}
     if INSTALLED_FILE.exists():
         with open(INSTALLED_FILE) as f:
             installed = json.load(f)
-    # Stdlib is always present — overlay so it can never be missing
+    # Stdlib is always present regardless of installed.json state
     for name in STDLIB_PACKAGES:
         installed[name] = stdlib_installed_entry(name)
     return installed
@@ -148,14 +170,16 @@ def load_installed() -> dict:
 
 def save_installed(installed: dict):
     FPM_DIR.mkdir(parents=True, exist_ok=True)
+    # Never write stdlib entries to installed.json — they're always derived from package.json
+    to_save = {k: v for k, v in installed.items() if v.get("source") != "stdlib"}
     with open(INSTALLED_FILE, "w") as f:
-        json.dump(installed, f, indent=2)
+        json.dump(to_save, f, indent=2)
 
 
 # ─── Registry ─────────────────────────────────────────────────────────────────
 
 def load_registry() -> dict:
-    """Load fpm_registry.json if it exists, merged with built-in stdlib entries."""
+    """Load fpm_registry.json merged with stdlib entries."""
     registry = dict(STDLIB_PACKAGES)
     if REGISTRY_FILE.exists():
         with open(REGISTRY_FILE) as f:
@@ -163,6 +187,8 @@ def load_registry() -> dict:
         registry.update(external)
     return registry
 
+
+# ─── Dependency resolution ────────────────────────────────────────────────────
 
 def resolve_dependencies(package_name: str, registry: dict, installed: dict,
                           resolved: list = None, seen: set = None) -> list:
@@ -185,7 +211,6 @@ def resolve_dependencies(package_name: str, registry: dict, installed: dict,
 
     pkg = registry[package_name]
     for dep_name, constraint in pkg.get("dependencies", {}).items():
-        # Check if already installed and satisfies constraint
         if dep_name in installed:
             if not check_version_constraint(installed[dep_name]["version"], constraint):
                 print(f"  WARNING: Installed '{dep_name}' v{installed[dep_name]['version']} "
@@ -200,24 +225,18 @@ def resolve_dependencies(package_name: str, registry: dict, installed: dict,
     return resolved
 
 
-# ─── Core install logic ───────────────────────────────────────────────────────
+# ─── Core install/update logic ────────────────────────────────────────────────
 
 def install_package(package_name: str, registry: dict, installed: dict,
                     force: bool = False) -> bool:
-    """Download and register a single package. Returns True on success."""
+    """Download and register a single third-party package. Returns True on success."""
     if package_name not in registry:
         print(f"  ERROR: '{package_name}' not found in registry.")
         return False
 
-    # Stdlib packages are always on disk — never download them
-    if is_stdlib_package(package_name):
-        print(f"  Stdlib:   {package_name} is part of the Flux standard library (always available)")
-        return True
-
-    pkg = registry[package_name]
+    pkg     = registry[package_name]
     version = pkg["version"]
 
-    # Check if already installed
     if package_name in installed and not force:
         installed_ver = installed[package_name]["version"]
         print(f"  Already installed: {package_name} v{installed_ver}  (use --force to reinstall)")
@@ -225,18 +244,8 @@ def install_package(package_name: str, registry: dict, installed: dict,
 
     entry    = pkg["entry"]
     sub_path = pkg.get("path", "")
-
-    # Build the raw GitHub URL
-    if sub_path:
-        url = f"{STDLIB_BASE_URL}/{sub_path}/{entry}"
-    else:
-        url = f"{STDLIB_BASE_URL}/{entry}"
-
-    # Destination on disk
-    if sub_path:
-        dest = PACKAGES_DIR / package_name / sub_path / entry
-    else:
-        dest = PACKAGES_DIR / package_name / entry
+    url      = f"{STDLIB_BASE_URL}/{sub_path}/{entry}" if sub_path else f"{STDLIB_BASE_URL}/{entry}"
+    dest     = PACKAGES_DIR / package_name / sub_path / entry if sub_path else PACKAGES_DIR / package_name / entry
 
     print(f"  Downloading {package_name} v{version}...")
     if not download_file(url, dest):
@@ -246,9 +255,41 @@ def install_package(package_name: str, registry: dict, installed: dict,
         "version": version,
         "entry":   entry,
         "path":    sub_path,
-        "file":    str(dest)
+        "file":    str(dest),
+        "source":  "remote"
     }
     print(f"  Installed:  {package_name} v{version} -> {dest}")
+    return True
+
+
+def update_stdlib_package(name: str, remote_pkg: dict, installed: dict) -> bool:
+    """
+    Compare local vs remote version of a stdlib package.
+    Download and overwrite the local file if remote is newer.
+    """
+    local_version  = STDLIB_PACKAGES.get(name, {}).get("version", "0.0.0")
+    remote_version = remote_pkg.get("version", "0.0.0")
+
+    if parse_version(remote_version) <= parse_version(local_version):
+        print(f"  Up to date: {name} v{local_version}")
+        return True
+
+    print(f"  Updating {name}: v{local_version} -> v{remote_version}")
+
+    entry    = remote_pkg["entry"]
+    sub_path = remote_pkg.get("path", "")
+    url      = f"{STDLIB_BASE_URL}/{sub_path}/{entry}" if sub_path else f"{STDLIB_BASE_URL}/{entry}"
+    dest     = STDLIB_DIR / sub_path / entry if sub_path else STDLIB_DIR / entry
+
+    if not download_file(url, dest):
+        return False
+
+    # Update in-memory STDLIB_PACKAGES so the rest of the session reflects the new version
+    STDLIB_PACKAGES[name] = remote_pkg
+    installed[name] = stdlib_installed_entry(name)
+    installed[name]["version"] = remote_version
+
+    print(f"  Updated:    {name} v{remote_version} -> {dest}")
     return True
 
 
@@ -278,8 +319,11 @@ def cmd_install(args, registry: dict, installed: dict):
     success = 0
     failed  = 0
     for name in targets:
-        ok = install_package(name, registry, installed, force=force)
-        if ok:
+        if is_stdlib_package(name):
+            print(f"  Stdlib:   {name} is part of the Flux standard library (always available)")
+            success += 1
+            continue
+        if install_package(name, registry, installed, force=force):
             success += 1
         else:
             failed += 1
@@ -306,29 +350,53 @@ def cmd_remove(args, registry: dict, installed: dict):
 
 def cmd_update(args, registry: dict, installed: dict):
     if args.all:
-        targets = list(installed.keys())
+        targets = list(registry.keys())
     else:
         targets = args.package
 
-    for name in targets:
-        if is_stdlib_package(name):
-            print(f"  Stdlib:   {name} is managed by the Flux distribution, not fpm.")
-            continue
+    stdlib_targets     = [n for n in targets if is_stdlib_package(n)]
+    thirdparty_targets = [n for n in targets if not is_stdlib_package(n)]
+
+    success, failed = 0, 0
+
+    # Stdlib: fetch remote package.json and compare versions
+    if stdlib_targets:
+        print("  Fetching remote stdlib package.json...")
+        remote_stdlib = fetch_remote_stdlib_json()
+        if not remote_stdlib:
+            print("  WARNING: Could not fetch remote stdlib package.json.")
+            failed += len(stdlib_targets)
+        else:
+            for name in stdlib_targets:
+                if name not in remote_stdlib:
+                    print(f"  Not found:  {name} not in remote stdlib")
+                    failed += 1
+                    continue
+                if update_stdlib_package(name, remote_stdlib[name], installed):
+                    success += 1
+                else:
+                    failed += 1
+
+    # Third-party: re-download
+    for name in thirdparty_targets:
         if name not in installed:
             print(f"  Not installed: {name}  (use: fpm install {name})")
             continue
         print(f"  Updating {name}...")
-        install_package(name, registry, installed, force=True)
+        if install_package(name, registry, installed, force=True):
+            success += 1
+        else:
+            failed += 1
 
     save_installed(installed)
-    print("\nUpdate complete.")
+    print(f"\nUpdate complete. {success} updated, {failed} failed.")
 
 
 def cmd_list(args, registry: dict, installed: dict):
     if args.available:
         print(f"Available packages ({len(registry)}):\n")
         for name, pkg in sorted(registry.items()):
-            desc = pkg.get("description", "")
+            desc   = pkg.get("description", "")
             marker = " [installed]" if name in installed else ""
             print(f"  {name:<30} v{pkg['version']:<10} {desc}{marker}")
     else:
@@ -337,7 +405,9 @@ def cmd_list(args, registry: dict, installed: dict):
             return
         print(f"Installed packages ({len(installed)}):\n")
         for name, pkg in sorted(installed.items()):
-            print(f"  {name:<30} v{pkg['version']}")
+            source = pkg.get("source", "remote")
+            tag    = "[stdlib]" if source == "stdlib" else "[local]" if source == "local" else "[remote]"
+            print(f"  {name:<30} v{pkg['version']}  {tag}")
 
 
 def cmd_info(args, registry: dict, installed: dict):
@@ -351,6 +421,9 @@ def cmd_info(args, registry: dict, installed: dict):
         print(f"  Version:      {pkg['version']}")
         print(f"  Description:  {pkg.get('description', 'N/A')}")
         print(f"  Entry:        {pkg['entry']}")
+        sub_path = pkg.get("path", "")
+        if sub_path:
+            print(f"  Subdirectory: {sub_path}/")
         deps = pkg.get("dependencies", {})
         if deps:
             print(f"  Dependencies:")
