@@ -2,7 +2,7 @@
 ### *A general purpose, statically typed, broadly mid-level language with first-class data manipulation.*
 
 <p align="center">
-    <img width="512" height="512" alt="image" src="https://github.com/user-attachments/assets/c4a212fd-6b71-454e-85aa-4b873021c62e" />
+    <img width="512" height="512" alt="image" src="https://github.com/user-attachments/assets/58da57a7-1924-48a2-ba29-c2040d9343eb" />
 </p>
 
 ## What is Flux?
