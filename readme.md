@@ -35,13 +35,6 @@ Flux follows a "high-trust" model:
 - Explicit is better than implicit
 - Performance and control over safety guarantees
 
-This means:
-- Manual memory management (no garbage collection)
-- No borrow checker (you manage lifetimes)
-- Direct hardware access when needed
-- Full compile-time programming capabilities* (coming soon)
-
-
 ## Ideal Use Cases
 
 Flux is well-suited for:
@@ -54,15 +47,13 @@ Flux is well-suited for:
 
 ## Current Status
 
-Flux is in active development. The language specification is complete, but implementation is ongoing.  
-The standard library is the current focus.
+Flux is in active development. The syntax and grammar will not change. The [standard library](https://github.com/kvthweatt/FluxLang/tree/main/src/stdlib) is the current focus.
 
 **What exists:**
 - [Complete language specification](https://github.com/kvthweatt/FluxLang/blob/main/docs/Specs/language_specification.md)
 - [Keyword Reference](https://github.com/kvthweatt/FluxLang/blob/main/docs/keyword_reference.md)
 - A Flux [style guide](https://github.com/kvthweatt/FluxLang/blob/main/docs/style_guide.md)
 - Tutorials for [beginner](https://github.com/kvthweatt/FluxLang/blob/main/docs/style_guide.md) and [adept](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_adept.md) programmers
-- Clear syntax and semantics
 
 **What's being built:**
 - Compiler Implementation ✅
