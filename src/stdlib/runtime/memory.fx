@@ -23,7 +23,7 @@ extern
         VirtualFree(ulong, size_t, u32)        -> bool,
         VirtualProtect(ulong, size_t, u32, u32*) -> bool;
 };
-#endif;
+#endif; //  /WINDOWS
 
 def !!memset(void* dst, int c, size_t n) -> void*
 {
@@ -50,7 +50,7 @@ def !!memcpy(void* dst, void* src, size_t n) -> void*
     return dst;
 };
 
-def memmove(void* dst, void* src, size_t n) -> void*
+def !!memmove(void* dst, void* src, size_t n) -> void*
 {
     byte* d = (byte*)dst,
           s = (byte*)src;
@@ -75,7 +75,7 @@ def memmove(void* dst, void* src, size_t n) -> void*
     return dst;
 };
 
-def memcmp(void* a, void* b, size_t n) -> int
+def !!memcmp(void* a, void* b, size_t n) -> int
 {
     byte* pa = (byte*)a,
           pb = (byte*)b;
@@ -168,7 +168,7 @@ extern
         mmap(u64, size_t, int, int, int, i64) -> u64,
         munmap(u64, size_t)                   -> int;
 };
-#endif;
+#endif; //  /LINUX
 
 #ifdef __MACOS__
 def !!malloc(size_t size) -> void*
@@ -239,7 +239,7 @@ def !!realloc(void* ptr, size_t new_size) -> void*
     free(ptr);
     return new_ptr;
 };
-#endif;
+#endif; //  /MACOS
 
 #ifdef __WINDOWS__
 extern

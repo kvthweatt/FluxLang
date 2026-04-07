@@ -17,7 +17,7 @@
       "version": "1.0.0",
       "entry": "collections.fx",
       "path": "",
-      "description": "Generic collections: list, map, set, queue, stack",
+      "description": "Generic collections: lists, maps, sets, queues, stacks",
       "dependencies": {}
     },
     "flux-console": {
@@ -31,7 +31,7 @@
       "version": "1.0.0",
       "entry": "cryptography.fx",
       "path": "",
-      "description": "AES-GCM, SHA-256/384, HKDF, X25519, ECDSA P-256",
+      "description": "Cryptographic algorithms",
       "dependencies": {
         "flux-bigint": ">=1.0.0"
       }
@@ -40,14 +40,14 @@
       "version": "1.0.0",
       "entry": "decimal.fx",
       "path": "",
-      "description": "Decimal floating point arithmetic",
+      "description": "Arbitrary precision floating point arithmetic",
       "dependencies": {}
     },
     "flux-detour": {
       "version": "1.0.0",
       "entry": "detour.fx",
       "path": "",
-      "description": "Runtime function hooking and detours",
+      "description": "Runtime function hooking and detouring",
       "dependencies": {}
     },
     "flux-format": {
@@ -75,7 +75,7 @@
       "version": "1.0.0",
       "entry": "io.fx",
       "path": "",
-      "description": "File and stream I/O",
+      "description": "Basic I/O (console & file)",
       "dependencies": {}
     },
     "flux-json": {
@@ -128,7 +128,7 @@
       "version": "1.0.0",
       "entry": "physics.fx",
       "path": "",
-      "description": "Rigid body and soft body physics simulation",
+      "description": "Rigid and soft body physics simulation",
       "dependencies": {
         "flux-math": ">=1.0.0",
         "flux-vectors": ">=1.0.0"
@@ -162,21 +162,21 @@
       "version": "1.0.0",
       "entry": "standard.fx",
       "path": "",
-      "description": "Flux standard prelude",
+      "description": "Standard import for any Flux program",
       "dependencies": {}
     },
     "flux-sys": {
       "version": "1.0.0",
       "entry": "sys.fx",
       "path": "",
-      "description": "Low-level system calls",
+      "description": "Centralized system-specific API and ABI",
       "dependencies": {}
     },
     "flux-tls": {
-      "version": "1.0.0",
+      "version": "1.3.0",
       "entry": "tls.fx",
       "path": "",
-      "description": "TLS 1.3 client and server",
+      "description": "TLS 1.3",
       "dependencies": {
         "flux-cryptography": ">=1.0.0",
         "flux-net-windows": ">=1.0.0"
@@ -262,7 +262,7 @@
       "version": "1.0.0",
       "entry": "ffifio.fx",
       "path": "runtime",
-      "description": "Foreign function interface I/O",
+      "description": "FFI-based file I/O",
       "dependencies": {}
     },
     "flux-memory": {
@@ -276,7 +276,7 @@
       "version": "1.0.0",
       "entry": "operators.fx",
       "path": "runtime",
-      "description": "Operator overload runtime support",
+      "description": "Standard operators",
       "dependencies": {}
     },
     "flux-runtime": {
@@ -290,7 +290,7 @@
       "version": "1.0.0",
       "entry": "sharedmemory.fx",
       "path": "runtime",
-      "description": "Shared memory IPC",
+      "description": "Shared memory module for IPC",
       "dependencies": {}
     },
     "flux-threading": {
@@ -318,7 +318,7 @@
       "version": "1.0.0",
       "entry": "string_utilities.fx",
       "path": "utility",
-      "description": "String processing utilities",
+      "description": "String manipulation utilities",
       "dependencies": {}
     }
   }
