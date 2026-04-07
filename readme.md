@@ -98,14 +98,11 @@ struct Packet
 def main() -> int
 {
     byte[7] bytes = [0x01, 0x00, 0x20, 0x5F, 0x12, 0x34, 0x56];
-    Packet pkt = Packet from bytes;
+    Packet pkt from bytes;
     
-    print("Type: \0");
-    print(pkt.type); print();
-    print("Length: \0");
-    print(pkt.length); print();
-    print("Time: \0");
-    print(pkt.timestamp); print();
+    println(f"Type: {int(pkt.type)}");
+    println(f"Length: {pkt.length}");
+    println(f"Time: {pkt.timestamp}");
     
     return 0;
 };
