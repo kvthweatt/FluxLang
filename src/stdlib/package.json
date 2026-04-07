@@ -7,7 +7,7 @@
   "base_url": "https://raw.githubusercontent.com/kvthweatt/FluxLang/main/src/stdlib",
   "packages": {
     "flux-bigint": {
-      "version": "1.0.1",
+      "version": "1.0.2",
       "entry": "bigint.fx",
       "path": "",
       "description": "Arbitrary precision integer arithmetic",

@@ -1,6 +1,6 @@
 {
   "flux-bigint": {
-    "version": "1.0.0",
+    "version": "1.0.1",
     "entry": "bigint.fx",
     "path": "",
     "file": "C:\\Users\\kvthw\\Flux\\src\\stdlib\\bigint.fx",
