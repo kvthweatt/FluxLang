@@ -38,7 +38,7 @@ class ASTNode:
         return self
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Any:
-        raise NotImplementedError(f"codegen not implemented for {self.__class__.__name__}")
+        raise NotImplementedError(f"codegen not implemented for {self.__class__.__name__} [{self.source_line}:{self.source_col}]")
 
 # Literal values (no dependencies)
 @dataclass
@@ -89,7 +89,7 @@ class Literal(ASTNode):
                 return ir.Constant(llvm_type, int(self.value) if isinstance(self.value, str) else self.value)
             elif isinstance(llvm_type, (ir.FloatType, ir.DoubleType)):
                 return ir.Constant(llvm_type, float(self.value))
-            raise ValueError(f"Unsupported DATA literal: {self.value}")
+            raise ValueError(f"Unsupported DATA literal: {self.value} [{self.source_line}:{self.source_col}]")
         else:
             # Handle custom types using LiteralTypeHandler
             llvm_type = TypeSystem.get_llvm_type(self.type, module, self.value)
@@ -97,12 +97,12 @@ class Literal(ASTNode):
                 return ir.Constant(llvm_type, int(self.value) if isinstance(self.value, str) else self.value)
             elif isinstance(llvm_type, (ir.FloatType, ir.DoubleType)):
                 return ir.Constant(llvm_type, float(self.value))
-            raise ValueError(f"Unsupported literal type: {self.type}")
+            raise ValueError(f"Unsupported literal type: {self.type} [{self.source_line}:{self.source_col}]")
 
     def _handle_struct_literal(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Handle struct literal initialization (e.g., {a = 10, b = 20})"""
         if not isinstance(self.value, dict):
-            raise ValueError("Expected dictionary for struct literal")
+            raise ValueError(f"Expected dictionary for struct literal [{self.source_line}:{self.source_col}]")
         
         # Resolve struct type using LiteralTypeHandler
         struct_type = LiteralTypeHandler.resolve_struct_type(self.value, module)
@@ -331,7 +331,7 @@ class Identifier(Expression):
             if IdentifierTypeHandler.is_type_alias(mangled_name, module):
                 return module._type_aliases[mangled_name]
             
-        raise NameError(f"Unknown identifier: {self.name}")
+        raise NameError(f"Unknown identifier: {self.name} [{self.source_line}:{self.source_col}]")
 
 @dataclass
 class ArrayLiteral(Expression):
@@ -524,7 +524,7 @@ class ArrayLiteral(Expression):
                     alloca = builder.alloca(array_type, name="empty_array")
                     return alloca
             else:
-                raise ValueError("Cannot create empty array without element type")
+                raise ValueError(f"Cannot create empty array without element type [{self.source_line}:{self.source_col}]")
         
         # Generate elements and infer common type
         element_values = []
@@ -1166,7 +1166,7 @@ class BinaryOp(Expression):
             return TypeSystem.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
 
-        raise ValueError(f"Unsupported operator: {self.operator}")
+        raise ValueError(f"Unsupported operator: {self.operator} [{self.source_line}:{self.source_col}]")
 
 @dataclass
 class UnaryOp(Expression):
@@ -1240,7 +1240,7 @@ class UnaryOp(Expression):
                     elif mangled and mangled in module.globals:
                         ptr = module.globals[mangled]
                     else:
-                        raise NameError(f"Variable '{self.operand.name}' not found in any scope")
+                        raise NameError(f"Variable '{self.operand.name}' not found in any scope [{self.source_line}:{self.source_col}]")
                 st = builder.store(new_val, ptr)
                 if hasattr(builder,'volatile_vars') and self.operand.name in builder.volatile_vars:
                     st.volatile = True
@@ -1272,7 +1272,7 @@ class UnaryOp(Expression):
                     elif mangled and mangled in module.globals:
                         ptr = module.globals[mangled]
                     else:
-                        raise NameError(f"Variable '{self.operand.name}' not found in any scope")
+                        raise NameError(f"Variable '{self.operand.name}' not found in any scope [{self.source_line}:{self.source_col}]")
                 st = builder.store(new_val, ptr)
                 if hasattr(builder,'volatile_vars') and self.operand.name in builder.volatile_vars:
                     st.volatile = True
@@ -1287,7 +1287,7 @@ class UnaryOp(Expression):
                     return ir.Constant(operand_val.type, ~operand_val.constant)
             return builder.not_(operand_val)
         else:
-            raise ValueError(f"Unsupported unary operator: {self.operator}")
+            raise ValueError(f"Unsupported unary operator: {self.operator} [{self.source_line}:{self.source_col}]")
     
     def _handle_increment_address_of(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Handle ++@x and --@x syntax (increment/decrement address of)"""
@@ -1320,7 +1320,7 @@ class UnaryOp(Expression):
                     offset = ir.Constant(ir.IntType(32), -1)
                     new_address = builder.gep(base_address, [offset], name="dec_addr")
         else:
-            raise ValueError(f"Cannot increment/decrement address of non-pointer type: {base_address.type}")
+            raise ValueError(f"Cannot increment/decrement address of non-pointer type: {base_address.type} [{self.source_line}:{self.source_col}]")
         
         #print(f"DEBUG: New address type: {new_address.type}")
         #print(f"DEBUG: Returning incremented/decremented address (not loaded value)")
@@ -1357,7 +1357,7 @@ class CastExpression(Expression):
             # float target => 0.0
             if isinstance(target_llvm_type, (ir.HalfType, ir.FloatType, ir.DoubleType)):
                 return ir.Constant(target_llvm_type, 0.0)
-            raise TypeError(f"cannot cast void-literal to {target_llvm_type}")
+            raise TypeError(f"cannot cast void-literal to {target_llvm_type} [{self.source_line}:{self.source_col}]")
 
         source_val = self.expression.codegen(builder, module)
         
@@ -1397,7 +1397,7 @@ class CastExpression(Expression):
                 reinterpreted_ptr = builder.bitcast(source_val, target_ptr_type, name="struct_reinterpret")
                 return builder.load(reinterpreted_ptr, name="reinterpreted_struct")
             else:
-                raise ValueError(f"Cannot cast struct of size {source_size} to struct of size {target_size}")
+                raise ValueError(f"Cannot cast struct of size {source_size} to struct of size {target_size} [{self.source_line}:{self.source_col}]")
         
         # Handle loaded struct-to-struct cast (when source is already loaded from pointer)
         elif (isinstance(source_val.type, ir.LiteralStructType) and
@@ -1417,7 +1417,7 @@ class CastExpression(Expression):
                 reinterpreted_ptr = builder.bitcast(source_ptr, target_ptr_type, name="struct_reinterpret")
                 return builder.load(reinterpreted_ptr, name="reinterpreted_struct")
             else:
-                raise ValueError(f"Cannot cast struct of size {source_size} to struct of size {target_size}")
+                raise ValueError(f"Cannot cast struct of size {source_size} to struct of size {target_size} [{self.source_line}:{self.source_col}]")
         
         # Handle standard numeric casts
         if isinstance(source_val.type, ir.IntType) and isinstance(target_llvm_type, ir.IntType):
@@ -1556,7 +1556,7 @@ class CastExpression(Expression):
             return ArrayTypeHandler.unpack_integer_to_array(builder, module, source_val, target_llvm_type)
 
         else:
-            raise ValueError(f"Unsupported cast from {source_val.type} to {target_llvm_type}")
+            raise ValueError(f"Unsupported cast from {source_val.type} to {target_llvm_type} [{self.source_line}:{self.source_col}]")
     
     def _handle_void_cast(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Handle void casting - immediately free memory according to Flux specification"""
@@ -1572,7 +1572,7 @@ class CastExpression(Expression):
                 gvar = module.globals[var_name]
                 self._generate_runtime_free(builder, module, gvar, var_name)
             else:
-                raise NameError(f"Cannot void cast unknown variable: {var_name}")
+                raise NameError(f"Cannot void cast unknown variable: {var_name} [{self.source_line}:{self.source_col}]")
         else:
             expr_val = self.expression.codegen(builder, module)
             if isinstance(expr_val.type, ir.PointerType):
@@ -1814,7 +1814,7 @@ class ArrayComprehension(Expression):
                 array_ptr = builder.alloca(array_type, name="comprehension_array")
             else:
                 # Runtime range with no expected size - cannot determine array size
-                raise NotImplementedError("Array comprehensions with runtime-determined ranges require an explicit array size (e.g., int[10] x = [...])")
+                raise NotImplementedError(f"Array comprehensions with runtime-determined ranges require an explicit array size (e.g., int[10] x = [...]) [{self.source_line}:{self.source_col}]")
             
             index_ptr = builder.alloca(ir.IntType(32), name="comp_index")
             builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
@@ -1861,7 +1861,7 @@ class ArrayComprehension(Expression):
             
             return array_ptr
         else:
-            raise NotImplementedError("Array comprehension only supports range expressions and array literals")
+            raise NotImplementedError(f"Array comprehension only supports range expressions and array literals [{self.source_line}:{self.source_col}]")
 
 @dataclass
 class FStringLiteral(Expression):
@@ -2045,7 +2045,7 @@ class FStringLiteral(Expression):
             elif expr.type == DataType.CHAR:
                 return str(expr.value) if isinstance(expr.value, str) else chr(expr.value)
             else:
-                raise ValueError(f"Cannot convert {expr.type} literal to string at compile time")
+                raise ValueError(f"Cannot convert {expr.type} literal to string at compile time [{self.source_line}:{self.source_col}]")
         
         # Handle simple binary operations with compile-time constants
         elif isinstance(expr, BinaryOp):
@@ -2075,7 +2075,7 @@ class FStringLiteral(Expression):
             elif expr.operator == Operator.GREATER_EQUAL:
                 return left >= right
             else:
-                raise NotImplementedError(f"Operator {expr.operator} not supported for compile-time f-string evaluation")
+                raise NotImplementedError(f"Operator {expr.operator} not supported for compile-time f-string evaluation [{self.source_line}:{self.source_col}]")
         
         # Handle unary operations
         elif isinstance(expr, UnaryOp):
@@ -2088,7 +2088,7 @@ class FStringLiteral(Expression):
             elif expr.operator == Operator.SUB:
                 return -operand
             else:
-                raise NotImplementedError(f"Unary operator {expr.operator} not supported for compile-time f-string evaluation")
+                raise NotImplementedError(f"Unary operator {expr.operator} not supported for compile-time f-string evaluation [{self.source_line}:{self.source_col}]")
         
         # Handle identifiers that refer to compile-time constants
         elif isinstance(expr, Identifier):
@@ -2124,7 +2124,7 @@ class FStringLiteral(Expression):
         #     pass
         
         # If we get here, we can't evaluate at compile time
-        raise NotImplementedError(f"Cannot evaluate {type(expr).__name__} at compile time for f-string")
+        raise NotImplementedError(f"Cannot evaluate {type(expr).__name__} at compile time for f-string [{self.source_line}:{self.source_col}]")
 
 @dataclass
 class FunctionCall(Expression):
@@ -2153,7 +2153,7 @@ class FunctionCall(Expression):
             if isinstance(arg, Identifier):
                 entry = module.symbol_table.lookup_variable(arg.name)
                 if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
-                    raise ValueError(f"Compile error: local variable '{arg.name}' cannot leave its scope via function call")
+                    raise ValueError(f"Compile error: local variable '{arg.name}' cannot leave its scope via function call [{self.source_line}:{self.source_col}]")
         arg_vals = [arg.codegen(builder, module) for arg in self.arguments]
         
         # Step 3: Get current namespace
@@ -2272,11 +2272,11 @@ class FunctionCall(Expression):
             if len(self.arguments) not in available_counts:
                 raise ValueError(
                     f"Function '{self.name}' found but no overload accepts {len(self.arguments)} arguments. "
-                    f"Available overloads accept: {available_counts} arguments."
+                    f"Available overloads accept: {available_counts} arguments. [{self.source_line}:{self.source_col}]"
                 )
         
         # Function not found anywhere - raise a clear error
-        raise NameError(f"Function '{self.name}' not found in module or any imported namespaces")
+        raise NameError(f"Function '{self.name}' not found in module or any imported namespaces [{self.source_line}:{self.source_col}]")
 
     def _generate_call(self, builder: ir.IRBuilder, module: ir.Module, func: ir.Function, arg_vals: List[ir.Value]) -> ir.Value:
         """
@@ -2419,7 +2419,7 @@ class MemberAccess(Expression):
                     if global_var.name == global_name:
                         return builder.load(global_var)
                 
-                raise NameError(f"Static member '{self.member}' not found in struct '{type_name}'")
+                raise NameError(f"Static member '{self.member}' not found in struct '{type_name}' [{self.source_line}:{self.source_col}]")
             # Check for union types
             elif MemberAccessTypeHandler.is_static_union_member(type_name, module):
                 # Look for the global variable representing this member
@@ -2428,7 +2428,7 @@ class MemberAccess(Expression):
                     if global_var.name == global_name:
                         return builder.load(global_var)
                 
-                raise NameError(f"Static member '{self.member}' not found in union '{type_name}'")
+                raise NameError(f"Static member '{self.member}' not found in union '{type_name}' [{self.source_line}:{self.source_col}]")
         
         # Handle regular member access (obj.x where obj is an instance)
         obj_val = self.object.codegen(builder, module)
@@ -2489,7 +2489,7 @@ class MemberAccess(Expression):
                 # Preserve type metadata from struct member type
                 return MemberAccessTypeHandler.attach_member_type_metadata(loaded, struct_type, self.member, module)
         
-        raise ValueError(f"Member access on unsupported type: {obj_val.type}")
+        raise ValueError(f"Member access on unsupported type: {obj_val.type} [{self.source_line}:{self.source_col}]")
     
     def _get_member_ptr(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Return the GEP pointer to the member without loading it. Used by ++ and --."""
@@ -2521,7 +2521,7 @@ class MemberAccess(Expression):
                 [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), member_index)],
                 inbounds=True
             )
-        raise ValueError(f"Cannot get member pointer for: {obj_val.type}")
+        raise ValueError(f"Cannot get member pointer for: {obj_val.type} [{self.source_line}:{self.source_col}]")
 
     def _handle_union_member_access(self, builder: ir.IRBuilder, module: ir.Module, union_ptr: ir.Value, union_name: str) -> ir.Value:
         """Handle union member access by casting the union to the appropriate member type"""
@@ -2534,7 +2534,7 @@ class MemberAccess(Expression):
         # Handle special ._ tag access for tagged unions
         if self.member == '_':
             if not is_tagged:
-                raise ValueError(f"Cannot access tag '._' on non-tagged union '{union_name}'")
+                raise ValueError(f"Cannot access tag '._' on non-tagged union '{union_name}' [{self.source_line}:{self.source_col}]")
             
             # For tagged unions, the tag is at index 0
             tag_ptr = builder.gep(
@@ -2589,14 +2589,11 @@ class MethodCall(Expression):
             if module.symbol_table.get_llvm_value(var_name) is not None:
                 obj_ptr = module.symbol_table.get_llvm_value(var_name)
             else:
-                raise NameError(f"Unknown variable: {var_name}")
-        else:
-            # For other expressions, generate code normally
-            obj_ptr = self.object.codegen(builder, module)
+                raise NameError(f"Unknown variable: {var_name} [{self.source_line}:{self.source_col}]")
         
         # Determine the object's type to construct the method name
         if not isinstance(obj_ptr.type, ir.PointerType):
-            raise ValueError(f"Method call internal error, expected alloca pointer, got: {obj_ptr.type}")
+            raise ValueError(f"Method call internal error, expected alloca pointer, got: {obj_ptr.type} [{self.source_line}:{self.source_col}]")
 
         slot_pointee = obj_ptr.type.pointee
 
@@ -2609,7 +2606,7 @@ class MethodCall(Expression):
             this_ptr = builder.load(obj_ptr, name=f"{var_name}_load")  # load T* out of T**
 
         else:
-            raise ValueError(f"Cannot determine object type for method call: {obj_ptr.type}")
+            raise ValueError(f"Cannot determine object type for method call: {obj_ptr.type} [{self.source_line}:{self.source_col}]")
 
         # Now infer the object type name from the struct type (NOT pointer)
         struct_ty = this_ptr.type.pointee
@@ -2620,7 +2617,7 @@ class MethodCall(Expression):
                     obj_type_name = type_name
                     break
         if obj_type_name is None:
-            raise ValueError(f"Cannot determine object type for method call: {struct_ty}")
+            raise ValueError(f"Cannot determine object type for method call: {struct_ty} [{self.source_line}:{self.source_col}]")
 
         method_func_name = f"{obj_type_name}.{self.method_name}"
         # Construct the base method name (e.g., "standard__strings__string.val")
@@ -2657,7 +2654,7 @@ class MethodCall(Expression):
         #if func is None:
         #    print(f"[METHOD CALL] ERROR: Could not find method!", file=sys.stdout)
         if func is None:
-            raise NameError(f"Unknown method: {method_func_name}")
+            raise NameError(f"Unknown method: {method_func_name} [{self.source_line}:{self.source_col}]")
 
         args = [this_ptr]  # 'this' is ALWAYS a T* now
         # (then keep your existing arg generation loop)
@@ -2666,7 +2663,7 @@ class MethodCall(Expression):
             if isinstance(arg_expr, Identifier):
                 entry = module.symbol_table.lookup_variable(arg_expr.name)
                 if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
-                    raise ValueError(f"Compile error: local variable '{arg_expr.name}' cannot leave its scope via method call")
+                    raise ValueError(f"Compile error: local variable '{arg_expr.name}' cannot leave its scope via method call [{self.source_line}:{self.source_col}]")
             arg_val = arg_expr.codegen(builder, module)
 
             # Expected type: method params include 'this' as arg0, so user args start at arg1
@@ -2727,7 +2724,7 @@ class VariadicAccess(Expression):
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         va_list_alloca = getattr(builder, '_flux_va_list', None)
         if va_list_alloca is None:
-            raise RuntimeError("...[N] used outside of a variadic function")
+            raise RuntimeError(f"...[N] used outside of a variadic function [{self.source_line}:{self.source_col}]")
 
         va_list_i8ptr = getattr(builder, '_flux_va_list_i8ptr')
 
@@ -2917,7 +2914,7 @@ class ArrayAccess(Expression):
             return builder.trunc(shifted, ir.IntType(8), name="byte_extract")
         
         else:
-            raise ValueError(f"Cannot access array element for type: {array_val.type}")
+            raise ValueError(f"Cannot access array element for type: {array_val.type} [{self.source_line}:{self.source_col}]")
 
 @dataclass
 class ArraySlice(Expression):
@@ -2977,7 +2974,7 @@ class ArraySlice(Expression):
                 if v.type.width > 32:
                     return builder.trunc(v, ir.IntType(32), name=f"{name}_trunc")
                 return builder.sext(v, ir.IntType(32), name=f"{name}_ext")
-            raise ValueError("Slice indices must be integers")
+            raise ValueError(f"Slice indices must be integers [{self.source_line}:{self.source_col}]")
 
         start_i32 = as_i32(start_val, "slice_start")
         end_i32 = as_i32(end_val, "slice_end")
@@ -2986,11 +2983,11 @@ class ArraySlice(Expression):
         const_len = self._try_const_len()
         if const_len is None:
             raise ValueError(
-                "Array slice length must be statically known right now (e.g. i:i+64). "
-                "The compiler couldn't prove the length as a constant."
+                f"Array slice length must be statically known right now (e.g. i:i+64). "
+                f"The compiler couldn't prove the length as a constant. [{self.source_line}:{self.source_col}]"
             )
         if const_len < 0:
-            raise ValueError("Array slice must be forward (start <= end)")
+            raise ValueError(f"Array slice must be forward (start <= end) [{self.source_line}:{self.source_col}]")
 
         # Determine element type using type handler
         elem_ty = ArrayTypeHandler.get_element_type_from_array_value(array_val)
@@ -3006,7 +3003,7 @@ class ArraySlice(Expression):
             # Pointer-to-element (e.g. byte[] lowered as i8*)
             src_ptr = builder.gep(array_val, [start_i32], inbounds=True, name="slice_src")
         else:
-            raise ValueError(f"Cannot slice type: {array_val.type}")
+            raise ValueError(f"Cannot slice type: {array_val.type} [{self.source_line}:{self.source_col}]")
 
         # Materialize [const_len x elem] on the stack and memcpy.
         dst_arr_ty = ir.ArrayType(elem_ty, const_len)
@@ -3141,7 +3138,7 @@ class BitSlice(Expression):
             builder.store(aligned, tmp)
             base_ptr = tmp
         else:
-            raise ValueError(f"Bit-slice operator `` requires array/pointer operand, got {val.type}")
+            raise ValueError(f"Bit-slice operator `` requires array/pointer operand, got {val.type} [{self.source_line}:{self.source_col}]")
 
         # Widen indices to i32
         def to_i32(v, name):
@@ -3151,7 +3148,7 @@ class BitSlice(Expression):
                 if v.type.width > 32:
                     return builder.trunc(v, ir.IntType(32), name=name)
                 return v
-            raise ValueError(f"Bit-slice indices must be integers")
+            raise ValueError(f"Bit-slice indices must be integers [{self.source_line}:{self.source_col}]")
 
         start_i32 = to_i32(start_val, "bs_start")
         end_i32   = to_i32(end_val,   "bs_end")
@@ -3206,7 +3203,7 @@ class PointerDeref(Expression):
         
         # Verify we have a pointer type
         if not isinstance(ptr_val.type, ir.PointerType):
-            raise ValueError("Cannot dereference non-pointer type")
+            raise ValueError(f"Cannot dereference non-pointer type [{self.source_line}:{self.source_col}]")
         
         # Load the value from the pointer
         return builder.load(ptr_val, name="deref")
@@ -3289,7 +3286,7 @@ class AddressOf(Expression):
                         raise ValueError(
                             f"Ambiguous function reference '@{var_name}': "
                             f"multiple overloads exist. Please use explicit cast or "
-                            f"specify parameter types."
+                            f"specify parameter types. [{self.source_line}:{self.source_col}]"
                         )
             
             # Check for namespace-qualified names using 'using' statements
@@ -3331,7 +3328,7 @@ class AddressOf(Expression):
                                 return zero_arg_overload['function']
             
             # If we get here, the variable/function hasn't been declared yet
-            raise NameError(f"Unknown identifier: {var_name}")
+            raise NameError(f"Unknown identifier: {var_name} [{self.source_line}:{self.source_col}]")
         
         # Handle pointer dereference - @(*ptr) is equivalent to ptr
         if isinstance(self.expression, PointerDeref):
@@ -3361,7 +3358,7 @@ class AddressOf(Expression):
                     elif mangled and mangled in module.globals:
                         array_ptr = module.globals[mangled]
                     else:
-                        raise NameError(f"Unknown array identifier: {var_name}")
+                        raise NameError(f"Unknown array identifier: {var_name} [{self.source_line}:{self.source_col}]")
             elif isinstance(self.expression.array, MemberAccess):
                 # For member access (e.g. @proj.m[0]), get the pointer to the member
                 # rather than loading its value, so we can GEP into it
@@ -3408,7 +3405,7 @@ class AddressOf(Expression):
             # Return pointer to the temporary storage
             return temp_alloca
         
-        raise ValueError(f"Cannot take address of {type(self.expression).__name__}")
+        raise ValueError(f"Cannot take address of {type(self.expression).__name__} [{self.source_line}:{self.source_col}]")
 
 @dataclass
 class Stringify(Expression):
@@ -3444,7 +3441,7 @@ class Stringify(Expression):
                     self.name not in module.globals and
                     module.symbol_table.lookup_variable(self.name, current_ns) is None and
                     module.symbol_table.lookup_function(self.name, current_ns) is None):
-                raise ComptimeError(f"Cannot stringify undefined identifier '{self.name}'")
+                raise ComptimeError(f"Cannot stringify undefined identifier '{self.name}' [{self.source_line}:{self.source_col}]")
             return self._emit_string(builder, module, self.name)
 
         # $x._ — resolve the tag value to its enum member name at runtime
@@ -3452,22 +3449,22 @@ class Stringify(Expression):
             # Look up the variable to find its union type
             var_entry = module.symbol_table.lookup_variable(self.name, current_ns)
             if var_entry is None:
-                raise ComptimeError(f"Cannot stringify: '{self.name}' is not a defined variable")
+                raise ComptimeError(f"Cannot stringify: '{self.name}' is not a defined variable [{self.source_line}:{self.source_col}]")
             union_name = var_entry.type_spec.custom_typename if var_entry.type_spec else None
             if union_name is None or not hasattr(module, '_union_member_info') or union_name not in module._union_member_info:
-                raise ComptimeError(f"Cannot stringify '._': '{self.name}' is not a tagged union variable")
+                raise ComptimeError(f"Cannot stringify '._': '{self.name}' is not a tagged union variable [{self.source_line}:{self.source_col}]")
             union_info = module._union_member_info[union_name]
             if not union_info.get('is_tagged'):
-                raise ComptimeError(f"Cannot stringify '._': union '{union_name}' has no tag")
+                raise ComptimeError(f"Cannot stringify '._': union '{union_name}' has no tag [{self.source_line}:{self.source_col}]")
             tag_enum_name = union_info['tag_name']
             if not hasattr(module, '_enum_types') or tag_enum_name not in module._enum_types:
-                raise ComptimeError(f"Cannot stringify '._': enum '{tag_enum_name}' not found")
+                raise ComptimeError(f"Cannot stringify '._': enum '{tag_enum_name}' not found [{self.source_line}:{self.source_col}]")
             enum_values = module._enum_types[tag_enum_name]  # dict: name -> int value
 
             # Load the tag value from the variable
             var_llvm = module.symbol_table.get_llvm_value(self.name)
             if var_llvm is None:
-                raise ComptimeError(f"Cannot stringify '._': no LLVM value for '{self.name}'")
+                raise ComptimeError(f"Cannot stringify '._': no LLVM value for '{self.name}' [{self.source_line}:{self.source_col}]")
             tag_ptr = builder.gep(var_llvm, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)], inbounds=True, name="tag_ptr")
             tag_val = builder.load(tag_ptr, name="tag_val")
 
@@ -3528,7 +3525,7 @@ class AlignOf(Expression):
 
         align2 = AlignOfTypeHandler.alignment_from_llvm_type(val_type, module)
         if align2 is None:
-            raise ValueError(f"Cannot determine alignment of type: {val_type}")
+            raise ValueError(f"Cannot determine alignment of type: {val_type} [{self.source_line}:{self.source_col}]")
 
         return ir.Constant(ir.IntType(32), align2)
 
@@ -3685,7 +3682,7 @@ class SizeOf(Expression):
         value = self.target.codegen(builder, module)
         bits = SizeOfTypeHandler.bits_from_llvm_type(value.type, module)
         if bits is None:
-            raise ValueError(f"Cannot determine size of type: {value.type}")
+            raise ValueError(f"Cannot determine size of type: {value.type} [{self.source_line}:{self.source_col}]")
 
         return ir.Constant(ir.IntType(32), bits)
 
@@ -3735,8 +3732,8 @@ class NoInit(Expression):
         It's a compile-time marker that's handled in VariableDeclaration.
         """
         raise RuntimeError(
-            "noinit is a compile-time marker and should not generate code directly. "
-            "It should only be used as an initializer in variable declarations."
+            f"noinit is a compile-time marker and should not generate code directly. "
+            f"It should only be used as an initializer in variable declarations. [{self.source_line}:{self.source_col}]"
         )
 
 # Variable declarations
@@ -4164,7 +4161,7 @@ class VariableDeclaration(ASTNode):
                         break
 
         if func is None:
-            raise NameError(f"Constructor not found: {func_call.name}")
+            raise NameError(f"Constructor not found: {func_call.name} [{self.source_line}:{self.source_col}]")
         # Build arguments: 'this' pointer first, then constructor arguments
         args = [alloca]
 
@@ -4309,7 +4306,7 @@ class Assignment(Statement):
                         s = rng.start.value if isinstance(rng.start, _Lit) else None
                         e = rng.end.value if isinstance(rng.end, _Lit) else None
                         if s is None or e is None:
-                            raise ValueError("Struct member slice assignment indices must be literals")
+                            raise ValueError(f"Struct member slice assignment indices must be literals [{self.source_line}:{self.source_col}]")
                         const_len = e - s + 1
                         zero = ir.Constant(ir.IntType(32), 0)
                         start_i32 = ir.Constant(ir.IntType(32), s)
@@ -4364,21 +4361,21 @@ class Assignment(Statement):
             # Bit-slice assignment: target[start``end] = val
             # Get the alloca pointer for the target variable
             if not isinstance(self.target.value, Identifier):
-                raise ValueError("Bit-slice assignment target must be a simple variable")
+                raise ValueError(f"Bit-slice assignment target must be a simple variable [{self.source_line}:{self.source_col}]")
             var_name = self.target.value.name
             ptr = module.symbol_table.get_llvm_value(var_name)
             if ptr is None:
-                raise ValueError(f"Unknown variable '{var_name}'")
+                raise ValueError(f"Unknown variable '{var_name}' [{self.source_line}:{self.source_col}]")
             # Determine integer width from the alloca pointee type
             int_type = ptr.type.pointee
             if not isinstance(int_type, ir.IntType):
-                raise ValueError("Bit-slice assignment requires an integer variable")
+                raise ValueError(f"Bit-slice assignment requires an integer variable [{self.source_line}:{self.source_col}]")
             w = int_type.width
             # Evaluate constant indices
             s_val = self.target.start.codegen(builder, module)
             e_val = self.target.end.codegen(builder, module)
             if not (hasattr(s_val, 'constant') and hasattr(e_val, 'constant')):
-                raise ValueError("Bit-slice assignment indices must be constants")
+                raise ValueError(f"Bit-slice assignment indices must be constants [{self.source_line}:{self.source_col}]")
             s_const = int(s_val.constant)
             e_const = int(e_val.constant)
             slice_width = e_const - s_const + 1
@@ -4404,7 +4401,7 @@ class Assignment(Statement):
             return result
 
         else:
-            raise ValueError(f"Cannot assign to {type(self.target).__name__}")
+            raise ValueError(f"Cannot assign to {type(self.target).__name__} [{self.source_line}:{self.source_col}]")
 
 @dataclass
 class CompoundAssignment(Statement):
@@ -4436,11 +4433,11 @@ class TernaryAssign(Statement):
         if isinstance(self.target, Identifier):
             sym = module.symbol_table.lookup(self.target.name)
             if sym is None:
-                raise ValueError(f"Undefined variable '{self.target.name}'")
+                raise ValueError(f"Undefined variable '{self.target.name}' [{self.source_line}:{self.source_col}]")
             ptr = module.symbol_table.get_llvm_value(self.target.name)
             current_val = builder.load(ptr, name="ternary_assign_cur")
         else:
-            raise ValueError(f"TernaryAssign: unsupported target type {type(self.target).__name__}")
+            raise ValueError(f"TernaryAssign: unsupported target type {type(self.target).__name__} [{self.source_line}:{self.source_col}]")
 
         # Compare current value to zero
         zero = ir.Constant(current_val.type, 0)
@@ -4547,7 +4544,7 @@ class AcceptorPlaceholder(Expression):
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         raise RuntimeError(
             f"AcceptorPlaceholder :({self.index}) should be substituted before codegen. "
-            f"This indicates a bug in the acceptor block implementation."
+            f"This indicates a bug in the acceptor block implementation. [{self.source_line}:{self.source_col}]"
         )
 
 
@@ -4599,7 +4596,7 @@ class AcceptorBlock(Expression):
             if expr.index not in values:
                 raise RuntimeError(
                     f"Placeholder :({expr.index}) referenced but no corresponding "
-                    f"labeled input provided"
+                    f"labeled input provided [{self.source_line}:{self.source_col}]"
                 )
             return IRStore(values[expr.index])
         
@@ -4693,7 +4690,7 @@ class IfStatement(Statement):
         try:
             cond_val = self.condition.codegen(builder, module)
         except Exception as e:
-            raise ComptimeError(f"if statement condition: {e}")
+            raise ComptimeError(f"if statement condition: {e} [{self.source_line}:{self.source_col}]")
         
         # Create basic blocks
         func = builder.block.function
@@ -4776,9 +4773,9 @@ class IfStatement(Statement):
                         self.else_block.codegen(builder, module)
             else:
                 # Runtime condition in global scope - not supported
-                raise RuntimeError("Cannot use runtime conditions in global scope if statements")
+                raise RuntimeError(f"Cannot use runtime conditions in global scope if statements [{self.source_line}:{self.source_col}]")
         except Exception as e:
-            raise RuntimeError(f"Warning: Could not evaluate global if condition: {e}")
+            raise RuntimeError(f"Warning: Could not evaluate global if condition: {e} [{self.source_line}:{self.source_col}]")
             # Default to executing the then block for safety
             #self.then_block.codegen(builder, module)
         
@@ -4869,7 +4866,7 @@ class IfExpression(Expression):
             else:
                 raise TypeError(
                     f"If expression branches have incompatible types: "
-                    f"{value_val.type} vs {else_val.type}"
+                    f"{value_val.type} vs {else_val.type} [{self.source_line}:{self.source_col}]"
                 )
         
         # Create phi node to select result
@@ -4996,7 +4993,7 @@ class TernaryOp(Expression):
             else:
                 raise TypeError(
                     f"Ternary operator branches have incompatible types: "
-                    f"{true_val.type} vs {false_val.type}"
+                    f"{true_val.type} vs {false_val.type} [{self.source_line}:{self.source_col}]"
                 )
         
         # Create phi node to select result
@@ -5040,7 +5037,7 @@ class NullCoalesce(Expression):
             zero = ir.Constant(left_val.type, 0)
             is_null = builder.icmp_signed('==', left_val, zero, name='is_zero')
         else:
-            raise TypeError(f"Null coalesce not supported for type: {left_val.type}")
+            raise TypeError(f"Null coalesce not supported for type: {left_val.type} [{self.source_line}:{self.source_col}]")
         
         # Create blocks
         func = builder.block.function
@@ -5079,7 +5076,7 @@ class NullCoalesce(Expression):
             else:
                 raise TypeError(
                     f"Null coalesce operands have incompatible types: "
-                    f"{left_val.type} vs {right_val.type}"
+                    f"{left_val.type} vs {right_val.type} [{self.source_line}:{self.source_col}]"
                 )
         
         # Phi node to select result
@@ -5417,7 +5414,7 @@ class ForInLoop(Statement):
             module.symbol_table.define(self.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
 
         else:
-            raise ValueError(f"Cannot iterate over type {coll_type}")
+            raise ValueError(f"Cannot iterate over type {coll_type} [{self.source_line}:{self.source_col}]")
 
         # Generate loop body
         old_break = getattr(builder, 'break_block', None)
@@ -5478,7 +5475,7 @@ class ReturnStatement(Statement):
         if isinstance(self.value, Identifier):
             entry = module.symbol_table.lookup_variable(self.value.name)
             if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
-                raise ValueError(f"Compile error: local variable '{self.value.name}' cannot leave its scope via return")
+                raise ValueError(f"Compile error: local variable '{self.value.name}' cannot leave its scope via return [{self.source_line}:{self.source_col}]")
 
         ret_val = self.value.codegen(builder, module)
 
@@ -5498,7 +5495,7 @@ class ReturnStatement(Statement):
         elif hasattr(func.type, 'pointee') and hasattr(func.type.pointee, 'return_type'):
             expected = func.type.pointee.return_type
         else:
-            raise RuntimeError("Cannot determine function return type")
+            raise RuntimeError(f"Cannot determine function return type [{self.source_line}:{self.source_col}]")
 
         # return <value>; in a void function is legal (value is discarded)
         if isinstance(expected, ir.VoidType):
@@ -5529,7 +5526,7 @@ class ReturnStatement(Statement):
 class BreakStatement(Statement):
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         if not hasattr(builder, 'break_block'):
-            raise SyntaxError("'break' outside of loop or switch")
+            raise SyntaxError(f"'break' outside of loop or switch [{self.source_line}:{self.source_col}]")
         
         # Don't do anything if block is already terminated
         if builder.block.is_terminated:
@@ -5546,7 +5543,7 @@ class BreakStatement(Statement):
 class ContinueStatement(Statement):
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         if not hasattr(builder, 'continue_block'):
-            raise SyntaxError("'continue' outside of loop")
+            raise SyntaxError(f"'continue' outside of loop [{self.source_line}:{self.source_col}]")
         
         # Don't do anything if block is already terminated
         if builder.block.is_terminated:
@@ -5594,7 +5591,7 @@ class EscapeStatement(Statement):
         if builder.block.is_terminated:
             return None
         if not getattr(builder, '_flux_is_recursive_func', False):
-            raise SyntaxError("'escape' is only valid inside a <~ recursive function")
+            raise SyntaxError(f"'escape' is only valid inside a <~ recursive function [{self.source_line}:{self.source_col}]")
         # Perform the escape call as a plain (non-tail) call, then ret
         result = self.call.codegen(builder, module)
         func = builder.block.function
@@ -5628,7 +5625,7 @@ class GotoStatement(Statement):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         if self.target not in builder._flux_label_blocks:
-            raise SyntaxError(f"'goto' to undefined label '{self.target}'")
+            raise SyntaxError(f"'goto' to undefined label '{self.target}' [{self.source_line}:{self.source_col}]")
         # Don't emit unreachable code
         if builder.block.is_terminated:
             return None
@@ -5713,7 +5710,7 @@ class SwitchStatement(Statement):
                 init = getattr(src[0], 'initializer', None)
                 if isinstance(init, ir.Constant) and isinstance(init.type, ir.IntType):
                     return ir.Constant(switch_val.type, init.constant)
-            raise ValueError(f"Switch case value is not a constant integer: {val_expr}")
+            raise ValueError(f"Switch case value is not a constant integer: {val_expr} [{self.source_line}:{self.source_col}]")
 
         # Create blocks for all cases, resolving constants BEFORE the switch terminator
         for i, case in enumerate(self.cases):
@@ -5897,7 +5894,7 @@ class ThrowStatement(Statement):
         
         # Get the exception state from builder (set by TryBlock)
         if not hasattr(builder, 'flux_exception_flag') or builder.flux_exception_flag is None:
-            raise RuntimeError("throw statement used outside of try block")
+            raise RuntimeError(f"throw statement used outside of try block [{self.source_line}:{self.source_col}]")
         
         exc_flag = builder.flux_exception_flag
         exc_value = builder.flux_exception_value
@@ -6262,7 +6259,7 @@ class DeprecateStatement(Statement):
         if references:
             ref_list = "\n".join(references)
             raise ComptimeError(
-                f"Deprecated namespace '{self.namespace_path}' is still referenced:\n{ref_list}"
+                f"Deprecated namespace '{self.namespace_path}' is still referenced:\n{ref_list} [{self.source_line}:{self.source_col}]"
             )
 
 # Function definition
@@ -6329,9 +6326,9 @@ class FunctionDef(ASTNode):
                     SymbolTable.register_function_overload(module, base_name, disambig_name, self.parameters, self.return_type, func)
                 else:
                     # Both existing and new are definitions - that's an error
-                    raise ValueError(f"Function '{self.name}' with signature '{mangled_name}' redefined")
+                    raise ValueError(f"Function '{self.name}' with signature '{mangled_name}' redefined [{self.source_line}:{self.source_col}]")
             else:
-                raise ValueError(f"Name '{mangled_name}' already used for non-function")
+                raise ValueError(f"Name '{mangled_name}' already used for non-function [{self.source_line}:{self.source_col}]")
         else:
             # Create new function with mangled name
             func = ir.Function(module, func_type, mangled_name)
@@ -6489,7 +6486,7 @@ class FunctionDef(ASTNode):
                     call_instr.tail = "musttail"
                 builder.ret_void()
             else:
-                raise RuntimeError(f"Function '{self.name}' must end with return statement [{getattr(self, 'line', '?')}:{getattr(self, 'col', '?')}]")
+                raise RuntimeError(f"Function '{self.name}' must end with return statement [{self.source_line}:{self.source_col}]")
         
         return func
 
@@ -6658,7 +6655,7 @@ class FunctionPointerAssignment(Statement):
         elif self.pointer_name in module.globals:
             ptr_storage = module.globals[self.pointer_name]
         else:
-            raise NameError(f"Function pointer '{self.pointer_name}' not found")
+            raise NameError(f"Function pointer '{self.pointer_name}' not found [{self.source_line}:{self.source_col}]")
         
         # Evaluate the function expression (should be a function address)
         func_value = self.function_expr.codegen(builder, module)
@@ -6692,7 +6689,7 @@ class EnumDef(ASTNode):
                 return
             # If existing enum has values and this has values, that's an error
             if existing_values:
-                raise ValueError(f"Enum '{self.name}' already defined")
+                raise ValueError(f"Enum '{self.name}' already defined [{self.source_line}:{self.source_col}]")
             # Existing was forward declaration, this is full definition - continue below
         
         module._enum_types[self.name] = self.values
@@ -6774,7 +6771,7 @@ class UnionDef(ASTNode):
                 if hasattr(module, '_type_aliases') and member_type in module._type_aliases:
                     member_type = module._type_aliases[member_type]
                 else:
-                    raise ValueError(f"Unknown type: {member_type}")
+                    raise ValueError(f"Unknown type: {member_type} [{self.source_line}:{self.source_col}]")
             
             member_types.append(member_type)
             member_names.append(member.name)
@@ -6822,7 +6819,7 @@ class UnionDef(ASTNode):
         if self.tag_name:
             # Verify the tag is an enum type
             if not hasattr(module, '_enum_types') or self.tag_name not in module._enum_types:
-                raise ValueError(f"Tag '{self.tag_name}' is not a defined enum type")
+                raise ValueError(f"Tag '{self.tag_name}' is not a defined enum type [{self.source_line}:{self.source_col}]")
             
             # Tagged union structure: { i32 tag, [max_size x i8] data }
             tag_type = ir.IntType(32)  # Enum is i32
@@ -6878,7 +6875,7 @@ class TieExpression(Expression):
         """Generate tie (move) operation."""
         # Must be an identifier (lvalue)
         if not isinstance(self.operand, Identifier):
-            raise ValueError("Tie operator ~ can only be applied to variables")
+            raise ValueError(f"Tie operator ~ can only be applied to variables [{self.source_line}:{self.source_col}]")
         
         var_name = self.operand.name
         
@@ -6888,9 +6885,7 @@ class TieExpression(Expression):
         elif var_name in module.globals:
             var_ptr = module.globals[var_name]
         else:
-            raise NameError(f"Unknown variable: {var_name}")
-        
-        # Load the value (this is the tie/move)
+            raise NameError(f"Unknown variable: {var_name} [{self.source_line}:{self.source_col}]")
         tied_value = builder.load(var_ptr, name=f"{var_name}_tied")
         
         # Create validity flag NOW (lazy initialization)
@@ -6958,11 +6953,11 @@ class StructInstance(Expression):
         """
         # Get struct definition
         if not hasattr(module, '_struct_vtables'):
-            raise ValueError(f"Struct '{self.struct_name}' not defined")
+            raise ValueError(f"Struct '{self.struct_name}' not defined [{self.source_line}:{self.source_col}]")
         
         vtable = module._struct_vtables.get(self.struct_name)
         if not vtable:
-            raise ValueError(f"Struct '{self.struct_name}' not defined")
+            raise ValueError(f"Struct '{self.struct_name}' not defined [{self.source_line}:{self.source_col}]")
         
         struct_type = module._struct_types[self.struct_name]
         
@@ -6977,7 +6972,7 @@ class StructInstance(Expression):
                 None
             )
             if not field_info:
-                raise ValueError(f"Field '{field_name}' not found in struct '{self.struct_name}'")
+                raise ValueError(f"Field '{field_name}' not found in struct '{self.struct_name}' [{self.source_line}:{self.source_col}]")
             
             _, bit_offset, bit_width, alignment = field_info
             
@@ -7008,8 +7003,8 @@ class StructLiteral(Expression):
         # Struct type MUST be known from context (variable declaration)
         if self.struct_type is None:
             raise ValueError(
-                "Struct literal must have type context. "
-                "This should be set by VariableDeclaration during parsing."
+                f"Struct literal must have type context. "
+                f"This should be set by VariableDeclaration during parsing. [{self.source_line}:{self.source_col}]"
             )
 
         return StructTypeHandler.pack_struct_literal(
@@ -7209,7 +7204,7 @@ class StructDef(ASTNode):
                         pointer_depth=0
                     )
                 else:
-                    raise TypeError(f"Expected TypeSystem or DataType, got {type(type_spec)}")
+                    raise TypeError(f"Expected TypeSystem or DataType, got {type(type_spec)} [{self.source_line}:{self.source_col}]")
                 
                 # Attach element type to the array type spec
                 type_spec.array_element_type = element_type_spec
@@ -7317,12 +7312,12 @@ class StructFieldAccess(Expression):
 
                 # Ensure we have names metadata
                 if not hasattr(struct_type, "names") or not struct_type.names:
-                    raise ValueError("Struct type missing member names")
+                    raise ValueError(f"Struct type missing member names [{self.source_line}:{self.source_col}]")
 
                 try:
                     field_index = struct_type.names.index(self.field_name)
                 except ValueError:
-                    raise ValueError(f"Field '{self.field_name}' not found in struct")
+                    raise ValueError(f"Field '{self.field_name}' not found in struct [{self.source_line}:{self.source_col}]")
 
                 zero = ir.Constant(ir.IntType(32), 0)
                 idx = ir.Constant(ir.IntType(32), field_index)
@@ -7353,11 +7348,11 @@ class StructFieldAccess(Expression):
         # Need vtable for packed extraction paths
         vtable = getattr(module, "_struct_vtables", {}).get(struct_name)
         if not vtable:
-            raise ValueError("Cannot determine struct type for field access")
+            raise ValueError(f"Cannot determine struct type for field access [{self.source_line}:{self.source_col}]")
 
         field_info = next((f for f in vtable.fields if f[0] == self.field_name), None)
         if not field_info:
-            raise ValueError(f"Field '{self.field_name}' not found in struct '{struct_name}'")
+            raise ValueError(f"Field '{self.field_name}' not found in struct '{struct_name}' [{self.source_line}:{self.source_col}]")
 
         _, bit_offset, bit_width, alignment = field_info
 
@@ -7389,7 +7384,7 @@ class StructFieldAccess(Expression):
                     field_index = i
                     break
             if field_index is None:
-                raise ValueError(f"Field '{self.field_name}' not found in struct '{struct_name}'")
+                raise ValueError(f"Field '{self.field_name}' not found in struct '{struct_name}' [{self.source_line}:{self.source_col}]")
             return builder.extract_value(instance, field_index, name=self.field_name)
 
         # Array-backed packed struct (byte extraction)
@@ -7419,7 +7414,7 @@ class StructFieldAccess(Expression):
                     result = builder.bitcast(result, target_type)
             return result
 
-        raise NotImplementedError("Unaligned field access in large structs not yet supported")
+        raise NotImplementedError(f"Unaligned field access in large structs not yet supported [{self.source_line}:{self.source_col}]")
 
 @dataclass
 class StructFieldAssign(Statement):
@@ -7630,7 +7625,7 @@ class ObjectDef(ASTNode):
                 self.name, method.name, method, struct_type, module)
             func = method_funcs.get(func_name)
             if func is None:
-                raise RuntimeError(f"Internal error: missing function for method {method.name}")
+                raise RuntimeError(f"Internal error: missing function for method {method.name} [{self.source_line}:{self.source_col}]")
         
             # Handle nested objects and structs
             ObjectTypeHandler.emit_method_body(method, func, self.name, module)
@@ -7641,11 +7636,11 @@ class ObjectDef(ASTNode):
             for trait_name in self.traits:
                 required = module.symbol_table._trait_registry.get(trait_name)
                 if required is None:
-                    raise ValueError(f"Object '{self.name}' does not implement required functions from '{trait_name}'")
+                    raise ValueError(f"Object '{self.name}' does not implement required functions from '{trait_name}' trait [{self.source_line}:{self.source_col}]")
                 for proto in required:
                     if proto.name not in implemented_names:
                         raise ValueError(
-                            f"Object '{self.name}' does not implement required functions from '{trait_name}'")
+                            f"Object '{self.name}' does not implement required functions from '{trait_name}' trait [{self.source_line}:{self.source_col}]")
         
         return struct_type
 
@@ -7716,7 +7711,7 @@ class ExternBlock(Statement):
         for func_def in self.declarations:
             # Ensure these are prototypes
             if not func_def.is_prototype:
-                raise ValueError(f"Extern functions must be prototypes (no body): {func_def.name}")
+                raise ValueError(f"Extern functions must be prototypes (no body): {func_def.name} [{self.source_line}:{self.source_col}]")
             
             # Generate the function declaration with external linkage using FunctionTypeHandler
             ret_type = TypeSystem.get_llvm_type(func_def.return_type,module)
@@ -7746,7 +7741,7 @@ class ExternBlock(Statement):
             if final_name in module.globals:
                 func = module.globals[final_name]
                 if not isinstance(func, ir.Function):
-                    raise ValueError(f"Name '{final_name}' already used for non-function")
+                    raise ValueError(f"Name '{final_name}' already used for non-function [{self.source_line}:{self.source_col}]")
             else:
                 func = ir.Function(module, func_type, final_name)
             
@@ -7861,7 +7856,7 @@ class NamespaceDef(ASTNode):
 
         # Set current namespace context for this namespace
         if not hasattr(module, 'symbol_table'):
-            raise RuntimeError("Module must have symbol_table for namespace support")
+            raise RuntimeError(f"Module must have symbol_table for namespace support [{self.source_line}:{self.source_col}]")
 
         original_namespace = module.symbol_table.current_namespace
         module.symbol_table.set_namespace(self.name)
