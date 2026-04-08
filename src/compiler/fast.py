@@ -2583,17 +2583,21 @@ class MethodCall(Expression):
 
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         # For method calls, we need the pointer to the object, not the loaded value
+        var_name = None
         if isinstance(self.object, Identifier):
             # Look up the variable in scope to get the pointer directly
             var_name = self.object.name
             if module.symbol_table.get_llvm_value(var_name) is not None:
                 obj_ptr = module.symbol_table.get_llvm_value(var_name)
             else:
-                raise NameError(f"Unknown variable: {var_name} [{self.source_line}:{self.source_col}]")
+                raise NameError(f"Unknown variable: {var_name}")
+        else:
+            # For other expressions, generate code normally
+            obj_ptr = self.object.codegen(builder, module)
         
         # Determine the object's type to construct the method name
         if not isinstance(obj_ptr.type, ir.PointerType):
-            raise ValueError(f"Method call internal error, expected alloca pointer, got: {obj_ptr.type} [{self.source_line}:{self.source_col}]")
+            raise ValueError(f"Method call internal error, expected alloca pointer, got: {obj_ptr.type}")
 
         slot_pointee = obj_ptr.type.pointee
 
@@ -2603,10 +2607,10 @@ class MethodCall(Expression):
 
         # Case B: variable is a pointer to an object: slot is (T*)*  => T**
         elif isinstance(slot_pointee, ir.PointerType) and isinstance(slot_pointee.pointee, ir.IdentifiedStructType):
-            this_ptr = builder.load(obj_ptr, name=f"{var_name}_load")  # load T* out of T**
+            this_ptr = builder.load(obj_ptr, name=f"{var_name}_load" if var_name else "obj_load")  # load T* out of T**
 
         else:
-            raise ValueError(f"Cannot determine object type for method call: {obj_ptr.type} [{self.source_line}:{self.source_col}]")
+            raise ValueError(f"Cannot determine object type for method call: {obj_ptr.type}")
 
         # Now infer the object type name from the struct type (NOT pointer)
         struct_ty = this_ptr.type.pointee
@@ -2617,7 +2621,7 @@ class MethodCall(Expression):
                     obj_type_name = type_name
                     break
         if obj_type_name is None:
-            raise ValueError(f"Cannot determine object type for method call: {struct_ty} [{self.source_line}:{self.source_col}]")
+            raise ValueError(f"Cannot determine object type for method call: {struct_ty}")
 
         method_func_name = f"{obj_type_name}.{self.method_name}"
         # Construct the base method name (e.g., "standard__strings__string.val")
@@ -2654,7 +2658,7 @@ class MethodCall(Expression):
         #if func is None:
         #    print(f"[METHOD CALL] ERROR: Could not find method!", file=sys.stdout)
         if func is None:
-            raise NameError(f"Unknown method: {method_func_name} [{self.source_line}:{self.source_col}]")
+            raise NameError(f"Unknown method: {method_func_name}")
 
         args = [this_ptr]  # 'this' is ALWAYS a T* now
         # (then keep your existing arg generation loop)
@@ -2663,7 +2667,7 @@ class MethodCall(Expression):
             if isinstance(arg_expr, Identifier):
                 entry = module.symbol_table.lookup_variable(arg_expr.name)
                 if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
-                    raise ValueError(f"Compile error: local variable '{arg_expr.name}' cannot leave its scope via method call [{self.source_line}:{self.source_col}]")
+                    raise ValueError(f"Compile error: local variable '{arg_expr.name}' cannot leave its scope via method call")
             arg_val = arg_expr.codegen(builder, module)
 
             # Expected type: method params include 'this' as arg0, so user args start at arg1
@@ -3864,8 +3868,29 @@ class VariableDeclaration(ASTNode):
         if self.initial_value and not isinstance(self.initial_value, NoInit):
             self._initialize_singinit(builder, module, gvar, llvm_type, resolved_type_spec)
         else:
-            zero = TypeSystem.get_default_initializer(llvm_type)
-            builder.store(zero, gvar)
+            if isinstance(llvm_type, ir.ArrayType) and llvm_type.count > 64:
+                i8_ptr_ty  = ir.PointerType(ir.IntType(8))
+                i8_ty      = ir.IntType(8)
+                i64_ty     = ir.IntType(64)
+                i1_ty      = ir.IntType(1)
+                elem = llvm_type.element
+                elem_bytes = (elem.width // 8) if isinstance(elem, ir.IntType) else 1
+                byte_count = llvm_type.count * elem_bytes
+                fnty    = ir.FunctionType(ir.VoidType(), [i8_ptr_ty, i8_ty, i64_ty, i1_ty])
+                ms_name = 'llvm.memset.p0i8.i64'
+                if ms_name not in module.globals:
+                    ir.Function(module, fnty, name=ms_name)
+                memset_fn = module.globals[ms_name]
+                cast_ptr  = builder.bitcast(gvar, i8_ptr_ty, name='memset_ptr')
+                builder.call(memset_fn, [
+                    cast_ptr,
+                    ir.Constant(i8_ty,  0),
+                    ir.Constant(i64_ty, byte_count),
+                    ir.Constant(i1_ty,  0),
+                ])
+            else:
+                zero = TypeSystem.get_default_initializer(llvm_type)
+                builder.store(zero, gvar)
         builder.store(ir.Constant(guard_type, 1), gguard)
         builder.branch(done_block)
 
@@ -3984,9 +4009,32 @@ class VariableDeclaration(ASTNode):
         elif self.initial_value:
             self._initialize_local(builder, module, alloca, llvm_type, resolved_type_spec)
         else:
-            # No initial value: zero-initialize per Flux spec
-            zero = TypeSystem.get_default_initializer(llvm_type)
-            builder.store(zero, alloca)
+            # No initial value: zero-initialize per Flux spec.
+            # For large arrays use llvm.memset to avoid emitting a massive
+            # constant aggregate literal that crashes the LLVM instruction selector.
+            if isinstance(llvm_type, ir.ArrayType) and llvm_type.count > 64:
+                i8_ptr_ty  = ir.PointerType(ir.IntType(8))
+                i8_ty      = ir.IntType(8)
+                i64_ty     = ir.IntType(64)
+                i1_ty      = ir.IntType(1)
+                elem = llvm_type.element
+                elem_bytes = (elem.width // 8) if isinstance(elem, ir.IntType) else 1
+                byte_count = llvm_type.count * elem_bytes
+                fnty    = ir.FunctionType(ir.VoidType(), [i8_ptr_ty, i8_ty, i64_ty, i1_ty])
+                ms_name = 'llvm.memset.p0i8.i64'
+                if ms_name not in module.globals:
+                    ir.Function(module, fnty, name=ms_name)
+                memset_fn = module.globals[ms_name]
+                cast_ptr  = builder.bitcast(alloca, i8_ptr_ty, name='memset_ptr')
+                builder.call(memset_fn, [
+                    cast_ptr,
+                    ir.Constant(i8_ty,  0),
+                    ir.Constant(i64_ty, byte_count),
+                    ir.Constant(i1_ty,  0),
+                ])
+            else:
+                zero = TypeSystem.get_default_initializer(llvm_type)
+                builder.store(zero, alloca)
         
         # Register in scope
         #print(f"[LOCAL VAR] Registering local variable '{self.name}' in scope level {module.symbol_table.scope_level}", file=sys.stdout)
@@ -4922,13 +4970,14 @@ class TernaryOp(Expression):
         # Generate true branch
         builder.position_at_start(true_block)
         true_val = self.true_expr.codegen(builder, module)
-        # If the value is a pointer to a non-pointer aggregate (e.g. struct field GEP),
-        # load it so both branches produce values rather than pointers.
+        # Only load if the pointer points to a scalar (int/float/double).
+        # Never load pointer-to-struct or pointer-to-pointer — those are object/pointer
+        # variables that must remain as pointers.
         if (isinstance(true_val.type, ir.PointerType) and
-                not isinstance(true_val.type.pointee, ir.PointerType)):
+                not isinstance(true_val.type.pointee, ir.PointerType) and
+                not isinstance(true_val.type.pointee, (ir.IdentifiedStructType, ir.LiteralStructType))):
             pointee = true_val.type.pointee
-            if isinstance(pointee, (ir.IdentifiedStructType, ir.LiteralStructType,
-                                    ir.IntType, ir.FloatType, ir.DoubleType)):
+            if isinstance(pointee, (ir.IntType, ir.FloatType, ir.DoubleType)):
                 true_val = builder.load(true_val, name='ternary_true_load')
         true_end_block = builder.block  # May have changed due to nested control flow
         builder.branch(merge_block)
@@ -4937,10 +4986,10 @@ class TernaryOp(Expression):
         builder.position_at_start(false_block)
         false_val = self.false_expr.codegen(builder, module)
         if (isinstance(false_val.type, ir.PointerType) and
-                not isinstance(false_val.type.pointee, ir.PointerType)):
+                not isinstance(false_val.type.pointee, ir.PointerType) and
+                not isinstance(false_val.type.pointee, (ir.IdentifiedStructType, ir.LiteralStructType))):
             pointee = false_val.type.pointee
-            if isinstance(pointee, (ir.IdentifiedStructType, ir.LiteralStructType,
-                                    ir.IntType, ir.FloatType, ir.DoubleType)):
+            if isinstance(pointee, (ir.IntType, ir.FloatType, ir.DoubleType)):
                 false_val = builder.load(false_val, name='ternary_false_load')
         false_end_block = builder.block  # May have changed due to nested control flow
         builder.branch(merge_block)
@@ -4981,14 +5030,23 @@ class TernaryOp(Expression):
                     return val
                 true_val  = _decay_inplace(true_val,  true_end_block)
                 false_val = _decay_inplace(false_val, false_end_block)
-                # If still mismatched after decay, bitcast false to true's type
+                # If still mismatched after decay, bitcast false to true's type.
+                # But skip the bitcast when both sides are pointers to the same
+                # identified struct (llvmlite may produce distinct type objects
+                # for the same struct, so compare by string representation).
                 if true_val.type != false_val.type:
-                    term = false_end_block.terminator
-                    if term is not None:
-                        builder.position_before(term)
-                    else:
-                        builder.position_at_end(false_end_block)
-                    false_val = builder.bitcast(false_val, true_val.type, name='ternary_cast')
+                    same_struct = (
+                        isinstance(true_val.type.pointee, ir.IdentifiedStructType) and
+                        isinstance(false_val.type.pointee, ir.IdentifiedStructType) and
+                        str(true_val.type.pointee) == str(false_val.type.pointee)
+                    )
+                    if not same_struct:
+                        term = false_end_block.terminator
+                        if term is not None:
+                            builder.position_before(term)
+                        else:
+                            builder.position_at_end(false_end_block)
+                        false_val = builder.bitcast(false_val, true_val.type, name='ternary_cast')
                 builder.position_at_start(merge_block)
             else:
                 raise TypeError(

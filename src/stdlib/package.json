@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "author": "Karac V. Thweatt",
   "license": "MIT",
-  "repository": "https://github.com/kvthweatt/FluxLang",
-  "base_url": "https://raw.githubusercontent.com/kvthweatt/FluxLang/main/src/stdlib",
+  "repository": "https://github.com/kvthweatt/Flux",
+  "base_url": "https://raw.githubusercontent.com/kvthweatt/Flux/main/src/stdlib",
   "packages": {
     "flux-bigint": {
       "version": "1.0.0",

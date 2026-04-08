@@ -84,23 +84,33 @@ def is_stdlib_package(name: str) -> bool:
     return name in STDLIB_PACKAGES
 
 
-def get_stdlib_file(pkg: dict) -> Path:
+def get_stdlib_files(pkg: dict) -> list[Path]:
+    """Return a list of resolved stdlib Paths for a package (handles entry and entries)."""
     sub_path = pkg.get("path", "")
-    entry    = pkg["entry"]
+    if "entries" in pkg:
+        base = STDLIB_DIR / sub_path if sub_path else STDLIB_DIR
+        return [base / filename for filename in pkg["entries"].values()]
+    entry = pkg["entry"]
     if sub_path:
-        return STDLIB_DIR / sub_path / entry
-    return STDLIB_DIR / entry
+        return [STDLIB_DIR / sub_path / entry]
+    return [STDLIB_DIR / entry]
 
 
 def stdlib_installed_entry(name: str) -> dict:
-    pkg = STDLIB_PACKAGES[name]
-    return {
+    pkg   = STDLIB_PACKAGES[name]
+    files = get_stdlib_files(pkg)
+    rec = {
         "version": pkg["version"],
-        "entry":   pkg["entry"],
         "path":    pkg.get("path", ""),
-        "file":    str(get_stdlib_file(pkg)),
+        "files":   [str(f) for f in files],
         "source":  "stdlib"
     }
+    if "entries" in pkg:
+        rec["entries"] = pkg["entries"]
+    else:
+        rec["entry"] = pkg["entry"]
+        rec["file"]  = str(files[0])
+    return rec
 
 
 # ─── Version constraint parsing ───────────────────────────────────────────────
@@ -318,30 +328,69 @@ def install_package(package_name: str, registry: dict, installed: dict,
         print(f"  Already installed: {package_name} v{installed_ver}  (use --force to reinstall)")
         return True
 
-    entry    = pkg["entry"]
-    sub_path = pkg.get("path", "")
-    url      = f"{STDLIB_BASE_URL}/{sub_path}/{entry}" if sub_path else f"{STDLIB_BASE_URL}/{entry}"
-    dest     = PACKAGES_DIR / package_name / sub_path / entry if sub_path else PACKAGES_DIR / package_name / entry
+    source_url = pkg.get("_source_url", "")
 
-    print(f"  Downloading {package_name} v{version}...")
-    if not download_file(url, dest):
+    def make_url(base: str, filename: str) -> str:
+        base = base.rstrip("/")
+        if base.endswith(".json"):
+            base = base.rsplit("/", 1)[0]
+        return f"{base}/{filename}"
+
+    def try_download(filename: str, dest: Path) -> bool:
+        candidate_urls = []
+        if source_url:
+            candidate_urls.append(make_url(source_url, filename))
+        candidate_urls.append(make_url(STDLIB_BASE_URL, filename))
+        for url in candidate_urls:
+            if download_file(url, dest):
+                return True
+            print(f"  Trying next source...")
         return False
 
-    installed[package_name] = {
-        "version": version,
-        "entry":   entry,
-        "path":    sub_path,
-        "file":    str(dest),
-        "source":  "remote"
-    }
-    print(f"  Installed:  {package_name} v{version} -> {dest}")
+    pkg_dir = PACKAGES_DIR / package_name
+    print(f"  Downloading {package_name} v{version}...")
+
+    if "entries" in pkg:
+        # Multi-file package
+        downloaded_files = {}
+        for label, filename in pkg["entries"].items():
+            dest = pkg_dir / filename
+            if not try_download(filename, dest):
+                print(f"  ERROR: Could not download '{filename}' for '{package_name}' from any source.")
+                return False
+            downloaded_files[label] = str(dest)
+            print(f"  Installed:  {filename} -> {dest}")
+
+        installed[package_name] = {
+            "version": version,
+            "entries": pkg["entries"],
+            "files":   list(downloaded_files.values()),
+            "source":  "remote"
+        }
+    else:
+        # Single-file package
+        entry = pkg["entry"]
+        dest  = pkg_dir / entry
+        if not try_download(entry, dest):
+            print(f"  ERROR: Could not download '{package_name}' from any source.")
+            return False
+
+        installed[package_name] = {
+            "version": version,
+            "entry":   entry,
+            "file":    str(dest),
+            "files":   [str(dest)],
+            "source":  "remote"
+        }
+        print(f"  Installed:  {package_name} v{version} -> {dest}")
+
     return True
 
 
 def update_stdlib_package(name: str, remote_pkg: dict, installed: dict) -> bool:
     """
     Compare local vs remote version for a stdlib package.
-    Download and overwrite the file in STDLIB_DIR if remote is newer.
+    Download and overwrite file(s) in STDLIB_DIR if remote is newer.
     Also updates the local package.json to reflect the new version.
     """
     local_version  = STDLIB_PACKAGES.get(name, {}).get("version", "0.0.0")
@@ -353,19 +402,34 @@ def update_stdlib_package(name: str, remote_pkg: dict, installed: dict) -> bool:
 
     print(f"  Updating {name}: v{local_version} -> v{remote_version}")
 
-    entry    = remote_pkg["entry"]
     sub_path = remote_pkg.get("path", "")
-    url      = f"{STDLIB_BASE_URL}/{sub_path}/{entry}" if sub_path else f"{STDLIB_BASE_URL}/{entry}"
-    dest     = STDLIB_DIR / sub_path / entry if sub_path else STDLIB_DIR / entry
 
-    if not download_file(url, dest):
-        return False
+    def base_url():
+        return f"{STDLIB_BASE_URL}/{sub_path}" if sub_path else STDLIB_BASE_URL
 
-    # Update in-memory STDLIB_PACKAGES
+    def base_dest():
+        return STDLIB_DIR / sub_path if sub_path else STDLIB_DIR
+
+    if "entries" in remote_pkg:
+        for label, filename in remote_pkg["entries"].items():
+            url  = f"{base_url()}/{filename}"
+            dest = base_dest() / filename
+            if not download_file(url, dest):
+                return False
+            print(f"  Updated:    {filename} -> {dest}")
+    else:
+        entry = remote_pkg["entry"]
+        url   = f"{base_url()}/{entry}"
+        dest  = base_dest() / entry
+        if not download_file(url, dest):
+            return False
+        print(f"  Updated:    {name} v{remote_version} -> {dest}")
+
+    # Update in-memory STDLIB_PACKAGES and installed record
     STDLIB_PACKAGES[name] = remote_pkg
     installed[name] = stdlib_installed_entry(name)
 
-    # Update the local package.json so the new version persists across runs
+    # Persist new version to local package.json
     stdlib_json_path = STDLIB_DIR / "package.json"
     if stdlib_json_path.exists():
         with open(stdlib_json_path) as f:
@@ -375,7 +439,6 @@ def update_stdlib_package(name: str, remote_pkg: dict, installed: dict) -> bool:
             with open(stdlib_json_path, "w") as f:
                 json.dump(data, f, indent=2)
 
-    print(f"  Updated:    {name} v{remote_version} -> {dest}")
     return True
 
 
@@ -501,7 +564,12 @@ def cmd_info(args, registry: dict, installed: dict):
         print(f"\n  Package:      {name}")
         print(f"  Version:      {pkg['version']}")
         print(f"  Description:  {pkg.get('description', 'N/A')}")
-        print(f"  Entry:        {pkg['entry']}")
+        if "entries" in pkg:
+            print(f"  Entries:")
+            for label, filename in pkg["entries"].items():
+                print(f"    {label}: {filename}")
+        else:
+            print(f"  Entry:        {pkg['entry']}")
         deps = pkg.get("dependencies", {})
         if deps:
             print(f"  Dependencies:")
@@ -513,7 +581,13 @@ def cmd_info(args, registry: dict, installed: dict):
         if name in installed:
             source = installed[name].get("source", "remote")
             tag    = "stdlib" if source == "stdlib" else "local" if source == "local" else "remote"
-            print(f"  Status:       installed [{tag}] -> {installed[name]['file']}")
+            files  = installed[name].get("files", [installed[name].get("file", "?")])
+            if len(files) == 1:
+                print(f"  Status:       installed [{tag}] -> {files[0]}")
+            else:
+                print(f"  Status:       installed [{tag}]")
+                for f in files:
+                    print(f"                -> {f}")
         else:
             print(f"  Status:       not installed")
 

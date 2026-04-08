@@ -1,0 +1,27 @@
+{
+  "pack": "flux-fpm",
+  "version": "1.0.0",
+  "author": "Karac V. Thweatt",
+  "license": "MIT",
+  "repository": "https://github.com/kvthweatt/Flux",
+  "base_url": "https://raw.githubusercontent.com/kvthweatt/Flux/main/src/stdlib",
+  "packages":
+  {
+    "fpm":
+    {
+      "version": "1.0.0",
+      "entry": "fpm.fx",
+      "path": "",
+      "description": "Flux Package Manager",
+      "dependencies":
+      {
+      	"flux-types": ">=1.0.0",
+      	"flux-memory": ">=1.0.0",
+      	"flux-allocators": ">=1.0.0",
+      	"flux-string-utilities": ">=1.0.0",
+      	"flux-sys": ">=1.0.0",
+      	"flux-io": ">=1.0.0",
+      	"flux-ffifio": ">=1.0.0"
+      }
+    }
+}

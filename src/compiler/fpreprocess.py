@@ -55,35 +55,55 @@ class FXPreprocessor:
         return combined_source
     
     def _strip_comments(self, content: str) -> str:
-        """Strip all comments from content: // and /// ... ///"""
+        """Strip all comments from content: // and /// ... ///
+        String literals (double or single quoted) are passed through unchanged
+        so that URLs like https:// inside strings are not treated as comments."""
         result = []
         i = 0
         n = len(content)
-        
+
         while i < n:
-            # Check for /// comment
-            if i + 2 < n and content[i] == '/' and content[i+1] == '/' and content[i+2] == '/':
-                # Skip the opening ///
+            c = content[i]
+
+            # ── String literal: skip over it intact ──────────────────────────
+            if c == '"' or c == "'":
+                quote = c
+                result.append(c)
+                i += 1
+                while i < n:
+                    sc = content[i]
+                    result.append(sc)
+                    if sc == '\\' and i + 1 < n:
+                        # Escaped character — consume both chars so an escaped
+                        # quote doesn't end the string prematurely.
+                        i += 1
+                        result.append(content[i])
+                    elif sc == quote:
+                        break
+                    i += 1
+                i += 1
+                continue
+
+            # ── Block comment: /// ... /// ────────────────────────────────────
+            if i + 2 < n and c == '/' and content[i+1] == '/' and content[i+2] == '/':
                 i += 3
-                # Skip everything until we find closing ///
                 while i < n:
                     if i + 2 < n and content[i] == '/' and content[i+1] == '/' and content[i+2] == '/':
-                        i += 3  # Skip closing ///
+                        i += 3
                         break
                     i += 1
                 continue
-            
-            # Check for // comment
-            if i + 1 < n and content[i] == '/' and content[i+1] == '/':
-                # Skip to end of line
+
+            # ── Line comment: // ──────────────────────────────────────────────
+            if i + 1 < n and c == '/' and content[i+1] == '/':
                 while i < n and content[i] != '\n':
                     i += 1
                 continue
-            
-            # Regular character
-            result.append(content[i])
+
+            # ── Regular character ─────────────────────────────────────────────
+            result.append(c)
             i += 1
-        
+
         return ''.join(result)
     
     def _resolve_path(self, filepath: str) -> Optional[Path]:
@@ -110,12 +130,6 @@ class FXPreprocessor:
         # Also search any directories added via #dir
         for lib_dir in self.lib_dirs:
             locations.append(Path(lib_dir) / filepath)
-
-        # Search ~/.fpm/packages recursively for installed third-party packages
-        fpm_packages = Path.home() / "Flux" / ".fpm" / "packages"
-        if fpm_packages.exists():
-            for match in fpm_packages.rglob(filepath):
-                locations.append(match)
         
         for location in locations:
             loc_path = Path(location)

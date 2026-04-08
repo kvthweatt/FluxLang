@@ -537,6 +537,7 @@ class FluxCompiler:
                     "comdlg32.lib",
                     "d2d1.lib",
                     "dwrite.lib",
+                    "wininet.lib",
                     #"libsynchronization.lib",
                     #"libcmt.lib",
                     #"msvcrt.lib",   # Optional, link with C runtime
@@ -591,6 +592,7 @@ class FluxCompiler:
                                 "-ldwrite "
                                 "-ldwmapi "
                                 "-luxtheme "
+                                "-lwininet "
                                 #"-lfreetype "
                                 #"-lgdiplus "
                                 #"-ld2d1 "
