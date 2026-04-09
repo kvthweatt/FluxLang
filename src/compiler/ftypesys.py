@@ -3684,29 +3684,29 @@ class CoercionContext:
     # Pointer helpers
     # --------------------------------------------------
 
-    def ptr_to_i64(instance, v: ir.Value) -> ir.Value:
+    def ptr_to_i64(self, v: ir.Value) -> ir.Value:
         if isinstance(v.type, ir.PointerType):
-            return instance.b.ptrtoint(v, ir.IntType(64))
+            return self.b.ptrtoint(v, ir.IntType(64))
         return v
 
     # --------------------------------------------------
     # Comparisons
     # --------------------------------------------------
 
-    def emit_int_cmp(instance, op: str, a: ir.Value, b: ir.Value):
-        unsigned = instance.comparison_is_unsigned(a, b)
-        a, b = instance.normalize_ints(a, b, unsigned=unsigned, promote=True)
+    def emit_int_cmp(self, op: str, a: ir.Value, b: ir.Value):
+        unsigned = self.comparison_is_unsigned(a, b)
+        a, b = self.normalize_ints(a, b, unsigned=unsigned, promote=True)
         return (
-            instance.b.icmp_unsigned(op, a, b)
+            self.b.icmp_unsigned(op, a, b)
             if unsigned
-            else instance.b.icmp_signed(op, a, b)
+            else self.b.icmp_signed(op, a, b)
         )
 
-    def emit_ptr_cmp(instance, op: str, a: ir.Value, b: ir.Value):
+    def emit_ptr_cmp(self, op: str, a: ir.Value, b: ir.Value):
         # Explicit raw-address semantics
-        a = instance.ptr_to_i64(a)
-        b = instance.ptr_to_i64(b)
-        return instance.b.icmp_unsigned(op, a, b)
+        a = self.ptr_to_i64(a)
+        b = self.ptr_to_i64(b)
+        return self.b.icmp_unsigned(op, a, b)
 
 
 def infer_int_width(value: int, data_type: DataType) -> int:
