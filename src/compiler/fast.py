@@ -4786,37 +4786,34 @@ class IfStatement(Statement):
     
     def _codegen_global_scope(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
         """Handle if statements at global scope (conditional compilation)"""
-        # Evaluate condition at compile time
+        # Try to evaluate the condition at compile time
         try:
-            # Try to evaluate the condition
             cond_val = self.condition.codegen(builder, module)
-            
-            # For compile-time conditionals (like def() checks), we get a constant
-            if isinstance(cond_val, ir.Constant):
-                # Evaluate the constant boolean value
-                if cond_val.constant:
-                    # Condition is true - execute then block
-                    self.then_block.codegen(builder, module)
-                else:
-                    # Condition is false - check elif blocks or execute else
-                    executed = False
-                    for elif_cond, elif_block in self.elif_blocks:
-                        elif_val = elif_cond.codegen(builder, module)
-                        if isinstance(elif_val, ir.Constant) and elif_val.constant:
-                            elif_block.codegen(builder, module)
-                            executed = True
-                            break
-                    
-                    if not executed and self.else_block:
-                        self.else_block.codegen(builder, module)
-            else:
-                # Runtime condition in global scope - not supported
-                raise RuntimeError(f"Cannot use runtime conditions in global scope if statements [{self.source_line}:{self.source_col}]")
         except Exception as e:
-            raise RuntimeError(f"Warning: Could not evaluate global if condition: {e} [{self.source_line}:{self.source_col}]")
-            # Default to executing the then block for safety
-            #self.then_block.codegen(builder, module)
-        
+            raise RuntimeError(f"Could not evaluate global if condition: {e} [{self.source_line}:{self.source_col}]")
+
+        # For compile-time conditionals (like def() checks), we get a constant
+        if isinstance(cond_val, ir.Constant):
+            # Evaluate the constant boolean value
+            if cond_val.constant:
+                # Condition is true - execute then block
+                self.then_block.codegen(builder, module)
+            else:
+                # Condition is false - check elif blocks or execute else
+                executed = False
+                for elif_cond, elif_block in self.elif_blocks:
+                    elif_val = elif_cond.codegen(builder, module)
+                    if isinstance(elif_val, ir.Constant) and elif_val.constant:
+                        elif_block.codegen(builder, module)
+                        executed = True
+                        break
+
+                if not executed and self.else_block:
+                    self.else_block.codegen(builder, module)
+        else:
+            # Runtime condition in global scope - not supported
+            raise RuntimeError(f"Cannot use runtime conditions in global scope if statements [{self.source_line}:{self.source_col}]")
+
         return None
 
 @dataclass
