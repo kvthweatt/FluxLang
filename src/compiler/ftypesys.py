@@ -403,7 +403,7 @@ class SymbolTable:
                 module._using_namespaces.remove(namespace)
     
     def define(self, name: str, kind: SymbolKind, type_spec=None, 
-               llvm_type=None, llvm_value=None, **metadata):
+               llvm_type=None, llvm_value=None, metadata: Optional[Dict[str, Any]] = None):
         """Define symbol in current scope"""
         
         if not isinstance(name, str):
@@ -421,7 +421,7 @@ class SymbolTable:
             type_spec=type_spec,
             llvm_type=llvm_type,
             llvm_value=llvm_value,
-            metadata=metadata
+            metadata=metadata if metadata is not None else {}
         )
         
         self.scopes[-1][name] = entry
