@@ -5798,12 +5798,14 @@ class SwitchStatement(Statement):
             # if it has one, otherwise just append). We do this by temporarily
             # positioning at the entry block for alloca emission, then restoring.
             # We accomplish this by patching _codegen_local via a flag on builder.
+            outer_alloca_block = getattr(builder, '_switch_case_alloca_block', None)
             builder._switch_case_alloca_block = func_entry
             
             # Generate the case body
             self.cases[i].body.codegen(builder, module)
             
-            builder._switch_case_alloca_block = None
+            # Restore outer switch's alloca block (handles nested switches)
+            builder._switch_case_alloca_block = outer_alloca_block
             
             # Add branch to merge block if the case doesn't already have a terminator
             # (cases with return/break will already be terminated)
@@ -8165,7 +8167,7 @@ class Program(ASTNode):
             pending_tl, pending_ns_retry, pending_ex = still_tl, still_ns, still_ex
 
         # Pass 3: Process all other statements
-        print("[AST] Pass 4: Processing all other statements...")
+        print("[AST] Pass 3: Processing all other statements...")
         for stmt in self.statements:
             if not isinstance(stmt, (UsingStatement, NotUsingStatement, ExternBlock, StructDef, StructDefStatement, ObjectDef, ObjectDefStatement)):
                 stmt.codegen(builder, module)
