@@ -6061,9 +6061,9 @@ class Parameter(ASTNode):
 
     def __repr__(self) -> str:
         if self.type_spec.custom_typename is not None:
-            return f"{self.type_spec.custom_typename} {name}"
+            return f"{self.type_spec.custom_typename} {self.name}"
         else:
-            return f"{self.type_spec.base_type} {name}"
+            return f"{self.type_spec.base_type} {self.name}"
     
     def __post_init__(self):
         # Store the original type name for debugging/metadata
