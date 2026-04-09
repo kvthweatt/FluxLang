@@ -4008,6 +4008,7 @@ class ObjectTypeHandler:
     @staticmethod
     def calculate_field_layout(members: List, member_types: List) -> List[tuple]:
         fields = []
+        bit_offset = 0
         for i, member in enumerate(members):
             member_type = member_types[i]
             if isinstance(member_type, ir.IntType):
@@ -4020,8 +4021,8 @@ class ObjectTypeHandler:
                 bit_width = 64  # pointer or other
                 alignment = 64
             
-            bit_offset = i * bit_width
             fields.append((member.name, bit_offset, bit_width, alignment))
+            bit_offset += bit_width
         
         return fields
     
