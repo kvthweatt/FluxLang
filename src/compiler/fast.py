@@ -4482,8 +4482,9 @@ class TernaryAssign(Statement):
         is_zero = builder.icmp_unsigned('==', current_val, zero, name="ternary_assign_cmp")
 
         # Create blocks for the conditional store
-        then_block = builder.append_basic_block(name="ternary_assign_then")
-        merge_block = builder.append_basic_block(name="ternary_assign_merge")
+        func = builder.block.function
+        then_block = func.append_basic_block(name="ternary_assign_then")
+        merge_block = func.append_basic_block(name="ternary_assign_merge")
 
         builder.cbranch(is_zero, then_block, merge_block)
 
