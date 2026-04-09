@@ -860,6 +860,54 @@ class TypeResolver:
         return TypeResolver.resolve_with_namespace(module, typename, current_namespace, TypeResolver.lookup_type)
     
     @staticmethod
+    def _resolve_from_overloads(overloads: list, arg_vals: Optional[List[ir.Value]]) -> Optional[ir.Function]:
+        """
+        Select the best matching function from a list of overload entries.
+        Tries to match on param count first, then on exact LLVM types, then on
+        signedness. Falls back to the first param-count match if no exact match
+        is found. Returns None if no overload has the right param count.
+        """
+        if not overloads:
+            return None
+
+        if arg_vals is not None:
+            matching_count = None
+            for overload in overloads:
+                if overload['param_count'] != len(arg_vals):
+                    continue
+                if matching_count is None:
+                    matching_count = overload['function']
+
+                func = overload['function']
+                param_types = [p.type for p in func.args]
+                arg_types   = [arg.type for arg in arg_vals]
+
+                if len(param_types) != len(arg_types):
+                    continue
+
+                types_match = True
+                for i, (pt, at) in enumerate(zip(param_types, arg_types)):
+                    if pt != at:
+                        types_match = False
+                        break
+                    if isinstance(pt, ir.IntType) and isinstance(at, ir.IntType):
+                        param_spec = overload['param_types'][i] if i < len(overload['param_types']) else None
+                        arg_spec   = getattr(arg_vals[i], '_flux_type_spec', None)
+                        if param_spec and arg_spec:
+                            if hasattr(param_spec, 'is_signed') and hasattr(arg_spec, 'is_signed'):
+                                if param_spec.is_signed != arg_spec.is_signed:
+                                    types_match = False
+                                    break
+
+                if types_match:
+                    return func
+
+            return matching_count  # first param-count match, or None
+
+        # No arg_vals — return first overload
+        return overloads[0]['function']
+
+    @staticmethod
     def resolve_function(module: ir.Module, func_name: str, current_namespace: str = "", arg_vals: List[ir.Value] = None) -> Optional[ir.Function]:
         """
         THE SINGLE SOURCE OF TRUTH FOR ALL FUNCTION RESOLUTION.
@@ -882,53 +930,10 @@ class TypeResolver:
         
         # Step 2: Check for overloaded functions
         if hasattr(module, '_function_overloads') and func_name in module._function_overloads:
-            overloads = module._function_overloads[func_name]
-            
-            # If we have arg_vals, match the overload directly
-            if arg_vals is not None:
-                matching_count = None
-                for overload in overloads:
-                    if overload['param_count'] == len(arg_vals):
-                        # Save first matching count in case we don't find exact type match
-                        if matching_count is None:
-                            matching_count = overload['function']
-                        
-                        # Check if types match exactly
-                        func = overload['function']
-                        param_types = [p.type for p in func.args]
-                        arg_types = [arg.type for arg in arg_vals]
-                        
-                        if len(param_types) == len(arg_types):
-                            types_match = True
-                            for i, (pt, at) in enumerate(zip(param_types, arg_types)):
-                                if pt != at:
-                                    types_match = False
-                                    break
-                                
-                                # Check signedness for integer types if available
-                                if isinstance(pt, ir.IntType) and isinstance(at, ir.IntType):
-                                    # Get parameter signedness from overload info
-                                    param_spec = overload['param_types'][i] if i < len(overload['param_types']) else None
-                                    # Get argument signedness from _flux_type_spec
-                                    arg_spec = getattr(arg_vals[i], '_flux_type_spec', None)
-                                    
-                                    if param_spec and arg_spec:
-                                        # Both have signedness info - check if they match
-                                        if hasattr(param_spec, 'is_signed') and hasattr(arg_spec, 'is_signed'):
-                                            if param_spec.is_signed != arg_spec.is_signed:
-                                                types_match = False
-                                                break
-                            
-                            if types_match:
-                                return func
-                
-                # Return first matching param count if we found one
-                if matching_count is not None:
-                    return matching_count
-            
-            # If no arg_vals or type resolution failed, return the first available overload
-            if overloads:
-                return overloads[0]['function']
+            result = TypeResolver._resolve_from_overloads(
+                module._function_overloads[func_name], arg_vals)
+            if result is not None:
+                return result
         
         # Step 3: Try symbol table lookup
         if hasattr(module, 'symbol_table'):
@@ -950,48 +955,9 @@ class TypeResolver:
                 # Check if it's an overloaded function with mangled name
                 if hasattr(module, '_function_overloads') and func_entry.mangled_name in module._function_overloads:
                     overloads = module._function_overloads[func_entry.mangled_name]
-                    
-                    if arg_vals is not None:
-                        matching_count = None
-                        for overload in overloads:
-                            if overload['param_count'] == len(arg_vals):
-                                # Save first matching count in case we don't find exact type match
-                                if matching_count is None:
-                                    matching_count = overload['function']
-                                
-                                # Check if types match exactly
-                                func = overload['function']
-                                param_types = [p.type for p in func.args]
-                                arg_types = [arg.type for arg in arg_vals]
-                                
-                                if len(param_types) == len(arg_types):
-                                    types_match = True
-                                    for i, (pt, at) in enumerate(zip(param_types, arg_types)):
-                                        if pt != at:
-                                            types_match = False
-                                            break
-                                        
-                                        # Check signedness for integer types if available
-                                        if isinstance(pt, ir.IntType) and isinstance(at, ir.IntType):
-                                            # Get parameter signedness from overload info
-                                            param_spec = overload['param_types'][i] if i < len(overload['param_types']) else None
-                                            # Get argument signedness from _flux_type_spec
-                                            arg_spec = getattr(arg_vals[i], '_flux_type_spec', None)
-                                            
-                                            if param_spec and arg_spec:
-                                                # Both have signedness info - check if they match
-                                                if hasattr(param_spec, 'is_signed') and hasattr(arg_spec, 'is_signed'):
-                                                    if param_spec.is_signed != arg_spec.is_signed:
-                                                        types_match = False
-                                                        break
-                                    
-                                    if types_match:
-                                        return func
-                        
-                        # Return first matching param count if we found one
-                        if matching_count is not None:
-                            return matching_count
-                    
+                    result = TypeResolver._resolve_from_overloads(overloads, arg_vals)
+                    if result is not None:
+                        return result
                     if len(overloads) == 1:
                         return overloads[0]['function']
         
@@ -1014,48 +980,9 @@ class TypeResolver:
             # Check overloads in current namespace
             if qualified_name in module._function_overloads:
                 overloads = module._function_overloads[qualified_name]
-                
-                if arg_vals is not None:
-                    matching_count = None
-                    for overload in overloads:
-                        if overload['param_count'] == len(arg_vals):
-                            # Save first matching count in case we don't find exact type match
-                            if matching_count is None:
-                                matching_count = overload['function']
-                            
-                            # Check if types match exactly
-                            func = overload['function']
-                            param_types = [p.type for p in func.args]
-                            arg_types = [arg.type for arg in arg_vals]
-                            
-                            if len(param_types) == len(arg_types):
-                                types_match = True
-                                for i, (pt, at) in enumerate(zip(param_types, arg_types)):
-                                    if pt != at:
-                                        types_match = False
-                                        break
-                                    
-                                    # Check signedness for integer types if available
-                                    if isinstance(pt, ir.IntType) and isinstance(at, ir.IntType):
-                                        # Get parameter signedness from overload info
-                                        param_spec = overload['param_types'][i] if i < len(overload['param_types']) else None
-                                        # Get argument signedness from _flux_type_spec
-                                        arg_spec = getattr(arg_vals[i], '_flux_type_spec', None)
-                                        
-                                        if param_spec and arg_spec:
-                                            # Both have signedness info - check if they match
-                                            if hasattr(param_spec, 'is_signed') and hasattr(arg_spec, 'is_signed'):
-                                                if param_spec.is_signed != arg_spec.is_signed:
-                                                    types_match = False
-                                                    break
-                                
-                                if types_match:
-                                    return func
-                    
-                    # Return first matching param count if we found one
-                    if matching_count is not None:
-                        return matching_count
-                
+                result = TypeResolver._resolve_from_overloads(overloads, arg_vals)
+                if result is not None:
+                    return result
                 if len(overloads) == 1:
                     return overloads[0]['function']
         
@@ -1073,48 +1000,9 @@ class TypeResolver:
                 # Check overloads
                 if hasattr(module, '_function_overloads') and qualified_name in module._function_overloads:
                     overloads = module._function_overloads[qualified_name]
-                    
-                    if arg_vals is not None:
-                        matching_count = None
-                        for overload in overloads:
-                            if overload['param_count'] == len(arg_vals):
-                                # Save first matching count in case we don't find exact type match
-                                if matching_count is None:
-                                    matching_count = overload['function']
-                                
-                                # Check if types match exactly
-                                func = overload['function']
-                                param_types = [p.type for p in func.args]
-                                arg_types = [arg.type for arg in arg_vals]
-                                
-                                if len(param_types) == len(arg_types):
-                                    types_match = True
-                                    for i, (pt, at) in enumerate(zip(param_types, arg_types)):
-                                        if pt != at:
-                                            types_match = False
-                                            break
-                                        
-                                        # Check signedness for integer types if available
-                                        if isinstance(pt, ir.IntType) and isinstance(at, ir.IntType):
-                                            # Get parameter signedness from overload info
-                                            param_spec = overload['param_types'][i] if i < len(overload['param_types']) else None
-                                            # Get argument signedness from _flux_type_spec
-                                            arg_spec = getattr(arg_vals[i], '_flux_type_spec', None)
-                                            
-                                            if param_spec and arg_spec:
-                                                # Both have signedness info - check if they match
-                                                if hasattr(param_spec, 'is_signed') and hasattr(arg_spec, 'is_signed'):
-                                                    if param_spec.is_signed != arg_spec.is_signed:
-                                                        types_match = False
-                                                        break
-                                    
-                                    if types_match:
-                                        return func
-                        
-                        # Return first matching param count if we found one
-                        if matching_count is not None:
-                            return matching_count
-                    
+                    result = TypeResolver._resolve_from_overloads(overloads, arg_vals)
+                    if result is not None:
+                        return result
                     if len(overloads) == 1:
                         return overloads[0]['function']
         
