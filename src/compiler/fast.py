@@ -78,8 +78,10 @@ class Literal(ASTNode):
         elif self.type == DataType.DATA:
             # Handle array literals
             if isinstance(self.value, list):
-                # For now, just return None for array literals - they should be handled at a higher level
-                return None
+                # Array literals must be handled at a higher level (e.g. VariableDeclaration,
+                # ArrayLiteral node). If we reach here directly it means the caller failed to
+                # intercept the array literal — raise a clear error instead of returning None.
+                raise ValueError(f"Array literal reached Literal.codegen directly — must be handled by ArrayLiteral or VariableDeclaration [{self.source_line}:{self.source_col}]")
             # Handle struct literals (dictionaries with field names -> values)
             elif isinstance(self.value, dict):
                 return self._handle_struct_literal(builder, module)
