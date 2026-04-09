@@ -692,6 +692,7 @@ class TypeResolver:
     Handles ALL module name path scope and mangling.
     """
 
+    @staticmethod
     def resolve(typename: str, module: ir.Module) -> Optional[ir.Type]:
         """
         Resolve a type name using current namespace from module.
