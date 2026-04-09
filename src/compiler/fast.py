@@ -4520,37 +4520,38 @@ class Block(Statement):
         outer_defer_stack = getattr(builder, '_flux_defer_stack', None)
         builder._flux_defer_stack = []
 
-        for i, stmt in enumerate(self.statements):
-            #print(f"DEBUG Block: Processing statement {i}: {type(stmt).__name__}")
-            if builder.block.is_terminated:
-                break
-            if stmt is not None:  # Skip None statements
-                try:
-                    stmt_result = stmt.codegen(builder, module)
-                    if stmt_result is not None:  # Only update result if not None
-                        result = stmt_result
-                except Exception as e:
-                    current_frame = inspect.currentframe()
-                    caller_frame = current_frame.f_back
-                    caller_name = caller_frame.f_code.co_name
-                    stack = inspect.stack()
-                    stmt_i = i
-                    #print("Full call stack (from current to outermost):")
-                    for i, frame_info in enumerate(reversed(stack)):
-                        print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
-                    # Emit a clean diagnostic with source location if available
-                    loc = ""
-                    if hasattr(stmt, 'source_line') and stmt.source_line:
-                        loc = f" [{module.name}:{stmt.source_line}:{stmt.source_col}]"
-                    raise ValueError(f"Block{{}} Debug: Error in statement {stmt_i} ({type(stmt).__name__}){loc}: {e} \n\n {stmt} \n\n {module.name}")
+        try:
+            for i, stmt in enumerate(self.statements):
+                #print(f"DEBUG Block: Processing statement {i}: {type(stmt).__name__}")
+                if builder.block.is_terminated:
+                    break
+                if stmt is not None:  # Skip None statements
+                    try:
+                        stmt_result = stmt.codegen(builder, module)
+                        if stmt_result is not None:  # Only update result if not None
+                            result = stmt_result
+                    except Exception as e:
+                        current_frame = inspect.currentframe()
+                        caller_frame = current_frame.f_back
+                        caller_name = caller_frame.f_code.co_name
+                        stack = inspect.stack()
+                        stmt_i = i
+                        #print("Full call stack (from current to outermost):")
+                        for i, frame_info in enumerate(reversed(stack)):
+                            print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
+                        # Emit a clean diagnostic with source location if available
+                        loc = ""
+                        if hasattr(stmt, 'source_line') and stmt.source_line:
+                            loc = f" [{module.name}:{stmt.source_line}:{stmt.source_col}]"
+                        raise ValueError(f"Block{{}} Debug: Error in statement {stmt_i} ({type(stmt).__name__}){loc}: {e} \n\n {stmt} \n\n {module.name}")
 
-        # Flush this scope's deferred expressions in LIFO order at natural block exit
-        if builder._flux_defer_stack and not builder.block.is_terminated:
-            for deferred_expr in reversed(builder._flux_defer_stack):
-                deferred_expr.codegen(builder, module)
-
-        # Restore outer defer stack
-        builder._flux_defer_stack = outer_defer_stack if outer_defer_stack is not None else []
+            # Flush this scope's deferred expressions in LIFO order at natural block exit
+            if builder._flux_defer_stack and not builder.block.is_terminated:
+                for deferred_expr in reversed(builder._flux_defer_stack):
+                    deferred_expr.codegen(builder, module)
+        finally:
+            # Restore outer defer stack — must happen even if body raises
+            builder._flux_defer_stack = outer_defer_stack if outer_defer_stack is not None else []
 
         return result
 
