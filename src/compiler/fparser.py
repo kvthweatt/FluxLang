@@ -2964,9 +2964,6 @@ class FluxParser:
         """
         chain_expression -> relational_expression ('<-' chain_expression)?
         Right associative chain arrow
-        
-        Also handles acceptor blocks:
-        {expr_with_placeholders} <- N:func_call <- N:func_call ...
         """
         tok = self.current_token
         expr = self.relational_expression()
@@ -2977,35 +2974,8 @@ class FluxParser:
             if next_pos < len(self.tokens):
                 next_token = self.tokens[next_pos]
                 peek_after = self.tokens[next_pos + 1] if next_pos + 1 < len(self.tokens) else None
-                
-                # Check if we have labeled input pattern: N:func_call
-                if next_token.type in (TokenType.SINT_LITERAL, TokenType.UINT_LITERAL) and \
-                   peek_after and peek_after.type == TokenType.COLON:
-                    # This is an acceptor block with labeled inputs
-                    # The left side (expr) is the acceptor expression
-                    labeled_inputs = []
-                    
-                    # Parse all labeled inputs
-                    while self.expect(TokenType.CHAIN_ARROW):
-                        self.advance()  # consume '<-'
-                        
-                        if not self.expect(TokenType.SINT_LITERAL, TokenType.UINT_LITERAL):
-                            self.error("Expected label number after '<-' in acceptor block")
-                        
-                        label = int(self.current_token.value, 0)
-                        self.advance()
-                        self.consume(TokenType.COLON)
-                        input_expr = self.relational_expression()
-                        
-                        if not isinstance(input_expr, (FunctionCall, AcceptorBlock)):
-                            self.error("Labeled input must be a function call or acceptor block")
-                        
-                        labeled_inputs.append((label, input_expr))
-                    
-                    # Create AcceptorBlock with the expression and labeled inputs
-                    return AcceptorBlock(expr, labeled_inputs).set_location(tok.line, tok.column)
-            
-            # Old-style chain arrow (function call chaining)
+                            
+            # Chain arrow (function call chaining)
             self.advance()  # consume '<-'
             right = self.chain_expression()
             

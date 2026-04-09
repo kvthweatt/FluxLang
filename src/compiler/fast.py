@@ -37,8 +37,17 @@ class ASTNode:
         self.source_col  = col
         return self
 
+    def accept(self, visitor, builder: ir.IRBuilder, module: ir.Module) -> Any:
+        """Dispatch this node through a CodegenVisitor."""
+        return visitor.visit(self, builder, module)
+
     def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Any:
-        raise NotImplementedError(f"codegen not implemented for {self.__class__.__name__} [{self.source_line}:{self.source_col}]")
+        # Once a node's codegen is removed during migration, this base
+        # implementation routes it through the module-level visitor singleton.
+        # Nodes that still have their own codegen() override this and never
+        # reach here, so there is no behaviour change during the transition.
+        from fcodegen import visitor as _visitor
+        return _visitor.visit(self, builder, module)
 
 # Literal values (no dependencies)
 @dataclass
@@ -3732,15 +3741,7 @@ class NoInit(Expression):
     handled specially in VariableDeclaration.codegen()
     """
     
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
-        """
-        NoInit should never be code-generated directly.
-        It's a compile-time marker that's handled in VariableDeclaration.
-        """
-        raise RuntimeError(
-            f"noinit is a compile-time marker and should not generate code directly. "
-            f"It should only be used as an initializer in variable declarations. [{self.source_line}:{self.source_col}]"
-        )
+
 
 # Variable declarations
 @dataclass
@@ -4291,8 +4292,7 @@ class ExpressionStatement(Statement):
     def __repr__(self) -> str:
         return f"{self.expression}"
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        return self.expression.codegen(builder, module)
+
 
 @dataclass
 class Assignment(Statement):
@@ -4567,8 +4567,7 @@ class IRStore(Expression):
     """
     ir_value: ir.Value
     
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        return self.ir_value
+
 
 
 @dataclass
@@ -5573,37 +5572,11 @@ class ReturnStatement(Statement):
 
 @dataclass
 class BreakStatement(Statement):
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        if not hasattr(builder, 'break_block'):
-            raise SyntaxError(f"'break' outside of loop or switch [{self.source_line}:{self.source_col}]")
-        
-        # Don't do anything if block is already terminated
-        if builder.block.is_terminated:
-            return None
-            
-        # Branch to break block - this terminates the block
-        builder.branch(builder.break_block)
-        
-        # Don't call unreachable() - the branch already terminated the block
-        # Any subsequent code will naturally be unreachable
-        return None
+    pass
 
 @dataclass
 class ContinueStatement(Statement):
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        if not hasattr(builder, 'continue_block'):
-            raise SyntaxError(f"'continue' outside of loop [{self.source_line}:{self.source_col}]")
-        
-        # Don't do anything if block is already terminated
-        if builder.block.is_terminated:
-            return None
-            
-        # Branch to continue block - this terminates the block
-        builder.branch(builder.continue_block)
-        
-        # Don't call unreachable() - the branch already terminated the block
-        # Any subsequent code will naturally be unreachable
-        return None
+    pass
 
 @dataclass
 class DeferStatement(Statement):
@@ -5612,22 +5585,14 @@ class DeferStatement(Statement):
     def __repr__(self) -> str:
         return f"defer {self.expression};"
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        # Push onto the builder's defer stack for the current scope
-        if not hasattr(builder, '_flux_defer_stack'):
-            builder._flux_defer_stack = []
-        builder._flux_defer_stack.append(self.expression)
-        return None
+
 
 @dataclass
 class NoreturnStatement(Statement):
     def __repr__(self) -> str:
         return "noreturn;"
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        if not builder.block.is_terminated:
-            builder.unreachable()
-        return None
+
 
 @dataclass
 class EscapeStatement(Statement):
@@ -5636,50 +5601,19 @@ class EscapeStatement(Statement):
     def __repr__(self) -> str:
         return f"escape {self.call};"
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        if builder.block.is_terminated:
-            return None
-        if not getattr(builder, '_flux_is_recursive_func', False):
-            raise SyntaxError(f"'escape' is only valid inside a <~ recursive function [{self.source_line}:{self.source_col}]")
-        # Perform the escape call as a plain (non-tail) call, then ret
-        result = self.call.codegen(builder, module)
-        func = builder.block.function
-        ret_type = func.type.return_type if hasattr(func.type, 'return_type') else func.type.pointee.return_type
-        if isinstance(ret_type, ir.VoidType):
-            builder.ret_void()
-        else:
-            if result is None:
-                builder.ret(ir.Constant(ret_type, 0))
-            else:
-                result = CoercionContext.coerce_return_value(builder, result, ret_type)
-                builder.ret(result)
-        return None
+
 
 @dataclass
 class LabelStatement(Statement):
     name: str
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        target_block = builder._flux_label_blocks[self.name]
-        # Close the current block with a fallthrough branch if not already terminated
-        if not builder.block.is_terminated:
-            builder.branch(target_block)
-        # Position the builder at the pre-created block
-        builder.position_at_start(target_block)
-        return None
+
 
 @dataclass
 class GotoStatement(Statement):
     target: str
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        if self.target not in builder._flux_label_blocks:
-            raise SyntaxError(f"'goto' to undefined label '{self.target}' [{self.source_line}:{self.source_col}]")
-        # Don't emit unreachable code
-        if builder.block.is_terminated:
-            return None
-        builder.branch(builder._flux_label_blocks[self.target])
-        return None
+
 
 # NOTE:
 #
@@ -5689,25 +5623,7 @@ class GotoStatement(Statement):
 class JumpStatement(Statement):
     target: Expression  # Any expression yielding an address (AddressOf or integer)
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> ir.Value:
-        if builder.block.is_terminated:
-            return None
-        addr_val = self.target.codegen(builder, module)
-        # Coerce to i64 for the asm constraint
-        i64 = ir.IntType(64)
-        if isinstance(addr_val.type, ir.PointerType):
-            addr_i64 = builder.ptrtoint(addr_val, i64, name="jump_addr")
-        elif addr_val.type != i64:
-            addr_i64 = builder.zext(addr_val, i64, name="jump_addr") if addr_val.type.width < 64 else builder.trunc(addr_val, i64, name="jump_addr")
-        else:
-            addr_i64 = addr_val
-        # Emit inline asm: pop the return address pushed by the call to this asm block,
-        # then jump - making it a true tail jump with no leftover stack frame.
-        ftype = ir.FunctionType(ir.VoidType(), [i64])
-        asm = ir.InlineAsm(ftype, "addq $$8, %rsp\njmp *%rax", "{rax}", side_effect=True)
-        builder.call(asm, [addr_i64])
-        builder.unreachable()
-        return None
+
 
 @dataclass
 class Case(ASTNode):
@@ -6274,44 +6190,7 @@ def _collect_label_names(stmts) -> list:
 class DeprecateStatement(Statement):
     namespace_path: str  # e.g., "standard::io::some::deprecated::namespace"
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
-        mangled = self.namespace_path.replace("::", "__")
 
-        # Walk all AST nodes in the program looking for references to the deprecated namespace
-        statements = getattr(module, '_program_statements', [])
-        references = []
-
-        def walk(node, path="<top>"):
-            if node is None:
-                return
-            # Check Identifier and FunctionCall names
-            if isinstance(node, Identifier):
-                if node.name == mangled or node.name.startswith(mangled + "__"):
-                    references.append(f"Identifier {node.name}")
-            elif isinstance(node, FunctionCall):
-                if node.name == mangled or node.name.startswith(mangled + "__"):
-                    references.append(f"Function call {node.name}()")
-                for i, arg in enumerate(node.arguments):
-                    walk(arg, f"{path} -> call arg {i}")
-            # Recurse into dataclass fields
-            if hasattr(node, '__dataclass_fields__'):
-                for field_name in node.__dataclass_fields__:
-                    child = getattr(node, field_name, None)
-                    child_path = f"{path}.{field_name}"
-                    if isinstance(child, list):
-                        for item in child:
-                            walk(item, child_path)
-                    elif isinstance(child, ASTNode):
-                        walk(child, child_path)
-
-        for stmt in statements:
-            walk(stmt, type(stmt).__name__)
-
-        if references:
-            ref_list = "\n".join(references)
-            raise ComptimeError(
-                f"Deprecated namespace '{self.namespace_path}' is still referenced:\n{ref_list} [{self.source_line}:{self.source_col}]"
-            )
 
 # Function definition
 @dataclass
@@ -6791,10 +6670,7 @@ class EnumDef(ASTNode):
 class EnumDefStatement(Statement):
     enum_def: EnumDef
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Value]:
-        # Delegate codegen to the contained EnumDef
-        self.enum_def.codegen(builder, module)
-        return None
+
 
 @dataclass
 class UnionMember(ASTNode):
@@ -7559,18 +7435,7 @@ class TraitDef(ASTNode):
     name: str
     prototypes: List['FunctionDef'] = field(default_factory=list)
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
-        # Register the trait in the symbol table trait registry (compile-time only)
-        if hasattr(module, 'symbol_table'):
-            module.symbol_table.define(
-                self.name,
-                SymbolKind.TRAIT,
-                type_spec=None,
-                llvm_type=None,
-                llvm_value=None
-            )
-            module.symbol_table._trait_registry[self.name] = self.prototypes
-        return None
+
 
 # Object method
 @dataclass
@@ -7976,16 +7841,7 @@ class NamespaceDef(ASTNode):
 class UsingStatement(Statement):
     namespace_path: str  # e.g., "standard::io"
     
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
-        """Using statements are compile-time directives - no runtime code generated"""
-        # For now, just store the namespace information for symbol resolution
-        if not hasattr(module, '_using_namespaces'):
-            module._using_namespaces = []
-        self.namespace_path = self.namespace_path.replace("::","__")
-        module._using_namespaces.append(self.namespace_path)
-        if hasattr(module, 'symbol_table'):
-            module.symbol_table.add_using_namespace(self.namespace_path)
-        #print(f"[USING] Registered namespace: {self.namespace_path}", file=sys.stdout)
+
 
 
 # Unusing statement (removes from using namespaces)
@@ -7993,13 +7849,7 @@ class UsingStatement(Statement):
 class NotUsingStatement(Statement):
     namespace_path: str  # e.g., "standard::io::file"
     
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> None:
-        """Unusing statements are compile-time directives - no runtime code generated"""
-        if not hasattr(module, '_excluded_namespaces'):
-            module._excluded_namespaces = set()
-        self.namespace_path = self.namespace_path.replace("::","__")
-        module._excluded_namespaces.add(self.namespace_path)
-        #print(f"[UNUSING] Excluding namespace from compilation: {self.namespace_path}", file=sys.stdout)
+
 
 
 # Function definition statement
@@ -8007,53 +7857,35 @@ class NotUsingStatement(Statement):
 class FunctionDefStatement(Statement):
     function_def: FunctionDef
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Value]:
-        # Delegate codegen to the contained FunctionDef
-        self.function_def.codegen(builder, module)
-        return None
+
 
 # Union definition statement
 @dataclass
 class UnionDefStatement(Statement):
     union_def: UnionDef
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Value]:
-        # Delegate codegen to the contained UnionDef
-        self.union_def.codegen(builder, module)
-        return None
+
 
 # Struct definition statement
 @dataclass
 class StructDefStatement(Statement):
     struct_def: StructDef
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Value]:
-        # Delegate codegen to the contained StructDef
-        self.struct_def.codegen(builder, module)
-        return None
+
 
 # Object definition statement
 @dataclass
 class ObjectDefStatement(Statement):
     object_def: ObjectDef
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Value]:
-        self.object_def.codegen(builder, module)
-        return None
+
 
 # Namespace definition statement
 @dataclass
 class NamespaceDefStatement(Statement):
     namespace_def: NamespaceDef
 
-    def codegen(self, builder: ir.IRBuilder, module: ir.Module) -> Optional[ir.Value]:
-        # Check if this namespace is excluded via !using
-        if hasattr(module, '_excluded_namespaces') and self.namespace_def.name in module._excluded_namespaces:
-            #print(f"[CODEGEN] Skipping excluded namespace: {self.namespace_def.name}", file=sys.stdout)
-            return None
-        
-        self.namespace_def.codegen(builder, module)
-        return None
+
 
 # Program root
 @dataclass

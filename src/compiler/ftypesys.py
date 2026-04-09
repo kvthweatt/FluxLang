@@ -140,160 +140,6 @@ class SymbolKind(Enum):
     OPERATOR = "operator"
 
 @dataclass
-class BaseType:
-    """Base type representation"""
-    
-    def to_llvm(self, module: ir.Module) -> ir.Type:
-        raise NotImplementedError(f"BaseType.to_llvm: not implemented for {self.__class__.__name__}")
-    
-    def __str__(self) -> str:
-        raise NotImplementedError(f"BaseType.__str__: not implemented for {self.__class__.__name__}")
-
-
-@dataclass
-class PrimitiveType(BaseType):
-    kind: DataType
-    width: Optional[int] = None
-    signed: bool = True
-    
-    def to_llvm(self, module: ir.Module) -> ir.Type:
-        if self.kind == DataType.SINT:
-            return ir.IntType(self.width or 32)
-        elif self.kind == DataType.UINT:
-            return ir.IntType(self.width or 32)
-        elif self.kind == DataType.SLONG:
-            return ir.IntType(64)
-        elif self.kind == DataType.ULONG:
-            return ir.IntType(64)
-        elif self.kind == DataType.FLOAT:
-            return ir.FloatType()
-        elif self.kind == DataType.DOUBLE:
-            return ir.DoubleType()
-        elif self.kind == DataType.BOOL:
-            return ir.IntType(1)
-        elif self.kind == DataType.CHAR:
-            return ir.IntType(8)
-        elif self.kind == DataType.BYTE:
-            from fconfig import config as _cfg, get_byte_width as _gbw
-            width = self.width if self.width is not None else _gbw(_cfg)
-            return ir.IntType(width)
-        elif self.kind == DataType.VOID:
-            return ir.VoidType()
-        elif self.kind == DataType.DATA:
-            if self.width is None:
-                raise ValueError(f"PrimitiveType.to_llvm: DATA type requires explicit width")
-            return ir.IntType(self.width)
-        else:
-            raise ValueError(f"PrimitiveType.to_llvm: Unsupported primitive type: {self.kind}")
-    
-    def __str__(self) -> str:
-        if self.kind == DataType.DATA and self.width:
-            return f"data{{{self.width}}}"
-        if self.kind == DataType.BYTE and self.width and self.width != 8:
-            return f"byte{{{self.width}}}"
-        return self.kind.value
-
-
-@dataclass
-class PointerType(BaseType):
-    pointee: BaseType
-    
-    def to_llvm(self, module: ir.Module) -> ir.Type:
-        pointee_llvm = self.pointee.to_llvm(module)
-        if isinstance(self.pointee, PrimitiveType) and self.pointee.kind == DataType.VOID:
-            return ir.PointerType(ir.IntType(8))
-        return ir.PointerType(pointee_llvm)
-    
-    def __str__(self) -> str:
-        return f"{self.pointee}*"
-
-
-@dataclass
-class ArrayType(BaseType):
-    element: BaseType
-    dimensions: List[Optional[int]]
-    
-    def to_llvm(self, module: ir.Module) -> ir.Type:
-        element_llvm = self.element.to_llvm(module)
-        current_type = element_llvm
-        
-        for dim in reversed(self.dimensions):
-            if dim is not None:
-                current_type = ir.ArrayType(current_type, dim)
-            else:
-                current_type = ir.PointerType(current_type)
-        
-        return current_type
-    
-    def __str__(self) -> str:
-        dims = ''.join(f'[{d if d else ""}]' for d in self.dimensions)
-        return f"{self.element}{dims}"
-
-
-@dataclass
-class NamedType(BaseType):
-    name: str
-    
-    def to_llvm(self, module: ir.Module) -> ir.Type:
-        resolved = TypeResolver.resolve(self.name, module)
-        if resolved is None:
-            raise NameError(f"NamedType.to_llvm: Unknown type: {self.name}")
-        return resolved
-    
-    def __str__(self) -> str:
-        return self.name
-
-
-@dataclass
-class StructType(BaseType):
-    name: str
-    
-    def to_llvm(self, module: ir.Module) -> ir.Type:
-        if hasattr(module, '_struct_types') and self.name in module._struct_types:
-            return module._struct_types[self.name]
-        raise NameError(f"StructType.to_llvm: Unknown struct type: {self.name}")
-    
-    def __str__(self) -> str:
-        return f"struct {self.name}"
-
-
-@dataclass
-class FunctionType(BaseType):
-    return_type: BaseType
-    parameters: List[BaseType]
-    
-    def to_llvm(self, module: ir.Module) -> ir.FunctionType:
-        ret_type = self.return_type.to_llvm(module)
-        param_types = [p.to_llvm(module) for p in self.parameters]
-        return ir.FunctionType(ret_type, param_types)
-    
-    def __str__(self) -> str:
-        params = ', '.join(str(p) for p in self.parameters)
-        return f"({params}) -> {self.return_type}"
-
-
-@dataclass
-class QualifiedType(BaseType):
-    base: BaseType
-    is_const: bool = False
-    is_volatile: bool = False
-    storage_class: Optional[StorageClass] = None
-    
-    def to_llvm(self, module: ir.Module) -> ir.Type:
-        return self.base.to_llvm(module)
-    
-    def __str__(self) -> str:
-        parts = []
-        if self.storage_class:
-            parts.append(self.storage_class.value)
-        if self.is_const:
-            parts.append("const")
-        if self.is_volatile:
-            parts.append("volatile")
-        parts.append(str(self.base))
-        return ' '.join(parts)
-
-@dataclass
 class SymbolEntry:
     """Complete symbol information"""
     kind: SymbolKind
@@ -613,46 +459,12 @@ class SymbolTable:
         return self._lookup_with_kinds(name, (SymbolKind.FUNCTION,), current_namespace)
     
     def _resolve_with_namespaces(self, name: str, current_namespace: str) -> Optional[SymbolEntry]:
-        # 0. If name contains '::' it is already fully qualified - mangle and look up directly
-        if '::' in name:
-            mangled = name.replace('::', '__')
-            if mangled in self._global_symbols:
-                return self._global_symbols[mangled]
-
-        # 1. Exact match
-        if name in self._global_symbols:
-            return self._global_symbols[name]
-        
-        # 2. Current namespace
-        if current_namespace:
-            mangled = TypeResolver.mangle_namespace_name(current_namespace, name)
-            if mangled in self._global_symbols:
-                return self._global_symbols[mangled]
-
-        # 3. Parent namespaces (FIX: proper indentation!)
-        if current_namespace:
-            parts = current_namespace.split('::')
-            while parts:
-                parts.pop()
-                parent_ns = '::'.join(parts)
-                mangled = TypeResolver.mangle_namespace_name(parent_ns, name) if parent_ns else name
-                if mangled in self._global_symbols:
-                    return self._global_symbols[mangled]
-
-        # 4. Using namespaces
-        for namespace in self.using_namespaces:
-            mangled = TypeResolver.mangle_namespace_name(namespace, name)
-            if mangled in self._global_symbols:
-                return self._global_symbols[mangled]
-        
-        # 5. All registered namespaces
-        for namespace in self.registered_namespaces:
-            mangled = TypeResolver.mangle_namespace_name(namespace, name)
-
-            if mangled in self._global_symbols:
-                return self._global_symbols[mangled]
-        
-        return None
+        return TypeResolver._walk_namespaces(
+            name, current_namespace,
+            lambda n: self._global_symbols.get(n),
+            self.using_namespaces,
+            self.registered_namespaces
+        )
     
     def get_type_spec(self, name: str):
         entry = self.lookup_any(name)
@@ -745,55 +557,91 @@ class TypeResolver:
     # ============================================================================
     
     @staticmethod
-    def resolve_with_namespace(module: ir.Module, name: str, current_namespace: str = "", lookup_func=None) -> Optional[Any]:
-        #print("IN RESOLVE_WITH_NAMESPACE()")
-        if lookup_func is None:
-            lookup_func = TypeResolver.lookup_type
-        
-        # 1. Try exact match first
-        result = lookup_func(module, name)
-        if result is not None:
-            return result
-        
-        # 2. Try current namespace
-        if current_namespace:
-            mangled = TypeResolver.mangle_namespace_name(current_namespace, name)
-            result = lookup_func(module, mangled)
+    def _walk_namespaces(name: str, current_namespace: str, lookup_func,
+                         using_namespaces, registered_namespaces) -> Optional[Any]:
+        """
+        Canonical 5-step namespace resolution walk.
+        All namespace lookups in the compiler funnel through here.
+
+        Steps:
+          0. Fully-qualified name (contains '::') - mangle and look up directly.
+          1. Exact match (unmangled name).
+          2. Current namespace.
+          3. Parent namespaces, walking up the tree.
+          4. Using namespaces (explicit 'using' declarations).
+          5. All registered namespaces.
+
+        Args:
+            name:                 The identifier to resolve.
+            current_namespace:    The namespace currently in scope.
+            lookup_func:          Callable(mangled_name) -> Optional[Any].
+                                  Returns non-None on a hit.
+            using_namespaces:     Iterable of namespaces brought in via 'using'.
+            registered_namespaces: Iterable of all namespaces seen so far.
+
+        Returns:
+            The first non-None result from lookup_func, or None.
+        """
+        # 0. Fully qualified name
+        if '::' in name:
+            mangled = name.replace('::', '__')
+            result = lookup_func(mangled)
             if result is not None:
                 return result
-        
-        # 3. Try parent namespaces (walk up the tree)
+
+        # 1. Exact match
+        result = lookup_func(name)
+        if result is not None:
+            return result
+
+        # 2. Current namespace
+        if current_namespace:
+            mangled = TypeResolver.mangle_namespace_name(current_namespace, name)
+            result = lookup_func(mangled)
+            if result is not None:
+                return result
+
+        # 3. Parent namespaces (walk up the tree)
         if current_namespace:
             parts = current_namespace.split('::')
             while parts:
                 parts.pop()
                 parent_ns = '::'.join(parts)
-                if parent_ns:
-                    mangled = TypeResolver.mangle_namespace_name(parent_ns, name)
-                else:
-                    mangled = name
-                
-                result = lookup_func(module, mangled)
+                mangled = TypeResolver.mangle_namespace_name(parent_ns, name) if parent_ns else name
+                result = lookup_func(mangled)
                 if result is not None:
                     return result
-        
-        # 4. Try using namespaces
-        if hasattr(module, '_using_namespaces'):
-            for namespace in module._using_namespaces:
-                mangled = TypeResolver.mangle_namespace_name(namespace, name)
-                result = lookup_func(module, mangled)
-                if result is not None:
-                    return result
-        
-        # 5. Try all registered namespaces
-        if hasattr(module, '_namespaces'):
-            for namespace in module._namespaces:
-                mangled = TypeResolver.mangle_namespace_name(namespace, name)
-                result = lookup_func(module, mangled)
-                if result is not None:
-                    return result
-        
+
+        # 4. Using namespaces
+        for namespace in using_namespaces:
+            mangled = TypeResolver.mangle_namespace_name(namespace, name)
+            result = lookup_func(mangled)
+            if result is not None:
+                return result
+
+        # 5. All registered namespaces
+        for namespace in registered_namespaces:
+            mangled = TypeResolver.mangle_namespace_name(namespace, name)
+            result = lookup_func(mangled)
+            if result is not None:
+                return result
+
         return None
+
+    @staticmethod
+    def resolve_with_namespace(module: ir.Module, name: str, current_namespace: str = "", lookup_func=None) -> Optional[Any]:
+        #print("IN RESOLVE_WITH_NAMESPACE()")
+        if lookup_func is None:
+            lookup_func = TypeResolver.lookup_type
+
+        using_ns     = getattr(module, '_using_namespaces', [])
+        registered_ns = getattr(module, '_namespaces', [])
+
+        return TypeResolver._walk_namespaces(
+            name, current_namespace,
+            lambda n: lookup_func(module, n),
+            using_ns, registered_ns
+        )
     
     # ============================================================================
     # High-level resolution methods - Use these from other code
@@ -1172,27 +1020,6 @@ class TypeResolver:
         raise ValueError(f"TypeResolver.resolve_struct_type: No compatible struct type found for fields: {field_names}")
 
 
-class TypeChecker:
-    """Type compatibility and casting validation"""
-    
-    @staticmethod
-    def is_compatible(source: BaseType, target: BaseType) -> bool:
-        if isinstance(source, PrimitiveType) and isinstance(target, PrimitiveType):
-            if source.kind == target.kind:
-                return True
-            if source.kind in (DataType.SINT, DataType.UINT) and target.kind in (DataType.SINT, DataType.UINT):
-                return True
-            if source.kind in (DataType.SLONG, DataType.ULONG) and target.kind in (DataType.SLONG, DataType.ULONG):
-                return True
-        
-        if isinstance(source, PointerType) and isinstance(target, PointerType):
-            return TypeChecker.is_compatible(source.pointee, target.pointee)
-        
-        if type(source) == type(target):
-            return True
-        
-        return False
-
 @dataclass
 class TypeSystem:
     base_type: Union[DataType, str]
@@ -1218,33 +1045,6 @@ class TypeSystem:
             return self.custom_typename
         return f"{self.base_type}"
     
-    def to_new_type(self) -> BaseType:
-        # THIS IS BAD, WHY THE FUCK ARE WE DROPPING TYPESYSTEM
-        # NEVER EVER EVER
-        # THIS IS BAD BAD BAD BAD
-        base = None
-        
-        # URGENT: PASS ALIGNMENT + ENDIANNESS
-        if self.custom_typename:
-            base = NamedType(self.custom_typename)
-        elif isinstance(self.base_type, DataType):
-            base = PrimitiveType(self.base_type, self.bit_width, self.is_signed)
-        else:
-            base = NamedType(self.base_type)
-        
-        if self.is_array and self.array_dimensions:
-            base = ArrayType(base, self.array_dimensions)
-        elif self.is_array and self.array_size:
-            base = ArrayType(base, [self.array_size])
-        
-        if self.is_pointer:
-            base = PointerType(base)
-        
-        if self.is_const or self.is_volatile or self.storage_class:
-            base = QualifiedType(base, self.is_const, self.is_volatile, self.storage_class)
-        
-        return base
-
     @staticmethod
     def get_default_initializer(llvm_type: ir.Type) -> ir.Constant:
         if isinstance(llvm_type, ir.IntType):
@@ -4213,36 +4013,8 @@ class FunctionTypeHandler:
         return arg_val
 
 def emit_memcpy(builder: ir.IRBuilder, module: ir.Module, dst_ptr: ir.Value, src_ptr: ir.Value, bytes: int) -> None:
-    """Emit llvm.memcpy intrinsic call"""
-    # Declare llvm.memcpy.p0i8.p0i8.i64 if not already declared
-    memcpy_name = "llvm.memcpy.p0i8.p0i8.i64"
-    if memcpy_name not in module.globals:
-        memcpy_type = ir.FunctionType(
-            ir.VoidType(),
-            [ir.PointerType(ir.IntType(8)),  # dst
-             ir.PointerType(ir.IntType(8)),  # src
-             ir.IntType(64),                 # len
-             ir.IntType(1)]                  # volatile
-        )
-        memcpy_func = ir.Function(module, memcpy_type, name=memcpy_name)
-        memcpy_func.attributes.add('nounwind')
-    else:
-        memcpy_func = module.globals[memcpy_name]
-    
-    # Cast pointers to i8* if needed
-    i8_ptr = ir.PointerType(ir.IntType(8))
-    if dst_ptr.type != i8_ptr:
-        dst_ptr = builder.bitcast(dst_ptr, i8_ptr)
-    if src_ptr.type != i8_ptr:
-        src_ptr = builder.bitcast(src_ptr, i8_ptr)
-    
-    # Call memcpy
-    builder.call(memcpy_func, [
-        dst_ptr,
-        src_ptr,
-        ir.Constant(ir.IntType(64), bytes),
-        ir.Constant(ir.IntType(1), 0)  # not volatile
-    ])
+    """Emit llvm.memcpy intrinsic call. Delegates to ArrayTypeHandler.emit_memcpy."""
+    ArrayTypeHandler.emit_memcpy(builder, module, dst_ptr, src_ptr, bytes)
 
 
 # String Heap Allocation
@@ -5201,6 +4973,41 @@ class StructTypeHandler:
         raise ValueError("StructTypeHandler.infer_struct_name: Cannot infer struct name from instance")
     
     @staticmethod
+    @staticmethod
+    def _array_bits(at: ir.ArrayType) -> int:
+        """Return the total bit width of an LLVM array type."""
+        elem = at.element
+        if isinstance(elem, ir.IntType):
+            w = elem.width
+        elif isinstance(elem, ir.FloatType):
+            w = 32
+        elif isinstance(elem, ir.DoubleType):
+            w = 64
+        elif isinstance(elem, (ir.IdentifiedStructType, ir.LiteralStructType)):
+            w = StructTypeHandler._struct_bits(elem)
+        else:
+            w = 64
+        return w * at.count
+
+    @staticmethod
+    def _struct_bits(st: 'ir.IdentifiedStructType | ir.LiteralStructType') -> int:
+        """Recursively sum the bit widths of all elements in an LLVM struct type."""
+        total = 0
+        for elem in st.elements:
+            if isinstance(elem, ir.IntType):
+                total += elem.width
+            elif isinstance(elem, ir.FloatType):
+                total += 32
+            elif isinstance(elem, ir.DoubleType):
+                total += 64
+            elif isinstance(elem, (ir.IdentifiedStructType, ir.LiteralStructType)):
+                total += StructTypeHandler._struct_bits(elem)
+            elif isinstance(elem, ir.ArrayType):
+                total += StructTypeHandler._array_bits(elem)
+            else:
+                total += 64  # pointer
+        return total
+
     def calculate_vtable(members: List, module: 'ir.Module') -> 'StructVTable':
         from fast import StructVTable, get_builtin_bit_width
         
@@ -5249,36 +5056,7 @@ class StructTypeHandler:
                         bit_width = 8 * llvm_type.count
                 elif isinstance(llvm_type, (ir.IdentifiedStructType, ir.LiteralStructType)):
                     # Nested struct — recursively sum element sizes
-                    def _struct_bits(st):
-                        total = 0
-                        for elem in st.elements:
-                            if isinstance(elem, ir.IntType):
-                                total += elem.width
-                            elif isinstance(elem, ir.FloatType):
-                                total += 32
-                            elif isinstance(elem, ir.DoubleType):
-                                total += 64
-                            elif isinstance(elem, (ir.IdentifiedStructType, ir.LiteralStructType)):
-                                total += _struct_bits(elem)
-                            elif isinstance(elem, ir.ArrayType):
-                                total += _array_bits(elem)
-                            else:
-                                total += 64  # pointer
-                        return total
-                    def _array_bits(at):
-                        elem = at.element
-                        if isinstance(elem, ir.IntType):
-                            w = elem.width
-                        elif isinstance(elem, ir.FloatType):
-                            w = 32
-                        elif isinstance(elem, ir.DoubleType):
-                            w = 64
-                        elif isinstance(elem, (ir.IdentifiedStructType, ir.LiteralStructType)):
-                            w = _struct_bits(elem)
-                        else:
-                            w = 64
-                        return w * at.count
-                    bit_width = _struct_bits(llvm_type)
+                    bit_width = StructTypeHandler._struct_bits(llvm_type)
                     alignment = 32  # struct fields align to at least 32-bit
                 elif isinstance(llvm_type, ir.PointerType):
                     bit_width = 64
@@ -5856,38 +5634,6 @@ class AlignOfTypeHandler:
         # alignof(TypeSystem)
         if isinstance(target, TypeSystem):
             return AlignOfTypeHandler.alignment_bytes_for_type_spec(target, module)
-            # Look up as a type (struct/union/enum/typedef) in symbol table
-            type_entry = module.symbol_table.lookup_type(target.name)
-            if type_entry is not None and type_entry.type_spec is not None:
-                return AlignOfTypeHandler.alignment_bytes_for_type_spec(type_entry.type_spec, module)
-
-            # Try looking up as a variable (for alignof(variable_name))
-            var_entry = module.symbol_table.lookup_variable(target.name)
-            if var_entry is not None and var_entry.type_spec is not None:
-                return AlignOfTypeHandler.alignment_bytes_for_type_spec(var_entry.type_spec, module)            # If the identifier names a struct type, use vtable info if it exists
-            if hasattr(module, "_struct_vtables") and target.name in module._struct_vtables:
-                vt = module._struct_vtables[target.name]
-                if hasattr(vt, "alignment_bytes"):
-                    return vt.alignment_bytes
-                if hasattr(vt, "alignment"):
-                    return vt.alignment
-
-            ts = IdentifierTypeHandler.get_type_spec(target.name, builder, module)
-            if ts is not None:
-                return AlignOfTypeHandler.alignment_bytes_for_type_spec(ts, module)
-
-            # Fallback: derive from existing LLVM storage (scope/globals)
-            if module.symbol_table.get_llvm_value(target.name) is not None:
-                ptr = module.symbol_table.get_llvm_value(target.name)
-                if isinstance(ptr.type, ir.PointerType):
-                    return AlignOfTypeHandler.alignment_from_llvm_type(ptr.type.pointee, module)
-
-            if target.name in module.globals:
-                gvar = module.globals[target.name]
-                if isinstance(gvar.type, ir.PointerType):
-                    return AlignOfTypeHandler.alignment_from_llvm_type(gvar.type.pointee, module)
-
-            return None
 
         # Some callsites may accidentally pass a decl node; support it without importing AST classes.
         if hasattr(target, "type_spec") and isinstance(getattr(target, "type_spec"), TypeSystem):

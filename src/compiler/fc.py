@@ -265,6 +265,9 @@ class FluxCompiler:
             #self.logger.step("[INFO] ► Reading source file", LogLevel.INFO, "compiler")
             parser = FluxParser.from_file(filename, compiler_macros=self.predefined_macros)
             ast = parser.parse()
+
+            if parser.parse_errors:
+                exit()
             #print("*"*40)
             #print("==== PARSER GENERATED SYMBOL TABLE ====")
             #print(parser.symbol_table.scopes)

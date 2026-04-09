@@ -2,6 +2,8 @@
 
 using standard::io::console;
 
+def foo() -> void {};
+
 def main() -> int
 {
 
