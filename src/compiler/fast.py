@@ -6223,7 +6223,7 @@ class InlineAsm(Expression):
         if has_register_output and output_operands:
             # Return the type of the first register output
             output_type = output_operands[0].type
-            if isinstance(output_type, ir.PointerType(ir.IntType(16))):
+            if isinstance(output_type, ir.PointerType):
                 output_type = output_type.pointee
             fn_type = ir.FunctionType(output_type, input_types)
         else:
