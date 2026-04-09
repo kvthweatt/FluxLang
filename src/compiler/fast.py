@@ -4036,16 +4036,6 @@ class VariableDeclaration(ASTNode):
                 zero = TypeSystem.get_default_initializer(llvm_type)
                 builder.store(zero, alloca)
         
-        # Register in scope
-        #print(f"[LOCAL VAR] Registering local variable '{self.name}' in scope level {module.symbol_table.scope_level}", file=sys.stdout)
-        #print(f"[LOCAL VAR]   Scopes count: {len(module.symbol_table.scopes)}", file=sys.stdout)
-        module.symbol_table.define(self.name, SymbolKind.VARIABLE, type_spec=resolved_type_spec, llvm_value=alloca)
-        #print(f"[LOCAL VAR]   Variable '{self.name}' registered successfully", file=sys.stdout)
-        if resolved_type_spec.is_volatile:
-            if not hasattr(builder, 'volatile_vars'):
-                builder.volatile_vars = set()
-            builder.volatile_vars.add(self.name)
-        
         return alloca
     
     def _initialize_local(self, builder: ir.IRBuilder, module: ir.Module, 
