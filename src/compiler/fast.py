@@ -7627,7 +7627,7 @@ class ObjectDef(ASTNode):
                 if hasattr(module, 'symbol_table'):
                     module.symbol_table.define(
                         self.name,
-                        SymbolKind.STRUCT,
+                        SymbolKind.OBJECT,
                         type_spec=None,
                         llvm_type=opaque_struct,
                         llvm_value=None
@@ -7651,7 +7651,7 @@ class ObjectDef(ASTNode):
                 #print(f"[OBJECT] Registering object '{self.name}' in symbol table", file=sys.stdout)
                 module.symbol_table.define(
                     self.name,
-                    SymbolKind.STRUCT,  # Objects are treated like structs for type purposes
+                    SymbolKind.OBJECT,
                     type_spec=None,
                     llvm_type=struct_type,
                     llvm_value=None

@@ -604,7 +604,7 @@ class SymbolTable:
         return entry if (entry and entry.kind in kinds) else None
     
     def lookup_type(self, name: str, current_namespace: str = None) -> Optional[SymbolEntry]:
-        return self._lookup_with_kinds(name, (SymbolKind.TYPE, SymbolKind.STRUCT, SymbolKind.UNION, SymbolKind.ENUM), current_namespace)
+        return self._lookup_with_kinds(name, (SymbolKind.TYPE, SymbolKind.STRUCT, SymbolKind.OBJECT, SymbolKind.UNION, SymbolKind.ENUM), current_namespace)
     
     def lookup_variable(self, name: str, current_namespace: str = None) -> Optional[SymbolEntry]:
         return self._lookup_with_kinds(name, (SymbolKind.VARIABLE,), current_namespace)
@@ -840,7 +840,7 @@ class TypeResolver:
                                 if mangled in storage:
                                     return storage[mangled]
                 
-                elif entry.kind in (SymbolKind.STRUCT, SymbolKind.UNION):
+                elif entry.kind in (SymbolKind.STRUCT, SymbolKind.OBJECT, SymbolKind.UNION):
                     if entry.llvm_type is not None:
                         return entry.llvm_type
                     # Fallback to _struct_types/_union_types storage
@@ -1264,7 +1264,7 @@ class TypeResolver:
                 if entry.kind == SymbolKind.TYPE:
                     if entry.type_spec is not None:
                         return TypeSystem.get_llvm_type(entry.type_spec, module)
-                elif entry.kind in (SymbolKind.STRUCT, SymbolKind.UNION):
+                elif entry.kind in (SymbolKind.STRUCT, SymbolKind.OBJECT, SymbolKind.UNION):
                     if entry.llvm_type is not None:
                         return entry.llvm_type
         return TypeResolver.resolve_type(module, typename, current_namespace)
