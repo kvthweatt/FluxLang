@@ -3775,7 +3775,7 @@ def get_builtin_bit_width(base_type: DataType) -> int:
     elif base_type == DataType.BOOL:
         return 1
     elif base_type == DataType.VOID:
-        return 64   # URGENT: Should be based on default pointer width
+        raise ValueError(f"get_builtin_bit_width: VOID has no bit width")
     else:
         raise ValueError(f"get_builtin_bit_width: Type {base_type} does not have a defined bit width")
 
