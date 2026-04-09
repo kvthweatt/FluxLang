@@ -1974,9 +1974,11 @@ class VariableTypeHandler:
         for elem in reversed(array_literal.elements):
             # Get the constant value and bit width
             if isinstance(elem, Literal):
-                elem_val = elem.value
-                # Default to 32-bit for literals unless we can infer better
-                elem_width = 32
+                llvm_const = elem.codegen(None, module)
+                if llvm_const is None or not isinstance(llvm_const.type, ir.IntType):
+                    return None  # Can't pack non-integer literal at compile time
+                elem_val = llvm_const.constant
+                elem_width = llvm_const.type.width
             elif isinstance(elem, Identifier):
                 # Look up the global variable
                 var_name = elem.name
@@ -2697,11 +2699,11 @@ class ArrayTypeHandler:
                 for inner_elem in reversed(elem.elements):
                     # For global constants, we need constant values
                     if isinstance(inner_elem, Literal):
-                        if inner_elem.type == FastDataType.INT or inner_elem.type == FastDataType.SINT:
-                            elem_val = inner_elem.value
-                            elem_width = 32  # This is wrong (hardcode = bad) - need to infer from context
-                        else:
+                        llvm_const = inner_elem.codegen(None, module)
+                        if llvm_const is None or not isinstance(llvm_const.type, ir.IntType):
                             raise ValueError(f"ArrayTypeHandler.create_global_array_initializer: Cannot pack {inner_elem.type} in global array initializer")
+                        elem_val = llvm_const.constant
+                        elem_width = llvm_const.type.width
                     elif isinstance(inner_elem, Identifier):
                         # Look up the global constant value
                         var_name = inner_elem.name
@@ -3775,7 +3777,7 @@ def get_builtin_bit_width(base_type: DataType) -> int:
     elif base_type == DataType.BOOL:
         return 1
     elif base_type == DataType.VOID:
-        raise ValueError(f"get_builtin_bit_width: VOID has no bit width")
+        return 0
     else:
         raise ValueError(f"get_builtin_bit_width: Type {base_type} does not have a defined bit width")
 
