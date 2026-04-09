@@ -3400,6 +3400,7 @@ class ArrayTypeHandler:
             zero = ArrayTypeHandler._zero()
             for i in range(len(string_bytes), llvm_type.count):
                 elem_ptr = builder.gep(alloca, [zero, ArrayTypeHandler._index(i)])
+                builder.store(ir.Constant(ir.IntType(8), 0), elem_ptr)
 
     @staticmethod
     def create_local_string_for_arg(builder: ir.IRBuilder, module: ir.Module, string_value: str, name_hint: str) -> ir.Value:
