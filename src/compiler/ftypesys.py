@@ -3298,13 +3298,16 @@ class ArrayTypeHandler:
         if isinstance(elem_type, ir.IntType):
             elem_bits = elem_type.width
             is_float_elem = False
+            is_double_elem = False
             int_elem_type = elem_type
         elif isinstance(elem_type, ir.FloatType):
             elem_bits = 32
             is_float_elem = True
+            is_double_elem = False
             int_elem_type = ir.IntType(32)
         elif isinstance(elem_type, ir.DoubleType):
             elem_bits = 64
+            is_float_elem = False
             is_double_elem = True
             int_elem_type = ir.IntType(64)
         else:
@@ -3347,8 +3350,8 @@ class ArrayTypeHandler:
             shifted = builder.lshr(packed, shift, name=f"unpack_shift_{i}")
             elem_int = builder.and_(shifted, mask, name=f"unpack_elem_{i}")
 
-            if is_float_elem:
-                # Truncate to element int width if needed, then bitcast to float
+            if is_float_elem or is_double_elem:
+                # Truncate to element int width if needed, then bitcast to float/double
                 if total_bits != elem_bits:
                     elem_int = builder.trunc(elem_int, int_elem_type, name=f"unpack_trunc_{i}")
                 elem_val = builder.bitcast(elem_int, elem_type, name=f"unpack_float_{i}")
@@ -3517,7 +3520,6 @@ class LiteralTypeHandler:
             return TypeSystem.get_llvm_type(variable_type, module)
         else:
             return ir.IntType(32)
-        return val
     
     @staticmethod
     def normalize_char_value(literal_value: Any) -> int:
