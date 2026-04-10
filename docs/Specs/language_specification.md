@@ -1757,6 +1757,38 @@ if ((u32)a < b)  // false: 4294967286 > 20
 
 ---
 
+## **Ownership with the tie operator `~`**
+
+Ownership only occurs if you use `~` to tell the compiler to perform a very simple set of rules:
+- A tied value requires it to be untied on-use
+- A tied value can only move to a tied type
+- One-time use, old reference invalidated on use
+
+```
+#import "standard.fx";
+
+def foo(~int z) -> void  // accepts a tied parameter
+{
+    return;
+};
+
+def main() -> int
+{
+    ~int x;
+    int  y;  // Non-tied var
+
+    foo(~x); // Untie from main, tie to foo()
+
+    foo(~x); // Compile error, use after untie
+
+    foo(y);  // Compile error, foo expects tied param
+
+    return 0;
+};
+```
+
+---
+
 ## **Control Flow Edge Cases**
 
 ### Nested Switches with Fallthrough

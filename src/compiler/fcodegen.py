@@ -2155,16 +2155,51 @@ class CodegenVisitor:
         return builder.gep(buffer, [zero, zero], name="fstring_result")
 
     def visit_FunctionCall(self, node, builder, module):
-        from fast import FunctionPointerCall, Identifier
+        from fast import FunctionPointerCall, Identifier, TieExpression
+
         if self._funcall_is_fp_variable(node, builder, module):
-            return self.visit(FunctionPointerCall(pointer=Identifier(node.name), arguments=node.arguments), builder, module)
-        for arg in node.arguments:
+            return self.visit(
+                FunctionPointerCall(pointer=Identifier(node.name),
+                                    arguments=node.arguments),
+                builder, module)
+
+        # ── Resolve the overload entry early so we can read param_types ──────
+        # (arg_vals aren't built yet, but a count-based pre-check is enough
+        #  for the tied/non-tied check which is purely structural.)
+        current_ns = (module.symbol_table.current_namespace
+                      if hasattr(module, 'symbol_table') else "")
+        overload_entry = TypeResolver.resolve_overload_entry(
+            module, node.name, current_ns, None)  # None → first count-match is fine
+
+        for i, arg in enumerate(node.arguments):
+            # Existing: block local vars from escaping their scope
             if isinstance(arg, Identifier):
                 entry = module.symbol_table.lookup_variable(arg.name)
-                if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
+                if (entry is not None and entry.type_spec is not None
+                        and entry.type_spec.is_local):
                     raise ValueError(
-                        f"Compile error: local variable '{arg.name}' cannot leave its scope via function call "
+                        f"Compile error: local variable '{arg.name}' cannot "
+                        f"leave its scope via function call "
                         f"[{node.source_line}:{node.source_col}]")
+
+            # ── New: enforce tied-parameter contract ─────────────────────────
+            if overload_entry and i < len(overload_entry['param_types']):
+                param_spec = overload_entry['param_types'][i]
+                arg_is_tie = isinstance(arg, TieExpression)
+                if param_spec is not None:
+                    if param_spec.is_tied and not arg_is_tie:
+                        raise ValueError(
+                            f"Compile error: parameter {i} of '{node.name}' "
+                            f"requires a tied argument (~), but a non-tied "
+                            f"expression was passed "
+                            f"[{node.source_line}:{node.source_col}]")
+                    if not param_spec.is_tied and arg_is_tie:
+                        raise ValueError(
+                            f"Compile error: parameter {i} of '{node.name}' "
+                            f"is not a tied parameter, but a tie expression "
+                            f"(~) was passed "
+                            f"[{node.source_line}:{node.source_col}]")
+
         arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
         current_ns = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ""
         # Pointer-param overload
@@ -2529,27 +2564,37 @@ class CodegenVisitor:
     def visit_TieExpression(self, node, builder, module):
         from fast import Identifier
         if not isinstance(node.operand, Identifier):
-            raise ValueError(f"Tie operator ~ can only be applied to variables [{node.source_line}:{node.source_col}]")
+            raise ValueError(
+                f"Tie operator ~ can only be applied to variables "
+                f"[{node.source_line}:{node.source_col}]")
         var_name = node.operand.name
+
+        # ── Use-after-untie check (must come before re-tie) ──────────────────
+        IdentifierTypeHandler.check_validity(var_name, builder)
+
+        # ── Resolve the pointer ───────────────────────────────────────────────
         if module.symbol_table.get_llvm_value(var_name) is not None:
             var_ptr = module.symbol_table.get_llvm_value(var_name)
         elif var_name in module.globals:
             var_ptr = module.globals[var_name]
         else:
-            raise NameError(f"Unknown variable: {var_name} [{node.source_line}:{node.source_col}]")
+            raise NameError(
+                f"Unknown variable: {var_name} "
+                f"[{node.source_line}:{node.source_col}]")
+
         tied_value = builder.load(var_ptr, name=f"{var_name}_tied")
-        if not hasattr(builder, 'object_validity_flags'):
-            builder.object_validity_flags = {}
-        if var_name not in builder.object_validity_flags:
-            validity_flag = builder.alloca(ir.IntType(1), name=f"{var_name}_valid")
-            builder.store(ir.Constant(ir.IntType(1), 1), validity_flag)
-            builder.object_validity_flags[var_name] = validity_flag
-        validity_flag = builder.object_validity_flags[var_name]
-        builder.store(ir.Constant(ir.IntType(1), 0), validity_flag)
+
+        # ── Mark as untied (Python-side, compile-time tracking) ──────────────
+        if not hasattr(builder, '_untied_vars'):
+            builder._untied_vars = set()
+        builder._untied_vars.add(var_name)
+
+        # ── Null out the source variable in LLVM IR ───────────────────────────
         if isinstance(var_ptr.type.pointee, ir.PointerType):
             builder.store(ir.Constant(var_ptr.type.pointee, None), var_ptr)
         elif isinstance(var_ptr.type.pointee, ir.IntType):
             builder.store(ir.Constant(var_ptr.type.pointee, 0), var_ptr)
+
         return tied_value
 
     def visit_StructLiteral(self, node, builder, module):
@@ -4350,7 +4395,7 @@ class CodegenVisitor:
             type_spec = TypeResolver.resolve_type_spec(node.name, module)
             #print("TYPE SPEC FROM TYPE RESOLVER:",type_spec)
 
-            # Check validity (use after tie)
+            # Check validity (use after untie)
             IdentifierTypeHandler.check_validity(node.name, builder)
 
             # Handle special case for 'this' pointer

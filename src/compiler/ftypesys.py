@@ -855,6 +855,50 @@ class TypeResolver:
                         return overloads[0]['function']
         
         return None
+
+    @staticmethod
+    def resolve_overload_entry(module: ir.Module, func_name: str,
+                               current_namespace: str = "",
+                               arg_vals=None) -> Optional[dict]:
+        """Like resolve_function, but returns the overload dict so callers
+        can inspect param_types (including is_tied)."""
+        def _pick(overloads):
+            if not overloads:
+                return None
+            if arg_vals is None:
+                return overloads[0]
+            matching = None
+            for ov in overloads:
+                if ov['param_count'] != len(arg_vals):
+                    continue
+                if matching is None:
+                    matching = ov
+                func = ov['function']
+                param_types = [p.type for p in func.args]
+                arg_types   = [a.type for a in arg_vals]
+                if len(param_types) != len(arg_types):
+                    continue
+                if all(pt == at for pt, at in zip(param_types, arg_types)):
+                    return ov
+            return matching
+
+        if not hasattr(module, '_function_overloads'):
+            return None
+        for key in (func_name,
+                    TypeResolver.mangle_namespace_name(current_namespace, func_name)
+                    if current_namespace else None):
+            if key and key in module._function_overloads:
+                entry = _pick(module._function_overloads[key])
+                if entry:
+                    return entry
+        if hasattr(module, '_using_namespaces'):
+            for ns in module._using_namespaces:
+                key = TypeResolver.mangle_namespace_name(ns, func_name)
+                if key in module._function_overloads:
+                    entry = _pick(module._function_overloads[key])
+                    if entry:
+                        return entry
+        return None
     
     @staticmethod
     def resolve_identifier(module: ir.Module, name: str, current_namespace: str = "") -> Optional[str]:
@@ -3056,11 +3100,10 @@ class IdentifierTypeHandler:
     
     @staticmethod
     def check_validity(name: str, builder: ir.IRBuilder) -> None:
-        if (hasattr(builder, 'object_validity_flags') and 
-            name in builder.object_validity_flags):
-            error_msg = f"COMPILE ERROR: Use after tie: variable '{name}' was moved"
-            print(error_msg)
-            raise RuntimeError(error_msg)
+        if (hasattr(builder, '_untied_vars') and
+                name in builder._untied_vars):
+            raise RuntimeError(
+                f"COMPILE ERROR: Use after untie: variable '{name}' was moved")
     
     def resolve_namespace_mangled_name(name: str, module: ir.Module) -> Optional[str]:
         current_ns = TypeResolver.get_current_namespace(module)
