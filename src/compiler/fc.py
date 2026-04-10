@@ -14,6 +14,7 @@ from pathlib import Path
 from llvmlite import ir
 from fparser import FluxParser, ParseError
 from fast import *
+from fcodegen import visitor as _codegen_visitor
 from flogger import FluxLogger, FluxLoggerConfig, LogLevel
 from fconfig import *
 
@@ -268,6 +269,7 @@ class FluxCompiler:
 
             if parser.parse_errors:
                 exit()
+
             #print("*"*40)
             #print("==== PARSER GENERATED SYMBOL TABLE ====")
             #print(parser.symbol_table.scopes)
@@ -282,7 +284,7 @@ class FluxCompiler:
             # Step 4: Code generation
             self.logger.step("LLVM IR code generation", LogLevel.INFO, "codegen")
             try:
-                self.module = ast.codegen(self.module)
+                self.module = _codegen_visitor.compile(ast, self.module)
                 llvm_ir = str(self.module)
                 self.logger.debug(f"Generated LLVM IR ({len(llvm_ir)} chars)", "codegen")
                 
@@ -540,7 +542,6 @@ class FluxCompiler:
                     "comdlg32.lib",
                     "d2d1.lib",
                     "dwrite.lib",
-                    "wininet.lib",
                     #"libsynchronization.lib",
                     #"libcmt.lib",
                     #"msvcrt.lib",   # Optional, link with C runtime
@@ -593,9 +594,6 @@ class FluxCompiler:
                                 "-lcomdlg32 "
                                 "-ld2d1 "
                                 "-ldwrite "
-                                "-ldwmapi "
-                                "-luxtheme "
-                                "-lwininet "
                                 #"-lfreetype "
                                 #"-lgdiplus "
                                 #"-ld2d1 "
@@ -739,7 +737,7 @@ class FluxCompiler:
             self.logger.step("LLVM IR code generation", LogLevel.INFO, "codegen")
             dos_module = ir.Module(name="dos_module")
             dos_module.triple = "i386-unknown-none"
-            dos_module = ast.codegen(dos_module)
+            dos_module = _codegen_visitor.compile(ast, dos_module)
             llvm_ir = str(dos_module)
             
             # Write LLVM IR
@@ -1039,7 +1037,7 @@ class FluxCompiler:
             # Step 4: Code generation with 16-bit configuration
             self.logger.step("LLVM IR code generation (16-bit mode)", LogLevel.INFO, "codegen")
             try:                
-                self.module = ast.codegen(self.module)
+                self.module = _codegen_visitor.compile(ast, self.module)
                 llvm_ir = str(self.module)
                 
                 self.logger.debug(f"Generated LLVM IR ({len(llvm_ir)} chars)", "codegen")

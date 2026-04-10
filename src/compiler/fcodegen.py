@@ -216,17 +216,12 @@ class CodegenVisitor:
         )
 
     # ------------------------------------------------------------------
-    # Top-level compilation entry point  [PENDING — migrated in Phase 3]
+    # Top-level compilation entry point  [DONE]
     # ------------------------------------------------------------------
 
     def compile(self, program, module: ir.Module = None) -> ir.Module:
-        """
-        Compile a Program node to an ir.Module.
-
-        Currently delegates to Program.codegen() — the 4-pass driver will be
-        moved here in Phase 3 once all individual nodes are migrated.
-        """
-        return program.codegen(module)
+        """Compile a Program node to an ir.Module."""
+        return self.visit(program, None, module)
 
     # ------------------------------------------------------------------
     # Tier 0 — trivial / leaf nodes  [DONE]
@@ -238,9 +233,6 @@ class CodegenVisitor:
             f"It should only be used as an initializer in variable declarations. "
             f"[{node.source_line}:{node.source_col}]"
         )
-
-    def visit_IRStore(self, node, builder, module):
-        return node.ir_value
 
     def visit_ExpressionStatement(self, node, builder, module):
         return self.visit(node.expression, builder, module)
@@ -404,35 +396,6 @@ class CodegenVisitor:
                 f"Deprecated namespace '{node.namespace_path}' is still referenced:\n"
                 f"{ref_list} [{node.source_line}:{node.source_col}]"
             )
-
-    # -- def/struct/union/object/namespace statement wrappers ------------
-
-    def visit_FunctionDefStatement(self, node, builder, module):
-        self.visit(node.function_def, builder, module)
-        return None
-
-    def visit_EnumDefStatement(self, node, builder, module):
-        self.visit(node.enum_def, builder, module)
-        return None
-
-    def visit_UnionDefStatement(self, node, builder, module):
-        self.visit(node.union_def, builder, module)
-        return None
-
-    def visit_StructDefStatement(self, node, builder, module):
-        self.visit(node.struct_def, builder, module)
-        return None
-
-    def visit_ObjectDefStatement(self, node, builder, module):
-        self.visit(node.object_def, builder, module)
-        return None
-
-    def visit_NamespaceDefStatement(self, node, builder, module):
-        if (hasattr(module, '_excluded_namespaces') and
-                node.namespace_def.name in module._excluded_namespaces):
-            return None
-        self.visit(node.namespace_def, builder, module)
-        return None
 
     # ------------------------------------------------------------------
     # Tier 1 — leaf expressions  [DONE]
@@ -1923,9 +1886,3103 @@ class CodegenVisitor:
         return result
 
     # ------------------------------------------------------------------
-    # [PENDING] — remaining tiers not yet migrated from fast.py.
+    # Tier 3 — structural expressions  [DONE]
     # ------------------------------------------------------------------
 
+    def visit_ArrayLiteral(self, node, builder, module):
+        if node.is_string:
+            return self._array_literal_string(node, builder, module)
+        return self._array_literal_array(node, builder, module)
+
+    def _array_literal_string(self, node, builder, module):
+        from fast import ArrayLiteral
+        if node.string_value is None:
+            return self._array_literal_array(node, builder, module)
+        string_bytes = node.string_value.encode('ascii')
+        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+        str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+        use_global = (
+            node.storage_class == StorageClass.GLOBAL or
+            module.symbol_table.is_global_scope()
+        )
+        use_heap   = node.storage_class == StorageClass.HEAP
+        use_stack  = (
+            node.storage_class in (StorageClass.STACK, StorageClass.LOCAL) or
+            (not module.symbol_table.is_global_scope() and not use_global and not use_heap)
+        )
+        if use_heap:
+            return heap_array_allocation(builder, module, str_val)   # deliberately unresolved; mirrors original
+        if use_global or not use_stack:
+            str_name = f".str.{id(node)}"
+            gv = ir.GlobalVariable(module, str_val.type, name=str_name)
+            gv.linkage = 'internal'; gv.global_constant = True; gv.initializer = str_val
+            zero = ir.Constant(ir.IntType(32), 0)
+            return builder.gep(gv, [zero, zero], inbounds=True, name="str_ptr")
+        stack_alloca = builder.alloca(str_array_ty, name="str_stack")
+        for i, byte_val in enumerate(string_bytes):
+            zero = ir.Constant(ir.IntType(32), 0)
+            elem_ptr = builder.gep(stack_alloca, [zero, ir.Constant(ir.IntType(32), i)], name=f"str_char_{i}")
+            builder.store(ir.Constant(ir.IntType(8), byte_val), elem_ptr)
+        zero = ir.Constant(ir.IntType(32), 0)
+        return builder.gep(stack_alloca, [zero, zero], inbounds=True, name="str_ptr")
+
+    def _array_literal_array(self, node, builder, module):
+        from fast import StringLiteral, ArrayLiteral
+        from ftypesys import find_common_type, cast_to_type
+        if not node.elements:
+            if node.element_type:
+                element_llvm_type = TypeSystem.get_llvm_type(node.element_type, module)
+                array_type = ir.ArrayType(element_llvm_type, 0)
+                if module.symbol_table.is_global_scope():
+                    gvar = ir.GlobalVariable(module, array_type, name=f".empty_array.{id(node)}")
+                    gvar.linkage = 'internal'; gvar.global_constant = True
+                    gvar.initializer = ir.Constant(array_type, [])
+                    return gvar
+                return builder.alloca(array_type, name="empty_array")
+            raise ValueError(
+                f"Cannot create empty array without element type [{node.source_line}:{node.source_col}]")
+        element_values = []
+        element_types = set()
+        for elem in node.elements:
+            if isinstance(elem, StringLiteral):
+                if node.element_type:
+                    target_type = TypeSystem.get_llvm_type(node.element_type, module)
+                else:
+                    target_type = ir.IntType(32)
+                if isinstance(target_type, ir.IntType):
+                    string_val = elem.value
+                    byte_count = min(len(string_val), target_type.width // 8)
+                    packed_value = 0
+                    for j in range(byte_count):
+                        packed_value |= (ord(string_val[j]) << (j * 8))
+                    elem_val = ir.Constant(target_type, packed_value)
+                else:
+                    elem_val = self.visit(elem, builder, module)
+            else:
+                elem_val = self.visit(elem, builder, module)
+            if node.element_type is not None:
+                target_elem_llvm = TypeSystem.get_llvm_type(node.element_type, module)
+                if isinstance(target_elem_llvm, ir.IntType) and isinstance(elem_val.type, ir.IntType):
+                    if elem_val.type.width > target_elem_llvm.width:
+                        elem_val = (ir.Constant(target_elem_llvm, elem_val.constant & ((1 << target_elem_llvm.width) - 1))
+                                    if isinstance(elem_val, ir.Constant)
+                                    else builder.trunc(elem_val, target_elem_llvm, name="elem_trunc"))
+                    elif elem_val.type.width < target_elem_llvm.width:
+                        elem_val = (ir.Constant(target_elem_llvm, elem_val.constant)
+                                    if isinstance(elem_val, ir.Constant)
+                                    else builder.zext(elem_val, target_elem_llvm, name="elem_zext"))
+            element_values.append(elem_val)
+            element_types.add(elem_val.type)
+        if len(element_types) == 1:
+            element_type = next(iter(element_types))
+        else:
+            element_type = find_common_type(list(element_types))
+            for i in range(len(element_values)):
+                if element_values[i].type != element_type:
+                    element_values[i] = cast_to_type(builder, element_values[i], element_type)
+        array_type = ir.ArrayType(element_type, len(element_values))
+        if module.symbol_table.is_global_scope() or all(isinstance(v, ir.Constant) for v in element_values):
+            const_elements = [v if isinstance(v, ir.Constant) else ir.Constant(element_type, 0) for v in element_values]
+            const_array = ir.Constant(array_type, const_elements)
+            if module.symbol_table.is_global_scope():
+                gvar = ir.GlobalVariable(module, array_type, name=f".array_literal.{id(node)}")
+                gvar.linkage = 'internal'; gvar.global_constant = True; gvar.initializer = const_array
+                gvar.type._is_array_pointer = True
+                return gvar
+            alloca = builder.alloca(array_type, name="array_literal_const")
+            builder.store(const_array, alloca)
+            alloca.type._is_array_pointer = True
+            return alloca
+        alloca = builder.alloca(array_type, name="array_literal")
+        zero = ir.Constant(ir.IntType(32), 0)
+        for i, elem_val in enumerate(element_values):
+            elem_ptr = builder.gep(alloca, [zero, ir.Constant(ir.IntType(32), i)], inbounds=True, name=f"elem_{i}")
+            builder.store(elem_val, elem_ptr)
+        alloca.type._is_array_pointer = True
+        return alloca
+
+    def visit_ArrayComprehension(self, node, builder, module, expected_size=None):
+        from fast import ArrayLiteral, RangeExpression, Literal
+        element_type = LiteralTypeHandler.resolve_comprehension_element_type(node.variable_type, module)
+        if isinstance(node.iterable, ArrayLiteral):
+            iterable_elements = node.iterable.elements
+            num_elements = len(iterable_elements)
+            array_type = ir.ArrayType(element_type, num_elements)
+            array_ptr = builder.alloca(array_type, name="comprehension_array")
+            iterable_array_ptr = builder.alloca(array_type, name="iterable_array")
+            for i, elem_expr in enumerate(iterable_elements):
+                elem_val = self.visit(elem_expr, builder, module)
+                elem_val = LiteralTypeHandler.cast_to_target_int_type(builder, elem_val, element_type)
+                elem_ptr = builder.gep(iterable_array_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), i)])
+                builder.store(elem_val, elem_ptr)
+            var_ptr = builder.alloca(element_type, name=node.variable)
+            module.symbol_table.define(node.variable, SymbolKind.VARIABLE, llvm_value=var_ptr)
+            index_ptr = builder.alloca(ir.IntType(32), name="comp_index")
+            builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
+            func = builder.block.function
+            loop_cond = func.append_basic_block('comp_loop_cond')
+            loop_body = func.append_basic_block('comp_loop_body')
+            loop_end  = func.append_basic_block('comp_loop_end')
+            builder.branch(loop_cond)
+            builder.position_at_start(loop_cond)
+            current_index = builder.load(index_ptr)
+            cond = builder.icmp_signed('<', current_index, ir.Constant(ir.IntType(32), num_elements))
+            builder.cbranch(cond, loop_body, loop_end)
+            builder.position_at_start(loop_body)
+            elem_ptr = builder.gep(iterable_array_ptr, [ir.Constant(ir.IntType(32), 0), current_index])
+            builder.store(builder.load(elem_ptr), var_ptr)
+            expr_val = self.visit(node.expression, builder, module)
+            expr_val = LiteralTypeHandler.cast_to_target_int_type(builder, expr_val, element_type)
+            result_elem_ptr = builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), current_index])
+            builder.store(expr_val, result_elem_ptr)
+            builder.store(builder.add(current_index, ir.Constant(ir.IntType(32), 1)), index_ptr)
+            builder.branch(loop_cond)
+            builder.position_at_start(loop_end)
+            return array_ptr
+        elif isinstance(node.iterable, RangeExpression):
+            # Pass element_type through to visit_RangeExpression
+            self.visit_RangeExpression(node.iterable, builder, module, element_type)
+            start_val = self.visit(node.iterable.start, builder, module)
+            end_val   = self.visit(node.iterable.end,   builder, module)
+            start_val_sized = LiteralTypeHandler.cast_to_target_int_type(builder, start_val, element_type)
+            end_val_sized   = LiteralTypeHandler.cast_to_target_int_type(builder, end_val,   element_type)
+            if isinstance(node.iterable.start, Literal) and isinstance(node.iterable.end, Literal):
+                actual_size = int(node.iterable.end.value) - int(node.iterable.start.value) + 1
+                array_type = ir.ArrayType(element_type, actual_size)
+                array_ptr  = builder.alloca(array_type, name="comprehension_array")
+            elif expected_size is not None:
+                array_type = ir.ArrayType(element_type, expected_size)
+                array_ptr  = builder.alloca(array_type, name="comprehension_array")
+            else:
+                raise NotImplementedError(
+                    f"Array comprehensions with runtime-determined ranges require an explicit array size "
+                    f"[{node.source_line}:{node.source_col}]")
+            index_ptr = builder.alloca(ir.IntType(32), name="comp_index")
+            builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
+            var_ptr = builder.alloca(element_type, name=node.variable)
+            module.symbol_table.define(node.variable, SymbolKind.VARIABLE, llvm_value=var_ptr)
+            start_val = LiteralTypeHandler.cast_to_target_int_type(builder, start_val, element_type)
+            end_val   = LiteralTypeHandler.cast_to_target_int_type(builder, end_val,   element_type)
+            func = builder.block.function
+            loop_cond = func.append_basic_block('comp_loop_cond')
+            loop_body = func.append_basic_block('comp_loop_body')
+            loop_end  = func.append_basic_block('comp_loop_end')
+            builder.store(start_val, var_ptr)
+            builder.branch(loop_cond)
+            builder.position_at_start(loop_cond)
+            current_var = builder.load(var_ptr, name="current_var")
+            builder.cbranch(builder.icmp_signed('<=', current_var, end_val, name="loop_cond"), loop_body, loop_end)
+            builder.position_at_start(loop_body)
+            expr_val = self.visit(node.expression, builder, module)
+            expr_val = LiteralTypeHandler.cast_to_target_int_type(builder, expr_val, element_type)
+            current_index = builder.load(index_ptr, name="current_index")
+            array_elem_ptr = builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), current_index], inbounds=True)
+            builder.store(expr_val, array_elem_ptr)
+            builder.store(builder.add(current_index, ir.Constant(ir.IntType(32), 1), name="next_index"), index_ptr)
+            builder.store(builder.add(current_var, ir.Constant(element_type, 1), name="next_var"), var_ptr)
+            builder.branch(loop_cond)
+            builder.position_at_start(loop_end)
+            return array_ptr
+        raise NotImplementedError(
+            f"Array comprehension only supports range expressions and array literals "
+            f"[{node.source_line}:{node.source_col}]")
+
+    def visit_FStringLiteral(self, node, builder, module):
+        from fast import ArrayLiteral, Literal, BinaryOp, UnaryOp, Identifier, SizeOf
+        try:
+            full_string = ""
+            for part in node.parts:
+                if isinstance(part, str):
+                    clean = part[2:] if part.startswith('f"') else part
+                    clean = clean[:-1] if clean.endswith('"') else clean
+                    full_string += clean
+                else:
+                    full_string += str(self._fstring_eval_ct(part, node, builder, module))
+            return self.visit(ArrayLiteral.from_string(full_string), builder, module)
+        except (ValueError, NotImplementedError):
+            return self._fstring_runtime(node, builder, module)
+
+    def _fstring_eval_ct(self, expr, node, builder, module):
+        from fast import Literal, BinaryOp, UnaryOp, Identifier, SizeOf
+        if isinstance(expr, Literal):
+            if expr.type == DataType.SINT:       return int(expr.value)
+            if expr.type == DataType.FLOAT:      return float(expr.value)
+            if expr.type == DataType.DOUBLE:     return float(expr.value)
+            if expr.type in (DataType.SLONG, DataType.ULONG): return int(expr.value)
+            if expr.type == DataType.BOOL:       return bool(expr.value)
+            if expr.type == DataType.CHAR:
+                return str(expr.value) if isinstance(expr.value, str) else chr(expr.value)
+            raise ValueError(f"Cannot convert {expr.type} at compile time")
+        if isinstance(expr, BinaryOp):
+            l = self._fstring_eval_ct(expr.left,  node, builder, module)
+            r = self._fstring_eval_ct(expr.right, node, builder, module)
+            ops = {Operator.ADD:l+r, Operator.SUB:l-r, Operator.MUL:l*r, Operator.DIV:l/r,
+                   Operator.MOD:l%r, Operator.EQUAL:l==r, Operator.NOT_EQUAL:l!=r,
+                   Operator.LESS_THAN:l<r, Operator.LESS_EQUAL:l<=r,
+                   Operator.GREATER_THAN:l>r, Operator.GREATER_EQUAL:l>=r}
+            if expr.operator not in ops:
+                raise NotImplementedError(f"Operator {expr.operator} not supported for compile-time f-string")
+            return ops[expr.operator]
+        if isinstance(expr, UnaryOp):
+            o = self._fstring_eval_ct(expr.operand, node, builder, module)
+            if expr.operator == Operator.NOT: return not o
+            if expr.operator == Operator.SUB: return -o
+            raise NotImplementedError
+        if isinstance(expr, Identifier) and expr.name in module.globals:
+            gvar = module.globals[expr.name]
+            if hasattr(gvar, 'initializer') and gvar.initializer is not None:
+                if hasattr(gvar.initializer, 'constant'):
+                    v = gvar.initializer.constant
+                    if isinstance(v, (int, float, bool)): return v
+        if isinstance(expr, SizeOf) and isinstance(expr.target, TypeSystem):
+            llvm_type = TypeSystem.get_llvm_type(expr.target, module, include_array=True)
+            if isinstance(llvm_type, ir.IntType):
+                return llvm_type.width // 8
+            if isinstance(llvm_type, ir.ArrayType):
+                return llvm_type.element.width * llvm_type.count // 8
+        raise NotImplementedError(f"Cannot evaluate {type(expr).__name__} at compile time for f-string")
+
+    def _fstring_runtime(self, node, builder, module):
+        from fast import ArrayLiteral, Literal
+        from ftypesys import is_unsigned as _is_unsigned
+        max_size = 256
+        for part in node.parts:
+            if isinstance(part, Literal) and part.type == DataType.CHAR:
+                max_size += len(part.value)
+            elif not isinstance(part, str):
+                max_size += 32
+        buffer_type = ir.ArrayType(ir.IntType(8), max_size)
+        buffer = builder.alloca(buffer_type, name="fstring_buffer")
+        pos_ptr = builder.alloca(ir.IntType(32), name="fstring_pos")
+        builder.store(ir.Constant(ir.IntType(32), 0), pos_ptr)
+        sprintf_fn = module.globals.get('sprintf')
+        if sprintf_fn is None:
+            sprintf_type = ir.FunctionType(ir.IntType(32),
+                [ir.PointerType(ir.IntType(8)), ir.PointerType(ir.IntType(8))], var_arg=True)
+            sprintf_fn = ir.Function(module, sprintf_type, 'sprintf')
+            sprintf_fn.linkage = 'external'
+        for part in node.parts:
+            pos = builder.load(pos_ptr, name="current_pos")
+            dest_ptr = builder.gep(buffer, [ir.Constant(ir.IntType(32), 0), pos], name="dest")
+            if isinstance(part, str):
+                clean = part[2:] if part.startswith('f"') else part
+                clean = clean[:-1] if clean.endswith('"') else clean
+                src_val = self.visit(ArrayLiteral.from_string(clean), builder, module)
+                for i in range(len(clean)):
+                    char_ptr = builder.gep(src_val, [ir.Constant(ir.IntType(32), i)])
+                    char_val = builder.load(char_ptr)
+                    dest_char_ptr = builder.gep(dest_ptr, [ir.Constant(ir.IntType(32), i)])
+                    builder.store(char_val, dest_char_ptr)
+                builder.store(builder.add(pos, ir.Constant(ir.IntType(32), len(clean))), pos_ptr)
+            elif isinstance(part, Literal) and part.type == DataType.CHAR:
+                src_val = self.visit(part, builder, module)
+                if isinstance(src_val.type, ir.PointerType):
+                    str_len = len(part.value)
+                    for i in range(str_len):
+                        char_ptr = builder.gep(src_val, [ir.Constant(ir.IntType(32), i)])
+                        char_val = builder.load(char_ptr)
+                        dest_char_ptr = builder.gep(dest_ptr, [ir.Constant(ir.IntType(32), i)])
+                        builder.store(char_val, dest_char_ptr)
+                    builder.store(builder.add(pos, ir.Constant(ir.IntType(32), str_len)), pos_ptr)
+            else:
+                val = self.visit(part, builder, module)
+                if isinstance(val.type, ir.IntType):
+                    fmt_str = "%llu" if _is_unsigned(val) else "%lld"
+                elif isinstance(val.type, (ir.FloatType, ir.DoubleType)):
+                    fmt_str = "%f"
+                elif (isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.IntType) and val.type.pointee.width == 8):
+                    fmt_str = "%s"
+                elif (isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType) and
+                      isinstance(val.type.pointee.element, ir.IntType) and val.type.pointee.element.width == 8):
+                    fmt_str = "%s"
+                    zero = ir.Constant(ir.IntType(32), 0)
+                    val = builder.gep(val, [zero, zero], name="str_decay")
+                else:
+                    fmt_str = "%p"
+                fmt_bytes = (fmt_str + "\x00").encode('ascii')
+                fmt_array_ty = ir.ArrayType(ir.IntType(8), len(fmt_bytes))
+                fmt_gv = ir.GlobalVariable(module, ir.Constant(fmt_array_ty, bytearray(fmt_bytes)).type,
+                                           name=f".fstring_fmt_{id(part)}")
+                fmt_gv.linkage = 'internal'; fmt_gv.global_constant = True
+                fmt_gv.initializer = ir.Constant(fmt_array_ty, bytearray(fmt_bytes))
+                zero = ir.Constant(ir.IntType(32), 0)
+                fmt_ptr = builder.gep(fmt_gv, [zero, zero])
+                if isinstance(val.type, ir.IntType) and val.type.width < 64:
+                    val = builder.zext(val, ir.IntType(64)) if _is_unsigned(val) else builder.sext(val, ir.IntType(64))
+                elif isinstance(val.type, ir.FloatType):
+                    val = builder.fpext(val, ir.DoubleType())
+                chars_written = builder.call(sprintf_fn, [dest_ptr, fmt_ptr, val])
+                builder.store(builder.add(pos, chars_written), pos_ptr)
+        final_pos = builder.load(pos_ptr)
+        null_ptr = builder.gep(buffer, [ir.Constant(ir.IntType(32), 0), final_pos])
+        builder.store(ir.Constant(ir.IntType(8), 0), null_ptr)
+        zero = ir.Constant(ir.IntType(32), 0)
+        return builder.gep(buffer, [zero, zero], name="fstring_result")
+
+    def visit_FunctionCall(self, node, builder, module):
+        from fast import FunctionPointerCall, Identifier
+        if self._funcall_is_fp_variable(node, builder, module):
+            return self.visit(FunctionPointerCall(pointer=Identifier(node.name), arguments=node.arguments), builder, module)
+        for arg in node.arguments:
+            if isinstance(arg, Identifier):
+                entry = module.symbol_table.lookup_variable(arg.name)
+                if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
+                    raise ValueError(
+                        f"Compile error: local variable '{arg.name}' cannot leave its scope via function call "
+                        f"[{node.source_line}:{node.source_col}]")
+        arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
+        current_ns = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ""
+        # Pointer-param overload
+        if hasattr(module, '_function_overloads'):
+            _op_key = None
+            for _k in module._function_overloads:
+                if _k == node.name or _k.endswith('__' + node.name):
+                    _op_key = _k; break
+            if _op_key is not None and len(node.arguments) == len(arg_vals):
+                for _ov in module._function_overloads[_op_key]:
+                    _func = _ov['function']
+                    _pts = [p.type for p in _func.args]
+                    if len(_pts) != len(arg_vals): continue
+                    if not all(isinstance(pt, ir.PointerType) and
+                               not isinstance(pt.pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType))
+                               for pt in _pts): continue
+                    _ptrs = []; _ok = True
+                    for arg, pt in zip(node.arguments, _pts):
+                        if not isinstance(arg, Identifier): _ok = False; break
+                        _alloca = module.symbol_table.get_llvm_value(arg.name)
+                        if _alloca is None or _alloca.type != pt: _ok = False; break
+                        _ptrs.append(_alloca)
+                    if _ok:
+                        return builder.call(_func, _ptrs, name="op_overload_result")
+        func = TypeResolver.resolve_function(module, node.name, current_ns, arg_vals)
+        if func is None and hasattr(module, '_struct_types') and node.name in module._struct_types:
+            struct_type = module._struct_types[node.name]
+            tmp = builder.alloca(struct_type, name=f"{node.name}_tmp")
+            init_name = f"{node.name}.__init"
+            init_func = TypeResolver.resolve_function(module, init_name, current_ns, [tmp] + arg_vals)
+            if init_func is None and hasattr(module, '_using_namespaces'):
+                for ns in module._using_namespaces:
+                    mangled = f"{ns.replace('::', '__')}__{init_name}"
+                    init_func = TypeResolver.resolve_function(module, mangled, current_ns, [tmp] + arg_vals)
+                    if init_func: break
+            if init_func is not None:
+                builder.call(init_func, [tmp] + arg_vals)
+                return tmp
+        if func is None:
+            self._funcall_not_found(node, module)
+        return self._funcall_generate(node, builder, module, func, arg_vals)
+
+    def _funcall_is_fp_variable(self, node, builder, module):
+        if module.symbol_table.get_llvm_value(node.name) is not None:
+            var_ptr = module.symbol_table.get_llvm_value(node.name)
+            if isinstance(var_ptr.type, ir.PointerType):
+                pointee = var_ptr.type.pointee
+                if isinstance(pointee, ir.FunctionType): return True
+                if isinstance(pointee, ir.PointerType) and isinstance(pointee.pointee, ir.FunctionType): return True
+        elif node.name in module.globals:
+            gvar = module.globals[node.name]
+            if not isinstance(gvar, ir.Function) and isinstance(gvar.type, ir.PointerType):
+                if isinstance(gvar.type.pointee, (ir.FunctionType, ir.PointerType)):
+                    return True
+        return False
+
+    def _funcall_not_found(self, node, module):
+        if hasattr(module, '_function_overloads') and node.name in module._function_overloads:
+            available_counts = [o['param_count'] for o in module._function_overloads[node.name]]
+            if len(node.arguments) not in available_counts:
+                raise ValueError(
+                    f"Function '{node.name}' found but no overload accepts {len(node.arguments)} arguments. "
+                    f"Available overloads accept: {available_counts} arguments. "
+                    f"[{node.source_line}:{node.source_col}]")
+        raise NameError(
+            f"Function '{node.name}' not found in module or any imported namespaces "
+            f"[{node.source_line}:{node.source_col}]")
+
+    def _funcall_generate(self, node, builder, module, func, arg_vals):
+        from fast import Literal, FunctionCall
+        is_method_call = '.' in node.name
+        parameter_offset = 1 if is_method_call else 0
+        processed_args = []
+        for i, (arg, arg_val) in enumerate(zip(node.arguments, arg_vals)):
+            param_index = i + parameter_offset
+            if (isinstance(arg, Literal) and arg.type == DataType.CHAR and
+                    param_index < len(func.args) and
+                    isinstance(func.args[param_index].type, ir.PointerType) and
+                    isinstance(func.args[param_index].type.pointee, ir.IntType) and
+                    func.args[param_index].type.pointee.width == 8):
+                string_val = arg.value
+                string_bytes = string_val.encode('ascii')
+                str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+                str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+                str_name = f".str.{FunctionCall._string_counter}"
+                FunctionCall._string_counter += 1
+                gv = ir.GlobalVariable(module, str_val.type, name=str_name)
+                gv.linkage = 'internal'; gv.global_constant = True; gv.initializer = str_val
+                zero = ir.Constant(ir.IntType(32), 0)
+                arg_val = builder.gep(gv, [zero, zero], name=f"arg{i}_str_ptr")
+            if param_index < len(func.args):
+                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(
+                    builder, module, arg_val, func.args[param_index].type, i)
+            processed_args.append(arg_val)
+        call_instr = builder.call(func, processed_args)
+        current_func = builder.function
+        if current_func is not None and func.name == current_func.name:
+            call_instr.tail = "musttail" if getattr(builder, '_flux_is_recursive_func', False) else "tail"
+        return call_instr
+
+    def visit_MemberAccess(self, node, builder, module):
+        from fast import Identifier, StructFieldAccess
+        if isinstance(node.object, Identifier):
+            type_name = node.object.name
+            if MemberAccessTypeHandler.is_enum_type(type_name, module):
+                return ir.Constant(ir.IntType(32), MemberAccessTypeHandler.get_enum_value(type_name, node.member, module))
+            mangled_type_name = IdentifierTypeHandler.resolve_namespace_mangled_name(type_name, module)
+            if mangled_type_name and MemberAccessTypeHandler.is_enum_type(mangled_type_name, module):
+                return ir.Constant(ir.IntType(32), MemberAccessTypeHandler.get_enum_value(mangled_type_name, node.member, module))
+            if not mangled_type_name and hasattr(module, '_enum_types'):
+                suffix = f"__{type_name}"
+                for key in module._enum_types:
+                    if key == type_name or key.endswith(suffix):
+                        return ir.Constant(ir.IntType(32), MemberAccessTypeHandler.get_enum_value(key, node.member, module))
+        if hasattr(module, '_struct_types'):
+            obj = self.visit(node.object, builder, module)
+            if MemberAccessTypeHandler.is_struct_type(obj, module):
+                return self.visit(StructFieldAccess(node.object, node.member), builder, module)
+        if isinstance(node.object, Identifier):
+            type_name = node.object.name
+            if MemberAccessTypeHandler.is_static_struct_member(type_name, module):
+                global_name = f"{type_name}.{node.member}"
+                for global_var in module.global_values:
+                    if global_var.name == global_name:
+                        return builder.load(global_var)
+                raise NameError(f"Static member '{node.member}' not found in struct '{type_name}' [{node.source_line}:{node.source_col}]")
+            elif MemberAccessTypeHandler.is_static_union_member(type_name, module):
+                global_name = f"{type_name}.{node.member}"
+                for global_var in module.global_values:
+                    if global_var.name == global_name:
+                        return builder.load(global_var)
+                raise NameError(f"Static member '{node.member}' not found in union '{type_name}' [{node.source_line}:{node.source_col}]")
+        obj_val = self.visit(node.object, builder, module)
+        if isinstance(node.object, Identifier) and node.object.name == "this" and MemberAccessTypeHandler.is_this_double_pointer(obj_val):
+            obj_val = builder.load(obj_val, name="this_ptr")
+        if (isinstance(obj_val.type, ir.PointerType) and isinstance(obj_val.type.pointee, ir.PointerType) and
+                MemberAccessTypeHandler.is_struct_pointer(obj_val.type.pointee)):
+            obj_val = builder.load(obj_val, name="deref_struct_ptr")
+        if isinstance(obj_val.type, ir.PointerType) and MemberAccessTypeHandler.is_struct_pointer(obj_val.type):
+            struct_type = obj_val.type.pointee
+            if MemberAccessTypeHandler.is_union_type(struct_type, module):
+                union_name = MemberAccessTypeHandler.get_union_name_from_type(struct_type, module)
+                return self._member_access_union(node, builder, module, obj_val, union_name)
+            member_index = MemberAccessTypeHandler.get_member_index(struct_type, node.member)
+            member_ptr = builder.gep(obj_val,
+                [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), member_index)], inbounds=True)
+            if isinstance(member_ptr.type, ir.PointerType):
+                pointee = member_ptr.type.pointee
+                if isinstance(pointee, ir.ArrayType):
+                    struct_name = MemberAccessTypeHandler.get_struct_name_from_type(struct_type, module)
+                    if struct_name:
+                        type_spec = MemberAccessTypeHandler.get_member_type_spec(struct_name, node.member, module)
+                        if type_spec:
+                            MemberAccessTypeHandler.attach_array_element_type_spec(member_ptr, type_spec, module)
+                    return member_ptr
+                if MemberAccessTypeHandler.should_return_pointer_for_member(pointee):
+                    return member_ptr
+            loaded = builder.load(member_ptr)
+            return MemberAccessTypeHandler.attach_member_type_metadata(loaded, struct_type, node.member, module)
+        raise ValueError(f"Member access on unsupported type: {obj_val.type} [{node.source_line}:{node.source_col}]")
+
+    def _member_access_union(self, node, builder, module, union_ptr, union_name):
+        union_info = MemberAccessTypeHandler.get_union_member_info(union_name, module)
+        member_names = union_info['member_names']
+        member_types = union_info['member_types']
+        is_tagged    = union_info['is_tagged']
+        if node.member == '_':
+            if not is_tagged:
+                raise ValueError(f"Cannot access tag '._' on non-tagged union '{union_name}' [{node.source_line}:{node.source_col}]")
+            tag_ptr = builder.gep(union_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)],
+                                  inbounds=True, name="union_tag_ptr")
+            return builder.load(tag_ptr, name="union_tag_value")
+        MemberAccessTypeHandler.validate_union_member(union_name, node.member, module)
+        member_type = MemberAccessTypeHandler.get_union_member_type(union_name, node.member, module)
+        if is_tagged:
+            data_ptr = builder.gep(union_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 1)],
+                                   inbounds=True, name="union_data_ptr")
+            casted_ptr = builder.bitcast(data_ptr, ir.PointerType(member_type), name=f"union_as_{node.member}")
+            return builder.load(casted_ptr, name=f"union_{node.member}_value")
+        casted_ptr = builder.bitcast(union_ptr, ir.PointerType(member_type), name=f"union_as_{node.member}")
+        return builder.load(casted_ptr, name=f"union_{node.member}_value")
+
+    def visit_MethodCall(self, node, builder, module):
+        from fast import Identifier
+        var_name = None
+        if isinstance(node.object, Identifier):
+            var_name = node.object.name
+            if module.symbol_table.get_llvm_value(var_name) is not None:
+                obj_ptr = module.symbol_table.get_llvm_value(var_name)
+            else:
+                raise NameError(f"Unknown variable: {var_name}")
+        else:
+            obj_ptr = self.visit(node.object, builder, module)
+        if not isinstance(obj_ptr.type, ir.PointerType):
+            raise ValueError(f"Method call internal error, expected alloca pointer, got: {obj_ptr.type}")
+        slot_pointee = obj_ptr.type.pointee
+        if isinstance(slot_pointee, ir.IdentifiedStructType):
+            this_ptr = obj_ptr
+        elif isinstance(slot_pointee, ir.PointerType) and isinstance(slot_pointee.pointee, ir.IdentifiedStructType):
+            this_ptr = builder.load(obj_ptr, name=f"{var_name}_load" if var_name else "obj_load")
+        else:
+            raise ValueError(f"Cannot determine object type for method call: {obj_ptr.type}")
+        struct_ty = this_ptr.type.pointee
+        obj_type_name = None
+        if hasattr(module, "_struct_types"):
+            for type_name, struct_type in module._struct_types.items():
+                if struct_type == struct_ty:
+                    obj_type_name = type_name; break
+        if obj_type_name is None:
+            raise ValueError(f"Cannot determine object type for method call: {struct_ty}")
+        method_func_name = f"{obj_type_name}.{node.method_name}"
+        func = module.globals.get(method_func_name)
+        if func is None and hasattr(module, '_function_overloads') and method_func_name in module._function_overloads:
+            arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
+            func = TypeResolver.resolve_function(module, method_func_name, "", arg_vals)
+        if func is None:
+            raise NameError(f"Unknown method: {method_func_name}")
+        args = [this_ptr]
+        for i, arg_expr in enumerate(node.arguments):
+            if isinstance(arg_expr, Identifier):
+                entry = module.symbol_table.lookup_variable(arg_expr.name)
+                if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
+                    raise ValueError(f"Compile error: local variable '{arg_expr.name}' cannot leave its scope via method call")
+            arg_val = self.visit(arg_expr, builder, module)
+            expected_type = func.args[i + 1].type
+            if (isinstance(arg_val.type, ir.PointerType) and isinstance(arg_val.type.pointee, ir.ArrayType) and
+                    isinstance(expected_type, ir.PointerType) and arg_val.type.pointee.element == expected_type.pointee):
+                zero = ir.Constant(ir.IntType(32), 0)
+                arg_val = builder.gep(arg_val, [zero, zero], name=f"marg{i}_decay")
+            if arg_val.type != expected_type:
+                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(builder, module, arg_val, expected_type, i)
+            args.append(arg_val)
+        return builder.call(func, args)
+
+    def visit_FunctionPointerCall(self, node, builder, module):
+        from fast import Literal, FunctionCall
+        func_ptr = self.visit(node.pointer, builder, module)
+        if isinstance(func_ptr.type, ir.PointerType) and isinstance(func_ptr.type.pointee, ir.PointerType):
+            func_ptr = builder.load(func_ptr, name="func_ptr_load")
+        args = [self.visit(arg, builder, module) for arg in node.arguments]
+        if isinstance(func_ptr.type, ir.PointerType) and isinstance(func_ptr.type.pointee, ir.FunctionType):
+            fn_type = func_ptr.type.pointee
+            coerced = []
+            for i, (arg_val, arg_expr) in enumerate(zip(args, node.arguments)):
+                if i < len(fn_type.args):
+                    expected_type = fn_type.args[i]
+                    if (isinstance(arg_expr, Literal) and arg_expr.type == DataType.CHAR and
+                            isinstance(expected_type, ir.PointerType) and
+                            isinstance(expected_type.pointee, ir.IntType) and expected_type.pointee.width == 8):
+                        string_bytes = arg_expr.value.encode('ascii')
+                        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+                        str_const = ir.Constant(str_array_ty, bytearray(string_bytes))
+                        str_name = f".str.fpc.{FunctionCall._string_counter}"
+                        FunctionCall._string_counter += 1
+                        gv = ir.GlobalVariable(module, str_const.type, name=str_name)
+                        gv.linkage = 'internal'; gv.global_constant = True; gv.initializer = str_const
+                        zero = ir.Constant(ir.IntType(32), 0)
+                        arg_val = builder.gep(gv, [zero, zero], name=f"arg{i}_str_ptr")
+                    arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(builder, module, arg_val, expected_type, i)
+                coerced.append(arg_val)
+            args = coerced
+        return builder.call(func_ptr, args, name="indirect_call", cconv=_get_fp_cconv(node.pointer, module))
+
+    def visit_FunctionPointerAssignment(self, node, builder, module):
+        if module.symbol_table.get_llvm_value(node.pointer_name) is not None:
+            ptr_storage = module.symbol_table.get_llvm_value(node.pointer_name)
+        elif node.pointer_name in module.globals:
+            ptr_storage = module.globals[node.pointer_name]
+        else:
+            raise NameError(f"Function pointer '{node.pointer_name}' not found [{node.source_line}:{node.source_col}]")
+        func_value = self.visit(node.function_expr, builder, module)
+        builder.store(func_value, ptr_storage)
+        return func_value
+
+    def visit_ArrayAccess(self, node, builder, module):
+        from fast import RangeExpression
+        array_val = self.visit(node.array, builder, module)
+        _ts    = getattr(array_val, '_flux_type_spec', None)
+        _depth = getattr(_ts, 'pointer_depth', 1) if _ts else 1
+        _is_arr = getattr(_ts, 'is_array', False) if _ts else False
+        if (not _is_arr and _depth <= 1 and
+                isinstance(array_val.type, ir.PointerType) and
+                isinstance(array_val.type.pointee, ir.PointerType) and
+                not isinstance(array_val.type.pointee.pointee, ir.ArrayType)):
+            array_val = builder.load(array_val, name="ptr_loaded_for_access")
+        if isinstance(node.index, RangeExpression):
+            start_val = self.visit(node.index.start, builder, module)
+            end_val   = self.visit(node.index.end,   builder, module)
+            is_reverse = (isinstance(start_val, ir.Constant) and isinstance(end_val, ir.Constant) and
+                          start_val.constant > end_val.constant)
+            return ArrayTypeHandler.slice_array(builder, module, array_val, start_val, end_val, is_reverse)
+        index_val = self.visit(node.index, builder, module)
+        if index_val.type != ir.IntType(32):
+            if isinstance(index_val.type, ir.IntType):
+                index_val = (builder.trunc(index_val, ir.IntType(32), name="idx_trunc")
+                             if index_val.type.width > 32
+                             else builder.sext(index_val, ir.IntType(32), name="idx_ext"))
+        zero = ir.Constant(ir.IntType(32), 0)
+        def _load_and_preserve(gep_val, src):
+            if isinstance(gep_val.type, ir.PointerType):
+                pointee = gep_val.type.pointee
+                if isinstance(pointee, ir.ArrayType): return gep_val
+                if isinstance(pointee, (ir.LiteralStructType, ir.IdentifiedStructType)): return gep_val
+                if hasattr(pointee, '_name') or hasattr(pointee, 'elements'): return gep_val
+            loaded = builder.load(gep_val, name="array_load")
+            return ArrayTypeHandler.preserve_array_element_type_metadata(loaded, src, module)
+        if isinstance(array_val, ir.GlobalVariable):
+            gep = builder.gep(array_val, [zero, index_val], inbounds=True, name="array_gep")
+            return _load_and_preserve(gep, array_val)
+        if isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
+            gep = builder.gep(array_val, [zero, index_val], inbounds=True, name="array_gep")
+            return _load_and_preserve(gep, array_val)
+        if isinstance(array_val.type, ir.PointerType):
+            gep = builder.gep(array_val, [index_val], inbounds=True, name="ptr_gep")
+            if isinstance(gep.type, ir.PointerType):
+                pointee = gep.type.pointee
+                if (isinstance(pointee, (ir.LiteralStructType, ir.IdentifiedStructType)) or
+                        hasattr(pointee, '_name') or hasattr(pointee, 'elements')):
+                    return gep
+            loaded = builder.load(gep, name="ptr_load")
+            return ArrayTypeHandler.preserve_array_element_type_metadata(loaded, array_val, module)
+        if isinstance(array_val.type, ir.IntType):
+            index_i64 = builder.sext(index_val, ir.IntType(64), name="idx_i64") if index_val.type != ir.IntType(64) else index_val
+            shift_amt = builder.mul(index_i64, ir.Constant(ir.IntType(64), 8), name="byte_shift")
+            val_i64 = builder.zext(array_val, ir.IntType(64), name="val_i64") if array_val.type != ir.IntType(64) else array_val
+            return builder.trunc(builder.lshr(val_i64, shift_amt, name="byte_shr"), ir.IntType(8), name="byte_extract")
+        raise ValueError(f"Cannot access array element for type: {array_val.type} [{node.source_line}:{node.source_col}]")
+
+    def visit_ArraySlice(self, node, builder, module):
+        array_val = self.visit(node.array, builder, module)
+        start_val = self.visit(node.start, builder, module)
+        end_val   = self.visit(node.end,   builder, module)
+        def as_i32(v, name):
+            if v.type == ir.IntType(32): return v
+            if isinstance(v.type, ir.IntType):
+                return builder.trunc(v, ir.IntType(32), name=f"{name}_trunc") if v.type.width > 32 else builder.sext(v, ir.IntType(32), name=f"{name}_ext")
+            raise ValueError(f"Slice indices must be integers [{node.source_line}:{node.source_col}]")
+        start_i32 = as_i32(start_val, "slice_start")
+        end_i32   = as_i32(end_val,   "slice_end")
+        const_len = node._try_const_len()
+        if const_len is None:
+            raise ValueError(f"Array slice length must be statically known [{node.source_line}:{node.source_col}]")
+        if const_len < 0:
+            raise ValueError(f"Array slice must be forward [{node.source_line}:{node.source_col}]")
+        elem_ty = ArrayTypeHandler.get_element_type_from_array_value(array_val)
+        zero = ir.Constant(ir.IntType(32), 0)
+        if isinstance(array_val, ir.GlobalVariable) and isinstance(array_val.type.pointee, ir.ArrayType):
+            src_ptr = builder.gep(array_val, [zero, start_i32], inbounds=True, name="slice_src")
+        elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
+            src_ptr = builder.gep(array_val, [zero, start_i32], inbounds=True, name="slice_src")
+        elif isinstance(array_val.type, ir.PointerType):
+            src_ptr = builder.gep(array_val, [start_i32], inbounds=True, name="slice_src")
+        else:
+            raise ValueError(f"Cannot slice type: {array_val.type} [{node.source_line}:{node.source_col}]")
+        dst_arr_ty = ir.ArrayType(elem_ty, const_len)
+        dst_alloca = builder.alloca(dst_arr_ty, name="slice_tmp")
+        dst_ptr = builder.gep(dst_alloca, [zero, zero], inbounds=True, name="slice_dst")
+        ArrayTypeHandler.emit_memcpy(builder, module, dst_ptr, src_ptr,
+                                     const_len * ArrayTypeHandler.compute_element_size_bytes(elem_ty))
+        return builder.load(dst_alloca, name="slice_val")
+
+    def visit_TieExpression(self, node, builder, module):
+        from fast import Identifier
+        if not isinstance(node.operand, Identifier):
+            raise ValueError(f"Tie operator ~ can only be applied to variables [{node.source_line}:{node.source_col}]")
+        var_name = node.operand.name
+        if module.symbol_table.get_llvm_value(var_name) is not None:
+            var_ptr = module.symbol_table.get_llvm_value(var_name)
+        elif var_name in module.globals:
+            var_ptr = module.globals[var_name]
+        else:
+            raise NameError(f"Unknown variable: {var_name} [{node.source_line}:{node.source_col}]")
+        tied_value = builder.load(var_ptr, name=f"{var_name}_tied")
+        if not hasattr(builder, 'object_validity_flags'):
+            builder.object_validity_flags = {}
+        if var_name not in builder.object_validity_flags:
+            validity_flag = builder.alloca(ir.IntType(1), name=f"{var_name}_valid")
+            builder.store(ir.Constant(ir.IntType(1), 1), validity_flag)
+            builder.object_validity_flags[var_name] = validity_flag
+        validity_flag = builder.object_validity_flags[var_name]
+        builder.store(ir.Constant(ir.IntType(1), 0), validity_flag)
+        if isinstance(var_ptr.type.pointee, ir.PointerType):
+            builder.store(ir.Constant(var_ptr.type.pointee, None), var_ptr)
+        elif isinstance(var_ptr.type.pointee, ir.IntType):
+            builder.store(ir.Constant(var_ptr.type.pointee, 0), var_ptr)
+        return tied_value
+
+    def visit_StructLiteral(self, node, builder, module):
+        if node.struct_type is None:
+            raise ValueError(
+                f"Struct literal must have type context. [{node.source_line}:{node.source_col}]")
+        return StructTypeHandler.pack_struct_literal(
+            builder, module, node.struct_type, node.field_values, node.positional_values)
+
+    def visit_StructInstance(self, node, builder, module):
+        if not hasattr(module, '_struct_vtables'):
+            raise ValueError(f"Struct '{node.struct_name}' not defined [{node.source_line}:{node.source_col}]")
+        vtable = module._struct_vtables.get(node.struct_name)
+        if not vtable:
+            raise ValueError(f"Struct '{node.struct_name}' not defined [{node.source_line}:{node.source_col}]")
+        struct_type = module._struct_types[node.struct_name]
+        instance = StructTypeHandler.create_zeroed_instance(struct_type, vtable)
+        for field_name, field_value_expr in node.field_values.items():
+            field_info = next((f for f in vtable.fields if f[0] == field_name), None)
+            if not field_info:
+                raise ValueError(f"Field '{field_name}' not found in struct '{node.struct_name}' [{node.source_line}:{node.source_col}]")
+            _, bit_offset, bit_width, alignment = field_info
+            field_value = self.visit(field_value_expr, builder, module)
+            instance = StructTypeHandler.pack_field_value(builder, instance, field_value, bit_offset, bit_width, vtable.total_bits)
+        return instance
+
+    def visit_StructFieldAccess(self, node, builder, module):
+        from fast import Identifier
+        instance_val = self.visit(node.struct_instance, builder, module)
+        struct_name = None
+        if isinstance(node.struct_instance, Identifier):
+            var_name = node.struct_instance.name
+            entry = module.symbol_table.lookup_variable(var_name)
+            if entry and entry.type_spec:
+                type_spec = entry.type_spec
+                if getattr(type_spec, "custom_typename", None):
+                    struct_name = type_spec.custom_typename
+            if (not isinstance(instance_val.type, ir.PointerType) and
+                    isinstance(instance_val.type, (ir.LiteralStructType, ir.IdentifiedStructType))):
+                alloca_ptr = module.symbol_table.get_llvm_value(var_name)
+                if alloca_ptr is not None and isinstance(alloca_ptr.type, ir.PointerType):
+                    if isinstance(alloca_ptr.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                        instance_val = alloca_ptr
+        def _resolve_struct_name(name):
+            if not name: return None
+            if hasattr(module, "_struct_vtables") and name in module._struct_vtables: return name
+            if hasattr(module, "_using_namespaces") and hasattr(module, "_struct_vtables"):
+                for ns in module._using_namespaces:
+                    mangled = ns.replace("::", "__") + "__" + name
+                    if mangled in module._struct_vtables: return mangled
+            if hasattr(module, "_struct_types") and name in module._struct_types: return name
+            if hasattr(module, "_using_namespaces") and hasattr(module, "_struct_types"):
+                for ns in module._using_namespaces:
+                    mangled = ns.replace("::", "__") + "__" + name
+                    if mangled in module._struct_types: return mangled
+            return name
+        struct_name = _resolve_struct_name(struct_name)
+        if isinstance(instance_val.type, ir.PointerType):
+            pointee = instance_val.type.pointee
+            if isinstance(pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                struct_type = pointee
+                if not hasattr(struct_type, "names") or not struct_type.names:
+                    raise ValueError(f"Struct type missing member names [{node.source_line}:{node.source_col}]")
+                try:
+                    field_index = struct_type.names.index(node.field_name)
+                except ValueError:
+                    raise ValueError(f"Field '{node.field_name}' not found in struct [{node.source_line}:{node.source_col}]")
+                zero = ir.Constant(ir.IntType(32), 0)
+                idx = ir.Constant(ir.IntType(32), field_index)
+                field_ptr = builder.gep(instance_val, [zero, idx], inbounds=True, name=f"{node.field_name}_ptr")
+                if isinstance(field_ptr.type, ir.PointerType):
+                    fp = field_ptr.type.pointee
+                    if isinstance(fp, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType)):
+                        return field_ptr
+                return builder.load(field_ptr, name=node.field_name)
+        if isinstance(instance_val.type, ir.PointerType):
+            instance = builder.load(instance_val, name="struct_load")
+        else:
+            instance = instance_val
+        if struct_name is None:
+            struct_name = StructTypeHandler.infer_struct_name(instance, module)
+            struct_name = _resolve_struct_name(struct_name)
+        vtable = getattr(module, "_struct_vtables", {}).get(struct_name)
+        if not vtable:
+            raise ValueError(f"Cannot determine struct type for field access [{node.source_line}:{node.source_col}]")
+        field_info = next((f for f in vtable.fields if f[0] == node.field_name), None)
+        if not field_info:
+            raise ValueError(f"Field '{node.field_name}' not found in struct '{struct_name}' [{node.source_line}:{node.source_col}]")
+        _, bit_offset, bit_width, alignment = field_info
+        if isinstance(instance.type, ir.IntType):
+            instance_type = instance.type
+            shifted = builder.lshr(instance, ir.Constant(instance_type, bit_offset)) if bit_offset > 0 else instance
+            masked  = builder.and_(shifted, ir.Constant(instance_type, (1 << bit_width) - 1))
+            field_type = ir.IntType(bit_width)
+            return builder.trunc(masked, field_type, name=node.field_name) if instance_type.width != bit_width else masked
+        if isinstance(instance.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
+            for i, f in enumerate(vtable.fields):
+                if f[0] == node.field_name:
+                    return builder.extract_value(instance, i, name=node.field_name)
+            raise ValueError(f"Field '{node.field_name}' not found [{node.source_line}:{node.source_col}]")
+        byte_offset = bit_offset // 8
+        if bit_offset % 8 == 0 and bit_width % 8 == 0:
+            field_bytes = bit_width // 8
+            field_type  = ir.IntType(bit_width)
+            result = ir.Constant(field_type, 0)
+            for i in range(field_bytes):
+                byte_val = builder.extract_value(instance, byte_offset + i)
+                byte_ext = builder.zext(byte_val, field_type)
+                byte_shifted = builder.shl(byte_ext, ir.Constant(field_type, (field_bytes - 1 - i) * 8))
+                result = builder.or_(result, byte_shifted)
+            if hasattr(vtable, "field_types") and node.field_name in vtable.field_types:
+                target_type = vtable.field_types[node.field_name]
+                if isinstance(target_type, (ir.FloatType, ir.DoubleType)) and isinstance(result.type, ir.IntType):
+                    result = builder.bitcast(result, target_type)
+            return result
+        raise NotImplementedError(f"Unaligned field access not yet supported [{node.source_line}:{node.source_col}]")
+
+    def visit_StructRecast(self, node, builder, module):
+        source_value = self.visit(node.source_expr, builder, module)
+        return StructTypeHandler.perform_struct_recast(builder, module, node.target_type, source_value)
+
+    # ------------------------------------------------------------------
+    # Tier 4 — statements  [DONE]
+    # ------------------------------------------------------------------
+
+    def visit_Assignment(self, node, builder, module):
+        from fast import (ArrayLiteral, Identifier, MemberAccess, ArrayAccess,
+                          PointerDeref, BitSlice, RangeExpression, Literal)
+        # Seed element_type on ArrayLiteral from target's type_spec so large
+        # unsigned literals aren't promoted to i64 when target is e.g. u32[N].
+        if isinstance(node.value, ArrayLiteral) and node.value.element_type is None:
+            target_name = node.target.name if isinstance(node.target, Identifier) else None
+            if target_name is not None:
+                entry = module.symbol_table.lookup_any(target_name)
+                if entry and entry.type_spec is not None:
+                    import dataclasses
+                    ts = entry.type_spec
+                    elem_ts = dataclasses.replace(ts, is_array=False, array_size=None, array_dimensions=None)
+                    node.value.element_type = elem_ts
+
+        val = self.visit(node.value, builder, module)
+
+        if isinstance(node.target, Identifier):
+            return AssignmentTypeHandler.handle_identifier_assignment(
+                builder, module, node.target.name, val, node.value)
+
+        elif isinstance(node.target, MemberAccess):
+            return AssignmentTypeHandler.handle_member_assignment(
+                builder, module, node.target.object, node.target.member, val)
+
+        elif isinstance(node.target, ArrayAccess):
+            if isinstance(node.target.array, MemberAccess):
+                member_ptr = node.target.array._get_member_ptr(builder, module)
+                if (isinstance(member_ptr.type, ir.PointerType) and
+                        isinstance(member_ptr.type.pointee, ir.ArrayType)):
+                    if isinstance(node.target.index, RangeExpression):
+                        from ftypesys import emit_memcpy
+                        rng = node.target.index
+                        s = rng.start.value if isinstance(rng.start, Literal) else None
+                        e = rng.end.value if isinstance(rng.end, Literal) else None
+                        if s is None or e is None:
+                            raise ValueError(f"Struct member slice assignment indices must be literals [{node.source_line}:{node.source_col}]")
+                        const_len = e - s + 1
+                        zero = ir.Constant(ir.IntType(32), 0)
+                        start_i32 = ir.Constant(ir.IntType(32), s)
+                        dst_ptr = builder.gep(member_ptr, [zero, start_i32], inbounds=True, name="slicewr_dst")
+                        i8ptr = ir.IntType(8).as_pointer()
+                        dst_i8 = builder.bitcast(dst_ptr, i8ptr, name="slicewr_dst_i8")
+                        if isinstance(val.type, ir.PointerType):
+                            src_i8 = builder.bitcast(val, i8ptr, name="slicewr_src_i8")
+                        else:
+                            src_alloca = builder.alloca(val.type, name="slicewr_src")
+                            builder.store(val, src_alloca)
+                            src_i8 = builder.bitcast(src_alloca, i8ptr, name="slicewr_src_i8")
+                        emit_memcpy(builder, module, dst_i8, src_i8, const_len)
+                        return val
+                    index = self.visit(node.target.index, builder, module)
+                    if index.type != ir.IntType(32):
+                        if isinstance(index.type, ir.IntType):
+                            if index.type.width > 32:
+                                index = builder.trunc(index, ir.IntType(32), name="idx_trunc")
+                            else:
+                                index = builder.sext(index, ir.IntType(32), name="idx_ext")
+                    zero = ir.Constant(ir.IntType(32), 0)
+                    elem_ptr = builder.gep(member_ptr, [zero, index], inbounds=True)
+                    element_type = member_ptr.type.pointee.element
+                    if val.type != element_type:
+                        if isinstance(val.type, ir.IntType) and isinstance(element_type, ir.IntType):
+                            if val.type.width > element_type.width:
+                                val = builder.trunc(val, element_type, name="val_trunc")
+                            else:
+                                val = builder.sext(val, element_type, name="val_ext")
+                    builder.store(val, elem_ptr)
+                    return val
+            return AssignmentTypeHandler.handle_array_element_assignment(
+                builder, module, node.target.array, node.target.index, node.value, val)
+
+        elif isinstance(node.target, PointerDeref):
+            ptr = self.visit(node.target.pointer, builder, module)
+            if (isinstance(ptr.type, ir.PointerType) and
+                isinstance(ptr.type.pointee, ir.PointerType) and
+                isinstance(ptr.type.pointee.pointee, ir.PointerType)):
+                ptr = builder.load(ptr, name="deref_ptr_loaded")
+            return AssignmentTypeHandler.handle_pointer_deref_assignment(builder, ptr, val)
+
+        elif isinstance(node.target, BitSlice):
+            if not isinstance(node.target.value, Identifier):
+                raise ValueError(f"Bit-slice assignment target must be a simple variable [{node.source_line}:{node.source_col}]")
+            var_name = node.target.value.name
+            ptr = module.symbol_table.get_llvm_value(var_name)
+            if ptr is None:
+                raise ValueError(f"Unknown variable '{var_name}' [{node.source_line}:{node.source_col}]")
+            int_type = ptr.type.pointee
+            if not isinstance(int_type, ir.IntType):
+                raise ValueError(f"Bit-slice assignment requires an integer variable [{node.source_line}:{node.source_col}]")
+            w = int_type.width
+            s_val = self.visit(node.target.start, builder, module)
+            e_val = self.visit(node.target.end, builder, module)
+            if not (hasattr(s_val, 'constant') and hasattr(e_val, 'constant')):
+                raise ValueError(f"Bit-slice assignment indices must be constants [{node.source_line}:{node.source_col}]")
+            s_const = int(s_val.constant)
+            e_const = int(e_val.constant)
+            slice_width = e_const - s_const + 1
+            lsb_shift = w - 1 - e_const
+            mask = ((1 << slice_width) - 1) << lsb_shift
+            inv_mask = ((1 << w) - 1) & ~mask
+            cur = builder.load(ptr, name="bsa_cur")
+            cleared = builder.and_(cur, ir.Constant(int_type, inv_mask), name="bsa_cleared")
+            if isinstance(val.type, ir.IntType):
+                if val.type.width < w:
+                    val = builder.zext(val, int_type, name="bsa_widen")
+                elif val.type.width > w:
+                    val = builder.trunc(val, int_type, name="bsa_trunc")
+            rhs_masked = builder.and_(val, ir.Constant(int_type, (1 << slice_width) - 1), name="bsa_rhs_mask")
+            rhs_shifted = builder.shl(rhs_masked, ir.Constant(int_type, lsb_shift), name="bsa_rhs_shift")
+            result = builder.or_(cleared, rhs_shifted, name="bsa_result")
+            builder.store(result, ptr)
+            return result
+
+        else:
+            raise ValueError(f"Cannot assign to {type(node.target).__name__} [{node.source_line}:{node.source_col}]")
+
+    def visit_CompoundAssignment(self, node, builder, module):
+        return AssignmentTypeHandler.handle_compound_assignment(
+            builder, module, node.target, node.op_token, node.value)
+
+    def visit_TernaryAssign(self, node, builder, module):
+        from fast import Identifier
+        if isinstance(node.target, Identifier):
+            sym = module.symbol_table.lookup(node.target.name)
+            if sym is None:
+                raise ValueError(f"Undefined variable '{node.target.name}' [{node.source_line}:{node.source_col}]")
+            ptr = module.symbol_table.get_llvm_value(node.target.name)
+            current_val = builder.load(ptr, name="ternary_assign_cur")
+        else:
+            raise ValueError(f"TernaryAssign: unsupported target type {type(node.target).__name__} [{node.source_line}:{node.source_col}]")
+
+        zero = ir.Constant(current_val.type, 0)
+        is_zero = builder.icmp_unsigned('==', current_val, zero, name="ternary_assign_cmp")
+
+        func = builder.block.function
+        then_block = func.append_basic_block(name="ternary_assign_then")
+        merge_block = func.append_basic_block(name="ternary_assign_merge")
+
+        builder.cbranch(is_zero, then_block, merge_block)
+
+        builder.position_at_start(then_block)
+        new_val = self.visit(node.value, builder, module)
+        if new_val.type != current_val.type:
+            if isinstance(new_val.type, ir.IntType) and isinstance(current_val.type, ir.IntType):
+                if new_val.type.width > current_val.type.width:
+                    new_val = builder.trunc(new_val, current_val.type, name="ternary_assign_trunc")
+                else:
+                    new_val = builder.sext(new_val, current_val.type, name="ternary_assign_ext")
+        builder.store(new_val, ptr)
+        builder.branch(merge_block)
+
+        builder.position_at_start(merge_block)
+        return None
+
+    def visit_Block(self, node, builder, module):
+        import inspect as _inspect
+        result = None
+        #print(node.statements)
+        #print(f"DEBUG Block: Processing {len(node.statements)} statements")
+
+        outer_defer_stack = getattr(builder, '_flux_defer_stack', None)
+        builder._flux_defer_stack = []
+
+        try:
+            for i, stmt in enumerate(node.statements):
+                #print(f"DEBUG Block: Processing statement {i}: {type(stmt).__name__}")
+                if builder.block.is_terminated:
+                    break
+                if stmt is not None:
+                    try:
+                        stmt_result = self.visit(stmt, builder, module)
+                        if stmt_result is not None:
+                            result = stmt_result
+                    except Exception as e:
+                        current_frame = _inspect.currentframe()
+                        caller_frame = current_frame.f_back
+                        caller_name = caller_frame.f_code.co_name
+                        stack = _inspect.stack()
+                        stmt_i = i
+                        #print("Full call stack (from current to outermost):")
+                        for i, frame_info in enumerate(reversed(stack)):
+                            print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
+                        loc = ""
+                        if hasattr(stmt, 'source_line') and stmt.source_line:
+                            loc = f" [{module.name}:{stmt.source_line}:{stmt.source_col}]"
+                        raise ValueError(f"Block{{}} Debug: Error in statement {stmt_i} ({type(stmt).__name__}){loc}: {e} \n\n {stmt} \n\n {module.name}")
+
+            if builder._flux_defer_stack and not builder.block.is_terminated:
+                for deferred_expr in reversed(builder._flux_defer_stack):
+                    self.visit(deferred_expr, builder, module)
+        finally:
+            builder._flux_defer_stack = outer_defer_stack if outer_defer_stack is not None else []
+
+        return result
+
+    def visit_IfStatement(self, node, builder, module):
+        if builder.block is None:
+            return self._visit_IfStatement_global_scope(node, builder, module)
+
+        try:
+            cond_val = self.visit(node.condition, builder, module)
+        except Exception as e:
+            from fast import ComptimeError
+            raise ComptimeError(f"if statement condition: {e} [{node.source_line}:{node.source_col}]")
+
+        func = builder.block.function
+        then_block = func.append_basic_block('then')
+        else_block = func.append_basic_block('else')
+        merge_block = func.append_basic_block('ifcont')
+
+        if isinstance(cond_val.type, ir.IntType) and cond_val.type.width != 1:
+            cond_val = builder.icmp_signed('!=', cond_val, ir.Constant(cond_val.type, 0))
+        builder.cbranch(cond_val, then_block, else_block)
+
+        builder.position_at_start(then_block)
+        self.visit(node.then_block, builder, module)
+        if not builder.block.is_terminated:
+            builder.branch(merge_block)
+
+        builder.position_at_start(else_block)
+
+        current_block = else_block
+        for i, (elif_cond, elif_body) in enumerate(node.elif_blocks):
+            elif_cond_val = self.visit(elif_cond, builder, module)
+            elif_then = func.append_basic_block(f'elif_then_{i}')
+            elif_else = func.append_basic_block(f'elif_else_{i}')
+            builder.cbranch(elif_cond_val, elif_then, elif_else)
+            builder.position_at_start(elif_then)
+            self.visit(elif_body, builder, module)
+            if not builder.block.is_terminated:
+                builder.branch(merge_block)
+            builder.position_at_start(elif_else)
+            current_block = elif_else
+
+        if node.else_block:
+            self.visit(node.else_block, builder, module)
+
+        if not builder.block.is_terminated:
+            builder.branch(merge_block)
+
+        builder.position_at_start(merge_block)
+        return None
+
+    def _visit_IfStatement_global_scope(self, node, builder, module):
+        try:
+            cond_val = self.visit(node.condition, builder, module)
+        except Exception as e:
+            raise RuntimeError(f"Could not evaluate global if condition: {e} [{node.source_line}:{node.source_col}]")
+
+        if isinstance(cond_val, ir.Constant):
+            if cond_val.constant:
+                self.visit(node.then_block, builder, module)
+            else:
+                executed = False
+                for elif_cond, elif_block in node.elif_blocks:
+                    elif_val = self.visit(elif_cond, builder, module)
+                    if isinstance(elif_val, ir.Constant) and elif_val.constant:
+                        self.visit(elif_block, builder, module)
+                        executed = True
+                        break
+                if not executed and node.else_block:
+                    self.visit(node.else_block, builder, module)
+        else:
+            raise RuntimeError(f"Cannot use runtime conditions in global scope if statements [{node.source_line}:{node.source_col}]")
+
+        return None
+
+    def visit_IfExpression(self, node, builder, module):
+        from fast import NoInit
+        cond_val = self.visit(node.condition, builder, module)
+
+        if isinstance(cond_val.type, ir.IntType) and cond_val.type.width != 1:
+            cond_val = builder.icmp_signed('!=', cond_val, ir.Constant(cond_val.type, 0))
+
+        func = builder.block.function
+        value_block = func.append_basic_block('ifexpr_value')
+        else_block  = func.append_basic_block('ifexpr_else')
+        merge_block = func.append_basic_block('ifexpr_merge')
+
+        builder.cbranch(cond_val, value_block, else_block)
+
+        builder.position_at_start(value_block)
+        value_val = self.visit(node.value_expr, builder, module)
+        value_end_block = builder.block
+        builder.branch(merge_block)
+
+        builder.position_at_start(else_block)
+        if node.else_expr is not None:
+            if isinstance(node.else_expr, NoInit):
+                else_val = ir.Constant(value_val.type, ir.Undefined)
+            else:
+                else_val = self.visit(node.else_expr, builder, module)
+        else:
+            else_val = ir.Constant(value_val.type, 0)
+
+        else_end_block = builder.block
+        builder.branch(merge_block)
+
+        builder.position_at_start(merge_block)
+
+        if value_val.type != else_val.type:
+            if isinstance(value_val.type, ir.IntType) and isinstance(else_val.type, ir.IntType):
+                if value_val.type.width < else_val.type.width:
+                    builder.position_at_end(value_end_block)
+                    value_val = builder.sext(value_val, else_val.type)
+                    builder.branch(merge_block)
+                    builder.position_at_start(merge_block)
+                elif else_val.type.width < value_val.type.width:
+                    builder.position_at_end(else_end_block)
+                    else_val = builder.sext(else_val, value_val.type)
+                    builder.branch(merge_block)
+                    builder.position_at_start(merge_block)
+            else:
+                raise TypeError(
+                    f"If expression branches have incompatible types: "
+                    f"{value_val.type} vs {else_val.type} [{node.source_line}:{node.source_col}]")
+
+        phi = builder.phi(value_val.type, name='ifexpr_result')
+        phi.add_incoming(value_val, value_end_block)
+        phi.add_incoming(else_val, else_end_block)
+        return phi
+
+    def visit_WhileLoop(self, node, builder, module):
+        func = builder.block.function
+        cond_block = func.append_basic_block('while.cond')
+        body_block = func.append_basic_block('while.body')
+        end_block  = func.append_basic_block('while.end')
+
+        old_break    = getattr(builder, 'break_block', None)
+        old_continue = getattr(builder, 'continue_block', None)
+        builder.break_block    = end_block
+        builder.continue_block = cond_block
+
+        builder.branch(cond_block)
+
+        builder.position_at_start(cond_block)
+        cond_val = self.visit(node.condition, builder, module)
+        if isinstance(cond_val.type, ir.IntType) and cond_val.type.width != 1:
+            cond_val = builder.icmp_signed('!=', cond_val, ir.Constant(cond_val.type, 0))
+        builder.cbranch(cond_val, body_block, end_block)
+
+        builder.position_at_start(body_block)
+        self.visit(node.body, builder, module)
+        if not builder.block.is_terminated:
+            builder.branch(cond_block)
+
+        builder.break_block    = old_break
+        builder.continue_block = old_continue
+
+        builder.position_at_start(end_block)
+        return None
+
+    def visit_DoLoop(self, node, builder, module):
+        if builder.block is None:
+            func_type = ir.FunctionType(ir.VoidType(), [])
+            temp_func = ir.Function(module, func_type, name="__do_temp")
+            temp_block = temp_func.append_basic_block("entry")
+            temp_builder = ir.IRBuilder(temp_block)
+            self._do_loop_generate(node, temp_builder, module)
+            temp_builder.ret_void()
+            return None
+        return self._do_loop_generate(node, builder, module)
+
+    def _do_loop_generate(self, node, builder, module):
+        func = builder.block.function
+        body_block = func.append_basic_block('do.body')
+        end_block  = func.append_basic_block('do.end')
+
+        old_break    = getattr(builder, 'break_block', None)
+        old_continue = getattr(builder, 'continue_block', None)
+        builder.break_block    = end_block
+        builder.continue_block = body_block
+
+        builder.branch(body_block)
+
+        builder.position_at_start(body_block)
+        self.visit(node.body, builder, module)
+        if not builder.block.is_terminated:
+            builder.branch(body_block)
+
+        builder.break_block    = old_break
+        builder.continue_block = old_continue
+
+        builder.position_at_start(end_block)
+        return None
+
+    def visit_DoWhileLoop(self, node, builder, module):
+        if builder.block is None:
+            func_type = ir.FunctionType(ir.VoidType(), [])
+            temp_func = ir.Function(module, func_type, name="__dowhile_temp")
+            temp_block = temp_func.append_basic_block("entry")
+            temp_builder = ir.IRBuilder(temp_block)
+            self._do_while_generate(node, temp_builder, module)
+            temp_builder.ret_void()
+            return None
+        return self._do_while_generate(node, builder, module)
+
+    def _do_while_generate(self, node, builder, module):
+        func = builder.block.function
+        body_block = func.append_basic_block('dowhile.body')
+        cond_block = func.append_basic_block('dowhile.cond')
+        end_block  = func.append_basic_block('dowhile.end')
+
+        old_break    = getattr(builder, 'break_block', None)
+        old_continue = getattr(builder, 'continue_block', None)
+        builder.break_block    = end_block
+        builder.continue_block = cond_block
+
+        builder.branch(body_block)
+
+        builder.position_at_start(body_block)
+        self.visit(node.body, builder, module)
+        if not builder.block.is_terminated:
+            builder.branch(cond_block)
+
+        builder.position_at_start(cond_block)
+        cond_val = self.visit(node.condition, builder, module)
+        builder.cbranch(cond_val, body_block, end_block)
+
+        builder.break_block    = old_break
+        builder.continue_block = old_continue
+
+        builder.position_at_start(end_block)
+        return None
+
+    def visit_ForLoop(self, node, builder, module):
+        func = builder.block.function
+        cond_block   = func.append_basic_block('for.cond')
+        body_block   = func.append_basic_block('for.body')
+        update_block = func.append_basic_block('for.update')
+        end_block    = func.append_basic_block('for.end')
+
+        if node.init:
+            self.visit(node.init, builder, module)
+
+        builder.branch(cond_block)
+
+        builder.position_at_start(cond_block)
+        if node.condition:
+            cond_val = self.visit(node.condition, builder, module)
+            builder.cbranch(cond_val, body_block, end_block)
+        else:
+            builder.branch(body_block)
+
+        builder.position_at_start(body_block)
+        old_break    = getattr(builder, 'break_block', None)
+        old_continue = getattr(builder, 'continue_block', None)
+        builder.break_block    = end_block
+        builder.continue_block = update_block
+
+        self.visit(node.body, builder, module)
+        if not builder.block.is_terminated:
+            builder.branch(update_block)
+
+        builder.position_at_start(update_block)
+        if node.update:
+            self.visit(node.update, builder, module)
+        builder.branch(cond_block)
+
+        builder.break_block    = old_break
+        builder.continue_block = old_continue
+
+        builder.position_at_start(end_block)
+        return None
+
+    def visit_ForInLoop(self, node, builder, module):
+        collection = self.visit(node.iterable, builder, module)
+        coll_type = collection.type
+
+        func = builder.block.function
+        entry_block = builder.block
+        cond_block  = func.append_basic_block('forin.cond')
+        body_block  = func.append_basic_block('forin.body')
+        end_block   = func.append_basic_block('forin.end')
+
+        if isinstance(coll_type, ir.PointerType) and isinstance(coll_type.pointee, ir.ArrayType):
+            arr_type  = coll_type.pointee
+            size      = arr_type.count
+            elem_type = arr_type.element
+
+            index_ptr = builder.alloca(ir.IntType(32), name='forin.idx')
+            builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
+            builder.branch(cond_block)
+
+            builder.position_at_start(cond_block)
+            current_idx = builder.load(index_ptr, name='idx')
+            cmp = builder.icmp_unsigned('<', current_idx,
+                                        ir.Constant(ir.IntType(32), size),
+                                        name='loop.cond')
+            builder.cbranch(cmp, body_block, end_block)
+
+            builder.position_at_start(body_block)
+            elem_ptr = builder.gep(collection,
+                                   [ir.Constant(ir.IntType(32), 0), current_idx],
+                                   name='elem.ptr')
+            elem_val = builder.load(elem_ptr, name='elem')
+            var_ptr  = builder.alloca(elem_type, name=node.variables[0])
+            builder.store(elem_val, var_ptr)
+            module.symbol_table.define(node.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
+
+        elif (isinstance(coll_type, ir.PointerType) and
+              isinstance(coll_type.pointee, ir.PointerType)):
+            elem_ptr_type = coll_type.pointee
+            cursor_ptr = builder.alloca(coll_type, name='forin.cursor')
+            builder.store(collection, cursor_ptr)
+            builder.branch(cond_block)
+
+            builder.position_at_start(cond_block)
+            cursor_val = builder.load(cursor_ptr, name='cursor')
+            slot_val   = builder.load(cursor_val, name='slot')
+            slot_int   = builder.ptrtoint(slot_val, ir.IntType(64), name='slot.int')
+            null_int   = ir.Constant(ir.IntType(64), 0)
+            cmp = builder.icmp_unsigned('!=', slot_int, null_int, name='loop.cond')
+            builder.cbranch(cmp, body_block, end_block)
+
+            builder.position_at_start(body_block)
+            var_ptr = builder.alloca(elem_ptr_type, name=node.variables[0])
+            builder.store(slot_val, var_ptr)
+            module.symbol_table.define(node.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
+
+        elif (isinstance(coll_type, ir.PointerType) and
+              isinstance(coll_type.pointee, ir.IntType) and
+              coll_type.pointee.width == 8):
+            current_ptr = builder.alloca(coll_type, name='char.ptr')
+            builder.store(collection, current_ptr)
+            builder.branch(cond_block)
+
+            builder.position_at_start(cond_block)
+            ptr_val  = builder.load(current_ptr, name='ptr')
+            char_val = builder.load(ptr_val, name='char')
+            cmp = builder.icmp_unsigned('!=', char_val,
+                                        ir.Constant(ir.IntType(8), 0),
+                                        name='loop.cond')
+            builder.cbranch(cmp, body_block, end_block)
+
+            builder.position_at_start(body_block)
+            var_ptr = builder.alloca(ir.IntType(8), name=node.variables[0])
+            builder.store(char_val, var_ptr)
+            module.symbol_table.define(node.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
+
+        else:
+            raise ValueError(f"Cannot iterate over type {coll_type} [{node.source_line}:{node.source_col}]")
+
+        old_break    = getattr(builder, 'break_block', None)
+        old_continue = getattr(builder, 'continue_block', None)
+        builder.break_block    = end_block
+        builder.continue_block = cond_block
+
+        self.visit(node.body, builder, module)
+
+        if not builder.block.is_terminated:
+            if isinstance(coll_type, ir.PointerType) and isinstance(coll_type.pointee, ir.ArrayType):
+                current_idx = builder.load(index_ptr, name='idx')
+                next_idx = builder.add(current_idx, ir.Constant(ir.IntType(32), 1), name='next.idx')
+                builder.store(next_idx, index_ptr)
+            elif (isinstance(coll_type, ir.PointerType) and
+                  isinstance(coll_type.pointee, ir.PointerType)):
+                cur = builder.load(cursor_ptr, name='cursor.latch')
+                nxt = builder.gep(cur, [ir.Constant(ir.IntType(32), 1)], name='cursor.next')
+                builder.store(nxt, cursor_ptr)
+            elif (isinstance(coll_type, ir.PointerType) and
+                  isinstance(coll_type.pointee, ir.IntType) and
+                  coll_type.pointee.width == 8):
+                pv  = builder.load(current_ptr, name='ptr.latch')
+                nxt = builder.gep(pv, [ir.Constant(ir.IntType(32), 1)], name='ptr.next')
+                builder.store(nxt, current_ptr)
+            builder.branch(cond_block)
+
+        builder.break_block    = old_break
+        builder.continue_block = old_continue
+        builder.position_at_start(end_block)
+        return None
+
+    def visit_ReturnStatement(self, node, builder, module):
+        from fast import Identifier
+        if builder.block.is_terminated:
+            return None
+
+        if node.value is None:
+            if getattr(builder, '_flux_is_recursive_func', False):
+                func = builder.block.function
+                call_instr = builder.call(func, list(func.args))
+                call_instr.tail = "musttail"
+            builder.ret_void()
+            return None
+
+        if isinstance(node.value, Identifier):
+            entry = module.symbol_table.lookup_variable(node.value.name)
+            if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
+                raise ValueError(f"Compile error: local variable '{node.value.name}' cannot leave its scope via return [{node.source_line}:{node.source_col}]")
+
+        ret_val = self.visit(node.value, builder, module)
+
+        if hasattr(builder, '_flux_defer_stack') and builder._flux_defer_stack:
+            for deferred_expr in reversed(builder._flux_defer_stack):
+                self.visit(deferred_expr, builder, module)
+
+        if ret_val is None:
+            builder.ret_void()
+            return None
+
+        func = builder.block.function
+
+        if hasattr(func.type, 'return_type'):
+            expected = func.type.return_type
+        elif hasattr(func.type, 'pointee') and hasattr(func.type.pointee, 'return_type'):
+            expected = func.type.pointee.return_type
+        else:
+            raise RuntimeError(f"Cannot determine function return type [{node.source_line}:{node.source_col}]")
+
+        if isinstance(expected, ir.VoidType):
+            builder.ret_void()
+            return None
+
+        if (isinstance(ret_val.type, ir.PointerType) and
+                isinstance(ret_val.type.pointee, ir.LiteralStructType) and
+                ret_val.type.pointee == expected):
+            ret_val = builder.load(ret_val, name="ret_load")
+
+        ret_val = CoercionContext.coerce_return_value(builder, ret_val, expected)
+
+        if getattr(builder, '_flux_is_recursive_func', False):
+            func = builder.block.function
+            call_instr = builder.call(func, [ret_val])
+            call_instr.tail = "musttail"
+            builder.ret(call_instr)
+            return None
+
+        builder.ret(ret_val)
+        return None
+
+    def visit_Case(self, node, builder, module):
+        return self.visit(node.body, builder, module)
+
+    def visit_SwitchStatement(self, node, builder, module):
+        from fast import Literal, Identifier
+        switch_val = self.visit(node.expression, builder, module)
+
+        func = builder.block.function
+        merge_block  = func.append_basic_block("switch_merge")
+        default_block = None
+        case_blocks  = []
+
+        def _fold_case_const(val_expr, switch_val, builder, module):
+            if isinstance(val_expr, Literal):
+                c = self.visit(val_expr, builder, module)
+                if isinstance(c, ir.Constant):
+                    return ir.Constant(switch_val.type, c.constant)
+            name = getattr(val_expr, 'name', None)
+            if name:
+                for gname, gval in module.globals.items():
+                    if (gname == name or gname.endswith('__' + name)) and hasattr(gval, 'initializer'):
+                        init = gval.initializer
+                        if isinstance(init, ir.Constant) and isinstance(init.type, ir.IntType):
+                            return ir.Constant(switch_val.type, init.constant)
+            case_val = self.visit(val_expr, builder, module)
+            if isinstance(case_val, ir.Constant):
+                return ir.Constant(switch_val.type, case_val.constant)
+            src = getattr(case_val, 'operands', [None])
+            if src and len(src) > 0:
+                init = getattr(src[0], 'initializer', None)
+                if isinstance(init, ir.Constant) and isinstance(init.type, ir.IntType):
+                    return ir.Constant(switch_val.type, init.constant)
+            raise ValueError(f"Switch case value is not a constant integer: {val_expr} [{node.source_line}:{node.source_col}]")
+
+        for i, case in enumerate(node.cases):
+            if case.value is None:
+                default_block = func.append_basic_block("switch_default")
+                case_blocks.append((None, default_block))
+            else:
+                case_block  = func.append_basic_block(f"switch_case_{i}")
+                case_const  = _fold_case_const(case.value, switch_val, builder, module)
+                case_blocks.append((case_const, case_block))
+
+        if default_block is None:
+            default_block = merge_block
+
+        switch = builder.switch(switch_val, default_block)
+        for case_const, block in case_blocks:
+            if case_const is not None:
+                if isinstance(case_const.type, ir.IntType) and isinstance(switch_val.type, ir.IntType):
+                    if case_const.type.width != switch_val.type.width:
+                        case_const = ir.Constant(switch_val.type, case_const.constant)
+                switch.add_case(case_const, block)
+
+        for i, (value, case_block) in enumerate(case_blocks):
+            builder.position_at_start(case_block)
+
+            func_entry = builder.function.entry_basic_block
+            saved_block = builder.block
+
+            outer_alloca_block = getattr(builder, '_switch_case_alloca_block', None)
+            builder._switch_case_alloca_block = func_entry
+
+            self.visit(node.cases[i].body, builder, module)
+
+            builder._switch_case_alloca_block = outer_alloca_block
+
+            if not builder.block.is_terminated:
+                builder.branch(merge_block)
+
+        builder.position_at_start(merge_block)
+        return None
+
+    def visit_TryBlock(self, node, builder, module):
+        exc_flag  = builder.alloca(ir.IntType(1),  name='exception_flag')
+        exc_value = builder.alloca(ir.IntType(64), name='exception_value')
+
+        old_exc_flag  = getattr(builder, 'flux_exception_flag',  None)
+        old_exc_value = getattr(builder, 'flux_exception_value', None)
+
+        builder.flux_exception_flag  = exc_flag
+        builder.flux_exception_value = exc_value
+
+        func = builder.block.function
+        try_block        = func.append_basic_block('try.body')
+        catch_check_block = func.append_basic_block('catch.check')
+        catch_blocks_ir  = []
+        end_block        = func.append_basic_block('try.end')
+
+        for i, (exc_type, exc_name, catch_body) in enumerate(node.catch_blocks):
+            catch_block = func.append_basic_block(f'catch.{i}')
+            catch_blocks_ir.append(catch_block)
+
+        builder.flux_exception_handler = catch_check_block
+
+        builder.store(ir.Constant(ir.IntType(1), 0), exc_flag)
+        builder.branch(try_block)
+
+        builder.position_at_start(try_block)
+        self.visit(node.try_body, builder, module)
+        if not builder.block.is_terminated:
+            builder.branch(catch_check_block)
+
+        builder.position_at_start(catch_check_block)
+        exc_flag_val  = builder.load(exc_flag, name='exc_flag')
+        zero          = ir.Constant(ir.IntType(32), 0)
+        has_exception = builder.icmp_signed('!=', exc_flag_val, zero, name='has_exception')
+
+        if catch_blocks_ir:
+            builder.cbranch(has_exception, catch_blocks_ir[0], end_block)
+        else:
+            builder.cbranch(has_exception, end_block, end_block)
+
+        for i, (exc_type, exc_name, catch_body) in enumerate(node.catch_blocks):
+            builder.position_at_start(catch_blocks_ir[i])
+
+            builder.store(ir.Constant(ir.IntType(1), 0), exc_flag)
+
+            if exc_name:
+                exc_val_i64 = builder.load(exc_value, name='exc_val')
+
+                if exc_type:
+                    exc_type_llvm = TypeSystem.get_llvm_type(exc_type, module)
+                else:
+                    exc_type_llvm = ir.IntType(32)
+
+                exc_var = builder.alloca(exc_type_llvm, name=exc_name)
+
+                if isinstance(exc_type_llvm, ir.IntType):
+                    if exc_type_llvm.width < 64:
+                        exc_val = builder.trunc(exc_val_i64, exc_type_llvm, name='exc_trunc')
+                    elif exc_type_llvm.width > 64:
+                        exc_val = builder.zext(exc_val_i64, exc_type_llvm, name='exc_ext')
+                    else:
+                        exc_val = exc_val_i64
+                else:
+                    exc_val = builder.bitcast(exc_val_i64, exc_type_llvm)
+
+                builder.store(exc_val, exc_var)
+
+                if not module.symbol_table.is_global_scope():
+                    module.symbol_table.define(exc_name, SymbolKind.VARIABLE, llvm_value=exc_var)
+
+            self.visit(catch_body, builder, module)
+
+            if exc_name and not module.symbol_table.is_global_scope() and module.symbol_table.get_llvm_value(exc_name) is not None:
+                module.symbol_table.delete_variable(exc_name)
+
+            if not builder.block.is_terminated:
+                builder.branch(end_block)
+
+        builder.flux_exception_flag   = old_exc_flag
+        builder.flux_exception_value  = old_exc_value
+        builder.flux_exception_handler = None
+
+        builder.position_at_start(end_block)
+        return None
+
+    def visit_ThrowStatement(self, node, builder, module):
+        if not hasattr(builder, 'flux_exception_flag') or builder.flux_exception_flag is None:
+            raise RuntimeError(f"throw statement used outside of try block [{node.source_line}:{node.source_col}]")
+
+        exc_flag  = builder.flux_exception_flag
+        exc_value = builder.flux_exception_value
+
+        exc_val = self.visit(node.expression, builder, module)
+
+        if isinstance(exc_val.type, ir.IntType):
+            if exc_val.type.width < 64:
+                exc_val_i64 = builder.zext(exc_val, ir.IntType(64), name='exc_zext')
+            elif exc_val.type.width > 64:
+                exc_val_i64 = builder.trunc(exc_val, ir.IntType(64), name='exc_trunc')
+            else:
+                exc_val_i64 = exc_val
+        else:
+            exc_val_i64 = builder.bitcast(exc_val, ir.IntType(64))
+
+        builder.store(exc_val_i64, exc_value)
+        builder.store(ir.Constant(ir.IntType(1), 1), exc_flag)
+
+        if hasattr(builder, 'flux_exception_handler') and builder.flux_exception_handler is not None:
+            builder.branch(builder.flux_exception_handler)
+        else:
+            builder.unreachable()
+
+        return None
+
+    def visit_AssertStatement(self, node, builder, module):
+        from fast import Literal as _Lit
+        cond_val = self.visit(node.condition, builder, module)
+
+        if not isinstance(cond_val.type, ir.IntType) or cond_val.type.width != 1:
+            zero = ir.Constant(cond_val.type, 0)
+            cond_val = builder.icmp_signed('!=', cond_val, zero)
+
+        func = builder.block.function
+        pass_block = func.append_basic_block('assert.pass')
+        fail_block = func.append_basic_block('assert.fail')
+
+        builder.cbranch(cond_val, pass_block, fail_block)
+
+        builder.position_at_start(fail_block)
+
+        if node.message:
+            if isinstance(node.message, str):
+                msg_bytes = node.message.encode('ascii')
+                msg_type  = ir.ArrayType(ir.IntType(8), len(msg_bytes))
+                msg_const = ir.Constant(msg_type, bytearray(msg_bytes))
+                msg_gv = ir.GlobalVariable(module, msg_type, name=f"assert_msg_{id(node)}")
+                msg_gv.initializer    = msg_const
+                msg_gv.linkage        = 'internal'
+                msg_gv.global_constant = True
+                zero    = ir.Constant(ir.IntType(32), 0)
+                msg_ptr = builder.gep(msg_gv, [zero, zero], inbounds=True)
+            else:
+                msg_val = self.visit(node.message, builder, module)
+                if isinstance(msg_val.type, ir.PointerType) and isinstance(msg_val.type.pointee, ir.ArrayType):
+                    zero    = ir.Constant(ir.IntType(32), 0)
+                    msg_ptr = builder.gep(msg_val, [zero, zero], inbounds=True, name="assert_msg_ptr")
+                else:
+                    msg_ptr = msg_val
+
+            print_fn = module.globals.get('print')
+            if print_fn is not None:
+                builder.call(print_fn, [msg_ptr])
+            else:
+                puts_fn = module.globals.get('puts')
+                if puts_fn is None:
+                    puts_type = ir.FunctionType(ir.IntType(32), [ir.PointerType(ir.IntType(8))])
+                    puts_fn   = ir.Function(module, puts_type, 'puts')
+                    puts_fn.linkage = 'external'
+                builder.call(puts_fn, [msg_ptr])
+
+        exit_proc = module.globals.get('ExitProcess')
+        if exit_proc is None:
+            exit_proc_type = ir.FunctionType(ir.VoidType(), [ir.IntType(32)])
+            exit_proc = ir.Function(module, exit_proc_type, 'ExitProcess')
+            exit_proc.linkage = 'external'
+        builder.call(exit_proc, [ir.Constant(ir.IntType(32), 1)])
+        builder.unreachable()
+
+        builder.position_at_start(pass_block)
+        return None
+
+    # ------------------------------------------------------------------
+    # Tier 5 — declarations  [DONE]
+    # ------------------------------------------------------------------
+
+    def visit_FunctionDef(self, node, builder, module):
+        ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(node.return_type, module)
+
+        param_types = []
+        param_metadata = FunctionTypeHandler.build_param_metadata(node.parameters, module)
+        for param in node.parameters:
+            param_type = FunctionTypeHandler.convert_type_spec_to_llvm(param.type_spec, module)
+            param_types.append(param_type)
+
+        func_type = ir.FunctionType(ret_type, param_types, var_arg=node.is_variadic)
+        mangled_name = SymbolTable.mangle_function_name(node.name, node.parameters, node.return_type, node.no_mangle)
+
+        if mangled_name in module.globals:
+            existing_func = module.globals[mangled_name]
+            if isinstance(existing_func, ir.Function):
+                if node.is_prototype:
+                    func = existing_func
+                elif existing_func.is_declaration and len(existing_func.args) == len(node.parameters):
+                    func = existing_func
+                elif existing_func.is_declaration and len(existing_func.args) != len(node.parameters):
+                    disambig_name = f"{mangled_name}__{len(node.parameters)}args"
+                    if disambig_name in module.globals:
+                        func = module.globals[disambig_name]
+                    else:
+                        func = ir.Function(module, func_type, disambig_name)
+                    base_name = node.name.split('::')[-1] if '::' in node.name else node.name
+                    SymbolTable.register_function_overload(module, base_name, disambig_name, node.parameters, node.return_type, func)
+                else:
+                    raise ValueError(f"Function '{node.name}' with signature '{mangled_name}' redefined [{node.source_line}:{node.source_col}]")
+            else:
+                raise ValueError(f"Name '{mangled_name}' already used for non-function [{node.source_line}:{node.source_col}]")
+        else:
+            func = ir.Function(module, func_type, mangled_name)
+            if hasattr(module, 'symbol_table') and module.symbol_table.current_namespace:
+                base_name = node.name
+            else:
+                base_name = node.name.split('::')[-1] if '::' in node.name else node.name
+            #print(f"[FUNC REG] Registering {base_name} (mangled: {mangled_name})", file=sys.stdout)
+            SymbolTable.register_function_overload(module, base_name, mangled_name, node.parameters, node.return_type, func)
+            #print(f"[FUNC REG] Registered! Overloads for {base_name}: {len(module._function_overloads.get(base_name, []))}", file=sys.stdout)
+            if hasattr(module, 'symbol_table'):
+                try:
+                    #print(f"DEFINING FUNCTION: {base_name} -> {mangled_name}", file=sys.stdout)
+                    module.symbol_table.define(
+                        base_name,
+                        SymbolKind.FUNCTION,
+                        type_spec=node.return_type,
+                        llvm_type=func_type,
+                        llvm_value=func)
+                    if base_name != node.name:
+                        module.symbol_table.define(
+                            node.name,
+                            SymbolKind.FUNCTION,
+                            type_spec=node.return_type,
+                            llvm_type=func_type,
+                            llvm_value=func)
+                except Exception as e:
+                    import traceback as _tb
+                    print(f"[ERROR] Failed to register function in symbol table:", file=sys.stdout)
+                    print(f"[ERROR]   base_name={base_name}", file=sys.stdout)
+                    print(f"[ERROR]   self.name={node.name}", file=sys.stdout)
+                    print(f"[ERROR]   mangled_name={mangled_name}", file=sys.stdout)
+                    print(f"[ERROR]   symbol_table type: {type(module.symbol_table)}", file=sys.stdout)
+                    print(f"[ERROR]   symbol_table.scope_level: {module.symbol_table.scope_level if hasattr(module, 'symbol_table') else 'N/A'}", file=sys.stdout)
+                    print(f"[ERROR]   symbol_table.current_namespace: {module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else 'N/A'}", file=sys.stdout)
+                    print(f"[ERROR]   symbol_table.scopes: {module.symbol_table.scopes if hasattr(module, 'symbol_table') else 'N/A'}", file=sys.stdout)
+                    print(f"[ERROR]   Exception type: {type(e).__name__}", file=sys.stdout)
+                    print(f"[ERROR]   Exception: {e}", file=sys.stdout)
+                    _tb.print_exc()
+                    raise
+
+        if node.is_prototype:
+            if node.calling_conv:
+                llvm_cc = CALLING_CONV_MAP.get(node.calling_conv, node.calling_conv)
+                func.calling_convention = llvm_cc
+            return func
+
+        if node.calling_conv:
+            llvm_cc = CALLING_CONV_MAP.get(node.calling_conv, node.calling_conv)
+            func.calling_convention = llvm_cc
+
+        for i, param in enumerate(func.args):
+            if node.parameters[i].name is not None:
+                param.name = node.parameters[i].name
+            else:
+                param.name = f"arg{i}"
+
+        entry_block = func.append_basic_block('entry')
+        builder.position_at_start(entry_block)
+
+        builder._flux_is_recursive_func = node.is_recursive
+
+        builder._flux_label_blocks = {'entry': entry_block}
+        for label_name in _collect_label_names(node.body.statements):
+            if label_name not in builder._flux_label_blocks:
+                builder._flux_label_blocks[label_name] = func.append_basic_block(label_name)
+
+        module.symbol_table.enter_scope()
+        if not hasattr(builder, 'initialized_unions'):
+            builder.initialized_unions = set()
+
+        for i, param in enumerate(func.args):
+            param_name = node.parameters[i].name if node.parameters[i].name is not None else f"arg{i}"
+            alloca = builder.alloca(param.type, name=f"{param_name}.addr")
+            param_type_spec = node.parameters[i].type_spec
+            if param_type_spec is not None:
+                alloca._flux_type_spec = param_type_spec
+            param_with_metadata = TypeSystem.attach_type_metadata(param, type_spec=param_type_spec)
+            builder.store(param_with_metadata, alloca)
+            module.symbol_table.define(
+                param_name,
+                SymbolKind.VARIABLE,
+                type_spec=param_type_spec,
+                llvm_value=alloca
+            )
+
+        if node.is_variadic:
+            va_list_type = ir.ArrayType(ir.IntType(8).as_pointer(), 1)
+            va_list_alloca = builder.alloca(va_list_type, name="va_list")
+            va_list_i8ptr = builder.bitcast(va_list_alloca, ir.IntType(8).as_pointer(), name="va_list_ptr")
+            va_start_type = ir.FunctionType(ir.VoidType(), [ir.IntType(8).as_pointer()])
+            if 'llvm.va_start' not in module.globals:
+                va_start_fn = ir.Function(module, va_start_type, 'llvm.va_start')
+            else:
+                va_start_fn = module.globals['llvm.va_start']
+            builder.call(va_start_fn, [va_list_i8ptr])
+            builder._flux_va_list = va_list_alloca
+            builder._flux_va_list_i8ptr = va_list_i8ptr
+            builder._flux_va_end_fn = None
+            va_end_type = ir.FunctionType(ir.VoidType(), [ir.IntType(8).as_pointer()])
+            if 'llvm.va_end' not in module.globals:
+                va_end_fn = ir.Function(module, va_end_type, 'llvm.va_end')
+            else:
+                va_end_fn = module.globals['llvm.va_end']
+            builder._flux_va_end_fn = va_end_fn
+
+        try:
+            self.visit(node.body, builder, module)
+        finally:
+            module.symbol_table.exit_scope()
+
+        if not builder.block.is_terminated:
+            if isinstance(ret_type, ir.VoidType):
+                if node.is_recursive:
+                    call_instr = builder.call(func, list(func.args))
+                    call_instr.tail = "musttail"
+                builder.ret_void()
+            else:
+                raise RuntimeError(f"Function '{node.name}' must end with return statement [{node.source_line}:{node.source_col}]")
+
+        return func
+
+    def visit_FunctionPointerDeclaration(self, node, builder, module):
+        ptr_type = FunctionPointerType.get_llvm_pointer_type(node.fp_type, module)
+        resolved_type_spec = None
+
+        _flux_cc = None
+        if node.fp_type.calling_conv:
+            _flux_cc = CALLING_CONV_MAP.get(node.fp_type.calling_conv, node.fp_type.calling_conv)
+
+        if not hasattr(module, '_flux_fp_calling_convs'):
+            module._flux_fp_calling_convs = {}
+
+        if module.symbol_table.is_global_scope():
+            gvar = ir.GlobalVariable(module, ptr_type, node.name)
+            gvar.linkage = 'internal'
+            if _flux_cc:
+                module._flux_fp_calling_convs[node.name] = _flux_cc
+            if node.initializer:
+                init_val = self.visit(node.initializer, builder, module)
+                if isinstance(init_val, ir.Function):
+                    init_val = init_val.bitcast(ptr_type)
+                elif isinstance(init_val, (ir.GlobalVariable, ir.Constant)) and isinstance(init_val.type, ir.PointerType) and init_val.type != ptr_type:
+                    init_val = init_val.bitcast(ptr_type)
+                gvar.initializer = init_val
+            else:
+                gvar.initializer = ir.Constant(ptr_type, None)
+            return gvar
+        else:
+            alloca = builder.alloca(ptr_type, name=node.name)
+            if _flux_cc:
+                module._flux_fp_calling_convs[node.name] = _flux_cc
+            module.symbol_table.define(node.name, SymbolKind.VARIABLE, type_spec=resolved_type_spec, llvm_value=alloca)
+            if node.initializer:
+                init_val = self.visit(node.initializer, builder, module)
+                if isinstance(init_val, ir.Function):
+                    func_as_int = builder.ptrtoint(init_val, ir.IntType(64))
+                    init_val = builder.inttoptr(func_as_int, ptr_type)
+                elif isinstance(init_val.type, ir.IntType):
+                    if init_val.type.width != 64:
+                        init_val = builder.zext(init_val, ir.IntType(64), name="fp_addr_ext")
+                    init_val = builder.inttoptr(init_val, ptr_type, name="fp_from_int")
+                elif isinstance(init_val.type, ir.PointerType) and init_val.type != ptr_type:
+                    init_val = builder.bitcast(init_val, ptr_type)
+                builder.store(init_val, alloca)
+            return alloca
+
+    def visit_FunctionPointerAssignment(self, node, builder, module):
+        raise NotImplementedError(
+            f"FunctionPointerAssignment has no codegen implementation [{node.source_line}:{node.source_col}]")
+
+    def visit_EnumDef(self, node, builder, module):
+        if not hasattr(module, '_enum_types'):
+            module._enum_types = {}
+
+        if node.name in module._enum_types:
+            existing_values = module._enum_types[node.name]
+            if not node.values:
+                return
+            if existing_values:
+                raise ValueError(f"Enum '{node.name}' already defined [{node.source_line}:{node.source_col}]")
+
+        module._enum_types[node.name] = node.values
+
+        if not node.values:
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.define(
+                    node.name, SymbolKind.ENUM,
+                    type_spec=None, llvm_type=ir.IntType(32), llvm_value=None)
+            return
+
+        if hasattr(module, 'symbol_table'):
+            #print(f"[ENUM] Registering enum '{node.name}' in symbol table", file=sys.stdout)
+            module.symbol_table.define(
+                node.name, SymbolKind.ENUM,
+                type_spec=None, llvm_type=ir.IntType(32), llvm_value=None)
+
+        for name, value in node.values.items():
+            const_name = f"{node.name}.{name}"
+            const_value = ir.Constant(ir.IntType(32), value)
+            global_const = ir.GlobalVariable(module, ir.IntType(32), name=const_name)
+            global_const.initializer = const_value
+            global_const.global_constant = True
+            if hasattr(module, 'symbol_table'):
+                full_name = f"{node.name}.{name}"
+                module.symbol_table.define(
+                    full_name, SymbolKind.VARIABLE,
+                    type_spec=None, llvm_type=ir.IntType(32), llvm_value=global_const)
+
+    def visit_UnionDef(self, node, builder, module):
+        member_types = []
+        member_names = []
+        max_size = 0
+        max_type = None
+
+        for member in node.members:
+            member_type = TypeSystem.get_llvm_type(member.type_spec, module)
+            if isinstance(member_type, str):
+                if hasattr(module, '_type_aliases') and member_type in module._type_aliases:
+                    member_type = module._type_aliases[member_type]
+                else:
+                    raise ValueError(f"Unknown type: {member_type} [{node.source_line}:{node.source_col}]")
+            member_types.append(member_type)
+            member_names.append(member.name)
+
+            if hasattr(member_type, 'width'):
+                size = (member_type.width + 7) // 8
+            elif isinstance(member_type, ir.FloatType):
+                size = 4
+            elif isinstance(member_type, ir.DoubleType):
+                size = 8
+            elif isinstance(member_type, ir.PointerType):
+                size = 8
+            elif isinstance(member_type, ir.ArrayType):
+                elem = member_type.element
+                if hasattr(elem, 'width'):
+                    elem_size = (elem.width + 7) // 8
+                elif isinstance(elem, ir.FloatType):
+                    elem_size = 4
+                elif isinstance(elem, ir.DoubleType):
+                    elem_size = 8
+                else:
+                    elem_size = 8
+                size = elem_size * member_type.count
+            elif isinstance(member_type, ir.LiteralStructType):
+                total = 0
+                for elem in member_type.elements:
+                    if hasattr(elem, 'width'):
+                        total += (elem.width + 7) // 8
+                    elif isinstance(elem, ir.FloatType):
+                        total += 4
+                    elif isinstance(elem, ir.DoubleType):
+                        total += 8
+                    else:
+                        total += 8
+                size = total
+            else:
+                size = 8
+
+            if size > max_size:
+                max_size = size
+                max_type = member_type
+
+        if node.tag_name:
+            if not hasattr(module, '_enum_types') or node.tag_name not in module._enum_types:
+                raise ValueError(f"Tag '{node.tag_name}' is not a defined enum type [{node.source_line}:{node.source_col}]")
+            tag_type = ir.IntType(32)
+            data_type = ir.ArrayType(ir.IntType(8), max_size)
+            union_type = ir.LiteralStructType([tag_type, data_type])
+            union_type.names = [f"{node.name}_tagged"]
+        else:
+            union_type = ir.LiteralStructType([max_type])
+            union_type.names = [node.name]
+
+        if not hasattr(module, '_union_types'):
+            module._union_types = {}
+        module._union_types[node.name] = union_type
+
+        if not hasattr(module, '_union_member_info'):
+            module._union_member_info = {}
+        module._union_member_info[node.name] = {
+            'member_types': member_types,
+            'member_names': member_names,
+            'max_size': max_size,
+            'tag_name': node.tag_name,
+            'is_tagged': bool(node.tag_name)
+        }
+
+        if hasattr(module, 'symbol_table'):
+            #print(f"[UNION] Registering union '{node.name}' in symbol table", file=sys.stdout)
+            module.symbol_table.define(
+                node.name, SymbolKind.UNION,
+                type_spec=None, llvm_type=union_type, llvm_value=None)
+
+        return union_type
+
+    def visit_StructDef(self, node, builder, module):
+        StructTypeHandler.initialize_struct_storage(module)
+
+        if node.name in module._struct_types:
+            existing_struct = module._struct_types[node.name]
+            if not node.members:
+                return existing_struct
+            if existing_struct.elements:
+                return existing_struct
+            opaque_struct = existing_struct
+        else:
+            opaque_struct = ir.global_context.get_identified_type(node.name)
+            opaque_struct.names = []
+            module._struct_types[node.name] = opaque_struct
+
+        if not node.members:
+            return opaque_struct
+
+        node.vtable = node.calculate_vtable(module)
+
+        field_types = [node.vtable.field_types[field_name] for field_name, _, _, _ in node.vtable.fields]
+        opaque_struct.set_body(*field_types)
+        opaque_struct.names = [field_name for field_name, _, _, _ in node.vtable.fields]
+
+        vtable_constant = node.vtable.to_llvm_constant(module)
+        vtable_global = ir.GlobalVariable(module, vtable_constant.type, name=f"{node.name}.TLD")
+        vtable_global.initializer = vtable_constant
+        vtable_global.linkage = 'internal'
+        vtable_global.global_constant = True
+
+        module._struct_vtables[node.name] = node.vtable
+
+        if hasattr(module, 'symbol_table'):
+            #print(f"[STRUCT] Registering struct '{node.name}' in symbol table", file=sys.stdout)
+            module.symbol_table.define(
+                node.name, SymbolKind.STRUCT,
+                type_spec=None, llvm_type=opaque_struct, llvm_value=vtable_global)
+
+        member_type_specs = {}
+        for member in node.members:
+            name = member.name
+            type_spec = member.type_spec
+            if isinstance(type_spec, TypeSystem) and type_spec.is_array:
+                if isinstance(type_spec, DataType):
+                    is_signed_value = type_spec in (DataType.SINT, DataType.CHAR, DataType.FLOAT, DataType.DOUBLE)
+                elif hasattr(type_spec, 'is_signed'):
+                    is_signed_value = type_spec.is_signed
+                else:
+                    is_signed_value = True
+                if hasattr(type_spec, 'custom_typename') and type_spec.custom_typename and hasattr(module, '_type_alias_specs'):
+                    if type_spec.custom_typename in module._type_alias_specs:
+                        alias_spec = module._type_alias_specs[type_spec.custom_typename]
+                        if hasattr(alias_spec, 'is_signed'):
+                            is_signed_value = alias_spec.is_signed
+                if isinstance(type_spec, TypeSystem):
+                    element_type_spec = TypeSystem(
+                        base_type=type_spec.base_type,
+                        is_signed=is_signed_value,
+                        bit_width=type_spec.bit_width if hasattr(type_spec, 'bit_width') else None,
+                        custom_typename=type_spec.custom_typename if hasattr(type_spec, 'custom_typename') else None,
+                        is_const=type_spec.is_const if hasattr(type_spec, 'is_const') else False,
+                        is_volatile=type_spec.is_volatile if hasattr(type_spec, 'is_volatile') else False,
+                        storage_class=type_spec.storage_class if hasattr(type_spec, 'storage_class') else None,
+                        is_array=False, array_size=None, array_dimensions=None,
+                        is_pointer=False, pointer_depth=0
+                    )
+                elif isinstance(type_spec, DataType):
+                    element_type_spec = TypeSystem(
+                        base_type=type_spec, is_signed=is_signed_value,
+                        bit_width=None, custom_typename=None,
+                        is_const=False, is_volatile=False, storage_class=None,
+                        is_array=False, array_size=None, array_dimensions=None,
+                        is_pointer=False, pointer_depth=0
+                    )
+                else:
+                    raise TypeError(f"Expected TypeSystem or DataType, got {type(type_spec)} [{node.source_line}:{node.source_col}]")
+                type_spec.array_element_type = element_type_spec
+            member_type_specs[name] = type_spec
+        # DEBUG: Print member type specs
+        #print(f"[STRUCT] Storing member specs for {node.name}", file=sys.stdout)
+        #for mem_name, mem_spec in member_type_specs.items():
+        #    print(f"  {mem_name}: is_array={mem_spec.is_array}, array_element_type={mem_spec.array_element_type}", file=sys.stdout)
+        #    if mem_spec.array_element_type:
+        #        print(f"    element is_signed={mem_spec.array_element_type.is_signed}", file=sys.stdout)
+        module._struct_member_type_specs[node.name] = member_type_specs
+
+        if node.storage_class is not None:
+            module._struct_storage_classes[node.name] = node.storage_class
+
+        for member in node.members:
+            if member.initial_value is not None:
+                if not hasattr(module, '_struct_member_defaults'):
+                    module._struct_member_defaults = {}
+                member_key = f"{node.name}.{member.name}"
+                module._struct_member_defaults[member_key] = member.initial_value
+
+        for nested in node.nested_structs:
+            self.visit(nested, builder, module)
+
+        return opaque_struct
+
+    def visit_StructFieldAssign(self, node, builder, module):
+        instance_ptr = self.visit(node.struct_instance, builder, module)
+        instance = builder.load(instance_ptr)
+        struct_name = StructTypeHandler.infer_struct_name(instance, module)
+        vtable = module._struct_vtables[struct_name]
+        new_value = self.visit(node.value, builder, module)
+        return StructTypeHandler.assign_field_value(
+            builder, module, instance_ptr, struct_name, node.field_name, new_value, vtable)
+
+    def visit_ObjectDef(self, node, builder, module):
+        ObjectTypeHandler.initialize_object_storage(module)
+
+        type_already_registered = False
+        if hasattr(module, '_struct_types') and node.name in module._struct_types:
+            existing_type = module._struct_types[node.name]
+            if not node.members and not node.methods:
+                return existing_type
+            if existing_type.elements:
+                struct_type = existing_type
+                type_already_registered = True
+
+        if not type_already_registered:
+            if not node.members and not node.methods:
+                opaque_struct = ir.global_context.get_identified_type(node.name)
+                opaque_struct.names = []
+                if not hasattr(module, '_struct_types'):
+                    module._struct_types = {}
+                module._struct_types[node.name] = opaque_struct
+                if hasattr(module, 'symbol_table'):
+                    module.symbol_table.define(
+                        node.name, SymbolKind.OBJECT,
+                        type_spec=None, llvm_type=opaque_struct, llvm_value=None)
+                return opaque_struct
+
+            member_types, member_names = ObjectTypeHandler.create_member_types(node.members, module)
+            struct_type = ObjectTypeHandler.create_struct_type(node.name, member_types, member_names, module)
+            fields = ObjectTypeHandler.calculate_field_layout(node.members, member_types)
+            ObjectTypeHandler.create_vtable(node.name, fields, module)
+
+            if hasattr(module, 'symbol_table'):
+                #print(f"[OBJECT] Registering object '{node.name}' in symbol table", file=sys.stdout)
+                module.symbol_table.define(
+                    node.name, SymbolKind.OBJECT,
+                    type_spec=None, llvm_type=struct_type, llvm_value=None)
+
+        method_funcs = {}
+        for method in node.methods:
+            func_type, func_name = ObjectTypeHandler.create_method_signature(
+                node.name, method.name, method, struct_type, module)
+            func = ObjectTypeHandler.predeclare_method(func_type, func_name, method, module)
+            method_funcs[func_name] = func
+
+        for method in node.methods:
+            from fast import FunctionDef as _FunctionDef
+            if isinstance(method, _FunctionDef) and method.is_prototype:
+                continue
+            _, func_name = ObjectTypeHandler.create_method_signature(
+                node.name, method.name, method, struct_type, module)
+            func = method_funcs.get(func_name)
+            if func is None:
+                raise RuntimeError(f"Internal error: missing function for method {method.name} [{node.source_line}:{node.source_col}]")
+            ObjectTypeHandler.emit_method_body(method, func, node.name, module)
+
+        if node.traits and hasattr(module, 'symbol_table'):
+            implemented_names = {m.name for m in node.methods}
+            for trait_name in node.traits:
+                required = module.symbol_table._trait_registry.get(trait_name)
+                if required is None:
+                    raise ValueError(f"Object '{node.name}' does not implement required functions from '{trait_name}' trait [{node.source_line}:{node.source_col}]")
+                for proto in required:
+                    if proto.name not in implemented_names:
+                        raise ValueError(
+                            f"Object '{node.name}' does not implement required functions from '{trait_name}' trait [{node.source_line}:{node.source_col}]")
+
+        return struct_type
+
+    def visit_ExternBlock(self, node, builder, module):
+        for func_def in node.declarations:
+            if not func_def.is_prototype:
+                raise ValueError(f"Extern functions must be prototypes (no body): {func_def.name} [{node.source_line}:{node.source_col}]")
+            ret_type = TypeSystem.get_llvm_type(func_def.return_type, module)
+            param_types = [TypeSystem.get_llvm_type(param.type_spec, module) for param in func_def.parameters]
+            func_type = ir.FunctionType(ret_type, param_types)
+            func_name = func_def.name or ""
+            base_name = func_name
+            if "::" in base_name:
+                base_name = base_name.split("::")[-1]
+            if "__" in base_name:
+                base_name = base_name.split("__")[-1]
+            if func_def.no_mangle:
+                final_name = base_name
+            else:
+                final_name = SymbolTable.mangle_function_name(base_name, func_def.parameters, func_def.return_type, False)
+            if final_name in module.globals:
+                func = module.globals[final_name]
+                if not isinstance(func, ir.Function):
+                    raise ValueError(f"Name '{final_name}' already used for non-function [{node.source_line}:{node.source_col}]")
+            else:
+                func = ir.Function(module, func_type, final_name)
+            func.linkage = 'external'
+            for i, param in enumerate(func.args):
+                if i < len(func_def.parameters):
+                    if func_def.parameters[i].name is not None:
+                        param.name = func_def.parameters[i].name
+                    else:
+                        param.name = f"arg{i}"
+
+    def visit_NamespaceDef(self, node, builder, module):
+        if hasattr(module, '_excluded_namespaces'):
+            if node.name in module._excluded_namespaces:
+                #print(f"[NAMESPACE] Skipping excluded namespace: {node.name}", file=sys.stdout)
+                return
+            for excluded_ns in module._excluded_namespaces:
+                if node.name.startswith(excluded_ns + "__"):
+                    #print(f"[NAMESPACE] Skipping namespace {node.name} (parent {excluded_ns} is excluded)", file=sys.stdout)
+                    return
+
+        #print(f"[NAMESPACE] Processing namespace: {node.name}", file=sys.stdout)
+        #print(f"[NAMESPACE]   Functions: {len(node.functions)}", file=sys.stdout)
+        #print(f"[NAMESPACE]   Nested namespaces: {len(node.nested_namespaces)}", file=sys.stdout)
+        SymbolTable.register_namespace(module, node.name)
+
+        for nested_ns in node.nested_namespaces:
+            full_nested_name = f"{node.name}__{nested_ns.name}"
+            #print("FULL NESTED NAME:", full_nested_name)
+            SymbolTable.register_namespace(module, full_nested_name)
+            SymbolTable.register_nested_namespaces(nested_ns, full_nested_name, module)
+
+        #NamespaceTypeHandler.add_using_namespace(module, node.name)
+
+        if not hasattr(module, 'symbol_table'):
+            raise RuntimeError(f"Module must have symbol_table for namespace support [{node.source_line}:{node.source_col}]")
+
+        original_namespace = module.symbol_table.current_namespace
+        module.symbol_table.set_namespace(node.name)
+
+        if builder is None or not hasattr(builder, 'block') or builder.block is None:
+            work_builder = NamespaceTypeHandler.create_static_init_builder(module)
+        else:
+            work_builder = builder
+
+        for nested_ns in node.nested_namespaces:
+            NamespaceTypeHandler.process_nested_namespace(node.name, nested_ns, work_builder, module)
+
+        for var in node.variables:
+            try:
+                NamespaceTypeHandler.process_namespace_variable(node.name, var, module)
+            except Exception as e:
+                var_name = getattr(var, 'name', '<unknown>')
+                print(f"\nError processing variable '{var_name}' in namespace '{node.name}':")
+                import traceback as _tb
+                _tb.print_exc()
+                raise
+
+        for enum in node.enums:
+            NamespaceTypeHandler.process_namespace_enum(node.name, enum, work_builder, module)
+
+        for struct in node.structs:
+            NamespaceTypeHandler.process_namespace_struct(node.name, struct, work_builder, module)
+
+        for extern_block in node.extern_blocks:
+            self.visit(extern_block, work_builder, module)
+
+        for obj in node.objects:
+            from fast import TraitDef as _TraitDef
+            if not isinstance(obj, _TraitDef):
+                NamespaceTypeHandler.process_namespace_object_type_only(node.name, obj, module)
+
+        for func in node.functions:
+            NamespaceTypeHandler.process_namespace_function(node.name, func, work_builder, module)
+
+        for obj in node.objects:
+            from fast import TraitDef as _TraitDef
+            if isinstance(obj, _TraitDef):
+                self.visit(obj, work_builder, module)
+            else:
+                NamespaceTypeHandler.process_namespace_object(node.name, obj, work_builder, module)
+
+        NamespaceTypeHandler.finalize_static_init(module)
+
+        module._current_namespace = original_namespace
+        module.symbol_table.set_namespace(original_namespace)
+        return None
+
+    # ------------------------------------------------------------------
+    # Tier 6 — wrapper statements  [DONE]
+    # Thin shells that delegate to the inner definition node.
+    # ------------------------------------------------------------------
+
+    def visit_FunctionDefStatement(self, node, builder, module):
+        self.visit(node.function_def, builder, module)
+        return None
+
+    def visit_EnumDefStatement(self, node, builder, module):
+        self.visit(node.enum_def, builder, module)
+        return None
+
+    def visit_UnionDefStatement(self, node, builder, module):
+        self.visit(node.union_def, builder, module)
+        return None
+
+    def visit_StructDefStatement(self, node, builder, module):
+        self.visit(node.struct_def, builder, module)
+        return None
+
+    def visit_ObjectDefStatement(self, node, builder, module):
+        self.visit(node.object_def, builder, module)
+        return None
+
+    def visit_NamespaceDefStatement(self, node, builder, module):
+        if (hasattr(module, '_excluded_namespaces') and
+                node.namespace_def.name in module._excluded_namespaces):
+            return None
+        self.visit(node.namespace_def, builder, module)
+        return None
+
+    # ------------------------------------------------------------------
+    # Tier 1 supplement — Identifier  [DONE]
+    # ------------------------------------------------------------------
+
+    def visit_Identifier(self, node, builder, module):
+        #print(f"[IDENTIFIER] Looking up '{node.name}'", file=sys.stdout)
+        #print(f"[IDENTIFIER]   Scope level: {module.symbol_table.scope_level}", file=sys.stdout)
+        #print(f"[IDENTIFIER]   Scopes count: {len(module.symbol_table.scopes)}", file=sys.stdout)
+
+        # Look up the name in the current scope
+        if not module.symbol_table.is_global_scope() and module.symbol_table.get_llvm_value(node.name) is not None:
+            ptr = module.symbol_table.get_llvm_value(node.name)
+
+            # Get type information if available
+            type_spec = TypeResolver.resolve_type_spec(node.name, module)
+            #print("TYPE SPEC FROM TYPE RESOLVER:",type_spec)
+
+            # Check validity (use after tie)
+            IdentifierTypeHandler.check_validity(node.name, builder)
+
+            # Handle special case for 'this' pointer
+            if node.name == "this":
+                return TypeSystem.attach_type_metadata(ptr, type_spec)
+
+            # For arrays and structs, return the pointer directly (don't load)
+            if IdentifierTypeHandler.should_return_pointer(ptr, type_spec):
+                return TypeSystem.attach_type_metadata(ptr, type_spec)
+
+            # Load the value if it's a non-array, non-struct pointer type
+            elif isinstance(ptr.type, ir.PointerType):
+                ret_val = builder.load(ptr, name=node.name)
+                if hasattr(ptr, '_flux_type_spec'):
+                    ret_val._flux_type_spec = ptr._flux_type_spec
+                if IdentifierTypeHandler.is_volatile(node.name, builder):
+                    ret_val.volatile = True
+                # Attach type metadata to loaded value from multiple sources
+                if not hasattr(ret_val, '_flux_type_spec'):
+                    # Priority 1: Check scope_type_info
+                    if type_spec:
+                        ret_val._flux_type_spec = type_spec
+                    # Priority 2: Check if alloca itself has metadata
+                    elif hasattr(ptr, '_flux_type_spec'):
+                        ret_val._flux_type_spec = ptr._flux_type_spec
+                return ret_val
+
+            # For non-pointer types, attach metadata and return
+            return TypeSystem.attach_type_metadata(ptr, type_spec)
+
+        # Check for global variables
+        if node.name in module.globals:
+            gvar = module.globals[node.name]
+            type_spec = module.symbol_table.get_type_spec(node.name)
+
+            # For arrays and structs, return the pointer directly (don't load)
+            if IdentifierTypeHandler.should_return_pointer(gvar, type_spec):
+                return TypeSystem.attach_type_metadata(gvar, type_spec)
+
+            # Load the value if it's a non-array, non-struct pointer type
+            elif isinstance(gvar.type, ir.PointerType):
+                ret_val = builder.load(gvar, name=node.name)
+                if IdentifierTypeHandler.is_volatile(node.name, builder):
+                    ret_val.volatile = True
+                return TypeSystem.attach_type_metadata(ret_val, type_spec)
+            return TypeSystem.attach_type_metadata(gvar, type_spec)
+
+        # Check if this is a custom type
+        if IdentifierTypeHandler.is_type_alias(node.name, module):
+            return module._type_aliases[node.name]
+
+        # Check for namespace-qualified names using 'using' statements
+        mangled_name = IdentifierTypeHandler.resolve_namespace_mangled_name(node.name, module)
+        if mangled_name:
+            # Check in global variables with mangled name
+            if mangled_name in module.globals:
+                gvar = module.globals[mangled_name]
+                type_spec = module.symbol_table.get_type_spec(mangled_name)
+                # For arrays and structs, return the pointer directly (don't load)
+                if IdentifierTypeHandler.should_return_pointer(gvar, type_spec):
+                    return TypeSystem.attach_type_metadata(gvar, type_spec)
+                # Load the value if it's a non-array, non-struct pointer type
+                elif isinstance(gvar.type, ir.PointerType):
+                    ret_val = builder.load(gvar, name=node.name)
+                    if IdentifierTypeHandler.is_volatile(node.name, builder):
+                        ret_val.volatile = True
+                    return TypeSystem.attach_type_metadata(ret_val, type_spec)
+
+                return TypeSystem.attach_type_metadata(gvar, type_spec)
+
+            # Check in type aliases with mangled name
+            if IdentifierTypeHandler.is_type_alias(mangled_name, module):
+                return module._type_aliases[mangled_name]
+
+        raise NameError(f"Unknown identifier: {node.name} [{node.source_line}:{node.source_col}]")
+
+    # ------------------------------------------------------------------
+    # Tier 5 supplement — VariableDeclaration  [DONE]
+    # ------------------------------------------------------------------
+
+    def visit_VariableDeclaration(self, node, builder, module):
+        # Resolve type (with automatic array size inference if needed)
+        resolved_type_spec = VariableTypeHandler.infer_array_size(node.type_spec, node.initial_value, module)
+        llvm_type = TypeSystem.get_llvm_type(resolved_type_spec, module, include_array=True)
+        #print(f"[VAR DECL] name={node.name}, type_spec={resolved_type_spec}, llvm_type={llvm_type}", file=sys.stdout)
+
+        # Check if this is global scope
+        is_global_scope = (
+            builder is None or
+            node.is_global or
+            module.symbol_table.is_global_scope()
+        )
+
+        # Handle global variables
+        if is_global_scope:
+            return self._vardecl_global(node, module, llvm_type, resolved_type_spec)
+
+        # Handle local variables
+        return self._vardecl_local(node, builder, module, llvm_type, resolved_type_spec)
+
+    def _vardecl_global(self, node, module, llvm_type, resolved_type_spec):
+        """Generate code for global variable."""
+        from fast import NoInit as _NoInit
+        # Check if global already exists
+        if node.name in module.globals:
+            return module.globals[node.name]
+
+        # Check for namespaced duplicates
+        base_name = node.name.split('__')[-1]
+        for existing_name in list(module.globals.keys()):
+            existing_base_name = existing_name.split('__')[-1]
+            if existing_base_name == base_name and existing_name != node.name:
+                return module.globals[existing_name]
+            elif existing_name == node.name:
+                return module.globals[existing_name]
+
+        # Create new global
+        gvar = ir.GlobalVariable(module, llvm_type, node.name)
+
+        # Handle noinit for global variables
+        if isinstance(node.initial_value, _NoInit):
+            gvar.initializer = ir.Undefined(llvm_type)
+        # Set initializer if value provided
+        elif node.initial_value:
+            init_const = self._vardecl_create_global_initializer(node, module, llvm_type)
+            if init_const is not None:
+                gvar.initializer = init_const
+            else:
+                gvar.initializer = TypeSystem.get_default_initializer(llvm_type)
+        else:
+            # Default behavior: zero-initialize
+            gvar.initializer = TypeSystem.get_default_initializer(llvm_type)
+
+        gvar.linkage = 'internal'
+
+        # Register global variable in symbol table
+        if hasattr(module, 'symbol_table'):
+            #print(f"[GLOBAL VAR] Registering global variable '{node.name}' in symbol table", file=sys.stdout)
+            module.symbol_table.define(
+                node.name,
+                SymbolKind.VARIABLE,
+                type_spec=resolved_type_spec,
+                llvm_type=llvm_type,
+                llvm_value=gvar
+            )
+
+        return gvar
+
+    def _vardecl_create_global_initializer(self, node, module, llvm_type):
+        """Create compile-time constant initializer for global variable."""
+        return VariableTypeHandler.create_global_initializer(node.initial_value, llvm_type, module)
+
+    def _vardecl_singinit(self, node, builder, module, llvm_type, resolved_type_spec):
+        """Generate code for a singinit (single-init, program-lifetime) local variable."""
+        from fast import NoInit as _NoInit, ArrayLiteral as _ArrayLiteral
+        func_name = builder.function.name
+        global_name = f"__singinit__{func_name}__{node.name}"
+        guard_name  = f"__singinit_guard__{func_name}__{node.name}"
+
+        # Create (or reuse) the backing global for the variable value
+        if global_name not in module.globals:
+            gvar = ir.GlobalVariable(module, llvm_type, global_name)
+            gvar.initializer = TypeSystem.get_default_initializer(llvm_type)
+            gvar.linkage = 'internal'
+        else:
+            gvar = module.globals[global_name]
+
+        # Create (or reuse) the init-guard (i1, false)
+        guard_type = ir.IntType(1)
+        if guard_name not in module.globals:
+            gguard = ir.GlobalVariable(module, guard_type, guard_name)
+            gguard.initializer = ir.Constant(guard_type, 0)
+            gguard.linkage = 'internal'
+        else:
+            gguard = module.globals[guard_name]
+
+        # Build the init-guard branch inline
+        cur_func   = builder.function
+        init_block = cur_func.append_basic_block(f"singinit_{node.name}_init")
+        done_block = cur_func.append_basic_block(f"singinit_{node.name}_done")
+
+        guard_val = builder.load(gguard, name=f"{node.name}_guard")
+        builder.cbranch(guard_val, done_block, init_block)
+
+        # init_block: initialize the global and set the guard
+        builder.position_at_end(init_block)
+        if node.initial_value and not isinstance(node.initial_value, _NoInit):
+            self._vardecl_initialize_singinit(node, builder, module, gvar, llvm_type, resolved_type_spec)
+        else:
+            if isinstance(llvm_type, ir.ArrayType) and llvm_type.count > 64:
+                i8_ptr_ty  = ir.PointerType(ir.IntType(8))
+                i8_ty      = ir.IntType(8)
+                i64_ty     = ir.IntType(64)
+                i1_ty      = ir.IntType(1)
+                elem = llvm_type.element
+                elem_bytes = (elem.width // 8) if isinstance(elem, ir.IntType) else 1
+                byte_count = llvm_type.count * elem_bytes
+                fnty    = ir.FunctionType(ir.VoidType(), [i8_ptr_ty, i8_ty, i64_ty, i1_ty])
+                ms_name = 'llvm.memset.p0i8.i64'
+                if ms_name not in module.globals:
+                    ir.Function(module, fnty, name=ms_name)
+                memset_fn = module.globals[ms_name]
+                cast_ptr  = builder.bitcast(gvar, i8_ptr_ty, name='memset_ptr')
+                builder.call(memset_fn, [
+                    cast_ptr,
+                    ir.Constant(i8_ty,  0),
+                    ir.Constant(i64_ty, byte_count),
+                    ir.Constant(i1_ty,  0),
+                ])
+            else:
+                zero = TypeSystem.get_default_initializer(llvm_type)
+                builder.store(zero, gvar)
+        builder.store(ir.Constant(guard_type, 1), gguard)
+        builder.branch(done_block)
+
+        # done_block: resume normal execution
+        builder.position_at_end(done_block)
+
+        # Register the global pointer in the symbol table so the rest of the
+        # function body can load/store it transparently
+        if resolved_type_spec:
+            gvar._flux_type_spec = resolved_type_spec
+        module.symbol_table.define(node.name, SymbolKind.VARIABLE,
+                                   type_spec=resolved_type_spec, llvm_value=gvar)
+        return gvar
+
+    def _vardecl_initialize_singinit(self, node, builder, module, gvar, llvm_type, resolved_type_spec):
+        """Initialize the backing global of a singinit variable."""
+        from fast import ArrayLiteral as _ArrayLiteral
+        if isinstance(node.initial_value, _ArrayLiteral):
+            if isinstance(llvm_type, ir.IntType):
+                packed_val = ArrayTypeHandler.pack_array_to_integer(builder, module, node.initial_value, llvm_type)
+                builder.store(packed_val, gvar)
+            else:
+                ArrayTypeHandler.initialize_local_array(builder, module, gvar, llvm_type, node.initial_value)
+            return
+        init_val = self.visit(node.initial_value, builder, module)
+        if hasattr(init_val, 'type') and init_val.type != llvm_type:
+            init_val = TypeSystem.cast_value(builder, module, init_val, llvm_type, resolved_type_spec)
+        builder.store(init_val, gvar)
+
+    def _vardecl_local(self, node, builder, module, llvm_type, resolved_type_spec):
+        """Generate code for local variable."""
+        from fast import NoInit as _NoInit, FunctionCall as _FunctionCall, ArrayLiteral as _ArrayLiteral, ArrayComprehension as _ArrayComprehension, StringLiteral as _StringLiteral, Identifier as _Identifier
+        # Handle singinit: single-init, program-lifetime, function-scoped variable
+        if (resolved_type_spec is not None and
+                resolved_type_spec.storage_class == StorageClass.SINGINIT):
+            return self._vardecl_singinit(node, builder, module, llvm_type, resolved_type_spec)
+
+        # If this is a constructor call and llvm_type resolved to i8* (void pointer),
+        # the type was polluted by a local variable named the same as the object type.
+        # Recover the correct struct type from the constructor's this parameter.
+        if (isinstance(node.initial_value, _FunctionCall) and
+                node.initial_value.name.endswith('.__init') and
+                isinstance(llvm_type, ir.PointerType) and
+                isinstance(llvm_type.pointee, ir.IntType) and
+                llvm_type.pointee.width == 8):
+            func = TypeResolver.resolve_function(module, node.initial_value.name)
+            if func is None and hasattr(module, '_using_namespaces'):
+                for namespace in module._using_namespaces:
+                    mangled = f"{namespace}__{node.initial_value.name}"
+                    func = TypeResolver.resolve_function(module, mangled)
+                    if func:
+                        break
+            if func and func.args and isinstance(func.args[0].type, ir.PointerType):
+                llvm_type = func.args[0].type.pointee
+
+        # Check for VLA: type_spec says is_array with a runtime expression dimension,
+        # so get_llvm_type returned PointerType(element) instead of ArrayType.
+        # Use alloca with a dynamic count so the result is element* not element**.
+        if (isinstance(llvm_type, ir.PointerType) and
+                resolved_type_spec is not None and
+                resolved_type_spec.is_array):
+            dim_expr = None
+            if resolved_type_spec.array_dimensions:
+                dim_expr = resolved_type_spec.array_dimensions[0]
+            elif resolved_type_spec.array_size is not None:
+                dim_expr = resolved_type_spec.array_size
+            if dim_expr is not None and not isinstance(dim_expr, int) and not (hasattr(dim_expr, 'value') and isinstance(dim_expr.value, int)):
+                count_val = self.visit(dim_expr, builder, module)
+                element_type = llvm_type.pointee
+                alloca = builder.alloca(element_type, size=count_val, name=node.name)
+                if resolved_type_spec:
+                    alloca._flux_type_spec = resolved_type_spec
+                module.symbol_table.define(node.name, SymbolKind.VARIABLE, type_spec=resolved_type_spec, llvm_value=alloca)
+                # VLA: cannot store an aggregate initializer into an element pointer — skip init
+                return alloca
+            else:
+                alloca = builder.alloca(llvm_type, name=node.name)
+        else:
+            # If inside a switch case body, hoist the alloca to the function entry
+            # block so it doesn't land mid-CFG (LLVM requires allocas in entry block)
+            alloca_block = getattr(builder, '_switch_case_alloca_block', None)
+            if alloca_block is not None:
+                current_block = builder.block
+                entry_term = alloca_block.terminator
+                if entry_term is not None:
+                    builder.position_before(entry_term)
+                else:
+                    builder.position_at_end(alloca_block)
+                alloca = builder.alloca(llvm_type, name=node.name)
+                builder.position_at_end(current_block)
+            else:
+                alloca = builder.alloca(llvm_type, name=node.name)
+
+        if resolved_type_spec:
+            alloca._flux_type_spec = resolved_type_spec
+
+        # Register in scope BEFORE initialization so endianness checking works
+        #print(f"[LOCAL VAR] Registering local variable '{node.name}' in scope level {module.symbol_table.scope_level}", file=sys.stdout)
+        #print(f"[LOCAL VAR]   Scopes count: {len(module.symbol_table.scopes)}", file=sys.stdout)
+        module.symbol_table.define(node.name, SymbolKind.VARIABLE, type_spec=resolved_type_spec, llvm_value=alloca)
+        #print(f"[LOCAL VAR]   Variable '{node.name}' registered successfully", file=sys.stdout)
+        if resolved_type_spec.is_volatile:
+            if not hasattr(builder, 'volatile_vars'):
+                builder.volatile_vars = set()
+            builder.volatile_vars.add(node.name)
+
+        # Handle noinit keyword - skip initialization entirely
+        if isinstance(node.initial_value, _NoInit):
+            # Mark variable as explicitly uninitialized for tracking
+            if not hasattr(builder, 'uninitialized_vars'):
+                builder.uninitialized_vars = set()
+            builder.uninitialized_vars.add(node.name)
+            # Do NOT initialize the alloca - it will contain undefined value
+        # Initialize variable if value is provided (and it's not noinit)
+        elif node.initial_value:
+            self._vardecl_initialize_local(node, builder, module, alloca, llvm_type, resolved_type_spec)
+        else:
+            # No initial value: zero-initialize per Flux spec.
+            # For large arrays use llvm.memset to avoid emitting a massive
+            # constant aggregate literal that crashes the LLVM instruction selector.
+            if isinstance(llvm_type, ir.ArrayType) and llvm_type.count > 64:
+                i8_ptr_ty  = ir.PointerType(ir.IntType(8))
+                i8_ty      = ir.IntType(8)
+                i64_ty     = ir.IntType(64)
+                i1_ty      = ir.IntType(1)
+                elem = llvm_type.element
+                elem_bytes = (elem.width // 8) if isinstance(elem, ir.IntType) else 1
+                byte_count = llvm_type.count * elem_bytes
+                fnty    = ir.FunctionType(ir.VoidType(), [i8_ptr_ty, i8_ty, i64_ty, i1_ty])
+                ms_name = 'llvm.memset.p0i8.i64'
+                if ms_name not in module.globals:
+                    ir.Function(module, fnty, name=ms_name)
+                memset_fn = module.globals[ms_name]
+                cast_ptr  = builder.bitcast(alloca, i8_ptr_ty, name='memset_ptr')
+                builder.call(memset_fn, [
+                    cast_ptr,
+                    ir.Constant(i8_ty,  0),
+                    ir.Constant(i64_ty, byte_count),
+                    ir.Constant(i1_ty,  0),
+                ])
+            else:
+                zero = TypeSystem.get_default_initializer(llvm_type)
+                builder.store(zero, alloca)
+
+        return alloca
+
+    def _vardecl_initialize_local(self, node, builder, module, alloca, llvm_type, resolved_type_spec):
+        """Initialize local variable with initial value."""
+        from fast import ArrayLiteral as _ArrayLiteral, ArrayComprehension as _ArrayComprehension, StringLiteral as _StringLiteral, FunctionCall as _FunctionCall, Identifier as _Identifier
+        # Handle array instance initialization
+        if isinstance(node.initial_value, _ArrayLiteral):
+            # If target is an integer, pack the array into it
+            if isinstance(llvm_type, ir.IntType):
+                packed_val = ArrayTypeHandler.pack_array_to_integer(builder, module, node.initial_value, llvm_type)
+                builder.store(packed_val, alloca)
+            # Otherwise, initialize as array
+            else:
+                ArrayTypeHandler.initialize_local_array(builder, module, alloca, llvm_type, node.initial_value)
+            return
+
+        if isinstance(node.initial_value, _ArrayComprehension):
+            # Extract expected size from the type_spec if it's an array type
+            expected_size = None
+            if resolved_type_spec and resolved_type_spec.array_size is not None:
+                raw_size = resolved_type_spec.array_size
+                if isinstance(raw_size, int):
+                    expected_size = raw_size
+                elif hasattr(raw_size, 'value') and isinstance(raw_size.value, int):
+                    expected_size = raw_size.value
+                else:
+                    expected_size = int(raw_size)
+
+            comp_result = self.visit_ArrayComprehension(node.initial_value, builder, module, expected_size=expected_size)
+            # comp_result is [5 x i32]*, alloca is [5 x i32]*
+            # Load from comp_result and store into alloca
+            loaded_array = builder.load(comp_result, name="comp_array_load")
+            builder.store(loaded_array, alloca)
+            return
+
+        # Delegate string literal initialization to ArrayLiteral
+        if isinstance(node.initial_value, _StringLiteral):
+            ArrayTypeHandler.initialize_local_string(
+                builder, module, alloca, llvm_type, node.initial_value)
+            return
+
+        # Handle constructor calls
+        if isinstance(node.initial_value, _FunctionCall) and node.initial_value.name.endswith('.__init'):
+            # Zero-initialize the alloca before calling the constructor so that embedded
+            # sub-object fields (e.g. arr.len, arr.cap inside JSONNode) start at zero per
+            # Flux semantics. Constructors that are empty (just return this) rely on this.
+            if isinstance(alloca.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                zero = TypeSystem.get_default_initializer(alloca.type.pointee)
+                builder.store(zero, alloca)
+            self._vardecl_call_constructor(node, builder, module, alloca)
+            return
+
+        # Handle array-to-array copy
+        if isinstance(llvm_type, ir.ArrayType) and isinstance(node.initial_value, _Identifier):
+            ArrayTypeHandler.copy_array_to_local(
+                builder, module, alloca, llvm_type, node.initial_value
+            )
+            return
+
+        # Handle regular initialization
+        init_val = self.visit(node.initial_value, builder, module)
+        if init_val is not None:
+            self._vardecl_store_with_type_conversion(node, builder, alloca, llvm_type, init_val, module)
+
+    def _vardecl_call_constructor(self, node, builder, module, alloca):
+        """Call constructor for object initialization using proper overload resolution."""
+        # Use the FunctionCall's existing resolution logic to find the constructor
+        # This handles namespace resolution, overloading, and name mangling properly
+        func_call = node.initial_value  # This is a FunctionCall with name like "string.__init"
+
+        #print(f"[CONSTRUCTOR] Looking for constructor: {func_call.name}", file=sys.stdout)
+        #print(f"[CONSTRUCTOR] current_namespace={getattr(module, '_current_namespace', '<none>')}", file=sys.stdout)
+        #print(f"[CONSTRUCTOR] Globals with __init:", file=sys.stdout)
+        #for name in module.globals:
+        #    if '__init' in name:
+        #        print(f"  - {name}", file=sys.stdout)
+        #if hasattr(module, '_function_overloads'):
+        #    print(f"[CONSTRUCTOR] Overload keys with __init:", file=sys.stdout)
+        #    for base_name in module._function_overloads:
+        #        if '__init' in base_name:
+        #            print(f"  - {base_name}: {len(module._function_overloads[base_name])} overload(s)", file=sys.stdout)
+
+        # Try to resolve the constructor using the same multi-step resolution as regular calls
+        func = None
+
+        # Step 1: Try direct lookup
+        func = module.globals.get(func_call.name, None)
+        if func and isinstance(func, ir.Function):
+            #print(f"[CONSTRUCTOR] Found via direct lookup: {func_call.name}", file=sys.stdout)
+            pass  # Found it
+        else:
+            #print("[CONSTRUCTOR] ATTEMPTING OVERLOAD RESOLUTION", file=sys.stdout)
+            # Step 2: Try overload resolution
+            if hasattr(module, '_function_overloads') and func_call.name in module._function_overloads:
+                func = TypeResolver.resolve_function(module, func_call.name)
+                #if func:
+                #    print(f"[CONSTRUCTOR] Found via overload resolution: {func_call.name}", file=sys.stdout)
+
+        # Step 3: Try namespace resolution if still not found
+        if func is None and hasattr(module, '_using_namespaces'):
+            #print("[CONSTRUCTOR] NOT FOUND, USING NAMESPACE RESOLUTION", file=sys.stdout)
+            for namespace in module._using_namespaces:
+                #print(f"[CONSTRUCTOR]   Trying namespace: {namespace}", file=sys.stdout)
+                mangled_prefix = namespace.replace("::", "__") + "__"
+                mangled_name = mangled_prefix + func_call.name
+                #print(f"[CONSTRUCTOR]   Mangled name: {mangled_name}", file=sys.stdout)
+
+                # Try direct lookup with namespace prefix
+                func = module.globals.get(mangled_name, None)
+                if func and isinstance(func, ir.Function):
+                    #print(f"[CONSTRUCTOR] Found via namespace direct lookup: {mangled_name}", file=sys.stdout)
+                    break
+
+                # Try overload resolution with namespace prefix
+                if hasattr(module, '_function_overloads'):
+                    #print(f"[CONSTRUCTOR]   Checking overloads for: {mangled_name}", file=sys.stdout)
+                    if mangled_name in module._function_overloads:
+                        #print(f"[CONSTRUCTOR]   FOUND in overloads!", file=sys.stdout)
+                        func = TypeResolver.resolve_function(module, mangled_name)
+                        if func:
+                            #print(f"[CONSTRUCTOR] Found via namespace overload resolution: {mangled_name}", file=sys.stdout)
+                            break
+
+        # Step 4: Try all registered namespaces (catches types in non-using namespaces)
+        if func is None and hasattr(module, '_namespaces'):
+            for namespace in module._namespaces:
+                mangled_prefix = namespace.replace("::", "__") + "__"
+                mangled_name = mangled_prefix + func_call.name
+
+                func = module.globals.get(mangled_name, None)
+                if func and isinstance(func, ir.Function):
+                    break
+
+                if hasattr(module, '_function_overloads') and mangled_name in module._function_overloads:
+                    func = TypeResolver.resolve_function(module, mangled_name)
+                    if func:
+                        break
+
+        # Step 5: Scan all overload keys for a suffix match (handles cross-namespace constructor calls
+        # where the target namespace was registered after the caller's namespace was first processed)
+        if func is None and hasattr(module, '_function_overloads'):
+            suffix = "__" + func_call.name
+            for key, overloads in module._function_overloads.items():
+                if key.endswith(suffix) or key == func_call.name:
+                    func = TypeResolver.resolve_function(module, key)
+                    if func:
+                        break
+
+        # Step 6: Scan module.globals directly for a function whose name ends with the constructor pattern
+        if func is None:
+            # func_call.name is e.g. "JSONNode.__init"; look for "*__JSONNode.__init*" in globals
+            base = func_call.name  # e.g. "JSONNode.__init"
+            dot = base.find(".")
+            if dot != -1:
+                obj_part = base[:dot]   # e.g. "JSONNode"
+                meth_part = base[dot:]  # e.g. ".__init"
+                needle = "__" + obj_part + meth_part  # e.g. "__JSONNode.__init"
+                for gname, gval in module.globals.items():
+                    if isinstance(gval, ir.Function) and needle in gname:
+                        func = gval
+                        break
+
+        if func is None:
+            raise NameError(f"Constructor not found: {func_call.name} [{node.source_line}:{node.source_col}]")
+        # Build arguments: 'this' pointer first, then constructor arguments
+        args = [alloca]
+
+        for i, arg_expr in enumerate(func_call.arguments):
+            param_index = i + 1
+            from fast import StringLiteral as _StringLiteral
+            if (isinstance(arg_expr, _StringLiteral) and
+                param_index < len(func.args) and
+                isinstance(func.args[param_index].type, ir.PointerType) and
+                isinstance(func.args[param_index].type.pointee, ir.IntType) and
+                func.args[param_index].type.pointee.width == 8):
+
+                arg_val = ArrayTypeHandler.create_local_string_for_arg(
+                    builder, module, arg_expr.value, f"ctor_arg{i}"
+                )
+            else:
+                arg_val = self.visit(arg_expr, builder, module)
+
+            if param_index < len(func.args):
+                expected_type = func.args[param_index].type
+                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(builder, module, arg_val, expected_type, i)
+
+            args.append(arg_val)
+
+        builder.call(func, args)
+
+    def _vardecl_store_with_type_conversion(self, node, builder, alloca, llvm_type, init_val, module):
+        """Store value with automatic type conversion if needed."""
+        VariableTypeHandler.store_with_type_conversion(builder, alloca, llvm_type, init_val, node.initial_value, module)
+
+    # ------------------------------------------------------------------
+    # Tier 7 — Program (top-level driver)  [DONE]
+    # ------------------------------------------------------------------
+
+    def visit_Program(self, node, builder, module):
+        from fast import (UsingStatement, NotUsingStatement, NamespaceDef,
+                          StructDef, StructDefStatement, ObjectDef, ObjectDefStatement,
+                          ExternBlock, NamespaceDefStatement)
+        print("[AST] Begining codegen for Flux program ...")
+        print(f"[AST] Total statements in AST: {len(node.statements)}", file=sys.stdout)
+        namespace_count = sum(1 for s in node.statements if isinstance(s, NamespaceDef))
+        print(f"[AST] Namespace definitions: {namespace_count}", file=sys.stdout)
+        #for s in node.statements:
+        #    if isinstance(s, NamespaceDef):
+        #        print(f"[AST]   - namespace {s.name} (funcs: {len(s.functions)}, nested: {len(s.nested_namespaces)})", file=sys.stdout)
+        if module is None:
+            module = ir.Module(name='flux_module') # Update to support module system.
+
+        # Validate and attach symbol table to module
+        if not isinstance(node.symbol_table, SymbolTable):
+            print(f"[ERROR] Program.symbol_table is {type(node.symbol_table)}, not SymbolTable!", file=sys.stdout)
+            print(f"[ERROR] Creating new SymbolTable to replace it", file=sys.stdout)
+            node.symbol_table = SymbolTable()
+
+        module.symbol_table = node.symbol_table
+        module._program_statements = node.statements
+
+        # Create global builder with no function context
+        builder = ir.IRBuilder()
+        # Symbol table already at global scope (level 0)
+        # Track initialized unions for immutability enforcement
+        builder.initialized_unions = set()
+
+        # 4-pass compilation
+        print("[AST] Pass 1: Processing using statements...")
+        for stmt in node.statements:
+            if isinstance(stmt, UsingStatement):
+                self.visit(stmt, builder, module)
+
+        print("[AST] Pass 2: Processing not using statements...")
+        for stmt in node.statements:
+            if isinstance(stmt, NotUsingStatement):
+                self.visit(stmt, builder, module)
+
+        # Pre-pass: register all object struct types across the entire namespace tree before
+        # any method bodies are emitted, so cross-namespace type references always resolve.
+        # Extern blocks are included in this retry loop so that extern param types that
+        # reference namespace-defined structs (e.g. RECT*) are resolved after those types
+        # are registered, rather than eagerly before them.
+        print("[AST] Pre-pass: Registering all object types and extern blocks...")
+        pending_toplevel = [stmt for stmt in node.statements
+                            if isinstance(stmt, (StructDef, StructDefStatement, ObjectDef, ObjectDefStatement))]
+        pending_ns = []
+        for stmt in node.statements:
+            ns = None
+            if isinstance(stmt, NamespaceDef):
+                ns = stmt
+            elif isinstance(stmt, NamespaceDefStatement):
+                ns = stmt.namespace_def
+            if ns is not None:
+                pending_ns.append(ns)
+
+        # Collect extern blocks for deferred processing.
+        pending_extern = [stmt for stmt in node.statements if isinstance(stmt, ExternBlock)]
+
+        # Pre-register namespace types using the existing retry helper first (best-effort).
+        for ns in pending_ns:
+            try:
+                NamespaceDef.preregister_all_types(ns, module)
+            except Exception:
+                pass  # will be retried in the unified loop below
+
+        # Now retry top-level structs/objects, namespace registrations, and extern blocks
+        # together until no further progress is possible.
+        max_passes = len(pending_toplevel) + len(pending_ns) + len(pending_extern) + 1
+        pending_tl = list(pending_toplevel)
+        pending_ns_retry = list(pending_ns)
+        pending_ex = list(pending_extern)
+        for _ in range(max_passes):
+            if not pending_tl and not pending_ns_retry and not pending_ex:
+                break
+            still_tl, still_ns, still_ex = [], [], []
+            for stmt in pending_tl:
+                try:
+                    self.visit(stmt, builder, module)
+                except Exception:
+                    still_tl.append(stmt)
+            for ns in pending_ns_retry:
+                try:
+                    NamespaceDef.preregister_all_types(ns, module)
+                except Exception:
+                    still_ns.append(ns)
+            for ex in pending_ex:
+                try:
+                    self.visit(ex, builder, module)
+                except Exception:
+                    still_ex.append(ex)
+            if (len(still_tl) == len(pending_tl) and
+                    len(still_ns) == len(pending_ns_retry) and
+                    len(still_ex) == len(pending_ex)):
+                # No progress — surface the real errors
+                for stmt in still_tl:
+                    self.visit(stmt, builder, module)
+                for ns in still_ns:
+                    NamespaceDef.preregister_all_types(ns, module)
+                for ex in still_ex:
+                    self.visit(ex, builder, module)
+                break
+            pending_tl, pending_ns_retry, pending_ex = still_tl, still_ns, still_ex
+
+        # Pass 3: Process all other statements
+        print("[AST] Pass 3: Processing all other statements...")
+        for stmt in node.statements:
+            if not isinstance(stmt, (UsingStatement, NotUsingStatement, ExternBlock, StructDef, StructDefStatement, ObjectDef, ObjectDefStatement)):
+                self.visit(stmt, builder, module)
+
+        main_args_name = "main__2__int__byte_ptr2__ret_int"
+        main_no_args_name = "main__0__ret_int"
+
+        main_func      = module.globals.get(main_no_args_name)
+        main_args_func = module.globals.get(main_args_name)
+
+        # Emit a stub main() if the user only defined main(argc, argv).
+        # The stub calls main(argc, argv) with argc=0 and argv=null so that
+        # FRTStartup's no-arg path still reaches the user's real entry point.
+        if (main_func is not None and
+                isinstance(main_func, ir.Function) and
+                main_func.is_declaration and
+                main_args_func is not None and
+                isinstance(main_args_func, ir.Function)):
+            stub_block = main_func.append_basic_block("entry")
+            stub_builder = ir.IRBuilder(stub_block)
+            argc_val = ir.Constant(ir.IntType(32), 0)
+            argv_type = ir.PointerType(ir.PointerType(ir.IntType(8)))
+            argv_val = ir.Constant(argv_type, None)
+            ret_val = stub_builder.call(main_args_func, [argc_val, argv_val])
+            stub_builder.ret(ret_val)
+
+        # Emit a stub main(argc, argv) if the user only defined main().
+        # The stub ignores its arguments and calls the no-arg main() directly,
+        # returning its result, so FRTStartup's args path still works.
+        if (main_args_func is not None and
+                isinstance(main_args_func, ir.Function) and
+                main_args_func.is_declaration and
+                main_func is not None and
+                isinstance(main_func, ir.Function)):
+            stub_block = main_args_func.append_basic_block("entry")
+            stub_builder = ir.IRBuilder(stub_block)
+            ret_val = stub_builder.call(main_func, [])
+            stub_builder.ret(ret_val)
+
+        return module
 
 # ---------------------------------------------------------------------------
 # Module-level singleton — imported by ASTNode.codegen() thunks
