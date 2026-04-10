@@ -978,7 +978,9 @@ class TieExpression(Expression):
     Only creates tracking when explicitly used.
     """
     operand: Expression
-    
+
+    def __repr__(self) -> str:
+        return f"~{self.operand}"
 
 
 # Struct member

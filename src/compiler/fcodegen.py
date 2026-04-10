@@ -3682,6 +3682,9 @@ class CodegenVisitor:
         entry_block = func.append_basic_block('entry')
         builder.position_at_start(entry_block)
 
+        # Reset per-function tracking state for tied vars
+        builder._untied_vars = set()
+
         builder._flux_is_recursive_func = node.is_recursive
 
         builder._flux_label_blocks = {'entry': entry_block}
