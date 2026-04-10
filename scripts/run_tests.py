@@ -38,8 +38,8 @@ class TestRunner:
         # Get current working directory (project root)
         self.project_root = Path.cwd()
         
-        # Compiler is fc.py at project root
-        self.compiler_path = self.project_root / "fc.py"
+        # Compiler is fxc.py at project root
+        self.compiler_path = self.project_root / "fxc.py"
         
         # Tests directory is at project root
         if examples:
