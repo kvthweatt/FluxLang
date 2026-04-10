@@ -3935,6 +3935,14 @@ class AssignmentTypeHandler:
         if symbol_entry and symbol_entry.type_spec and hasattr(symbol_entry.type_spec, 'is_const'):
             if symbol_entry.type_spec.is_const:
                 raise TypeError(f"AssignmentTypeHandler.handle_identifier_assignment: Cannot assign to const variable '{target_name}'")
+
+        # Check if variable has been invalidated by a prior tie-transfer (~)
+        if hasattr(builder, '_untied_vars') and target_name in builder._untied_vars:
+            raise ValueError(
+                f"Compile error: [use after invalidation]\n"
+                f"'{target_name}' was previously invalidated by a tie-transfer (~) "
+                f"and cannot be assigned to. Redeclare '{target_name}' here."
+                )
         
         # Check if this is an array concatenation assignment that requires resizing
         from fast import BinaryOp, Operator

@@ -1764,6 +1764,9 @@ Ownership only occurs if you use `~` to tell the compiler to perform a very simp
 - A tied value can only move to a tied type
 - One-time use, old reference invalidated on use
 
+A function returning a tied type cannot return to a variable of non-tied type.  
+Similarly, you cannot pass a non-tied variable to a tied parameter.
+
 ```
 #import "standard.fx";
 

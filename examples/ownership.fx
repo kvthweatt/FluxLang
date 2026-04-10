@@ -12,16 +12,14 @@ def bar(~int y) -> ~int  // returns a tied type
 
 def main() -> int
 {
-    ~int x, y; // Tied vars
-    int  z;    // Non-tied var
+    ~int x, y, z; // Tied vars
+    int  w = 3;   // Non-tied var
 
-    foo(~x);   // Untie from main, tie to foo()
+    x = bar(~y);  // Compile error, function returns tied type to non-tied type
 
-    //bar(~x); // Use after untie
+    z = ~w;
 
-    //foo(y);  // Compile error, foo expects tied param
+    w = 5; // Compile error, w invalidated previously
 
-    z = bar(~y);  // Copmile error, function returns tied type to non-tied type
-
-	return 0;
+    return 0;
 };

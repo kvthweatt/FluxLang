@@ -2737,20 +2737,44 @@ class CodegenVisitor:
         # If the RHS is a function call whose return type is ~T, the LHS must
         # also be a ~T variable.  Assigning a tied return value to a non-tied
         # variable is a compile error.
-        from fast import FunctionCall
-        if isinstance(node.value, FunctionCall) and isinstance(node.target, Identifier):
-            current_ns = (module.symbol_table.current_namespace
-                          if hasattr(module, 'symbol_table') else "")
-            ov = TypeResolver.resolve_overload_entry(
-                module, node.value.name, current_ns, None)
-            if ov is not None:
-                ret_spec = ov.get('return_type')
-                if ret_spec is not None and getattr(ret_spec, 'is_tied', False):
-                    target_entry = module.symbol_table.lookup_any(node.target.name)
-                    target_is_tied = (target_entry is not None
-                                      and target_entry.type_spec is not None
-                                      and getattr(target_entry.type_spec, 'is_tied', False))
-                    if not target_is_tied:
+        from fast import FunctionCall, TieExpression
+        if isinstance(node.target, Identifier):
+            target_entry = module.symbol_table.lookup_any(node.target.name)
+            target_is_tied = (target_entry is not None
+                              and target_entry.type_spec is not None
+                              and getattr(target_entry.type_spec, 'is_tied', False))
+
+            if target_is_tied:
+                # Case 1: RHS is a function call — return type must be tied
+                if isinstance(node.value, FunctionCall):
+                    current_ns = (module.symbol_table.current_namespace
+                                  if hasattr(module, 'symbol_table') else "")
+                    ov = TypeResolver.resolve_overload_entry(
+                        module, node.value.name, current_ns, None)
+                    if ov is not None:
+                        ret_spec = ov.get('return_type')
+                        if ret_spec is not None and not getattr(ret_spec, 'is_tied', False):
+                            raise ValueError(
+                                f"Compile error: '{node.value.name}' does not return a tied type, "
+                                f"cannot assign to tied variable '{node.target.name}' "
+                                f"[{node.source_line}:{node.source_col}]")
+
+                # Case 2: RHS is a plain identifier — must be a TieExpression (~w)
+                elif isinstance(node.value, Identifier):
+                    raise ValueError(
+                        f"Compile error: cannot assign non-tied value to tied variable "
+                        f"'{node.target.name}' — use '~{node.value.name}' to transfer ownership "
+                        f"[{node.source_line}:{node.source_col}]")
+
+            # Case 3: non-tied target, tied-return function (original check, flipped)
+            elif isinstance(node.value, FunctionCall):
+                current_ns = (module.symbol_table.current_namespace
+                              if hasattr(module, 'symbol_table') else "")
+                ov = TypeResolver.resolve_overload_entry(
+                    module, node.value.name, current_ns, None)
+                if ov is not None:
+                    ret_spec = ov.get('return_type')
+                    if ret_spec is not None and getattr(ret_spec, 'is_tied', False):
                         raise ValueError(
                             f"Compile error: Function {node.value.name} returns a tied type (~), "
                             f"but {node.target.name}'s type is not tied."
@@ -2920,8 +2944,8 @@ class CodegenVisitor:
                         stack = _inspect.stack()
                         stmt_i = i
                         #print("Full call stack (from current to outermost):")
-                        for i, frame_info in enumerate(reversed(stack)):
-                            print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
+                        #for i, frame_info in enumerate(reversed(stack)):
+                            #print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
                         loc = ""
                         if hasattr(stmt, 'source_line') and stmt.source_line:
                             loc = f" [{module.name}:{stmt.source_line}:{stmt.source_col}]"
