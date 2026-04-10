@@ -21,7 +21,7 @@ def main() -> int
 
     //foo(y);  // Compile error, foo expects tied param
 
-    z = bar(~y);
+    z = bar(~y);  // Copmile error, function returns tied type to non-tied type
 
 	return 0;
 };

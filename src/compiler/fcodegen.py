@@ -2733,6 +2733,29 @@ class CodegenVisitor:
 
         val = self.visit(node.value, builder, module)
 
+        # ── Tied return-type check ────────────────────────────────────────────
+        # If the RHS is a function call whose return type is ~T, the LHS must
+        # also be a ~T variable.  Assigning a tied return value to a non-tied
+        # variable is a compile error.
+        from fast import FunctionCall
+        if isinstance(node.value, FunctionCall) and isinstance(node.target, Identifier):
+            current_ns = (module.symbol_table.current_namespace
+                          if hasattr(module, 'symbol_table') else "")
+            ov = TypeResolver.resolve_overload_entry(
+                module, node.value.name, current_ns, None)
+            if ov is not None:
+                ret_spec = ov.get('return_type')
+                if ret_spec is not None and getattr(ret_spec, 'is_tied', False):
+                    target_entry = module.symbol_table.lookup_any(node.target.name)
+                    target_is_tied = (target_entry is not None
+                                      and target_entry.type_spec is not None
+                                      and getattr(target_entry.type_spec, 'is_tied', False))
+                    if not target_is_tied:
+                        raise ValueError(
+                            f"Compile error: Function {node.value.name} returns a tied type (~), "
+                            f"but {node.target.name}'s type is not tied."
+                            f"[{node.source_line}:{node.source_col}]")
+
         if isinstance(node.target, Identifier):
             return AssignmentTypeHandler.handle_identifier_assignment(
                 builder, module, node.target.name, val, node.value)
