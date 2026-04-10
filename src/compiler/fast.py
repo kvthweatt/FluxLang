@@ -1297,6 +1297,7 @@ class NamespaceDef(ASTNode):
         """Recursively walk the namespace tree and pre-register every object struct type
         before any method bodies are emitted.  Uses a retry loop so forward references
         between objects (e.g. FreeNode* inside another object) resolve in dependency order."""
+        from fcodegen import visitor as _visitor
         if excluded is None:
             excluded = getattr(module, '_excluded_namespaces', set())
         pending = NamespaceDef._collect_all_ns_objects(ns, excluded)
@@ -1309,9 +1310,9 @@ class NamespaceDef(ASTNode):
                 kind, ns_name, item = entry
                 try:
                     if kind == 'struct':
-                        NamespaceTypeHandler.process_namespace_struct(ns_name, item, None, module)
+                        _visitor._ns_struct(ns_name, item, None, module)
                     else:
-                        NamespaceTypeHandler.process_namespace_object_type_only(ns_name, item, module)
+                        _visitor._ns_object_type_only(ns_name, item, module)
                 except Exception:
                     still_pending.append(entry)
             if len(still_pending) == len(pending):
@@ -1319,9 +1320,9 @@ class NamespaceDef(ASTNode):
                 for entry in still_pending:
                     kind, ns_name, item = entry
                     if kind == 'struct':
-                        NamespaceTypeHandler.process_namespace_struct(ns_name, item, None, module)
+                        _visitor._ns_struct(ns_name, item, None, module)
                     else:
-                        NamespaceTypeHandler.process_namespace_object_type_only(ns_name, item, module)
+                        _visitor._ns_object_type_only(ns_name, item, module)
                 break
             pending = still_pending
 

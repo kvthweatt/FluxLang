@@ -4,25 +4,10 @@ Flux Code Generator
 
 Copyright (C) 2026 Karac Thweatt
 
-Separates IR emission from AST node definitions.  All LLVM IR generation
-that previously lived as .codegen() methods on AST node classes is being
-migrated here, one node at a time.
-
-Migration status
-----------------
-Nodes whose codegen has been moved here are marked [DONE].
-Nodes still delegating back to their own .codegen() are marked [PENDING].
-
-Once every node is [DONE], fast.py will no longer import llvmlite and
-ASTNode.codegen() will be removed entirely.
-
 Usage
 -----
     from fcodegen import visitor
-    ir_module = visitor.compile(program_node, module)   # top-level entry point
-
-    # Or for individual nodes during transition:
-    result = visitor.visit(node, builder, module)
+    ir_module = visitor.compile(program_node, module)
 """
 
 import sys
@@ -32,17 +17,10 @@ from typing import Any, Optional
 
 from llvmlite import ir
 
-# All AST node classes and type-system helpers are imported via fast.py's
-# wildcard re-export of ftypesys.  We import fast lazily inside methods that
-# need concrete node types to avoid circular-import issues during the
-# transition (fast.py still imports from ftypesys, which may import fcodegen).
-#
-# ftypesys symbols (TypeSystem, DataType, SymbolKind, …) are safe to import
-# at module level because ftypesys does NOT import fcodegen.
 from ftypesys import *
 
 # ---------------------------------------------------------------------------
-# Calling-convention map (migrated from FunctionDef._CALLING_CONV_MAP)
+# Calling-convention map
 # ---------------------------------------------------------------------------
 
 CALLING_CONV_MAP: dict = {
@@ -54,9 +32,7 @@ CALLING_CONV_MAP: dict = {
 }
 
 # ---------------------------------------------------------------------------
-# Module-level helpers (migrated from fast.py module scope)
-# These still exist in fast.py during the transition; they will be removed
-# from there once every caller has been updated.
+# Module-level helpers
 # ---------------------------------------------------------------------------
 
 _BUILTIN_OP_SYMBOL_MANGLE: dict = {
@@ -94,7 +70,6 @@ def _mangle_builtin_op(symbol: str) -> str:
 
 def _collect_label_names(stmts) -> list:
     """Recursively walk a statement list and collect all LabelStatement names."""
-    # Import lazily to avoid circular imports during transition.
     from fast import LabelStatement, Block
     names = []
     for stmt in stmts:
@@ -169,20 +144,6 @@ def get_struct_vtable(module: ir.Module, struct_name: str):
 class CodegenVisitor:
     """
     Visitor that drives LLVM IR generation for every Flux AST node.
-
-    Dispatch
-    --------
-    visit(node, builder, module)
-        Looks up visit_<ClassName> on self and calls it.
-        Falls back to node.codegen(builder, module) for nodes that have not
-        yet been migrated (PENDING nodes).  This lets us migrate one node at
-        a time while keeping the compiler runnable throughout.
-
-    Entry point
-    -----------
-    compile(program, module=None) -> ir.Module
-        Drives the 4-pass compilation sequence currently in Program.codegen().
-        Migrated in Phase 3 once all other nodes are done.
     """
 
     # ------------------------------------------------------------------
@@ -190,12 +151,7 @@ class CodegenVisitor:
     # ------------------------------------------------------------------
 
     def visit(self, node, builder: ir.IRBuilder, module: ir.Module) -> Any:
-        """
-        Dispatch to visit_<ClassName>(node, builder, module).
-
-        If no such method exists, the node has not been migrated yet.
-        Delegate to node.codegen() so the compiler keeps working.
-        """
+        """Dispatch to visit_<ClassName>(node, builder, module)."""
         if node is None:
             return None
 
@@ -205,7 +161,6 @@ class CodegenVisitor:
         if method is not None:
             return method(node, builder, module)
 
-        # PENDING: node not yet migrated — fall back to the node's own codegen.
         if hasattr(node, 'codegen'):
             return node.codegen(builder, module)
 
@@ -215,17 +170,9 @@ class CodegenVisitor:
             f"{getattr(node, 'source_col', '?')}]"
         )
 
-    # ------------------------------------------------------------------
-    # Top-level compilation entry point  [DONE]
-    # ------------------------------------------------------------------
-
     def compile(self, program, module: ir.Module = None) -> ir.Module:
         """Compile a Program node to an ir.Module."""
         return self.visit(program, None, module)
-
-    # ------------------------------------------------------------------
-    # Tier 0 — trivial / leaf nodes  [DONE]
-    # ------------------------------------------------------------------
 
     def visit_NoInit(self, node, builder, module):
         raise RuntimeError(
@@ -397,11 +344,7 @@ class CodegenVisitor:
                 f"{ref_list} [{node.source_line}:{node.source_col}]"
             )
 
-    # ------------------------------------------------------------------
-    # Tier 1 — leaf expressions  [DONE]
-    # ------------------------------------------------------------------
-
-    # typeof() kind constants (migrated from TypeOf class attributes)
+    # typeof() kind constants
     _TYPEOF_KIND_UNKNOWN  = 0
     _TYPEOF_KIND_SINT     = 1
     _TYPEOF_KIND_UINT     = 2
@@ -944,10 +887,6 @@ class CodegenVisitor:
         if isinstance(llvm_type, ir.VoidType):
             return self._TYPEOF_KIND_VOID
         return self._TYPEOF_KIND_UNKNOWN
-
-    # ------------------------------------------------------------------
-    # Tier 2 — compound expressions  [DONE]
-    # ------------------------------------------------------------------
 
     def visit_BinaryOp(self, node, builder, module):
         ctx = CoercionContext(builder)
@@ -1885,10 +1824,6 @@ class CodegenVisitor:
             builder.store(result, output_operands[0])
         return result
 
-    # ------------------------------------------------------------------
-    # Tier 3 — structural expressions  [DONE]
-    # ------------------------------------------------------------------
-
     def visit_ArrayLiteral(self, node, builder, module):
         if node.is_string:
             return self._array_literal_string(node, builder, module)
@@ -2735,10 +2670,6 @@ class CodegenVisitor:
     def visit_StructRecast(self, node, builder, module):
         source_value = self.visit(node.source_expr, builder, module)
         return StructTypeHandler.perform_struct_recast(builder, module, node.target_type, source_value)
-
-    # ------------------------------------------------------------------
-    # Tier 4 — statements  [DONE]
-    # ------------------------------------------------------------------
 
     def visit_Assignment(self, node, builder, module):
         from fast import (ArrayLiteral, Identifier, MemberAccess, ArrayAccess,
@@ -3616,10 +3547,6 @@ class CodegenVisitor:
         builder.position_at_start(pass_block)
         return None
 
-    # ------------------------------------------------------------------
-    # Tier 5 — declarations  [DONE]
-    # ------------------------------------------------------------------
-
     def visit_FunctionDef(self, node, builder, module):
         ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(node.return_type, module)
 
@@ -4108,7 +4035,7 @@ class CodegenVisitor:
             func = method_funcs.get(func_name)
             if func is None:
                 raise RuntimeError(f"Internal error: missing function for method {method.name} [{node.source_line}:{node.source_col}]")
-            ObjectTypeHandler.emit_method_body(method, func, node.name, module)
+            self._emit_method_body(method, func, node.name, module)
 
         if node.traits and hasattr(module, 'symbol_table'):
             implemented_names = {m.name for m in node.methods}
@@ -4154,6 +4081,158 @@ class CodegenVisitor:
                     else:
                         param.name = f"arg{i}"
 
+    # ------------------------------------------------------------------
+    # Namespace codegen helpers (moved from NamespaceTypeHandler)
+    # ------------------------------------------------------------------
+
+    def _create_static_init_builder(self, module: ir.Module) -> ir.IRBuilder:
+        init_func_name = "__static_init"
+        if init_func_name not in module.globals:
+            func_type = ir.FunctionType(ir.VoidType(), [])
+            init_func = ir.Function(module, func_type, init_func_name)
+            block = init_func.append_basic_block("entry")
+        else:
+            init_func = module.globals[init_func_name]
+            if not init_func.blocks:
+                block = init_func.append_basic_block("entry")
+            else:
+                block = init_func.blocks[-1]
+                if block.is_terminated:
+                    block = init_func.append_basic_block("cont")
+        builder = ir.IRBuilder(block)
+        builder.initialized_unions = set()
+        return builder
+
+    def _finalize_static_init(self, module: ir.Module) -> None:
+        if "__static_init" in module.globals:
+            init_func = module.globals["__static_init"]
+            if init_func.blocks and not init_func.blocks[-1].is_terminated:
+                final_builder = ir.IRBuilder(init_func.blocks[-1])
+                final_builder.ret_void()
+
+    def _run_in_namespace(self, namespace: str, item, builder, module: ir.Module,
+                          codegen_attr: str = 'codegen') -> None:
+        """Set namespace context, call item.<codegen_attr>(builder, module), restore."""
+        original_name = item.name
+        item.name = f"{namespace.replace('::', '__')}__{item.name}"
+        orig_mod_ns = getattr(module, '_current_namespace', '')
+        orig_st_ns = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
+        module._current_namespace = namespace
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.set_namespace(namespace)
+        try:
+            method = getattr(item, codegen_attr)
+            if codegen_attr == 'codegen_type_only':
+                method(module)
+            else:
+                method(builder, module)
+        finally:
+            item.name = original_name
+            module._current_namespace = orig_mod_ns
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.set_namespace(orig_st_ns)
+
+    def _ns_struct(self, namespace: str, struct_def, builder, module: ir.Module) -> None:
+        self._run_in_namespace(namespace, struct_def, builder, module, 'codegen')
+
+    def _ns_object_type_only(self, namespace: str, obj_def, module: ir.Module) -> None:
+        self._run_in_namespace(namespace, obj_def, None, module, 'codegen_type_only')
+
+    def _ns_object(self, namespace: str, obj_def, builder, module: ir.Module) -> None:
+        self._run_in_namespace(namespace, obj_def, builder, module, 'codegen')
+
+    def _ns_enum(self, namespace: str, enum_def, builder, module: ir.Module) -> None:
+        self._run_in_namespace(namespace, enum_def, builder, module, 'codegen')
+
+    def _ns_variable(self, namespace: str, var_def, module: ir.Module):
+        original_name = var_def.name
+        var_def.name = f"{namespace.replace('::', '__')}__{var_def.name}"
+        orig_mod_ns = getattr(module, '_current_namespace', '')
+        orig_st_ns = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
+        module._current_namespace = namespace
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.set_namespace(namespace)
+        try:
+            return var_def.codegen(None, module)
+        finally:
+            var_def.name = original_name
+            module._current_namespace = orig_mod_ns
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.set_namespace(orig_st_ns)
+
+    def _ns_function(self, namespace: str, func_def, builder, module: ir.Module) -> None:
+        original_name = func_def.name
+        func_def.name = f"{namespace}__{func_def.name}"
+        orig_mod_ns = getattr(module, '_current_namespace', '')
+        orig_st_ns = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
+        module._current_namespace = namespace
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.set_namespace(namespace)
+        try:
+            func_def.codegen(builder, module)
+        finally:
+            func_def.name = original_name
+            module._current_namespace = orig_mod_ns
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.set_namespace(orig_st_ns)
+
+    def _ns_nested(self, parent_namespace: str, nested_ns, builder, module: ir.Module) -> None:
+        original_name = nested_ns.name
+        full_nested_name = f"{parent_namespace}__{nested_ns.name}"
+        nested_ns.name = full_nested_name
+        orig_mod_ns = getattr(module, '_current_namespace', '')
+        orig_st_ns = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
+        module._current_namespace = full_nested_name
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.set_namespace(full_nested_name)
+        try:
+            nested_ns.codegen(builder, module)
+        finally:
+            nested_ns.name = original_name
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.set_namespace(orig_st_ns)
+
+    # ------------------------------------------------------------------
+    # Object method body codegen (moved from ObjectTypeHandler)
+    # ------------------------------------------------------------------
+
+    def _emit_method_body(self, method, func: ir.Function, object_name: str, module: ir.Module) -> None:
+        from fast import DataType as _DataType, TypeSystem as _TypeSystem, FunctionDef as _FunctionDef
+        if isinstance(method, _FunctionDef) and method.is_prototype:
+            return
+        if len(func.blocks) != 0:
+            return
+        entry_block = func.append_basic_block('entry')
+        method_builder = ir.IRBuilder(entry_block)
+        saved_namespace = module.symbol_table.current_namespace
+        prev_object_name = getattr(module, '_current_object_name', None)
+        module._current_object_name = object_name
+        module.symbol_table.enter_scope()
+        this_type_spec = _TypeSystem(base_type=_DataType.DATA, custom_typename=object_name, is_pointer=True)
+        module.symbol_table.define(
+            "this", SymbolKind.VARIABLE,
+            llvm_value=func.args[0], type_spec=this_type_spec)
+        for i, param in enumerate(func.args[1:], 1):
+            param_name = method.parameters[i - 1].name if method.parameters[i - 1].name is not None else f"arg{i - 1}"
+            alloca = method_builder.alloca(param.type, name=f"{param_name}.addr")
+            param_type_spec = method.parameters[i - 1].type_spec
+            if param_type_spec is not None:
+                alloca._flux_type_spec = param_type_spec
+            param_with_metadata = TypeSystem.attach_type_metadata(param, type_spec=param_type_spec)
+            method_builder.store(param_with_metadata, alloca)
+            module.symbol_table.define(param_name, SymbolKind.VARIABLE, type_spec=param_type_spec, llvm_value=alloca)
+        self.visit(method.body, method_builder, module)
+        if isinstance(method, _FunctionDef) and method.name == '__init' and not method_builder.block.is_terminated:
+            method_builder.ret(func.args[0])
+        if not method_builder.block.is_terminated:
+            if isinstance(func.function_type.return_type, ir.VoidType):
+                method_builder.ret_void()
+            else:
+                raise RuntimeError(f"CodegenVisitor._emit_method_body: Method {method.name} must end with return statement")
+        module.symbol_table.exit_scope()
+        module.symbol_table.current_namespace = saved_namespace
+        module._current_object_name = prev_object_name
+
     def visit_NamespaceDef(self, node, builder, module):
         if hasattr(module, '_excluded_namespaces'):
             if node.name in module._excluded_namespaces:
@@ -4184,16 +4263,16 @@ class CodegenVisitor:
         module.symbol_table.set_namespace(node.name)
 
         if builder is None or not hasattr(builder, 'block') or builder.block is None:
-            work_builder = NamespaceTypeHandler.create_static_init_builder(module)
+            work_builder = self._create_static_init_builder(module)
         else:
             work_builder = builder
 
         for nested_ns in node.nested_namespaces:
-            NamespaceTypeHandler.process_nested_namespace(node.name, nested_ns, work_builder, module)
+            self._ns_nested(node.name, nested_ns, work_builder, module)
 
         for var in node.variables:
             try:
-                NamespaceTypeHandler.process_namespace_variable(node.name, var, module)
+                self._ns_variable(node.name, var, module)
             except Exception as e:
                 var_name = getattr(var, 'name', '<unknown>')
                 print(f"\nError processing variable '{var_name}' in namespace '{node.name}':")
@@ -4202,10 +4281,10 @@ class CodegenVisitor:
                 raise
 
         for enum in node.enums:
-            NamespaceTypeHandler.process_namespace_enum(node.name, enum, work_builder, module)
+            self._ns_enum(node.name, enum, work_builder, module)
 
         for struct in node.structs:
-            NamespaceTypeHandler.process_namespace_struct(node.name, struct, work_builder, module)
+            self._ns_struct(node.name, struct, work_builder, module)
 
         for extern_block in node.extern_blocks:
             self.visit(extern_block, work_builder, module)
@@ -4213,28 +4292,23 @@ class CodegenVisitor:
         for obj in node.objects:
             from fast import TraitDef as _TraitDef
             if not isinstance(obj, _TraitDef):
-                NamespaceTypeHandler.process_namespace_object_type_only(node.name, obj, module)
+                self._ns_object_type_only(node.name, obj, module)
 
         for func in node.functions:
-            NamespaceTypeHandler.process_namespace_function(node.name, func, work_builder, module)
+            self._ns_function(node.name, func, work_builder, module)
 
         for obj in node.objects:
             from fast import TraitDef as _TraitDef
             if isinstance(obj, _TraitDef):
                 self.visit(obj, work_builder, module)
             else:
-                NamespaceTypeHandler.process_namespace_object(node.name, obj, work_builder, module)
+                self._ns_object(node.name, obj, work_builder, module)
 
-        NamespaceTypeHandler.finalize_static_init(module)
+        self._finalize_static_init(module)
 
         module._current_namespace = original_namespace
         module.symbol_table.set_namespace(original_namespace)
         return None
-
-    # ------------------------------------------------------------------
-    # Tier 6 — wrapper statements  [DONE]
-    # Thin shells that delegate to the inner definition node.
-    # ------------------------------------------------------------------
 
     def visit_FunctionDefStatement(self, node, builder, module):
         self.visit(node.function_def, builder, module)
@@ -4262,10 +4336,6 @@ class CodegenVisitor:
             return None
         self.visit(node.namespace_def, builder, module)
         return None
-
-    # ------------------------------------------------------------------
-    # Tier 1 supplement — Identifier  [DONE]
-    # ------------------------------------------------------------------
 
     def visit_Identifier(self, node, builder, module):
         #print(f"[IDENTIFIER] Looking up '{node.name}'", file=sys.stdout)
@@ -4356,10 +4426,6 @@ class CodegenVisitor:
                 return module._type_aliases[mangled_name]
 
         raise NameError(f"Unknown identifier: {node.name} [{node.source_line}:{node.source_col}]")
-
-    # ------------------------------------------------------------------
-    # Tier 5 supplement — VariableDeclaration  [DONE]
-    # ------------------------------------------------------------------
 
     def visit_VariableDeclaration(self, node, builder, module):
         # Resolve type (with automatic array size inference if needed)
@@ -4831,10 +4897,6 @@ class CodegenVisitor:
         """Store value with automatic type conversion if needed."""
         VariableTypeHandler.store_with_type_conversion(builder, alloca, llvm_type, init_val, node.initial_value, module)
 
-    # ------------------------------------------------------------------
-    # Tier 7 — Program (top-level driver)  [DONE]
-    # ------------------------------------------------------------------
-
     def visit_Program(self, node, builder, module):
         from fast import (UsingStatement, NotUsingStatement, NamespaceDef,
                           StructDef, StructDefStatement, ObjectDef, ObjectDefStatement,
@@ -4985,7 +5047,7 @@ class CodegenVisitor:
         return module
 
 # ---------------------------------------------------------------------------
-# Module-level singleton — imported by ASTNode.codegen() thunks
+# Module-level singleton
 # ---------------------------------------------------------------------------
 
 visitor = CodegenVisitor()

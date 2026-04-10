@@ -1132,8 +1132,7 @@ class TypeSystem:
             # Get the current namespace context
             current_namespace = getattr(module, '_current_namespace', '')
             
-            # Use NamespaceTypeHandler to resolve the custom type
-            resolved_type = NamespaceTypeHandler.resolve_custom_type(
+            resolved_type = TypeResolver.resolve_custom_type(
                 module, type_spec.custom_typename, current_namespace
             )
             
@@ -1185,7 +1184,7 @@ class TypeSystem:
             # here we just need to not crash. Fall back to i8* when context is unavailable.
             obj_name = getattr(module, '_current_object_name', None)
             if obj_name is not None:
-                resolved = NamespaceTypeHandler.resolve_custom_type(module, obj_name,
+                resolved = TypeResolver.resolve_custom_type(module, obj_name,
                                 getattr(module, '_current_namespace', ''))
                 base_type = ir.PointerType(resolved) if resolved is not None else ir.PointerType(ir.IntType(8))
             else:
@@ -1370,225 +1369,17 @@ class NamespaceTypeHandler:
             module._using_namespaces.append(namespace)
     
     @staticmethod
-    def create_static_init_builder(module: 'ir.Module') -> 'ir.IRBuilder':
-        init_func_name = "__static_init"
-
-        # Create function if it doesn't exist
-        if init_func_name not in module.globals:
-            func_type = ir.FunctionType(ir.VoidType(), [])
-            init_func = ir.Function(module, func_type, init_func_name)
-            block = init_func.append_basic_block("entry")
-        else:
-            init_func = module.globals[init_func_name]
-
-            # ALWAYS emit into a non-terminated block
-            if not init_func.blocks:
-                block = init_func.append_basic_block("entry")
-            else:
-                block = init_func.blocks[-1]
-                if block.is_terminated:
-                    block = init_func.append_basic_block("cont")
-
-        builder = ir.IRBuilder(block)
-        # Scope management now handled by module.symbol_table
-        builder.initialized_unions = set()
-        return builder
-    
-    @staticmethod
-    def finalize_static_init(module: 'ir.Module'):
-        if "__static_init" in module.globals:
-            init_func = module.globals["__static_init"]
-            if init_func.blocks and not init_func.blocks[-1].is_terminated:
-                # Get a builder positioned at the end of the last block
-                final_builder = ir.IRBuilder(init_func.blocks[-1])
-                final_builder.ret_void()
-    
-    @staticmethod
     def process_namespace_struct(namespace: str, struct_def: 'StructDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
-        original_name = struct_def.name
-        struct_def.name = f"{namespace.replace('::', '__')}__{struct_def.name}"
-        
-        # SAVE BOTH namespace contexts (matching pattern from process_namespace_function)
-        original_module_namespace = getattr(module, '_current_namespace', '')
-        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
-        
-        # SET namespace on module (for type resolution during codegen)
-        module._current_namespace = namespace
-        
-        if not hasattr(module, 'symbol_table'):
-            raise RuntimeError("NamespaceTypeHandler.process_namespace_struct: Module must have symbol_table for namespace support")
+        """Delegate to CodegenVisitor._ns_struct."""
+        from fcodegen import visitor as _visitor
+        _visitor._ns_struct(namespace, struct_def, builder, module)
 
-        # SET namespace on symbol table (for symbol lookup)
-        module.symbol_table.set_namespace(namespace)
-
-        try:
-            struct_def.codegen(builder, module)
-        finally:
-            # RESTORE ALL saved state
-            struct_def.name = original_name
-            module._current_namespace = original_module_namespace
-            module.symbol_table.set_namespace(original_st_namespace)
-    
     @staticmethod
     def process_namespace_object_type_only(namespace: str, obj_def: 'ObjectDef', module: 'ir.Module'):
-        """Pre-pass: register the struct type for a namespace object without emitting method bodies.
-        This allows namespace-level functions compiled afterward to resolve the object type."""
-        original_name = obj_def.name
-        obj_def.name = f"{namespace.replace('::', '__')}__{obj_def.name}"
-
-        original_module_namespace = getattr(module, '_current_namespace', '')
-        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
-
-        module._current_namespace = namespace
-        if hasattr(module, 'symbol_table'):
-            module.symbol_table.set_namespace(namespace)
-
-        try:
-            obj_def.codegen_type_only(module)
-        finally:
-            obj_def.name = original_name
-            module._current_namespace = original_module_namespace
-            if hasattr(module, 'symbol_table'):
-                module.symbol_table.set_namespace(original_st_namespace)
-
-    @staticmethod
-    def process_namespace_object(namespace: str, obj_def: 'ObjectDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
-        original_name = obj_def.name
-        obj_def.name = f"{namespace.replace('::', '__')}__{obj_def.name}"
-        
-        # SAVE BOTH namespace contexts (matching pattern from process_namespace_function)
-        original_module_namespace = getattr(module, '_current_namespace', '')
-        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
-        
-        # SET namespace on module (for type resolution during codegen)
-        module._current_namespace = namespace
-        
-        if not hasattr(module, 'symbol_table'):
-            raise RuntimeError("NamespaceTypeHandler.process_namespace_object: Module must have symbol_table for namespace support")
-
-        # SET namespace on symbol table (for symbol lookup)
-        module.symbol_table.set_namespace(namespace)
-
-        try:
-            obj_def.codegen(builder, module)
-        finally:
-            # RESTORE ALL saved state
-            obj_def.name = original_name
-            module._current_namespace = original_module_namespace
-            module.symbol_table.set_namespace(original_st_namespace)
+        """Delegate to CodegenVisitor._ns_object_type_only."""
+        from fcodegen import visitor as _visitor
+        _visitor._ns_object_type_only(namespace, obj_def, module)
     
-    @staticmethod
-    def process_namespace_enum(namespace: str, enum_def: 'EnumDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
-        original_name = enum_def.name
-        enum_def.name = f"{namespace.replace('::', '__')}__{enum_def.name}"
-        
-        # SAVE BOTH namespace contexts (matching pattern from process_namespace_function)
-        original_module_namespace = getattr(module, '_current_namespace', '')
-        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
-        
-        # SET namespace on module (for type resolution during codegen)
-        module._current_namespace = namespace
-        
-        if not hasattr(module, 'symbol_table'):
-            raise RuntimeError("NamespaceTypeHandler.process_namespace_enum: Module must have symbol_table for namespace support")
-
-        # SET namespace on symbol table (for symbol lookup)
-        module.symbol_table.set_namespace(namespace)
-
-        try:
-            enum_def.codegen(builder, module)
-        finally:
-            # RESTORE ALL saved state
-            enum_def.name = original_name
-            module._current_namespace = original_module_namespace
-            module.symbol_table.set_namespace(original_st_namespace)
-    
-    @staticmethod
-    def process_namespace_variable(namespace: str, var_def: 'VariableDeclaration', module: 'ir.Module'):
-        original_name = var_def.name
-        # Always mangle namespace-level variables
-        var_def.name = f"{namespace.replace('::', '__')}__{var_def.name}"
-        
-        # Set current namespace context on BOTH module and symbol_table
-        original_namespace = getattr(module, '_current_namespace', '')
-        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
-        
-        module._current_namespace = namespace
-        if hasattr(module, 'symbol_table'):
-            module.symbol_table.set_namespace(namespace)
-        
-        try:
-            result = var_def.codegen(None, module)  # Always use None builder for globals
-            return result
-        finally:
-            # Restore original context
-            var_def.name = original_name
-            module._current_namespace = original_namespace
-            if hasattr(module, 'symbol_table'):
-                module.symbol_table.set_namespace(original_st_namespace)
-    
-    @staticmethod
-    def process_nested_namespace(parent_namespace: str, nested_ns: 'NamespaceDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
-        original_name = nested_ns.name
-        # Nested namespace gets parent path prepended - use __ format throughout
-        full_nested_name = f"{parent_namespace}__{nested_ns.name}"
-        nested_ns.name = full_nested_name
-        
-        # Set current namespace context on BOTH module and symbol_table
-        original_namespace = getattr(module, '_current_namespace', '')
-        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
-        
-        module._current_namespace = full_nested_name
-        if not hasattr(module, 'symbol_table'):
-            raise RuntimeError("NamespaceTypeHandler.process_nested_namespace: Module must have symbol_table for namespace support")
-
-        # Set the FULL nested namespace in symbol_table - use __ format
-        module.symbol_table.set_namespace(full_nested_name)
-
-        # nested_ns is NamespaceDef
-        try:
-            nested_ns.codegen(builder, module)
-        finally:
-            nested_ns.name = original_name
-            module.symbol_table.set_namespace(original_st_namespace)
-    
-    @staticmethod
-    def process_namespace_function(namespace: str, func_def: 'FunctionDef', builder: 'ir.IRBuilder', module: 'ir.Module'):
-        """Process a function within a namespace context."""
-        from fast import FunctionTypeHandler  # Import here to avoid circular dependency
-        
-        original_name = func_def.name
-        # Mangle the name for LLVM IR (so functions don't collide)
-        mangled_func_name = f"{namespace}__{func_def.name}"
-        
-        # Temporarily set the function name for LLVM
-        func_def.name = mangled_func_name
-        
-        # SAVE BOTH namespace contexts (use distinct variable names to avoid overwriting)
-        original_module_namespace = getattr(module, '_current_namespace', '')
-        original_st_namespace = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
-        
-        # SET namespace on module (for type resolution during codegen)
-        module._current_namespace = namespace
-        
-        if not hasattr(module, 'symbol_table'):
-            raise RuntimeError("NamespaceTypeHandler.process_namespace_function: Module must have symbol_table for namespace support")
-
-        # SET namespace on symbol table (for symbol lookup)
-        module.symbol_table.set_namespace(namespace)
-
-        try:
-            func_def.codegen(builder, module)
-        finally:
-            # RESTORE ALL saved state
-            func_def.name = original_name
-            module._current_namespace = original_module_namespace
-            module.symbol_table.set_namespace(original_st_namespace)
-    
-    @staticmethod
-    def resolve_custom_type(module: ir.Module, typename: str, current_namespace: str = "") -> Optional[ir.Type]:
-        return TypeResolver.resolve_custom_type(module, typename, current_namespace)
-
 
 @dataclass
 class FunctionPointerType:
@@ -3155,16 +2946,6 @@ class LiteralTypeHandler:
         return val
         
     @staticmethod
-    def preserve_array_element_type_metadata(loaded_val: ir.Value, array_val: ir.Value, module: ir.Module) -> ir.Value:
-        # Try to get the element type spec from the array value's metadata
-        element_type_spec = TypeSystem.get_array_element_type_spec(array_val)
-        
-        if element_type_spec:
-            return TypeSystem.attach_type_metadata(loaded_val, type_spec=element_type_spec)
-        
-        return TypeSystem.attach_type_metadata_from_llvm_type(loaded_val, loaded_val.type, module)
-    
-    @staticmethod
     def cast_to_target_int_type(builder: ir.IRBuilder, value: ir.Value, target_type: ir.Type) -> ir.Value:
         # Only handle integer-to-integer casts
         if not (isinstance(value.type, ir.IntType) and isinstance(target_type, ir.IntType)):
@@ -3549,17 +3330,7 @@ def infer_int_width(value: int, data_type: DataType) -> int:
         return 64
 
 def is_unsigned(val: ir.Value) -> bool:
-    if hasattr(val, '_flux_type_spec'):
-        type_spec = val._flux_type_spec
-        if hasattr(type_spec, 'base_type'):
-            if type_spec.base_type == DataType.UINT:
-                return True
-            if type_spec.base_type == DataType.DATA:
-                return not getattr(type_spec, 'is_signed', False)
-            return False
-        if hasattr(type_spec, 'is_signed'):
-            return not type_spec.is_signed
-    return False
+    return CoercionContext.is_unsigned(val)
 
 def get_builtin_bit_width(base_type: DataType) -> int:
     if base_type in (DataType.SINT, DataType.UINT):
@@ -3676,7 +3447,7 @@ class ObjectTypeHandler:
         member_names = []
         
         for member in members:
-            member_type = FunctionTypeHandler.convert_type_spec_to_llvm(member.type_spec, module)
+            member_type = TypeSystem.get_llvm_type(member.type_spec, module, include_array=True)
             member_types.append(member_type)
             member_names.append(member.name)
         
@@ -3745,11 +3516,11 @@ class ObjectTypeHandler:
         if method.return_type.base_type == DataType.THIS:
             ret_type = ir.PointerType(struct_type)
         else:
-            ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(method.return_type, module)
+            ret_type = TypeSystem.get_llvm_type(method.return_type, module, include_array=True)
         
         # Param types: always 'this' first
         param_types = [ir.PointerType(struct_type)]
-        param_types.extend([FunctionTypeHandler.convert_type_spec_to_llvm(p.type_spec, module) 
+        param_types.extend([TypeSystem.get_llvm_type(p.type_spec, module, include_array=True) 
                           for p in method.parameters])
         
         func_type = ir.FunctionType(ret_type, param_types)
@@ -3808,67 +3579,6 @@ class ObjectTypeHandler:
         
         return func
 
-    
-    @staticmethod
-    def emit_method_body(method, func: 'ir.Function', object_name: str, module: 'ir.Module'):
-        from fast import DataType, TypeSystem, FunctionDef
-        
-        if isinstance(method, FunctionDef) and method.is_prototype:
-            return
-        
-        if len(func.blocks) != 0:
-            return
-        
-        entry_block = func.append_basic_block('entry')
-        method_builder = ir.IRBuilder(entry_block)
-        
-        saved_namespace = module.symbol_table.current_namespace
-        prev_object_name = getattr(module, '_current_object_name', None)
-        module._current_object_name = object_name
-        
-        # Enter method scope
-        module.symbol_table.enter_scope()
-        
-        # Register 'this' parameter
-        this_type_spec = TypeSystem(base_type=DataType.DATA, custom_typename=object_name, is_pointer=True)
-        module.symbol_table.define(
-            "this",
-            SymbolKind.VARIABLE,
-            llvm_value=func.args[0],
-            type_spec=this_type_spec)
-        
-        # Store other params
-        for i, param in enumerate(func.args[1:], 1):
-            param_name = method.parameters[i - 1].name if method.parameters[i - 1].name is not None else f"arg{i - 1}"
-            alloca = method_builder.alloca(param.type, name=f"{param_name}.addr")
-            param_type_spec = method.parameters[i - 1].type_spec
-            # Attach type metadata to the alloca so signedness survives loads in Identifier.codegen
-            if param_type_spec is not None:
-                alloca._flux_type_spec = param_type_spec
-            param_with_metadata = TypeSystem.attach_type_metadata(param, type_spec=param_type_spec)
-            method_builder.store(param_with_metadata, alloca)
-            module.symbol_table.define(param_name, SymbolKind.VARIABLE, type_spec=param_type_spec, llvm_value=alloca)
-        
-        # Emit body - namespace context is still available via saved_namespace
-        method.body.codegen(method_builder, module)
-        
-        # __init implicit return
-        if isinstance(method, FunctionDef) and method.name == '__init' and not method_builder.block.is_terminated:
-            method_builder.ret(func.args[0])
-        
-        # Implicit return for void
-        if not method_builder.block.is_terminated:
-            if isinstance(func.function_type.return_type, ir.VoidType):
-                method_builder.ret_void()
-            else:
-                raise RuntimeError(f"ObjectTypeHandler.emit_method_body: Method {method.name} must end with return statement")
-        
-        module.symbol_table.exit_scope()
-        
-        module.symbol_table.current_namespace = saved_namespace
-        module._current_object_name = prev_object_name
-        return
-
 
 class FunctionTypeHandler:
     """
@@ -3882,8 +3592,8 @@ class FunctionTypeHandler:
     
     @staticmethod
     def create_function_type(return_type_spec, param_type_specs: List, module: ir.Module) -> ir.FunctionType:
-        ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(return_type_spec, module)
-        param_types = [FunctionTypeHandler.convert_type_spec_to_llvm(pts, module) 
+        ret_type = TypeSystem.get_llvm_type(return_type_spec, module, include_array=True)
+        param_types = [TypeSystem.get_llvm_type(pts, module, include_array=True)
                       for pts in param_type_specs]
         return ir.FunctionType(ret_type, param_types)
     
@@ -4972,7 +4682,6 @@ class StructTypeHandler:
         
         raise ValueError("StructTypeHandler.infer_struct_name: Cannot infer struct name from instance")
     
-    @staticmethod
     @staticmethod
     def _array_bits(at: ir.ArrayType) -> int:
         """Return the total bit width of an LLVM array type."""
