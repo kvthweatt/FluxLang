@@ -3304,6 +3304,50 @@ class CodegenVisitor:
             builder.store(char_val, var_ptr)
             module.symbol_table.define(node.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
 
+        elif (isinstance(coll_type, ir.PointerType) and
+              isinstance(coll_type.pointee, ir.IntType) and
+              coll_type.pointee.width != 8):
+            # Decayed array pointer: int[] stored as i32* (VLA / inferred-size array).
+            # Recover the element count from the symbol table type_spec.
+            elem_type = coll_type.pointee
+            size = None
+            if hasattr(node, 'iterable'):
+                from fast import Identifier as _Identifier
+                if isinstance(node.iterable, _Identifier):
+                    entry = module.symbol_table.lookup_any(node.iterable.name)
+                    if entry and entry.type_spec is not None:
+                        ts = entry.type_spec
+                        if ts.array_size is not None:
+                            raw = ts.array_size
+                            size = raw if isinstance(raw, int) else (
+                                raw.value if hasattr(raw, 'value') else int(raw))
+                        elif ts.array_dimensions:
+                            raw = ts.array_dimensions[0]
+                            size = raw if isinstance(raw, int) else (
+                                raw.value if hasattr(raw, 'value') else int(raw))
+            if size is None:
+                raise ValueError(
+                    f"Cannot iterate over pointer type {coll_type} — "
+                    f"array size not known at compile time [{node.source_line}:{node.source_col}]")
+
+            index_ptr = builder.alloca(ir.IntType(32), name='forin.idx')
+            builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
+            builder.branch(cond_block)
+
+            builder.position_at_start(cond_block)
+            current_idx = builder.load(index_ptr, name='idx')
+            cmp = builder.icmp_unsigned('<', current_idx,
+                                        ir.Constant(ir.IntType(32), size),
+                                        name='loop.cond')
+            builder.cbranch(cmp, body_block, end_block)
+
+            builder.position_at_start(body_block)
+            elem_ptr = builder.gep(collection, [current_idx], name='elem.ptr')
+            elem_val = builder.load(elem_ptr, name='elem')
+            var_ptr  = builder.alloca(elem_type, name=node.variables[0])
+            builder.store(elem_val, var_ptr)
+            module.symbol_table.define(node.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
+
         else:
             raise ValueError(f"Cannot iterate over type {coll_type} [{node.source_line}:{node.source_col}]")
 
@@ -3330,6 +3374,12 @@ class CodegenVisitor:
                 pv  = builder.load(current_ptr, name='ptr.latch')
                 nxt = builder.gep(pv, [ir.Constant(ir.IntType(32), 1)], name='ptr.next')
                 builder.store(nxt, current_ptr)
+            elif (isinstance(coll_type, ir.PointerType) and
+                  isinstance(coll_type.pointee, ir.IntType) and
+                  coll_type.pointee.width != 8):
+                current_idx = builder.load(index_ptr, name='idx')
+                next_idx = builder.add(current_idx, ir.Constant(ir.IntType(32), 1), name='next.idx')
+                builder.store(next_idx, index_ptr)
             builder.branch(cond_block)
 
         builder.break_block    = old_break

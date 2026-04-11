@@ -5223,14 +5223,87 @@ class StructTypeHandler:
             return result
         
         # Fallback: Perform zero-cost bitcast for other cases
-        if isinstance(actual_source.type, ir.PointerType):
-            # Cast pointer, then load
-            casted_ptr = builder.bitcast(actual_source, llvm_target_type.as_pointer())
-            result = builder.load(casted_ptr)
-        else:
-            # Direct bitcast (reinterpret bits)
-            result = builder.bitcast(actual_source, llvm_target_type)
-        
+        source_vtable = None
+        if hasattr(module, '_struct_vtables'):
+            # Find source vtable by matching the LLVM type
+            for vt_name, vt in module._struct_vtables.items():
+                candidate = module._struct_types.get(vt_name)
+                if candidate is not None and candidate == actual_source.type:
+                    source_vtable = vt
+                    break
+
+        if source_vtable is None:
+            # Cannot identify source struct — fall back to memory reinterpret
+            src_alloca = builder.alloca(actual_source.type, name="recast_src")
+            builder.store(actual_source, src_alloca)
+            casted_ptr = builder.bitcast(
+                src_alloca, ir.PointerType(llvm_target_type), name="recast_ptr")
+            return builder.load(casted_ptr, name="recast_result")
+
+        total_bits = target_vtable.total_bytes * 8
+        wide_int_type = ir.IntType(total_bits)
+        source_bits = ir.Constant(wide_int_type, 0)
+
+        # Walk source fields and pack into the wide integer, MSB of field 0 at the top
+        bits_consumed = 0
+        for field_name, bit_offset, bit_width, _ in source_vtable.fields:
+            field_idx = [f[0] for f in source_vtable.fields].index(field_name)
+            field_val = builder.extract_value(actual_source, field_idx,
+                                              name=f"src_field_{field_name}")
+            # Widen to the full integer
+            field_wide = builder.zext(field_val, wide_int_type,
+                                      name=f"src_wide_{field_name}")
+            # Shift so this field's MSB lands at the right position
+            shift = total_bits - bits_consumed - bit_width
+            if shift > 0:
+                field_wide = builder.shl(field_wide,
+                                         ir.Constant(wide_int_type, shift),
+                                         name=f"src_shift_{field_name}")
+            source_bits = builder.or_(source_bits, field_wide,
+                                      name=f"src_acc_{field_name}")
+            bits_consumed += bit_width
+
+        # --- Step 2: extract target fields from source_bits, consuming from MSB ---
+        field_values = []
+        bits_consumed = 0
+        for field_name, bit_offset, bit_width, _ in target_vtable.fields:
+            field_type = target_vtable.field_types[field_name]
+            # Shift the desired bits down to the LSB position
+            shift = total_bits - bits_consumed - bit_width
+            if shift > 0:
+                shifted = builder.lshr(source_bits,
+                                       ir.Constant(wide_int_type, shift),
+                                       name=f"tgt_shift_{field_name}")
+            else:
+                shifted = source_bits
+            # Mask to the field width
+            mask = ir.Constant(wide_int_type, (1 << bit_width) - 1)
+            masked = builder.and_(shifted, mask, name=f"tgt_mask_{field_name}")
+            # Truncate to the actual field type
+            if isinstance(field_type, ir.IntType):
+                if field_type.width < total_bits:
+                    field_val = builder.trunc(masked, field_type,
+                                             name=f"tgt_{field_name}")
+                else:
+                    field_val = masked
+            elif isinstance(field_type, ir.FloatType):
+                truncated = builder.trunc(masked, ir.IntType(32),
+                                          name=f"tgt_i_{field_name}")
+                field_val = builder.bitcast(truncated, field_type,
+                                            name=f"tgt_{field_name}")
+            elif isinstance(field_type, ir.DoubleType):
+                field_val = builder.bitcast(masked, field_type,
+                                            name=f"tgt_{field_name}")
+            else:
+                field_val = masked
+            field_values.append(field_val)
+            bits_consumed += bit_width
+
+        # Assemble the target struct
+        result = ir.Constant(llvm_target_type, ir.Undefined)
+        for i, fv in enumerate(field_values):
+            result = builder.insert_value(result, fv, i)
+
         return result
 
 

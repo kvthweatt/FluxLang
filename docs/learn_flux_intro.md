@@ -687,11 +687,9 @@ For this example we will be modeling the [Bitmap File Format](https://www.ece.ua
 
 Using this schematic we will capture the header of a `.bmp` image but not the color table.  
 ```
-import "types.fx", "io.fx", "fio.fx";
+#import "standard.fx";
 
-using fio::File, fio::input::open;
 using standard::io::console;
-using types::string;
 
 struct Header
 {
@@ -748,7 +746,7 @@ In this case, casting data to a structure results in the data aligning to the st
 
 #### f5.4 Restructuring
 ```
-import "types.fx", "io.fx";
+#import "standard.fx";
 
 using standard::io::console;
 using types::string;
@@ -761,16 +759,14 @@ struct Values32
 struct Values16
 {
     i16 a, b, c, d, e, f, g, h;
-}
+};
 
 def main() -> int
 {
     Values32 v1 = {a=10, b=20, c=30, d=40};
-    
-    Values16 v2 = (Values16)v1;
+    Values16 v2 from v1;    // Restructure
 
-    print(f"v2.a = {v2.a}\n");
-    print(f"v2.b = {v2.b});
+    print(f"{v2.a} {v2.b} {v2.c} {v2.d}\n");
     return 0;
 };
 ```
@@ -861,10 +857,9 @@ So `v2.a` which is `i16` type (16 bits wide) gets all zeros, `v2.b` gets the rem
 
 Say we use `Values16` to create a new instance called `v3`, and we swap the order of `a` and `b`. Then we cast it to a new instance `v4` which is type `Values32`.
 ```
-import "types.fx", "io.fx";
+#import "standard.fx";
 
 using standard::io::console;
-using types::string;
 
 struct Values32
 {
@@ -874,21 +869,21 @@ struct Values32
 struct Values16
 {
     i16 a, b, c, d, e, f, g, h;
-}
+};
 
 def main() -> int
 {
     Values32 v1 = {a=10, b=20, c=30, d=40};
-    Values16 v2 = (Values16)v1;    // Restructure
+    Values16 v2 from v1;    // Restructure
     Values16 v3 = {a=v2.b, b=v2.a, c=v2.c, d=v2.d, e=v2.e, f=v2.f, g=v2.g, h=v2.h};
-    Values32 v4 = (Values32)v3;    // Restructure
+    Values32 v4 from v3;    // Restructure
 
     print(f"v4.a = {v4.a}\n");
     return 0;
 };
 ```
 Result:  
-`327680`
+`v4.a = 655360`
 
 - **Why is the value so much larger than 10?**  
 We swapped the order of the bits, essentially rotating them left 16 spaces.
@@ -907,15 +902,15 @@ Every condition is known at compile time, so a more optimized jump table can be 
 
 #### f6.1 A little game.
 ```
-import "types.fx", "io.fx", "random.fx";
+#import "standard.fx", "random.fx";
 
-using io::input::input, standard::io::console;
-using types::string;
-using random::rand_int;
+using standard::io::console,
+      standard::strings,
+      math::random;
 
 def main() -> int
 {
-    string s();
+    string s = "";
     int value;
     int rand;
 
@@ -969,15 +964,13 @@ A `do`-`while` loop will execute its block before checking the condition. Here's
 
 #### f6.2.1 `do`-`while`
 ```
-import "types.fx", "io.fx";
+#import "standard.fx";
 
-using types::string;
 using standard::io::console;
 
 def main() -> int
 {
-    int start = 0;
-    int end = 3;
+    int start, end = 0, 3;
 
     do
     {
@@ -986,7 +979,7 @@ def main() -> int
             print("You fell off the cliff!");
             break;
         };
-        print("You take a step.")
+        print("You take a step.\n");
         start++;
     }
     while (start < end);
@@ -999,20 +992,18 @@ Result:
 You take a step.
 You take a step.
 You take a step.
-You fell off the cliff!
 ```
 
 #### f6.2.2 `while` without `do`
 ```
-import "types.fx", "io.fx";
+#import "standard.fx";
 
-using types::string;
 using standard::io::console;
 
 def main() -> int
 {
-    int start = 0;
-    int end = 3;
+    int start = 0,
+        end = 3;
 
     while (start < end)
     {
@@ -1021,7 +1012,7 @@ def main() -> int
             print("You fell off the cliff!");
             break;
         };
-        print("You take a step.")
+        print("You take a step.\n");
         start++;
     };
 
@@ -1035,7 +1026,7 @@ You take a step.
 You take a step.
 ```
 
-As you can see, there's a difference in the output of these two programs.  
+As you can see, these programs run identically.  
 In figure 6.2.1 we go past the end and fall off the imaginary cliff.  
 In figure 6.2.2 we make sure we're not at the end before taking a step.  
 `do`-`while` loops are guaranteed to execute their block **at least once**.  
@@ -1043,14 +1034,13 @@ A `while`-only loop may not execute at all in some circumstances.
 
 #### f6.3.1 `for` Style 1: initializer, condition, expression
 ```
-import "types.fx", "io.fx";
+#import "standard.fx";
 
-using types::string;
 using standard::io::console;
 
 def main() -> int
 {
-    for (int counter = 0; counter < 3; counter++)
+    for (int counter; counter < 3; counter++)
     {
         print(f"All you're base are belong to us.\n");
     };
@@ -1066,14 +1056,13 @@ All you're base are belong to us.
 
 #### f6.3.2 `for` Style 2: element in array
 ```
-import "types.fx", "io.fx";
+#import "standard.fx";
 
-using types::string;
 using standard::io::console;
 
 def main() -> int
 {
-    int[] int_array = [11, 22, 33, 44, 55, 66, 77, 88, 99, 00];
+    int[10] int_array = [11, 22, 33, 44, 55, 66, 77, 88, 99, 00];
 
     for (x in int_array)
     {
@@ -1102,7 +1091,7 @@ In Flux you are bound to come across an array like:
 signed data{20} as someType;
 someType[50] someArray;
 ```
-The reason we've been dividing `sizeof` results by `8` is because we've been sizing an array of bytes. In figure 6.4, `someType` is `20` bits wide so we divide the `sizeof(someArray)` by `20` to get the number of elements.
+The reason we've been dividing `sizeof` results by `8` is because we've been sizing an array of bytes. In figure 6.4, `someType` is `20` bits wide so we divide the `sizeof(someArray)` by `sizeof(someType)` to get the number of elements.
 
 ---
 
@@ -1140,17 +1129,13 @@ object myObject
 This is the minimum boilerplate for an object. It must have a constructor, and a destructor function defined exactly as so.  You can change the constructor or destructor definitions, but their signatures and return values must be the same.  
 Without the comments (`//`) or delimeters (`{}`) an object is only 5 lines of code to prepare.  
 
-- **You can save yourself the time of writing this boilerplate by inheriting\* `standard::collections::baseObj`.**  
-**\*** *__Inheritance__ is a topic we will go over soon.*
-
 Now that we see what objects look like, let's try doing something with them.
 
 #### f7.2 Modeling a lock with `object`
 ```
 import "standard.fx";
 
-// using statements for commonly used modules/components are performed in standard.fx's global space.
-// No need to do `using standard::standard::io::console;` if you imported standard.fx
+using standard::io::console;
 
 object Lock
 {
