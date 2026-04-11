@@ -1841,7 +1841,16 @@ class FluxParser:
 
                 self.consume(TokenType.RIGHT_BRACE)
 
-        # Array specification - support multiple dimensions
+        # Pointer specification - support multiple levels
+        # Must be parsed BEFORE array brackets so that `int*[]` (array of pointers)
+        # is handled correctly: base=int, pointer_depth=1, is_array=True.
+        pointer_depth = 0
+        while self.expect(TokenType.MULTIPLY):
+            pointer_depth += 1
+            self.advance()
+
+        # Array specification - support multiple dimensions.
+        # Parsed AFTER pointer so `int*[]` means "array of int-pointers".
         array_dims = []
         while self.expect(TokenType.LEFT_BRACKET):
             self.advance()
@@ -1855,12 +1864,6 @@ class FluxParser:
         is_array = len(array_dims) > 0
         array_size = array_dims[0] if array_dims else None
         array_dimensions = array_dims if array_dims else None
-
-        # Pointer specification - support multiple levels
-        pointer_depth = 0
-        while self.expect(TokenType.MULTIPLY):
-            pointer_depth += 1
-            self.advance()
 
         #if custom_typename == "byte":
         #    print(custom_typename)

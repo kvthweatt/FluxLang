@@ -177,21 +177,21 @@ global float g_ball_x  = -1.0,  // -1 = needs reset on first gameplay frame
 global int g_lives = 3;
 global int g_level = 1;
 
-def btn_hit_test(int mx, int my, int cx, int cy) -> bool;
-def btn_hit_test_ex(int, int, int, int, int, int) -> bool;
-def draw_parallelogram_btn(int, int, int, int, int, float, float) -> void;
-def text_width(byte*, int) -> int;
-def draw_text(byte*, int, int, int, float, float) -> void;
-def draw_quit_dialog(int, int) -> void;
-def paddle_update() -> void;
-def cpu_paddle_update() -> void;
-def draw_paddle(int, int, int, int) -> void;
-def ball_reset(int, int) -> void;
-def ball_update(int, int) -> void;
-def draw_ball(int, int) -> void;
-def draw_hud(int, int) -> void;
-def inject_vorticity() -> void;
-def vorticity_confinement(double*, double*) -> void;
+def btn_hit_test(int mx, int my, int cx, int cy) -> bool,
+    btn_hit_test_ex(int, int, int, int, int, int) -> bool,
+    draw_parallelogram_btn(int, int, int, int, int, float, float) -> void,
+    text_width(byte*, int) -> int,
+    draw_text(byte*, int, int, int, float, float) -> void,
+    draw_quit_dialog(int, int) -> void,
+    paddle_update() -> void,
+    cpu_paddle_update() -> void,
+    draw_paddle(int, int, int, int) -> void,
+    ball_reset(int, int) -> void,
+    ball_update(int, int) -> void,
+    draw_ball(int, int) -> void,
+    draw_hud(int, int) -> void,
+    inject_vorticity() -> void,
+    vorticity_confinement(double*, double*) -> void;
 
 // ============================================================================
 // WINDOW PROCEDURE
