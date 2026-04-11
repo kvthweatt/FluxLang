@@ -1,10 +1,5 @@
 #import "standard.fx";
 
-def foo(~int z) -> void  // accepts a tied type
-{
-    return;
-};
-
 def bar(~int y) -> ~int  // returns a tied type
 {
     return ~y;
@@ -13,13 +8,13 @@ def bar(~int y) -> ~int  // returns a tied type
 def main() -> int
 {
     ~int x, y, z; // Tied vars
-    int  w = 3;   // Non-tied var
+    int  w = 5;       // Non-tied var
 
-    x = bar(~y);  // Compile error, function returns tied type to non-tied type
+    x = bar(~y);  // Copmile error, function returns tied type to non-tied type
 
-    z = ~w;
+    z = ~w;   // Illegal but currently valid line
 
-    w = 5; // Compile error, w invalidated previously
+    int w = 10;
 
     return 0;
 };

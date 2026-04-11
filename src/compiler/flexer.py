@@ -336,12 +336,134 @@ single_char_tokens = {
     '$': TokenType.STRINGIFY
 }
 
+_TOKEN_TYPE_TO_STR: dict = {
+    # Operators - symbol maps
+    **{v: k for k, v in single_char_tokens.items()},
+    **{v: k for k, v in double_char_tokens.items()},
+    **{v: k for k, v in triple_char_tokens.items()},
+    **{v: k for k, v in quadruple_binary_tokens.items()},
+    **{v: k for k, v in quintuple_binary_tokens.items()},
+    **{v: k for k, v in sextuple_binary_tokens.items()},
+    # Keywords
+    TokenType.ALIGNOF:    'alignof',
+    TokenType.ASSERT:     'assert',
+    TokenType.ENDIANOF:   'endianof',
+    TokenType.SIZEOF:     'sizeof',
+    TokenType.TYPEOF:     'typeof',
+    TokenType.AND:        'and',
+    TokenType.AS:         'as',
+    TokenType.ASM:        'asm',
+    TokenType.AUTO:       'auto',
+    TokenType.BREAK:      'break',
+    TokenType.BOOL_KW:    'bool',
+    TokenType.BYTE:       'byte',
+    TokenType.CASE:       'case',
+    TokenType.CATCH:      'catch',
+    TokenType.COMPT:      'compt',
+    TokenType.CONST:      'const',
+    TokenType.CONTINUE:   'continue',
+    TokenType.CONTRACT:   'contract',
+    TokenType.DATA:       'data',
+    TokenType.DEF:        'def',
+    TokenType.DEFER:      'defer',
+    TokenType.DEFAULT:    'default',
+    TokenType.DEPRECATE:  'deprecate',
+    TokenType.DO:         'do',
+    TokenType.DOUBLE_KW:  'double',
+    TokenType.ELIF:       'elif',
+    TokenType.ELSE:       'else',
+    TokenType.ENUM:       'enum',
+    TokenType.ESCAPE_KW:  'escape',
+    TokenType.EXTERN:     'extern',
+    TokenType.FALSE:      'false',
+    TokenType.FLOAT_KW:   'float',
+    TokenType.FOR:        'for',
+    TokenType.FROM:       'from',
+    TokenType.GLOBAL:     'global',
+    TokenType.GOTO:       'goto',
+    TokenType.HEAP:       'heap',
+    TokenType.IF:         'if',
+    TokenType.IN:         'in',
+    TokenType.IS:         'is',
+    TokenType.JUMP:       'jump',
+    TokenType.LABEL:      'label',
+    TokenType.LOCAL:      'local',
+    TokenType.SLONG:      'long',
+    TokenType.ULONG:      'ulong',
+    TokenType.SINT:       'int',
+    TokenType.UINT:       'uint',
+    TokenType.NAMESPACE:  'namespace',
+    TokenType.NOT:        'not',
+    TokenType.NO_INIT:    'noinit',
+    TokenType.NORET:      'noreturn',
+    TokenType.OBJECT:     'object',
+    TokenType.OPERATOR:   'operator',
+    TokenType.OR:         'or',
+    TokenType.PRIVATE:    'private',
+    TokenType.PUBLIC:     'public',
+    TokenType.REGISTER:   'register',
+    TokenType.RETURN:     'return',
+    TokenType.SIGNED:     'signed',
+    TokenType.SINGINIT:   'singinit',
+    TokenType.STACK:      'stack',
+    TokenType.STRUCT:     'struct',
+    TokenType.SWITCH:     'switch',
+    TokenType.THIS:       'this',
+    TokenType.THROW:      'throw',
+    TokenType.TRAIT:      'trait',
+    TokenType.TRUE:       'true',
+    TokenType.TRY:        'try',
+    TokenType.UNION:      'union',
+    TokenType.UNSIGNED:   'unsigned',
+    TokenType.USING:      'using',
+    TokenType.VECTOR:     'vector',
+    TokenType.VOID:       'void',
+    TokenType.VOLATILE:   'volatile',
+    TokenType.WHILE:      'while',
+    TokenType.XOR:        'xor',
+    TokenType.CDECL:      'cdecl',
+    TokenType.STDCALL:    'stdcall',
+    TokenType.FASTCALL:   'fastcall',
+    TokenType.THISCALL:   'thiscall',
+    TokenType.VECTORCALL: 'vectorcall',
+    # Literals / special
+    TokenType.SINT_LITERAL:   '<int>',
+    TokenType.UINT_LITERAL:   '<uint>',
+    TokenType.SLONG_LITERAL:  '<long>',
+    TokenType.ULONG_LITERAL:  '<ulong>',
+    TokenType.FLOAT:          '<float>',
+    TokenType.DOUBLE:         '<double>',
+    TokenType.CHAR:           '<char>',
+    TokenType.STRING_LITERAL: '<string>',
+    TokenType.BOOL:           '<bool>',
+    TokenType.I_STRING:       '<istring>',
+    TokenType.F_STRING:       '<fstring>',
+    TokenType.IDENTIFIER:     '<identifier>',
+    TokenType.ASM_BLOCK:      '<asm>',
+    TokenType.EOF:            '<EOF>',
+    TokenType.NEWLINE:        '<newline>',
+}
+
+def _token_type_str(self):
+    return _TOKEN_TYPE_TO_STR.get(self, self.name)
+
+TokenType.__str__ = _token_type_str
+TokenType.__repr__ = _token_type_str
+
 @dataclass
 class Token:
     type: TokenType
     value: str
     line: int
     column: int
+
+    def __repr__(self) -> str:
+        sym = _TOKEN_TYPE_TO_STR.get(self.type)
+        if sym:
+            return sym
+        if self.value:
+            return self.value
+        return self.type.name
 
 class FluxLexer:
     def __init__(self, source_code: str):

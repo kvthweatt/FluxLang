@@ -13,6 +13,8 @@ Flux resembles the C-family of languages.
 It is neither C, nor a derivative of C.  
 It has a fundamentally different type system while still being C ABI compatible.
 
+Flux is a giant F-you to the tech industry gatekeeping jobs through pieces of paper. I built this compiler in 100 days worth of actual time spent, in less than a year, while homeless over the winter. I was coding the Flux compiler at 4am while it was -10F for many weeks. They wouldn't even call to interview me. We all deserve a chance to prove our skill, whether it results in a win or not.
+
 **Characteristics:**
 - Unique type system allowing creation of primitive integer types
 - Manual memory management
