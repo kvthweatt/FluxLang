@@ -68,6 +68,58 @@ def debugger(debug_levels: list, target_levels: list, args: list):
             continue
 
 
+def resolve_llvm_tool(tool_name: str) -> str:
+    """
+    Resolve the full path to an LLVM tool on Windows.
+
+    Resolution order:
+      1. llvm_path from flux_config.cfg  (e.g. D:\\LLVM\\bin)
+      2. PATH lookup via `where`
+      3. Hard-coded default  C:\\Program Files\\LLVM\\bin
+
+    Args:
+        tool_name: bare executable name without extension, e.g. "lld-link" or "llc"
+
+    Returns:
+        Full path string to the .exe, e.g. "D:\\LLVM\\bin\\lld-link.exe"
+
+    Raises:
+        FileNotFoundError: if the tool cannot be found by any method
+    """
+    exe = tool_name + ".exe"
+
+    # 1. Explicit path from config
+    cfg_llvm = config.get('llvm_path', '').strip()
+    if cfg_llvm:
+        candidate = Path(cfg_llvm) / exe
+        if candidate.exists():
+            return str(candidate)
+
+    # 2. PATH lookup (works even if llvm_path is not set)
+    try:
+        result = subprocess.run(
+            ["where", tool_name],
+            check=True, capture_output=True, text=True
+        )
+        # `where` may return multiple lines; take the first hit
+        found = result.stdout.strip().splitlines()[0].strip()
+        if found:
+            return found
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # 3. Hard-coded fallback
+    fallback = Path(r"C:\Program Files\LLVM\bin") / exe
+    if fallback.exists():
+        return str(fallback)
+
+    raise FileNotFoundError(
+        f"Cannot find '{exe}'. "
+        f"Set 'llvm_path' in flux_config.cfg to your LLVM bin directory "
+        f"(e.g. llvm_path = D:\\LLVM\\bin), or add LLVM to your PATH."
+    )
+
+
 class FluxCompiler:
     def __init__(self, /, 
                  verbosity: int = None, 
@@ -381,6 +433,8 @@ class FluxCompiler:
                 
                 # Use configuration to determine desired compiler.
                 compiler = config.get('compiler')
+                # Resolve full path to the compiler so non-default LLVM installs work.
+                compiler_exe = resolve_llvm_tool(compiler)
                 # TODO:
                 # match (compiler):   case "clang", case "llc", etc...
                 compiler_args = [
@@ -405,7 +459,7 @@ class FluxCompiler:
                 ]
 
                 # Compile LLVM IR to object file using desired compiler
-                cmd = [compiler] + compiler_args
+                cmd = [compiler_exe] + compiler_args
                 self.logger.debug(f"Running: {' '.join(cmd)}", compiler)
                 
                 try:
@@ -500,9 +554,15 @@ class FluxCompiler:
             if self.platform == "Darwin":  # macOS
                 link_cmd = ["clang", str(obj_file), "-o", f"build/{output_dir}/{output_bin}"]
             elif self.platform == "Windows":
-                # Use LLD
+                # Use LLD — resolve the full path so non-default LLVM installs work.
+                linker_name = config['linker']
+                try:
+                    linker_exe = resolve_llvm_tool(linker_name)
+                except FileNotFoundError as e:
+                    self.logger.error(str(e), "linker")
+                    raise
                 link_cmd = [
-                    f"C:\\Program Files\\LLVM\\bin\\{config['linker']}.exe",
+                    linker_exe,
                     "/entry:" + config.get('entrypoint', 'main'),                 # TODO -> f"/entry:{entrypoint}"
                                                    # Custom entrypoint support, default main if unspecified
                     "/stack:67108864",
