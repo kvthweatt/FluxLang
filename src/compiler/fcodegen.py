@@ -1630,16 +1630,56 @@ class CodegenVisitor:
                 return builder.trunc(result, ir.IntType(num_bits), name="rev_trunc")
             return result
 
-        # Forward bit slice — build base_ptr
+        # Forward bit slice — build base_ptr.
+        # Flux bit addressing is MSB-first (bit 0 = MSB of the whole value).
+        # Fields are in declaration order (field 0 = most significant bits), but each
+        # field's bytes are little-endian on x86. For struct types we build a flat staging
+        # buffer where every field's bytes are written big-endian so that
+        # byte_idx = bit_idx // 8 and shift = 7 - (bit_idx % 8) work correctly.
+        def _build_msb_struct_buf(struct_type, struct_ptr):
+            elements = getattr(struct_type, 'elements', None) or []
+            field_sizes = []
+            for el in elements:
+                bits = SizeOfTypeHandler.bits_from_llvm_type(el, module)
+                field_sizes.append((bits or 8) // 8)
+            total = sum(field_sizes)
+            buf   = builder.alloca(ir.ArrayType(i8, total), name="bs_msb_buf")
+            i8buf = builder.bitcast(buf, ir.PointerType(i8), name="bs_msb_i8")
+            offset = 0
+            for fi, (el, nbytes) in enumerate(zip(elements, field_sizes)):
+                fptr = builder.gep(struct_ptr, [ir.Constant(i32, 0), ir.Constant(i32, fi)],
+                                   inbounds=True, name=f"bs_fptr_{fi}")
+                if isinstance(el, ir.IntType) and el.width >= 8:
+                    fval = builder.load(fptr, name=f"bs_fval_{fi}")
+                    wty  = fval.type if fval.type.width >= 32 else ir.IntType(32)
+                    wval = builder.zext(fval, wty) if fval.type.width < 32 else fval
+                    for bi in range(nbytes):
+                        sh   = (nbytes - 1 - bi) * 8
+                        bval = builder.trunc(
+                            builder.lshr(wval, ir.Constant(wty, sh), name=f"bs_fsh_{fi}_{bi}"),
+                            i8, name=f"bs_fb_{fi}_{bi}")
+                        bptr = builder.gep(i8buf, [ir.Constant(i32, offset + bi)],
+                                           inbounds=True, name=f"bs_fbptr_{fi}_{bi}")
+                        builder.store(bval, bptr)
+                else:
+                    fsrc = builder.bitcast(fptr, ir.PointerType(i8))
+                    for bi in range(nbytes):
+                        bval = builder.load(
+                            builder.gep(fsrc, [ir.Constant(i32, bi)], inbounds=True))
+                        builder.store(bval,
+                            builder.gep(i8buf, [ir.Constant(i32, offset + bi)], inbounds=True))
+                offset += nbytes
+            return i8buf
+
         if isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType):
             base_ptr = val
         elif isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
-            base_ptr = builder.bitcast(val, ir.PointerType(i8), name="bs_struct_raw")
+            base_ptr = _build_msb_struct_buf(val.type.pointee, val)
         elif isinstance(val.type, ir.PointerType):
             base_ptr = val
         elif isinstance(val.type, (ir.LiteralStructType, ir.IdentifiedStructType)):
             tmp = builder.alloca(val.type, name="bs_tmp"); builder.store(val, tmp)
-            base_ptr = builder.bitcast(tmp, ir.PointerType(i8), name="bs_struct_raw")
+            base_ptr = _build_msb_struct_buf(val.type, tmp)
         elif isinstance(val.type, ir.ArrayType):
             tmp = builder.alloca(val.type, name="bs_tmp"); builder.store(val, tmp); base_ptr = tmp
         elif isinstance(val.type, ir.IntType) and val.type.width >= 8:
@@ -1674,12 +1714,15 @@ class CodegenVisitor:
             raise ValueError(
                 f"Bit-slice indices must be integers [{node.source_line}:{node.source_col}]")
 
+
+
         start_i32 = to_i32(start_val, "bs_start")
         end_i32   = to_i32(end_val,   "bs_end")
         eight     = ir.Constant(i32, 8)
-        byte_idx  = builder.sdiv(start_i32, eight, name="bs_byte_idx")
-        bit_start = builder.srem(start_i32, eight, name="bs_bit_start")
-        bit_end   = builder.srem(end_i32,   eight, name="bs_bit_end")
+        byte_idx  = builder.udiv(start_i32, eight, name="bs_byte_idx")
+        bit_start = builder.urem(start_i32, eight, name="bs_bit_start")
+        bit_end   = builder.urem(end_i32,   eight, name="bs_bit_end")
+
         if isinstance(base_ptr.type.pointee, ir.ArrayType):
             byte_ptr = builder.gep(base_ptr, [zero32, byte_idx], inbounds=True, name="bs_byte_ptr")
         else:
@@ -1687,6 +1730,8 @@ class CodegenVisitor:
         byte_val     = builder.load(byte_ptr, name="bs_byte")
         bit_end_i8   = builder.trunc(bit_end,   i8, name="bs_bit_end_i8")
         bit_start_i8 = builder.trunc(bit_start, i8, name="bs_bit_start_i8")
+        # MSB-first within each byte: bit N%8==0 is MSB, so shift right by (7 - bit_end)
+        # to place the LSB of the slice at position 0, then mask.
         shift_amt    = builder.sub(ir.Constant(i8, 7), bit_end_i8, name="bs_shift_amt")
         shifted      = builder.lshr(byte_val, shift_amt, name="bs_shift")
         slice_w      = builder.add(builder.sub(bit_end_i8, bit_start_i8, name="bs_slen"),

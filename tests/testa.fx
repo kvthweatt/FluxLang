@@ -2,31 +2,15 @@
 
 using standard::io::console;
 
-struct Header
-{
-    unsigned data{16} sig;
-    unsigned data{32} filesize, reserved, dataoffset;
-};
-
-struct InfoHeader
-{
-    unsigned data{32} size, width, height;
-    unsigned data{16} planes, bitsperpixel;
-    unsigned data{32} compression, imagesize, xpixelsperm, ypixelsperm, colorsused, importantcolors;
-};
-
-struct PostData
-{
-    int test;
-};
-
-struct BMP : Header, InfoHeader : PostData;
+struct xx { int a, b; };
 
 def main() -> int
 {
-    BMP bitmap;
+    data{4} as u4;
+    xx yy = {5,10};
+    u4 a = yy[59``63]; // 10 because 0b1010
 
-    bitmap.test = 5;
+    print((int)a);
 
     return 0;
 };
