@@ -102,7 +102,14 @@ namespace standard
                     movl ($2), %eax
                 } : : "r"(buf), "r"(max_len), "r"(bytes_read_ptr), "r"(mode_ptr)
                   : "rax","rcx","rdx","r8","r9","r10","r11","r12","memory";
-                return bytes_read - 2;
+                for (int i; i < bytes_read; i++)
+                {
+                    if (buf[i] == '\r' | buf[i] == '\n')
+                    {
+                        buf[i] = 0;
+                    };
+                };
+                return bytes_read;
             };
 #endif;
 #endif; // ARCH 86 64

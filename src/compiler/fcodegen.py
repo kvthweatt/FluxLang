@@ -2604,7 +2604,7 @@ class CodegenVisitor:
         dst_ptr = builder.gep(dst_alloca, [zero, zero], inbounds=True, name="slice_dst")
         ArrayTypeHandler.emit_memcpy(builder, module, dst_ptr, src_ptr,
                                      const_len * ArrayTypeHandler.compute_element_size_bytes(elem_ty))
-        return builder.load(dst_alloca, name="slice_val")
+        return builder.gep(dst_alloca, [zero, zero], inbounds=True, name="slice_ptr")
 
     def visit_TieExpression(self, node, builder, module):
         from fast import Identifier

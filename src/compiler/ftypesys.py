@@ -2108,6 +2108,31 @@ class ArrayTypeHandler:
         # Call memset
         builder.call(memset_func, [dst_ptr, ir.Constant(ir.IntType(8), value), ir.Constant(ir.IntType(64), bytes), ir.Constant(ir.IntType(1), 0)])
     
+
+    @staticmethod
+    def get_element_type_from_array_value(array_val: ir.Value) -> ir.Type:
+        if isinstance(array_val, ir.GlobalVariable) and isinstance(array_val.type.pointee, ir.ArrayType):
+            return array_val.type.pointee.element
+        elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
+            return array_val.type.pointee.element
+        elif isinstance(array_val.type, ir.PointerType):
+            # Pointer-to-element (e.g. byte[] lowered as i8*)
+            return array_val.type.pointee
+        else:
+            raise ValueError(f"LiteralTypeHandler.get_element_type_from_array_value: Cannot determine element type for: {array_val.type}")
+
+    @staticmethod
+    def compute_element_size_bytes(elem_type: ir.Type) -> int:
+        if isinstance(elem_type, ir.IntType):
+            return max(1, elem_type.width // 8)
+        elif isinstance(elem_type, ir.FloatType):
+            return 4
+        elif isinstance(elem_type, ir.DoubleType):
+            return 8
+        else:
+            # Struct/other: fallback to 1 byte
+            return 1
+
     @staticmethod
     def concatenate(builder: ir.IRBuilder, module: ir.Module, left_val: ir.Value, right_val: ir.Value, operator) -> ir.Value:
         """Handle array concatenation (+ and -) operations."""

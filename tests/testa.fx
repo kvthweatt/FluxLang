@@ -1,16 +1,11 @@
 #import "standard.fx";
 
-using standard::io::console;
-
-struct xx { int a, b; };
+using standard::io::console,
+      standard::strings;
 
 def main() -> int
 {
-    data{4} as u4;
-    xx yy = {5,10};
-    u4 a = yy[59``63]; // 10 because 0b1010
-
-    print(int(a));
-
+    string s("Testing!\0");
+    print(s.val()[0:3]);
     return 0;
 };

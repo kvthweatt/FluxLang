@@ -380,46 +380,50 @@ def main() -> int
 ### Logically performing logic
 #### f2.4
 ```
-int a = 0;
-int b = 100;
-int c = 1000;
+int a, b, c = 0, 100, 1000;
 
 def main() -> int
 {
     if (a < b)
     {
-        a = b;
+        println(b);
     }
     elif (a < c)
     {
-        a = c;
+        println(c);
     };
 
     return 0;
 };
 ```
+Result:
+`100`
+
 #### f2.5
 ```
-int a = 0;
-int b = 100;
-int c = 1000;
+int a = 0,
+    b = 100,
+    c = 1000;
 
 def main() -> int
 {
     if (a < b)
     {
-        a = b;
+        println(b);
     };
     if (a < c)
     {
-        a = c;
+        println(c);
     };
 
     return 0;
 };
 ```
-- **Figures 2.4 and 2.5 appear identical as far as their code, but their execution is different, and the assembly (machine code) resulting from these figures also differs.**
-
+Result:
+```
+100
+1000
+```
 ---
 
 ## 3 - Hello World
@@ -486,13 +490,18 @@ def main() -> int
 {
     int max = 32;
     byte[max] name;
-    print("What's your name? \0");
+    print("What's your name? ");
     int bytes_read = input(@name, max);
-    print(f"\nHello, {s}!\0");
+    println(f"Hello, {name}!");
     return 0;
 };
 ```
-That's better. Here we see a string `"\nHello, {s}!"` but it is prefixed with an `f`. This makes this string an `f-string`. Flux also has something called an `i-string` but those are more advanced, we'll save them for later.
+Result:
+```
+What's your name? John
+Hello, John!
+```
+That's better. Here we see a string `f"Hello, {name}!"` but it is prefixed with an `f`. This makes this string an `f-string`. Flux also has something called an `i-string` but those are more advanced, we'll save them for later.
 
 ---
 
@@ -507,7 +516,7 @@ using standard::io::console
 
 def main() -> int
 {
-    string s("Testing!\0";
+    string s("Testing!\0");
     print(s[0:3]);
     return 0;
 };
