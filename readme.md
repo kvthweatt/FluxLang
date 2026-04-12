@@ -54,7 +54,7 @@ Flux is in active development. The syntax and grammar will not change. The [stan
 **What exists:**
 - [Complete language specification](https://github.com/kvthweatt/FluxLang/blob/main/docs/Specs/language_specification.md)
 - [Keyword Reference](https://github.com/kvthweatt/FluxLang/blob/main/docs/keyword_reference.md)
-- A Flux [style guide](https://github.com/kvthweatt/FluxLang/blob/main/docs/style_guide.md)
+- A Flux [style guide](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_intro.md)
 - Tutorials for [beginner](https://github.com/kvthweatt/FluxLang/blob/main/docs/style_guide.md) and [adept](https://github.com/kvthweatt/FluxLang/blob/main/docs/learn_flux_adept.md) programmers
 
 **What's being built:**

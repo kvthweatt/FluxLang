@@ -10,7 +10,7 @@ def main() -> int
     xx yy = {5,10};
     u4 a = yy[59``63]; // 10 because 0b1010
 
-    print((int)a);
+    print(int(a));
 
     return 0;
 };
