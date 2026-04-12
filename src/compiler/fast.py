@@ -1091,6 +1091,7 @@ class StructDef(ASTNode):
     name: str
     members: List[StructMember] = field(default_factory=list)
     base_structs: List[str] = field(default_factory=list)
+    post_structs: List[str] = field(default_factory=list)
     nested_structs: List['StructDef'] = field(default_factory=list)
     storage_class: Optional[StorageClass] = None
     vtable: Optional[StructVTable] = None

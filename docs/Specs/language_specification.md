@@ -657,38 +657,19 @@ For example, you can just keep type-punning:
 `unsigned data{16} as dbyte;`  
 `dbyte as xbyte;`  
 `xbyte as ybyte;`  
-`ybyte as zbyte = 0xFF;`
+You can pun and declare a variable as well:  
+`ybyte as zbyte zbx = 0xFF;`
 
 Data decays to an integer type under the hood. All data is binary, and is therefore an integer.
 
-```
-#import "standard.fx";
-
-unsigned data{8} as byte;   // optionally `unsigned data{8}[] as noopstr;`
-byte[] as noopstring;
-
-byte someByte = 0x41;                         // "A" but in binary
-noopstring somestring = (noopstring)((char)someByte); // "A"
-// Back to data
-somestring = (data)somestring;                // 01000001b
-string anotherstring = "B\0";                   // 01000010b
-
-somestring<<;                                 // 10000100b  // Bit-shift left  (binary doubling)
-somestring>>;                                 // 01000010b  // Bit-shift right (binary halving)
-somestring<<2;                                // 00001000b  // Information lost
-somestring>>2;                                // 00000010b
-
-newstring = somestring xor anotherstring;     // 01000000b  // XOR two or more values
-```
-
-Casting objects or structs to `data` results in a new data variable with bit width equal to the size of the object/struct's length.  
-You cannot do the reverse with objects or structs unless **ALL** of their member types are explicitly aligned, otherwise you risk corrupting your resulting object/struct.
-
 **Minimal specification:**
-`unsigned data{8} as byte;         // 8-bit, packed`
+`unsigned data{8} as byte;            // 8-bit`
 
 **Full specification:**
-`unsigned data{13:16} as custom;   // 13-bit, 16-bit aligned`
+`data{width : alignment : endianness}`
+
+**Example:**
+`unsigned data{16::0} as custom_le;   // 16-bit, 16-bit aligned, little endian`
 
 ---
 
@@ -709,20 +690,13 @@ It calls `ffree()` under the hood, which uses the standard heap allocator. You s
 **Void casting in relation to the stack and heap:**
 ```
 def example() -> void {
-    int stackVar = 42;          // Stack allocated
-    heap int heapVar = 67;      // Heap allocated
+    int stackVar = 42; // Stack allocated
 
-    (void)stackVar;  // What happens here?
-    (void)heapVar;   // And here?
+    (void)stackVar;    // What happens here?
 }
 ```
 
-In either place, the stack or the heap, the memory is freed.
-`(void)` is essentially a "free this memory now" no matter where it is or how it got there.
-If you want to free something early, you can, but if you attempt to use it later you'll get a use-after-free bug.
-If you're not familiar with a use-after-free, it is something that shows up in runtime, not comptime.
-However in Flux, they can show up in comptime as well.
-All of this is runtime behavior, but can also happen in comptime.
+In this case, `stackVar` is zeroed out and the reference invalidated.
 
 ---
 
@@ -736,10 +710,12 @@ def main() -> int
 {
     int Hello = 5;
 
-    print($Hello); print();
+    println($Hello);
     return 0;
 };
 ```
+Result:
+`Hello`
 
 ---
 
@@ -750,15 +726,19 @@ You can do function-like conversion only with built-in types like `int`, `long`,
 
 using standard::io::console;
 
-
 def main() -> int
 {
     double d = 3.1415925658;
 
     int i = int(d);
+
+    print(i);
+
     return 0;
 };
 ```
+Result:
+`3`
 
 ---
 
@@ -773,6 +753,9 @@ unsigned data{32} as ui32;
 signed   data{64} as  i64;
 unsigned data{64} as ui64;
 ```
+
+Note: `data` primitives are **unsigned by default.**
+`data{30} as my30t;` is identical to `unsigned data{30} as my30t;`
 
 ---
 
@@ -815,15 +798,20 @@ In literal context, `void` is `0`. `false` is also `0`, which means `void == fal
 ## **Arrays:**
 ```
 #import "standard.fx";
-using standard::io, standard::types;
+
+using standard::io::console;
 
 int[] ia_myArray = [3, 92, 14, 30, 6, 5, 11, 400];
-
-// int undefined_behavior = ia_myArray[10];          // Length is only 8, accessing index 11
 
 def len(int[] array) -> int
 {
     return sizeof(array) / sizeof(int);
+};
+
+def main() -> int
+{
+    print(len(ia_myArray));
+    return 0;
 };
 ```
 

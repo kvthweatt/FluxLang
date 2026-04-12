@@ -2,15 +2,27 @@
 
 using standard::io::console;
 
-int a = 5;
+int a, b, c = 5, 10, 20;
 
 def main() -> int
 {
-    int* xa = @a,
-         ya = @a,
-         za = @a;
-    int*[] piarr = [xa, ya, za];
+    int* pa = @a,
+         pb = @b,
+         pc = @c;
 
-    print(f"{piarr[0]} {ya} {za}");
+    println(a);
+
+    int*[] piarr = [pa, pb, pc];
+
+    print
+    (
+    i"{} {} {}"
+    :{
+        (piarr[0] + 4);
+        piarr[1];
+        piarr[2];
+    }
+    );
+
 	return 0;
 };

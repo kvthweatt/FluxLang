@@ -4033,6 +4033,42 @@ class CodegenVisitor:
             opaque_struct.names = []
             module._struct_types[node.name] = opaque_struct
 
+        from fast import StructMember as _StructMember
+        # Composition: flatten members from all base structs in declaration order.
+        # This handles:  struct BMP : Header, InfoHeader;
+        # which is syntactic sugar for inlining all fields from the base structs.
+        if not node.members and node.base_structs:
+            for base_name in node.base_structs:
+                base_specs = module._struct_member_type_specs.get(base_name)
+                if base_specs is None:
+                    raise RuntimeError(
+                        f"Struct composition: base struct '{base_name}' has not been defined "
+                        f"before '{node.name}' [{node.source_line}:{node.source_col}]"
+                    )
+                base_vtable = module._struct_vtables.get(base_name)
+                ordered_names = [fname for fname, _, _, _ in base_vtable.fields] if base_vtable else list(base_specs.keys())
+                for fname in ordered_names:
+                    node.members.append(
+                        _StructMember(name=fname, type_spec=base_specs[fname])
+                    )
+
+        # Post-composition: append members from post_structs after inline members.
+        # struct BMP : Header, InfoHeader { int extra; } : PostData;
+        # => fields: [Header fields] [InfoHeader fields] [extra] [PostData fields]
+        for base_name in getattr(node, 'post_structs', []):
+            base_specs = module._struct_member_type_specs.get(base_name)
+            if base_specs is None:
+                raise RuntimeError(
+                    f"Struct post-composition: struct '{base_name}' has not been defined "
+                    f"before '{node.name}' [{node.source_line}:{node.source_col}]"
+                )
+            base_vtable = module._struct_vtables.get(base_name)
+            ordered_names = [fname for fname, _, _, _ in base_vtable.fields] if base_vtable else list(base_specs.keys())
+            for fname in ordered_names:
+                node.members.append(
+                    _StructMember(name=fname, type_spec=base_specs[fname])
+                )
+
         if not node.members:
             return opaque_struct
 

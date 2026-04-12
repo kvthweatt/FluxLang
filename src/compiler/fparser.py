@@ -1249,8 +1249,28 @@ class FluxParser:
         members = []
         nested_structs = []
 
-        # Handle forward declarations (prototypes)
-        if self.expect(TokenType.SEMICOLON):
+        # Pre-composition: struct BMP : Header, InfoHeader;
+        # Post-composition (no body): struct BMP : Header, InfoHeader : PostData;
+        if self.expect(TokenType.COLON):
+            self.advance()
+            base_structs.append(self.consume(TokenType.IDENTIFIER).value)
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                base_structs.append(self.consume(TokenType.IDENTIFIER).value)
+            # Second colon = post-composition list
+            post_structs = []
+            if self.expect(TokenType.COLON):
+                self.advance()
+                post_structs.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    post_structs.append(self.consume(TokenType.IDENTIFIER).value)
+            if self.expect(TokenType.SEMICOLON):
+                self.advance()
+                return StructDef(name, members, base_structs, post_structs=post_structs, nested_structs=nested_structs).set_location(tok.line, tok.column)
+
+        # Handle forward declarations (prototypes) - not a prototype if base_structs present
+        if self.expect(TokenType.SEMICOLON) and not base_structs:
             self.advance()
             # Return multiple prototypes if comma-separated
             if len(names) > 1:
@@ -1328,9 +1348,19 @@ class FluxParser:
                     members.append(member)
         
         self.consume(TokenType.RIGHT_BRACE)
-        self.expect(TokenType.SEMICOLON)
-        self.advance()
-        return StructDef(name, members, base_structs, nested_structs).set_location(tok.line, tok.column)
+
+        # Post-composition: struct BMP : Header, InfoHeader { ... } : PostData;
+        # Members from post_structs are appended after the struct's own inline members.
+        post_structs = []
+        if self.expect(TokenType.COLON):
+            self.advance()
+            post_structs.append(self.consume(TokenType.IDENTIFIER).value)
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                post_structs.append(self.consume(TokenType.IDENTIFIER).value)
+
+        self.consume(TokenType.SEMICOLON)
+        return StructDef(name, members, base_structs, post_structs=post_structs, nested_structs=nested_structs).set_location(tok.line, tok.column)
     
     def struct_member(self) -> Union[StructMember, List[StructMember]]:
         """
