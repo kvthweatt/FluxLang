@@ -509,15 +509,15 @@ That's better. Here we see a string `f"Hello, {name}!"` but it is prefixed with 
 We will now learn different ways we can play with strings, starting by slicing them up.
 #### f4.1 Slices
 ```
-import "standard.fx";
+#import "standard.fx";
 
-using standard::io::console
+using standard::io::console,
       standard::strings;
 
 def main() -> int
 {
-    string s("Testing!\0");
-    print(s[0:3]);
+    string s("Testing!");
+    print(s.val()[0:3]);
     return 0;
 };
 ```
@@ -528,11 +528,11 @@ What did we just do? What is that `[0:3]` notation?
 This is known as array slice notation.  
 It translates to "start at position 0, end at position 3". That totals 4 bytes, or `"Test"`.  
 - `[x:y]`  
-**x** is the starting point, and **y** is the ending point.
+**x** is the starting point, and **y** is the ending point. All slicing in Flux is inclusive.
 
 #### f4.2 Reverse a String
 ```
-import "standard.fx";
+#import "standard.fx";
 
 using standard::io::console,
       standard::string;
@@ -540,8 +540,7 @@ using standard::io::console,
 def main() -> int
 {
     string s("Testing!\0");
-    int len = (sizeof(s) / 8) - 1;
-    print(s[len:0]);
+    print(s.val()[s.length:0]);
     return 0;
 };
 ```

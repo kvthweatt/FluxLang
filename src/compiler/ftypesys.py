@@ -2086,7 +2086,26 @@ class ArrayTypeHandler:
         
         # Call memcpy
         builder.call(memcpy_func, [dst_ptr, src_ptr, ir.Constant(ir.IntType(64), bytes), ir.Constant(ir.IntType(1), 0)])
-    
+
+    @staticmethod
+    def emit_memcpy_dynamic(builder: ir.IRBuilder, module: ir.Module, dst_ptr: ir.Value, src_ptr: ir.Value, byte_count: ir.Value) -> None:
+        """Emit llvm.memcpy with a runtime-computed byte count (ir.Value)."""
+        memcpy_name = "llvm.memcpy.p0i8.p0i8.i64"
+        if memcpy_name not in module.globals:
+            memcpy_type = ir.FunctionType(ir.VoidType(), [ir.PointerType(ir.IntType(8)), ir.PointerType(ir.IntType(8)), ir.IntType(64), ir.IntType(1)])
+            memcpy_func = ir.Function(module, memcpy_type, name=memcpy_name)
+            memcpy_func.attributes.add('nounwind')
+        else:
+            memcpy_func = module.globals[memcpy_name]
+        i8_ptr = ir.PointerType(ir.IntType(8))
+        if dst_ptr.type != i8_ptr:
+            dst_ptr = builder.bitcast(dst_ptr, i8_ptr)
+        if src_ptr.type != i8_ptr:
+            src_ptr = builder.bitcast(src_ptr, i8_ptr)
+        if byte_count.type != ir.IntType(64):
+            byte_count = builder.zext(byte_count, ir.IntType(64), name="slice_bytes64") if byte_count.type.width < 64 else builder.trunc(byte_count, ir.IntType(64), name="slice_bytes64")
+        builder.call(memcpy_func, [dst_ptr, src_ptr, byte_count, ir.Constant(ir.IntType(1), 0)])
+
     @staticmethod
     def emit_memset(builder: ir.IRBuilder, module: ir.Module, dst_ptr: ir.Value, value: int, bytes: int) -> None:
         """Emit llvm.memset intrinsic call."""

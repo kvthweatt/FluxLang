@@ -2577,34 +2577,66 @@ class CodegenVisitor:
         array_val = self.visit(node.array, builder, module)
         start_val = self.visit(node.start, builder, module)
         end_val   = self.visit(node.end,   builder, module)
+        i32 = ir.IntType(32)
         def as_i32(v, name):
-            if v.type == ir.IntType(32): return v
+            if v.type == i32: return v
             if isinstance(v.type, ir.IntType):
-                return builder.trunc(v, ir.IntType(32), name=f"{name}_trunc") if v.type.width > 32 else builder.sext(v, ir.IntType(32), name=f"{name}_ext")
+                return builder.trunc(v, i32, name=f"{name}_trunc") if v.type.width > 32 else builder.sext(v, i32, name=f"{name}_ext")
             raise ValueError(f"Slice indices must be integers [{node.source_line}:{node.source_col}]")
         start_i32 = as_i32(start_val, "slice_start")
         end_i32   = as_i32(end_val,   "slice_end")
-        const_len = node._try_const_len()
-        if const_len is None:
-            raise ValueError(f"Array slice length must be statically known [{node.source_line}:{node.source_col}]")
-        if const_len < 0:
-            raise ValueError(f"Array slice must be forward [{node.source_line}:{node.source_col}]")
+        zero = ir.Constant(i32, 0)
+        # Support backwards ranges: [high:low] reverses the result.
+        is_backward = builder.icmp_signed('>', start_i32, end_i32, name="slice_is_backward")
+        gep_start   = builder.select(is_backward, end_i32,   start_i32, name="slice_gep_start")
+        raw_len     = builder.sub(end_i32, start_i32, name="slice_raw_len")
+        neg_len     = builder.neg(raw_len, name="slice_neg_len")
+        dyn_len     = builder.select(is_backward, neg_len, raw_len, name="slice_len")
         elem_ty = ArrayTypeHandler.get_element_type_from_array_value(array_val)
-        zero = ir.Constant(ir.IntType(32), 0)
         if isinstance(array_val, ir.GlobalVariable) and isinstance(array_val.type.pointee, ir.ArrayType):
-            src_ptr = builder.gep(array_val, [zero, start_i32], inbounds=True, name="slice_src")
+            src_ptr = builder.gep(array_val, [zero, gep_start], inbounds=True, name="slice_src")
         elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
-            src_ptr = builder.gep(array_val, [zero, start_i32], inbounds=True, name="slice_src")
+            src_ptr = builder.gep(array_val, [zero, gep_start], inbounds=True, name="slice_src")
         elif isinstance(array_val.type, ir.PointerType):
-            src_ptr = builder.gep(array_val, [start_i32], inbounds=True, name="slice_src")
+            src_ptr = builder.gep(array_val, [gep_start], inbounds=True, name="slice_src")
         else:
             raise ValueError(f"Cannot slice type: {array_val.type} [{node.source_line}:{node.source_col}]")
-        dst_arr_ty = ir.ArrayType(elem_ty, const_len)
-        dst_alloca = builder.alloca(dst_arr_ty, name="slice_tmp")
-        dst_ptr = builder.gep(dst_alloca, [zero, zero], inbounds=True, name="slice_dst")
-        ArrayTypeHandler.emit_memcpy(builder, module, dst_ptr, src_ptr,
-                                     const_len * ArrayTypeHandler.compute_element_size_bytes(elem_ty))
-        return builder.gep(dst_alloca, [zero, zero], inbounds=True, name="slice_ptr")
+        # If the length happens to be statically known and forward, use a fixed alloca (avoids VLA).
+        const_len = node._try_const_len()
+        alloca_len = abs(const_len) if const_len is not None else None
+        i8_ptr_ty = ir.PointerType(ir.IntType(8))
+        elem_bytes = ArrayTypeHandler.compute_element_size_bytes(elem_ty)
+        i8 = ir.IntType(8)
+        null = ir.Constant(i8, 0)
+        if alloca_len is not None:
+            dst_arr_ty = ir.ArrayType(elem_ty, alloca_len + 1)
+            dst_alloca = builder.alloca(dst_arr_ty, name="slice_tmp")
+            dst_ptr = builder.gep(dst_alloca, [zero, zero], inbounds=True, name="slice_dst")
+            ArrayTypeHandler.emit_memcpy(builder, module, dst_ptr, src_ptr, alloca_len * elem_bytes)
+            if const_len < 0:
+                reverse_fn_name = "standard__memory__reverse_bytes__2__byte_ptr1__data_ubits64__ret_void"
+                if reverse_fn_name in module.globals:
+                    buf_i8 = builder.bitcast(dst_ptr, i8_ptr_ty, name="slice_rev_ptr")
+                    builder.call(module.globals[reverse_fn_name],
+                                 [buf_i8, ir.Constant(ir.IntType(64), alloca_len * elem_bytes)])
+            null_pos = builder.gep(dst_alloca, [zero, ir.Constant(i32, alloca_len)], inbounds=True, name="slice_null_pos")
+            builder.store(null, null_pos)
+            return builder.gep(dst_alloca, [zero, zero], inbounds=True, name="slice_ptr")
+        else:
+            elem_bytes_val = ir.Constant(i32, elem_bytes)
+            byte_count = builder.mul(dyn_len, elem_bytes_val, name="slice_byte_count")
+            byte_count_p1 = builder.add(byte_count, ir.Constant(i32, 1), name="slice_byte_count_p1")
+            i8_alloca = builder.alloca(i8, size=byte_count_p1, name="slice_tmp")
+            src_as_i8 = builder.bitcast(src_ptr, i8_ptr_ty, name="slice_src_i8")
+            ArrayTypeHandler.emit_memcpy_dynamic(builder, module, i8_alloca, src_as_i8, byte_count)
+            reverse_fn_name = "standard__memory__reverse_bytes__2__byte_ptr1__data_ubits64__ret_void"
+            if reverse_fn_name in module.globals:
+                with builder.if_then(is_backward):
+                    count64 = builder.zext(byte_count, ir.IntType(64), name="slice_rev_count64")
+                    builder.call(module.globals[reverse_fn_name], [i8_alloca, count64])
+            null_pos = builder.gep(i8_alloca, [byte_count], name="slice_null_pos")
+            builder.store(null, null_pos)
+            return builder.bitcast(i8_alloca, ir.PointerType(elem_ty), name="slice_ptr")
 
     def visit_TieExpression(self, node, builder, module):
         from fast import Identifier
