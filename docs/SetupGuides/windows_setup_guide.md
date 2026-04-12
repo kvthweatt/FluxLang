@@ -83,7 +83,7 @@ link                                # Should show Microsoft linker
 From a command prompt:
 ```powershell
 cd C:\path\to\Flux
-python fc.py tests\test.fx --log-level 3
+python fxc.py tests\test.fx --log-level 3
 ```
 
 ## Common Issues and Solutions
@@ -134,7 +134,7 @@ When properly configured, you should see these environment variables:
 - `PATH` - Includes LLVM, Python, and MSVC tools
 
 ### Compilation Process Understanding
-When you run `python fc.py program.fx`, Flux:
+When you run `python fxc.py program.fx`, Flux:
 1. **Lexes** your Flux source code into tokens
 2. **Parses** tokens into an Abstract Syntax Tree (AST)
 3. **Generates** LLVM Intermediate Representation (IR)
@@ -160,7 +160,7 @@ Flux creates temporary files in `build/` directory:
 ### Debugging Compilation Issues
 Enable detailed logging to understand what's happening:
 ```
-python fc.py program.fx --log-level 4 --log-timestamp
+python fxc.py program.fx --log-level 4 --log-timestamp
 ```
 
 This shows exactly which tools are being called and their output.

@@ -140,7 +140,7 @@ timestamp = false
 ### CLI
 
 ```bash
-python fc.py <input.fx> [options]
+python fxc.py <input.fx> [options]
 
 -o <name>                # Output name
 -v <0-5>                 # Legacy verbosity

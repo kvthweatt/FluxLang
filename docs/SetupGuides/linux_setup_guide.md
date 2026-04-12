@@ -29,7 +29,7 @@ git clone https://github.com/kvthweatt/FluxLang.git
 cd FluxLang
 
 # Test compilation
-python3 fc.py tests/test.fx --log-level 3
+python3 fxc.py tests/test.fx --log-level 3
 
 # Install Sublime Text (optional)
 wget -qO - https://download.sublimetext.com/sublimehq-pub.gpg | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/sublimehq-archive.gpg
@@ -127,7 +127,7 @@ git --version                               # Any recent version is fine
 ### 4. Test Flux Compilation
 ```bash
 cd Flux
-python3 fc.py tests/test.fx --log-level 3
+python3 fxc.py tests/test.fx --log-level 3
 ```
 
 You should see compilation succeed and an executable created.
@@ -139,7 +139,7 @@ You should see compilation succeed and an executable created.
 Navigate to your Flux directory and compile a program:
 ```bash
 cd ~/Flux
-python3 fc.py examples/hello.fx
+python3 fxc.py examples/hello.fx
 ./hello
 ```
 
@@ -162,7 +162,7 @@ Create a Flux build system in Sublime Text:
 
 ```json
 {
-    "cmd": ["python3", "fc.py", "$file"],
+    "cmd": ["python3", "fxc.py", "$file"],
     "working_dir": "$folder",
     "selector": "source.flux",
     "file_regex": "^(.+?):(\\d+):(\\d+): (.*)$"
@@ -276,7 +276,7 @@ source flux-env/bin/activate
 pip install llvmlite==0.41.0 dataclasses
 
 # Now compile normally
-python fc.py examples/hello.fx
+python fxc.py examples/hello.fx
 
 # Deactivate when done
 deactivate
@@ -293,7 +293,7 @@ Add these to `~/.bashrc` or `~/.zshrc`:
 
 ```bash
 # Quick flux compilation
-alias fluxc='python3 ~/FluxLang/fc.py'
+alias fluxc='python3 ~/FluxLang/fxc.py'
 ```
 
 Apply changes:
@@ -315,7 +315,7 @@ Flux creates temporary files in `build/`:
 
 Inspect generated IR:
 ```bash
-python3 fc.py program.fx
+python3 fxc.py program.fx
 cat build/program.ll
 ```
 
@@ -323,7 +323,7 @@ cat build/program.ll
 
 Enable detailed logging:
 ```bash
-python3 fc.py program.fx --log-level 4 --log-timestamp
+python3 fxc.py program.fx --log-level 4 --log-timestamp
 ```
 
 This shows:
@@ -334,7 +334,7 @@ This shows:
 
 ## Understanding the Compilation Process
 
-When you run `python3 fc.py program.fx`, Flux:
+When you run `python3 fxc.py program.fx`, Flux:
 1. **Preprocesses** - Handles macros, strips comments and empty lines, output to `build\tmp.fx`
 2. **Lexes** - Breaks source code into tokens
 3. **Parses** - Builds an Abstract Syntax Tree (AST)
@@ -356,15 +356,15 @@ Now that your environment is ready:
 2. **Try examples:**
    ```bash
    cd examples
-   python3 ../fc.py hello.fx && ./hello
-   python3 ../fc.py bit_fields.fx && ./bit_fields
+   python3 ../fxc.py hello.fx && ./hello
+   python3 ../fxc.py bit_fields.fx && ./bit_fields
    ```
 
 3. **Write your first program:**
    ```bash
    subl myprogram.fx
    # Write some Flux code
-   python3 fc.py myprogram.fx
+   python3 fxc.py myprogram.fx
    ./myprogram
    ```
 

@@ -374,12 +374,41 @@ struct newStruct
 ```
 
 Structs are non-executable.  
-Structs cannot contain functions, or objects. This includes prototypes and definitions, but pointers are ok.  
-Anonymous blocks in structs make data inside them inaccessible.  
+Structs cannot contain functions, or objects. This includes prototypes and definitions. Pointers are ok, including function pointers.  
+
+Structs support composition via prepending and appending other structs. Example:
+```
+struct Header
+{
+    data{16} sig;
+    data{32} filesize, reserved, dataoffset;
+};
+
+struct InfoHeader
+{
+    data{32} size, width, height;
+    data{16} planes, bitsperpixel;
+    data{32} compression, imagesize, xpixelsperm, ypixelsperm, colorsused, importantcolors;
+};
+
+struct ExtraData
+{
+    byte[64] author;
+};
+
+struct BMP : Header, InfoHeader
+{
+    // More bitmap fields
+} : ExtraData;
+```
+
+
+---
+
 Objects are functional with behavior and are executable.  
 Structs cannot contain objects, but objects can contain structs. This means struct template parameters cannot be objects.
 
-**Public/Private with Objects/Structs:**  
+## **Public/Private with Objects/Structs:**  
 Struct public and private works by only allowing access to private sections by the parent object/struct that "owns" the struct.  
 The struct is still data where public members are visible anywhere, but its private members are only visible/modifiable by the object immediately containing it.
 
