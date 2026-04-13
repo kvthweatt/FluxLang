@@ -1791,9 +1791,15 @@ class FluxParser:
         is_signed = False
         signedness_explicit = False
         storage_class = None
+        singinit_seen = False
+        
+        if self.expect(TokenType.SINGINIT):
+            singinit_seen = True
+            storage_class = StorageClass.SINGINIT
+            self.advance()
 
-        # Parse storage class FIRST (before qualifiers)
-        if self.expect(TokenType.GLOBAL, TokenType.LOCAL, TokenType.HEAP, TokenType.STACK):
+        if self.expect(TokenType.GLOBAL, TokenType.LOCAL, TokenType.HEAP,
+                       TokenType.STACK, TokenType.REGISTER):
             if self.expect(TokenType.GLOBAL):
                 storage_class = StorageClass.GLOBAL
                 self.advance()
@@ -1807,11 +1813,11 @@ class FluxParser:
             elif self.expect(TokenType.STACK):
                 storage_class = StorageClass.STACK
                 self.advance()
-        elif self.expect(TokenType.REGISTER):
+            elif self.expect(TokenType.REGISTER):
+                storage_class = StorageClass.REGISTER
+                self.advance()
+        elif not singinit_seen and self.expect(TokenType.REGISTER):
             storage_class = StorageClass.REGISTER
-            self.advance()
-        elif self.expect(TokenType.SINGINIT):
-            storage_class = StorageClass.SINGINIT
             self.advance()
 
         # Parse qualifiers AFTER storage class

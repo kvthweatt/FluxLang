@@ -530,6 +530,8 @@ It translates to "start at position 0, end at position 3". That totals 4 bytes, 
 - `[x:y]`  
 **x** is the starting point, and **y** is the ending point. All slicing in Flux is inclusive.
 
+The `standard::strings::string` type has a `length` attribute which you can use to make some things easier.
+
 #### f4.2 Reverse a String
 ```
 #import "standard.fx";
@@ -552,7 +554,7 @@ If the first parameter is larger than the second, it means we're traversing the 
 
 - **Why do we subtract 1 from the length of the string?**  
 Computers count starting at 0, meaning 9 is the 10th number when computers count. If my string length is 10, that means the last element is at position 9. Position 10 is outside of the array, and as far as the computer is concerned, position 10 is undefined. It's like saying:  
-**[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]** 10  
+**`[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]`** = 10 elements  
 You can do this, but it may result in a crash or undefined behavior.  
 This is why we must always be aware of our data types, sizes, and array lengths.
 
@@ -561,27 +563,22 @@ Characters are one byte in size. Strings are an array of bytes, interpreted as c
 If I have 40 characters, that's 40 bytes.  
 `sizeof()` returns the size of something in bits, not bytes.  
 This means we must be aware of the bit length of our types.
-```
-import "io.fx", "types.fx";
 
-using standard::io::console, io::input::input;
-using types::string;
+```
+#import "standard.fx";
+
+using standard::io::console,
+      standard::strings;
 
 def main() -> int
 {
-    string s();
-    s = "Testing!";
-    int len = sizeof(s) / 8;
-    print(f"The size of s is {len} bytes long.");
+    string s("Testing!");
+    print(f"The length of string s is {s.length} characters long.");
     return 0;
 };
 ```
 Result:  
-`The size of s is 8 bytes long.`
-
-Why didn't we subtract 1 from `len` this time?  
-Because we're not using `len` to index the string.  
-Why did we divide by 8? Because if the size of a byte is 8 bits, and our data length is 80 bits, that means there are 10 bytes.
+`The size of string s is 8 characters long.`
 
 #### f4.4 Constant Values
 Sometimes we want to make sure there's no possible way a value can change.  
@@ -589,7 +586,7 @@ We do that by using the `const` keyword, like so:
 ```
 const int myAge = 21;  // Forever 21!
 ```
-If we try to change the value of `myAge` we will get a runtime error. Example:
+If we try to change the value of `myAge` we will get a compile error. Example:
 ```
 const bool authorized = false;
 
@@ -597,7 +594,7 @@ def main() -> int
 {
     if (!authorized)    // false == false, therefore true
     {
-        authorized = true;  // Runtime error.
+        authorized = true;  // Compile error.
     };
     return 0;
 };
@@ -607,10 +604,10 @@ def main() -> int
 ## 5 - `data` and `struct`
 Remember that `data` keyword from a few segments ago? Here's what it looks like:
 ```
-unsigned data{32} as u32;
+data{32} as u32;
 ```
 This new `u32` type is unsigned, and 32 bits wide.  
-`data` is used to create new data types. These types are primitives, and are not functional.  
+`data` is used to create new data types. These types are primitives, unsigned by default, and are not functional.  
 We'll expand more about `data` after you learn about structures.
 
 - **What exactly is a `struct`?**  
@@ -918,9 +915,9 @@ using standard::io::console,
 
 def main() -> int
 {
-    string s = "";
-    int value;
-    int rand;
+    string s = "";  // Syntactic sugar for single-parameter constructors like __init(byte*)
+    int value,
+        rand;
 
     while (true)
     {
@@ -2374,13 +2371,13 @@ Imagine you're making a program to track books. Each book has:
 
 You could use separate variables:
 ```
-char[] book1_title = "1984\0";
-char[] book1_author = "George Orwell\0";
+char[] book1_title = "1984\0",
+       book1_author = "George Orwell\0";
 int book1_pages = 328;
 float book1_price = 15.99;
 
-char[] book2_title = "Dune\0";
-char[] book2_author = "Frank Herbert\0";
+char[] book2_title = "Dune\0",
+       book2_author = "Frank Herbert\0";
 int book2_pages = 688;
 float book2_price = 19.99;
 ```
@@ -2390,8 +2387,8 @@ This gets messy fast! Instead, we use a struct:
 ```
 struct Book
 {
-    char[100] title;
-    char[100] author;
+    char[64] title;
+    char[32] author;
     int pages;
     float price;
 };
@@ -2406,8 +2403,8 @@ Now `Book` is a type, just like `int` or `float`.
 
 struct Point
 {
-    int x;
-    int y;
+    int x,
+        y;
 };
 
 def main() -> int
@@ -2416,12 +2413,8 @@ def main() -> int
     p1.x = 10;
     p1.y = 20;
     
-    print("Point: (\0");
-    print(p1.x);
-    print(", \0");
-    print(p1.y);
-    print(")\n\0");
-    
+    print(f"Point: ({p1.x},{p1.y})");
+
     return 0;
 };
 ```
@@ -2439,20 +2432,16 @@ You can set values when you create a struct:
 ```
 struct Rectangle
 {
-    int width;
-    int height;
+    int width,
+        height;
 };
 
 def main() -> int
 {
     Rectangle rect {width = 50, height = 30};
     
-    print("Rectangle: \0");
-    print(rect.width);
-    print(" x \0");
-    print(rect.height);
-    print("\n\0");
-    
+    print(f"Rectangle: {rect.width} x {rect.height}");
+
     return 0;
 };
 ```
@@ -2462,40 +2451,36 @@ def main() -> int
 Structs can contain arrays:
 
 ```
+#import "standard.fx";
+
+using standard::io::console,
+      standard::string;
+
 struct Student
 {
     char[50] name;
-    int grades[5];
-    int num_grades;
+    int[5] grades;
 };
 
 def main() -> int
 {
-    Student alice;
-    alice.name[0] = 65;  // 'A'
-    alice.name[1] = 108; // 'l'
-    alice.name[2] = 105; // 'i'
-    alice.name[3] = 99;  // 'c'
-    alice.name[4] = 101; // 'e'
-    alice.name[5] = 0;
+    Student s1;
+
+    s1.name = "Alice";
     
-    alice.grades[0] = 85;
-    alice.grades[1] = 92;
-    alice.grades[2] = 78;
-    alice.grades[3] = 95;
-    alice.grades[4] = 88;
-    alice.num_grades = 5;
+    s1.grades[0] = 85;
+    s1.grades[1] = 92;
+    s1.grades[2] = 78;
+    s1.grades[3] = 95;
+    s1.grades[4] = 88;
     
-    print("Student: \0");
-    print(alice.name);
-    print("\nGrades: \0");
+    println(f"Student: {s1.name}");
+    print("Grades: ");
     
-    for (int i = 0; i < alice.num_grades; i++)
+    for (x in s1.grades)
     {
-        print(alice.grades[i]);
-        print(" \0");
+        print(f"{x} ");
     };
-    print("\n\0");
     
     return 0;
 };
@@ -2582,18 +2567,14 @@ struct Date
 
 struct Event
 {
-    char[100] name;
+    char[32] name;
     Date date;
 };
 
 def main() -> int
 {
     Event birthday;
-    birthday.name[0] = 66;  // 'B'
-    birthday.name[1] = 100; // 'd'
-    birthday.name[2] = 97;  // 'a'
-    birthday.name[3] = 121; // 'y'
-    birthday.name[4] = 0;
+    birthday.name = "Bday";
     
     birthday.date.day = 15;
     birthday.date.month = 7;
