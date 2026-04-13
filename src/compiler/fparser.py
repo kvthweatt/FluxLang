@@ -1820,6 +1820,11 @@ class FluxParser:
             storage_class = StorageClass.REGISTER
             self.advance()
 
+        # Allow singinit after a location class too (e.g. heap singinit float[])
+        if not singinit_seen and self.expect(TokenType.SINGINIT):
+            singinit_seen = True
+            self.advance()  # consume it; storage_class already set to the location class
+
         # Parse qualifiers AFTER storage class
         if self.expect(TokenType.CONST):
             is_const = True
