@@ -514,7 +514,7 @@ class FluxParser:
             saved_token = self.current_token
             
             # Skip past const/volatile to see what comes next
-            while self.expect(TokenType.CONST, TokenType.VOLATILE):
+            while self.expect(TokenType.CONST, TokenType.VOLATILE, TokenType.SINGINIT):
                 self.advance()
             
             is_asm = self.expect(TokenType.ASM)
@@ -1792,7 +1792,7 @@ class FluxParser:
         signedness_explicit = False
         storage_class = None
         singinit_seen = False
-        
+
         if self.expect(TokenType.SINGINIT):
             singinit_seen = True
             storage_class = StorageClass.SINGINIT
@@ -1901,6 +1901,12 @@ class FluxParser:
             else:
                 array_dims.append(None)
             self.consume(TokenType.RIGHT_BRACKET)
+
+        # Trailing pointer after array brackets: `byte[N]*` means pointer to array.
+        # Parsed AFTER array spec so `byte[1]*` means "pointer to byte[1]".
+        while self.expect(TokenType.MULTIPLY):
+            pointer_depth += 1
+            self.advance()
 
         is_array = len(array_dims) > 0
         array_size = array_dims[0] if array_dims else None

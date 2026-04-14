@@ -53,10 +53,14 @@ namespace json
 
 		def __exit() -> void
 		{
-			if ((u64)this.buf != 0)
+			switch ((u64)this.buf != 0)
 			{
-				ffree((u64)this.buf);
-				this.buf = (@)0;
+				case (1)
+				{
+					ffree((u64)this.buf);
+					this.buf = (@)0;
+				}
+				default {};
 			};
 			return;
 		};
@@ -67,7 +71,11 @@ namespace json
 			size_t new_cap;
 			new_cap = this.cap * 2;
 			nb      = (@)fmalloc(new_cap * 8);
-			if ((u64)nb == 0) { return false; };
+			switch ((u64)nb == 0)
+			{
+				case (1) { return false; }
+				default {};
+			};
 			memcpy(nb, this.buf, this.cap * 8);
 			ffree((u64)this.buf);
 			this.buf = nb;
@@ -90,7 +98,11 @@ namespace json
 			size_t new_cap;
 			new_cap = this.cap * 2;
 			nb      = (@)standard::memory::allocators::stdarena::alloc(a, new_cap * 8);
-			if ((u64)nb == 0) { return false; };
+			switch ((u64)nb == 0)
+			{
+				case (1) { return false; }
+				default {};
+			};
 			memcpy(nb, this.buf, this.cap * 8);
 			this.buf = nb;
 			this.cap = new_cap;
@@ -100,9 +112,17 @@ namespace json
 		def push_arena(void* node, standard::memory::allocators::stdarena::Arena* a) -> bool
 		{
 			void** slot;
-			if (this.len >= this.cap)
+			switch (this.len >= this.cap)
 			{
-				if (!this._grow_arena(a)) { return false; };
+				case (1)
+				{
+					switch (!this._grow_arena(a))
+					{
+						case (1) { return false; }
+						default {};
+					};
+				}
+				default {};
 			};
 			slot  = (void**)this.buf + this.len;
 			*slot = node;
@@ -113,9 +133,17 @@ namespace json
 		def push(void* node) -> bool
 		{
 			void** slot;
-			if (this.len >= this.cap)
+			switch (this.len >= this.cap)
 			{
-				if (!this._grow()) { return false; };
+				case (1)
+				{
+					switch (!this._grow())
+					{
+						case (1) { return false; }
+						default {};
+					};
+				}
+				default {};
 			};
 			slot  = (void**)this.buf + this.len;
 			*slot = node;
@@ -126,7 +154,11 @@ namespace json
 		def get(size_t i) -> void*
 		{
 			void** slot;
-			if (i >= this.len) { return (@)0; };
+			switch (i >= this.len)
+			{
+				case (1) { return (@)0; }
+				default {};
+			};
 			slot = (void**)this.buf + i;
 			return *slot;
 		};
@@ -154,26 +186,49 @@ namespace json
 		{
 			byte** ks;
 			size_t i;
-			if ((u64)this.keys != 0)
+			switch ((u64)this.keys != 0)
 			{
-				ks = (byte**)this.keys;
-				while (i < this.len)
+				case (1)
 				{
-					if ((u64)ks[i] != 0) { ffree((u64)ks[i]); };
-					i++;
-				};
-				ffree((u64)this.keys);
-				this.keys = (@)0;
+					ks = (byte**)this.keys;
+					do
+					{
+						switch (i < this.len)
+						{
+							case (1)
+							{
+								switch ((u64)ks[i] != 0)
+								{
+									case (1) { ffree((u64)ks[i]); }
+									default {};
+								};
+								i++;
+							}
+							default { break; };
+						};
+					};
+					ffree((u64)this.keys);
+					this.keys = (@)0;
+				}
+				default {};
 			};
-			if ((u64)this.vals != 0)
+			switch ((u64)this.vals != 0)
 			{
-				ffree((u64)this.vals);
-				this.vals = (@)0;
+				case (1)
+				{
+					ffree((u64)this.vals);
+					this.vals = (@)0;
+				}
+				default {};
 			};
-			if ((u64)this.klens != 0)
+			switch ((u64)this.klens != 0)
 			{
-				ffree((u64)this.klens);
-				this.klens = (@)0;
+				case (1)
+				{
+					ffree((u64)this.klens);
+					this.klens = (@)0;
+				}
+				default {};
 			};
 			return;
 		};
@@ -184,11 +239,23 @@ namespace json
 			size_t new_cap;
 			new_cap = this.cap * 2;
 			nk      = (@)fmalloc(new_cap * 8);
-			if ((u64)nk == 0) { return false; };
+			switch ((u64)nk == 0)
+			{
+				case (1) { return false; }
+				default {};
+			};
 			nv = (@)fmalloc(new_cap * 8);
-			if ((u64)nv == 0) { ffree((u64)nk); return false; };
+			switch ((u64)nv == 0)
+			{
+				case (1) { ffree((u64)nk); return false; }
+				default {};
+			};
 			nl = (@)fmalloc(new_cap * (sizeof(size_t) / 8));
-			if ((u64)nl == 0) { ffree((u64)nk); ffree((u64)nv); return false; };
+			switch ((u64)nl == 0)
+			{
+				case (1) { ffree((u64)nk); ffree((u64)nv); return false; }
+				default {};
+			};
 			memcpy(nk, this.keys,  this.cap * 8);
 			memcpy(nv, this.vals,  this.cap * 8);
 			memcpy(nl, this.klens, this.cap * (sizeof(size_t) / 8));
@@ -219,11 +286,23 @@ namespace json
 			size_t new_cap;
 			new_cap = this.cap * 2;
 			nk      = (@)standard::memory::allocators::stdarena::alloc(a, new_cap * 8);
-			if ((u64)nk == 0) { return false; };
+			switch ((u64)nk == 0)
+			{
+				case (1) { return false; }
+				default {};
+			};
 			nv = (@)standard::memory::allocators::stdarena::alloc(a, new_cap * 8);
-			if ((u64)nv == 0) { return false; };
+			switch ((u64)nv == 0)
+			{
+				case (1) { return false; }
+				default {};
+			};
 			nl = (@)standard::memory::allocators::stdarena::alloc(a, new_cap * (sizeof(size_t) / 8));
-			if ((u64)nl == 0) { return false; };
+			switch ((u64)nl == 0)
+			{
+				case (1) { return false; }
+				default {};
+			};
 			memcpy(nk, this.keys,  this.cap * 8);
 			memcpy(nv, this.vals,  this.cap * 8);
 			memcpy(nl, this.klens, this.cap * (sizeof(size_t) / 8));
@@ -249,31 +328,77 @@ namespace json
 			vs      = (void**)this.vals;
 			kl_slab = (size_t*)this.klens;
 			kl      = (size_t)standard::strings::strlen(key);
-			while (i < this.len)
+			do
 			{
-				match = kl_slab[i] == kl;
-				if (match)
+				switch (i < this.len)
 				{
-					while (j < (int)kl)
+					case (1)
 					{
-						if (ks[i][j] != key[j]) { match = false; break; };
-						j = j + 1;
-					};
+						match = kl_slab[i] == kl;
+						switch (match)
+						{
+							case (1)
+							{
+								j = 0;
+								do
+								{
+									switch (j < (int)kl)
+									{
+										case (1)
+										{
+											switch (ks[i][j] != key[j])
+											{
+												case (1) { match = false; break; }
+												default {};
+											};
+											j = j + 1;
+										}
+										default { break; };
+									};
+								};
+							}
+							default {};
+						};
+						switch (match)
+						{
+							case (1) { vs[i] = val; return true; }
+							default {};
+						};
+						i++;
+					}
+					default { break; };
 				};
-				if (match) { vs[i] = val; return true; };
-				i++;
 			};
-			if (this.len >= this.cap)
+			switch (this.len >= this.cap)
 			{
-				if (!this._grow_arena(a)) { return false; };
-				ks      = (byte**)this.keys;
-				vs      = (void**)this.vals;
-				kl_slab = (size_t*)this.klens;
+				case (1)
+				{
+					switch (!this._grow_arena(a))
+					{
+						case (1) { return false; }
+						default {};
+					};
+					ks      = (byte**)this.keys;
+					vs      = (void**)this.vals;
+					kl_slab = (size_t*)this.klens;
+				}
+				default {};
 			};
 			kc = (byte*)standard::memory::allocators::stdarena::alloc(a, kl + (size_t)1);
-			if ((u64)kc == 0) { return false; };
+			switch ((u64)kc == 0)
+			{
+				case (1) { return false; }
+				default {};
+			};
 			j = 0;
-			while (j <= (int)kl) { kc[j] = key[j]; j = j + 1; };
+			do
+			{
+				switch (j <= (int)kl)
+				{
+					case (1) { kc[j] = key[j]; j = j + 1; }
+					default { break; };
+				};
+			};
 			ks[this.len]      = kc;
 			vs[this.len]      = val;
 			kl_slab[this.len] = kl;
@@ -294,31 +419,77 @@ namespace json
 			vs      = (void**)this.vals;
 			kl_slab = (size_t*)this.klens;
 			kl      = (size_t)standard::strings::strlen(key);
-			while (i < this.len)
+			do
 			{
-				match = kl_slab[i] == kl;
-				if (match)
+				switch (i < this.len)
 				{
-					while (j < (int)kl)
+					case (1)
 					{
-						if (ks[i][j] != key[j]) { match = false; break; };
-						j = j + 1;
-					};
+						match = kl_slab[i] == kl;
+						switch (match)
+						{
+							case (1)
+							{
+								j = 0;
+								do
+								{
+									switch (j < (int)kl)
+									{
+										case (1)
+										{
+											switch (ks[i][j] != key[j])
+											{
+												case (1) { match = false; break; }
+												default {};
+											};
+											j = j + 1;
+										}
+										default { break; };
+									};
+								};
+							}
+							default {};
+						};
+						switch (match)
+						{
+							case (1) { vs[i] = val; return true; }
+							default {};
+						};
+						i++;
+					}
+					default { break; };
 				};
-				if (match) { vs[i] = val; return true; };
-				i++;
 			};
-			if (this.len >= this.cap)
+			switch (this.len >= this.cap)
 			{
-				if (!this._grow()) { return false; };
-				ks      = (byte**)this.keys;
-				vs      = (void**)this.vals;
-				kl_slab = (size_t*)this.klens;
+				case (1)
+				{
+					switch (!this._grow())
+					{
+						case (1) { return false; }
+						default {};
+					};
+					ks      = (byte**)this.keys;
+					vs      = (void**)this.vals;
+					kl_slab = (size_t*)this.klens;
+				}
+				default {};
 			};
 			kc = (byte*)fmalloc((u64)(kl + (size_t)1));
-			if ((u64)kc == 0) { return false; };
+			switch ((u64)kc == 0)
+			{
+				case (1) { return false; }
+				default {};
+			};
 			j = 0;
-			while (j <= (int)kl) { kc[j] = key[j]; j = j + 1; };
+			do
+			{
+				switch (j <= (int)kl)
+				{
+					case (1) { kc[j] = key[j]; j = j + 1; }
+					default { break; };
+				};
+			};
 			ks[this.len]      = kc;
 			vs[this.len]      = val;
 			kl_slab[this.len] = kl;
@@ -338,32 +509,68 @@ namespace json
 			vs      = (void**)this.vals;
 			kl_slab = (size_t*)this.klens;
 			kl      = (size_t)standard::strings::strlen(key);
-			while (i < this.len)
+			do
 			{
-				match = kl_slab[i] == kl;
-				if (match)
+				switch (i < this.len)
 				{
-					while (j < (int)kl)
+					case (1)
 					{
-						if (ks[i][j] != key[j]) { match = false; break; };
-						j = j + 1;
-					};
+						match = kl_slab[i] == kl;
+						switch (match)
+						{
+							case (1)
+							{
+								j = 0;
+								do
+								{
+									switch (j < (int)kl)
+									{
+										case (1)
+										{
+											switch (ks[i][j] != key[j])
+											{
+												case (1) { match = false; break; }
+												default {};
+											};
+											j = j + 1;
+										}
+										default { break; };
+									};
+								};
+							}
+							default {};
+						};
+						switch (match)
+						{
+							case (1) { return vs[i]; }
+							default {};
+						};
+						i++;
+					}
+					default { break; };
 				};
-				if (match) { return vs[i]; };
-				i++;
 			};
 			return (@)0;
 		};
 
 		def has(byte* key) -> bool
 		{
-			return (u64)this.get(key) != 0;
+			switch ((u64)this.get(key) != 0)
+			{
+				case (1) { return true; }
+				default { return false; };
+			};
+			return false;
 		};
 
 		def key_at(size_t i) -> byte*
 		{
 			byte** ks;
-			if (i >= this.len) { return (byte*)0; };
+			switch (i >= this.len)
+			{
+				case (1) { return (byte*)0; }
+				default {};
+			};
 			ks = (byte**)this.keys;
 			return ks[i];
 		};
@@ -371,7 +578,11 @@ namespace json
 		def val_at(size_t i) -> void*
 		{
 			void** vs;
-			if (i >= this.len) { return (@)0; };
+			switch (i >= this.len)
+			{
+				case (1) { return (@)0; }
+				default {};
+			};
 			vs = (void**)this.vals;
 			return vs[i];
 		};
@@ -404,46 +615,132 @@ namespace json
 		{
 			void*  child;
 			size_t k, n;
-			if (this.type == JSON_STRING)
+			switch (this.type)
 			{
-				if (this.s_owned & (u64)this.s != 0)
+				case (JSON_STRING)
 				{
-					ffree((u64)this.s);
-					this.s = (byte*)0;
-				};
-			};
-			if (this.type == JSON_ARRAY)
-			{
-				n = this.arr.len;
-				while (k < n)
+					switch (this.s_owned & (u64)this.s != 0)
+					{
+						case (1)
+						{
+							ffree((u64)this.s);
+							this.s = (byte*)0;
+						}
+						default {};
+					};
+				}
+				case (JSON_ARRAY)
 				{
-					child = this.arr.get(k);
-					if ((u64)child != 0) { node_free(child); };
-					k++;
-				};
-				this.arr.__exit();
-			};
-			if (this.type == JSON_OBJECT)
-			{
-				n = this.obj.len;
-				while (k < n)
+					n = this.arr.len;
+					do
+					{
+						switch (k < n)
+						{
+							case (1)
+							{
+								child = this.arr.get(k);
+								switch ((u64)child != 0)
+								{
+									case (1) { node_free(child); }
+									default {};
+								};
+								k++;
+							}
+							default { break; };
+						};
+					};
+					this.arr.__exit();
+				}
+				case (JSON_OBJECT)
 				{
-					child = this.obj.val_at(k);
-					if ((u64)child != 0) { node_free(child); };
-					k++;
-				};
-				this.obj.__exit();
+					n = this.obj.len;
+					do
+					{
+						switch (k < n)
+						{
+							case (1)
+							{
+								child = this.obj.val_at(k);
+								switch ((u64)child != 0)
+								{
+									case (1) { node_free(child); }
+									default {};
+								};
+								k++;
+							}
+							default { break; };
+						};
+					};
+					this.obj.__exit();
+				}
+				default {};
 			};
 			return;
 		};
 
-		def is_null()   -> bool { return this.type == JSON_NULL;   };
-		def is_bool()   -> bool { return this.type == JSON_BOOL;   };
-		def is_int()    -> bool { return this.type == JSON_INT;    };
-		def is_float()  -> bool { return this.type == JSON_FLOAT;  };
-		def is_string() -> bool { return this.type == JSON_STRING; };
-		def is_array()  -> bool { return this.type == JSON_ARRAY;  };
-		def is_object() -> bool { return this.type == JSON_OBJECT; };
+		def is_null()   -> bool
+		{
+			switch (this.type == JSON_NULL)
+			{
+				case (1) { return true; }
+				default { return false; };
+			};
+			return true;
+		};
+		def is_bool()   -> bool
+		{
+			switch (this.type == JSON_BOOL)
+			{
+				case (1) { return true; }
+				default { return false; };
+			};
+			return false;
+		};
+		def is_int()    -> bool
+		{
+			switch (this.type == JSON_INT)
+			{
+				case (1) { return true; }
+				default { return false; };
+			};
+			return false;
+		};
+		def is_float()  -> bool
+		{
+			switch (this.type == JSON_FLOAT)
+			{
+				case (1) { return true; }
+				default { return false; };
+			};
+			return false;
+		};
+		def is_string() -> bool
+		{
+			switch (this.type == JSON_STRING)
+			{
+				case (1) { return true; }
+				default { return false; };
+			};
+			return false;
+		};
+		def is_array()  -> bool
+		{
+			switch (this.type == JSON_ARRAY)
+			{
+				case (1) { return true; }
+				default { return false; };
+			};
+			return false;
+		};
+		def is_object() -> bool
+		{
+			switch (this.type == JSON_OBJECT)
+			{
+				case (1) { return true; }
+				default { return false; };
+			};
+			return false;
+		};
 
 		def set_null() -> void
 		{
@@ -478,9 +775,25 @@ namespace json
 			int   n, j;
 			n  = standard::strings::strlen(src);
 			kc = (byte*)fmalloc((u64)(n + 1));
-			if ((u64)kc == 0) { return false; };
-			while (j <= n) { kc[j] = src[j]; j = j + 1; };
-			if (this.s_owned & (u64)this.s != 0) { ffree((u64)this.s); };
+			switch ((u64)kc == 0)
+			{
+				case (1) { return false; }
+				default {};
+			};
+			j = 0;
+			do
+			{
+				switch (j <= n)
+				{
+					case (1) { kc[j] = src[j]; j = j + 1; }
+					default { break; };
+				};
+			};
+			switch (this.s_owned & (u64)this.s != 0)
+			{
+				case (1) { ffree((u64)this.s); }
+				default {};
+			};
 			this.s       = kc;
 			this.slen    = n;
 			this.s_owned = true;
@@ -494,8 +807,20 @@ namespace json
 			int   n, j;
 			n  = standard::strings::strlen(src);
 			kc = (byte*)standard::memory::allocators::stdarena::alloc(a, (size_t)(n + 1));
-			if ((u64)kc == 0) { return false; };
-			while (j <= n) { kc[j] = src[j]; j = j + 1; };
+			switch ((u64)kc == 0)
+			{
+				case (1) { return false; }
+				default {};
+			};
+			j = 0;
+			do
+			{
+				switch (j <= n)
+				{
+					case (1) { kc[j] = src[j]; j = j + 1; }
+					default { break; };
+				};
+			};
 			// arena strings are not individually freed — skip the old free check
 			this.s       = kc;
 			this.slen    = n;
@@ -534,29 +859,52 @@ namespace json
 
 		def as_bool() -> bool
 		{
-			if (this.type == JSON_BOOL) { return this.b; };
-			if (this.type == JSON_INT)  { return this.i != 0; };
+			switch (this.type)
+			{
+				case (JSON_BOOL) { return this.b; }
+				case (JSON_INT)  { return this.i != 0; }
+				default { return false; };
+			};
 			return false;
 		};
 
 		def as_int() -> i64
 		{
-			if (this.type == JSON_INT)   { return this.i; };
-			if (this.type == JSON_FLOAT) { return (i64)this.f; };
-			if (this.type == JSON_BOOL)  { return this.b ? 1 : 0; };
+			switch (this.type)
+			{
+				case (JSON_INT)   { return this.i; }
+				case (JSON_FLOAT) { return (i64)this.f; }
+				case (JSON_BOOL)
+				{
+					switch (this.b)
+					{
+						case (1) { return 1; }
+						default { return 0; };
+					};
+				}
+				default { return 0; };
+			};
 			return 0;
 		};
 
 		def as_float() -> double
 		{
-			if (this.type == JSON_FLOAT) { return this.f; };
-			if (this.type == JSON_INT)   { return (double)this.i; };
-			return 0.0;
+			switch (this.type)
+			{
+				case (JSON_FLOAT) { return this.f; }
+				case (JSON_INT)   { return (double)this.i; }
+				default { return 0.0d; };
+			};
+			return 0.0d;
 		};
 
 		def as_string() -> byte*
 		{
-			if (this.type == JSON_STRING) { return this.s; };
+			switch (this.type == JSON_STRING)
+			{
+				case (1) { return this.s; }
+				default { return (byte*)0; };
+			};
 			return (byte*)0;
 		};
 
@@ -564,7 +912,11 @@ namespace json
 		// Use this in preference to as_string() when working with parsed data.
 		def as_string_view(byte** out, int* out_len) -> bool
 		{
-			if (this.type != JSON_STRING) { return false; };
+			switch (this.type != JSON_STRING)
+			{
+				case (1) { return false; }
+				default {};
+			};
 			*out     = this.s;
 			*out_len = this.slen;
 			return true;
@@ -573,15 +925,27 @@ namespace json
 		def array_push_new() -> void*
 		{
 			void* child;
-			if (this.type != JSON_ARRAY) { return (@)0; };
-			child = (@)fmalloc(sizeof(JSONNode) / 8);
-			if ((u64)child == 0) { return (@)0; };
-			((JSONNode*)child).__init();
-			if (!this.arr.push(child))
+			switch (this.type != JSON_ARRAY)
 			{
-				((JSONNode*)child).__exit();
-				ffree((u64)child);
-				return (@)0;
+				case (1) { return (@)0; }
+				default {};
+			};
+			child = (@)fmalloc(sizeof(JSONNode) / 8);
+			switch ((u64)child == 0)
+			{
+				case (1) { return (@)0; }
+				default {};
+			};
+			((JSONNode*)child).__init();
+			switch (!this.arr.push(child))
+			{
+				case (1)
+				{
+					((JSONNode*)child).__exit();
+					ffree((u64)child);
+					return (@)0;
+				}
+				default {};
 			};
 			return child;
 		};
@@ -590,39 +954,71 @@ namespace json
 		{
 			JSONNode* child;
 			size_t    sz;
-			if (this.type != JSON_ARRAY) { return (@)0; };
+			switch (this.type != JSON_ARRAY)
+			{
+				case (1) { return (@)0; }
+				default {};
+			};
 			sz    = sizeof(JSONNode) / sizeof(byte);
 			child = (JSONNode*)standard::memory::allocators::stdarena::alloc(a, sz);
-			if ((u64)child == 0) { return (@)0; };
+			switch ((u64)child == 0)
+			{
+				case (1) { return (@)0; }
+				default {};
+			};
 			child.__init();
-			if (!this.arr.push_arena((void*)child, a)) { return (@)0; };
+			switch (!this.arr.push_arena((void*)child, a))
+			{
+				case (1) { return (@)0; }
+				default {};
+			};
 			return (void*)child;
 		};
 
 		def array_len() -> size_t
 		{
-			if (this.type != JSON_ARRAY) { return 0; };
-			return this.arr.len;
+			switch (this.type != JSON_ARRAY)
+			{
+				case (1) { return 0; }
+				default { return this.arr.len; };
+			};
+			return 0;
 		};
 
 		def array_get(size_t i) -> void*
 		{
-			if (this.type != JSON_ARRAY) { return (@)0; };
-			return this.arr.get(i);
+			switch (this.type != JSON_ARRAY)
+			{
+				case (1) { return (@)0; }
+				default { return this.arr.get(i); };
+			};
+			return (@)0;
 		};
 
 		def object_set_new(byte* key) -> void*
 		{
 			void* child;
-			if (this.type != JSON_OBJECT) { return (@)0; };
-			child = (@)fmalloc(sizeof(JSONNode) / 8);
-			if ((u64)child == 0) { return (@)0; };
-			((JSONNode*)child).__init();
-			if (!this.obj.set(key, child))
+			switch (this.type != JSON_OBJECT)
 			{
-				((JSONNode*)child).__exit();
-				ffree((u64)child);
-				return (@)0;
+				case (1) { return (@)0; }
+				default {};
+			};
+			child = (@)fmalloc(sizeof(JSONNode) / 8);
+			switch ((u64)child == 0)
+			{
+				case (1) { return (@)0; }
+				default {};
+			};
+			((JSONNode*)child).__init();
+			switch (!this.obj.set(key, child))
+			{
+				case (1)
+				{
+					((JSONNode*)child).__exit();
+					ffree((u64)child);
+					return (@)0;
+				}
+				default {};
 			};
 			return child;
 		};
@@ -631,43 +1027,75 @@ namespace json
 		{
 			JSONNode* child;
 			size_t    sz;
-			if (this.type != JSON_OBJECT) { return (@)0; };
+			switch (this.type != JSON_OBJECT)
+			{
+				case (1) { return (@)0; }
+				default {};
+			};
 			sz    = sizeof(JSONNode) / sizeof(byte);
 			child = (JSONNode*)standard::memory::allocators::stdarena::alloc(a, sz);
-			if ((u64)child == 0) { return (@)0; };
+			switch ((u64)child == 0)
+			{
+				case (1) { return (@)0; }
+				default {};
+			};
 			child.__init();
-			if (!this.obj.arena_set(key, (void*)child, a)) { return (@)0; };
+			switch (!this.obj.arena_set(key, (void*)child, a))
+			{
+				case (1) { return (@)0; }
+				default {};
+			};
 			return (void*)child;
 		};
 
 		def object_get(byte* key) -> void*
 		{
-			if (this.type != JSON_OBJECT) { return (@)0; };
-			return this.obj.get(key);
+			switch (this.type != JSON_OBJECT)
+			{
+				case (1) { return (@)0; }
+				default { return this.obj.get(key); };
+			};
+			return (@)0;
 		};
 
 		def object_has(byte* key) -> bool
 		{
-			if (this.type != JSON_OBJECT) { return false; };
-			return this.obj.has(key);
+			switch (this.type != JSON_OBJECT)
+			{
+				case (1) { return false; }
+				default { return this.obj.has(key); };
+			};
+			return false;
 		};
 
 		def object_len() -> size_t
 		{
-			if (this.type != JSON_OBJECT) { return 0; };
-			return this.obj.len;
+			switch (this.type != JSON_OBJECT)
+			{
+				case (1) { return 0; }
+				default { return this.obj.len; };
+			};
+			return 0;
 		};
 
 		def object_key_at(size_t i) -> byte*
 		{
-			if (this.type != JSON_OBJECT) { return (byte*)0; };
-			return this.obj.key_at(i);
+			switch (this.type != JSON_OBJECT)
+			{
+				case (1) { return (byte*)0; }
+				default { return this.obj.key_at(i); };
+			};
+			return (byte*)0;
 		};
 
 		def object_val_at(size_t i) -> void*
 		{
-			if (this.type != JSON_OBJECT) { return (@)0; };
-			return this.obj.val_at(i);
+			switch (this.type != JSON_OBJECT)
+			{
+				case (1) { return (@)0; }
+				default { return this.obj.val_at(i); };
+			};
+			return (@)0;
 		};
 	};
 
@@ -718,34 +1146,58 @@ namespace json
 
 		def ok() -> bool
 		{
-			return this.error == 0;
+			switch (this.error == 0)
+			{
+				case (1) { return true; }
+				default { return false; };
+			};
+			return false;
 		};
 
 		def _skip_ws() -> void
 		{
 			char c;
-			while (this.pos < this.len)
+			do
 			{
-				c = (char)this.src[this.pos];
-				if (c == ' ' | c == '\t' | c == '\n' | c == '\r')
+				switch (this.pos < this.len)
 				{
-					this.pos = this.pos + 1;
-				}
-				else { break; };
+					case (1)
+					{
+						c = (char)this.src[this.pos];
+						switch (c)
+						{
+							case (32) {}  // space
+							case (9) {}   // tab
+							case (10) {}  // newline
+							case (13) {}  // carriage return
+							default { break; };
+						};
+						this.pos = this.pos + 1;
+					}
+					default { break; };
+				};
 			};
 			return;
 		};
 
 		def _peek() -> char
 		{
-			if (this.pos >= this.len) { return '\x00'; };
-			return (char)this.src[this.pos];
+			switch (this.pos >= this.len)
+			{
+				case (1) { return '\x00'; }
+				default { return (char)this.src[this.pos]; };
+			};
+			return '\x00';
 		};
 
 		def _adv() -> char
 		{
 			char c;
-			if (this.pos >= this.len) { return '\x00'; };
+			switch (this.pos >= this.len)
+			{
+				case (1) { return '\x00'; }
+				default {};
+			};
 			c        = (char)this.src[this.pos];
 			this.pos = this.pos + 1;
 			return c;
@@ -760,47 +1212,88 @@ namespace json
 			this._adv();
 			start = this.pos;
 			// Scan to find end and whether escapes are present.
-			while (this.pos < this.len)
+			do
 			{
-				c = (char)this.src[this.pos];
-				if (c == '"') { break; };
-				if (c == '\\') { has_escape = true; this.pos = this.pos + 1; };
-				this.pos = this.pos + 1;
-				slen     = slen + 1;
+				switch (this.pos < this.len)
+				{
+					case (1)
+					{
+						c = (char)this.src[this.pos];
+						switch (c)
+						{
+							case (34) { break; }  // "
+							case (92)  // \
+							{
+								has_escape = true;
+								this.pos = this.pos + 1;
+							}
+							default {};
+						};
+						this.pos = this.pos + 1;
+						slen     = slen + 1;
+					}
+					default { break; };
+				};
 			};
-			if (this._peek() != '"') { this.error = 1; return false; };
-			this._adv();
-			if (!has_escape)
+			switch (this._peek() != '"')
 			{
-				// Zero-copy: point directly into source buffer.
-				node.s       = @this.src[start];
-				node.slen    = slen;
-				node.s_owned = false;
-				node.type    = JSON_STRING;
-				return true;
+				case (1) { this.error = 1; return false; }
+				default {};
+			};
+			this._adv();
+			switch (!has_escape)
+			{
+				case (1)
+				{
+					// Zero-copy: point directly into source buffer.
+					node.s       = @this.src[start];
+					node.slen    = slen;
+					node.s_owned = false;
+					node.type    = JSON_STRING;
+					return true;
+				}
+				default {};
 			};
 			// Has escapes: allocate into arena and decode.
 			s = (byte*)standard::memory::allocators::stdarena::alloc(this.arena, (size_t)(slen + 1));
-			if ((u64)s == 0) { this.error = 2; return false; };
-			this.pos = start;
-			while (this.pos < this.len)
+			switch ((u64)s == 0)
 			{
-				c = (char)this.src[this.pos];
-				if (c == '"') { break; };
-				if (c == '\\')
+				case (1) { this.error = 2; return false; }
+				default {};
+			};
+			this.pos = start;
+			j = 0;
+			do
+			{
+				switch (this.pos < this.len)
 				{
-					this.pos = this.pos + 1;
-					c = (char)this.src[this.pos];
-					if      (c == '"')  { s[j] = '"';  }
-					elif    (c == '\\') { s[j] = '\\'; }
-					elif    (c == 'n')  { s[j] = '\n'; }
-					elif    (c == 'r')  { s[j] = '\r'; }
-					elif    (c == 't')  { s[j] = '\t'; }
-					else                { s[j] = (byte)c; };
-				}
-				else { s[j] = (byte)c; };
-				this.pos = this.pos + 1;
-				j = j + 1;
+					case (1)
+					{
+						c = (char)this.src[this.pos];
+						switch (c)
+						{
+							case (34) { break; }  // "
+							case (92)  // \
+							{
+								this.pos = this.pos + 1;
+								c = (char)this.src[this.pos];
+								switch (c)
+								{
+									case (34) { s[j] = '"';  }
+									case (92) { s[j] = '\\'; }
+									case (110) { s[j] = '\n'; }
+									case (114) { s[j] = '\r'; }
+									case (116) { s[j] = '\t'; }
+									default   { s[j] = (byte)c; };
+								};
+							}
+							default { s[j] = (byte)c; };
+						};
+						this.pos = this.pos + 1;
+						j = j + 1;
+					}
+					default { break; };
+				};
 			};
 			s[j]         = '\x00';
 			this._adv();
@@ -818,37 +1311,68 @@ namespace json
 			double fv, fdiv;
 			char   c;
 			c = this._peek();
-			if (c == '-') { neg = true; this._adv(); };
-			while (this.pos < this.len)
+			switch (c == '-')
 			{
-				c = (char)this.src[this.pos];
-				if (c >= '0' & c <= '9')
-				{
-					iv = iv * 10 + (c - '0');
-					this.pos = this.pos + 1;
-				}
-				else { break; };
+				case (1) { neg = true; this._adv(); }
+				default {};
 			};
-			if (this._peek() == '.')
+			do
 			{
-				is_float = true;
-				fdiv     = 1.0;
-				fv       = (double)iv;
-				this._adv();
-				while (this.pos < this.len)
+				switch (this.pos < this.len)
 				{
-					c = (char)this.src[this.pos];
-					if (c >= '0' & c <= '9')
+					case (1)
 					{
-						fdiv = fdiv * 10.0;
-						fv   = fv + (double)(c - '0') / fdiv;
-						this.pos = this.pos + 1;
+						c = (char)this.src[this.pos];
+						switch (c >= '0' & c <= '9')
+						{
+							case (1)
+							{
+								iv = iv * 10 + (c - '0');
+								this.pos = this.pos + 1;
+							}
+							default { break; };
+						};
 					}
-					else { break; };
+					default { break; };
 				};
 			};
-			if (is_float) { node.set_float(neg ? -fv : fv); }
-			else          { node.set_int(neg ? -iv : iv);   };
+			switch (this._peek() == '.')
+			{
+				case (1)
+				{
+					is_float = true;
+					fdiv     = 1.0;
+					fv       = (double)iv;
+					this._adv();
+					do
+					{
+						switch (this.pos < this.len)
+						{
+							case (1)
+							{
+								c = (char)this.src[this.pos];
+								switch (c >= '0' & c <= '9')
+								{
+									case (1)
+									{
+										fdiv = fdiv * 10.0;
+										fv   = fv + (double)(c - '0') / fdiv;
+										this.pos = this.pos + 1;
+									}
+									default { break; };
+								};
+							}
+							default { break; };
+						};
+					};
+				}
+				default {};
+			};
+			switch (is_float)
+			{
+				case (1) { node.set_float(neg ? -fv : fv); }
+				default  { node.set_int(neg ? -iv : iv);   };
+			};
 			return true;
 		};
 
@@ -858,12 +1382,20 @@ namespace json
 		{
 			JSONNode* child;
 			size_t    sz;
-			if (this.slab_remaining == 0)
+			switch (this.slab_remaining == 0)
 			{
-				sz             = (sizeof(JSONNode) / sizeof(byte)) * (size_t)NODE_SLAB_SIZE;
-				this.node_slab = (JSONNode*)standard::memory::allocators::stdarena::alloc(this.arena, sz);
-				if ((u64)this.node_slab == 0) { this.error = 2; return (JSONNode*)0; };
-				this.slab_remaining = NODE_SLAB_SIZE;
+				case (1)
+				{
+					sz             = (sizeof(JSONNode) / sizeof(byte)) * (size_t)NODE_SLAB_SIZE;
+					this.node_slab = (JSONNode*)standard::memory::allocators::stdarena::alloc(this.arena, sz);
+					switch ((u64)this.node_slab == 0)
+					{
+						case (1) { this.error = 2; return (JSONNode*)0; }
+						default {};
+					};
+					this.slab_remaining = NODE_SLAB_SIZE;
+				}
+				default {};
 			};
 			child               = this.node_slab;
 			this.node_slab      = (JSONNode*)((u64)this.node_slab + sizeof(JSONNode) / sizeof(byte));
@@ -893,18 +1425,49 @@ namespace json
 			node.set_array_arena(this.arena);
 			this._adv();
 			this._skip_ws();
-			if (this._peek() == ']') { this._adv(); return true; };
-			while (this.pos < this.len)
+			switch (this._peek() == ']')
 			{
-				child = this._alloc_child();
-				if ((u64)child == 0) { return false; };
-				if (!node.arr.push_arena((void*)child, this.arena)) { this.error = 2; return false; };
-				if (!this._parse_value(child)) { return false; };
-				this._skip_ws();
-				if (this._peek() == ']') { this._adv(); return true; };
-				if (this._peek() != ',') { this.error = 1; return false; };
-				this._adv();
-				this._skip_ws();
+				case (1) { this._adv(); return true; }
+				default {};
+			};
+			do
+			{
+				switch (this.pos < this.len)
+				{
+					case (1)
+					{
+						child = this._alloc_child();
+						switch ((u64)child == 0)
+						{
+							case (1) { return false; }
+							default {};
+						};
+						switch (!node.arr.push_arena((void*)child, this.arena))
+						{
+							case (1) { this.error = 2; return false; }
+							default {};
+						};
+						switch (!this._parse_value(child))
+						{
+							case (1) { return false; }
+							default {};
+						};
+						this._skip_ws();
+						switch (this._peek() == ']')
+						{
+							case (1) { this._adv(); return true; }
+							default {};
+						};
+						switch (this._peek() != ',')
+						{
+							case (1) { this.error = 1; return false; }
+							default {};
+						};
+						this._adv();
+						this._skip_ws();
+					}
+					default { break; };
+				};
 			};
 			this.error = 1;
 			return false;
@@ -923,86 +1486,168 @@ namespace json
 			node.set_object_arena(this.arena);
 			this._adv();
 			this._skip_ws();
-			if (this._peek() == '}') { this._adv(); return true; };
-			while (this.pos < this.len)
+			switch (this._peek() == '}')
 			{
-				this._skip_ws();
-				if (this._peek() != '"') { this.error = 1; return false; };
-				this._adv();
-				key_start  = this.pos;
-				kl         = 0;
-				key_escape = false;
-				while (this.pos < this.len)
+				case (1) { this._adv(); return true; }
+				default {};
+			};
+			do
+			{
+				switch (this.pos < this.len)
 				{
-					c = (char)this.src[this.pos];
-					if (c == '"') { break; };
-					if (c == '\\') { key_escape = true; this.pos = this.pos + 1; };
-					this.pos = this.pos + 1;
-					kl       = kl + 1;
-				};
-				if (this._peek() != '"') { this.error = 1; return false; };
-				this._adv();
-				this._skip_ws();
-				if (this._peek() != ':') { this.error = 1; return false; };
-				this._adv();
-				this._skip_ws();
-				// Save position — value parse starts here.
-				resume_pos = this.pos;
-				child = this._alloc_child();
-				if ((u64)child == 0) { return false; };
-				if (!key_escape)
-				{
-					// Zero-copy key: point directly into source.
-					kc = @this.src[key_start];
-				}
-				else
-				{
-					// Key has escapes: decode into arena buffer.
-					kc = (byte*)standard::memory::allocators::stdarena::alloc(this.arena, (size_t)(kl + 1));
-					if ((u64)kc == 0) { this.error = 2; return false; };
-					this.pos = key_start;
-					j = 0;
-					while (this.pos < this.len)
+					case (1)
 					{
-						c = (char)this.src[this.pos];
-						if (c == '"') { break; };
-						if (c == '\\')
+						this._skip_ws();
+						switch (this._peek() != '"')
 						{
-							this.pos = this.pos + 1;
-							c = (char)this.src[this.pos];
-							if      (c == '"')  { kc[j] = '"';  }
-							elif    (c == '\\') { kc[j] = '\\'; }
-							elif    (c == 'n')  { kc[j] = '\n'; }
-							elif    (c == 'r')  { kc[j] = '\r'; }
-							elif    (c == 't')  { kc[j] = '\t'; }
-							else                { kc[j] = (byte)c; };
-						}
-						else { kc[j] = (byte)c; };
-						this.pos = this.pos + 1;
-						j = j + 1;
-					};
-					kc[j] = '\x00';
-					kl     = j;
-					// Restore position to after ':' for value parse.
-					this.pos = resume_pos;
+							case (1) { this.error = 1; return false; }
+							default {};
+						};
+						this._adv();
+						key_start  = this.pos;
+						kl         = 0;
+						key_escape = false;
+						do
+						{
+							switch (this.pos < this.len)
+							{
+								case (1)
+								{
+									c = (char)this.src[this.pos];
+									switch (c)
+									{
+										case (34) { break; }  // "
+										case (92)  // \
+										{
+											key_escape = true;
+											this.pos = this.pos + 1;
+										}
+										default {};
+									};
+									this.pos = this.pos + 1;
+									kl       = kl + 1;
+								}
+								default { break; };
+							};
+						};
+						switch (this._peek() != '"')
+						{
+							case (1) { this.error = 1; return false; }
+							default {};
+						};
+						this._adv();
+						this._skip_ws();
+						switch (this._peek() != ':')
+						{
+							case (1) { this.error = 1; return false; }
+							default {};
+						};
+						this._adv();
+						this._skip_ws();
+						// Save position — value parse starts here.
+						resume_pos = this.pos;
+						child = this._alloc_child();
+						switch ((u64)child == 0)
+						{
+							case (1) { return false; }
+							default {};
+						};
+						switch (!key_escape)
+						{
+							case (1)
+							{
+								// Zero-copy key: point directly into source.
+								kc = @this.src[key_start];
+							}
+							default
+							{
+								// Key has escapes: decode into arena buffer.
+								kc = (byte*)standard::memory::allocators::stdarena::alloc(this.arena, (size_t)(kl + 1));
+								switch ((u64)kc == 0)
+								{
+									case (1) { this.error = 2; return false; }
+									default {};
+								};
+								this.pos = key_start;
+								j = 0;
+								do
+								{
+									switch (this.pos < this.len)
+									{
+										case (1)
+										{
+											c = (char)this.src[this.pos];
+											switch (c)
+											{
+												case (34) { break; }  // "
+												case (92)  // \
+												{
+													this.pos = this.pos + 1;
+													c = (char)this.src[this.pos];
+													switch (c)
+													{
+														case (34) { kc[j] = '"';  }
+														case (92) { kc[j] = '\\'; }
+														case (110) { kc[j] = '\n'; }
+														case (114) { kc[j] = '\r'; }
+														case (116) { kc[j] = '\t'; }
+														default   { kc[j] = (byte)c; };
+													};
+												}
+												default { kc[j] = (byte)c; };
+											};
+											this.pos = this.pos + 1;
+											j = j + 1;
+										}
+										default { break; };
+									};
+								};
+								kc[j] = '\x00';
+								kl     = j;
+								// Restore position to after ':' for value parse.
+								this.pos = resume_pos;
+							};
+						};
+						// Push directly into obj — arena-backed grow, no ffree
+						switch (node.obj.len >= node.obj.cap)
+						{
+							case (1)
+							{
+								switch (!node.obj._grow_arena(this.arena))
+								{
+									case (1) { this.error = 2; return false; }
+									default {};
+								};
+							}
+							default {};
+						};
+						ks      = (byte**)node.obj.keys;
+						vs      = (void**)node.obj.vals;
+						kl_slab = (size_t*)node.obj.klens;
+						ks[node.obj.len]      = kc;
+						vs[node.obj.len]      = (void*)child;
+						kl_slab[node.obj.len] = (size_t)kl;
+						node.obj.len++;
+						switch (!this._parse_value(child))
+						{
+							case (1) { return false; }
+							default {};
+						};
+						this._skip_ws();
+						switch (this._peek() == '}')
+						{
+							case (1) { this._adv(); return true; }
+							default {};
+						};
+						switch (this._peek() != ',')
+						{
+							case (1) { this.error = 1; return false; }
+							default {};
+						};
+						this._adv();
+					}
+					default { break; };
 				};
-				// Push directly into obj — arena-backed grow, no ffree
-				if (node.obj.len >= node.obj.cap)
-				{
-					if (!node.obj._grow_arena(this.arena)) { this.error = 2; return false; };
-				};
-				ks      = (byte**)node.obj.keys;
-				vs      = (void**)node.obj.vals;
-				kl_slab = (size_t*)node.obj.klens;
-				ks[node.obj.len]      = kc;
-				vs[node.obj.len]      = (void*)child;
-				kl_slab[node.obj.len] = (size_t)kl;
-				node.obj.len++;
-				if (!this._parse_value(child)) { return false; };
-				this._skip_ws();
-				if (this._peek() == '}') { this._adv(); return true; };
-				if (this._peek() != ',') { this.error = 1; return false; };
-				this._adv();
 			};
 			this.error = 1;
 			return false;
@@ -1013,15 +1658,28 @@ namespace json
 			char c;
 			this._skip_ws();
 			c = this._peek();
-			if      (c == '"')                          { return this._parse_string(node); }
-			elif    (c == '[')                          { return this._parse_array(node);  }
-			elif    (c == '{')                          { return this._parse_object(node); }
-			elif    (c == 't') { this.pos = this.pos + 4; node.set_bool(true);  return true; }
-			elif    (c == 'f') { this.pos = this.pos + 5; node.set_bool(false); return true; }
-			elif    (c == 'n') { this.pos = this.pos + 4; node.set_null();      return true; }
-			elif    (c == '-' | (c >= '0' & c <= '9')) { return this._parse_number(node); };
-			this.error = 1;
-			return false;
+			switch (c)
+			{
+				case (34) { return this._parse_string(node); }  // "
+				case (91) { return this._parse_array(node);  }  // [
+				case (123) { return this._parse_object(node); } // {
+				case (116) { this.pos = this.pos + 4; node.set_bool(true);  return true; } // t
+				case (102) { this.pos = this.pos + 5; node.set_bool(false); return true; } // f
+				case (110) { this.pos = this.pos + 4; node.set_null();      return true; } // n
+				case (45) {}   // -
+				case (48) {}   // 0
+				case (49) {}   // 1
+				case (50) {}   // 2
+				case (51) {}   // 3
+				case (52) {}   // 4
+				case (53) {}   // 5
+				case (54) {}   // 6
+				case (55) {}   // 7
+				case (56) {}   // 8
+				case (57) {}   // 9
+				default { this.error = 1; return false; };
+			};
+			return this._parse_number(node);
 		};
 
 		def parse(JSONNode* node) -> bool
@@ -1036,7 +1694,11 @@ namespace json
 
 	def _wc(byte* buf, int pos, int cap, char c) -> int
 	{
-		if (pos < cap - 1) { buf[pos] = (byte)c; pos = pos + 1; };
+		switch (pos < cap - 1)
+		{
+			case (1) { buf[pos] = (byte)c; pos = pos + 1; }
+			default {};
+		};
 		buf[pos] = '\x00';
 		return pos;
 	};
@@ -1044,11 +1706,18 @@ namespace json
 	def _ws(byte* buf, int pos, int cap, byte* src) -> int
 	{
 		int i;
-		while (src[i] != '\x00' & pos < cap - 1)
+		do
 		{
-			buf[pos] = src[i];
-			pos = pos + 1;
-			i   = i + 1;
+			switch (src[i] != '\x00' & pos < cap - 1)
+			{
+				case (1)
+				{
+					buf[pos] = src[i];
+					pos = pos + 1;
+					i   = i + 1;
+				}
+				default { break; };
+			};
 		};
 		buf[pos] = '\x00';
 		return pos;
@@ -1058,16 +1727,59 @@ namespace json
 	{
 		int  i;
 		char c;
-		while (src[i] != '\x00')
+		do
 		{
-			c = (char)src[i];
-			if      (c == '"')  { pos = _wc(buf, pos, cap, '\\'); pos = _wc(buf, pos, cap, '"');  }
-			elif    (c == '\\') { pos = _wc(buf, pos, cap, '\\'); pos = _wc(buf, pos, cap, '\\'); }
-			elif    (c == '\n') { pos = _wc(buf, pos, cap, '\\'); pos = _wc(buf, pos, cap, 'n');  }
-			elif    (c == '\r') { pos = _wc(buf, pos, cap, '\\'); pos = _wc(buf, pos, cap, 'r');  }
-			elif    (c == '\t') { pos = _wc(buf, pos, cap, '\\'); pos = _wc(buf, pos, cap, 't');  }
-			else                { pos = _wc(buf, pos, cap, c); };
-			i = i + 1;
+			switch (src[i] != '\x00')
+			{
+				case (1)
+				{
+					c = (char)src[i];
+					switch (c)
+					{
+						case (34) {}  // "
+						case (92) {}  // \
+						case (10) {}  // \n
+						case (13) {}  // \r
+						case (9) {}   // \t
+						default
+						{
+							pos = _wc(buf, pos, cap, c);
+							break;
+						};
+					};
+					switch (c)
+					{
+						case (34)  // "
+						{
+							pos = _wc(buf, pos, cap, '\\');
+							pos = _wc(buf, pos, cap, '"');
+						}
+						case (92)  // \
+						{
+							pos = _wc(buf, pos, cap, '\\');
+							pos = _wc(buf, pos, cap, '\\');
+						}
+						case (10)  // \n
+						{
+							pos = _wc(buf, pos, cap, '\\');
+							pos = _wc(buf, pos, cap, 'n');
+						}
+						case (13)  // \r
+						{
+							pos = _wc(buf, pos, cap, '\\');
+							pos = _wc(buf, pos, cap, 'r');
+						}
+						case (9)   // \t
+						{
+							pos = _wc(buf, pos, cap, '\\');
+							pos = _wc(buf, pos, cap, 't');
+						}
+						default {};
+					};
+					i = i + 1;
+				}
+				default { break; };
+			};
 		};
 		return pos;
 	};
@@ -1078,15 +1790,22 @@ namespace json
 		size_t    k, n;
 		JSONNode* child;
 
-		if ((u64)node == 0) { return _ws(buf, pos, cap, "null\0"); };
+		switch ((u64)node == 0)
+		{
+			case (1) { return _ws(buf, pos, cap, "null\0"); }
+			default {};
+		};
 
 		switch (node.type)
 		{
 			case (JSON_NULL) { pos = _ws(buf, pos, cap, "null\0"); }
 			case (JSON_BOOL)
 			{
-				if (node.b) { pos = _ws(buf, pos, cap, "true\0"); }
-				else        { pos = _ws(buf, pos, cap, "false\0"); };
+				switch (node.b)
+				{
+					case (1) { pos = _ws(buf, pos, cap, "true\0"); }
+					default  { pos = _ws(buf, pos, cap, "false\0"); };
+				};
 			}
 			case (JSON_INT)
 			{
@@ -1108,12 +1827,23 @@ namespace json
 			{
 				n   = node.arr.len;
 				pos = _wc(buf, pos, cap, '[');
-				while (k < n)
+				do
 				{
-					if (k > 0) { pos = _wc(buf, pos, cap, ','); };
-					child = (JSONNode*)node.arr.get(k);
-					pos   = serialize(child, buf, pos, cap);
-					k++;
+					switch (k < n)
+					{
+						case (1)
+						{
+							switch (k > 0)
+							{
+								case (1) { pos = _wc(buf, pos, cap, ','); }
+								default {};
+							};
+							child = (JSONNode*)node.arr.get(k);
+							pos   = serialize(child, buf, pos, cap);
+							k++;
+						}
+						default { break; };
+					};
 				};
 				pos = _wc(buf, pos, cap, ']');
 			}
@@ -1121,16 +1851,27 @@ namespace json
 			{
 				n   = node.obj.len;
 				pos = _wc(buf, pos, cap, '{');
-				while (k < n)
+				do
 				{
-					if (k > 0) { pos = _wc(buf, pos, cap, ','); };
-					pos   = _wc(buf, pos, cap, '"');
-					pos   = _we(buf, pos, cap, node.obj.key_at(k));
-					pos   = _wc(buf, pos, cap, '"');
-					pos   = _wc(buf, pos, cap, ':');
-					child = (JSONNode*)node.obj.val_at(k);
-					pos   = serialize(child, buf, pos, cap);
-					k++;
+					switch (k < n)
+					{
+						case (1)
+						{
+							switch (k > 0)
+							{
+								case (1) { pos = _wc(buf, pos, cap, ','); }
+								default {};
+							};
+							pos   = _wc(buf, pos, cap, '"');
+							pos   = _we(buf, pos, cap, node.obj.key_at(k));
+							pos   = _wc(buf, pos, cap, '"');
+							pos   = _wc(buf, pos, cap, ':');
+							child = (JSONNode*)node.obj.val_at(k);
+							pos   = serialize(child, buf, pos, cap);
+							k++;
+						}
+						default { break; };
+					};
 				};
 				pos = _wc(buf, pos, cap, '}');
 			}
@@ -1161,7 +1902,12 @@ namespace json
 		sb.buf   = (byte*)standard::memory::allocators::stdarena::alloc(a, (size_t)init_cap);
 		sb.cap   = init_cap;
 		sb.arena = a;
-		return (u64)sb.buf != 0;
+		switch ((u64)sb.buf == 0)
+		{
+			case (1) { return false; }
+			default { return true; };
+		};
+		return false;
 	};
 
 	def _sb_grow(SerializeBuf* sb) -> bool
@@ -1170,8 +1916,19 @@ namespace json
 		int    new_cap, i;
 		new_cap = sb.cap * 2;
 		nb      = (byte*)standard::memory::allocators::stdarena::alloc(sb.arena, (size_t)new_cap);
-		if ((u64)nb == 0) { return false; };
-		while (i < sb.pos) { nb[i] = sb.buf[i]; i = i + 1; };
+		switch ((u64)nb == 0)
+		{
+			case (1) { return false; }
+			default {};
+		};
+		do
+		{
+			switch (i < sb.pos)
+			{
+				case (1) { nb[i] = sb.buf[i]; i = i + 1; }
+				default { break; };
+			};
+		};
 		sb.buf = nb;
 		sb.cap = new_cap;
 		return true;
@@ -1179,9 +1936,17 @@ namespace json
 
 	def _sb_wc(SerializeBuf* sb, char c) -> bool
 	{
-		if (sb.pos >= sb.cap - 1)
+		switch (sb.pos >= sb.cap - 1)
 		{
-			if (!_sb_grow(sb)) { return false; };
+			case (1)
+			{
+				switch (!_sb_grow(sb))
+				{
+					case (1) { return false; }
+					default {};
+				};
+			}
+			default {};
 		};
 		sb.buf[sb.pos] = (byte)c;
 		sb.pos = sb.pos + 1;
@@ -1191,10 +1956,21 @@ namespace json
 	def _sb_ws(SerializeBuf* sb, byte* src) -> bool
 	{
 		int i;
-		while (src[i] != '\x00')
+		do
 		{
-			if (!_sb_wc(sb, (char)src[i])) { return false; };
-			i = i + 1;
+			switch (src[i] != '\x00')
+			{
+				case (1)
+				{
+					switch (!_sb_wc(sb, (char)src[i]))
+					{
+						case (1) { return false; }
+						default {};
+					};
+					i = i + 1;
+				}
+				default { break; };
+			};
 		};
 		return true;
 	};
@@ -1203,16 +1979,59 @@ namespace json
 	{
 		int  i;
 		char c;
-		while (src[i] != '\x00')
+		do
 		{
-			c = (char)src[i];
-			if      (c == '"')  { if (!_sb_wc(sb, '\\')) { return false; }; if (!_sb_wc(sb, '"'))  { return false; }; }
-			elif    (c == '\\') { if (!_sb_wc(sb, '\\')) { return false; }; if (!_sb_wc(sb, '\\')) { return false; }; }
-			elif    (c == '\n') { if (!_sb_wc(sb, '\\')) { return false; }; if (!_sb_wc(sb, 'n'))  { return false; }; }
-			elif    (c == '\r') { if (!_sb_wc(sb, '\\')) { return false; }; if (!_sb_wc(sb, 'r'))  { return false; }; }
-			elif    (c == '\t') { if (!_sb_wc(sb, '\\')) { return false; }; if (!_sb_wc(sb, 't'))  { return false; }; }
-			else                { if (!_sb_wc(sb, c))    { return false; }; };
-			i = i + 1;
+			switch (src[i] != '\x00')
+			{
+				case (1)
+				{
+					c = (char)src[i];
+					switch (c)
+					{
+						case (34) {}  // "
+						case (92) {}  // \
+						case (10) {}  // \n
+						case (13) {}  // \r
+						case (9) {}   // \t
+						default
+						{
+							switch (!_sb_wc(sb, c)) { case (1) { return false; } default {}; };
+							break;
+						};
+					};
+					switch (c)
+					{
+						case (34)  // "
+						{
+							switch (!_sb_wc(sb, '\\')) { case (1) { return false; } default {}; };
+							switch (!_sb_wc(sb, '"'))  { case (1) { return false; } default {}; };
+						}
+						case (92)  // \
+						{
+							switch (!_sb_wc(sb, '\\')) { case (1) { return false; } default {}; };
+							switch (!_sb_wc(sb, '\\')) { case (1) { return false; } default {}; };
+						}
+						case (10)  // \n
+						{
+							switch (!_sb_wc(sb, '\\')) { case (1) { return false; } default {}; };
+							switch (!_sb_wc(sb, 'n'))  { case (1) { return false; } default {}; };
+						}
+						case (13)  // \r
+						{
+							switch (!_sb_wc(sb, '\\')) { case (1) { return false; } default {}; };
+							switch (!_sb_wc(sb, 'r'))  { case (1) { return false; } default {}; };
+						}
+						case (9)   // \t
+						{
+							switch (!_sb_wc(sb, '\\')) { case (1) { return false; } default {}; };
+							switch (!_sb_wc(sb, 't'))  { case (1) { return false; } default {}; };
+						}
+						default {};
+					};
+					i = i + 1;
+				}
+				default { break; };
+			};
 		};
 		return true;
 	};
@@ -1225,61 +2044,98 @@ namespace json
 		size_t    k, n;
 		JSONNode* child;
 
-		if ((u64)node == 0) { return _sb_ws(sb, "null\0"); };
+		switch ((u64)node == 0)
+		{
+			case (1) { return _sb_ws(sb, "null\0"); }
+			default {};
+		};
 
 		switch (node.type)
 		{
-			case (JSON_NULL) { if (!_sb_ws(sb, "null\0"))  { return false; }; }
+			case (JSON_NULL) { switch (!_sb_ws(sb, "null\0"))  { case (1) { return false; } default {}; }; }
 			case (JSON_BOOL)
 			{
-				if (node.b) { if (!_sb_ws(sb, "true\0"))  { return false; }; }
-				else        { if (!_sb_ws(sb, "false\0")) { return false; }; };
+				switch (node.b)
+				{
+					case (1) { switch (!_sb_ws(sb, "true\0"))  { case (1) { return false; } default {}; }; }
+					default  { switch (!_sb_ws(sb, "false\0")) { case (1) { return false; } default {}; }; };
+				};
 			}
 			case (JSON_INT)
 			{
 				standard::strings::i64str(node.i, @num_buf[0]);
-				if (!_sb_ws(sb, @num_buf[0])) { return false; };
+				switch (!_sb_ws(sb, @num_buf[0])) { case (1) { return false; } default {}; };
 			}
 			case (JSON_FLOAT)
 			{
 				standard::strings::dbl2str(node.f, @num_buf[0], 6);
-				if (!_sb_ws(sb, @num_buf[0])) { return false; };
+				switch (!_sb_ws(sb, @num_buf[0])) { case (1) { return false; } default {}; };
 			}
 			case (JSON_STRING)
 			{
-				if (!_sb_wc(sb, '"'))         { return false; };
-				if (!_sb_we(sb, node.s))      { return false; };
-				if (!_sb_wc(sb, '"'))         { return false; };
+				switch (!_sb_wc(sb, '"'))         { case (1) { return false; } default {}; };
+				switch (!_sb_we(sb, node.s))      { case (1) { return false; } default {}; };
+				switch (!_sb_wc(sb, '"'))         { case (1) { return false; } default {}; };
 			}
 			case (JSON_ARRAY)
 			{
 				n = node.arr.len;
-				if (!_sb_wc(sb, '[')) { return false; };
-				while (k < n)
+				switch (!_sb_wc(sb, '[')) { case (1) { return false; } default {}; };
+				do
 				{
-					if (k > 0) { if (!_sb_wc(sb, ',')) { return false; }; };
-					child = (JSONNode*)node.arr.get(k);
-					if (!_serialize_arena_node(child, sb)) { return false; };
-					k++;
+					switch (k < n)
+					{
+						case (1)
+						{
+							switch (k > 0)
+							{
+								case (1) { switch (!_sb_wc(sb, ',')) { case (1) { return false; } default {}; }; }
+								default {};
+							};
+							child = (JSONNode*)node.arr.get(k);
+							switch (!_serialize_arena_node(child, sb))
+							{
+								case (1) { return false; }
+								default {};
+							};
+							k++;
+						}
+						default { break; };
+					};
 				};
-				if (!_sb_wc(sb, ']')) { return false; };
+				switch (!_sb_wc(sb, ']')) { case (1) { return false; } default {}; };
 			}
 			case (JSON_OBJECT)
 			{
 				n = node.obj.len;
-				if (!_sb_wc(sb, '{')) { return false; };
-				while (k < n)
+				switch (!_sb_wc(sb, '{')) { case (1) { return false; } default {}; };
+				do
 				{
-					if (k > 0) { if (!_sb_wc(sb, ',')) { return false; }; };
-					if (!_sb_wc(sb, '"'))                    { return false; };
-					if (!_sb_we(sb, node.obj.key_at(k)))     { return false; };
-					if (!_sb_wc(sb, '"'))                    { return false; };
-					if (!_sb_wc(sb, ':'))                    { return false; };
-					child = (JSONNode*)node.obj.val_at(k);
-					if (!_serialize_arena_node(child, sb)) { return false; };
-					k++;
+					switch (k < n)
+					{
+						case (1)
+						{
+							switch (k > 0)
+							{
+								case (1) { switch (!_sb_wc(sb, ',')) { case (1) { return false; } default {}; }; }
+								default {};
+							};
+							switch (!_sb_wc(sb, '"'))                    { case (1) { return false; } default {}; };
+							switch (!_sb_we(sb, node.obj.key_at(k)))     { case (1) { return false; } default {}; };
+							switch (!_sb_wc(sb, '"'))                    { case (1) { return false; } default {}; };
+							switch (!_sb_wc(sb, ':'))                    { case (1) { return false; } default {}; };
+							child = (JSONNode*)node.obj.val_at(k);
+							switch (!_serialize_arena_node(child, sb))
+							{
+								case (1) { return false; }
+								default {};
+							};
+							k++;
+						}
+						default { break; };
+					};
 				};
-				if (!_sb_wc(sb, '}')) { return false; };
+				switch (!_sb_wc(sb, '}')) { case (1) { return false; } default {}; };
 			}
 			default {};
 		};
@@ -1293,8 +2149,16 @@ namespace json
 	def serialize_arena(JSONNode* node, standard::memory::allocators::stdarena::Arena* a, int init_cap) -> byte*
 	{
 		SerializeBuf sb;
-		if (!_sb_init(@sb, a, init_cap)) { return (byte*)0; };
-		if (!_serialize_arena_node(node, @sb)) { return (byte*)0; };
+		switch (!_sb_init(@sb, a, init_cap))
+		{
+			case (1) { return (byte*)0; }
+			default {};
+		};
+		switch (!_serialize_arena_node(node, @sb))
+		{
+			case (1) { return (byte*)0; }
+			default {};
+		};
 		sb.buf[sb.pos] = '\x00';
 		return sb.buf;
 	};

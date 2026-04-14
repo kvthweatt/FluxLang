@@ -1,24 +1,13 @@
 #import "standard.fx";
 
+using standard::io::console,
+      standard::strings;
 
-heap singinit float[] invPow10 = [
-    1.0,
-    0.1,
-    0.01,
-    0.001,
-    0.0001,
-    0.00001,
-    0.000001,
-    0.0000001,
-    0.00000001,
-    0.000000001,
-    0.0000000001,
-    0.00000000001,
-    0.000000000001,
-    0.0000000000001,
-    0.00000000000001,
-    0.000000000000001,
-    0.0000000000000001
-];
+def main() -> int
+{
+    noopstr test = "tesasdasdaasdasdaAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaaasdasdasdttesasdasdaasdasdaAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaaasdasdasdttesasdasdaasdasdaAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaaasdasdasdttesasdasdaasdasdaAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaaasdasdasdttesasdasdaasdasdaAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaaasdasdasdt";
 
-def main() -> int { return 0; };
+    println(strlen(test));
+
+    return 0;
+};

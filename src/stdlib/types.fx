@@ -59,14 +59,14 @@ namespace standard
 
         // ============ NETWORK/ENDIAN TYPES ============
         // Big-endian types (network byte order)
-        unsigned data{16::1} as be16;
-        unsigned data{32::1} as be32;
-        unsigned data{64::1} as be64;
+        data{16::1} as be16;
+        data{32::1} as be32;
+        data{64::1} as be64;
 
         // Little-endian types (host byte order)
-        unsigned data{16::0} as le16;
-        unsigned data{32::0} as le32;
-        unsigned data{64::0} as le64;
+        data{16::0} as le16;
+        data{32::0} as le32;
+        data{64::0} as le64;
 
         // ============ TYPE UTILITIES ============
         // Endian swapping utilities

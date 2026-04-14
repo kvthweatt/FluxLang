@@ -1,6 +1,6 @@
-#import "standard.fx", "redallocators.fx";
+#import "standard.fx";
 
-using standard::memory::allocators::stdheap;
+using standard::io::console;
 
 // ============================================================================
 // Helpers

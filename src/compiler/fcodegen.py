@@ -4490,6 +4490,7 @@ class CodegenVisitor:
         module.symbol_table.exit_scope()
         module.symbol_table.current_namespace = saved_namespace
         module._current_object_name = prev_object_name
+        return
 
     def visit_NamespaceDef(self, node, builder, module):
         if hasattr(module, '_excluded_namespaces'):

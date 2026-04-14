@@ -5,6 +5,7 @@
 #import "socket_object_raw.fx";
 
 using standard::io::console,
+      standard::io::sockets,
       standard::strings;
 
 def main() -> int
@@ -48,7 +49,7 @@ def main() -> int
     
     // Send some test messages
     int message_count = 3;
-    int i = 0;
+    int i;
     
     while (i < message_count)
     {

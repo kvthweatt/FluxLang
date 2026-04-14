@@ -25,16 +25,18 @@ namespace standard
 
         def strlen(byte* ps) -> int
         {
-            int c = 0;
+            int c;
             byte* ch;
-            while (true)
+            do
             {
                 ch = ps++;
 
-                if (*ch == 0)
+                switch (*ch)
                 {
-                    break;
+                    case (0) { break; }
+                    default {};
                 };
+
                 c++;
             };
             return c;
@@ -42,7 +44,7 @@ namespace standard
 
         def strcpy(noopstr dest, noopstr src) -> noopstr
         {
-            size_t i = 0;
+            size_t i;
             while (src[i] != 0)
             {
                 dest[i] = src[i];
@@ -54,17 +56,17 @@ namespace standard
 
         def i16str(i16 value, byte* buffer) -> i16
         {
-            if (value == (i16)0)
+            if (value == 0)
             {
                 buffer[0] = (byte)48;
                 buffer[1] = (byte)0;
-                return (i16)1;
+                return 1;
             };
 
-            i16 is_negative = (i16)0;
+            bool is_negative;
             if (value < (i16)0)
             {
-                is_negative = (i16)1;
+                is_negative = true;
                 value = -value;
             };
 
@@ -79,7 +81,7 @@ namespace standard
             };
 
             i16 write_pos = (i16)0;
-            if (is_negative == (i16)1)
+            if (is_negative)
             {
                 buffer[0] = (byte)45;
                 write_pos = (i16)1;

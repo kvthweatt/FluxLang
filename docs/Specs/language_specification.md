@@ -271,40 +271,7 @@ __exit()       -> void               Example: newObj.__exit();             // De
 ```
 
 `__init` is always called on object instantiation.  
-`__exit` is always called on object destruction, or called manually to destroy the object.
-
-Inheritance:
-
-```
-object XYZ;   // Forward declaration
-
-object myObj
-{
-    def __init() -> this
-    {
-        return this;
-    };
-
-    def __exit() -> void
-    {
-        return;
-    };
-};
-
-object anotherObj
-{
-    def __init() -> this
-    {
-        this newObj(10,2);
-        return this;
-    };
-
-    def __exit() -> void
-    {
-        return;
-    };
-};
-```
+`__exit` called manually to destroy the object.
 
 If an object's `__init` method takes **only one parameter**, you may instance it like sO:
 ```
@@ -453,9 +420,9 @@ Enumerated lists are type `int`, but in a later update when full RTTI is added t
 
 ## **Unions:**
 
-Prototype: `union myUnion;`
-Definition: `union myUnion {int iVal; float fVal;};`
-Insance: `myUnion newUnion;`
+Prototype: `union myUnion;`  
+Definition: `union myUnion {int iVal; float fVal;};`  
+Insance: `myUnion newUnion;`  
 Instance with assignment: `myUnion newUnion {iVal = 10};`  
 Member access: `newUnion.iVal;`
 
@@ -796,15 +763,15 @@ not using some::specific::namespace;
 
 ---
 
-## **The `sizeof`, `typeof`, `alignof`, and `endianof` built-ins:**
+## **The `typeof`, `sizeof`, `alignof`, and `endianof` built-ins:**
 ```
-unsigned data{8:8}[] as string;
+data{8:8:0}* as lestr;
 signed data{13:16} as strange;
 
-sizeof(string);    // 8
-alignof(string);   // 8
-typeof(string);    // unsigned data{8:8}*
-endianof(string);  // 1
+sizeof(lestr);    // 8
+alignof(lestr);   // 8
+typeof(lestr);    // unsigned data{8:8}*
+endianof(lestr);  // 1
 
 sizeof(strange);   // 13
 alignof(strange);  // 16
@@ -825,24 +792,6 @@ In literal context, `void` is `0`. `false` is also `0`, which means `void == fal
 ---
 
 ## **Arrays:**
-```
-#import "standard.fx";
-
-using standard::io::console;
-
-int[] ia_myArray = [3, 92, 14, 30, 6, 5, 11, 400];
-
-def len(int[] array) -> int
-{
-    return sizeof(array) / sizeof(int);
-};
-
-def main() -> int
-{
-    print(len(ia_myArray));
-    return 0;
-};
-```
 
 **Static array comprehension:**
 ```
@@ -875,32 +824,54 @@ Array[] myArr = [x.name for (Array x in oldArr) if (x.name.len() > 5)];
 
 ## **Loops:**
 
-Flux supports 2 styles of for loops, it uses Python style and C++ style
+Flux supports 2 styles of for loops:
 ```
-for (x in y)                     // Python style
+for (x in y)                     // Array iteration
 {
     // ... code ...
 };
 
-for (x,y in z)                   // Python style
+for (int c = 0; c < 10; c++)     // init ; cond ; expr
 {
     // ... code ...
 };
+```
 
-for (int c = 0; c < 10; c++)     // C++ style
-{
-    // ... code ...
-};
+A `for`-ever loop:
+`for (;;) {};`
 
+A `do` loop:
+```
 do
 {
-    // ... code ...
+    // some code;
+};
+```
+
+You can also do comprehension on `while` conditions:
+```
+do
+{
+    y[i--] = void;     // Nulled out of array
 }
-while (x in y);
+while (x in y & i > 0);
 
 while (condition)
 {
     // ... code ...
+};
+```
+
+An infinite `while` loop:
+```
+while (true)
+{
+    // ...
+};
+// or
+while (1)
+{
+    // ...
 };
 ```
 
@@ -910,11 +881,15 @@ while (condition)
 ```
 def rsub(int x, int y) -> int
 {
-    if (x == 0 | y == 0) { return 0; };
+    switch (x == 0 | y == 0)
+    {
+    };
 
     rsub(--x,--y);
 };
 ```
+
+---
 
 ## **Single-initialized variables with `singinit`:**
 ```
@@ -1441,17 +1416,17 @@ traverse_as_bytes(@data[0], 4);
 // Tightly packed struct (no padding)
 struct PackedRGB
 {
-    unsigned data{5:1} as r5 r;    // 5 bits, byte-aligned
-    unsigned data{6:1} as g6 g;    // 6 bits, byte-aligned
-    unsigned data{5:1} as b5 b;    // 5 bits, byte-aligned
+    data{5:0:1} as r5 r;    // 5 bits
+    data{6:0:1} as g6 g;    // 6 bits
+    data{5:0:1} as b5 b;    // 5 bits
 };  // Total: 16 bits (2 bytes)
 
 // Aligned struct with gaps
 struct AlignedData
 {
-    unsigned data{8:16} as byte16 flag;   // 8 bits, 16-bit aligned (1 byte data, 1 byte padding)
+    data{8:16} as byte16 flag;   // 8 bits, 16-bit aligned (1 byte data, 1 byte padding)
     u32 value;                            // 32 bits, 32-bit aligned
-    unsigned data{8:16} as byte16 status; // 8 bits, 16-bit aligned
+    data{8:16} as byte16 status; // 8 bits, 16-bit aligned
 };  // Total: 64 bits (8 bytes) with padding
 
 sizeof(PackedRGB);    // 2 bytes
@@ -1464,32 +1439,28 @@ alignof(AlignedData); // 4 bytes (strictest member alignment)
 
 ### Endianness Handling
 ```
-unsigned data{16::0} as little16;  // Little-endian 16-bit
-unsigned data{16} as big16;        // Big-endian default 16-bit
+data{16::0} as le16;  // Little-endian 16-bit
+data{16}    as be16;  // Big-endian default 16-bit
 
-def swap_endian_16(unsigned data{16} value) -> unsigned data{16}
+def swap_endian_16(be value) -> data{16}
 {
-    return ((value & 0xFF) << 8) | ((value >> 8) & 0xFF);
+    data{16::0} v2 = value; // Explicit byte swap on assignment
+    return v2;
 };
 
 // Network byte order (big-endian) to host (little-endian)
-def network_to_host(big16 net_value) -> little16
+def network_to_host(be16 net_value) -> le16
 {
-    // Explicit byte swap
-    return (little16)swap_endian_16((unsigned data{16})net_value);
+    le16 x = net_value;     // Explicit byte swap on assignment
+    return x;
 };
 
 // Reading from network buffer
-unsigned data{8}[] as byte_array buffer = [0x12, 0x34, 0x56, 0x78];
-big16* net_ptr = (big16*)@buffer[0];
-
-print(*net_ptr);           // 0x1234 (interpreted as big-endian)
-print(*(net_ptr + 1));     // 0x5678
-
-// Convert to little-endian
-little16 host_value = network_to_host(*net_ptr);
-print(host_value);         // 0x3412 (byte-swapped for little-endian)
+data{8::0}[4] buf = [0x12, 0x34, 0x56, 0x78];
+be16[2] net = buf; // autopack and convert endianness
 ```
+
+1. Single-endian arithmetic model - All math is performed in one endianness (big). Swapping on assignment means the compiler doesn't need to track mixed-endian states through complex expressions.
 
 ### Bit-Field Manipulation
 ```
@@ -1515,6 +1486,8 @@ uint32 nibble0 = extract_bits(packed, 0, 4);   // 0x80
 uint32 nibble3 = extract_bits(packed, 12, 4);  // 0x50
 uint32 byte1 = extract_bits(packed, 8, 8);     // 0x56
 ```
+
+---
 
 ### ***Advanced data manipulation techniques:***
 ***C***:
@@ -1671,7 +1644,7 @@ arr[0] = 0x1F;  // Max value for 5 bits
 // Casting between weird widths
 unsigned data{13} as u13 a = 8191;
 unsigned data{17} as u17 b = (u17)a;  // Zero-extend
-signed data{13} as s13 c = (s13)a;    // Reinterpret bits
+signed data{13} as s13 c = (s13)a;    // Truncate LTR, losing most significant bits
 ```
 
 You may take arbitrary width slices as well, stored in your arbitrarily sized types.

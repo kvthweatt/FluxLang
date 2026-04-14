@@ -96,6 +96,7 @@ def main():
             print("  -dos                Compile for DOS (16-bit)")
             print("  -com                Create COM file instead of EXE (requires -dos)")
             print("  --library           Compile as static library instead of executable")
+            print("  -lib <libs...>      Link extra libraries (e.g. -lib lib1.a lib2.a lib3.lib)")
             print("")
             print("Advanced Logging Options:")
             print("  --log-level <n>     Logging level: 0=silent, 1=error, 2=warning, 3=info, 4=debug, 5=trace")
@@ -127,6 +128,7 @@ def main():
         output_bin = None
         verbosity = None
         compile_as_library = False
+        extra_libs = []
         logger_config = {}
     
         i = 0
@@ -149,6 +151,12 @@ def main():
             elif arg == "--library":
                 compile_as_library = True
                 i += 1
+            elif arg == "-lib":
+                # Consume all following args that look like library files
+                i += 1
+                while i < len(args) and not args[i].startswith('-'):
+                    extra_libs.append(args[i])
+                    i += 1
             elif arg == "--log-level" and i + 1 < len(args):
                 logger_config['level'] = int(args[i + 1])
                 i += 2
@@ -214,7 +222,7 @@ def main():
             elif compile_as_library:
                 binary_path = compiler.compile_library(input_file, output_bin)
             else:
-                binary_path = compiler.compile_file(input_file, output_bin)
+                binary_path = compiler.compile_file(input_file, output_bin, extra_libs=extra_libs)
         
             # Final success message
             if logger_config.get('level', 0) < 3:

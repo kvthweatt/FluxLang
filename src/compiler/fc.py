@@ -203,17 +203,19 @@ class FluxCompiler:
         debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
                                               f"Module triple: {self.module_triple}"])
 
-    def compile_file(self, filename: str, output_bin: str = None) -> str:
+    def compile_file(self, filename: str, output_bin: str = None, extra_libs: list = None) -> str:
         """
         Compile a Flux source file to executable binary
         
         Args:
             filename: Path to the .fx source file
             output_bin: Optional output binary name
+            extra_libs: Optional list of extra library paths to link (e.g. ['lib1.a', 'lib2.a'])
             
         Returns:
             Path to the generated executable
         """
+        extra_libs = extra_libs or []
         try:
             self.logger.section(f"Preprocessing Flux file: {filename}", LogLevel.INFO)
             self.predefined_macros = {
@@ -607,6 +609,7 @@ class FluxCompiler:
                     #"msvcrt.lib",   # Optional, link with C runtime
                     "user32.lib",  # Uncomment only if GUI functions are used
                     "gdi32.lib",   # Uncomment only if drawing functions are used
+                    *extra_libs,
                     f"/out:build\\{output_dir}\\{output_bin}"
                 ]
                 self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
@@ -654,6 +657,7 @@ class FluxCompiler:
                                 "-lcomdlg32 "
                                 "-ld2d1 "
                                 "-ldwrite "
+                                "-lucrt -lmsvcrt "
                                 #"-lfreetype "
                                 #"-lgdiplus "
                                 #"-ld2d1 "
@@ -723,6 +727,7 @@ class FluxCompiler:
                     "--start-group",
                     "-lc",
                     "--end-group",
+                    *extra_libs,
                     "-o", f"build/{output_dir}/{output_bin}"
                 ]
                 #link_cmd = ["clang", "-static", str(obj_file), "-o", output_bin]

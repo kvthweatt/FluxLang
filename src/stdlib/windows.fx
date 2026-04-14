@@ -10,6 +10,8 @@
 #import "math.fx";
 #endif;
 
+using standard::math;
+
 #ifndef __WIN32_INTERFACE__
 #def __WIN32_INTERFACE__ 1;
 

@@ -109,7 +109,7 @@
       }
     },
     "flux-net-windows": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "net_windows.fx",
       "path": "",
       "description": "Networking for Windows",
@@ -230,8 +230,8 @@
       "description": "Raw file object",
       "dependencies": {}
     },
-    "flux-socket": {
-      "version": "1.0.0",
+    "flux-sockets": {
+      "version": "1.0.1",
       "entry": "socket_object_raw.fx",
       "path": "builtins",
       "description": "Raw socket object",
@@ -245,7 +245,7 @@
       "dependencies": {}
     },
     "flux-allocators": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "allocators.fx",
       "path": "runtime",
       "description": "Memory allocators",
@@ -315,7 +315,7 @@
       "dependencies": {}
     },
     "flux-string-utilities": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "string_utilities.fx",
       "path": "utility",
       "description": "String manipulation utilities",
