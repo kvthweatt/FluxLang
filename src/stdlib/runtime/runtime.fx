@@ -297,7 +297,13 @@ def !!FRTStartup() -> int
     // Call the appropriate main overload
     if (argc > 1)
     {
+        // Check 32-bit / 64-bit here, call appropriate main
+        // 32 bit should call this one
+        // #ifdef ...
         return_code = main__2__int__byte_ptr2__ret_int(argc, argv);
+        // #else
+        // 64 bit should call this one
+        // return_code = main_2_int__byte_ptr2__ret_long(argc, argv);
     }
     else
     {

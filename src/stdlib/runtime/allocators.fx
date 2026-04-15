@@ -61,9 +61,11 @@ extern
 
 // Block kinds
 //
-//  BLOCK_SMALL (0): size field holds size class index (0-8)
-//  BLOCK_LARGE (1): size field holds exact byte count requested
-//  BLOCK_TABLE (2): this entry describes a table slab itself
+//  BLOCK_SMALL  (0): size field holds size class index (0-8), block is live
+//  BLOCK_LARGE  (1): size field holds exact byte count requested
+//  BLOCK_TABLE  (2): this entry describes a table slab itself
+//  BLOCK_BINNED (3): small block on the free list; entry kept so slab pointer
+//                    is authoritative on reuse — no slab scan needed
 
 // Block table entry
 //
@@ -702,20 +704,24 @@ namespace standard
                         case (1)
                         {
                             u64 ptr = (u64)node;
-                            // Find which slab owns this block, increment its counter,
-                            // then store the slab pointer in the table entry
+                            // The BLOCK_BINNED entry was kept in the table by ffree,
+                            // so entry.slab is authoritative — no slab scan needed.
+                            BlockEntry* bentry = table_find(ptr);
                             Slab* owner = (Slab*)0;
-                            Slab* s = g_slab_head;
-                            while (s != (Slab*)0)
+                            switch (bentry != (BlockEntry*)0)
                             {
-                                switch (ptr >= s.base & ptr < s.base + (u64)s.capacity)
+                                case (1)
                                 {
-                                    case (1) { s.used++; owner = s; s = (Slab*)0; }
-                                    default  { s = s.next; };
-                                };
+                                    owner        = (Slab*)bentry.slab;
+                                    bentry.kind  = (u64)0;   // BLOCK_SMALL: mark live
+                                }
+                                default {};
                             };
-                            // Re-insert into table as live (kind=0), storing owning slab
-                            table_insert(ptr, cls, (u64)0, (u64)owner);
+                            switch (owner != (Slab*)0)
+                            {
+                                case (1) { owner.used++; }
+                                default  {};
+                            };
                             return ptr;
                         }
                         default {};
@@ -754,15 +760,14 @@ namespace standard
 
                     u64    kind = entry.kind;
                     size_t size = entry.size;
-                    u64  slab = entry.slab;
-
-                    table_remove(ptr);
+                    u64    slab = entry.slab;
 
                     switch (kind == (u64)1)
                     {
                         case (1)
                         {
-                            // Large block: release immediately, decrement large counter
+                            // Large block: remove from table, release OS memory.
+                            table_remove(ptr);
                             g_large_used--;
                             heap_os_free(ptr, (size_t)slab);
                             return;
@@ -770,13 +775,18 @@ namespace standard
                         default {};
                     };
 
-                    // Small block: decrement owning slab counter, return to bin
+                    // Small block: decrement owning slab counter, return to bin.
+                    // Keep the table entry alive as BLOCK_BINNED (kind=3) so that
+                    // the reuse path in fmalloc can read entry.slab directly without
+                    // scanning the slab list.
                     Slab* owner = (Slab*)slab;
                     switch (owner != (Slab*)0)
                     {
                         case (1) { switch (owner.used > (size_t)0) { case (1) { owner.used--; } default {}; }; }
                         default  {};
                     };
+                    // Mark in-place as BLOCK_BINNED; key and slab remain authoritative.
+                    entry.kind = (u64)3;
                     bin_push(size, (FreeNode*)ptr);
                 };
 

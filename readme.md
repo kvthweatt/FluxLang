@@ -92,9 +92,9 @@ Flux is in active development. The syntax and grammar will not change. The [stan
 
 struct Packet
 {
-    unsigned data{8} type;
-    unsigned data{16} length;
-    unsigned data{32} timestamp;
+    data{8} type;
+    data{16} length;
+    data{32} timestamp;
 };
 
 def main() -> int

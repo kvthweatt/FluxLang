@@ -2401,6 +2401,8 @@ Now `Book` is a type, just like `int` or `float`.
 ```
 #import "standard.fx";
 
+using standard::io::console;
+
 struct Point
 {
     int x,
@@ -2420,7 +2422,7 @@ def main() -> int
 ```
 Result:
 ```
-Point: (10, 20)
+Point: (10,20)
 ```
 
 You access struct members with the dot `.` operator.
@@ -2430,6 +2432,10 @@ You access struct members with the dot `.` operator.
 You can set values when you create a struct:
 
 ```
+#import "standard.fx";
+
+using standard::io::console;
+
 struct Rectangle
 {
     int width,
@@ -2438,7 +2444,7 @@ struct Rectangle
 
 def main() -> int
 {
-    Rectangle rect {width = 50, height = 30};
+    Rectangle rect = {width = 50, height = 30};
     
     print(f"Rectangle: {rect.width} x {rect.height}");
 
@@ -2491,6 +2497,10 @@ def main() -> int
 You can create arrays of structs:
 
 ```
+#import "standard.fx";
+
+using standard::io::console;
+
 struct Temperature
 {
     int day;
@@ -2499,26 +2509,25 @@ struct Temperature
 
 def main() -> int
 {
-    Temperature week[7];
+    Temperature[7] week;
     
     week[0] = {day = 1, celsius = 20.5};
     week[1] = {day = 2, celsius = 22.0};
     week[2] = {day = 3, celsius = 19.5};
     
-    print("Day \0");
-    print(week[0].day);
-    print(": \0");
-    print(week[0].celsius);
-    print("°C\n\0");
-    
-    print("Day \0");
-    print(week[1].day);
-    print(": \0");
-    print(week[1].celsius);
-    print("°C\n\0");
+    for (int i; i < 3; i++)
+    {
+        println(f"Day {week[i].day)}: {week[i].celsius}");
+    };
     
     return 0;
 };
+```
+Result:
+```
+Day 1: 20.500000
+Day 2: 22.000000
+Day 3: 19.500000
 ```
 
 #### f11.6 Passing Structs to Functions
@@ -2526,6 +2535,10 @@ def main() -> int
 Structs can be passed to functions:
 
 ```
+#import "standard.fx";
+
+using standard::io::console;
+
 struct Circle
 {
     float radius;
@@ -2533,24 +2546,23 @@ struct Circle
 
 def calc_area(Circle c) -> float
 {
-    float pi = 3.14159;
-    return pi * c.radius * c.radius;
+    return 3.14159 * (c.radius ^ 2f);
 };
 
 def main() -> int
 {
-    Circle myCircle {radius = 5.0};
+    Circle myCircle = {5.0};
     
     float area = calc_area(myCircle);
     
-    print("Circle with radius \0");
-    print(myCircle.radius);
-    print(" has area \0");
-    print(area);
-    print("\n\0");
+    println(f"Circle with radius {myCircle.radius} has area {area}");
     
     return 0;
 };
+```
+Result:
+```
+Circle with radius 5.000000 has area 78.539749
 ```
 
 #### f11.7 Nested Structs
@@ -2558,6 +2570,10 @@ def main() -> int
 Structs can contain other structs:
 
 ```
+#import "standard.fx";
+
+using standard::io::console;
+
 struct Date
 {
     int day;
@@ -2573,25 +2589,23 @@ struct Event
 
 def main() -> int
 {
-    Event birthday;
-    birthday.name = "Bday";
+    Event e;
+    e.name = "John's Birthday";
     
-    birthday.date.day = 15;
-    birthday.date.month = 7;
-    birthday.date.year = 2024;
+    e.date.day = 15;
+    e.date.month = 7;
+    e.date.year = 2024;
     
-    print("Event: \0");
-    print(birthday.name);
-    print("\nDate: \0");
-    print(birthday.date.day);
-    print("/\0");
-    print(birthday.date.month);
-    print("/\0");
-    print(birthday.date.year);
-    print("\n\0");
+    println(f"Event:\t{e.name}");
+    println(f"Date:\t{e.date.day}/{e.date.month}/{e.date.year}");
     
     return 0;
 };
+```
+Result:
+```
+Event:  John's Birthday
+Date:   15/7/2024
 ```
 
 #### f11.8 Structs vs Objects - Key Differences
@@ -2613,21 +2627,21 @@ Remember these important differences:
 - Can contain structs
 
 ```
-// This is LEGAL
 object Container
 {
-    struct Data
-    {
+    struct Box
+    {               // Struct definition disallowed inside object
         int value;
     };
     
-    Data myData;
+    Box b;          // Struct instance allowed
 };
 
 // This is ILLEGAL - structs cannot contain objects!
 struct BadExample
 {
-    object SomeObject;  // COMPILE ERROR!
+    object SomeObject;   // COMPILE ERROR!
+    object* pSomeObject; // Legal, can contain pointers to objects.
 };
 ```
 
@@ -2636,6 +2650,10 @@ struct BadExample
 Let's create a simple inventory system:
 
 ```
+#import "standard.fx";
+
+using standard::io::console;
+
 struct Item
 {
     char[50] name;
@@ -2645,13 +2663,9 @@ struct Item
 
 def printItem(Item item) -> void
 {
-    print("Item: \0");
-    print(item.name);
-    print("\n  Quantity: \0");
-    print(item.quantity);
-    print("\n  Price: $\0");
-    print(item.price);
-    print();
+    println(f"Item:\t\t{item.name}");
+    println(f"Quantity:\t{item.quantity}");
+    println(f"Price:\t\t${item.price}\0");
     return;
 };
 
@@ -2662,7 +2676,7 @@ def totalValue(Item item) -> float
 
 def main() -> int
 {
-    Item inventory[3];
+    Item[3] inventory;
     
     // First item
     inventory[0].name[0] = 65; // 'A'
@@ -2675,12 +2689,17 @@ def main() -> int
     inventory[0].price = 1.25;
     
     printItem(inventory[0]);
-    print("Total value: $\0");
-    print(totalValue(inventory[0]));
-    print("\n\0");
+    println(f"Total value:\t${totalValue(inventory[0])}");
     
     return 0;
 };
+```
+Result:
+```
+Item:           Apple
+Quantity:       50
+Price:          $1.250000
+Total value:    $62.500000
 ```
 
 Structs are essential for organizing complex data. They let you group related information together and treat it as a single unit.

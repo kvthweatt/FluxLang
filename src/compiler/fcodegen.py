@@ -2266,12 +2266,12 @@ class CodegenVisitor:
                 if src_endian != tgt_endian:
                     endian_names = {0: "little-endian", 1: "big-endian"}
                     raise ValueError(
-                        f"\nCompile error: argument {i} of '{node.name}' is "
+                        f"\nCompile error: Passing argument {i} of function {node.name} is "
                         f"{endian_names.get(src_endian, f'endian({src_endian})')}, "
                         f"but parameter {i} expects "
                         f"{endian_names.get(tgt_endian, f'endian({tgt_endian})')}.\n"
-                        f"Endianness mismatch in function call is not allowed "
-                        f"(assignment auto-swaps, but parameter passing does not). "
+                        f"Endianness mismatch in function call disallowed "
+                        f"(assignment auto-swaps, parameter passing does not). "
                         f"[{node.source_line}:{node.source_col}]")
 
         # Pointer-param overload
@@ -2693,11 +2693,25 @@ class CodegenVisitor:
             builder._untied_vars = set()
         builder._untied_vars.add(var_name)
 
-        # ── Null out the source variable in LLVM IR ───────────────────────────
-        if isinstance(var_ptr.type.pointee, ir.PointerType):
-            builder.store(ir.Constant(var_ptr.type.pointee, None), var_ptr)
-        elif isinstance(var_ptr.type.pointee, ir.IntType):
-            builder.store(ir.Constant(var_ptr.type.pointee, 0), var_ptr)
+        # ── Zero out the source variable in LLVM IR (move-safety / crypto zeroing) ──
+        # Every supported type is explicitly zeroed so no stale data remains
+        # in the source location after ownership is transferred.
+        pointee = var_ptr.type.pointee
+        if isinstance(pointee, ir.PointerType):
+            # Pointer: store a null pointer constant.
+            builder.store(ir.Constant(pointee, None), var_ptr)
+        elif isinstance(pointee, ir.IntType):
+            # Integer (any width): store integer zero.
+            builder.store(ir.Constant(pointee, 0), var_ptr)
+        elif isinstance(pointee, (ir.FloatType, ir.DoubleType, ir.HalfType)):
+            # Floating-point: store positive zero.
+            builder.store(ir.Constant(pointee, 0.0), var_ptr)
+        elif isinstance(pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
+            # Struct: store an all-zeros aggregate constant.
+            builder.store(ir.Constant(pointee, None), var_ptr)
+        elif isinstance(pointee, ir.ArrayType):
+            # Array: store an all-zeros aggregate constant.
+            builder.store(ir.Constant(pointee, None), var_ptr)
 
         return tied_value
 
@@ -2821,7 +2835,7 @@ class CodegenVisitor:
         return StructTypeHandler.perform_struct_recast(builder, module, node.target_type, source_value)
 
     def visit_Assignment(self, node, builder, module):
-        from fast import (ArrayLiteral, Identifier, MemberAccess, ArrayAccess,
+        from fast import (ArrayLiteral, StructLiteral, Identifier, MemberAccess, ArrayAccess,
                           PointerDeref, BitSlice, RangeExpression, Literal)
         # Seed element_type on ArrayLiteral from target's type_spec so large
         # unsigned literals aren't promoted to i64 when target is e.g. u32[N].
@@ -2834,6 +2848,22 @@ class CodegenVisitor:
                     ts = entry.type_spec
                     elem_ts = dataclasses.replace(ts, is_array=False, array_size=None, array_dimensions=None)
                     node.value.element_type = elem_ts
+
+        # Seed struct_type on StructLiteral from target's type_spec so that bare
+        # struct literals like `week[0] = {day = 1, celsius = 20.5}` have the
+        # required type context when the target is an array element (ArrayAccess)
+        # or a plain variable (Identifier).
+        if isinstance(node.value, StructLiteral) and node.value.struct_type is None:
+            target_name = node.target.name if isinstance(node.target, Identifier) else None
+            if target_name is None and isinstance(node.target, ArrayAccess):
+                inner = node.target.array
+                target_name = inner.name if isinstance(inner, Identifier) else None
+            if target_name is not None:
+                entry = module.symbol_table.lookup_any(target_name)
+                if entry and entry.type_spec is not None:
+                    ctn = getattr(entry.type_spec, 'custom_typename', None)
+                    if ctn:
+                        node.value.struct_type = ctn
 
         val = self.visit(node.value, builder, module)
 
