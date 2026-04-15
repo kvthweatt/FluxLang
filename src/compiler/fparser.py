@@ -799,12 +799,17 @@ class FluxParser:
             no_mangle = True
             self.consume(TokenType.NO_MANGLE)
         
-        # Function name can be either an IDENTIFIER or a STRING_LITERAL
+        # Function name can be an IDENTIFIER, STRING_LITERAL, or F_STRING
         if self.expect(TokenType.STRING_LITERAL):
             # String literal function name (e.g., for mangled names)
             name = self.consume(TokenType.STRING_LITERAL).value
             # Note: The string literal includes quotes, you may want to strip them
             # name = name.strip('"')  # Uncomment if you want to remove quotes
+        elif self.expect(TokenType.F_STRING):
+            # F-string function name (e.g., def f"{x} {y}"() -> void)
+            # Stored as a FStringLiteral node; codegen evaluates it at compile time.
+            tok = self.current_token
+            name = self.parse_f_string(self.consume(TokenType.F_STRING).value).set_location(tok.line, tok.column)
         elif self.expect(TokenType.IDENTIFIER):
             name = self.consume(TokenType.IDENTIFIER).value
         else:
@@ -866,9 +871,12 @@ class FluxParser:
             while self.expect(TokenType.COMMA):
                 self.advance()  # consume comma
                 
-                # Each additional prototype has its own name (can also be string literal)
+                # Each additional prototype has its own name (can also be string literal or f-string)
                 if self.expect(TokenType.STRING_LITERAL):
                     proto_name = self.consume(TokenType.STRING_LITERAL).value
+                elif self.expect(TokenType.F_STRING):
+                    tok = self.current_token
+                    proto_name = self.parse_f_string(self.consume(TokenType.F_STRING).value).set_location(tok.line, tok.column)
                 elif self.expect(TokenType.IDENTIFIER):
                     proto_name = self.consume(TokenType.IDENTIFIER).value
                 else:
@@ -3578,6 +3586,9 @@ class FluxParser:
                 elif isinstance(expr, StringLiteral):
                     # String literal function name (for targeting mangled names like "??0Widget@@QEAA@AEBV0@@Z")
                     expr = FunctionCall(expr.value, args).set_location(tok.line, tok.column)
+                elif isinstance(expr, FStringLiteral):
+                    # F-string literal function name: f"{x} {y}"() — name resolved at codegen time
+                    expr = FunctionCall(expr, args).set_location(tok.line, tok.column)
                 elif isinstance(expr, MemberAccess):
                     # Method call: obj.method() -> call obj_type.method with obj as first arg
                     method_name = f"{{obj_type}}.{expr.member}"

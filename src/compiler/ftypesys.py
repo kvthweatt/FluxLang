@@ -302,48 +302,60 @@ class SymbolTable:
         if no_mangle:
             return base_name
         #print("MANGLE_FUNCTION_NAME AFTER IF CHECK OR BASE_NAME == 'main'")
-        
-        # Start with base name
-        mangled = base_name
-        
-        # Add parameter count for quick filtering
-        mangled += f"__{len(parameters)}"
-        
-        # Add parameter type information
-        for param in parameters:
-            type_spec = param.type_spec
-            
-            # Handle custom type names
+
+        def _endian_suffix(type_spec) -> str:
+            """Return 'E1' for big-endian (default) or 'E0' for little-endian."""
+            return "E0" if getattr(type_spec, 'endianness', 1) == 0 else "E1"
+
+        def _mangle_type(type_spec) -> str:
+            """
+            Produce the mangled token for a single TypeSystem, including:
+              - endianness suffix on the base/custom type name  (E1/E0)
+              - _arr / _arrN qualifier
+              - _ptrN qualifier
+              - _sbitsN / _ubitsN suffix for DATA types
+            """
+            # Base or custom type name with endianness
             if type_spec.custom_typename:
-                # For custom types, use the type name (sanitized)
                 type_name = type_spec.custom_typename.replace(':', '_').replace('.', '_')
-                mangled += f"__{type_name}"
             else:
-                # For built-in types, use base type
-                mangled += f"__{type_spec.base_type.value}"
-            
-            # Add array/pointer qualifiers
+                type_name = type_spec.base_type.value
+
+            endian = _endian_suffix(type_spec)
+            token = f"{type_name}{endian}"
+
+            # Array qualifier
             if type_spec.is_array:
                 if type_spec.array_size:
-                    mangled += f"_arr{type_spec.array_size}"
+                    token += f"_arr{type_spec.array_size}"
                 else:
-                    mangled += "_arr"
-            
+                    token += "_arr"
+
+            # Pointer qualifier
             if type_spec.is_pointer:
-                mangled += f"_ptr{type_spec.pointer_depth}"
-            
-            # Add bit width for DATA types (with signedness)
+                token += f"_ptr{type_spec.pointer_depth}"
+
+            # DATA-type bit-width / signedness suffix (kept alongside endianness for
+            # full disambiguation of le32 vs be32 vs signed vs unsigned variants).
             if type_spec.base_type == DataType.DATA and type_spec.bit_width:
                 sign_prefix = "sbits" if type_spec.is_signed else "ubits"
-                mangled += f"_{sign_prefix}{type_spec.bit_width}"
-        
+                token += f"_{sign_prefix}{type_spec.bit_width}"
+
+            return token
+
+        # Start with base name
+        mangled = base_name
+
+        # Add parameter count for quick filtering
+        mangled += f"__{len(parameters)}"
+
+        # Add parameter type information
+        for param in parameters:
+            mangled += f"__{_mangle_type(param.type_spec)}"
+
         # Add return type information
-        if return_type_spec.custom_typename:
-            ret_name = return_type_spec.custom_typename.replace(':', '_').replace('.', '_')
-            mangled += f"__ret_{ret_name}"
-        else:
-            mangled += f"__ret_{return_type_spec.base_type.value}"
-        
+        mangled += f"__ret_{_mangle_type(return_type_spec)}"
+
         return mangled
 
     @staticmethod
@@ -746,6 +758,14 @@ class TypeResolver:
                                 if param_spec.is_signed != arg_spec.is_signed:
                                     types_match = False
                                     break
+                            # Endianness must also match for DATA-typed parameters so that
+                            # le32 and be32 overloads don't collapse onto the same candidate.
+                            param_endian = getattr(param_spec, 'endianness', None)
+                            arg_endian   = getattr(arg_spec,   'endianness', None)
+                            if (param_endian is not None and arg_endian is not None
+                                    and param_endian != arg_endian):
+                                types_match = False
+                                break
 
                 if types_match:
                     return func
@@ -1477,6 +1497,7 @@ class VariableTypeHandler:
                         is_local=type_spec.is_local,
                         bit_width=type_spec.bit_width,
                         alignment=type_spec.alignment,
+                        endianness=type_spec.endianness,
                         is_array=True,
                         array_size=elem_count,
                         is_pointer=new_pointer_depth > 0,
@@ -1504,6 +1525,7 @@ class VariableTypeHandler:
                 is_local=type_spec.is_local,
                 bit_width=type_spec.bit_width or 8,
                 alignment=type_spec.alignment,
+                endianness=type_spec.endianness,
                 is_array=True,
                 array_size=inferred_size,
                 is_pointer=type_spec.is_pointer,
@@ -1521,6 +1543,7 @@ class VariableTypeHandler:
                         is_signed=False,
                         is_const=type_spec.is_const,
                         is_volatile=type_spec.is_volatile,
+                        endianness=type_spec.endianness,
                         bit_width=8,
                         alignment=type_spec.alignment,
                         is_array=True,

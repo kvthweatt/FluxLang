@@ -2202,6 +2202,27 @@ class CodegenVisitor:
     def visit_FunctionCall(self, node, builder, module):
         from fast import FunctionPointerCall, Identifier, TieExpression
 
+        # Resolve f-string function names at compile time, exactly as visit_FunctionDef does.
+        # e.g. f"{x} {y}"() must be resolved to its string value before any lookup.
+        from fast import FStringLiteral as _FStringLiteral
+        if isinstance(node.name, _FStringLiteral):
+            parts = []
+            for part in node.name.parts:
+                if isinstance(part, str):
+                    clean = part[2:] if part.startswith('f"') else part
+                    clean = clean[:-1] if clean.endswith('"') else clean
+                    parts.append(clean)
+                else:
+                    try:
+                        parts.append(str(self._fstring_eval_ct(part, node.name, builder, module)))
+                    except (ValueError, NotImplementedError) as e:
+                        raise ValueError(
+                            f"f-string function name contains a runtime-only expression "
+                            f"that cannot be evaluated at compile time "
+                            f"[{node.source_line}:{node.source_col}]: {e}"
+                        ) from e
+            node.name = "".join(parts)
+
         if self._funcall_is_fp_variable(node, builder, module):
             return self.visit(
                 FunctionPointerCall(pointer=Identifier(node.name),
@@ -2507,7 +2528,32 @@ class CodegenVisitor:
         return builder.call(func, args)
 
     def visit_FunctionPointerCall(self, node, builder, module):
-        from fast import Literal, FunctionCall
+        from fast import Literal, FunctionCall, FStringLiteral as _FStringLiteral
+        # If the callee is an f-string literal (e.g. f"{x} {y}"()), resolve its
+        # name at compile time and redirect to a plain named FunctionCall —
+        # exactly the same way StringLiteral names are already handled.
+        if isinstance(node.pointer, _FStringLiteral):
+            parts = []
+            for part in node.pointer.parts:
+                if isinstance(part, str):
+                    clean = part[2:] if part.startswith('f"') else part
+                    clean = clean[:-1] if clean.endswith('"') else clean
+                    parts.append(clean)
+                else:
+                    try:
+                        parts.append(str(self._fstring_eval_ct(part, node.pointer, builder, module)))
+                    except (ValueError, NotImplementedError) as e:
+                        raise ValueError(
+                            f"f-string function name contains a runtime-only expression "
+                            f"that cannot be evaluated at compile time "
+                            f"[{node.source_line}:{node.source_col}]: {e}"
+                        ) from e
+            resolved_name = "".join(parts)
+            synthetic = FunctionCall(name=resolved_name, arguments=node.arguments)
+            synthetic.source_line = node.source_line
+            synthetic.source_col  = node.source_col
+            return self.visit(synthetic, builder, module)
+
         func_ptr = self.visit(node.pointer, builder, module)
         if isinstance(func_ptr.type, ir.PointerType) and isinstance(func_ptr.type.pointee, ir.PointerType):
             func_ptr = builder.load(func_ptr, name="func_ptr_load")
@@ -3824,6 +3870,31 @@ class CodegenVisitor:
         return None
 
     def visit_FunctionDef(self, node, builder, module):
+        # Resolve f-string function names at compile time.
+        # A plain string literal name (e.g. def "foo"()) is already resolved to a
+        # str by the parser.  An f-string name (e.g. def f"{x} {y}"()) arrives as a
+        # FStringLiteral node; we evaluate it here using the same compile-time path
+        # that visit_FStringLiteral uses, then replace node.name with the result so
+        # the rest of this method sees a plain str, exactly like the string-literal case.
+        from fast import FStringLiteral as _FStringLiteral
+        if isinstance(node.name, _FStringLiteral):
+            parts = []
+            for part in node.name.parts:
+                if isinstance(part, str):
+                    clean = part[2:] if part.startswith('f"') else part
+                    clean = clean[:-1] if clean.endswith('"') else clean
+                    parts.append(clean)
+                else:
+                    try:
+                        parts.append(str(self._fstring_eval_ct(part, node.name, builder, module)))
+                    except (ValueError, NotImplementedError) as e:
+                        raise ValueError(
+                            f"f-string function name contains a runtime-only expression "
+                            f"that cannot be evaluated at compile time "
+                            f"[{node.source_line}:{node.source_col}]: {e}"
+                        ) from e
+            node.name = "".join(parts)
+
         ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(node.return_type, module)
 
         param_types = []
@@ -5325,8 +5396,8 @@ class CodegenVisitor:
             if not isinstance(stmt, (UsingStatement, NotUsingStatement, ExternBlock, StructDef, StructDefStatement, ObjectDef, ObjectDefStatement)):
                 self.visit(stmt, builder, module)
 
-        main_args_name = "main__2__int__byte_ptr2__ret_int"
-        main_no_args_name = "main__0__ret_int"
+        main_args_name = "main__2__intE1__byteE1_ptr2__ret_intE1"
+        main_no_args_name = "main__0__ret_intE1"
 
         main_func      = module.globals.get(main_no_args_name)
         main_args_func = module.globals.get(main_args_name)
