@@ -2,57 +2,13 @@
 
 using standard::io::console;
 
-object Lock
-{
-    bool status = false;  // We'll treat false as unlocked, true as locked.
+be32 x = 5;
+le32 y = 10;
 
-    def __init() -> this
-    {
-        print("Created a new lock.\n");
-        return this;
-    };
-
-    def __exit() -> void
-    {
-        print("Lock destroyed.\n");
-        return;
-    };
-
-    def doThis() -> int
-    {
-        if (this.status)
-        {
-            //print("Error: Locked.\n");
-            return -1;
-        };
-        print("Doing this!\n");
-        return 0;
-    };
-
-    def lock() -> bool
-    {
-        this.status = true;
-        print("Status: Locked.\n");
-        return;
-    };
-
-    def unlock() -> bool
-    {
-        this.status = false;
-        print("Status: Unlocked.\n");
-        return;
-    };
-};
+def foo(be32 k) -> le32 { return 0; };
 
 def main() -> int
 {
-    Lock myNewLock();
-
-    myNewLock.doThis();
-    myNewLock.lock();
-    myNewLock.doThis();
-    myNewLock.unlock();
-    myNewLock.doThis();
-
+    le32 z = foo(y); // Compile error, passing little-endian type to big-endian parameter
     return 0;
 };

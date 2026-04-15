@@ -2247,6 +2247,33 @@ class CodegenVisitor:
 
         arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
         current_ns = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ""
+
+        # ── Enforce endianness-parameter contract ─────────────────────────────
+        # Passing a little-endian value to a big-endian parameter (or vice versa)
+        # is a compile error.  Assignment auto-swaps, but parameter passing does not.
+        if overload_entry:
+            for i, (arg_val, param_spec) in enumerate(
+                    zip(arg_vals, overload_entry['param_types'])):
+                if param_spec is None:
+                    continue
+                tgt_endian = EndianSwapHandler.get_endianness(param_spec)
+                if tgt_endian is None:
+                    continue  # parameter has no explicit endianness requirement
+                src_spec   = getattr(arg_val, '_flux_type_spec', None)
+                src_endian = EndianSwapHandler.get_endianness(src_spec)
+                if src_endian is None:
+                    continue  # argument endianness unknown / native, let it pass
+                if src_endian != tgt_endian:
+                    endian_names = {0: "little-endian", 1: "big-endian"}
+                    raise ValueError(
+                        f"\nCompile error: argument {i} of '{node.name}' is "
+                        f"{endian_names.get(src_endian, f'endian({src_endian})')}, "
+                        f"but parameter {i} expects "
+                        f"{endian_names.get(tgt_endian, f'endian({tgt_endian})')}.\n"
+                        f"Endianness mismatch in function call is not allowed "
+                        f"(assignment auto-swaps, but parameter passing does not). "
+                        f"[{node.source_line}:{node.source_col}]")
+
         # Pointer-param overload
         if hasattr(module, '_function_overloads'):
             _op_key = None

@@ -1411,7 +1411,7 @@ traverse_as_bytes(@data[0], 4);
 
 ## **Memory Layout and Alignment Tricks**
 
-### Struct packing with  ustom alignment
+### Struct packing with custom alignment
 ```
 // Tightly packed struct (no padding)
 struct PackedRGB
@@ -1425,7 +1425,7 @@ struct PackedRGB
 struct AlignedData
 {
     data{8:16} as byte16 flag;   // 8 bits, 16-bit aligned (1 byte data, 1 byte padding)
-    u32 value;                            // 32 bits, 32-bit aligned
+    u32 value;                   // 32 bits, 32-bit aligned
     data{8:16} as byte16 status; // 8 bits, 16-bit aligned
 };  // Total: 64 bits (8 bytes) with padding
 
@@ -1468,7 +1468,7 @@ be16[2] net = buf; // autopack and convert endianness
 signed data{13:16} as strange13;
 
 strange13 value = 0x1FFF;  // Max positive value for 13 bits
-print(value);               // 8191
+print(value);              // 8191
 
 value = 0x1000;            // Sign bit set (bit 12)
 print(value);              // -4096 (two's complement)
@@ -1977,13 +1977,13 @@ def from_fixed(fixed16_16 value) -> float
 
 def fixed_mul(fixed16_16 a, fixed16_16 b) -> fixed16_16
 {
-    signed data{64} as i64 temp = ((i64)a * (i64)b) >> 16;
+    i64 temp = ((i64)a * (i64)b) >> 16;
     return (fixed16_16)temp;
 };
 
 def fixed_div(fixed16_16 a, fixed16_16 b) -> fixed16_16
 {
-    signed data{64} as i64 temp = ((i64)a << 16) / (i64)b;
+    i64 temp = ((i64)a << 16) / (i64)b;
     return (fixed16_16)temp;
 };
 
@@ -2001,11 +2001,13 @@ print(from_fixed(result));  // approx 6.28318
 ### `void` semantics
 ```
 // Void as a value
-void x = void;
+void x = void;      // Cannot have void type, only void pointer
+void* px = @0;      // Null void pointer. Allocates a 0 and takes its address
+                    // Based on default pointer width (64)
 
-if (x == void)
+if (px is void)
 {
-    print("x is void\0");
+    print("px is null\0");
 };
 
 // Conditional void assignment
@@ -2142,7 +2144,7 @@ ADDRESS_CAST = "(@)"
 
 ## Primitive types:
 
-bool, byte `0xFF`, int `5`, float `3.14159`, double `3.1415926585`, char `"B"` == `66` - `65` == `'A'`, data
+bool `true`/`false`, byte `0xFF`, int `5`, uint `300u`, long `23492399393233`, ulong `983787283748727u`, float `3.14159`/`20f`, double `3.1415926585`/`360d`, char `"B"` == `66` - `65` == `'A'`, data
 
 ## All types:
 

@@ -267,7 +267,7 @@ def main() -> int
     };
 
     // Connect to server
-    if (!client_socket.connect("127.0.0.1\0", (i16)8080))
+    if (!client_socket.connect("127.0.0.1\0", 8080))
     {
         print("Failed to connect to server\n\0");
         client_socket.close();
