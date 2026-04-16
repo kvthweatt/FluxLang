@@ -7,13 +7,17 @@ le32 y = 10;
 
 int X = 0;
 
-def f"{x} {y}"() -> void { println("yay"); };
+byte[4] bytes = [0xAA, 0xBB, 0xCC, 0xDD];
+
+int x = 5;
+
+def f"{bytes}"() -> void { println("yay"); };
 
 def $X() -> void { println("yay"); };
 
 def main() -> int
 {
-    f"{x} {y}"();
+    f"{bytes}"();
 
     $X();
 

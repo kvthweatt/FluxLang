@@ -2132,12 +2132,46 @@ class CodegenVisitor:
             if expr.operator == Operator.NOT: return not o
             if expr.operator == Operator.SUB: return -o
             raise NotImplementedError
-        if isinstance(expr, Identifier) and expr.name in module.globals:
-            gvar = module.globals[expr.name]
-            if hasattr(gvar, 'initializer') and gvar.initializer is not None:
-                if hasattr(gvar.initializer, 'constant'):
-                    v = gvar.initializer.constant
-                    if isinstance(v, (int, float, bool)): return v
+        if isinstance(expr, Identifier):
+            # Try the bare name first, then common type-mangled suffixes used by
+            # be32/le32/be64/le64 variables (e.g. "x__be32", "x__le32").
+            _TYPED_SUFFIXES = ('__be32', '__le32', '__be64', '__le64',
+                               '__be16', '__le16')
+            gvar = module.globals.get(expr.name)
+            if gvar is None:
+                for _sfx in _TYPED_SUFFIXES:
+                    gvar = module.globals.get(expr.name + _sfx)
+                    if gvar is not None:
+                        break
+            if gvar is not None and hasattr(gvar, 'initializer') and gvar.initializer is not None:
+                init = gvar.initializer
+                if hasattr(init, 'constant'):
+                    v = init.constant
+                    if isinstance(v, (int, float, bool)):
+                        return v
+                    # byte[N] / char[N] array: constant is a bytearray or list of ints
+                    if isinstance(v, (bytearray, bytes)):
+                        # Try to decode as a UTF-8 string (char arrays); fall back to
+                        # a hex representation like "AABBCCDD" (byte arrays).
+                        try:
+                            return v.rstrip(b'\x00').decode('utf-8')
+                        except (UnicodeDecodeError, AttributeError):
+                            return ''.join(f'{b:02X}' for b in v)
+                    if isinstance(v, list):
+                        # List of ir.Constant elements (e.g. from ArrayType initialiser)
+                        parts_ct = []
+                        for elem in v:
+                            ev = getattr(elem, 'constant', None)
+                            if ev is None:
+                                break
+                            parts_ct.append(ev)
+                        else:
+                            # All elements resolved — treat as byte array
+                            raw = bytes(int(b) & 0xFF for b in parts_ct)
+                            try:
+                                return raw.rstrip(b'\x00').decode('utf-8')
+                            except UnicodeDecodeError:
+                                return ''.join(f'{b:02X}' for b in raw)
         if isinstance(expr, SizeOf) and isinstance(expr.target, TypeSystem):
             llvm_type = TypeSystem.get_llvm_type(expr.target, module, include_array=True)
             if isinstance(llvm_type, ir.IntType):
