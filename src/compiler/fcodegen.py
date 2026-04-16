@@ -1878,7 +1878,12 @@ class CodegenVisitor:
         from fast import ArrayLiteral
         if node.string_value is None:
             return self._array_literal_array(node, builder, module)
-        string_bytes = node.string_value.encode('ascii')
+        import fconfig as _fconfig
+        _null_terminate = _fconfig.config.get('null_terminate_strings', '0').strip() == '1'
+        string_value = node.string_value
+        if _null_terminate and (not string_value or string_value[-1] != '\0'):
+            string_value += '\0'
+        string_bytes = string_value.encode('ascii')
         str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
         str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
         use_global = (
@@ -2107,7 +2112,7 @@ class CodegenVisitor:
         return resolved
 
     def _fstring_eval_ct(self, expr, node, builder, module):
-        from fast import Literal, BinaryOp, UnaryOp, Identifier, SizeOf
+        from fast import Literal, BinaryOp, UnaryOp, Identifier, SizeOf, TypeConvertExpression
         if isinstance(expr, Literal):
             if expr.type == DataType.SINT:       return int(expr.value)
             if expr.type == DataType.FLOAT:      return float(expr.value)
@@ -2178,6 +2183,32 @@ class CodegenVisitor:
                 return llvm_type.width // 8
             if isinstance(llvm_type, ir.ArrayType):
                 return llvm_type.element.width * llvm_type.count // 8
+        if isinstance(expr, TypeConvertExpression):
+            inner = self._fstring_eval_ct(expr.expression, node, builder, module)
+            # Map the target Flux type to the appropriate Python built-in so the
+            # result stays a plain int/float/bool — exactly what the other branches
+            # return.  Unknown target types just pass the value through unchanged.
+            target = getattr(expr, 'target_type', None)
+            if target is not None:
+                _UINT_TYPES = {DataType.UINT}
+                _SINT_TYPES = {DataType.SINT}
+                _FLOAT_TYPES = {DataType.FLOAT, DataType.DOUBLE}
+                _BOOL_TYPES  = {DataType.BOOL}
+                if hasattr(target, 'base') and target.base in _FLOAT_TYPES:
+                    return float(inner)
+                if hasattr(target, 'base') and target.base in _BOOL_TYPES:
+                    return bool(inner)
+                if hasattr(target, 'base') and target.base in (_UINT_TYPES | _SINT_TYPES):
+                    return int(inner)
+                # Fallback: attempt coercion from the target's string representation
+                type_name = str(target).lower()
+                if any(k in type_name for k in ('int', 'uint', 'long', 'ulong', 'byte', 'be', 'le')):
+                    return int(inner)
+                if 'float' in type_name or 'double' in type_name:
+                    return float(inner)
+                if 'bool' in type_name:
+                    return bool(inner)
+            return inner  # no narrowing needed — pass value through unchanged
         raise NotImplementedError(f"Cannot evaluate {type(expr).__name__} at compile time for f-string")
 
     def _fstring_runtime(self, node, builder, module):
@@ -2414,7 +2445,7 @@ class CodegenVisitor:
             available_counts = [o['param_count'] for o in module._function_overloads[node.name]]
             if len(node.arguments) not in available_counts:
                 raise ValueError(
-                    f"Function '{node.name}' found but no overload accepts {len(node.arguments)} arguments. "
+                    f"Function {node.name} found but no overload accepts {len(node.arguments)} arguments. "
                     f"Available overloads accept: {available_counts} arguments. "
                     f"[{node.source_line}:{node.source_col}]")
         raise NameError(
@@ -2570,6 +2601,20 @@ class CodegenVisitor:
             func = TypeResolver.resolve_function(module, method_func_name, "", arg_vals)
         if func is None:
             raise NameError(f"Unknown method: {method_func_name}")
+
+        # Enforce private method access restriction
+        if hasattr(module, '_private_methods'):
+            current_object = getattr(module, '_current_object_name', None)
+            for obj_type_name_key, priv_set in module._private_methods.items():
+                if method_func_name in priv_set:
+                    if current_object != obj_type_name_key:
+                        raise AttributeError(
+                            f"\nCannot call private method {node.method_name} on "
+                            f"object instance of {obj_type_name_key} from outside its definition "
+                            f"[{node.source_line}:{node.source_col}]"
+                        )
+                    break
+
         args = [this_ptr]
         for i, arg_expr in enumerate(node.arguments):
             if isinstance(arg_expr, Identifier):
@@ -4445,7 +4490,13 @@ class CodegenVisitor:
             existing_type = module._struct_types[node.name]
             if not node.members and not node.methods:
                 return existing_type
-            if existing_type.elements:
+            # Consider the type already registered if it has elements (data members),
+            # OR if it has no data members but does have methods (methods-only object).
+            # Previously only `existing_type.elements` was checked, which is falsy for
+            # objects with no member variables — causing the struct and symbol to be
+            # re-registered on retry passes, producing "X is already defined" errors
+            # when a private method body caused the first visit to raise an exception.
+            if existing_type.elements or not node.members:
                 struct_type = existing_type
                 type_already_registered = True
 
@@ -4480,16 +4531,35 @@ class CodegenVisitor:
             func = ObjectTypeHandler.predeclare_method(func_type, func_name, method, module)
             method_funcs[func_name] = func
 
+        # Record private method names for access enforcement.
+        # We store the fully-qualified "ObjName.method_name" key (plain, not mangled)
+        # because visit_MethodCall builds its lookup key the same way:
+        #   method_func_name = f"{obj_type_name}.{node.method_name}"
+        if not hasattr(module, '_private_methods'):
+            module._private_methods = {}
+        private_set = set()
         for method in node.methods:
-            from fast import FunctionDef as _FunctionDef
-            if isinstance(method, _FunctionDef) and method.is_prototype:
-                continue
-            _, func_name = ObjectTypeHandler.create_method_signature(
-                node.name, method.name, method, struct_type, module)
-            func = method_funcs.get(func_name)
-            if func is None:
-                raise RuntimeError(f"Internal error: missing function for method {method.name} [{node.source_line}:{node.source_col}]")
-            self._emit_method_body(method, func, node.name, module)
+            if getattr(method, 'is_private', False):
+                priv_func_name = f"{node.name}.{method.name}"
+                private_set.add(priv_func_name)
+        if private_set:
+            module._private_methods.setdefault(node.name, set()).update(private_set)
+
+        # Only emit method bodies when NOT in pre-pass mode.
+        # During the pre-pass, using-namespace functions (e.g. println) are not yet
+        # registered, so body emission would fail.  Pass 4 handles body emission after
+        # all top-level symbols are available.
+        if not getattr(module, '_prepass_only', False):
+            for method in node.methods:
+                from fast import FunctionDef as _FunctionDef
+                if isinstance(method, _FunctionDef) and method.is_prototype:
+                    continue
+                _, func_name = ObjectTypeHandler.create_method_signature(
+                    node.name, method.name, method, struct_type, module)
+                func = method_funcs.get(func_name)
+                if func is None:
+                    raise RuntimeError(f"Internal error: missing function for method {method.name} [{node.source_line}:{node.source_col}]")
+                self._emit_method_body(method, func, node.name, module)
 
         if node.traits and hasattr(module, 'symbol_table'):
             implemented_names = {m.name for m in node.methods}
@@ -4655,7 +4725,17 @@ class CodegenVisitor:
         if isinstance(method, _FunctionDef) and method.is_prototype:
             return
         if len(func.blocks) != 0:
-            return
+            # If the existing entry block is already properly terminated, the method
+            # was fully emitted on a previous pass — skip it.
+            # If it is *not* terminated, it was partially emitted during an earlier
+            # failed attempt (e.g. a function-resolution error in the pre-pass retry
+            # loop).  In that case we must wipe the stale block and re-emit the body
+            # now that all symbols are available, otherwise the function is left with
+            # an unterminated block and LLC rejects the IR.
+            if func.blocks[0].is_terminated:
+                return
+            # Remove the stale partial block so we can start fresh.
+            func.blocks.clear()
         entry_block = func.append_basic_block('entry')
         method_builder = ir.IRBuilder(entry_block)
         saved_namespace = module.symbol_table.current_namespace
@@ -4675,17 +4755,19 @@ class CodegenVisitor:
             param_with_metadata = TypeSystem.attach_type_metadata(param, type_spec=param_type_spec)
             method_builder.store(param_with_metadata, alloca)
             module.symbol_table.define(param_name, SymbolKind.VARIABLE, type_spec=param_type_spec, llvm_value=alloca)
-        self.visit(method.body, method_builder, module)
-        if isinstance(method, _FunctionDef) and method.name == '__init' and not method_builder.block.is_terminated:
-            method_builder.ret(func.args[0])
-        if not method_builder.block.is_terminated:
-            if isinstance(func.function_type.return_type, ir.VoidType):
-                method_builder.ret_void()
-            else:
-                raise RuntimeError(f"CodegenVisitor._emit_method_body: Method {method.name} must end with return statement")
-        module.symbol_table.exit_scope()
-        module.symbol_table.current_namespace = saved_namespace
-        module._current_object_name = prev_object_name
+        try:
+            self.visit(method.body, method_builder, module)
+            if isinstance(method, _FunctionDef) and method.name == '__init' and not method_builder.block.is_terminated:
+                method_builder.ret(func.args[0])
+            if not method_builder.block.is_terminated:
+                if isinstance(func.function_type.return_type, ir.VoidType):
+                    method_builder.ret_void()
+                else:
+                    raise RuntimeError(f"CodegenVisitor._emit_method_body: Method {method.name} must end with return statement")
+        finally:
+            module.symbol_table.exit_scope()
+            module.symbol_table.current_namespace = saved_namespace
+            module._current_object_name = prev_object_name
         return
 
     def visit_NamespaceDef(self, node, builder, module):
@@ -5422,6 +5504,11 @@ class CodegenVisitor:
 
         # Now retry top-level structs/objects, namespace registrations, and extern blocks
         # together until no further progress is possible.
+        # _prepass_only=True tells visit_ObjectDef to skip method body emission so that
+        # unresolvable using-namespace functions (e.g. println) don't cause spurious
+        # failures here.  Pass 4 emits all method bodies after Pass 3 has registered
+        # every top-level symbol.
+        module._prepass_only = True
         max_passes = len(pending_toplevel) + len(pending_ns) + len(pending_extern) + 1
         pending_tl = list(pending_toplevel)
         pending_ns_retry = list(pending_ns)
@@ -5457,12 +5544,42 @@ class CodegenVisitor:
                     self.visit(ex, builder, module)
                 break
             pending_tl, pending_ns_retry, pending_ex = still_tl, still_ns, still_ex
+        module._prepass_only = False
 
         # Pass 3: Process all other statements
         print("[AST] Pass 3: Processing all other statements...")
         for stmt in node.statements:
             if not isinstance(stmt, (UsingStatement, NotUsingStatement, ExternBlock, StructDef, StructDefStatement, ObjectDef, ObjectDefStatement)):
                 self.visit(stmt, builder, module)
+
+        # Pass 4: Re-emit object method bodies that were skipped or partially emitted
+        # during the pre-pass (e.g. because using-namespace functions such as println()
+        # were not yet registered at that point).  _emit_method_body is idempotent for
+        # fully-terminated functions and will re-attempt any that were left without a
+        # terminator.
+        print("[AST] Pass 4: Re-emitting pending object method bodies...")
+        for stmt in node.statements:
+            obj_def = None
+            if isinstance(stmt, ObjectDef):
+                obj_def = stmt
+            elif isinstance(stmt, ObjectDefStatement):
+                obj_def = stmt.object_def
+            if obj_def is None:
+                continue
+            if not hasattr(module, '_struct_types') or obj_def.name not in module._struct_types:
+                continue
+            struct_type = module._struct_types[obj_def.name]
+            for method in obj_def.methods:
+                from fast import FunctionDef as _FunctionDef
+                if isinstance(method, _FunctionDef) and method.is_prototype:
+                    continue
+                from ftypesys import ObjectTypeHandler as _OTH
+                _, func_name = _OTH.create_method_signature(
+                    obj_def.name, method.name, method, struct_type, module)
+                func = module.globals.get(func_name)
+                if func is None or not isinstance(func, ir.Function):
+                    continue
+                self._emit_method_body(method, func, obj_def.name, module)
 
         main_args_name = "main__2__intE1__byteE1_ptr2__ret_intE1"
         main_no_args_name = "main__0__ret_intE1"
