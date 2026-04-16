@@ -2156,12 +2156,10 @@ class CodegenVisitor:
                         return v
                     # byte[N] / char[N] array: constant is a bytearray or list of ints
                     if isinstance(v, (bytearray, bytes)):
-                        # Try to decode as a UTF-8 string (char arrays); fall back to
-                        # a hex representation like "AABBCCDD" (byte arrays).
-                        try:
-                            return v.rstrip(b'\x00').decode('utf-8')
-                        except (UnicodeDecodeError, AttributeError):
-                            return ''.join(f'{b:02X}' for b in v)
+                        # Decode as latin-1: every byte value 0x00-0xFF maps 1:1 to a
+                        # Unicode code point, so this never raises and preserves raw
+                        # byte identity (e.g. 0xC0 -> 'À', not a hex escape).
+                        return v.rstrip(b'\x00').decode('latin-1')
                     if isinstance(v, list):
                         # List of ir.Constant elements (e.g. from ArrayType initialiser)
                         parts_ct = []
@@ -2173,10 +2171,9 @@ class CodegenVisitor:
                         else:
                             # All elements resolved — treat as byte array
                             raw = bytes(int(b) & 0xFF for b in parts_ct)
-                            try:
-                                return raw.rstrip(b'\x00').decode('utf-8')
-                            except UnicodeDecodeError:
-                                return ''.join(f'{b:02X}' for b in raw)
+                            # Decode as latin-1 for the same reason as the bytearray
+                            # branch above: 1:1 byte→codepoint, never raises.
+                            return raw.rstrip(b'\x00').decode('latin-1')
         if isinstance(expr, SizeOf) and isinstance(expr.target, TypeSystem):
             llvm_type = TypeSystem.get_llvm_type(expr.target, module, include_array=True)
             if isinstance(llvm_type, ir.IntType):
