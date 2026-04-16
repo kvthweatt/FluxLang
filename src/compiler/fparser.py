@@ -758,10 +758,15 @@ class FluxParser:
     
     def function_def(self, calling_conv: Optional[str] = None) -> Union[FunctionDef, List[FunctionDef]]:
         """
-        function_def -> ('const')? ('volatile')? ('def' | calling_conv_kw) ('!!')? (IDENTIFIER | STRING_LITERAL) '(' parameter_list? ')' '->' type_spec (';' | block ';')
+        function_def -> ('const')? ('volatile')? ('def' | calling_conv_kw) ('!!')? (IDENTIFIER | STRING_LITERAL | F_STRING | I_STRING | STRINGIFY) '(' parameter_list? ')' '->' type_spec (';' | block ';')
         
         Now supports string literals as function names for mangled/decorated names:
             def "??@YAPAX?_FOO"()->void{};
+
+        Also supports f-string, i-string, and stringify names evaluated at compile time:
+            def f"{x}_{y}"() -> void {};
+            def i"{}":{x * 333;}() -> void {};
+            def $X() -> void {};
 
         Calling convention syntax (replaces 'def'):
             cdecl foo() -> void {};
@@ -799,7 +804,7 @@ class FluxParser:
             no_mangle = True
             self.consume(TokenType.NO_MANGLE)
         
-        # Function name can be an IDENTIFIER, STRING_LITERAL, F_STRING, or STRINGIFY
+        # Function name can be an IDENTIFIER, STRING_LITERAL, F_STRING, I_STRING, or STRINGIFY
         if self.expect(TokenType.STRING_LITERAL):
             # String literal function name (e.g., for mangled names)
             name = self.consume(TokenType.STRING_LITERAL).value
@@ -810,6 +815,11 @@ class FluxParser:
             # Stored as a FStringLiteral node; codegen evaluates it at compile time.
             tok = self.current_token
             name = self.parse_f_string(self.consume(TokenType.F_STRING).value).set_location(tok.line, tok.column)
+        elif self.expect(TokenType.I_STRING):
+            # I-string function name (e.g., def i"{}":{x * 333;}() -> void)
+            # Stored as a FStringLiteral node; codegen evaluates it at compile time.
+            tok = self.current_token
+            name = self.parse_i_string(self.consume(TokenType.I_STRING).value).set_location(tok.line, tok.column)
         elif self.expect(TokenType.STRINGIFY):
             # Stringify function name (e.g., def $X() -> void)
             # Stored as a Stringify node; codegen evaluates it at compile time.
@@ -889,12 +899,15 @@ class FluxParser:
             while self.expect(TokenType.COMMA):
                 self.advance()  # consume comma
                 
-                # Each additional prototype has its own name (can also be string literal or f-string)
+                # Each additional prototype has its own name (can also be string literal, f-string, or i-string)
                 if self.expect(TokenType.STRING_LITERAL):
                     proto_name = self.consume(TokenType.STRING_LITERAL).value
                 elif self.expect(TokenType.F_STRING):
                     tok = self.current_token
                     proto_name = self.parse_f_string(self.consume(TokenType.F_STRING).value).set_location(tok.line, tok.column)
+                elif self.expect(TokenType.I_STRING):
+                    tok = self.current_token
+                    proto_name = self.parse_i_string(self.consume(TokenType.I_STRING).value).set_location(tok.line, tok.column)
                 elif self.expect(TokenType.STRINGIFY):
                     tok = self.current_token
                     self.advance()
