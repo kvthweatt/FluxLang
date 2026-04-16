@@ -2082,6 +2082,30 @@ class CodegenVisitor:
         except (ValueError, NotImplementedError):
             return self._fstring_runtime(node, builder, module)
 
+    def _resolve_stringify_name(self, stringify_node, builder, module, parent_node) -> str:
+        """Resolve a Stringify node used as a function name to a plain string.
+
+        $X        -> compile-time value of X (if a global integer/bool constant),
+                     otherwise the literal identifier name "X".
+        $X.member -> "X.member" (same rules for X, dot-joined with member).
+        """
+        from fast import Identifier as _Identifier
+        var_name = stringify_node.name
+        resolved = var_name  # default: use the identifier name literally
+
+        # Try to evaluate X as a compile-time constant (mirrors _fstring_eval_ct for Identifier)
+        try:
+            val = self._fstring_eval_ct(
+                _Identifier(var_name), stringify_node, builder, module)
+            resolved = str(val)
+        except (ValueError, NotImplementedError):
+            pass  # Not a known global constant — fall back to the identifier name itself
+
+        if stringify_node.member is not None:
+            resolved = f"{resolved}.{stringify_node.member}"
+
+        return resolved
+
     def _fstring_eval_ct(self, expr, node, builder, module):
         from fast import Literal, BinaryOp, UnaryOp, Identifier, SizeOf
         if isinstance(expr, Literal):
@@ -2204,7 +2228,7 @@ class CodegenVisitor:
 
         # Resolve f-string function names at compile time, exactly as visit_FunctionDef does.
         # e.g. f"{x} {y}"() must be resolved to its string value before any lookup.
-        from fast import FStringLiteral as _FStringLiteral
+        from fast import FStringLiteral as _FStringLiteral, Stringify as _Stringify
         if isinstance(node.name, _FStringLiteral):
             parts = []
             for part in node.name.parts:
@@ -2222,6 +2246,8 @@ class CodegenVisitor:
                             f"[{node.source_line}:{node.source_col}]: {e}"
                         ) from e
             node.name = "".join(parts)
+        elif isinstance(node.name, _Stringify):
+            node.name = self._resolve_stringify_name(node.name, builder, module, node)
 
         if self._funcall_is_fp_variable(node, builder, module):
             return self.visit(
@@ -2528,7 +2554,7 @@ class CodegenVisitor:
         return builder.call(func, args)
 
     def visit_FunctionPointerCall(self, node, builder, module):
-        from fast import Literal, FunctionCall, FStringLiteral as _FStringLiteral
+        from fast import Literal, FunctionCall, FStringLiteral as _FStringLiteral, Stringify as _Stringify
         # If the callee is an f-string literal (e.g. f"{x} {y}"()), resolve its
         # name at compile time and redirect to a plain named FunctionCall —
         # exactly the same way StringLiteral names are already handled.
@@ -2552,6 +2578,12 @@ class CodegenVisitor:
             synthetic = FunctionCall(name=resolved_name, arguments=node.arguments)
             synthetic.source_line = node.source_line
             synthetic.source_col  = node.source_col
+        elif isinstance(node.pointer, _Stringify):
+            resolved_name = self._resolve_stringify_name(node.pointer, builder, module, node)
+            synthetic = FunctionCall(name=resolved_name, arguments=node.arguments)
+            synthetic.source_line = node.source_line
+            synthetic.source_col  = node.source_col
+            return self.visit_FunctionCall(synthetic, builder, module)
             return self.visit(synthetic, builder, module)
 
         func_ptr = self.visit(node.pointer, builder, module)
@@ -3876,7 +3908,7 @@ class CodegenVisitor:
         # FStringLiteral node; we evaluate it here using the same compile-time path
         # that visit_FStringLiteral uses, then replace node.name with the result so
         # the rest of this method sees a plain str, exactly like the string-literal case.
-        from fast import FStringLiteral as _FStringLiteral
+        from fast import FStringLiteral as _FStringLiteral, Stringify as _Stringify
         if isinstance(node.name, _FStringLiteral):
             parts = []
             for part in node.name.parts:
@@ -3894,6 +3926,8 @@ class CodegenVisitor:
                             f"[{node.source_line}:{node.source_col}]: {e}"
                         ) from e
             node.name = "".join(parts)
+        elif isinstance(node.name, _Stringify):
+            node.name = self._resolve_stringify_name(node.name, builder, module, node)
 
         ret_type = FunctionTypeHandler.convert_type_spec_to_llvm(node.return_type, module)
 

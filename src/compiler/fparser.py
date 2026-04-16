@@ -799,7 +799,7 @@ class FluxParser:
             no_mangle = True
             self.consume(TokenType.NO_MANGLE)
         
-        # Function name can be an IDENTIFIER, STRING_LITERAL, or F_STRING
+        # Function name can be an IDENTIFIER, STRING_LITERAL, F_STRING, or STRINGIFY
         if self.expect(TokenType.STRING_LITERAL):
             # String literal function name (e.g., for mangled names)
             name = self.consume(TokenType.STRING_LITERAL).value
@@ -810,6 +810,24 @@ class FluxParser:
             # Stored as a FStringLiteral node; codegen evaluates it at compile time.
             tok = self.current_token
             name = self.parse_f_string(self.consume(TokenType.F_STRING).value).set_location(tok.line, tok.column)
+        elif self.expect(TokenType.STRINGIFY):
+            # Stringify function name (e.g., def $X() -> void)
+            # Stored as a Stringify node; codegen evaluates it at compile time.
+            tok = self.current_token
+            self.advance()
+            if not self.expect(TokenType.IDENTIFIER):
+                self.error("Expected identifier after '$' in function name")
+            str_name = self.current_token.value
+            self.advance()
+            str_member = None
+            if self.expect(TokenType.DOT):
+                self.advance()
+                if self.expect(TokenType.IDENTIFIER):
+                    str_member = self.current_token.value
+                    self.advance()
+                else:
+                    self.error("Expected member name after '.' in stringify function name")
+            name = Stringify(str_name, str_member).set_location(tok.line, tok.column)
         elif self.expect(TokenType.IDENTIFIER):
             name = self.consume(TokenType.IDENTIFIER).value
         else:
@@ -877,6 +895,22 @@ class FluxParser:
                 elif self.expect(TokenType.F_STRING):
                     tok = self.current_token
                     proto_name = self.parse_f_string(self.consume(TokenType.F_STRING).value).set_location(tok.line, tok.column)
+                elif self.expect(TokenType.STRINGIFY):
+                    tok = self.current_token
+                    self.advance()
+                    if not self.expect(TokenType.IDENTIFIER):
+                        self.error("Expected identifier after '$' in function name")
+                    _sn = self.current_token.value
+                    self.advance()
+                    _sm = None
+                    if self.expect(TokenType.DOT):
+                        self.advance()
+                        if self.expect(TokenType.IDENTIFIER):
+                            _sm = self.current_token.value
+                            self.advance()
+                        else:
+                            self.error("Expected member name after '.' in stringify function name")
+                    proto_name = Stringify(_sn, _sm).set_location(tok.line, tok.column)
                 elif self.expect(TokenType.IDENTIFIER):
                     proto_name = self.consume(TokenType.IDENTIFIER).value
                 else:
@@ -3336,24 +3370,6 @@ class FluxParser:
             self.advance()
             operand = self.unary_expression()
             return TieExpression(operand).set_location(tok.line, tok.column)
-        elif self.expect(TokenType.STRINGIFY):
-            # Stringify operator: $x or $x.member produces the name/value as a string
-            tok = self.current_token
-            self.advance()
-            if not self.expect(TokenType.IDENTIFIER):
-                raise SyntaxError(f"Expected identifier after '$'")
-            name = self.current_token.value
-            self.advance()
-            member = None
-            if self.expect(TokenType.DOT):
-                self.advance()
-                # Accept any identifier including the special '_' tag accessor
-                if self.expect(TokenType.IDENTIFIER):
-                    member = self.current_token.value
-                    self.advance()
-                else:
-                    raise SyntaxError(f"Expected member name after '.' in stringify expression")
-            return Stringify(name, member).set_location(tok.line, tok.column)
         else:
             return self.postfix_expression()
     
@@ -3589,6 +3605,10 @@ class FluxParser:
                 elif isinstance(expr, FStringLiteral):
                     # F-string literal function name: f"{x} {y}"() — name resolved at codegen time
                     expr = FunctionCall(expr, args).set_location(tok.line, tok.column)
+                elif isinstance(expr, Stringify):
+                    # Stringify call: $X() — name resolved at codegen time (like FStringLiteral)
+                    expr = FunctionCall(expr, args).set_location(tok.line, tok.column)
+                    
                 elif isinstance(expr, MemberAccess):
                     # Method call: obj.method() -> call obj_type.method with obj as first arg
                     method_name = f"{{obj_type}}.{expr.member}"
@@ -3956,6 +3976,25 @@ class FluxParser:
             tok = self.current_token
             self.advance()
             return Literal(value=13, type=DataType.SINT).set_location(tok.line, tok.column)  # TypeOf.KIND_OBJECT
+        elif self.expect(TokenType.STRINGIFY):
+            # Stringify operator: $x or $x.member produces the name/value as a string.
+            # Parsed here (primary level) so that the postfix loop can handle ($X)(args)
+            # as a function call — e.g.  $X();  def $X() -> void {};
+            tok = self.current_token
+            self.advance()
+            if not self.expect(TokenType.IDENTIFIER):
+                raise SyntaxError("Expected identifier after '$'")
+            name = self.current_token.value
+            self.advance()
+            member = None
+            if self.expect(TokenType.DOT):
+                self.advance()
+                if self.expect(TokenType.IDENTIFIER):
+                    member = self.current_token.value
+                    self.advance()
+                else:
+                    raise SyntaxError("Expected member name after '.' in stringify expression")
+            return Stringify(name, member).set_location(tok.line, tok.column)
         elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW,
                          TokenType.CHAR, TokenType.BYTE, TokenType.BOOL_KW, TokenType.SLONG, TokenType.ULONG):
             # Built-in type convert expression: float(x), int(y), char(z), etc.
