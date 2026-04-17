@@ -701,11 +701,11 @@ class TypeResolver:
                                 if mangled in storage:
                                     return storage[mangled]
                 
-                elif entry.kind in (SymbolKind.STRUCT, SymbolKind.OBJECT, SymbolKind.UNION):
+                elif entry.kind in (SymbolKind.STRUCT, SymbolKind.OBJECT, SymbolKind.UNION, SymbolKind.ENUM):
                     if entry.llvm_type is not None:
                         return entry.llvm_type
                     # Fallback to _struct_types/_union_types storage
-                    for storage_name in ['_struct_types', '_union_types']:
+                    for storage_name in ['_struct_types', '_union_types', '_object_types', '_enum_types']:
                         if hasattr(module, storage_name):
                             storage = getattr(module, storage_name)
                             if typename in storage:

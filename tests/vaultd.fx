@@ -205,7 +205,7 @@ def handle_write(byte* payload, u16 plen) -> u32
     for (byte i; i < VAULT_SLOTS; i++)
     {
         if (!g_vault[i].occupied | memcmp(@g_vault[i].name, name_ptr, name_len) == 0)
-        {
+        {`
             if (g_vault[i].locked) { net_send_err("LOCKED\0"); return 3; };
             if (data_len > SLOT_DATA_MAX) { return 2; };
             memcpy(@g_vault[i].value[0], data_ptr, data_len);

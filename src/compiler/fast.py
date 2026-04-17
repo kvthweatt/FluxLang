@@ -1268,6 +1268,7 @@ class NamespaceDef(ASTNode):
     structs: List[StructDef] = field(default_factory=list)
     objects: List[ObjectDef] = field(default_factory=list)
     enums: List[EnumDef] = field(default_factory=list)
+    unions: List['UnionDef'] = field(default_factory=list)
     extern_blocks: List[ExternBlock] = field(default_factory=list)
     variables: List[VariableDeclaration] = field(default_factory=list)
     nested_namespaces: List['NamespaceDef'] = field(default_factory=list)

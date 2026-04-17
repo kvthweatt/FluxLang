@@ -1682,55 +1682,57 @@ My name is Alice.
 Since strings are arrays, you can access individual characters:
 
 ```
+#import "standard.fx";
+
+using standard::io::console;
+
 def main() -> int
 {
-    char[] word = "Flux\0";
+    char[] word = ['F','l','u','x','\0'];
     
-    print("First character: \0");
-    print(word[0]);  // 'F' = 70 in ASCII
-    print("\n\0");
+
+    println(f"First character value: {word[0]}");
     
-    print("Second character: \0");
-    print(word[1]);  // 'l' = 108 in ASCII
-    print("\n\0");
+    println(f"Second character value: {word[1]}");
+
+    println(f"First character: {(byte[1])word[0]}");
+    
+    println(f"Second and third characters: {(byte[2])word[2:3]}");
     
     return 0;
 };
 ```
-
-Remember, characters are just numbers. If you want to see the number, cast your char to an integer like so:  
-`print((int)some_char);`
+Result:
+```
+First character value: 70
+Second character value: 108
+First character: F
+Second character: ux
+```
 
 #### f9.4 String Length
 
 To find how long a string is, we count characters until we hit the null terminator:
 
 ```
-def strlen(char[] str) -> int
-{
-    int length = 0;
-    for (int i = 0; i < 1000; i++)  // Safety limit
-    {
-        if (str[i] == 0)  // Found null terminator
-        {
-            return length;
-        };
-        length++;
-    };
-    return length;
-};
+#import "standard.fx";
+
+using standard::io::console,
+      standard::strings;
 
 def main() -> int
 {
-    char[] text = "Programming!\0";
+    noopstr text = "Programming!\0";
     int len = strlen(text);
     
-    print("Length: \0");
-    print(len);
-    print("\n\0");
+    println(f"Length: {len}");
     
     return 0;
 };
+```
+Result:
+```
+Length: 12
 ```
 
 #### f9.5 Comparing Strings

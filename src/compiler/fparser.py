@@ -1672,6 +1672,7 @@ class FluxParser:
         structs = []
         objects = []
         enums = []
+        unions = []
         extern_blocks = []
         variables = []
         nested_namespaces = []
@@ -1766,6 +1767,13 @@ class FluxParser:
                     qualified_name = f"{current_namespace}__{enum.name}"
                     self.symbol_table.define(qualified_name, SymbolKind.TYPE)
                     self.symbol_table.define(enum.name, SymbolKind.TYPE)
+            elif self.expect(TokenType.UNION):
+                union_stmt = self.union_def()
+                union = union_stmt.union_def  # Unwrap UnionDefStatement -> UnionDef
+                unions.append(union)
+                qualified_name = f"{current_namespace}__{union.name}"
+                self.symbol_table.define(qualified_name, SymbolKind.TYPE)
+                self.symbol_table.define(union.name, SymbolKind.TYPE)
             elif self.expect(TokenType.OPERATOR):
                 op_func = self.operator_def()
                 functions.append(op_func)
@@ -1785,6 +1793,7 @@ class FluxParser:
                         existing_ns.structs.extend(nested_ns.structs)
                         existing_ns.objects.extend(nested_ns.objects)
                         existing_ns.enums.extend(nested_ns.enums)
+                        existing_ns.unions.extend(nested_ns.unions)
                         existing_ns.variables.extend(nested_ns.variables)
                         existing_ns.nested_namespaces.extend(nested_ns.nested_namespaces)
                         existing_ns.base_namespaces.extend(nested_ns.base_namespaces)
@@ -1812,7 +1821,7 @@ class FluxParser:
                     self.symbol_table.define(var_decl.name, SymbolKind.VARIABLE, var_decl.type_spec)
                 self.consume(TokenType.SEMICOLON)
             else:
-                self.error("Expected function, struct, object, namespace, or variable declaration")
+                self.error("Expected function, struct, object, namespace, enum, union, or variable declaration")
         
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
@@ -1826,6 +1835,7 @@ class FluxParser:
             structs=structs,
             objects=objects,
             enums=enums,
+            unions=unions,
             extern_blocks=extern_blocks,
             variables=variables,
             nested_namespaces=nested_namespaces,

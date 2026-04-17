@@ -1,19 +1,23 @@
-#import "standard.fx";
+#import "standard.fx", "exceptions.fx";
 
 using standard::io::console;
 
+enum testEnum
+{
+    A,
+    B,
+    C,
+    D,
+    E
+};
+
 def main() -> int
 {
-    char[] word = ['F','l','u','x','\0'];
-    
+    testEnum e;
 
-    println(f"First character value: {word[0]}");
-    
-    println(f"Second character value: {word[1]}");
+    e = testEnum.B;
 
-    println(f"First character: {(byte[1])word[0]}");
-    
-    println(f"Second character: {(byte[2])word[2:3]}");
-    
+    println(e);
+
     return 0;
 };

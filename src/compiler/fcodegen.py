@@ -3292,9 +3292,9 @@ class CodegenVisitor:
                         caller_name = caller_frame.f_code.co_name
                         stack = _inspect.stack()
                         stmt_i = i
-                        #print("Full call stack (from current to outermost):")
-                        #for i, frame_info in enumerate(reversed(stack)):
-                            #print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
+                        print("Full call stack (from current to outermost):")
+                        for i, frame_info in enumerate(reversed(stack)):
+                            print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
                         loc = ""
                         if hasattr(stmt, 'source_line') and stmt.source_line:
                             loc = f" [{module.name}:{stmt.source_line}:{stmt.source_col}]"
