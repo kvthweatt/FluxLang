@@ -2,49 +2,18 @@
 
 using standard::io::console;
 
-object to1
-{
-    def __init() -> this
-    {
-        return this;
-    };
-
-    def __exit() -> void
-    {
-    };
-
-    private
-    {
-        int x = 5;
-
-        def bar() -> void
-        {
-            println("in bar!");
-            return;
-        };
-    };
-
-    public
-    {
-        int y = 10;
-
-        def foo() -> void
-        {
-            println("in foo!");
-            this.bar();
-        };
-    };
-};
-
 def main() -> int
 {
-    to1 newObj();
+    char[] word = ['F','l','u','x','\0'];
+    
 
-    newObj.foo();
+    println(f"First character value: {word[0]}");
+    
+    println(f"Second character value: {word[1]}");
 
-    println(newObj.y);
-
-    newObj.__exit();
-
-	return 0;
+    println(f"First character: {(byte[1])word[0]}");
+    
+    println(f"Second character: {(byte[2])word[2:3]}");
+    
+    return 0;
 };

@@ -1414,6 +1414,67 @@ class CodegenVisitor:
                 null_ptr = builder.gep(alloca, [zero, null_idx], inbounds=True, name="null_term")
                 builder.store(ir.Constant(target_llvm_type.element, 0), null_ptr)
                 return alloca
+            # Source is a bare pointer-to-element (e.g. i8* from an array slice or a
+            # single-element address).  Copy 'count' elements directly — do NOT convert
+            # the pointer value itself to an integer and unpack its bytes, which would
+            # produce garbage stack-address bytes instead of the actual data.
+            if (isinstance(source_val.type, ir.PointerType) and
+                    source_val.type.pointee == target_llvm_type.element):
+                count = target_llvm_type.count
+                zero = ir.Constant(ir.IntType(32), 0)
+                null_term_type = ir.ArrayType(target_llvm_type.element, count + 1)
+                alloca = builder.alloca(null_term_type, name="arr_from_ptr")
+                for i in range(count):
+                    idx = ir.Constant(ir.IntType(32), i)
+                    src_ptr = builder.gep(source_val, [idx], inbounds=True, name=f"src_{i}")
+                    src_val_elem = builder.load(src_ptr, name=f"val_{i}")
+                    dst_ptr = builder.gep(alloca, [zero, idx], inbounds=True, name=f"dst_{i}")
+                    builder.store(src_val_elem, dst_ptr)
+                null_idx = ir.Constant(ir.IntType(32), count)
+                null_ptr = builder.gep(alloca, [zero, null_idx], inbounds=True, name="null_term")
+                builder.store(ir.Constant(target_llvm_type.element, 0), null_ptr)
+                return alloca
+            # Source is a scalar integer — unpack its bytes into a null-terminated array.
+            # For byte[N] / char[N] casts of a scalar value (e.g. `(byte[1])word[0]`)
+            # we must allocate count+1 slots and write a null terminator so that the
+            # result is usable as a C-string by println / %s.  Delegating to
+            # unpack_integer_to_array produces a count-element array with NO null
+            # terminator, so the consumer reads garbage bytes past the payload.
+            if (isinstance(source_val.type, ir.IntType) and
+                    isinstance(target_llvm_type.element, ir.IntType) and
+                    target_llvm_type.element.width == 8):
+                count = target_llvm_type.count
+                zero = ir.Constant(ir.IntType(32), 0)
+                null_term_type = ir.ArrayType(target_llvm_type.element, count + 1)
+                alloca = builder.alloca(null_term_type, name="scalar_to_bytes")
+                i8 = ir.IntType(8)
+                # Widen the source to at least 32 bits so lshr is legal for multi-byte
+                # casts; for a single byte we just truncate directly.
+                src_width = source_val.type.width
+                if src_width < 32:
+                    wide = builder.zext(source_val, ir.IntType(32), name="scalar_widen")
+                else:
+                    wide = source_val
+                # Big-endian byte layout: byte 0 = most-significant byte of the value,
+                # matching the existing unpack_integer_to_array convention.
+                for i in range(count):
+                    shift = (count - 1 - i) * 8
+                    if shift > 0:
+                        shifted = builder.lshr(wide, ir.Constant(wide.type, shift),
+                                               name=f"scalar_shift_{i}")
+                    else:
+                        shifted = wide
+                    byte_val = builder.trunc(shifted, i8, name=f"scalar_byte_{i}")
+                    dst_ptr = builder.gep(alloca, [zero, ir.Constant(ir.IntType(32), i)],
+                                         inbounds=True, name=f"scalar_dst_{i}")
+                    builder.store(byte_val, dst_ptr)
+                # Null terminator
+                null_idx = ir.Constant(ir.IntType(32), count)
+                null_ptr = builder.gep(alloca, [zero, null_idx], inbounds=True,
+                                       name="scalar_null_term")
+                builder.store(ir.Constant(i8, 0), null_ptr)
+                return alloca
+            # General fallback — unpack scalar integer bytes (no null terminator).
             return ArrayTypeHandler.unpack_integer_to_array(builder, module, source_val, target_llvm_type)
         else:
             raise ValueError(
