@@ -616,9 +616,10 @@ namespace standard
                 def heap_new_slab(size_t min_capacity) -> Slab*
                 {
                     size_t sz = g_next_slab_size;
-                    switch (min_capacity + SLAB_HEADER_SIZE > sz)
+                    size_t header_size = (SLAB_HEADER_SIZE + 15) & `!15;
+                    switch (min_capacity + header_size > sz)
                     {
-                        case (1) { sz = min_capacity + SLAB_HEADER_SIZE; }
+                        case (1) { sz = min_capacity + header_size; }
                         default  {};
                     };
 
@@ -628,7 +629,7 @@ namespace standard
                     Slab* slab    = (Slab*)raw;
                     slab.base     = raw;
                     slab.capacity = sz;
-                    slab.frontier = SLAB_HEADER_SIZE;
+                    slab.frontier = header_size;
                     slab.used     = 0;
                     slab.next     = g_slab_head;
                     g_slab_head   = slab;
@@ -655,12 +656,7 @@ namespace standard
                     return ptr;
                 };
 
-                // Public API
 
-                // Fast path helper: pop bin, update table entry and slab used counter,
-                // return the pointer. Returns 0 if the bin is empty (caller falls through
-                // to the bump path).  cls must be a known compile-time constant so the
-                // compiler can fold the bin_pop switch to a single load.
                 def fmalloc_fast(size_t cls, FreeNode* head) -> u64
                 {
                     switch (head == NP_FREENODE) { case (1) { return 0; } default {}; };
@@ -691,6 +687,8 @@ namespace standard
                     };
                     return ptr;
                 };
+
+                // Public API
 
                 def fmalloc(size_t size) -> u64
                 {
@@ -890,6 +888,204 @@ namespace standard
                     return ptr;
                 };
 
+                def fmalloc(ulong size) -> u64
+                {
+                    switch (size == 0) { case (1) { return 0; } default {}; };
+
+                    // Fast path: bypass size_class() for the three most common sizes.
+                    // Each branch resolves cls and the bin head as constants, so no
+                    // switch dispatch overhead inside fmalloc_fast.
+                    switch (size <= 32)
+                    {
+                        case (1)
+                        {
+                            switch (size > 16)   // exactly class 1 (17..32 bytes)
+                            {
+                                case (1)
+                                {
+                                    u64 fast = fmalloc_fast(1, g_bin_1);
+                                    switch (fast != 0) { case (1) { return fast; } default {}; };
+                                    // Bin empty: fall through to bump path with cls already known.
+                                    size_t cls = 1;
+                                    u64 ptr = bump_alloc(32);
+                                    switch (ptr == 0)
+                                    {
+                                        case (1)
+                                        {
+                                            switch (heap_new_slab(32) == NP_SLAB) { case (1) { return 0; } default {}; };
+                                            ptr = bump_alloc(32);
+                                            switch (ptr == 0) { case (1) { return 0; } default {}; };
+                                        }
+                                        default {};
+                                    };
+                                    switch (!table_insert(ptr, cls, 0, (u64)g_slab_head))
+                                    {
+                                        case (1) { return 0; }
+                                        default  {};
+                                    };
+                                    g_slab_head.used++;
+                                    return ptr;
+                                }
+                                default {};  // size <= 16: handled by slow path (class 0)
+                            };
+                        }
+                        default {};
+                    };
+
+                    switch (size <= 64)
+                    {
+                        case (1)
+                        {
+                            switch (size > 32)   // exactly class 2 (33..64 bytes)
+                            {
+                                case (1)
+                                {
+                                    u64 fast = fmalloc_fast(2, g_bin_2);
+                                    switch (fast != 0) { case (1) { return fast; } default {}; };
+                                    size_t cls = 2;
+                                    u64 ptr = bump_alloc(64);
+                                    switch (ptr == 0)
+                                    {
+                                        case (1)
+                                        {
+                                            switch (heap_new_slab(64) == NP_SLAB) { case (1) { return 0; } default {}; };
+                                            ptr = bump_alloc(64);
+                                            switch (ptr == 0) { case (1) { return 0; } default {}; };
+                                        }
+                                        default {};
+                                    };
+                                    switch (!table_insert(ptr, cls, 0, (u64)g_slab_head))
+                                    {
+                                        case (1) { return 0; }
+                                        default  {};
+                                    };
+                                    g_slab_head.used++;
+                                    return ptr;
+                                }
+                                default {};  // size <= 32: already handled above
+                            };
+                        }
+                        default {};
+                    };
+
+                    switch (size <= 128)
+                    {
+                        case (1)
+                        {
+                            switch (size > 64)   // exactly class 3 (65..128 bytes)
+                            {
+                                case (1)
+                                {
+                                    u64 fast = fmalloc_fast(3, g_bin_3);
+                                    switch (fast != 0) { case (1) { return fast; } default {}; };
+                                    size_t cls = 3;
+                                    u64 ptr = bump_alloc(128);
+                                    switch (ptr == 0)
+                                    {
+                                        case (1)
+                                        {
+                                            switch (heap_new_slab(128) == NP_SLAB) { case (1) { return 0; } default {}; };
+                                            ptr = bump_alloc(128);
+                                            switch (ptr == 0) { case (1) { return 0; } default {}; };
+                                        }
+                                        default {};
+                                    };
+                                    switch (!table_insert(ptr, cls, 0, (u64)g_slab_head))
+                                    {
+                                        case (1) { return 0; }
+                                        default  {};
+                                    };
+                                    g_slab_head.used++;
+                                    return ptr;
+                                }
+                                default {};  // size <= 64: already handled above
+                            };
+                        }
+                        default {};
+                    };
+
+                    // Slow path: all other sizes go through the full size_class() dispatch.
+                    size_t cls = size_class((size_t)size);
+
+                    switch (cls == 9)
+                    {
+                        case (1)
+                        {
+                            // Large: dedicated OS slab, no bump involvement
+                            u64 raw = heap_os_alloc((size_t)size);
+                            switch (raw == 0) { case (1) { return 0; } default {}; };
+
+                            // slab field stores OS allocation size so ffree can release correctly
+                            switch (!table_insert(raw, (size_t)size, 1, (size_t)size))
+                            {
+                                case (1)
+                                {
+                                    heap_os_free(raw, (size_t)size);
+                                    return 0;
+                                }
+                                default {};
+                            };
+
+                            g_large_used++;
+                            return raw;
+                        }
+                        default {};
+                    };
+
+                    // Small: try free list bin first
+                    FreeNode* node = bin_pop(cls);
+                    switch (node != NP_FREENODE)
+                    {
+                        case (1)
+                        {
+                            u64 ptr = (u64)node;
+                            // The BLOCK_BINNED entry was kept in the table by ffree,
+                            // so entry.slab is authoritative — no slab scan needed.
+                            BlockEntry* bentry = table_find(ptr);
+                            Slab* owner = NP_SLAB;
+                            switch (bentry != NP_BLOCKENTRY)
+                            {
+                                case (1)
+                                {
+                                    owner        = (Slab*)bentry.slab;
+                                    bentry.kind  = 0;   // BLOCK_SMALL: mark live
+                                }
+                                default {};
+                            };
+                            switch (owner != NP_SLAB)
+                            {
+                                case (1) { owner.used++; }
+                                default  {};
+                            };
+                            return ptr;
+                        }
+                        default {};
+                    };
+
+                    // Bump allocate from current slab
+                    size_t block = class_block_size(cls);
+                    u64 ptr = bump_alloc(block);
+                    switch (ptr == 0)
+                    {
+                        case (1)
+                        {
+                            switch (heap_new_slab(block) == NP_SLAB) { case (1) { return 0; } default {}; };
+                            ptr = bump_alloc(block);
+                            switch (ptr == 0) { case (1) { return 0; } default {}; };
+                        }
+                        default {};
+                    };
+
+                    switch (!table_insert(ptr, cls, 0, (u64)g_slab_head))
+                    {
+                        case (1) { return 0; }
+                        default  {};
+                    };
+
+                    g_slab_head.used++;
+                    return ptr;
+                };
+
                 def ffree(u64 ptr) -> void
                 {
                     switch (ptr == 0) { case (1) { return; } default {}; };
@@ -955,7 +1151,7 @@ namespace standard
                     FreeNode* reuse;
                     Slab* old_owner, new_owner, ws;
 
-                    switch (kind == (u64)1)
+                    switch (kind == 1)
                     {
                         case (1)
                         {
@@ -993,36 +1189,39 @@ namespace standard
                                 case (1)
                                 {
                                     new_ptr = (u64)reuse;
-                                    // Find and increment owning slab for new_ptr
-                                    new_owner = NP_SLAB;
-                                    ws = g_slab_head;
-                                    while (ws != NP_SLAB)
+                                    BlockEntry* reuse_entry = table_find(new_ptr);
+                                    switch (reuse_entry != NP_BLOCKENTRY)
                                     {
-                                        switch (new_ptr >= ws.base & new_ptr < ws.base + (u64)ws.capacity)
+                                        case (1)
                                         {
-                                            case (1) { ws.used++; new_owner = ws; ws = NP_SLAB; }
-                                            default  { ws = ws.next; };
-                                        };
+                                            new_owner = (Slab*)reuse_entry.slab;
+                                            reuse_entry.size = new_cls;
+                                            reuse_entry.kind = 0;  // BLOCK_SMALL: mark live
+                                            switch (new_owner != NP_SLAB)
+                                            {
+                                                case (1) { new_owner.used++; }
+                                                default  {};
+                                            };
+                                        }
+                                        default {};
                                     };
-                                    table_insert(new_ptr, new_cls, 0, (u64)new_owner);
                                     src = (byte*)ptr;
                                     dst = (byte*)new_ptr;
                                     while (i < copy_size) { dst[i] = src[i]; i++; };
-                                    // Decrement old ptr's slab used counter before removing
                                     old_owner = (Slab*)entry.slab;
                                     switch (old_owner != NP_SLAB)
                                     {
                                         case (1) { switch (old_owner.used > 0) { case (1) { old_owner.used--; } default {}; }; }
                                         default  {};
                                     };
-                                    table_remove(ptr);
+                                    entry.kind = (u64)3;   // BLOCK_BINNED
                                     bin_push(old_cls, (FreeNode*)ptr);
                                     return new_ptr;
                                 }
                                 default {};
                             };
 
-                            // No free block in bin Ã¢â‚¬â€ bump allocate, copy, free old
+                            // No free block in bin, bump allocate, copy, free old
                             new_ptr = fmalloc(new_size);
                             switch (new_ptr == 0) { case (1) { return 0; } default {}; };
                             src = (byte*)ptr;
