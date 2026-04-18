@@ -740,8 +740,17 @@ class FluxCompiler:
                         self.logger.warning(f"Linker stderr: {result.stderr}", "linker")
                         failed = True
                 except subprocess.CalledProcessError as e:
-                    self.logger.error(f"Linking failed: {e.stderr}", "linker")
-                    raise
+                    self.logger.error(f"ld failed: {e.stderr}", "linker")
+                    self.logger.step("Falling back to lld-link...", LogLevel.INFO, "linker")
+                    try:
+                        lld_cmd = ["lld-link"] + link_cmd[1:]  # same args, swap linker
+                        result = subprocess.run(lld_cmd, check=True, capture_output=True, text=True)
+                        self.logger.trace(f"lld-link output: {result.stdout}", "linker")
+                        if result.stderr:
+                            self.logger.warning(f"lld-link stderr: {result.stderr}", "linker")
+                    except subprocess.CalledProcessError as e2:
+                        self.logger.error(f"lld-link also failed: {e2.stderr}", "linker")
+                        raise
                 
             # Success!
             self.logger.success(f"Compilation completed: {output_bin}")
