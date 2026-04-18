@@ -137,15 +137,7 @@ namespace standard
                 size_t      g_table_slab_cap = 0;   // byte size of table OS slab
 
                 // Segregated free list bins (indices 0-8)
-                FreeNode* g_bin_0 = NP_FREENODE,
-                          g_bin_1 = NP_FREENODE,
-                          g_bin_2 = NP_FREENODE,
-                          g_bin_3 = NP_FREENODE,
-                          g_bin_4 = NP_FREENODE,
-                          g_bin_5 = NP_FREENODE,
-                          g_bin_6 = NP_FREENODE,
-                          g_bin_7 = NP_FREENODE,
-                          g_bin_8 = NP_FREENODE;
+                FreeNode*[9] g_bins;
 
                 // OS helpers
 
@@ -181,17 +173,39 @@ namespace standard
 
                 def size_class(size_t size) -> size_t
                 {
-                    bool b;
-                    b = size <= 16;   switch (b) { case (1) { return 0; } default {}; };
-                    b = size <= 32;   switch (b) { case (1) { return 1; } default {}; };
-                    b = size <= 64;   switch (b) { case (1) { return 2; } default {}; };
-                    b = size <= 128;  switch (b) { case (1) { return 3; } default {}; };
-                    b = size <= 256;  switch (b) { case (1) { return 4; } default {}; };
-                    b = size <= 512;  switch (b) { case (1) { return 5; } default {}; };
-                    b = size <= 1024; switch (b) { case (1) { return 6; } default {}; };
-                    b = size <= 2048; switch (b) { case (1) { return 7; } default {}; };
-                    b = size <= 4096; switch (b) { case (1) { return 8; } default {}; };
-                    return (size_t)9;
+                    // Fast reject for large blocks (>4096)
+                    switch (size > 4096) { case (1) { return (size_t)9; } default {}; };
+
+                    // Classes map to power-of-two ceilings: 16,32,64,128,256,512,1024,2048,4096
+                    // which are 1<<4 through 1<<12.
+                    // Round size up to the nearest class ceiling, then find the position
+                    // of its highest set bit via successive halving (no inline asm).
+                    // bit_pos(16)=4 -> class 0, bit_pos(4096)=12 -> class 8.
+
+                    // Round size up to the smallest class ceiling >= size.
+                    // Equivalent to: s = size <= 16 ? 16 : next_pow2_ceil(size) clamped to 4096.
+                    // We compute via: s-1, then fill all lower bits, then +1.
+                    size_t s = size - 1;
+                    s |= (s >> 1);
+                    s |= (s >> 2);
+                    s |= (s >> 4);
+                    s |= (s >> 8);
+                    s += 1;
+                    // s is now the next power of two >= size (or size itself if already pow2).
+                    // Clamp to 16 minimum.
+                    switch (s < 16) { case (1) { s = 16; } default {}; };
+
+                    // Find bit position of s (which is a power of two) via right-shifts.
+                    // We know s is in [16..4096] = [1<<4..1<<12].
+                    size_t bit, tmp = s;
+                    switch (tmp >> 8  != 0) { case (1) { bit += 8;  tmp >>= 8;  } default {}; };
+                    switch (tmp >> 4  != 0) { case (1) { bit += 4;  tmp >>= 4;  } default {}; };
+                    switch (tmp >> 2  != 0) { case (1) { bit += 2;  tmp >>= 2;  } default {}; };
+                    switch (tmp >> 1  != 0) { case (1) { bit += 1;              } default {}; };
+
+                    // bit is the index of the highest set bit (4..12).
+                    // class = bit - 4  maps [4..12] -> [0..8].
+                    return bit - 4;
                 };
 
                 def class_block_size(size_t cls) -> size_t
@@ -214,38 +228,17 @@ namespace standard
 
                 def bin_pop(size_t cls) -> FreeNode*
                 {
-                    FreeNode* n = NP_FREENODE;
-                    switch (cls)
-                    {
-                        case (0) { n = g_bin_0; switch (n != NP_FREENODE) { case (1) { g_bin_0 = n.next; } default {}; }; return n; }
-                        case (1) { n = g_bin_1; switch (n != NP_FREENODE) { case (1) { g_bin_1 = n.next; } default {}; }; return n; }
-                        case (2) { n = g_bin_2; switch (n != NP_FREENODE) { case (1) { g_bin_2 = n.next; } default {}; }; return n; }
-                        case (3) { n = g_bin_3; switch (n != NP_FREENODE) { case (1) { g_bin_3 = n.next; } default {}; }; return n; }
-                        case (4) { n = g_bin_4; switch (n != NP_FREENODE) { case (1) { g_bin_4 = n.next; } default {}; }; return n; }
-                        case (5) { n = g_bin_5; switch (n != NP_FREENODE) { case (1) { g_bin_5 = n.next; } default {}; }; return n; }
-                        case (6) { n = g_bin_6; switch (n != NP_FREENODE) { case (1) { g_bin_6 = n.next; } default {}; }; return n; }
-                        case (7) { n = g_bin_7; switch (n != NP_FREENODE) { case (1) { g_bin_7 = n.next; } default {}; }; return n; }
-                        case (8) { n = g_bin_8; switch (n != NP_FREENODE) { case (1) { g_bin_8 = n.next; } default {}; }; return n; }
-                        default  {};
-                    };
-                    return NP_FREENODE;
+                    switch (cls > 8) { case (1) { return NP_FREENODE; } default {}; };
+                    FreeNode* n = g_bins[cls];
+                    switch (n != NP_FREENODE) { case (1) { g_bins[cls] = n.next; } default {}; };
+                    return n;
                 };
 
                 def bin_push(size_t cls, FreeNode* node) -> void
                 {
-                    switch (cls)
-                    {
-                        case (0) { node.next = g_bin_0; g_bin_0 = node; return; }
-                        case (1) { node.next = g_bin_1; g_bin_1 = node; return; }
-                        case (2) { node.next = g_bin_2; g_bin_2 = node; return; }
-                        case (3) { node.next = g_bin_3; g_bin_3 = node; return; }
-                        case (4) { node.next = g_bin_4; g_bin_4 = node; return; }
-                        case (5) { node.next = g_bin_5; g_bin_5 = node; return; }
-                        case (6) { node.next = g_bin_6; g_bin_6 = node; return; }
-                        case (7) { node.next = g_bin_7; g_bin_7 = node; return; }
-                        case (8) { node.next = g_bin_8; g_bin_8 = node; return; }
-                        default  {return;};
-                    };
+                    switch (cls > 8) { case (1) { return; } default {}; };
+                    node.next = g_bins[cls];
+                    g_bins[cls] = node;
                 };
 
                 // Block table
@@ -660,32 +653,9 @@ namespace standard
                 def fmalloc_fast(size_t cls, FreeNode* head) -> u64
                 {
                     switch (head == NP_FREENODE) { case (1) { return 0; } default {}; };
-                    // Advance the bin head (bin_pop body inlined for the three hot classes).
-                    switch (cls)
-                    {
-                        case (1) { g_bin_1 = head.next; }
-                        case (2) { g_bin_2 = head.next; }
-                        case (3) { g_bin_3 = head.next; }
-                        default  {}; // unreachable for fast-path callers
-                    };
-                    u64 ptr = (u64)head;
-                    BlockEntry* bentry = table_find(ptr);
-                    Slab* owner = NP_SLAB;
-                    switch (bentry != NP_BLOCKENTRY)
-                    {
-                        case (1)
-                        {
-                            owner       = (Slab*)bentry.slab;
-                            bentry.kind = 0;   // BLOCK_SMALL: mark live
-                        }
-                        default {};
-                    };
-                    switch (owner != NP_SLAB)
-                    {
-                        case (1) { owner.used++; }
-                        default  {};
-                    };
-                    return ptr;
+                    // Advance the bin head and return directly — no table_find needed.
+                    g_bins[cls] = head.next;
+                    return (u64)head;
                 };
 
                 // Public API
@@ -705,7 +675,7 @@ namespace standard
                             {
                                 case (1)
                                 {
-                                    u64 fast = fmalloc_fast(1, g_bin_1);
+                                    u64 fast = fmalloc_fast(1, g_bins[1]);
                                     switch (fast != 0) { case (1) { return fast; } default {}; };
                                     // Bin empty: fall through to bump path with cls already known.
                                     size_t cls = 1;
@@ -742,7 +712,7 @@ namespace standard
                             {
                                 case (1)
                                 {
-                                    u64 fast = fmalloc_fast(2, g_bin_2);
+                                    u64 fast = fmalloc_fast(2, g_bins[2]);
                                     switch (fast != 0) { case (1) { return fast; } default {}; };
                                     size_t cls = 2;
                                     u64 ptr = bump_alloc(64);
@@ -778,7 +748,7 @@ namespace standard
                             {
                                 case (1)
                                 {
-                                    u64 fast = fmalloc_fast(3, g_bin_3);
+                                    u64 fast = fmalloc_fast(3, g_bins[3]);
                                     switch (fast != 0) { case (1) { return fast; } default {}; };
                                     size_t cls = 3;
                                     u64 ptr = bump_alloc(128);
@@ -834,34 +804,12 @@ namespace standard
                         default {};
                     };
 
-                    // Small: try free list bin first
+                    // Small: try free list bin first — return directly, no table_find needed.
                     FreeNode* node = bin_pop(cls);
                     switch (node != NP_FREENODE)
                     {
-                        case (1)
-                        {
-                            u64 ptr = (u64)node;
-                            // The BLOCK_BINNED entry was kept in the table by ffree,
-                            // so entry.slab is authoritative — no slab scan needed.
-                            BlockEntry* bentry = table_find(ptr);
-                            Slab* owner = NP_SLAB;
-                            switch (bentry != NP_BLOCKENTRY)
-                            {
-                                case (1)
-                                {
-                                    owner        = (Slab*)bentry.slab;
-                                    bentry.kind  = 0;   // BLOCK_SMALL: mark live
-                                }
-                                default {};
-                            };
-                            switch (owner != NP_SLAB)
-                            {
-                                case (1) { owner.used++; }
-                                default  {};
-                            };
-                            return ptr;
-                        }
-                        default {};
+                        case (1) { return (u64)node; }
+                        default  {};
                     };
 
                     // Bump allocate from current slab
@@ -903,7 +851,7 @@ namespace standard
                             {
                                 case (1)
                                 {
-                                    u64 fast = fmalloc_fast(1, g_bin_1);
+                                    u64 fast = fmalloc_fast(1, g_bins[1]);
                                     switch (fast != 0) { case (1) { return fast; } default {}; };
                                     // Bin empty: fall through to bump path with cls already known.
                                     size_t cls = 1;
@@ -940,7 +888,7 @@ namespace standard
                             {
                                 case (1)
                                 {
-                                    u64 fast = fmalloc_fast(2, g_bin_2);
+                                    u64 fast = fmalloc_fast(2, g_bins[2]);
                                     switch (fast != 0) { case (1) { return fast; } default {}; };
                                     size_t cls = 2;
                                     u64 ptr = bump_alloc(64);
@@ -976,7 +924,7 @@ namespace standard
                             {
                                 case (1)
                                 {
-                                    u64 fast = fmalloc_fast(3, g_bin_3);
+                                    u64 fast = fmalloc_fast(3, g_bins[3]);
                                     switch (fast != 0) { case (1) { return fast; } default {}; };
                                     size_t cls = 3;
                                     u64 ptr = bump_alloc(128);
@@ -1032,34 +980,12 @@ namespace standard
                         default {};
                     };
 
-                    // Small: try free list bin first
+                    // Small: try free list bin first — return directly, no table_find needed.
                     FreeNode* node = bin_pop(cls);
                     switch (node != NP_FREENODE)
                     {
-                        case (1)
-                        {
-                            u64 ptr = (u64)node;
-                            // The BLOCK_BINNED entry was kept in the table by ffree,
-                            // so entry.slab is authoritative — no slab scan needed.
-                            BlockEntry* bentry = table_find(ptr);
-                            Slab* owner = NP_SLAB;
-                            switch (bentry != NP_BLOCKENTRY)
-                            {
-                                case (1)
-                                {
-                                    owner        = (Slab*)bentry.slab;
-                                    bentry.kind  = 0;   // BLOCK_SMALL: mark live
-                                }
-                                default {};
-                            };
-                            switch (owner != NP_SLAB)
-                            {
-                                case (1) { owner.used++; }
-                                default  {};
-                            };
-                            return ptr;
-                        }
-                        default {};
+                        case (1) { return (u64)node; }
+                        default  {};
                     };
 
                     // Bump allocate from current slab
@@ -1110,17 +1036,8 @@ namespace standard
                         default {};
                     };
 
-                    // Small block: decrement owning slab counter, return to bin.
-                    // Keep the table entry alive as BLOCK_BINNED (kind=3) so that
-                    // the reuse path in fmalloc can read entry.slab directly without
-                    // scanning the slab list.
-                    Slab* owner = (Slab*)slab;
-                    switch (owner != NP_SLAB)
-                    {
-                        case (1) { switch (owner.used > 0) { case (1) { owner.used--; } default {}; }; }
-                        default  {};
-                    };
-                    // Mark in-place as BLOCK_BINNED; key and slab remain authoritative.
+                    // Small block: mark BLOCK_BINNED and return to bin.
+                    // Table entry stays alive so coalesce_heap can find the owning slab.
                     entry.kind = (u64)3;
                     bin_push(size, (FreeNode*)ptr);
                 };

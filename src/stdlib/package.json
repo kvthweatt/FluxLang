@@ -245,7 +245,7 @@
       "dependencies": {}
     },
     "flux-allocators": {
-      "version": "1.0.4",
+      "version": "1.0.5",
       "entry": "allocators.fx",
       "path": "runtime",
       "description": "Standard memory allocators",

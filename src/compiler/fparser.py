@@ -2186,6 +2186,10 @@ class FluxParser:
                         self.advance()
                 if self.expect(TokenType.RIGHT_BRACE):
                     self.advance()
+
+            # Consume leading pointer levels (mirrors type_spec order: ptr then bracket)
+            while self.expect(TokenType.MULTIPLY):
+                self.advance()
             
             # Handle array dimensions
             while self.expect(TokenType.LEFT_BRACKET):
@@ -2966,7 +2970,8 @@ class FluxParser:
         elif self.expect(TokenType.PLUS_ASSIGN, TokenType.MINUS_ASSIGN, TokenType.MULTIPLY_ASSIGN, 
                          TokenType.DIVIDE_ASSIGN, TokenType.MODULO_ASSIGN, TokenType.POWER_ASSIGN,
                          TokenType.XOR_ASSIGN, TokenType.BITXOR_ASSIGN, TokenType.BITXNOR_ASSIGN, TokenType.BITSHIFT_LEFT_ASSIGN, TokenType.BITSHIFT_RIGHT_ASSIGN,
-                         TokenType.BITAND_ASSIGN, TokenType.BITOR_ASSIGN, TokenType.BITNAND_ASSIGN, TokenType.BITNOR_ASSIGN):
+                         TokenType.BITAND_ASSIGN, TokenType.BITOR_ASSIGN, TokenType.BITNAND_ASSIGN, TokenType.BITNOR_ASSIGN,
+                         TokenType.OR_ASSIGN, TokenType.AND_ASSIGN):
             # Handle compound assignments
             op_token = self.current_token.type
             self.advance()
