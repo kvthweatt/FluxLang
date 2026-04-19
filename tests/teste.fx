@@ -2,22 +2,22 @@
 
 using standard::io::console;
 
-enum testEnum
-{
-    A,
-    B,
-    C,
-    D,
-    E
-};
-
 def main() -> int
 {
-    testEnum e;
+    byte*str1=@"Testing address of string.";
+    byte*str2=@f"{str1}";
+    byte*str3=@i"{}":{str2};
+    byte*str4=@[0x41, 0x42, 0x43, 0x44, 0x00];
 
-    e = testEnum.B;
+    char* x = @'x';
 
-    println(e);
+    int x = 5;
+
+    int* px @= x;
+
+    println(str3);
+    println(str4);
+    println(*px);
 
     return 0;
 };

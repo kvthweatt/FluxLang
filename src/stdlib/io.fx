@@ -928,6 +928,15 @@ namespace standard
 #endif; // Windows
 
 #ifdef __LINUX__
+            extern
+            {
+                def !!
+                    fseek(void* stream, long offset, int whence) -> int,
+                    ftell(void* stream) -> long,
+                    rewind(void* stream) -> void,
+                    fread(void* ptr, ulong size, ulong count, void* stream) -> ulong,
+                    fclose(void* stream) -> int;
+            };
 #endif;
         };
     };

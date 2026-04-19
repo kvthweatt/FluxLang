@@ -590,8 +590,20 @@ class CodegenVisitor:
 
     def visit_AddressOf(self, node, builder, module):
         from fast import (Literal, Identifier, PointerDeref, MemberAccess,
-                          ArrayAccess, FunctionCall)
+                          ArrayAccess, FunctionCall, NotNull, AddressOf,
+                          StringLiteral, FStringLiteral, ArrayLiteral)
         expr = node.expression
+        # Parser bug workaround: `@x!?` is mis-parsed as AddressOf(NotNull(x))
+        # instead of the correct NotNull(AddressOf(x)).  Detect and re-route.
+        if isinstance(expr, NotNull):
+            inner_addr = AddressOf(expr.operand)
+            inner_addr.source_line = node.source_line
+            inner_addr.source_col  = node.source_col
+            addr_val = self.visit(inner_addr, builder, module)
+            i8   = ir.IntType(8)
+            null = ir.Constant(addr_val.type, None)
+            cmp  = builder.icmp_unsigned('!=', addr_val, null, name='not_null')
+            return builder.zext(cmp, i8, name='not_null_result')
         if isinstance(expr, Literal):
             literal_val = self.visit(expr, builder, module)
             temp = builder.alloca(literal_val.type)
@@ -687,6 +699,10 @@ class CodegenVisitor:
             temp_alloca = builder.alloca(func_result.type, name="func_result_temp")
             builder.store(func_result, temp_alloca)
             return temp_alloca
+        if isinstance(expr, (StringLiteral, FStringLiteral, ArrayLiteral)):
+            # All three visitors already return a pointer (global gvar, stack alloca, or gep),
+            # so we can return it directly as the address of the data.
+            return self.visit(expr, builder, module)
         raise ValueError(
             f"Cannot take address of {type(expr).__name__} [{node.source_line}:{node.source_col}]")
 
@@ -1540,7 +1556,8 @@ class CodegenVisitor:
             if isinstance(true_val.type.pointee, (ir.IntType, ir.FloatType, ir.DoubleType)):
                 true_val = builder.load(true_val, name='ternary_true_load')
         true_end_block = builder.block
-        builder.branch(merge_block)
+        if not builder.block.is_terminated:
+            builder.branch(merge_block)
 
         builder.position_at_start(false_block)
         false_val = self.visit(node.false_expr, builder, module)
@@ -1550,18 +1567,27 @@ class CodegenVisitor:
             if isinstance(false_val.type.pointee, (ir.IntType, ir.FloatType, ir.DoubleType)):
                 false_val = builder.load(false_val, name='ternary_false_load')
         false_end_block = builder.block
-        builder.branch(merge_block)
+        if not builder.block.is_terminated:
+            builder.branch(merge_block)
 
         builder.position_at_start(merge_block)
         if true_val.type != false_val.type:
             if isinstance(true_val.type, ir.IntType) and isinstance(false_val.type, ir.IntType):
                 if true_val.type.width < false_val.type.width:
                     builder.position_at_end(true_end_block)
+                    term = true_end_block.terminator
+                    if term is not None:
+                        true_end_block.instructions.remove(term)
+                        true_end_block.terminator = None
                     true_val = builder.sext(true_val, false_val.type)
                     builder.branch(merge_block)
                     builder.position_at_start(merge_block)
                 elif false_val.type.width < true_val.type.width:
                     builder.position_at_end(false_end_block)
+                    term = false_end_block.terminator
+                    if term is not None:
+                        false_end_block.instructions.remove(term)
+                        false_end_block.terminator = None
                     false_val = builder.sext(false_val, true_val.type)
                     builder.branch(merge_block)
                     builder.position_at_start(merge_block)
@@ -1637,6 +1663,34 @@ class CodegenVisitor:
         phi.add_incoming(left_val,  left_block)
         phi.add_incoming(right_val, right_end_block)
         return phi
+
+    def visit_NotNull(self, node, builder, module):
+        # Evaluate the operand unconditionally — no branches needed, this is
+        # a pure comparison that folds into a single LLVM instruction.
+        val = self.visit(node.operand, builder, module)
+
+        i8 = ir.IntType(8)
+
+        if isinstance(val.type, ir.PointerType):
+            # Pointer: icmp ne ptr, null  -> i1, then zext to i8
+            null = ir.Constant(val.type, None)
+            cmp  = builder.icmp_unsigned('!=', val, null, name='not_null')
+        elif isinstance(val.type, ir.IntType):
+            # Integer / bool / data-width value: icmp ne val, 0  -> i1, then zext to i8
+            zero = ir.Constant(val.type, 0)
+            cmp  = builder.icmp_signed('!=', val, zero, name='not_zero')
+        elif isinstance(val.type, (ir.FloatType, ir.DoubleType)):
+            # Float: fcmp one val, 0.0  (ordered, not-equal — false on NaN)  -> i1, zext to i8
+            zero = ir.Constant(val.type, 0.0)
+            cmp  = builder.fcmp_ordered('!=', val, zero, name='not_zero_f')
+        else:
+            raise TypeError(
+                f"'!?' operator not supported for type {val.type} "
+                f"[{node.source_line}:{node.source_col}]")
+
+        # Widen i1 -> i8 so the result is a usable bool-width integer that
+        # can be stored, compared, or passed without further extension.
+        return builder.zext(cmp, i8, name='not_null_result')
 
     def visit_BitSlice(self, node, builder, module):
         val       = self.visit(node.value, builder, module)
@@ -3287,6 +3341,7 @@ class CodegenVisitor:
                         if stmt_result is not None:
                             result = stmt_result
                     except Exception as e:
+                        import traceback as _tb
                         current_frame = _inspect.currentframe()
                         caller_frame = current_frame.f_back
                         caller_name = caller_frame.f_code.co_name
@@ -3295,6 +3350,9 @@ class CodegenVisitor:
                         print("Full call stack (from current to outermost):")
                         for i, frame_info in enumerate(reversed(stack)):
                             print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
+                        print("--- REAL EXCEPTION ---")
+                        _tb.print_exc()
+                        print("--- END REAL EXCEPTION ---")
                         loc = ""
                         if hasattr(stmt, 'source_line') and stmt.source_line:
                             loc = f" [{module.name}:{stmt.source_line}:{stmt.source_col}]"
@@ -3382,6 +3440,22 @@ class CodegenVisitor:
 
     def visit_IfExpression(self, node, builder, module):
         from fast import NoInit
+
+        def _coerce_ifexpr_operand(expr, ref_val, builder, module):
+            """Visit an if-expression operand, handling raw Python scalars that the
+            parser may emit directly (e.g. the ``0`` in ``x if (c) else 0``)."""
+            if isinstance(expr, (int, float, bool)):
+                # Raw scalar: emit as a constant matching ref_val's type when available.
+                if ref_val is not None and isinstance(ref_val.type, ir.IntType):
+                    return ir.Constant(ref_val.type, int(expr))
+                if ref_val is not None and isinstance(ref_val.type, (ir.FloatType, ir.DoubleType)):
+                    return ir.Constant(ref_val.type, float(expr))
+                # No type hint available yet: default to i64 for ints, double for floats.
+                if isinstance(expr, float):
+                    return ir.Constant(ir.DoubleType(), expr)
+                return ir.Constant(ir.IntType(64), int(expr))
+            return self.visit(expr, builder, module)
+
         cond_val = self.visit(node.condition, builder, module)
 
         if isinstance(cond_val.type, ir.IntType) and cond_val.type.width != 1:
@@ -3395,33 +3469,47 @@ class CodegenVisitor:
         builder.cbranch(cond_val, value_block, else_block)
 
         builder.position_at_start(value_block)
-        value_val = self.visit(node.value_expr, builder, module)
+        value_val = _coerce_ifexpr_operand(node.value_expr, None, builder, module)
         value_end_block = builder.block
-        builder.branch(merge_block)
+        if not builder.block.is_terminated:
+            builder.branch(merge_block)
 
         builder.position_at_start(else_block)
         if node.else_expr is not None:
             if isinstance(node.else_expr, NoInit):
                 else_val = ir.Constant(value_val.type, ir.Undefined)
             else:
-                else_val = self.visit(node.else_expr, builder, module)
+                else_val = _coerce_ifexpr_operand(node.else_expr, value_val, builder, module)
         else:
             else_val = ir.Constant(value_val.type, 0)
 
         else_end_block = builder.block
-        builder.branch(merge_block)
+        if not builder.block.is_terminated:
+            builder.branch(merge_block)
 
         builder.position_at_start(merge_block)
 
         if value_val.type != else_val.type:
             if isinstance(value_val.type, ir.IntType) and isinstance(else_val.type, ir.IntType):
                 if value_val.type.width < else_val.type.width:
+                    # Re-open value_end_block: remove its branch terminator,
+                    # insert the sext, then re-emit the branch.
                     builder.position_at_end(value_end_block)
+                    term = value_end_block.terminator
+                    if term is not None:
+                        value_end_block.instructions.remove(term)
+                        value_end_block.terminator = None
                     value_val = builder.sext(value_val, else_val.type)
                     builder.branch(merge_block)
                     builder.position_at_start(merge_block)
                 elif else_val.type.width < value_val.type.width:
+                    # Re-open else_end_block: remove its branch terminator,
+                    # insert the sext, then re-emit the branch.
                     builder.position_at_end(else_end_block)
+                    term = else_end_block.terminator
+                    if term is not None:
+                        else_end_block.instructions.remove(term)
+                        else_end_block.terminator = None
                     else_val = builder.sext(else_val, value_val.type)
                     builder.branch(merge_block)
                     builder.position_at_start(merge_block)
@@ -3737,7 +3825,7 @@ class CodegenVisitor:
         return None
 
     def visit_ReturnStatement(self, node, builder, module):
-        from fast import Identifier
+        from fast import Identifier, IfExpression
         if builder.block.is_terminated:
             return None
 
@@ -3762,6 +3850,12 @@ class CodegenVisitor:
 
         if ret_val is None:
             builder.ret_void()
+            return None
+
+        # After visiting an IfExpression the builder is positioned at the
+        # ifexpr_merge block. If that block is already terminated (e.g. a
+        # nested return inside one of the arms already emitted a ret), bail.
+        if builder.block.is_terminated:
             return None
 
         func = builder.block.function
@@ -5302,7 +5396,20 @@ class CodegenVisitor:
 
     def _vardecl_initialize_local(self, node, builder, module, alloca, llvm_type, resolved_type_spec):
         """Initialize local variable with initial value."""
-        from fast import ArrayLiteral as _ArrayLiteral, ArrayComprehension as _ArrayComprehension, StringLiteral as _StringLiteral, FunctionCall as _FunctionCall, Identifier as _Identifier
+        from fast import ArrayLiteral as _ArrayLiteral, ArrayComprehension as _ArrayComprehension, StringLiteral as _StringLiteral, FunctionCall as _FunctionCall, Identifier as _Identifier, AddressOf as _AddressOf
+        # When the RHS is @[...] and the LHS is a pointer (e.g. byte*), propagate the
+        # pointee type as the array element_type so elements are not defaulted to i32.
+        if (isinstance(node.initial_value, _AddressOf) and
+                isinstance(node.initial_value.expression, _ArrayLiteral) and
+                node.initial_value.expression.element_type is None and
+                resolved_type_spec is not None and
+                getattr(resolved_type_spec, 'pointer_depth', 0) > 0):
+            node.initial_value.expression.element_type = resolved_type_spec.__class__(
+                base_type=resolved_type_spec.base_type,
+                pointer_depth=resolved_type_spec.pointer_depth - 1,
+                bit_width=getattr(resolved_type_spec, 'bit_width', None),
+                custom_typename=getattr(resolved_type_spec, 'custom_typename', None),
+            )
         # Handle array instance initialization
         if isinstance(node.initial_value, _ArrayLiteral):
             # If target is an integer, pack the array into it

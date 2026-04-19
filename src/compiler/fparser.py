@@ -2228,7 +2228,8 @@ class FluxParser:
             # Variable declaration should be followed by one of these tokens
             return self.expect(TokenType.ASSIGN, TokenType.SEMICOLON, 
                              TokenType.LEFT_PAREN, TokenType.LEFT_BRACE,
-                             TokenType.COMMA, TokenType.LEFT_BRACKET, TokenType.FROM)
+                             TokenType.COMMA, TokenType.LEFT_BRACKET, TokenType.FROM,
+                             TokenType.ADDRESS_ASSIGN)
 
     def variable_declaration_statement(self) -> Union[Statement, List[Statement]]:
         """
@@ -2317,7 +2318,13 @@ class FluxParser:
             initializers = []
             
             # Check if first variable has an initializer or FROM keyword
-            if self.expect(TokenType.FROM):
+            if self.expect(TokenType.ADDRESS_ASSIGN):
+                # `byte* x @= expr;` is sugar for `byte* x = @expr;`
+                addr_tok = self.current_token
+                self.advance()
+                rhs = self.expression()
+                initializers.append(AddressOf(rhs).set_location(addr_tok.line, addr_tok.column))
+            elif self.expect(TokenType.FROM):
                 # Syntactic sugar: Type name from source; => Type name = Type from source;
                 self.advance()
                 source_expr = self.expression()
@@ -2977,6 +2984,13 @@ class FluxParser:
             self.advance()
             value = self.assignment_expression()
             return CompoundAssignment(expr, op_token, value).set_location(tok.line, tok.column)
+        elif self.expect(TokenType.ADDRESS_ASSIGN):
+            # `x @= expr;` is sugar for `x = @expr;`
+            addr_tok = self.current_token
+            self.advance()
+            rhs = self.assignment_expression()
+            value = AddressOf(rhs).set_location(addr_tok.line, addr_tok.column)
+            return Assignment(expr, value).set_location(tok.line, tok.column)
         elif self.expect(TokenType.TERNARY_ASSIGN):
             # Handle ternary assignment: x ?= value  (assign value to x only if x == 0)
             self.advance()
@@ -3695,6 +3709,13 @@ class FluxParser:
                     break
                 self.advance()
                 expr = UnaryOp(Operator.DECREMENT, expr, is_postfix=True).set_location(tok.line, tok.column)
+            elif self.expect(TokenType.NOT_NULL):
+                # Postfix not-null operator: expr!?
+                # Evaluates to true (i8 1) when operand is non-zero/non-null,
+                # false (i8 0) when it is zero/null.
+                tok = self.current_token
+                self.advance()
+                expr = NotNull(expr).set_location(tok.line, tok.column)
             elif self.expect(TokenType.AS):
                 # AS cast expression (postfix) - support all type casts
                 tok = self.current_token

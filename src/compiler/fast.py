@@ -688,6 +688,36 @@ class NullCoalesce(Expression):
     """
     left: Expression
     right: Expression
+
+
+@dataclass
+class NotNull(Expression):
+    """
+    Not-null operator: expr!?
+
+    Postfix unary operator that evaluates to True (i8 1) when the operand is
+    non-zero/non-null, and False (i8 0) when it is zero/null.
+
+    Semantics:
+        ptr!?          ->  ptr != 0   (boolean i1, zero-extended to i8)
+        x!?            ->  x  != 0
+        obj.field!?    ->  obj.field != 0
+
+    The operator sits in the postfix position because the subject is already
+    in mind when the assertion is made — mirroring natural language:
+        "The pointer isn't null!?"  ->  ptr!?
+
+    Codegen produces an LLVM icmp ne ... 0 (or fcmp one for floats), then
+    zext i1 to i8 so the result is a usable bool-width integer.
+
+    Example:
+        if (ptr!?) { use(ptr); };
+        bool live = node.next!?;
+    """
+    operand: Expression
+
+    def __repr__(self) -> str:
+        return f"{self.operand}!?"
     
 
 

@@ -98,7 +98,9 @@ extern
         malloc(size_t size) -> void*,
         free(void* ptr) -> void,
         calloc(size_t count, size_t size) -> void*,
-        realloc(void* ptr, size_t new_size) -> void*;
+        realloc(void* ptr, size_t new_size) -> void*,
+        mmap(u64, size_t, int, int, int, i64) -> u64,
+        munmap(u64, size_t)                   -> int;
 };
 ///
 def !!malloc(size_t size) -> void*
@@ -172,13 +174,6 @@ def !!realloc(void* ptr, size_t new_size) -> void*
     return new_ptr;
 };
 ///
-
-extern
-{
-    def !!
-        mmap(u64, size_t, int, int, int, i64) -> u64,
-        munmap(u64, size_t)                   -> int;
-};
 #endif; //  /LINUX
 
 #ifdef __MACOS__

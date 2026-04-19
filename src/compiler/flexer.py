@@ -195,15 +195,16 @@ class TokenType(Enum):
     SCOPE = auto()          # ::
     QUESTION = auto()       # ?     a?b:c = Parse as ternary
     TERNARY_ASSIGN = auto() # ?=    x ?= 45 // assign if x == 0
+    ADDRESS_ASSIGN = auto() # @=    byte* x @= "I love anonymous allocations!";
+    NULL_COALESCE = auto()  # ??
+    NOT_NULL = auto()       # !?
     COLON = auto()          # :
     TIE = auto()            # ~             Ownership/move semantics
-    LAMBDA_ARROW = auto()   # <:-
 
     # Directionals
     RETURN_ARROW = auto()   # ->
     CHAIN_ARROW = auto()    # <-
     RECURSE_ARROW = auto()  # <~
-    NULL_COALESCE = auto()  # ??
     NO_MANGLE = auto()      # !! tell the compiler not to mangle this name at all for any reason.
 
     # SPECIAL
@@ -264,7 +265,6 @@ triple_char_tokens = {
     '^^=': TokenType.XOR_ASSIGN,
     '{}*': TokenType.FUNCTION_POINTER,
     '(@)': TokenType.ADDRESS_CAST,
-    '<:-': TokenType.LAMBDA_ARROW,
     '...': TokenType.ELLIPSIS,
 } | triple_binary_tokens
 
@@ -303,6 +303,8 @@ double_char_tokens = {
     '..': TokenType.RANGE,
     '::': TokenType.SCOPE,
     '?=': TokenType.TERNARY_ASSIGN,
+    '!?': TokenType.NOT_NULL,
+    '@=': TokenType.ADDRESS_ASSIGN,
     '``': TokenType.BITSLICE
 } | double_binary_tokens
 

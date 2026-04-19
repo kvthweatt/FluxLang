@@ -110,8 +110,8 @@ struct RingAllocResult
 };
 
 #def NP_BLOCKENTRY (BlockEntry*)0; // Null block entry pointer
-#def NP_FREENODE (FreeNode*)0;     // Null free node pointer
-#def NP_SLAB     (Slab*)0;         // Null slab pointer
+#def NP_FREENODE   (FreeNode*)0;   // Null free node pointer
+#def NP_SLAB       (Slab*)0;       // Null slab pointer
 
 #def SLAB_HEADER_SIZE 40;
 #def SLAB_ENTRY_SIZE  32;
@@ -461,23 +461,15 @@ namespace standard
 
                 def table_insert(u64 key, size_t size, u64 kind, u64 slab) -> bool
                 {
-                    switch (g_table == NP_BLOCKENTRY)
+                    if (g_table == NP_BLOCKENTRY)
                     {
-                        case (1)
-                        {
-                            switch (!table_init()) { case (1) { return false; } default {}; };
-                        }
-                        default {};
+                        if (!table_init()) { return false; };
                     };
 
                     // Grow if load > 50%
-                    switch (g_table_count * 2 >= g_table_cap)
+                    if (g_table_count * 2 >= g_table_cap)
                     {
-                        case (1)
-                        {
                             switch (!table_grow()) { case (1) { return false; } default {}; };
-                        }
-                        default {};
                     };
 
                     table_raw_insert(g_table, g_table_cap, key, size, kind, slab);
@@ -644,18 +636,18 @@ namespace standard
                 def bump_alloc(size_t bytes) -> u64
                 {
                     Slab* slab = g_slab_head;
-                    switch (slab == NP_SLAB) { case (1) { return 0; } default {}; };
-                    switch (slab.frontier + bytes > slab.capacity) { case (1) { return 0; } default {}; };
-                    u64 ptr     = (u64)((byte*)slab.base + slab.frontier);
+                    bool b = slab == NP_SLAB;
+                    if (b) { return 0; };
+                    bool ret = ((slab != NP_SLAB) & (slab.frontier + bytes <= slab.capacity));
+                    u64 ptr       = (u64)((byte*)slab.base + slab.frontier);
                     slab.frontier = slab.frontier + bytes;
-                    return ptr;
+                    return ptr * ret;
                 };
-
 
                 def fmalloc_fast(size_t cls) -> u64
                 {
                     FreeNode* head = g_bins[cls];
-                    switch (head == NP_FREENODE) { case (1) { return 0; } default {}; };
+                    if (head == NP_FREENODE) { return 0; };
                     g_bins[cls] = head.next;
                     return (u64)head;
                 };
@@ -664,118 +656,81 @@ namespace standard
 
                 def fmalloc(size_t size) -> u64
                 {
-                    switch (size == 0) { case (1) { return 0; } default {}; };
+                    if (size is void) { return size; };
 
                     // Fast path: bypass size_class() for the three most common sizes.
                     // Each branch resolves cls and the bin head as constants, so no
                     // switch dispatch overhead inside fmalloc_fast.
-                    switch (size <= 32)
+                    if (size <= 32)
                     {
-                        case (1)
+                        if (size > 16)   // exactly class 1 (17..32 bytes)
                         {
-                            switch (size > 16)   // exactly class 1 (17..32 bytes)
+                            u64 fast = fmalloc_fast(1);
+                            if (fast != void) { return fast; };
+                            // Bin empty: fall through to bump path with cls already known.
+                            size_t cls = 1;
+                            u64 ptr = bump_alloc(32);
+                            if (ptr is void)
                             {
-                                case (1)
-                                {
-                                    u64 fast = fmalloc_fast(1);
-                                    switch (fast != 0) { case (1) { return fast; } default {}; };
-                                    // Bin empty: fall through to bump path with cls already known.
-                                    size_t cls = 1;
-                                    u64 ptr = bump_alloc(32);
-                                    switch (ptr == 0)
-                                    {
-                                        case (1)
-                                        {
-                                            switch (heap_new_slab(32) == NP_SLAB) { case (1) { return 0; } default {}; };
-                                            ptr = bump_alloc(32);
-                                            switch (ptr == 0) { case (1) { return 0; } default {}; };
-                                        }
-                                        default {};
-                                    };
-                                    switch (!table_insert(ptr, cls, 0, (u64)g_slab_head))
-                                    {
-                                        case (1) { return 0; }
-                                        default  {};
-                                    };
-                                    g_slab_head.used++;
-                                    return ptr;
-                                }
-                                default {};  // size <= 16: handled by slow path (class 0)
+                                    if (heap_new_slab(32) is NP_SLAB) { return 0; };
+                                    ptr = bump_alloc(32);
+                                    if (ptr is void) { return 0; };
                             };
-                        }
-                        default {};
+
+                            if (!table_insert(ptr, cls, 0, (u64)g_slab_head))
+                            {
+                                return 0;
+                            };
+                            g_slab_head.used++;
+                            return ptr;
+                        };
                     };
 
-                    switch (size <= 64)
+                    if (size <= 64)
                     {
-                        case (1)
+                        if (size > 32)   // exactly class 2 (33..64 bytes)
                         {
-                            switch (size > 32)   // exactly class 2 (33..64 bytes)
+                            u64 fast = fmalloc_fast(2);
+                            if (fast != void) { return fast; };
+                            size_t cls = 2;
+                            u64 ptr = bump_alloc(64);
+                            if (ptr is void)
                             {
-                                case (1)
-                                {
-                                    u64 fast = fmalloc_fast(2);
-                                    switch (fast != 0) { case (1) { return fast; } default {}; };
-                                    size_t cls = 2;
-                                    u64 ptr = bump_alloc(64);
-                                    switch (ptr == 0)
-                                    {
-                                        case (1)
-                                        {
-                                            switch (heap_new_slab(64) == NP_SLAB) { case (1) { return 0; } default {}; };
-                                            ptr = bump_alloc(64);
-                                            switch (ptr == 0) { case (1) { return 0; } default {}; };
-                                        }
-                                        default {};
-                                    };
-                                    switch (!table_insert(ptr, cls, 0, (u64)g_slab_head))
-                                    {
-                                        case (1) { return 0; }
-                                        default  {};
-                                    };
-                                    g_slab_head.used++;
-                                    return ptr;
-                                }
-                                default {};  // size <= 32: already handled above
+                                if (heap_new_slab(64) is NP_SLAB) { return 0; };
+                                ptr = bump_alloc(64);
+                                if (ptr is void) { return 0; };
                             };
-                        }
-                        default {};
+
+                            if (!table_insert(ptr, cls, 0, (u64)g_slab_head))
+                            {
+                                return 0;
+                            };
+                            g_slab_head.used++;
+                            return ptr;
+                        };
                     };
 
-                    switch (size <= 128)
+                    if (size <= 128)
                     {
-                        case (1)
+                        if (size > 64)   // exactly class 3 (65..128 bytes)
                         {
-                            switch (size > 64)   // exactly class 3 (65..128 bytes)
+                            u64 fast = fmalloc_fast(3);
+                            if (fast != 0) { return fast; };
+                            size_t cls = 3;
+                            u64 ptr = bump_alloc(128);
+                            if (ptr is void)
                             {
-                                case (1)
-                                {
-                                    u64 fast = fmalloc_fast(3);
-                                    switch (fast != 0) { case (1) { return fast; } default {}; };
-                                    size_t cls = 3;
-                                    u64 ptr = bump_alloc(128);
-                                    switch (ptr == 0)
-                                    {
-                                        case (1)
-                                        {
-                                            switch (heap_new_slab(128) == NP_SLAB) { case (1) { return 0; } default {}; };
-                                            ptr = bump_alloc(128);
-                                            switch (ptr == 0) { case (1) { return 0; } default {}; };
-                                        }
-                                        default {};
-                                    };
-                                    switch (!table_insert(ptr, cls, 0, (u64)g_slab_head))
-                                    {
-                                        case (1) { return 0; }
-                                        default  {};
-                                    };
-                                    g_slab_head.used++;
-                                    return ptr;
-                                }
-                                default {};  // size <= 64: already handled above
+                                    if (heap_new_slab(128) == NP_SLAB) { return 0; };
+                                    ptr = bump_alloc(128);
+                                    if (ptr is void) { return 0; };
                             };
-                        }
-                        default {};
+                            if (!table_insert(ptr, cls, 0, (u64)g_slab_head))
+                            {
+                                return 0;
+                            };
+                            g_slab_head.used++;
+                            return ptr;
+                        };
                     };
 
                     // Slow path: all other sizes go through the full size_class() dispatch.
@@ -817,13 +772,13 @@ namespace standard
                     // Bump allocate from current slab
                     size_t block = class_block_size(cls);
                     u64 ptr = bump_alloc(block);
-                    switch (ptr == 0)
+                    switch (ptr is void)
                     {
                         case (1)
                         {
                             switch (heap_new_slab(block) == NP_SLAB) { case (1) { return 0; } default {}; };
                             ptr = bump_alloc(block);
-                            switch (ptr == 0) { case (1) { return 0; } default {}; };
+                            switch (ptr is void) { case (1) { return 0; } default {}; };
                         }
                         default {};
                     };
@@ -845,7 +800,7 @@ namespace standard
 
                 def ffree(u64 ptr) -> void
                 {
-                    switch (ptr == 0) { case (1) { return; } default {}; };
+                    switch (ptr is void) { case (1) { return; } default {}; };
 
                     BlockEntry* entry = table_find(ptr);
                     switch (entry == NP_BLOCKENTRY) { case (1) { return; } default {}; };
@@ -880,7 +835,7 @@ namespace standard
 
                 def frealloc(u64 ptr, size_t new_size) -> u64
                 {
-                    switch (ptr == 0) { case (1) { return fmalloc(new_size); } default {}; };
+                    switch (ptr is void) { case (1) { return fmalloc(new_size); } default {}; };
                     switch (new_size == 0) { case (1) { ffree(ptr); return 0; } default {}; };
 
                     BlockEntry* entry = table_find(ptr);
@@ -971,7 +926,7 @@ namespace standard
 
                             // No free block in bin, bump allocate, copy, free old
                             new_ptr = fmalloc(new_size);
-                            switch (new_ptr == 0) { case (1) { return 0; } default {}; };
+                            switch (new_ptr is void) { case (1) { return 0; } default {}; };
                             src = (byte*)ptr;
                             dst = (byte*)new_ptr;
                             i = 0;
@@ -983,7 +938,7 @@ namespace standard
 
                     // Large block growing or shrinking to small: must move
                     new_ptr = fmalloc(new_size);
-                    switch (new_ptr == 0) { case (1) { return 0; } default {}; };
+                    switch (new_ptr is void) { case (1) { return 0; } default {}; };
                     src = (byte*)ptr;
                     dst = (byte*)new_ptr;
                     copy_size = old_size;
