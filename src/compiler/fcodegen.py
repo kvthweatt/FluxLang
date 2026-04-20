@@ -591,7 +591,7 @@ class CodegenVisitor:
     def visit_AddressOf(self, node, builder, module):
         from fast import (Literal, Identifier, PointerDeref, MemberAccess,
                           ArrayAccess, FunctionCall, NotNull, AddressOf,
-                          StringLiteral, FStringLiteral, ArrayLiteral)
+                          StringLiteral, FStringLiteral, ArrayLiteral, StructLiteral)
         expr = node.expression
         # Parser bug workaround: `@x!?` is mis-parsed as AddressOf(NotNull(x))
         # instead of the correct NotNull(AddressOf(x)).  Detect and re-route.
@@ -703,6 +703,17 @@ class CodegenVisitor:
             # All three visitors already return a pointer (global gvar, stack alloca, or gep),
             # so we can return it directly as the address of the data.
             return self.visit(expr, builder, module)
+        if isinstance(expr, StructLiteral):
+            # Allocate stack space for the struct literal, store the value into it,
+            # and return a pointer -- consistent with @[...] and @"..." behaviour.
+            struct_val = self.visit(expr, builder, module)
+            if isinstance(struct_val.type, ir.PointerType):
+                # visit_StructLiteral may already return a pointer (alloca) when
+                # the literal contains non-constant fields; return it directly.
+                return struct_val
+            temp = builder.alloca(struct_val.type, name="struct_literal_tmp")
+            builder.store(struct_val, temp)
+            return temp
         raise ValueError(
             f"Cannot take address of {type(expr).__name__} [{node.source_line}:{node.source_col}]")
 
@@ -5396,7 +5407,7 @@ class CodegenVisitor:
 
     def _vardecl_initialize_local(self, node, builder, module, alloca, llvm_type, resolved_type_spec):
         """Initialize local variable with initial value."""
-        from fast import ArrayLiteral as _ArrayLiteral, ArrayComprehension as _ArrayComprehension, StringLiteral as _StringLiteral, FunctionCall as _FunctionCall, Identifier as _Identifier, AddressOf as _AddressOf
+        from fast import ArrayLiteral as _ArrayLiteral, ArrayComprehension as _ArrayComprehension, StringLiteral as _StringLiteral, FunctionCall as _FunctionCall, Identifier as _Identifier, AddressOf as _AddressOf, StructLiteral as _StructLiteral
         # When the RHS is @[...] and the LHS is a pointer (e.g. byte*), propagate the
         # pointee type as the array element_type so elements are not defaulted to i32.
         if (isinstance(node.initial_value, _AddressOf) and
@@ -5410,6 +5421,16 @@ class CodegenVisitor:
                 bit_width=getattr(resolved_type_spec, 'bit_width', None),
                 custom_typename=getattr(resolved_type_spec, 'custom_typename', None),
             )
+        # When the RHS is @{...} (AddressOf a StructLiteral) and the LHS is a struct
+        # pointer (e.g. test*), seed struct_type onto the StructLiteral from the LHS
+        # type spec so that visit_StructLiteral has the required type context.
+        if (isinstance(node.initial_value, _AddressOf) and
+                isinstance(node.initial_value.expression, _StructLiteral) and
+                node.initial_value.expression.struct_type is None and
+                resolved_type_spec is not None):
+            ctn = getattr(resolved_type_spec, 'custom_typename', None)
+            if ctn:
+                node.initial_value.expression.struct_type = ctn
         # Handle array instance initialization
         if isinstance(node.initial_value, _ArrayLiteral):
             # If target is an integer, pack the array into it
