@@ -2425,11 +2425,45 @@ class FluxParser:
                 
                 return var_decl.set_location(tok.line, tok.column)
     
-    def block_statement(self) -> Block:
+    def block_statement(self) -> Union[Block, IfStatement]:
         """
-        block_statement -> block
+        block_statement -> block (('if' '(' expression ')') ('else' block)? ';')?
+
+        Supports the postfix-if form:
+            { stmt1; stmt2; } if (cond);
+            { stmt1; stmt2; } if (cond) else { stmt3; };
+
+        A bare block-then-block is intentionally rejected here: the 'if'
+        keyword MUST follow the closing brace before any second block is
+        allowed (the else block).
         """
-        return self.block()
+        tok = self.current_token
+        body = self.block()
+
+        # Postfix 'if' on a block: `{ ... } if (cond);`
+        if self.expect(TokenType.IF):
+            self.advance()
+            self.consume(TokenType.LEFT_PAREN, "Expected '(' after 'if' in block-if statement")
+            condition = self.expression()
+            self.consume(TokenType.RIGHT_PAREN, "Expected ')' after condition in block-if statement")
+
+            # Optional else block — but NOT an immediate bare block (that would
+            # be ambiguous / wrong syntax).  Only 'else { ... }' is accepted.
+            else_block = None
+            if self.expect(TokenType.ELSE):
+                self.advance()
+                else_block = self.block()
+
+            self.consume(TokenType.SEMICOLON)
+            return IfStatement(condition, body, [], else_block).set_location(tok.line, tok.column)
+
+        # Plain anonymous block — no postfix condition.
+        # Reject an immediately following block: `{ ... } { ... }` is not valid.
+        if self.expect(TokenType.LEFT_BRACE):
+            self.error("Unexpected block after block statement. Did you mean '{ ... } if (cond);'?")
+
+        self.consume(TokenType.SEMICOLON)
+        return body
     
     def block(self) -> Block:
         tok = self.current_token
