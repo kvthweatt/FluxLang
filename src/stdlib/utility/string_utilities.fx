@@ -18,9 +18,7 @@ namespace standard
                 strncpy(byte* dest, byte* src, size_t n) -> byte*,
                 strcat(byte* dest, byte* src) -> byte*,
                 strncat(byte* dest, byte* src, size_t n) -> byte*,
-                strncmp(byte* s1, byte* s2, size_t n) -> int,
-                strchr(byte* str, int ch) -> byte*;
-                //strstr(byte*, byte*) -> byte*;
+                strncmp(byte* s1, byte* s2, size_t n) -> int;
         };
 
         def strlen(byte* ps) -> int
@@ -40,6 +38,37 @@ namespace standard
                 c++;
             };
             return c;
+        };
+
+        def !!strstr(byte* haystack, byte* needle) -> byte*
+        {
+            byte* h, n;
+            if (*needle == 0) { return haystack; };
+            for (;;)
+            {
+                if (*haystack == 0) { return (byte*)0; };
+                h = haystack;
+                n = needle;
+                while (*h != 0 & *n != 0 & *h == *n)
+                {
+                    h = h + 1;
+                    n = n + 1;
+                };
+                if (*n == 0) { return haystack; };
+                haystack = haystack + 1;
+            };
+            return haystack;
+        };
+
+        def strchr(byte* str, int c) -> byte*
+        {
+            for (;;)
+            {
+                if (*str == c) { return str; };
+                if (*str == 0) { return (byte*)0; };
+                str = str + 1;
+            };
+            return (byte*)0;
         };
 
         def strcpy(noopstr dest, noopstr src) -> noopstr
