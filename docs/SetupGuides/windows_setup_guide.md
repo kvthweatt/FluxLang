@@ -24,6 +24,7 @@ Choose one of these methods:
 **Option 1: Official LLVM (Recommended)**
 ```
 winget install LLVM.LLVM
+winget install clang
 ```
 
 **Option 2: Manual Installation**
@@ -55,7 +56,7 @@ If you prefer a lighter installation:
 
 ### Python Dependencies
 ```powershell
-pip install llvmlite==0.41.0 dataclasses
+pip install llvmlite==0.44.0 dataclasses
 ```
 
 ## Verification Steps
@@ -83,7 +84,7 @@ link                                # Should show Microsoft linker
 From a command prompt:
 ```powershell
 cd C:\path\to\Flux
-python fxc.py tests\test.fx --log-level 3
+python fxc.py tests\test.fx
 ```
 
 ## Common Issues and Solutions
@@ -95,14 +96,6 @@ python fxc.py tests\test.fx --log-level 3
 1. Run Flux from a **Visual Studio Developer Command Prompt**
 2. Ensure Visual Studio includes the "Desktop development with C++" workload
 3. Verify environment variables are set: `echo $env:VCINSTALLDIR`
-
-### "Command 'clang' not found"
-**Cause:** LLVM not in PATH or not installed.
-
-**Solutions:**
-1. Reinstall LLVM and ensure PATH is updated
-2. Use full path: `C:\Program Files\LLVM\bin\clang.exe --version`
-3. Restart your terminal after installation
 
 ### "Module 'llvmlite' not found"
 **Cause:** Python dependencies not installed.
@@ -154,7 +147,7 @@ You can also set a custom configuration in `config\flux_config.cfg`
 ### Building
 Flux creates temporary files in `build/` directory:
 - `program.ll` - LLVM IR code
-- `program.obj` - Object file
+- `program.o` - Object file
 - `program.exe` - Final executable (Windows)
 
 ### Debugging Compilation Issues

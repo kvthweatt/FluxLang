@@ -50,6 +50,15 @@
       "description": "Runtime function hooking and detouring",
       "dependencies": {}
     },
+    "flux-dotenv": {
+      "version": "1.0.1",
+      "entry": "dotenv.fx",
+      "path": "",
+      "description": "Environment variable loading from .env files",
+      "dependencies": {
+        "flux-string-utilities": ">=1.0.0"
+      }
+    },
     "flux-format": {
       "version": "1.0.0",
       "entry": "format.fx",
@@ -72,7 +81,7 @@
       "dependencies": {}
     },
     "flux-io": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "io.fx",
       "path": "",
       "description": "Basic I/O (console & file)",
@@ -315,7 +324,7 @@
       "dependencies": {}
     },
     "flux-string-utilities": {
-      "version": "1.0.1",
+      "version": "1.0.2",
       "entry": "string_utilities.fx",
       "path": "utility",
       "description": "String manipulation utilities",

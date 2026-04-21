@@ -14,47 +14,47 @@ namespace gzip
 
     enum GzipError
     {
-        ERR_OK,
-        ERR_BAD_HEADER,
-        ERR_BAD_BLOCK,
-        ERR_BAD_HUFFMAN,
-        ERR_BAD_CRC,
-        ERR_BAD_LEN,
-        ERR_OOM,
-        ERR_OVERFLOW
+        OK,
+        BAD_HEADER,
+        BAD_BLOCK,
+        BAD_HUFFMAN,
+        BAD_CRC,
+        BAD_LEN,
+        OOM,
+        OVERFLOW
     };
 
     enum BlockType
     {
-        BTYPE_STORED,
-        BTYPE_FIXED,
-        BTYPE_DYNAMIC
+        STORED,
+        FIXED,
+        DYNAMIC
     };
 
     enum GzipHeader
     {
-        GZIP_ID1        = 0x1F,
-        GZIP_ID2        = 0x8B,
-        GZIP_CM_DEFLATE = 8,
-        GZIP_OS_UNKNOWN = 255,
-        GZIP_HDR_SIZE   = 10,
-        GZIP_FTR_SIZE   = 8
+        ID1        = 0x1F,
+        ID2        = 0x8B,
+        CM_DEFLATE = 8,
+        OS_UNKNOWN = 255,
+        HDR_SIZE   = 10,
+        FTR_SIZE   = 8
     };
 
     enum Lz77Params
     {
-        LZ77_WIN_SIZE = 32768,
-        LZ77_WIN_MASK = 32767,
-        LZ77_MAX_LEN  = 258,
-        LZ77_MIN_LEN  = 3,
-        LZ77_MAX_DIST = 32768
+        WIN_SIZE = 32768,
+        WIN_MASK = 32767,
+        MAX_LEN  = 258,
+        MIN_LEN  = 3,
+        MAX_DIST = 32768
     };
 
     enum HashParams
     {
-        HASH_SIZE = 65536,
-        HASH_MASK = 65535,
-        HASH_NIL  = 0
+        SIZE = 65536,
+        MASK = 65535,
+        NIL  = 0
     };
 
     enum HuffParams

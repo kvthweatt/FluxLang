@@ -119,6 +119,32 @@ def _get_fp_cconv(pointer_expr, module) -> Optional[str]:
     return None
 
 
+def _coerce_to_bool(builder: ir.IRBuilder, val: ir.Value) -> ir.Value:
+    """Coerce *val* to an i1 suitable for use as a branch condition.
+
+    Rules
+    -----
+    - Already i1 → return as-is.
+    - Any other integer width → compare != 0.
+    - Pointer type → compare != null  (supports ``if (ptr) { ... }``).
+    - Floating-point → compare != 0.0.
+    - Anything else → attempt != 0 comparison and let llvmlite surface the
+      error if the type is truly incompatible.
+    """
+    t = val.type
+    if isinstance(t, ir.IntType):
+        if t.width == 1:
+            return val
+        return builder.icmp_signed('!=', val, ir.Constant(t, 0), name='tobool')
+    if isinstance(t, ir.PointerType):
+        null = ir.Constant(t, None)          # null pointer constant
+        return builder.icmp_unsigned('!=', val, null, name='ptrbool')
+    if isinstance(t, (ir.FloatType, ir.DoubleType)):
+        return builder.fcmp_ordered('!=', val, ir.Constant(t, 0.0), name='fpbool')
+    # Fallback – try integer comparison; llvmlite will raise if unsupported.
+    return builder.icmp_signed('!=', val, ir.Constant(t, 0), name='tobool')
+
+
 def register_struct_type(module: ir.Module, type_name: str,
                          bit_width: int, alignment: int) -> None:
     """Register a custom data type in the module's type registry."""
@@ -1551,8 +1577,7 @@ class CodegenVisitor:
 
     def visit_TernaryOp(self, node, builder, module):
         cond_val = self.visit(node.condition, builder, module)
-        if isinstance(cond_val.type, ir.IntType) and cond_val.type.width != 1:
-            cond_val = builder.icmp_signed('!=', cond_val, ir.Constant(cond_val.type, 0))
+        cond_val = _coerce_to_bool(builder, cond_val)
         func = builder.block.function
         true_block  = func.append_basic_block('ternary_true')
         false_block = func.append_basic_block('ternary_false')
@@ -3392,8 +3417,7 @@ class CodegenVisitor:
         else_block = func.append_basic_block('else')
         merge_block = func.append_basic_block('ifcont')
 
-        if isinstance(cond_val.type, ir.IntType) and cond_val.type.width != 1:
-            cond_val = builder.icmp_signed('!=', cond_val, ir.Constant(cond_val.type, 0))
+        cond_val = _coerce_to_bool(builder, cond_val)
         builder.cbranch(cond_val, then_block, else_block)
 
         builder.position_at_start(then_block)
@@ -3406,6 +3430,7 @@ class CodegenVisitor:
         current_block = else_block
         for i, (elif_cond, elif_body) in enumerate(node.elif_blocks):
             elif_cond_val = self.visit(elif_cond, builder, module)
+            elif_cond_val = _coerce_to_bool(builder, elif_cond_val)
             elif_then = func.append_basic_block(f'elif_then_{i}')
             elif_else = func.append_basic_block(f'elif_else_{i}')
             builder.cbranch(elif_cond_val, elif_then, elif_else)
@@ -3468,9 +3493,7 @@ class CodegenVisitor:
             return self.visit(expr, builder, module)
 
         cond_val = self.visit(node.condition, builder, module)
-
-        if isinstance(cond_val.type, ir.IntType) and cond_val.type.width != 1:
-            cond_val = builder.icmp_signed('!=', cond_val, ir.Constant(cond_val.type, 0))
+        cond_val = _coerce_to_bool(builder, cond_val)
 
         func = builder.block.function
         value_block = func.append_basic_block('ifexpr_value')
@@ -3485,6 +3508,17 @@ class CodegenVisitor:
         if not builder.block.is_terminated:
             builder.branch(merge_block)
 
+        # Statement-context if-expression with a void value and no else clause:
+        # e.g. ``println("hi") if (cond);``
+        # The else branch just falls through to merge — no phi needed.
+        is_void_value = isinstance(value_val.type, ir.VoidType)
+        if is_void_value and node.else_expr is None:
+            builder.position_at_start(else_block)
+            if not builder.block.is_terminated:
+                builder.branch(merge_block)
+            builder.position_at_start(merge_block)
+            return None
+
         builder.position_at_start(else_block)
         if node.else_expr is not None:
             if isinstance(node.else_expr, NoInit):
@@ -3492,6 +3526,7 @@ class CodegenVisitor:
             else:
                 else_val = _coerce_ifexpr_operand(node.else_expr, value_val, builder, module)
         else:
+            # value is non-void but no else clause: default to zero of the same type
             else_val = ir.Constant(value_val.type, 0)
 
         else_end_block = builder.block
@@ -3549,8 +3584,7 @@ class CodegenVisitor:
 
         builder.position_at_start(cond_block)
         cond_val = self.visit(node.condition, builder, module)
-        if isinstance(cond_val.type, ir.IntType) and cond_val.type.width != 1:
-            cond_val = builder.icmp_signed('!=', cond_val, ir.Constant(cond_val.type, 0))
+        cond_val = _coerce_to_bool(builder, cond_val)
         builder.cbranch(cond_val, body_block, end_block)
 
         builder.position_at_start(body_block)
@@ -4089,10 +4123,7 @@ class CodegenVisitor:
     def visit_AssertStatement(self, node, builder, module):
         from fast import Literal as _Lit
         cond_val = self.visit(node.condition, builder, module)
-
-        if not isinstance(cond_val.type, ir.IntType) or cond_val.type.width != 1:
-            zero = ir.Constant(cond_val.type, 0)
-            cond_val = builder.icmp_signed('!=', cond_val, zero)
+        cond_val = _coerce_to_bool(builder, cond_val)
 
         func = builder.block.function
         pass_block = func.append_basic_block('assert.pass')

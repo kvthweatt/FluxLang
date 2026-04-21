@@ -79,6 +79,9 @@ Flux is in active development. The syntax and grammar will not change. The [stan
 - **[Windows Setup Guide](docs/SetupGuides/windows_setup_guide.md)**  
 - **[Linux Setup Guide](docs/SetupGuides/linux_setup_guide.md)** 
 
+## Requirements:
+- Python v3.12 or higher
+- LLVM v21 or higher
 
 ## Star History
 
