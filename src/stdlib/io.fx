@@ -22,7 +22,7 @@ extern
         fgets(byte* str, int n, byte* stream) -> byte*,
         fopen(byte* filename, byte* mode) -> byte*,
         fclose(byte* stream) -> int;
-}
+};
 #endif;
 
 namespace standard

@@ -5,9 +5,9 @@ using standard::io::console;
 def main() -> int
 {
     int x = 5;
-    int* px = (int*)0;
+    int* px = @x;
 
-    println("Test") if (px);
+    println("px is valid") if (px);
 
     return 0;
 };

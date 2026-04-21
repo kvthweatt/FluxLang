@@ -657,6 +657,12 @@ class IfExpression(Expression):
     condition: Expression
     else_expr: Optional[Expression] = None  # Can be another IfExpression for chaining
 
+    def __repr__(self) -> str:
+        if else_expr:
+            return f"{value_expr} if ({condition}) else {else_expr}"
+        else:
+            return f"{value_expr} if ({condition})"
+
 @dataclass
 class TernaryOp(Expression):
     """
