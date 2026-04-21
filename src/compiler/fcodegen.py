@@ -1586,29 +1586,75 @@ class CodegenVisitor:
 
         builder.position_at_start(true_block)
         true_val = self.visit(node.true_expr, builder, module)
-        if (isinstance(true_val.type, ir.PointerType) and
-                not isinstance(true_val.type.pointee, ir.PointerType) and
-                not isinstance(true_val.type.pointee, (ir.IdentifiedStructType, ir.LiteralStructType))):
-            if isinstance(true_val.type.pointee, (ir.IntType, ir.FloatType, ir.DoubleType)):
-                true_val = builder.load(true_val, name='ternary_true_load')
         true_end_block = builder.block
         if not builder.block.is_terminated:
             builder.branch(merge_block)
 
         builder.position_at_start(false_block)
         false_val = self.visit(node.false_expr, builder, module)
-        if (isinstance(false_val.type, ir.PointerType) and
-                not isinstance(false_val.type.pointee, ir.PointerType) and
-                not isinstance(false_val.type.pointee, (ir.IdentifiedStructType, ir.LiteralStructType))):
-            if isinstance(false_val.type.pointee, (ir.IntType, ir.FloatType, ir.DoubleType)):
-                false_val = builder.load(false_val, name='ternary_false_load')
         false_end_block = builder.block
         if not builder.block.is_terminated:
             builder.branch(merge_block)
 
         builder.position_at_start(merge_block)
+
+        def _load_branch(val, end_block, target_type):
+            """Re-open end_block, load val as target_type, re-emit branch to merge_block."""
+            term = end_block.terminator
+            if term is not None:
+                end_block.instructions.remove(term)
+                end_block.terminator = None
+            builder.position_at_end(end_block)
+            loaded = builder.load(val, name='ternary_load')
+            builder.branch(merge_block)
+            builder.position_at_start(merge_block)
+            return loaded
+
         if true_val.type != false_val.type:
-            if isinstance(true_val.type, ir.IntType) and isinstance(false_val.type, ir.IntType):
+            true_is_ptr  = isinstance(true_val.type,  ir.PointerType)
+            false_is_ptr = isinstance(false_val.type, ir.PointerType)
+
+            # Case 1: one branch is a pointer to exactly the type the other branch
+            # produced by value.  This covers struct member accesses (which the
+            # identifier visitor returns as a pointer) mixed with by-value returns
+            # such as `hit.front ? tri.normal : vec3_negate(tri.normal)`.
+            if true_is_ptr and true_val.type.pointee == false_val.type:
+                true_val = _load_branch(true_val, true_end_block, false_val.type)
+            elif false_is_ptr and false_val.type.pointee == true_val.type:
+                false_val = _load_branch(false_val, false_end_block, true_val.type)
+
+            # Case 2: both are pointers — array decay and same-struct bitcast
+            elif true_is_ptr and false_is_ptr:
+                def _decay(val, end_block):
+                    pt = val.type.pointee
+                    if isinstance(pt, ir.ArrayType):
+                        elem_ptr = ir.PointerType(pt.element)
+                        term = end_block.terminator
+                        builder.position_before(term) if term else builder.position_at_end(end_block)
+                        return builder.bitcast(val, elem_ptr, name='ternary_decay')
+                    return val
+                true_val  = _decay(true_val,  true_end_block)
+                false_val = _decay(false_val, false_end_block)
+                if true_val.type != false_val.type:
+                    same_struct = (
+                        isinstance(true_val.type.pointee,  ir.IdentifiedStructType) and
+                        isinstance(false_val.type.pointee, ir.IdentifiedStructType) and
+                        str(true_val.type.pointee) == str(false_val.type.pointee)
+                    )
+                    if not same_struct:
+                        term = false_end_block.terminator
+                        builder.position_before(term) if term else builder.position_at_end(false_end_block)
+                        false_val = builder.bitcast(false_val, true_val.type, name='ternary_cast')
+                builder.position_at_start(merge_block)
+
+            # Case 3: scalar pointer vs value (non-struct) — load the pointer side
+            elif true_is_ptr and isinstance(true_val.type.pointee, (ir.IntType, ir.FloatType, ir.DoubleType)):
+                true_val = _load_branch(true_val, true_end_block, true_val.type.pointee)
+            elif false_is_ptr and isinstance(false_val.type.pointee, (ir.IntType, ir.FloatType, ir.DoubleType)):
+                false_val = _load_branch(false_val, false_end_block, false_val.type.pointee)
+
+            # Case 4: integer widening
+            elif isinstance(true_val.type, ir.IntType) and isinstance(false_val.type, ir.IntType):
                 if true_val.type.width < false_val.type.width:
                     builder.position_at_end(true_end_block)
                     term = true_end_block.terminator
@@ -1627,28 +1673,7 @@ class CodegenVisitor:
                     false_val = builder.sext(false_val, true_val.type)
                     builder.branch(merge_block)
                     builder.position_at_start(merge_block)
-            elif isinstance(true_val.type, ir.PointerType) and isinstance(false_val.type, ir.PointerType):
-                def _decay(val, end_block):
-                    pt = val.type.pointee
-                    if isinstance(pt, ir.ArrayType):
-                        elem_ptr = ir.PointerType(pt.element)
-                        term = end_block.terminator
-                        builder.position_before(term) if term else builder.position_at_end(end_block)
-                        return builder.bitcast(val, elem_ptr, name='ternary_decay')
-                    return val
-                true_val  = _decay(true_val,  true_end_block)
-                false_val = _decay(false_val, false_end_block)
-                if true_val.type != false_val.type:
-                    same_struct = (
-                        isinstance(true_val.type.pointee, ir.IdentifiedStructType) and
-                        isinstance(false_val.type.pointee, ir.IdentifiedStructType) and
-                        str(true_val.type.pointee) == str(false_val.type.pointee)
-                    )
-                    if not same_struct:
-                        term = false_end_block.terminator
-                        builder.position_before(term) if term else builder.position_at_end(false_end_block)
-                        false_val = builder.bitcast(false_val, true_val.type, name='ternary_cast')
-                builder.position_at_start(merge_block)
+
             else:
                 raise TypeError(
                     f"Ternary operator branches have incompatible types: "

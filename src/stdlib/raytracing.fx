@@ -499,42 +499,6 @@ namespace raytracer
         return true;
     };
 
-    // Like rt_aabb_hit but returns the entry t (t_min after slab clamp), or -1.0 on miss.
-    // Used by BVH traversal to sort children by distance.
-    def rt_aabb_hit_dist(Vec3 bb_min, Vec3 bb_max, RTRay* ray, float t_min, float t_max) -> float
-    {
-        float inv, t0, t1, tmp;
-
-        // X slab
-        inv = 1.0 / ray.dir.x;
-        t0  = (bb_min.x - ray.origin.x) * inv;
-        t1  = (bb_max.x - ray.origin.x) * inv;
-        if (inv < 0.0) { tmp = t0; t0 = t1; t1 = tmp; };
-        if (t0 > t_min) { t_min = t0; };
-        if (t1 < t_max) { t_max = t1; };
-        if (t_max <= t_min) { return -1.0; };
-
-        // Y slab
-        inv = 1.0 / ray.dir.y;
-        t0  = (bb_min.y - ray.origin.y) * inv;
-        t1  = (bb_max.y - ray.origin.y) * inv;
-        if (inv < 0.0) { tmp = t0; t0 = t1; t1 = tmp; };
-        if (t0 > t_min) { t_min = t0; };
-        if (t1 < t_max) { t_max = t1; };
-        if (t_max <= t_min) { return -1.0; };
-
-        // Z slab
-        inv = 1.0 / ray.dir.z;
-        t0  = (bb_min.z - ray.origin.z) * inv;
-        t1  = (bb_max.z - ray.origin.z) * inv;
-        if (inv < 0.0) { tmp = t0; t0 = t1; t1 = tmp; };
-        if (t0 > t_min) { t_min = t0; };
-        if (t1 < t_max) { t_max = t1; };
-        if (t_max <= t_min) { return -1.0; };
-
-        return t_min;
-    };
-
     // ============================================================================
     // PRIMITIVE INTERSECTION
     // ============================================================================
@@ -827,16 +791,16 @@ namespace raytracer
 
     def rt_bvh_hit(RTScene* s, RTRay* ray, float t_min, float t_max, RTHit* hit) -> bool
     {
+        // Iterative BVH traversal with an explicit stack
+        // Stack holds node indices
         i32[64] node_stack;
         i32   stack_top, node_idx, i, prim_abs, leaf_end;
-        i32   left_idx, right_idx;
-        float t_left, t_right;
         bool  found, prim_hit_result;
         RTHit temp_hit;
 
-        node_stack[0] = 0;
-        stack_top     = 1;
-        found         = false;
+        node_stack[0]  = 0;
+        stack_top = 1;
+        found     = false;
 
         while (stack_top > 0)
         {
@@ -853,67 +817,30 @@ namespace raytracer
             if (s.bvh_nodes[node_idx].prim_count > 0)
             {
                 // Leaf — test all primitives
-                i        = s.bvh_nodes[node_idx].prim_start;
-                leaf_end = i + s.bvh_nodes[node_idx].prim_count;
+                i         = s.bvh_nodes[node_idx].prim_start;
+                leaf_end  = i + s.bvh_nodes[node_idx].prim_count;
                 while (i < leaf_end)
                 {
-                    prim_abs        = s.bvh_prim_order[i];
+                    prim_abs = s.bvh_prim_order[i];
                     prim_hit_result = rt_prim_hit(s, prim_abs, ray, t_min, t_max, @temp_hit);
                     if (prim_hit_result)
                     {
-                        found = true;
-                        t_max = temp_hit.t;
-                        *hit  = temp_hit;
+                        found   = true;
+                        t_max   = temp_hit.t;
+                        *hit    = temp_hit;
                     };
                     i++;
                 };
             }
             else
             {
-                // Internal node — test both children's AABBs and push farther first
-                // so the nearer child is popped next, shrinking t_max sooner.
+                // Internal node — push children
                 if (stack_top < 62)
                 {
-                    left_idx  = s.bvh_nodes[node_idx].left;
-                    right_idx = s.bvh_nodes[node_idx].right;
-
-                    t_left  = rt_aabb_hit_dist(s.bvh_nodes[left_idx].aabb_min,
-                                               s.bvh_nodes[left_idx].aabb_max,
-                                               ray, t_min, t_max);
-                    t_right = rt_aabb_hit_dist(s.bvh_nodes[right_idx].aabb_min,
-                                               s.bvh_nodes[right_idx].aabb_max,
-                                               ray, t_min, t_max);
-
-                    // Push the farther (or missed) child first — it gets popped last
-                    if (t_left >= 0.0 & t_right >= 0.0)
-                    {
-                        // Both hit: push farther first, nearer on top
-                        if (t_left <= t_right)
-                        {
-                            node_stack[stack_top] = right_idx;
-                            stack_top++;
-                            node_stack[stack_top] = left_idx;
-                            stack_top++;
-                        }
-                        else
-                        {
-                            node_stack[stack_top] = left_idx;
-                            stack_top++;
-                            node_stack[stack_top] = right_idx;
-                            stack_top++;
-                        };
-                    }
-                    elif (t_left >= 0.0)
-                    {
-                        node_stack[stack_top] = left_idx;
-                        stack_top++;
-                    }
-                    elif (t_right >= 0.0)
-                    {
-                        node_stack[stack_top] = right_idx;
-                        stack_top++;
-                    };
-                    // Both missed — push nothing
+                    node_stack[stack_top] = s.bvh_nodes[node_idx].left;
+                    stack_top++;
+                    node_stack[stack_top] = s.bvh_nodes[node_idx].right;
+                    stack_top++;
                 };
             };
         };
@@ -945,26 +872,11 @@ namespace raytracer
 
     def rt_scene_hit(RTScene* s, RTRay* ray, float t_min, float t_max, RTHit* hit) -> bool
     {
-        bool  found = false;
-        RTHit temp;
-        i32   i = 0;
-
-        // Planes first — they are infinite, can't live in BVH usefully
-        while (i < s.plane_count)
-        {
-            if (rt_plane_hit(@s.planes[i], ray, t_min, t_max, @temp))
-            {
-                found = true;  t_max = temp.t;  *hit = temp;
-            };
-            i++;
-        };
-
-        // BVH for spheres + triangles (rebuilt without planes)
         if ((u64)s.bvh_nodes != (u64)0 & s.prim_count > 0)
         {
-            if (rt_bvh_hit(s, ray, t_min, t_max, @temp)) { found = true; *hit = temp; };
+            return rt_bvh_hit(s, ray, t_min, t_max, hit);
         };
-        return found;
+        return rt_scene_hit_linear(s, ray, t_min, t_max, hit);
     };
 
     // ============================================================================
@@ -1263,7 +1175,6 @@ namespace raytracer
             };
 
             colour = vec3_scale(colour, attenuation);
-
             ray    = scattered;
             bounce++;
         };

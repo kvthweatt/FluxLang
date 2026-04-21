@@ -32,8 +32,6 @@ namespace standard
         const float EF = 2.71828;
         const float ED = 2.71828182845904523536;
 
-        struct Vec3  { float x, y, z;    };
-        struct Vec4  { float w, x, y, z; };
         struct Face  { int   a, b, c;    };
         struct Edge  { int   a, b;       };
         struct POINT { int   x, y;       };
