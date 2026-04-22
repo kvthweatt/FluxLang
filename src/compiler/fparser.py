@@ -129,6 +129,7 @@ class FluxParser:
         self._template_instantiations = []  # concrete FunctionDef nodes to inject into program
         self._parsed_objects = {}  # object_name -> ObjectDef AST node
         self._custom_operators: Dict[str, str] = {}  # symbol string -> base function name
+        self._contracts: Dict[str, Block] = {}  # name -> Block of statements to inject
         self._function_depth = 0  # Tracks nesting depth; nested function defs are illegal
         self._loop_depth = 0      # Tracks nesting depth of for/while/do-while loops
         self._default_byte_width = default_byte_width if default_byte_width is not None else _get_byte_width(_flux_config)
@@ -558,6 +559,8 @@ class FluxParser:
             return self.operator_def()
         elif self.expect(TokenType.EXTERN):
             return self.extern_statement()
+        elif self.expect(TokenType.CONTRACT):
+            return self.contract_def()
         elif self.expect(TokenType.DEF):
             return self.function_def()
         elif self.current_token.type in _CALLING_CONV_TOKENS:
@@ -759,6 +762,25 @@ class FluxParser:
         
         return ExternBlock(declarations).set_location(tok.line, tok.column)
     
+    def contract_def(self) -> ContractDef:
+        """
+        contract_def -> 'contract' IDENTIFIER block ';'
+
+        Parses a contract definition and registers its statement block in
+        self._contracts so function_def() can inject it at parse time.
+        ContractDef is returned so it appears in the top-level statement
+        list (for diagnostics / future tooling); codegen ignores it.
+        Supports multiple comma-separated contracts on one function:
+            def foo(int x) -> int : NonZero, Positive { ... };
+        """
+        tok = self.current_token
+        self.consume(TokenType.CONTRACT)
+        name = self.consume(TokenType.IDENTIFIER).value
+        body = self.block()
+        self.consume(TokenType.SEMICOLON)
+        self._contracts[name] = body
+        return ContractDef(name, body).set_location(tok.line, tok.column)
+
     def function_def(self, calling_conv: Optional[str] = None) -> Union[FunctionDef, List[FunctionDef]]:
         """
         function_def -> ('const')? ('volatile')? ('def' | calling_conv_kw) ('!!')? (IDENTIFIER | STRING_LITERAL | F_STRING | I_STRING | STRINGIFY) '(' parameter_list? ')' '->' type_spec (';' | block ';')
@@ -952,6 +974,22 @@ class FluxParser:
             
             # Return the list of prototypes
             return [fd.set_location(tok.line, tok.column) for fd in prototypes]
+        # Resolve contract(s): def foo(int x) -> int : NonZero, OtherContract { ... }
+        contract_stmts = []
+        if self.expect(TokenType.COLON):
+            self.advance()
+            contract_name = self.consume(TokenType.IDENTIFIER).value
+            if contract_name not in self._contracts:
+                self.error(f"Undefined contract '{contract_name}'")
+            contract_stmts.extend(self._contracts[contract_name].statements)
+            # Support multiple contracts: : NonZero, Positive
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                contract_name = self.consume(TokenType.IDENTIFIER).value
+                if contract_name not in self._contracts:
+                    self.error(f"Undefined contract '{contract_name}'")
+                contract_stmts.extend(self._contracts[contract_name].statements)
+
         is_prototype = False
         body = None
 
@@ -990,6 +1028,9 @@ class FluxParser:
             self._function_depth += 1
             body = self.block()
             self._function_depth -= 1
+            # Prepend contract statements to the top of the function body
+            if contract_stmts:
+                body.statements = contract_stmts + body.statements
             self.consume(TokenType.SEMICOLON)
         
         # Only add named real parameters to symbol table
@@ -2422,12 +2463,18 @@ class FluxParser:
                             break
             elif self.expect(TokenType.COMMA):
                 # Mode: int x = 1, y = 2, z = 3; Ã¢â‚¬â€ each name has its own initializer
+                # Also handles: int* px @= x, px2 @= x; (address-assign sugar)
                 while self.expect(TokenType.COMMA):
                     self.advance()
                     var_name = self.consume(TokenType.IDENTIFIER).value
                     self.symbol_table.define(var_name, SymbolKind.VARIABLE, type_spec)
                     names.append(var_name)
-                    if self.expect(TokenType.ASSIGN):
+                    if self.expect(TokenType.ADDRESS_ASSIGN):
+                        addr_tok = self.current_token
+                        self.advance()
+                        rhs = self.expression()
+                        initializers.append(AddressOf(rhs).set_location(addr_tok.line, addr_tok.column))
+                    elif self.expect(TokenType.ASSIGN):
                         self.advance()
                         initializers.append(self.expression())
                     else:

@@ -1478,6 +1478,32 @@ class macroDefStatement(Statement):
     macro_def: macroDef
 
 
+# Contract definition
+@dataclass
+class ContractDef(Statement):
+    """
+    A named contract: a list of statements injected into a function body at compile time.
+
+    Syntax:
+        contract NonZero
+        {
+            assert(x > 0, "x must be positive");
+        };
+
+    Applied via colon syntax:
+        def foo(int x) -> int : NonZero { ... };
+
+    The parser expands the contract body statements into the top of the
+    function body at parse time. ContractDef nodes are stored in the
+    parser's _contracts table and never reach codegen directly.
+    """
+    name: str
+    body: Block  # statements to inject at the top of the function body
+
+    def __repr__(self) -> str:
+        return f"contract {self.name} {{ {self.body} }}"
+
+
 # Program root
 @dataclass
 class Program(ASTNode):

@@ -74,6 +74,7 @@ class TokenType(Enum):
     ESCAPE_KW = auto()    # "        escape
     EXTERN = auto()       # "        extern
     FALSE = auto()        # "        false
+    FASTNODE = auto()     # "        fastnode
     FLOAT_KW = auto()     # "        float
     FOR = auto()          # "        for
     FROM = auto()         # "        from
@@ -380,6 +381,7 @@ _TOKEN_TYPE_TO_STR: dict = {
     TokenType.ESCAPE_KW:  'escape',
     TokenType.EXTERN:     'extern',
     TokenType.FALSE:      'false',
+    TokenType.FASTNODE:   'fastnode',
     TokenType.FLOAT_KW:   'float',
     TokenType.FOR:        'for',
     TokenType.FROM:       'from',
@@ -495,6 +497,7 @@ class FluxLexer:
             'compt': TokenType.COMPT,
             'const': TokenType.CONST,
             'continue': TokenType.CONTINUE,
+            'contract': TokenType.CONTRACT,
             'data': TokenType.DATA,
             'def': TokenType.DEF,
             'defer': TokenType.DEFER,
@@ -510,6 +513,7 @@ class FluxLexer:
             'escape': TokenType.ESCAPE_KW,
             'extern': TokenType.EXTERN,
             'false': TokenType.FALSE,
+            'fastnode': TokenType.FASTNODE,
             'float': TokenType.FLOAT_KW,
             'from': TokenType.FROM,
             'for': TokenType.FOR,

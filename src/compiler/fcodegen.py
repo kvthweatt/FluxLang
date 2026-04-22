@@ -4164,7 +4164,12 @@ class CodegenVisitor:
 
         if node.message:
             if isinstance(node.message, str):
-                msg_bytes = node.message.encode('ascii')
+                import fconfig as _fconfig
+                _null_terminate = _fconfig.config.get('null_terminate_strings', '0').strip() == '1'
+                msg_str = node.message
+                if _null_terminate and (not msg_str or msg_str[-1] != '\0'):
+                    msg_str += '\0'
+                msg_bytes = msg_str.encode('ascii')
                 msg_type  = ir.ArrayType(ir.IntType(8), len(msg_bytes))
                 msg_const = ir.Constant(msg_type, bytearray(msg_bytes))
                 msg_gv = ir.GlobalVariable(module, msg_type, name=f"assert_msg_{id(node)}")
@@ -5090,6 +5095,15 @@ class CodegenVisitor:
         """Direct visit of the macroDef node — also a no-op at codegen time."""
         return None
 
+    def visit_ContractDef(self, node, builder, module):
+        """
+        ContractDef is a compile-time-only construct.
+        Contract body statements are inlined into the top of each annotated
+        function body at parse time (by fparser.py's function_def()).
+        There is nothing to emit into LLVM IR here.
+        """
+        return None
+
     def visit_macroCall(self, node, builder, module):
         """
         Expand an expression macro call inline.
@@ -5990,8 +6004,9 @@ class CodegenVisitor:
 
         # Pass 3: Process all other statements
         print("[AST] Pass 3: Processing all other statements...")
+        from fast import ContractDef as _ContractDef
         for stmt in node.statements:
-            if not isinstance(stmt, (UsingStatement, NotUsingStatement, ExternBlock, StructDef, StructDefStatement, ObjectDef, ObjectDefStatement)):
+            if not isinstance(stmt, (UsingStatement, NotUsingStatement, ExternBlock, StructDef, StructDefStatement, ObjectDef, ObjectDefStatement, _ContractDef)):
                 self.visit(stmt, builder, module)
 
         # Pass 4: Re-emit object method bodies that were skipped or partially emitted
