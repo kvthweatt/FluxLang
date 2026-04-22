@@ -69,6 +69,7 @@ class TokenType(Enum):
     DOUBLE_KW = auto()    # "        double
     ELIF = auto()         # "        elif | else if
     ELSE = auto()         # "        else
+    MACRO = auto()        # "        macro
     ENUM = auto()         # "        enum
     ESCAPE_KW = auto()    # "        escape
     EXTERN = auto()       # "        extern
@@ -374,6 +375,7 @@ _TOKEN_TYPE_TO_STR: dict = {
     TokenType.DOUBLE_KW:  'double',
     TokenType.ELIF:       'elif',
     TokenType.ELSE:       'else',
+    TokenType.MACRO:      'macro',
     TokenType.ENUM:       'enum',
     TokenType.ESCAPE_KW:  'escape',
     TokenType.EXTERN:     'extern',
@@ -502,6 +504,7 @@ class FluxLexer:
             'double': TokenType.DOUBLE_KW,
             'elif': TokenType.ELIF,
             'else': TokenType.ELSE,
+            'macro': TokenType.MACRO,
             'endianof': TokenType.ENDIANOF,
             'enum': TokenType.ENUM,
             'escape': TokenType.ESCAPE_KW,

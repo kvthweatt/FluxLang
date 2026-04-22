@@ -1419,6 +1419,65 @@ class NamespaceDefStatement(Statement):
 
 
 
+# ============================================================================
+# Expression Macros (macro)
+# ============================================================================
+
+@dataclass
+class macroDef(ASTNode):
+    """
+    Expression macro definition.
+
+    Syntax:
+        macro someMac(a, b, c)
+        {
+            (a + b) ^ c;
+        };
+
+    The body is a single expression. The trailing ';' inside the braces is a
+    terminator only — it is consumed during parsing and is NOT injected into
+    the expanded expression.
+
+    macroDef nodes are registered in the parser's macro table at parse time
+    and never reach codegen directly. Invocation sites are replaced with
+    macroCall, which expands by substituting caller arguments for params.
+    """
+    name: str
+    params: List[str]          # parameter names, e.g. ['a', 'b', 'c']
+    body: Expression           # parsed body expression (params appear as Identifier nodes)
+
+    def __repr__(self) -> str:
+        params_str = ', '.join(self.params)
+        return f"macro {self.name}({params_str}) {{ {self.body} }}"
+
+
+@dataclass
+class macroCall(Expression):
+    """
+    Invocation of an expression macro.
+
+    Syntax (call site):
+        someMac(x, y + 1, z)
+
+    Expansion substitutes each argument expression for the corresponding
+    parameter Identifier inside the macro body. Expansion happens at
+    codegen (or in a pre-codegen pass) via deep-copy + substitution so
+    each call site gets an independent copy of the body.
+    """
+    name: str
+    arguments: List[Expression] = field(default_factory=list)
+
+    def __repr__(self) -> str:
+        args_str = ', '.join(repr(a) for a in self.arguments)
+        return f"{self.name}({args_str})  /* macro */"
+
+
+@dataclass
+class macroDefStatement(Statement):
+    """Wraps an macroDef so it can appear as a top-level statement."""
+    macro_def: macroDef
+
+
 # Program root
 @dataclass
 class Program(ASTNode):

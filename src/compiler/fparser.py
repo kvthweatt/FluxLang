@@ -121,6 +121,7 @@ class FluxParser:
         self._processing_imports = set()
         self.symbol_table = SymbolTable()
         self._preprocessor_macros = []
+        self._macros = {}  # name -> macroDef, populated as macro definitions are parsed
         self._namespace_stack = []  # Track current namespace path for symbol registration
         self._object_init_params = {}  # object_name -> __init parameter count (excluding 'this')
         self._template_functions = {}  # name -> (template_param_names, FunctionDef AST)
@@ -544,7 +545,9 @@ class FluxParser:
                 return var_decl
         
         # No storage class or qualifiers - check for other statement types
-        if self.expect(TokenType.USING):
+        if self.expect(TokenType.MACRO):
+            return self.macro_def()
+        elif self.expect(TokenType.USING):
             return self.using_statement()
         elif self.expect(TokenType.NOT):
             self.advance()
@@ -1237,10 +1240,49 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
         return EnumDefStatement(EnumDef(name, values)).set_location(tok.line, tok.column)
 
+
+    def macro_def(self) -> macroDefStatement:
+        """
+        macro_def -> 'macro' IDENTIFIER '(' param_list? ')' '{' expression ';'? '}' ';'
+
+        param_list -> IDENTIFIER (',' IDENTIFIER)*
+
+        The trailing ';' inside the braces is a body terminator only.
+        It is consumed here and is NOT part of the stored body expression,
+        so it will not be injected when the macro is expanded at the call site.
+        """
+        tok = self.current_token
+        self.consume(TokenType.MACRO)
+        name = self.consume(TokenType.IDENTIFIER).value
+
+        # Parameter list
+        self.consume(TokenType.LEFT_PAREN)
+        params = []
+        if not self.expect(TokenType.RIGHT_PAREN):
+            params.append(self.consume(TokenType.IDENTIFIER).value)
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                params.append(self.consume(TokenType.IDENTIFIER).value)
+        self.consume(TokenType.RIGHT_PAREN)
+
+        # Body: a single expression wrapped in braces
+        self.consume(TokenType.LEFT_BRACE)
+        body = self.expression()
+        # Trailing ';' is a body terminator -- consume silently, NOT stored in body
+        if self.expect(TokenType.SEMICOLON):
+            self.advance()
+        self.consume(TokenType.RIGHT_BRACE)
+        # Outer terminating ';'
+        self.consume(TokenType.SEMICOLON)
+
+        node = macroDef(name=name, params=params, body=body).set_location(tok.line, tok.column)
+        self._macros[name] = node   # register so call sites can be recognised
+        return macroDefStatement(macro_def=node).set_location(tok.line, tok.column)
+
     def union_def(self) -> UnionDefStatement:
         """
         union_def -> 'union' IDENTIFIER (';' | '{' union_member* '}' (IDENTIFIER)? ';')
-        
+
         Tagged union syntax: union name {} tagname;
         where tagname is an identifier that is an enum type
         """
@@ -3674,7 +3716,11 @@ class FluxParser:
                     args = self.argument_list()
                 self.consume(TokenType.RIGHT_PAREN)
                 if isinstance(expr, Identifier):
-                    expr = FunctionCall(expr.name, args).set_location(tok.line, tok.column)
+                    if expr.name in self._macros:
+                        # Expression macro invocation — build macroCall instead of FunctionCall
+                        expr = macroCall(name=expr.name, arguments=args).set_location(tok.line, tok.column)
+                    else:
+                        expr = FunctionCall(expr.name, args).set_location(tok.line, tok.column)
                 elif isinstance(expr, StringLiteral):
                     # String literal function name (for targeting mangled names like "??0Widget@@QEAA@AEBV0@@Z")
                     expr = FunctionCall(expr.value, args).set_location(tok.line, tok.column)
@@ -3838,6 +3884,9 @@ class FluxParser:
                 lexer = FluxLexer(expr_text)
                 tokens = lexer.tokenize()
                 expr_parser = FluxParser(tokens)
+                # Propagate registered macros so call sites inside f-strings
+                # are recognised and produce macroCall instead of FunctionCall.
+                expr_parser._macros = self._macros
                 expression = expr_parser.expression()
                 
                 parts.append(expression)
@@ -3891,6 +3940,8 @@ class FluxParser:
                 lexer = FluxLexer(expr_text)
                 tokens = lexer.tokenize()
                 expr_parser = FluxParser(tokens)
+                # Propagate macros so call sites inside i-strings are recognised.
+                expr_parser._macros = self._macros
                 expressions.append(expr_parser.expression())
 
         # Build FStringLiteral parts, substituting {} placeholders positionally

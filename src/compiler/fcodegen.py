@@ -1117,9 +1117,11 @@ class CodegenVisitor:
                 rhs = builder.fpext(rhs, ir.DoubleType(), name="float_to_double_rhs")
             if isinstance(lhs.type, (ir.FloatType, ir.DoubleType)):
                 if node.operator == Operator.POWER:
+                    pow_name = "llvm.pow.f64" if lhs.type == ir.DoubleType() else "llvm.pow.f32"
                     pow_fn_type = ir.FunctionType(lhs.type, [lhs.type, lhs.type])
-                    pow_fn = ir.Function(module, pow_fn_type,
-                                         name="llvm.pow.f64" if lhs.type == ir.DoubleType() else "llvm.pow.f32")
+                    pow_fn = (module.globals[pow_name]
+                              if pow_name in module.globals
+                              else ir.Function(module, pow_fn_type, name=pow_name))
                     return builder.call(pow_fn, [lhs, rhs])
                 return {
                     Operator.ADD: builder.fadd, Operator.SUB: builder.fsub,
@@ -1134,7 +1136,9 @@ class CodegenVisitor:
             if node.operator == Operator.POWER:
                 base_as_float = builder.sitofp(lhs, ir.DoubleType()) if not unsigned else builder.uitofp(lhs, ir.DoubleType())
                 powi_fn_type = ir.FunctionType(ir.DoubleType(), [ir.DoubleType(), ir.IntType(32)])
-                powi_fn = ir.Function(module, powi_fn_type, name="llvm.powi.f64.i32")
+                powi_fn = (module.globals["llvm.powi.f64.i32"]
+                           if "llvm.powi.f64.i32" in module.globals
+                           else ir.Function(module, powi_fn_type, name="llvm.powi.f64.i32"))
                 if rhs.type.width > 32:
                     exp_i32 = builder.trunc(rhs, ir.IntType(32))
                 elif rhs.type.width < 32:
@@ -5070,6 +5074,193 @@ class CodegenVisitor:
         self.visit(node.function_def, builder, module)
         return None
 
+    # ------------------------------------------------------------------
+    # Expression macros (macro)
+    # ------------------------------------------------------------------
+
+    def visit_macroDefStatement(self, node, builder, module):
+        """
+        macroDef is a compile-time-only construct.
+        The definition was already registered into the parser's _macros table
+        during parsing; there is nothing to emit into LLVM IR here.
+        """
+        return None
+
+    def visit_macroDef(self, node, builder, module):
+        """Direct visit of the macroDef node — also a no-op at codegen time."""
+        return None
+
+    def visit_macroCall(self, node, builder, module):
+        """
+        Expand an expression macro call inline.
+
+        Steps:
+          1. Look up the macroDef that was registered at parse time.
+          2. Deep-copy the body expression so each call site gets an independent
+             AST subtree (important for nested/recursive expansion and for
+             location stamping).
+          3. Walk the copy, substituting every Identifier whose name matches a
+             macro parameter with the corresponding caller argument expression
+             (also deep-copied so the same argument can appear multiple times).
+          4. Codegen the substituted body — it's a plain Expression at this point
+             and goes through the normal visitor dispatch.
+
+        Arity is checked eagerly so the error message points at the call site.
+        """
+        import copy
+
+        # ── 1. Locate the definition ──────────────────────────────────────────
+        macro_def = None
+        if hasattr(module, '_macros'):
+            macro_def = module._macros.get(node.name)
+        # Fall back to the parser-side table carried on the module (if wired up)
+        if macro_def is None and hasattr(module, '_parser_macros'):
+            macro_def = module._parser_macros.get(node.name)
+
+        if macro_def is None:
+            raise NameError(
+                f"Unknown expression macro '{node.name}' "
+                f"[{node.source_line}:{node.source_col}]"
+            )
+
+        # ── 2. Arity check ────────────────────────────────────────────────────
+        if len(node.arguments) != len(macro_def.params):
+            raise TypeError(
+                f"Expression macro '{node.name}' expects {len(macro_def.params)} "
+                f"argument(s), got {len(node.arguments)} "
+                f"[{node.source_line}:{node.source_col}]"
+            )
+
+        # ── 3. Build substitution map: param_name -> deep-copied arg expression
+        subst = {
+            param: copy.deepcopy(arg)
+            for param, arg in zip(macro_def.params, node.arguments)
+        }
+
+        # ── 4. Deep-copy the body and substitute ─────────────────────────────
+        body_copy = copy.deepcopy(macro_def.body)
+        expanded  = self._macro_substitute(body_copy, subst)
+
+        # ── 5. Codegen the expanded expression ───────────────────────────────
+        return self.visit(expanded, builder, module)
+
+    @staticmethod
+    def _macro_substitute(node, subst: dict):
+        """
+        Recursively walk an AST subtree and replace every Identifier whose
+        name is a key in `subst` with the corresponding argument node.
+
+        Returns the (possibly replaced) node.  All mutations happen on the
+        already-deep-copied tree so the original macroDef body is untouched.
+        """
+        from fast import (Identifier, BinaryOp, UnaryOp, FunctionCall,
+                          ArrayAccess, MemberAccess, MethodCall, CastExpression,
+                          TypeConvertExpression, TernaryOp, NullCoalesce,
+                          NotNull, AddressOf, PointerDeref, ArrayLiteral,
+                          ArrayComprehension, RangeExpression, IfExpression,
+                          macroCall)
+        import copy
+
+        if isinstance(node, Identifier):
+            if node.name in subst:
+                return copy.deepcopy(subst[node.name])
+            return node
+
+        if isinstance(node, BinaryOp):
+            node.left  = CodegenVisitor._macro_substitute(node.left,  subst)
+            node.right = CodegenVisitor._macro_substitute(node.right, subst)
+            return node
+
+        if isinstance(node, UnaryOp):
+            node.operand = CodegenVisitor._macro_substitute(node.operand, subst)
+            return node
+
+        if isinstance(node, TernaryOp):
+            node.condition  = CodegenVisitor._macro_substitute(node.condition,  subst)
+            node.true_expr  = CodegenVisitor._macro_substitute(node.true_expr,  subst)
+            node.false_expr = CodegenVisitor._macro_substitute(node.false_expr, subst)
+            return node
+
+        if isinstance(node, NullCoalesce):
+            node.left  = CodegenVisitor._macro_substitute(node.left,  subst)
+            node.right = CodegenVisitor._macro_substitute(node.right, subst)
+            return node
+
+        if isinstance(node, NotNull):
+            node.operand = CodegenVisitor._macro_substitute(node.operand, subst)
+            return node
+
+        if isinstance(node, (CastExpression, TypeConvertExpression)):
+            node.expression = CodegenVisitor._macro_substitute(node.expression, subst)
+            return node
+
+        if isinstance(node, FunctionCall):
+            node.arguments = [
+                CodegenVisitor._macro_substitute(a, subst) for a in node.arguments
+            ]
+            return node
+
+        if isinstance(node, macroCall):
+            # Nested macro call — substitute into its arguments too
+            node.arguments = [
+                CodegenVisitor._macro_substitute(a, subst) for a in node.arguments
+            ]
+            return node
+
+        if isinstance(node, ArrayAccess):
+            node.array = CodegenVisitor._macro_substitute(node.array, subst)
+            node.index = CodegenVisitor._macro_substitute(node.index, subst)
+            return node
+
+        if isinstance(node, MemberAccess):
+            node.object = CodegenVisitor._macro_substitute(node.object, subst)
+            return node
+
+        if isinstance(node, MethodCall):
+            node.object    = CodegenVisitor._macro_substitute(node.object, subst)
+            node.arguments = [
+                CodegenVisitor._macro_substitute(a, subst) for a in node.arguments
+            ]
+            return node
+
+        if isinstance(node, AddressOf):
+            node.expression = CodegenVisitor._macro_substitute(node.expression, subst)
+            return node
+
+        if isinstance(node, PointerDeref):
+            node.pointer = CodegenVisitor._macro_substitute(node.pointer, subst)
+            return node
+
+        if isinstance(node, ArrayLiteral):
+            node.elements = [
+                CodegenVisitor._macro_substitute(e, subst) for e in node.elements
+            ]
+            return node
+
+        if isinstance(node, RangeExpression):
+            node.start = CodegenVisitor._macro_substitute(node.start, subst)
+            node.end   = CodegenVisitor._macro_substitute(node.end,   subst)
+            if node.step is not None:
+                node.step = CodegenVisitor._macro_substitute(node.step, subst)
+            return node
+
+        if isinstance(node, ArrayComprehension):
+            node.expression = CodegenVisitor._macro_substitute(node.expression, subst)
+            node.iterable   = CodegenVisitor._macro_substitute(node.iterable,   subst)
+            if node.condition is not None:
+                node.condition = CodegenVisitor._macro_substitute(node.condition, subst)
+            return node
+
+        if isinstance(node, IfExpression):
+            node.value_expr = CodegenVisitor._macro_substitute(node.value_expr, subst)
+            node.condition  = CodegenVisitor._macro_substitute(node.condition,  subst)
+            if node.else_expr is not None:
+                node.else_expr = CodegenVisitor._macro_substitute(node.else_expr, subst)
+            return node
+
+        # Literals, SizeOf, AlignOf, Stringify, etc. — nothing to substitute
+        return node
+
     def visit_EnumDefStatement(self, node, builder, module):
         self.visit(node.enum_def, builder, module)
         return None
@@ -5698,6 +5889,15 @@ class CodegenVisitor:
 
         module.symbol_table = node.symbol_table
         module._program_statements = node.statements
+
+        # Collect macro definitions onto the module so visit_macroCall can
+        # find them without needing a reference back to the parser.
+        from fast import macroDefStatement as _macroDefStatement
+        if not hasattr(module, '_macros'):
+            module._macros = {}
+        for _stmt in node.statements:
+            if isinstance(_stmt, _macroDefStatement):
+                module._macros[_stmt.macro_def.name] = _stmt.macro_def
 
         # Create global builder with no function context
         builder = ir.IRBuilder()
