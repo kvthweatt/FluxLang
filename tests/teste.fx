@@ -2,35 +2,13 @@
 
 using standard::io::console;
 
-contract LessThan(a, b)
-{
-    assert(a < b, "a must be less than b");
-};
-
-contract NonZero(a,b)
-{
-    assert(a != 0, "a must be nonzero");
-    assert(b != 0, "b must be nonzero");
-};
-
-def addi(int x, int y) -> int : LessThan(a,b)
-{
-    return x + y;
-};
-
-operator(int x, i32 y)[+] -> int : NonZero(a,b)
-{
-    return x+y;
-};
-
-
 def main() -> int
 {
-    //int c = addi(5,2);
+    byte* test = "int x = 5;";
 
-    //println(c);
+    ~$test;
 
-    0 + 4;
-
+    println(x);
+    
     return 0;
 };

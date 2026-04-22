@@ -133,6 +133,7 @@ class FluxParser:
         self._function_depth = 0  # Tracks nesting depth; nested function defs are illegal
         self._loop_depth = 0      # Tracks nesting depth of for/while/do-while loops
         self._default_byte_width = default_byte_width if default_byte_width is not None else _get_byte_width(_flux_config)
+        self._comptime_strings: Dict[str, str] = {}  # var_name -> string value, for ~$ codify splicing
 
     @classmethod
     def from_file(self, source_file: str, compiler_macros: Optional[Dict[str, str]] = None):
@@ -676,6 +677,36 @@ class FluxParser:
             destructure = self.destructuring_assignment()
             self.consume(TokenType.SEMICOLON)
             return destructure
+        elif self.expect(TokenType.CODIFY):
+            # ~$varname; — compile-time code injection.
+            # The parser re-lexes the string literal stored in varname and parses
+            # it into statements that are spliced in place of this statement.
+            # A completely fresh parser is used with zero shared state so that
+            # no symbol-table mutations bleed back into the outer parse.
+            tok = self.current_token
+            self.advance()  # consume CODIFY (~$)
+            if not self.expect(TokenType.IDENTIFIER):
+                self.error("~$: expected identifier after codify operator")
+            var_name = self.current_token.value
+            self.advance()  # consume identifier
+            self.consume(TokenType.SEMICOLON)
+            if var_name not in self._comptime_strings:
+                self.error(
+                    f"~$: '{var_name}' is not a compile-time-known byte* string literal. "
+                    f"Only variables declared as 'byte* name = \"...\";' are supported."
+                )
+            source_text = self._comptime_strings[var_name]
+            sub_lexer = FluxLexer(source_text)
+            sub_tokens = sub_lexer.tokenize()
+            sub_parser = FluxParser(sub_tokens)
+            sub_stmts = []
+            while not sub_parser.expect(TokenType.EOF):
+                stmt = sub_parser.statement()
+                if isinstance(stmt, list):
+                    sub_stmts.extend(s for s in stmt if s is not None)
+                elif stmt is not None:
+                    sub_stmts.append(stmt)
+            return sub_stmts if sub_stmts else None
         elif self.expect(TokenType.ASM):
             return self.asm_statement()
         else:
@@ -957,6 +988,11 @@ class FluxParser:
             expr.right = self._substitute_expr(expr.right, subst)
         elif isinstance(expr, ArrayLiteral):
             expr.elements = [self._substitute_expr(e, subst) for e in expr.elements]
+        elif isinstance(expr, FStringLiteral):
+            expr.parts = [
+                self._substitute_expr(part, subst) if not isinstance(part, str) else part
+                for part in expr.parts
+            ]
         return expr
 
     def _apply_post_contracts(self, body: Block, return_type, post_stmts: list) -> Block:
@@ -2739,6 +2775,10 @@ class FluxParser:
                     return var_decl.set_location(tok.line, tok.column)
 
                 initializers.append(init_expr)
+                # Record byte* string-literal initialisers so ~$varname can splice them
+                if (isinstance(init_expr, StringLiteral) and
+                        type_spec.is_pointer and type_spec.base_type == DataType.BYTE):
+                    self._comptime_strings[name] = init_expr.value
             else:
                 initializers.append(None)
             
@@ -3317,7 +3357,7 @@ class FluxParser:
     
     def assert_statement(self) -> AssertStatement:
         """
-        assert_statement -> 'assert' '(' expression (',' CHAR)? ')' ';'
+        assert_statement -> 'assert' '(' expression (',' (STRING_LITERAL | F_STRING | I_STRING))? ')' ';'
         """
         tok = self.current_token
         self.consume(TokenType.ASSERT)
@@ -3327,7 +3367,14 @@ class FluxParser:
         message = None
         if self.expect(TokenType.COMMA):
             self.advance()
-            message = self.consume(TokenType.STRING_LITERAL).value
+            if self.expect(TokenType.F_STRING):
+                f_string_content = self.consume(TokenType.F_STRING).value
+                message = self.parse_f_string(f_string_content).set_location(tok.line, tok.column)
+            elif self.expect(TokenType.I_STRING):
+                i_string_content = self.consume(TokenType.I_STRING).value
+                message = self.parse_i_string(i_string_content).set_location(tok.line, tok.column)
+            else:
+                message = self.consume(TokenType.STRING_LITERAL).value
         
         self.consume(TokenType.RIGHT_PAREN)
         self.consume(TokenType.SEMICOLON)

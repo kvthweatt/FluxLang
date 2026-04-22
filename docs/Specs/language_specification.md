@@ -696,7 +696,7 @@ In this case, `stackVar` is zeroed out and the reference invalidated.
 
 ---
 
-## Stringification:
+## Stringification with `$`:
 ```
 #import "standard.fx";
 
@@ -712,6 +712,26 @@ def main() -> int
 ```
 Result:
 `Hello`
+
+## Codification:
+Codification is the inverse of stringification, using the codify operator `~$`
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+def main() -> int
+{
+    byte* test = "int x = 5;";
+
+    ~$test;
+
+    println(x);
+    
+    return 0;
+};
+```
+Result: `5`
 
 ---
 

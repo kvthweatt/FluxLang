@@ -491,6 +491,19 @@ class Stringify(Expression):
 
 
 @dataclass
+class Codify(Expression):
+    """~$x -- parse-time code injection operator.
+    The byte* variable x must be initialised with a string literal.
+    The parser re-lexes and re-parses that string, splicing the resulting
+    statements in place of the ~$x; statement. This node never reaches codegen."""
+    operand: Expression
+
+    def __repr__(self) -> str:
+        return f"~${self.operand!r}"
+
+
+
+@dataclass
 class AlignOf(Expression):
     target: Union[TypeSystem, Expression]
 
