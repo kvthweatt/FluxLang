@@ -14,7 +14,8 @@ contract rValGT5
 
 def foo(int x) -> int : NonZero
 {
-    return x / 2;
+    x = x / 2;
+    return x;
 } : rValGT5;
 
 def main() -> int

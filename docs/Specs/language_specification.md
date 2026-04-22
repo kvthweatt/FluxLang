@@ -1234,6 +1234,57 @@ def main() -> int
 
 ---
 
+## **Functions and `contract`:**
+Contracts are compile time function modification.  
+They prepend or append the code contained to a function's body.
+
+Pre-contract form puts the contract's statements before the function's code.  
+Post-contract form puts the contract's statements before the function's return.
+
+Contracts are not specifically `assert`-only, they can contain any statement.
+They are similar to macros and expand before type checking and semantic analysis.
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+contract NonZero
+{
+    assert(x > 0, "x must be positive");
+};
+
+contract rValGT10
+{
+    assert(x > 10, "r must be greater than 10");
+};
+
+def foo(int x) -> int : NonZero
+{
+    x = x / 2;
+    return x;
+} : rValGT5;
+
+def main() -> int
+{
+    int y = foo(18);
+
+    return 0;
+};
+```
+Turns into:
+```
+def foo(int x) -> int : NonZero
+{
+    assert(x > 0, "x must be positive");
+    x = x / 2;
+    assert(x > 10, "x must be greater than 10");
+    return x;
+};
+```
+The contracts disappear from the compilation unit after transformation.
+
+---
+
 ## **Custom infix operators and overloading**
 - Custom:
 ```
@@ -2050,10 +2101,15 @@ vectorcall{}* someSIMDfunc() -> u64*;
 
 # Keyword list:
 ```
-alignof, and, as, asm, assert, auto, break, bool, byte, case, catch, cdecl, const, continue, data, def, default, deprecate, 
-do, double, elif, else, enum, false, fastcall, float, for, global, goto, heap, if, in, is, int, jump, label, local, long, namespace, noinit, noreturn, not, object, or,
-private, public, register, return, signed, singinit, sizeof, stack, stdcall, struct, switch, this, thiscall, throw, true, try, typeof, uint, ulong,
-union, unsigned, vectorcall, void, volatile, while, xor
+alignof, and, as, asm, assert, auto, break, bool, byte, case,
+catch, cdecl, const, continue, contract, data, def, default,
+deprecate, do, double, elif, else, enum, false, fastcall,
+float, for, global, goto, heap, if, in, is, int, jump, label,
+local, long, namespace, noinit, noreturn, not, object, or,
+private, public, register, return, signed, singinit, sizeof,
+stack, stdcall, struct, switch, this, thiscall, throw, true,
+try, typeof, uint, ulong, union, unsigned, vectorcall, void,
+volatile, while, xor
 ```
 
 # Operator list:
@@ -2114,6 +2170,7 @@ BITXNOR_ASSIGN = "`^^!|="
 
 # Ternary assignment, assign if left side is null.
 TERN_ASSIGN = "?="
+NOT_NULL = "!?"     // unary boolean postfix operator, primary use for pointers `if (px!?) {...}`
 
 # Shift
 BITSHIFT_LEFT = "<<"
@@ -2124,13 +2181,13 @@ BITSHIFT_RIGHT_ASSIGN = ">>="
 BITSLICE = "``"
 
 ADDRESS_OF = "@"
+ADDRESS_ASSIGN = "@="
 RANGE = ".."
 SCOPE = "::"
 QUESTION = "?"
 COLON = ":"
 TIE = "~"
 STRINGIFY = "$"
-LAMBDA_ARROW = "<:-"
 RETURN_ARROW = "->"
 CHAIN_ARROW = "<-"
 RECURSE_ARROW = "<~" // def foo() <~ void;  // Emits musttail, 0 stack growth

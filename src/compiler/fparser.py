@@ -762,6 +762,85 @@ class FluxParser:
         
         return ExternBlock(declarations).set_location(tok.line, tok.column)
     
+    def _apply_post_contracts(self, body: Block, return_type, post_stmts: list) -> Block:
+        """
+        Rewrite every ReturnStatement in body so that post-contract assertions
+        run against the return value before the function actually returns.
+
+        Each ``return <expr>;`` becomes::
+
+            <return_type> r = <expr>;
+            <post_contract assertions referencing r>
+            return r;
+
+        The rewrite is recursive so returns inside nested if/for/while/try blocks
+        are also caught.  The sentinel name ``r`` matches the convention used
+        in contract bodies (e.g. ``assert(r > 10, ...)``).
+        """
+        import copy
+
+        def _rewrite_stmts(stmts):
+            out = []
+            for stmt in stmts:
+                if isinstance(stmt, ReturnStatement) and stmt.value is not None:
+                    # <return_type> r = <expr>;
+                    r_decl = VariableDeclaration(
+                        name='r',
+                        type_spec=return_type,
+                        initial_value=stmt.value,
+                    )
+                    r_decl.set_location(stmt.source_line, stmt.source_col)
+                    # deep-copy contract stmts so each return site is independent
+                    injected = copy.deepcopy(post_stmts)
+                    # return r;
+                    r_ret = ReturnStatement(Identifier('r'))
+                    r_ret.set_location(stmt.source_line, stmt.source_col)
+                    out.append(r_decl)
+                    out.extend(injected)
+                    out.append(r_ret)
+                elif isinstance(stmt, Block):
+                    out.append(Block(_rewrite_stmts(stmt.statements)))
+                elif isinstance(stmt, IfStatement):
+                    stmt.then_block = Block(_rewrite_stmts(stmt.then_block.statements))
+                    if stmt.else_block is not None:
+                        stmt.else_block = Block(_rewrite_stmts(stmt.else_block.statements))
+                    stmt.elif_blocks = [
+                        (cond, Block(_rewrite_stmts(blk.statements)))
+                        for cond, blk in stmt.elif_blocks
+                    ]
+                    out.append(stmt)
+                elif isinstance(stmt, (ForLoop, ForInLoop, WhileLoop, DoLoop, DoWhileLoop)):
+                    stmt.body = Block(_rewrite_stmts(stmt.body.statements))
+                    out.append(stmt)
+                elif isinstance(stmt, SwitchStatement):
+                    stmt.cases = [
+                        type(c)(c.value, Block(_rewrite_stmts(c.body.statements)))
+                        if hasattr(c, 'body') else c
+                        for c in stmt.cases
+                    ]
+                    out.append(stmt)
+                elif isinstance(stmt, TryBlock):
+                    stmt.try_body = Block(_rewrite_stmts(stmt.try_body.statements))
+                    stmt.catch_blocks = [
+                        (exc_type, exc_name, Block(_rewrite_stmts(blk.statements)))
+                        for exc_type, exc_name, blk in stmt.catch_blocks
+                    ]
+                    out.append(stmt)
+                else:
+                    out.append(stmt)
+            return out
+
+        # For void functions there are no return values to wrap, so just
+        # append the contract statements at the end of the body directly.
+        is_void = (
+            hasattr(return_type, 'base_type') and return_type.base_type == DataType.VOID
+        ) or str(return_type) == 'void'
+        if is_void:
+            body.statements = body.statements + copy.deepcopy(post_stmts)
+        else:
+            body.statements = _rewrite_stmts(body.statements)
+        return body
+
     def contract_def(self) -> ContractDef:
         """
         contract_def -> 'contract' IDENTIFIER block ';'
@@ -1028,9 +1107,27 @@ class FluxParser:
             self._function_depth += 1
             body = self.block()
             self._function_depth -= 1
-            # Prepend contract statements to the top of the function body
+            # Prepend pre-contract statements to the top of the function body
             if contract_stmts:
                 body.statements = contract_stmts + body.statements
+            # Post-contracts: } : ContractName, OtherContract;
+            # The contract body sees 'r' as the return value.
+            # Each return expr is rewritten to: r = expr; <asserts>; return r;
+            post_contract_stmts = []
+            if self.expect(TokenType.COLON):
+                self.advance()
+                post_name = self.consume(TokenType.IDENTIFIER).value
+                if post_name not in self._contracts:
+                    self.error(f"Undefined post-contract '{post_name}'")
+                post_contract_stmts.extend(self._contracts[post_name].statements)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    post_name = self.consume(TokenType.IDENTIFIER).value
+                    if post_name not in self._contracts:
+                        self.error(f"Undefined post-contract '{post_name}'")
+                    post_contract_stmts.extend(self._contracts[post_name].statements)
+            if post_contract_stmts:
+                body = self._apply_post_contracts(body, return_type, post_contract_stmts)
             self.consume(TokenType.SEMICOLON)
         
         # Only add named real parameters to symbol table
