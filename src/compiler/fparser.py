@@ -318,7 +318,8 @@ class FluxParser:
 
     def operator_def(self) -> FunctionDef:
         """
-        operator_def -> 'operator' '(' parameter_list ')' '[' op_tokens+ ']' '->' type_spec (';' | block ';')
+        operator_def -> 'operator' '(' parameter_list ')' '[' op_tokens+ ']' '->' type_spec
+                        (':' contract_list)? (';' | block (':' post_contract_list)? ';')
         """
         tok = self.current_token
         # Consume 'operator' keyword token
@@ -349,12 +350,45 @@ class FluxParser:
         self.consume(TokenType.RETURN_ARROW)
         return_type = self.type_spec()
 
+        # Pre-contracts: -> rtype : Contract1, Contract2 { ... }
+        contract_stmts = []
+        if self.expect(TokenType.COLON):
+            self.advance()
+            contract_name, call_args = self._parse_contract_ref()
+            if contract_name not in self._contracts:
+                self.error(f"Undefined contract '{contract_name}'")
+            contract_stmts.extend(self._resolve_contract(contract_name, params, call_args))
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                contract_name, call_args = self._parse_contract_ref()
+                if contract_name not in self._contracts:
+                    self.error(f"Undefined contract '{contract_name}'")
+                contract_stmts.extend(self._resolve_contract(contract_name, params, call_args))
+
         if self.expect(TokenType.SEMICOLON):
             self.advance()
             body = Block([])
             is_prototype = True
         else:
             body = self.block()
+            if contract_stmts:
+                body.statements = contract_stmts + body.statements
+            # Post-contracts: } : Post1, Post2;
+            post_contract_stmts = []
+            if self.expect(TokenType.COLON):
+                self.advance()
+                post_name, post_call_args = self._parse_contract_ref()
+                if post_name not in self._contracts:
+                    self.error(f"Undefined post-contract '{post_name}'")
+                post_contract_stmts.extend(self._resolve_contract(post_name, params, post_call_args))
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    post_name, post_call_args = self._parse_contract_ref()
+                    if post_name not in self._contracts:
+                        self.error(f"Undefined post-contract '{post_name}'")
+                    post_contract_stmts.extend(self._resolve_contract(post_name, params, post_call_args))
+            if post_contract_stmts:
+                body = self._apply_post_contracts(body, return_type, post_contract_stmts)
             self.consume(TokenType.SEMICOLON)
             is_prototype = False
 
@@ -370,14 +404,17 @@ class FluxParser:
             # parameter is an object or struct type.  Allowing purely primitive
             # operand pairs (e.g. int + int) would silently hijack all uses of
             # that operator on those types.
-            def _is_object_or_struct(ts):
+            def _is_non_builtin(ts):
+                # Any type that is not one of the core primitive keywords is
+                # non-builtin: objects, structs, custom-typename aliases, DATA
+                # width types (i32, ui32, be16, ...), and pointers.
                 return (ts.custom_typename is not None or
-                        ts.base_type in (DataType.STRUCT, DataType.OBJECT) or
+                        ts.base_type in (DataType.STRUCT, DataType.OBJECT, DataType.DATA) or
                         ts.is_pointer)
-            if not any(_is_object_or_struct(p.type_spec) for p in params):
+            if not any(_is_non_builtin(p.type_spec) for p in params):
                 self.error(
                     f"Overloading built-in operator '{symbol}' requires at least "
-                    f"one parameter to be an object or struct type"
+                    f"one parameter to be a non-builtin type"
                 )
         else:
             self._custom_operators[symbol] = func_name
@@ -762,6 +799,166 @@ class FluxParser:
         
         return ExternBlock(declarations).set_location(tok.line, tok.column)
     
+    def _parse_contract_ref(self):
+        """
+        Parse a contract reference at an attachment site.
+        Returns (contract_name, call_site_args_or_None).
+
+        Syntax:
+            ContractName                  -> ('ContractName', None)
+            ContractName(a, b)            -> ('ContractName', ['a', 'b'])
+        """
+        name = self.consume(TokenType.IDENTIFIER).value
+        call_args = None
+        if self.expect(TokenType.LEFT_PAREN):
+            self.advance()
+            call_args = []
+            if not self.expect(TokenType.RIGHT_PAREN):
+                call_args.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    call_args.append(self.consume(TokenType.IDENTIFIER).value)
+            self.consume(TokenType.RIGHT_PAREN)
+        return name, call_args
+
+    def _resolve_contract(self, contract_name: str, func_params: list,
+                          call_site_args: list = None) -> list:
+        """
+        Return a deep-copied, substituted list of statements for the named contract.
+
+        call_site_args: optional list of identifier strings supplied at the
+        attachment site, e.g. the ['y', 'x'] from `: LessThan(y, x)`.  When
+        provided they define the mapping order (contract param[i] -> call_site_args[i],
+        which must itself be a name of a real function parameter).  When absent,
+        mapping is positional: contract param[i] -> real_params[i].
+
+        For plain (unparameterized) contracts the statements are returned as-is
+        (deep-copied so each injection site is independent).
+        """
+        import copy
+        c_params, c_body = self._contracts[contract_name]
+        real_params = [p for p in func_params if not getattr(p, '_is_variadic_sentinel', False)]
+        real_param_names = {p.name for p in real_params if p.name is not None}
+        if c_params:
+            if call_site_args is not None:
+                # Explicit remapping: arity must match contract params
+                if len(call_site_args) != len(c_params):
+                    self.error(
+                        f"Contract '{contract_name}' expects {len(c_params)} parameter(s) "
+                        f"but {len(call_site_args)} argument(s) given at attachment site"
+                    )
+                # Remap contract params to function params positionally.
+                # call_site_args[i] is the contract param name that maps to real_params[i].
+                if len(real_params) < len(call_site_args):
+                    self.error(
+                        f"Contract '{contract_name}' attachment maps {len(call_site_args)} "
+                        f"parameter(s) but function only has {len(real_params)}"
+                    )
+                subst = {
+                    call_site_args[i]: real_params[i].name
+                    for i in range(len(call_site_args))
+                    if real_params[i].name is not None
+                }
+            else:
+                # Positional mapping
+                if len(c_params) != len(real_params):
+                    self.error(
+                        f"Contract '{contract_name}' expects {len(c_params)} parameter(s) "
+                        f"but function has {len(real_params)}"
+                    )
+                subst = {
+                    c_param: real_params[i].name
+                    for i, c_param in enumerate(c_params)
+                    if real_params[i].name is not None
+                }
+            stmts_copy = copy.deepcopy(c_body.statements)
+            return self._substitute_contract_stmts(stmts_copy, subst)
+        return copy.deepcopy(c_body.statements)
+
+    def _substitute_contract_stmts(self, stmts: list, subst: dict) -> list:
+        """
+        Walk a list of statements and replace every Identifier whose name is a
+        key in `subst` with a new Identifier of the mapped name.  This covers
+        the statement-level nodes that appear in contract bodies.
+        """
+        for stmt in stmts:
+            self._substitute_stmt(stmt, subst)
+        return stmts
+
+    def _substitute_stmt(self, stmt, subst: dict) -> None:
+        """In-place substitution over a single statement node."""
+        if stmt is None:
+            return
+        if isinstance(stmt, AssertStatement):
+            stmt.condition = self._substitute_expr(stmt.condition, subst)
+            if stmt.message is not None and not isinstance(stmt.message, str):
+                stmt.message = self._substitute_expr(stmt.message, subst)
+        elif isinstance(stmt, ExpressionStatement):
+            stmt.expression = self._substitute_expr(stmt.expression, subst)
+        elif isinstance(stmt, ReturnStatement):
+            if stmt.value is not None:
+                stmt.value = self._substitute_expr(stmt.value, subst)
+        elif isinstance(stmt, (Assignment, CompoundAssignment, TernaryAssign)):
+            stmt.target = self._substitute_expr(stmt.target, subst)
+            stmt.value  = self._substitute_expr(stmt.value,  subst)
+        elif isinstance(stmt, VariableDeclaration):
+            if stmt.initial_value is not None:
+                stmt.initial_value = self._substitute_expr(stmt.initial_value, subst)
+        elif isinstance(stmt, Block):
+            self._substitute_contract_stmts(stmt.statements, subst)
+        elif isinstance(stmt, IfStatement):
+            stmt.condition = self._substitute_expr(stmt.condition, subst)
+            self._substitute_contract_stmts(stmt.then_block.statements, subst)
+            if stmt.else_block:
+                self._substitute_contract_stmts(stmt.else_block.statements, subst)
+            stmt.elif_blocks = [
+                (self._substitute_expr(cond, subst),
+                 Block(self._substitute_contract_stmts(blk.statements, subst)))
+                for cond, blk in stmt.elif_blocks
+            ]
+        elif isinstance(stmt, (ForLoop, ForInLoop, WhileLoop, DoLoop, DoWhileLoop)):
+            self._substitute_contract_stmts(stmt.body.statements, subst)
+        elif isinstance(stmt, TryBlock):
+            self._substitute_contract_stmts(stmt.try_body.statements, subst)
+            for _, _, blk in stmt.catch_blocks:
+                self._substitute_contract_stmts(blk.statements, subst)
+
+    def _substitute_expr(self, expr, subst: dict):
+        """Recursively substitute Identifiers in an expression node."""
+        if expr is None:
+            return expr
+        if isinstance(expr, Identifier):
+            if expr.name in subst:
+                return Identifier(subst[expr.name]).set_location(expr.source_line, expr.source_col)
+            return expr
+        if isinstance(expr, BinaryOp):
+            expr.left  = self._substitute_expr(expr.left,  subst)
+            expr.right = self._substitute_expr(expr.right, subst)
+        elif isinstance(expr, UnaryOp):
+            expr.operand = self._substitute_expr(expr.operand, subst)
+        elif isinstance(expr, (CastExpression, TieExpression)):
+            expr.expression = self._substitute_expr(expr.expression, subst)
+        elif isinstance(expr, FunctionCall):
+            expr.arguments = [self._substitute_expr(a, subst) for a in expr.arguments]
+        elif isinstance(expr, MethodCall):
+            expr.object    = self._substitute_expr(expr.object, subst)
+            expr.arguments = [self._substitute_expr(a, subst) for a in expr.arguments]
+        elif isinstance(expr, MemberAccess):
+            expr.object = self._substitute_expr(expr.object, subst)
+        elif isinstance(expr, ArrayAccess):
+            expr.array = self._substitute_expr(expr.array, subst)
+            expr.index = self._substitute_expr(expr.index, subst)
+        elif isinstance(expr, TernaryOp):
+            expr.condition  = self._substitute_expr(expr.condition,  subst)
+            expr.true_expr  = self._substitute_expr(expr.true_expr,  subst)
+            expr.false_expr = self._substitute_expr(expr.false_expr, subst)
+        elif isinstance(expr, NullCoalesce):
+            expr.left  = self._substitute_expr(expr.left,  subst)
+            expr.right = self._substitute_expr(expr.right, subst)
+        elif isinstance(expr, ArrayLiteral):
+            expr.elements = [self._substitute_expr(e, subst) for e in expr.elements]
+        return expr
+
     def _apply_post_contracts(self, body: Block, return_type, post_stmts: list) -> Block:
         """
         Rewrite every ReturnStatement in body so that post-contract assertions
@@ -855,10 +1052,20 @@ class FluxParser:
         tok = self.current_token
         self.consume(TokenType.CONTRACT)
         name = self.consume(TokenType.IDENTIFIER).value
+        # Optional parameter list for parameterized contracts: contract Foo(a, b) { ... }
+        params = []
+        if self.expect(TokenType.LEFT_PAREN):
+            self.advance()
+            if not self.expect(TokenType.RIGHT_PAREN):
+                params.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    params.append(self.consume(TokenType.IDENTIFIER).value)
+            self.consume(TokenType.RIGHT_PAREN)
         body = self.block()
         self.consume(TokenType.SEMICOLON)
-        self._contracts[name] = body
-        return ContractDef(name, body).set_location(tok.line, tok.column)
+        self._contracts[name] = (params, body)
+        return ContractDef(name, body, params).set_location(tok.line, tok.column)
 
     def function_def(self, calling_conv: Optional[str] = None) -> Union[FunctionDef, List[FunctionDef]]:
         """
@@ -1053,21 +1260,21 @@ class FluxParser:
             
             # Return the list of prototypes
             return [fd.set_location(tok.line, tok.column) for fd in prototypes]
-        # Resolve contract(s): def foo(int x) -> int : NonZero, OtherContract { ... }
+        # Resolve contract(s): def foo(int x) -> int : NonZero, LessThan(y,x) { ... }
         contract_stmts = []
         if self.expect(TokenType.COLON):
             self.advance()
-            contract_name = self.consume(TokenType.IDENTIFIER).value
+            contract_name, call_args = self._parse_contract_ref()
             if contract_name not in self._contracts:
                 self.error(f"Undefined contract '{contract_name}'")
-            contract_stmts.extend(self._contracts[contract_name].statements)
+            contract_stmts.extend(self._resolve_contract(contract_name, parameters, call_args))
             # Support multiple contracts: : NonZero, Positive
             while self.expect(TokenType.COMMA):
                 self.advance()
-                contract_name = self.consume(TokenType.IDENTIFIER).value
+                contract_name, call_args = self._parse_contract_ref()
                 if contract_name not in self._contracts:
                     self.error(f"Undefined contract '{contract_name}'")
-                contract_stmts.extend(self._contracts[contract_name].statements)
+                contract_stmts.extend(self._resolve_contract(contract_name, parameters, call_args))
 
         is_prototype = False
         body = None
@@ -1116,16 +1323,16 @@ class FluxParser:
             post_contract_stmts = []
             if self.expect(TokenType.COLON):
                 self.advance()
-                post_name = self.consume(TokenType.IDENTIFIER).value
+                post_name, post_call_args = self._parse_contract_ref()
                 if post_name not in self._contracts:
                     self.error(f"Undefined post-contract '{post_name}'")
-                post_contract_stmts.extend(self._contracts[post_name].statements)
+                post_contract_stmts.extend(self._resolve_contract(post_name, parameters, post_call_args))
                 while self.expect(TokenType.COMMA):
                     self.advance()
-                    post_name = self.consume(TokenType.IDENTIFIER).value
+                    post_name, post_call_args = self._parse_contract_ref()
                     if post_name not in self._contracts:
                         self.error(f"Undefined post-contract '{post_name}'")
-                    post_contract_stmts.extend(self._contracts[post_name].statements)
+                    post_contract_stmts.extend(self._resolve_contract(post_name, parameters, post_call_args))
             if post_contract_stmts:
                 body = self._apply_post_contracts(body, return_type, post_contract_stmts)
             self.consume(TokenType.SEMICOLON)

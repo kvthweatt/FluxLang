@@ -1234,6 +1234,31 @@ def main() -> int
 
 ---
 
+## **Expression-based macros with `macro`:**
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+macro xyz(a,b,c)
+{
+    (a + b) ^ c
+};
+
+def main() -> int
+{
+    int x, y, z = 1, 2, 3;
+
+    println(f"xyz(abc) = {xyz(x,y,z)}");
+
+    return 0;
+};
+```
+Result:
+`xyz(abc) = 27`
+
+---
+
 ## **Functions and `contract`:**
 Contracts are compile time function modification.  
 They prepend or append the code contained to a function's body.

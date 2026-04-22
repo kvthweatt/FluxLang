@@ -2,25 +2,35 @@
 
 using standard::io::console;
 
-contract NonZero
+contract LessThan(a, b)
 {
-    assert(x > 0, "x must be positive");
+    assert(a < b, "a must be less than b");
 };
 
-contract rValGT5
+contract NonZero(a,b)
 {
-    assert(x > 10, "r must be greater than 10");
+    assert(a != 0, "a must be nonzero");
+    assert(b != 0, "b must be nonzero");
 };
 
-def foo(int x) -> int : NonZero
+def addi(int x, int y) -> int : LessThan(a,b)
 {
-    x = x / 2;
-    return x;
-} : rValGT5;
+    return x + y;
+};
+
+operator(int x, i32 y)[+] -> int : NonZero(a,b)
+{
+    return x+y;
+};
+
 
 def main() -> int
 {
-    int y = foo(18);
+    //int c = addi(5,2);
+
+    //println(c);
+
+    0 + 4;
 
     return 0;
 };

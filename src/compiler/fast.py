@@ -1499,9 +1499,11 @@ class ContractDef(Statement):
     """
     name: str
     body: Block  # statements to inject at the top of the function body
+    params: List[str] = field(default_factory=list)  # param names for parameterized contracts
 
     def __repr__(self) -> str:
-        return f"contract {self.name} {{ {self.body} }}"
+        params_str = f'({', '.join(self.params)})' if self.params else ''
+        return f"contract {self.name}{params_str} {{ {self.body} }}"
 
 
 # Program root
