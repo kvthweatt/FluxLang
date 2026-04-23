@@ -1245,6 +1245,42 @@ def main() -> int
 };
 ```
 
+The compiler can also infer templates at call sites, so you don't end up with a mess of angle brackets:
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+struct myStru<T>
+{
+    T a, b;
+};
+
+def foo<T, U>(T a, U b) -> U
+{
+    return a.a * b;
+};
+
+def bar(myStru<int> a, int b) -> int
+{
+    return foo(a, 3); // inferred from signature via 'a'
+};
+
+def main() -> int
+{
+    myStru<int> ms = {10,20};
+
+    //int w = foo<myStru<int>, int>(ms, 3); // brackets at call site
+
+    int x = foo(ms, 3); // inferred locally
+
+    int y = bar(ms, 3);
+
+    println(x == y);
+    return 0;
+};
+```
+
 ---
 
 ## **Expression-based macros with `macro`:**

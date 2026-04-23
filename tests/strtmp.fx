@@ -23,10 +23,10 @@ def main() -> int
 
     //int x = foo<myStru<int>, int>(ms, 3);
 
-    //int x = foo(ms, 3);
+    int x = foo(ms, 3);
 
-    int x = bar(ms, 3);
+    int y = bar(ms, 3);
 
-    println(x);
+    println(x == y);
 	return 0;
 };

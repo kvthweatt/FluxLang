@@ -1363,6 +1363,14 @@ class FluxParser:
                     self.error(f"Function definition requires parameter names, but parameter of type {param.type_spec} has no name")
             if self._function_depth > 0:
                 self.error(f"Illegal nested function definition '{name}': function definitions are not allowed inside another function body")
+            # Register parameters in the symbol table BEFORE parsing the body so
+            # that template inference inside the body (e.g. foo(a, 3) where 'a' is
+            # a parameter with a known concrete type) can resolve argument types via
+            # get_type_spec().  Without this, lookup returns None during body parsing
+            # and inference falls back to an unresolved FunctionCall.
+            for param in real_parameters:
+                if param.name:
+                    self.symbol_table.define(param.name, SymbolKind.VARIABLE, param.type_spec)
             self._function_depth += 1
             body = self.block()
             self._function_depth -= 1
@@ -1388,11 +1396,6 @@ class FluxParser:
             if post_contract_stmts:
                 body = self._apply_post_contracts(body, return_type, post_contract_stmts)
             self.consume(TokenType.SEMICOLON)
-        
-        # Only add named real parameters to symbol table
-        for param in real_parameters:
-            if param.name:
-                self.symbol_table.define(param.name, SymbolKind.VARIABLE, param.type_spec)
         
         # If this is a template function, store it and return None (no immediate codegen)
         if template_params:
