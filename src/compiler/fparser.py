@@ -127,6 +127,9 @@ class FluxParser:
         self._template_functions = {}  # name -> (template_param_names, FunctionDef AST)
         self._emitted_template_instances = set()  # mangled names already instantiated
         self._template_instantiations = []  # concrete FunctionDef nodes to inject into program
+        self._template_structs = {}               # name -> (param_names, StructDef AST)
+        self._emitted_template_struct_instances = set()
+        self._template_struct_instances = []      # concrete StructDefs to inject
         self._parsed_objects = {}  # object_name -> ObjectDef AST node
         self._custom_operators: Dict[str, str] = {}  # symbol string -> base function name
         self._contracts: Dict[str, Block] = {}  # name -> Block of statements to inject
@@ -468,6 +471,8 @@ class FluxParser:
                 self.parse_errors.append(error_msg)
                 self.synchronize()
         # Prepend template instantiations so they are emitted before any call site
+        if self._template_struct_instances:
+            statements = self._template_struct_instances + statements
         if self._template_instantiations:
             statements = self._template_instantiations + statements
         return Program(self.symbol_table, statements=statements)
@@ -1727,6 +1732,30 @@ class FluxParser:
         tok = self.current_token
         self.consume(TokenType.STRUCT)
         name = self.consume(TokenType.IDENTIFIER).value
+
+        # Parse optional template parameter list: struct name<T, U, ...>
+        # Use lookahead to confirm all angle-bracket contents are identifiers.
+        template_params = []
+        if self.expect(TokenType.LESS_THAN):
+            with self._lookahead():
+                is_template = False
+                self.advance()  # consume '<'
+                if self.expect(TokenType.IDENTIFIER):
+                    self.advance()
+                    while self.expect(TokenType.COMMA):
+                        self.advance()
+                        if not self.expect(TokenType.IDENTIFIER):
+                            break
+                        self.advance()
+                    if self.expect(TokenType.GREATER_THAN):
+                        is_template = True
+            if is_template:
+                self.advance()  # consume '<'
+                template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                self.consume(TokenType.GREATER_THAN)
         
         # Check for comma-separated prototypes
         names = [name]
@@ -1849,7 +1878,13 @@ class FluxParser:
                 post_structs.append(self.consume(TokenType.IDENTIFIER).value)
 
         self.consume(TokenType.SEMICOLON)
-        return StructDef(name, members, base_structs, post_structs=post_structs, nested_structs=nested_structs).set_location(tok.line, tok.column)
+        sd = StructDef(name, members, base_structs, post_structs=post_structs,
+                       nested_structs=nested_structs, template_params=template_params)
+        sd.set_location(tok.line, tok.column)
+        if template_params:
+            self._template_structs[name] = (template_params, sd)
+            return None  # no immediate emission; instantiated on use
+        return sd
     
     def struct_member(self) -> Union[StructMember, List[StructMember]]:
         """
@@ -2358,6 +2393,24 @@ class FluxParser:
         else:
             base_type = base_type_result
 
+        # Template struct instantiation: MyStruct<int> or MyStruct<T, U>
+        # After parsing a custom typename, check if '<' follows and it names a template struct.
+        if custom_typename is not None and self.expect(TokenType.LESS_THAN):
+            if custom_typename in self._template_structs:
+                self.advance()  # consume '<'
+                type_names = []
+                type_specs_list = []
+                ts = self.type_spec()
+                type_names.append(self._type_system_to_mangle_str(ts))
+                type_specs_list.append(ts)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    ts = self.type_spec()
+                    type_names.append(self._type_system_to_mangle_str(ts))
+                    type_specs_list.append(ts)
+                self.consume(TokenType.GREATER_THAN)
+                custom_typename = self._resolve_template_struct(custom_typename, type_names, type_specs_list)
+
         # Bit width and alignment for data types
         bit_width = None
         alignment = None
@@ -2604,7 +2657,22 @@ class FluxParser:
                     self.advance()
                 else:
                     break
-            
+
+            # Handle template args: MyStruct<int> or MyStruct<T, U>
+            if self.expect(TokenType.LESS_THAN):
+                self.advance()  # consume '<'
+                depth = 1
+                while depth > 0 and not self.expect(TokenType.EOF):
+                    if self.expect(TokenType.LESS_THAN):
+                        depth += 1
+                    elif self.expect(TokenType.GREATER_THAN):
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    self.advance()
+                if self.expect(TokenType.GREATER_THAN):
+                    self.advance()
+
             # Handle optional bit-width/alignment specification {width:alignment}
             if self.expect(TokenType.LEFT_BRACE):
                 self.advance()
@@ -3974,6 +4042,37 @@ class FluxParser:
             sign = 'i' if ts.is_signed else 'u'
             return f"data_{sign}{ts.bit_width}"
         return base
+
+    def _resolve_template_struct(self, struct_name, type_names, type_specs=None):
+        """
+        Instantiate a template struct with concrete type arguments.
+        Returns the mangled concrete struct name.
+        """
+        if struct_name not in self._template_structs:
+            self.error(f"Unknown template struct '{struct_name}'")
+        template_params, template_sd = self._template_structs[struct_name]
+        if len(type_names) != len(template_params):
+            self.error(
+                f"Template struct '{struct_name}' expects {len(template_params)} "
+                f"type argument(s), got {len(type_names)}"
+            )
+        mangled = struct_name + "__" + "_".join(type_names)
+        if mangled not in self._emitted_template_struct_instances:
+            self._emitted_template_struct_instances.add(mangled)
+            mapping = {}
+            for param, tname, tspec in zip(
+                    template_params, type_names,
+                    type_specs or [None] * len(type_names)):
+                if tspec is not None:
+                    mapping[param] = tspec
+                else:
+                    mapping[param] = TypeSystem(
+                        base_type=DataType.DATA, custom_typename=tname)
+            concrete = self._substitute_template(template_sd, mapping)
+            concrete.name = mangled
+            concrete.template_params = []
+            self._template_struct_instances.append(concrete)
+        return mangled
 
     def _resolve_template_call(self, func_name, arg_type_names, arg_type_specs=None):
         """

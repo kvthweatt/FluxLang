@@ -1144,6 +1144,7 @@ class StructDef(ASTNode):
     nested_structs: List['StructDef'] = field(default_factory=list)
     storage_class: Optional[StorageClass] = None
     vtable: Optional[StructVTable] = None
+    template_params: List[str] = field(default_factory=list)
     
     def calculate_vtable(self, module: ir.Module) -> StructVTable:
             """Calculate struct layout and generate TLD."""
