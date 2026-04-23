@@ -66,6 +66,7 @@ _CALLING_CONV_TOKEN_TO_STR = {
 }
 
 _TOKEN_SYMBOL_MAP = {
+    # Operators
     TokenType.PLUS:               '+',
     TokenType.MINUS:              '-',
     TokenType.MULTIPLY:           '*',
@@ -96,6 +97,19 @@ _TOKEN_SYMBOL_MAP = {
     TokenType.BITNOR_OP:          '`!|',
     TokenType.BITXNAND:           '`^^!&',
     TokenType.BITXNOR:            '`^^!|',
+    # Punctuation / delimiters
+    TokenType.LEFT_PAREN:         '(',
+    TokenType.RIGHT_PAREN:        ')',
+    TokenType.LEFT_BRACE:         '{',
+    TokenType.RIGHT_BRACE:        '}',
+    TokenType.LEFT_BRACKET:       '[',
+    TokenType.RIGHT_BRACKET:      ']',
+    TokenType.SEMICOLON:          ';',
+    TokenType.COLON:              ':',
+    TokenType.COMMA:              ',',
+    TokenType.DOT:                '.',
+    TokenType.RETURN_ARROW:       '->',
+    TokenType.SCOPE:              '::',
 }
 
 _SYMBOL_MANGLE = {
@@ -107,17 +121,67 @@ _SYMBOL_MANGLE = {
 
 class ParseError(Exception):
     """Exception raised when parsing fails"""
-    def __init__(self, message: str, token: Optional[Token] = None):
+
+    # Token types where the missing token belongs at the END of the previous
+    # line, not at the start of wherever the parser noticed it was absent.
+    _END_OF_PREV_LINE_TYPES = {TokenType.SEMICOLON, TokenType.COMMA}
+
+    def __init__(self, message: str, token: Optional[Token] = None,
+                 source_lines: Optional[List[str]] = None,
+                 expected_type=None, prev_token: Optional[Token] = None):
         self.message = message
         self.token = token
-        super().__init__(f"{message} Line {token.line}:{token.column}")
+        self.source_lines = source_lines
+        self.expected_type = expected_type  # TokenType or None
+        self.prev_token = prev_token
+        super().__init__(self._format())
+
+    def _format(self) -> str:
+        if self.token is None:
+            return self.message
+
+        line_no = self.token.line
+        col    = self.token.column  # 1-based
+
+        header = f"Parse error: {self.message}  Line {line_no}:{col}"
+
+        if not self.source_lines:
+            return header
+
+        # For tokens like ';' that should appear at the end of the previous
+        # statement, point to the end of that line instead of the start of the
+        # current (wrong) token — but only when the offending token is actually
+        # on a different line than the previous token.
+        show_line_no = line_no
+        show_col = col
+        if (self.expected_type in self._END_OF_PREV_LINE_TYPES
+                and self.prev_token is not None
+                and self.prev_token.line < line_no
+                and 1 <= self.prev_token.line <= len(self.source_lines)):
+            show_line_no = self.prev_token.line
+            prev_src = self.source_lines[show_line_no - 1].rstrip('\n')
+            show_col = len(prev_src) + 1  # one past the last real character
+
+        if not (1 <= show_line_no <= len(self.source_lines)):
+            return header
+
+        src_line = self.source_lines[show_line_no - 1].rstrip('\n')
+        dash_count = max(0, show_col - 1)
+        hint = ''
+        if self.expected_type is not None:
+            sym = _TOKEN_SYMBOL_MAP.get(self.expected_type)
+            hint = f' {sym} here' if sym else f' {self.expected_type.name} here'
+        caret_line = '-' * dash_count + '^' + hint
+
+        return f"{header}\n{src_line}\n{caret_line}"
 
 class FluxParser:
-    def __init__(self, tokens: List[Token], default_byte_width: int = None):
+    def __init__(self, tokens: List[Token], default_byte_width: int = None, source_lines: Optional[List[str]] = None):
         self.tokens = tokens
         self.position = 0
         self.current_token = self.tokens[0] if tokens else None
         self.parse_errors = []  # Track parse errors
+        self._source_lines: Optional[List[str]] = source_lines  # for rich error display
         self._processing_imports = set()
         self.symbol_table = SymbolTable()
         self._preprocessor_macros = []
@@ -156,7 +220,8 @@ class FluxParser:
 
         # Step 3: Create parser
         print(f"[INFO] [parser] ► Parsing")
-        parser = self(tokens)
+        source_lines = preprocessed_source.splitlines(keepends=True)
+        parser = self(tokens, source_lines=source_lines)
         print(f"[INFO] [parser] ► AST generated.")
 
         # Expose final macro set to parser/codegen if needed
@@ -174,9 +239,9 @@ class FluxParser:
             self.position = saved_pos
             self.current_token = saved_token
     
-    def error(self, message: str) -> None:
+    def error(self, message: str, expected_type=None, prev_token=None) -> None:
         """Raise a parse error with current token context"""
-        raise ParseError(message, self.current_token)
+        raise ParseError(message, self.current_token, self._source_lines, expected_type, prev_token)
     
     def advance(self) -> Token:
         """Move to the next token"""
@@ -202,7 +267,8 @@ class FluxParser:
         """Consume a token of the expected type or raise error"""
         if not self.expect(expected_type):
             msg = message or f"Expected {expected_type.name}, got {self.current_token.type.name if self.current_token else 'EOF'}"
-            self.error(msg)
+            prev = self.tokens[self.position - 1] if self.position > 0 else None
+            self.error(msg, expected_type, prev)
         token = self.current_token
         self.advance()
         return token
@@ -5242,7 +5308,7 @@ def main():
             print()
         
         # Parse
-        parser = FluxParser(tokens)
+        parser = FluxParser(tokens, source_lines=result.splitlines(keepends=True))
         ast = parser.parse()
         
         if show_ast:
