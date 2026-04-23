@@ -277,7 +277,7 @@ If an object's `__init` method takes **only one parameter**, you may instance it
 ```
 object SomeOBJ
 {
-    def __init(int) -> this { return this; };
+    def __init(int x) -> this { return this; };
 
     def __exit() -> void {};
 };
@@ -285,6 +285,37 @@ object SomeOBJ
 SomeOBJ sobj = 5;
 ```
 It is syntactic sugar for `SomeObj sobj(5);`
+
+## Deferred object cleanup with `defer`:
+Deferred statements execute in LIFO order.  
+Deferred calls execute after post-contract code, immediately before the function returns.
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+object SomeOBJ
+{
+    int val;
+    def __init(int x) -> this
+    {
+        this.val = x;
+        return this;
+    };
+
+    def __exit() -> void {};
+};
+
+def main() -> int
+{
+    SomeOBJ sobj = 5;
+    defer sobj.__exit();
+
+    print(sobj.val);
+    // deferred statements injected here
+    return 0;
+};
+```
 
 ---
 
@@ -1220,7 +1251,7 @@ If you do this to a stack element, it is nulled, and all references invalidated.
 
 ---
 
-## **Templates**
+## **Templates:**
 
 ```
 #import "standard.fx";
@@ -1270,7 +1301,7 @@ def main() -> int
 {
     myStru<int> ms = {10,20};
 
-    //int w = foo<myStru<int>, int>(ms, 3); // brackets at call site
+    //int w = foo<myStru<int>, int>(ms, 3); // <brackets> at call site
 
     int x = foo(ms, 3); // inferred locally
 
@@ -1388,6 +1419,34 @@ operator (int L, BigInt R) [+] -> bool
     // Implementation for adding an int and a BigInt
 };
 ```
+
+## Contracts on operators:
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+contract NonZero(a,b)
+{
+    assert(a != 0, "a must be nonzero");
+    assert(b != 0, "b must be nonzero");
+};
+
+operator(int x, i32 y)[+] -> int : NonZero(a,b)
+{
+    return x+y;
+};
+
+
+def main() -> int
+{
+    0 + 4;
+
+    return 0;
+};
+```
+Result at runtime:
+`a must be nonzero`
 
 ---
 

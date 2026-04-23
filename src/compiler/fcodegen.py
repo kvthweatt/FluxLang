@@ -130,8 +130,17 @@ def _coerce_to_bool(builder: ir.IRBuilder, val: ir.Value) -> ir.Value:
     - Floating-point → compare != 0.0.
     - Anything else → attempt != 0 comparison and let llvmlite surface the
       error if the type is truly incompatible.
+
+    Note: string literals (array pointers flagged with _is_string_literal) are
+    rejected here as a safety net.  The primary check happens earlier in
+    _check_not_string_literal so that source location info can be included.
     """
     t = val.type
+    # Safety-net: catch any string-literal array/pointer that slipped through.
+    if getattr(t, '_is_string_literal', False):
+        raise TypeError(
+            "A string literal cannot be used as a boolean condition. "
+            "Use a pointer variable instead (e.g. `byte* p = \"...\"; if (p) { ... };`).")
     if isinstance(t, ir.IntType):
         if t.width == 1:
             return val
@@ -143,6 +152,38 @@ def _coerce_to_bool(builder: ir.IRBuilder, val: ir.Value) -> ir.Value:
         return builder.fcmp_ordered('!=', val, ir.Constant(t, 0.0), name='fpbool')
     # Fallback – try integer comparison; llvmlite will raise if unsupported.
     return builder.icmp_signed('!=', val, ir.Constant(t, 0), name='tobool')
+
+
+def _check_not_string_literal(expr_node, context: str = 'condition') -> None:
+    """Raise a compile-time TypeError if *expr_node* is a string or f-string literal.
+
+    This enforces the Flux rule that string literals may not be used directly
+    as boolean conditions (e.g. ``if ("x") { ... }``).  Pointer *variables*
+    that happen to hold a string address are allowed; only the literal syntax
+    itself is banned.
+
+    Parameters
+    ----------
+    expr_node:
+        The AST node for the condition expression.
+    context:
+        A short description of where the check is being applied, used in the
+        error message (e.g. ``'if'``, ``'while'``, ``'elif'``).
+    """
+    try:
+        from fast import StringLiteral as _SL, FStringLiteral as _FSL
+    except ImportError:
+        return  # If fast module not available, skip (will be caught later)
+
+    if isinstance(expr_node, (_SL, _FSL)):
+        line = getattr(expr_node, 'source_line', '?')
+        col  = getattr(expr_node, 'source_col',  '?')
+        raise TypeError(
+            f"\nString literal cannot be used as a boolean as {context} condition [{line}:{col}]. "
+            f"\nA string literal is always a non-null pointer and its truthiness is "
+            f"meaningless in Flux.\nStore it in a pointer variable first: "
+            f"byte* p = \"...\"; {context} (p) {{ ... }};"
+        )
 
 
 def register_struct_type(module: ir.Module, type_name: str,
@@ -963,7 +1004,12 @@ class CodegenVisitor:
                         _ptr_overload_func = _func
                         break
 
-        if _ptr_overload_func is not None:
+        # Suppress self-recursive dispatch: if we are currently inside the body
+        # of the overload function itself, skip the overload and fall through to
+        # the native LLVM instruction.
+        _current_llvm_func = builder.block.function if builder.block else None
+
+        if _ptr_overload_func is not None and _ptr_overload_func is not _current_llvm_func:
             from fast import Identifier
             def _get_alloca(n):
                 if isinstance(n, Identifier) and not module.symbol_table.is_global_scope():
@@ -991,6 +1037,10 @@ class CodegenVisitor:
                     if overload['param_count'] != 2:
                         continue
                     func = overload['function']
+                    # Do not re-dispatch to the overload we are currently
+                    # compiling — that produces infinite self-recursion.
+                    if func is _current_llvm_func:
+                        continue
                     param_types = [p.type for p in func.args]
                     if len(param_types) != 2:
                         continue
@@ -1580,6 +1630,7 @@ class CodegenVisitor:
         builder.call(ir.InlineAsm(asm_type, asm_code, constraints, side_effect=True), [void_ptr])
 
     def visit_TernaryOp(self, node, builder, module):
+        _check_not_string_literal(node.condition, 'ternary condition')
         cond_val = self.visit(node.condition, builder, module)
         cond_val = _coerce_to_bool(builder, cond_val)
         func = builder.block.function
@@ -3412,12 +3463,12 @@ class CodegenVisitor:
                         caller_name = caller_frame.f_code.co_name
                         stack = _inspect.stack()
                         stmt_i = i
-                        print("Full call stack (from current to outermost):")
-                        for i, frame_info in enumerate(reversed(stack)):
-                            print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
-                        print("--- REAL EXCEPTION ---")
-                        _tb.print_exc()
-                        print("--- END REAL EXCEPTION ---")
+                        #print("Full call stack (from current to outermost):")
+                        #for i, frame_info in enumerate(reversed(stack)):
+                            #print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
+                        #print("--- REAL EXCEPTION ---")
+                        #_tb.print_exc()
+                        #print("--- END REAL EXCEPTION ---")
                         loc = ""
                         if hasattr(stmt, 'source_line') and stmt.source_line:
                             loc = f" [{module.name}:{stmt.source_line}:{stmt.source_col}]"
@@ -3434,6 +3485,8 @@ class CodegenVisitor:
     def visit_IfStatement(self, node, builder, module):
         if builder.block is None:
             return self._visit_IfStatement_global_scope(node, builder, module)
+
+        _check_not_string_literal(node.condition, 'if')
 
         try:
             cond_val = self.visit(node.condition, builder, module)
@@ -3458,6 +3511,7 @@ class CodegenVisitor:
 
         current_block = else_block
         for i, (elif_cond, elif_body) in enumerate(node.elif_blocks):
+            _check_not_string_literal(elif_cond, 'elif')
             elif_cond_val = self.visit(elif_cond, builder, module)
             elif_cond_val = _coerce_to_bool(builder, elif_cond_val)
             elif_then = func.append_basic_block(f'elif_then_{i}')
@@ -3480,6 +3534,7 @@ class CodegenVisitor:
         return None
 
     def _visit_IfStatement_global_scope(self, node, builder, module):
+        _check_not_string_literal(node.condition, 'if')
         try:
             cond_val = self.visit(node.condition, builder, module)
         except Exception as e:
@@ -3521,6 +3576,7 @@ class CodegenVisitor:
                 return ir.Constant(ir.IntType(64), int(expr))
             return self.visit(expr, builder, module)
 
+        _check_not_string_literal(node.condition, 'if-expression condition')
         cond_val = self.visit(node.condition, builder, module)
         cond_val = _coerce_to_bool(builder, cond_val)
 
@@ -3612,6 +3668,7 @@ class CodegenVisitor:
         builder.branch(cond_block)
 
         builder.position_at_start(cond_block)
+        _check_not_string_literal(node.condition, 'while')
         cond_val = self.visit(node.condition, builder, module)
         cond_val = _coerce_to_bool(builder, cond_val)
         builder.cbranch(cond_val, body_block, end_block)
@@ -3691,6 +3748,7 @@ class CodegenVisitor:
             builder.branch(cond_block)
 
         builder.position_at_start(cond_block)
+        _check_not_string_literal(node.condition, 'do-while')
         cond_val = self.visit(node.condition, builder, module)
         builder.cbranch(cond_val, body_block, end_block)
 
@@ -3714,7 +3772,9 @@ class CodegenVisitor:
 
         builder.position_at_start(cond_block)
         if node.condition:
+            _check_not_string_literal(node.condition, 'for')
             cond_val = self.visit(node.condition, builder, module)
+            cond_val = _coerce_to_bool(builder, cond_val)
             builder.cbranch(cond_val, body_block, end_block)
         else:
             builder.branch(body_block)
@@ -6014,7 +6074,7 @@ class CodegenVisitor:
         # were not yet registered at that point).  _emit_method_body is idempotent for
         # fully-terminated functions and will re-attempt any that were left without a
         # terminator.
-        print("[AST] Pass 4: Re-emitting pending object method bodies...")
+        print("[AST] Pass 4: Re-emitting pending bodies...")
         for stmt in node.statements:
             obj_def = None
             if isinstance(stmt, ObjectDef):

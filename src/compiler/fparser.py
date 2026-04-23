@@ -132,6 +132,8 @@ class FluxParser:
         self._template_struct_instances = []      # concrete StructDefs to inject
         self._parsed_objects = {}  # object_name -> ObjectDef AST node
         self._custom_operators: Dict[str, str] = {}  # symbol string -> base function name
+        self._template_operators: Dict[str, tuple] = {}  # op_symbol -> (template_param_names, FunctionDef AST)
+        self._emitted_template_operator_instances: set = set()  # mangled names already instantiated
         self._contracts: Dict[str, Block] = {}  # name -> Block of statements to inject
         self._function_depth = 0  # Tracks nesting depth; nested function defs are illegal
         self._loop_depth = 0      # Tracks nesting depth of for/while/do-while loops
@@ -322,12 +324,37 @@ class FluxParser:
 
     def operator_def(self) -> FunctionDef:
         """
-        operator_def -> 'operator' '(' parameter_list ')' '[' op_tokens+ ']' '->' type_spec
+        operator_def -> 'operator' ('<' template_params '>')? '(' parameter_list ')' '[' op_tokens+ ']' '->' type_spec
                         (':' contract_list)? (';' | block (':' post_contract_list)? ';')
         """
         tok = self.current_token
         # Consume 'operator' keyword token
         self.consume(TokenType.OPERATOR)
+
+        # Parse optional template parameter list: operator<T, K>(...)
+        # Use lookahead to confirm all angle-bracket contents are identifiers.
+        template_params = []
+        if self.expect(TokenType.LESS_THAN):
+            with self._lookahead():
+                is_template = False
+                self.advance()  # consume '<'
+                if self.expect(TokenType.IDENTIFIER):
+                    self.advance()
+                    while self.expect(TokenType.COMMA):
+                        self.advance()
+                        if not self.expect(TokenType.IDENTIFIER):
+                            break
+                        self.advance()
+                    if self.expect(TokenType.GREATER_THAN):
+                        is_template = True
+            if is_template:
+                self.advance()  # consume '<'
+                template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                self.consume(TokenType.GREATER_THAN)
+
         self.consume(TokenType.LEFT_PAREN)
         params = self.parameter_list()
         self.consume(TokenType.RIGHT_PAREN)
@@ -405,24 +432,37 @@ class FluxParser:
         _builtin_op_values = {op.value for op in _Operator}
         if symbol in _builtin_op_values:
             # Overloading a built-in operator is only permitted when at least one
-            # parameter is an object or struct type.  Allowing purely primitive
-            # operand pairs (e.g. int + int) would silently hijack all uses of
-            # that operator on those types.
-            def _is_non_builtin(ts):
-                # Any type that is not one of the core primitive keywords is
-                # non-builtin: objects, structs, custom-typename aliases, DATA
-                # width types (i32, ui32, be16, ...), and pointers.
-                return (ts.custom_typename is not None or
-                        ts.base_type in (DataType.STRUCT, DataType.OBJECT, DataType.DATA) or
-                        ts.is_pointer)
-            if not any(_is_non_builtin(p.type_spec) for p in params):
-                self.error(
-                    f"Overloading built-in operator '{symbol}' requires at least "
-                    f"one parameter to be a non-builtin type"
-                )
+            # parameter is an object or struct type — OR the overload is templated
+            # (in which case the concrete types are not known yet).
+            if not template_params:
+                def _is_non_builtin(ts):
+                    # Any type that is not one of the core primitive keywords is
+                    # non-builtin: objects, structs, custom-typename aliases, DATA
+                    # width types (i32, ui32, be16, ...), and pointers.
+                    return (ts.custom_typename is not None or
+                            ts.base_type in (DataType.STRUCT, DataType.OBJECT, DataType.DATA) or
+                            ts.is_pointer)
+                if not any(_is_non_builtin(p.type_spec) for p in params):
+                    self.error(
+                        f"Overloading built-in operator '{symbol}' requires at least "
+                        f"one parameter to be a non-builtin type"
+                    )
         else:
             self._custom_operators[symbol] = func_name
         self.symbol_table.define(symbol, SymbolKind.OPERATOR)
+
+        # If this is a template operator, store it for deferred instantiation.
+        if template_params:
+            func_def = FunctionDef(
+                name=func_name,
+                parameters=params,
+                return_type=return_type,
+                body=body,
+                is_prototype=is_prototype,
+                no_mangle=False
+            ).set_location(tok.line, tok.column)
+            self._template_operators[symbol] = (template_params, func_def)
+            return None
 
         return FunctionDef(
             name=func_name,
@@ -3001,37 +3041,40 @@ class FluxParser:
     def asm_statement(self, is_volatile: bool = False) -> ExpressionStatement:
         """
         asm_statement -> ('volatile')? 'asm' ASM_BLOCK (':' operand_list)? (':' operand_list)? (':' clobber_list)? ';'
+                       | ('volatile')? 'asm' ASM_BLOCK ';'   # shorthand when no outputs, inputs, or clobbers
         """
         tok = self.current_token
         # Check for volatile keyword if not already passed in
         if not is_volatile and self.expect(TokenType.VOLATILE):
             is_volatile = True
             self.advance()
-        
+
         self.consume(TokenType.ASM)
-        
+
         # Get the ASM block content
         asm_block_token = self.consume(TokenType.ASM_BLOCK)
         asm_body = asm_block_token.value
-        
-        # Parse optional output operands (first colon)
+
+        # If a ';' follows the block directly, skip all colon sections — no operands or clobbers.
         output_operands = ""
-        if self.expect(TokenType.COLON):
-            self.advance()
-            output_operands = self.parse_operand_list()
-        
-        # Parse optional input operands (second colon)
         input_operands = ""
-        if self.expect(TokenType.COLON):
-            self.advance()
-            input_operands = self.parse_operand_list()
-        
-        # Parse optional clobber list (third colon)
         clobber_list = ""
-        if self.expect(TokenType.COLON):
-            self.advance()
-            clobber_list = self.parse_clobber_list()
-        
+        if not self.expect(TokenType.SEMICOLON):
+            # Parse optional output operands (first colon)
+            if self.expect(TokenType.COLON):
+                self.advance()
+                output_operands = self.parse_operand_list()
+
+            # Parse optional input operands (second colon)
+            if self.expect(TokenType.COLON):
+                self.advance()
+                input_operands = self.parse_operand_list()
+
+            # Parse optional clobber list (third colon)
+            if self.expect(TokenType.COLON):
+                self.advance()
+                clobber_list = self.parse_clobber_list()
+
         self.consume(TokenType.SEMICOLON)
         
         # Construct constraints string for LLVM
@@ -3596,6 +3639,7 @@ class FluxParser:
             self.advance()
             right = self.logical_and_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
     
@@ -3611,6 +3655,7 @@ class FluxParser:
             self.advance()
             right = self.logical_xor_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
 
@@ -3626,6 +3671,7 @@ class FluxParser:
             self.advance()
             right = self.bitwise_or_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
 
         return expr
     
@@ -3647,6 +3693,7 @@ class FluxParser:
             self.advance()
             right = self.chain_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
 
@@ -3696,6 +3743,7 @@ class FluxParser:
             self.advance()
             right = self.bitwise_xor_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
 
@@ -3714,6 +3762,7 @@ class FluxParser:
             self.advance()
             right = self.bitwise_and_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
 
@@ -3732,6 +3781,7 @@ class FluxParser:
             self.advance()
             right = self.equality_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
     
@@ -3755,6 +3805,7 @@ class FluxParser:
             self.advance()
             right = self.shift_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
     
@@ -3774,6 +3825,7 @@ class FluxParser:
             self.advance()
             right = self.additive_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
     
@@ -3813,6 +3865,7 @@ class FluxParser:
             self.advance()
             right = self.custom_op_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
     
@@ -3837,6 +3890,7 @@ class FluxParser:
             self.advance()
             right = self.cast_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
         return expr
     
@@ -4153,6 +4207,95 @@ class FluxParser:
                 self._template_instantiations.append(concrete_func)
 
         return func_name  # Call site uses the original name; overload resolution finds it
+
+    def _try_instantiate_template_op(self, op_symbol: str, left_expr, right_expr):
+        """
+        Called immediately after every BinaryOp creation.  If a template operator is
+        registered for `op_symbol` and we can infer concrete types from both operands,
+        instantiate the concrete FunctionDef so codegen's overload lookup finds it.
+        """
+        if op_symbol not in self._template_operators:
+            return
+        lts = self._infer_type_from_expr(left_expr)
+        rts = self._infer_type_from_expr(right_expr)
+        if lts is None or rts is None:
+            return
+        self._resolve_template_operator(op_symbol, [lts, rts])
+
+    def _resolve_template_operator(self, op_symbol: str, arg_type_specs: list):
+        """
+        Instantiate a template operator for the given concrete operand TypeSystems.
+        `op_symbol` is the raw operator symbol string (e.g. '+').
+        `arg_type_specs` is a list of two TypeSystem objects — one per operand.
+
+        A concrete FunctionDef is produced (via _substitute_template) and appended to
+        _template_instantiations so codegen can find it by normal overload resolution
+        inside visit_BinaryOp.  The BinaryOp AST node is left unchanged.
+        """
+        if op_symbol not in self._template_operators:
+            return
+        template_params, template_func = self._template_operators[op_symbol]
+        if len(template_params) != len(arg_type_specs):
+            return  # Arity mismatch — cannot instantiate
+
+        # Mirror the parser's non-builtin guard for concrete operator overloads:
+        # refuse to instantiate when all operand types are plain primitives.
+        # This prevents the overload from hijacking every built-in arithmetic
+        # operation in the standard library (e.g. every i + 1 loop increment).
+        from ftypesys import Operator as _Operator
+        _builtin_op_values = {op.value for op in _Operator}
+        if op_symbol in _builtin_op_values:
+            def _is_non_builtin(ts):
+                # DATA with no custom_typename is a fixed-width int alias (i32, u64,
+                # etc.) — treat it as primitive. Only structs, objects, named custom
+                # types, or pointers count as genuinely non-builtin.
+                return (ts.custom_typename is not None or
+                        ts.base_type in (DataType.STRUCT, DataType.OBJECT) or
+                        ts.is_pointer)
+            if not any(_is_non_builtin(ts) for ts in arg_type_specs):
+                return  # All-primitive instantiation — skip to avoid overriding builtins
+
+        # Build a stable mangle key so each unique pair of concrete types is only
+        # instantiated once.
+        type_names = [self._type_system_to_mangle_str(ts) for ts in arg_type_specs]
+        mangle_key = template_func.name + '__tmpl__' + '__'.join(type_names)
+
+        if mangle_key in self._emitted_template_operator_instances:
+            return
+        self._emitted_template_operator_instances.add(mangle_key)
+
+        # Build the substitution mapping: template param name -> concrete TypeSystem
+        mapping = {pname: ts for pname, ts in zip(template_params, arg_type_specs)}
+
+        concrete_func = self._substitute_template(template_func, mapping)
+        # Keep the original mangled function name (e.g. operator__plus); the
+        # LLVM-level overload uniqueness comes from distinct parameter types.
+        concrete_func.name = template_func.name
+        concrete_func.no_mangle = False
+        self._template_instantiations.append(concrete_func)
+
+    def _infer_type_from_expr(self, expr) -> 'TypeSystem | None':
+        """
+        Best-effort parse-time type inference for a BinaryOp operand.
+        Returns a TypeSystem if the type can be determined, else None.
+        """
+        from fast import Identifier, Literal, BinaryOp as _BinaryOp
+        if isinstance(expr, Identifier):
+            return self.symbol_table.get_type_spec(expr.name)
+        if isinstance(expr, Literal):
+            _dt_map = {
+                DataType.SINT:   TypeSystem(base_type=DataType.SINT,   is_signed=True),
+                DataType.UINT:   TypeSystem(base_type=DataType.UINT,   is_signed=False),
+                DataType.SLONG:  TypeSystem(base_type=DataType.SLONG,  is_signed=True),
+                DataType.ULONG:  TypeSystem(base_type=DataType.ULONG,  is_signed=False),
+                DataType.FLOAT:  TypeSystem(base_type=DataType.FLOAT),
+                DataType.DOUBLE: TypeSystem(base_type=DataType.DOUBLE),
+                DataType.CHAR:   TypeSystem(base_type=DataType.CHAR,   is_signed=True),
+                DataType.BOOL:   TypeSystem(base_type=DataType.BOOL),
+                DataType.BYTE:   TypeSystem(base_type=DataType.BYTE),
+            }
+            return _dt_map.get(expr.type)
+        return None
 
     def postfix_expression(self) -> Expression:
         """
