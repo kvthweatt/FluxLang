@@ -1209,13 +1209,6 @@ def main() -> int
 
 ---
 
-## **Constant Expressions:**
-```
-const def myconstexpr(int x, int y) -> int {return x * y;};  // Basic syntax
-```
-
----
-
 ## **Heap allocation:**
 ```
 heap int x = 5;      // Allocate

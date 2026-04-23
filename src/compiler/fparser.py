@@ -685,17 +685,28 @@ class FluxParser:
             # no symbol-table mutations bleed back into the outer parse.
             tok = self.current_token
             self.advance()  # consume CODIFY (~$)
-            if not self.expect(TokenType.IDENTIFIER):
-                self.error("~$: expected identifier after codify operator")
-            var_name = self.current_token.value
-            self.advance()  # consume identifier
+            if self.expect(TokenType.STRING_LITERAL):
+                source_text = self.current_token.value
+                self.advance()
+            elif self.expect(TokenType.F_STRING):
+                raw = self.consume(TokenType.F_STRING).value
+                fstr = self.parse_f_string(raw[2:-1])  # strip f" and closing "
+                source_text = "".join(p if isinstance(p, str) else self._comptime_strings[p.name] for p in fstr.parts)
+            elif self.expect(TokenType.I_STRING):
+                istr = self.parse_i_string(self.consume(TokenType.I_STRING).value)
+                source_text = "".join(p if isinstance(p, str) else self._comptime_strings[p.name] for p in istr.parts)
+            elif self.expect(TokenType.IDENTIFIER):
+                var_name = self.current_token.value
+                self.advance()
+                if var_name not in self._comptime_strings:
+                    self.error(
+                        f"~$: '{var_name}' is not a compile-time-known byte* string literal. "
+                        f"Only variables declared as 'byte* name = \"...\";' are supported."
+                    )
+                source_text = self._comptime_strings[var_name]
+            else:
+                self.error("~$: expected identifier, string literal, f-string, or i-string after codify operator")
             self.consume(TokenType.SEMICOLON)
-            if var_name not in self._comptime_strings:
-                self.error(
-                    f"~$: '{var_name}' is not a compile-time-known byte* string literal. "
-                    f"Only variables declared as 'byte* name = \"...\";' are supported."
-                )
-            source_text = self._comptime_strings[var_name]
             sub_lexer = FluxLexer(source_text)
             sub_tokens = sub_lexer.tokenize()
             sub_parser = FluxParser(sub_tokens)
