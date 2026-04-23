@@ -865,6 +865,7 @@ class AssertStatement(Statement):
 class Parameter(ASTNode):
     name: Optional[str] # Can be none for unnamed prototype parameters
     type_spec: TypeSystem
+    default_value: Optional['Expression'] = None  # e.g. the `5` in `int x = 5`
 
     def __repr__(self) -> str:
         if self.type_spec.custom_typename is not None:

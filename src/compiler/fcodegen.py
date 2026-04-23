@@ -179,10 +179,10 @@ def _check_not_string_literal(expr_node, context: str = 'condition') -> None:
         line = getattr(expr_node, 'source_line', '?')
         col  = getattr(expr_node, 'source_col',  '?')
         raise TypeError(
-            f"\nString literal cannot be used as a boolean as {context} condition [{line}:{col}]. "
-            f"\nA string literal is always a non-null pointer and its truthiness is "
-            f"meaningless in Flux.\nStore it in a pointer variable first: "
-            f"byte* p = \"...\"; {context} (p) {{ ... }};"
+            f"String literal cannot be used as a boolean {context} [{line}:{col}]. "
+            f"A string literal is always a non-null pointer and its truthiness is "
+            f"meaningless in Flux. Store it in a pointer variable first: "
+            f"`byte* p = \"...\"; if (p) {{ ... }};`"
         )
 
 
@@ -2588,6 +2588,29 @@ class CodegenVisitor:
         arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
         current_ns = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ""
 
+        # Inject default arguments for any trailing parameters not supplied by the caller.
+        # We find the best matching overload by mangled name, then pad node.arguments and
+        # arg_vals so the rest of the resolution pipeline sees a full argument list.
+        if hasattr(module, '_func_defaults'):
+            n_supplied = len(node.arguments)
+            # Search all registered defaults for this function name to find a matching overload.
+            for mangled, defaults in module._func_defaults.items():
+                base = mangled.split('__')[0] if '__' in mangled else mangled
+                if base != node.name and not mangled.endswith('__' + node.name) and node.name not in (base, mangled):
+                    continue
+                n_total = len(defaults)
+                if n_supplied >= n_total:
+                    continue  # Caller supplied all (or too many) args — nothing to fill.
+                # Check that all missing args have defaults.
+                missing = defaults[n_supplied:]
+                if any(d is None for d in missing):
+                    continue  # Some required params missing — let normal error path handle it.
+                # Pad with default expressions.
+                for default_expr in missing:
+                    node.arguments.append(default_expr)
+                    arg_vals.append(self.visit(default_expr, builder, module))
+                break
+
         # ── Enforce endianness-parameter contract ─────────────────────────────
         # Passing a little-endian value to a big-endian parameter (or vice versa)
         # is a compile error.  Assignment auto-swaps, but parameter passing does not.
@@ -3463,12 +3486,12 @@ class CodegenVisitor:
                         caller_name = caller_frame.f_code.co_name
                         stack = _inspect.stack()
                         stmt_i = i
-                        #print("Full call stack (from current to outermost):")
-                        #for i, frame_info in enumerate(reversed(stack)):
-                            #print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
-                        #print("--- REAL EXCEPTION ---")
-                        #_tb.print_exc()
-                        #print("--- END REAL EXCEPTION ---")
+                        print("Full call stack (from current to outermost):")
+                        for i, frame_info in enumerate(reversed(stack)):
+                            print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
+                        print("--- REAL EXCEPTION ---")
+                        _tb.print_exc()
+                        print("--- END REAL EXCEPTION ---")
                         loc = ""
                         if hasattr(stmt, 'source_line') and stmt.source_line:
                             loc = f" [{module.name}:{stmt.source_line}:{stmt.source_col}]"
@@ -4334,6 +4357,12 @@ class CodegenVisitor:
                 base_name = node.name.split('::')[-1] if '::' in node.name else node.name
             #print(f"[FUNC REG] Registering {base_name} (mangled: {mangled_name})", file=sys.stdout)
             SymbolTable.register_function_overload(module, base_name, mangled_name, node.parameters, node.return_type, func)
+            # Store default parameter values keyed by mangled name so call sites can inject them.
+            defaults = [p.default_value for p in node.parameters]
+            if any(d is not None for d in defaults):
+                if not hasattr(module, '_func_defaults'):
+                    module._func_defaults = {}
+                module._func_defaults[mangled_name] = defaults
             #print(f"[FUNC REG] Registered! Overloads for {base_name}: {len(module._function_overloads.get(base_name, []))}", file=sys.stdout)
             if hasattr(module, 'symbol_table'):
                 try:

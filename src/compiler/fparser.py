@@ -1622,8 +1622,14 @@ class FluxParser:
         name = None
         if self.expect(TokenType.IDENTIFIER):
             name = self.consume(TokenType.IDENTIFIER).value
-        
-        return Parameter(name, type_spec).set_location(tok.line, tok.column)
+
+        # Optional default value: int x = 5
+        default_value = None
+        if name is not None and self.expect(TokenType.ASSIGN):
+            self.advance()
+            default_value = self.expression()
+
+        return Parameter(name, type_spec, default_value).set_location(tok.line, tok.column)
 
     def enum_def(self) -> Union[EnumDefStatement, List[EnumDefStatement]]:
         """

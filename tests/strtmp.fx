@@ -41,10 +41,6 @@ operator<T, K>(T t, K k)[+] -> int : ctNonZero(a,b)
 
 def main() -> int
 {
-    volatile asm
-    {
-        nop
-    };
     myStru<int> ms = {10,20};
 
     int x = foo(ms, 3);
