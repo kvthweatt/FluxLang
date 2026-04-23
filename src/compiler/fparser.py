@@ -4192,6 +4192,77 @@ class FluxParser:
             mangled = self._resolve_template_call(expr.name, type_names, type_specs)
             expr = FunctionCall(mangled, args).set_location(tok.line, tok.column)
 
+        # Handle implicit template call: foo(args) — infer <T, U, ...> from argument types.
+        # Only triggered when the function name is a known template function and the next
+        # token is '(' (no explicit '<' type list was written by the programmer).
+        elif (isinstance(expr, Identifier) and
+                expr.name in self._template_functions and
+                self.expect(TokenType.LEFT_PAREN)):
+            tok = self.current_token
+            self.consume(TokenType.LEFT_PAREN)
+            args = []
+            if not self.expect(TokenType.RIGHT_PAREN):
+                args = self.argument_list()
+            self.consume(TokenType.RIGHT_PAREN)
+
+            template_param_names, template_func = self._template_functions[expr.name]
+
+            # Build a mapping from template-param-name -> inferred TypeSystem by
+            # walking each declared parameter and matching its template param name
+            # against the corresponding call-site argument.
+            inferred: dict = {}  # template param name -> TypeSystem
+
+            for i, decl_param in enumerate(template_func.parameters):
+                if i >= len(args):
+                    break
+                param_ts = decl_param.type_spec
+                if param_ts is None:
+                    continue
+                # The declared parameter type names a template param when its
+                # custom_typename (or base_type string) appears in template_param_names.
+                param_tname = (
+                    param_ts.custom_typename if param_ts.custom_typename
+                    else (param_ts.base_type if isinstance(param_ts.base_type, str) else None)
+                )
+                if param_tname not in template_param_names:
+                    continue  # This param's type is concrete — no inference needed here.
+
+                # Try to derive the concrete TypeSystem from the call-site argument.
+                arg = args[i]
+                inferred_ts = None
+
+                if isinstance(arg, Identifier):
+                    # Look up the variable's declared type in the symbol table.
+                    inferred_ts = self.symbol_table.get_type_spec(arg.name)
+                elif isinstance(arg, Literal):
+                    # Map the Literal's DataType to a minimal TypeSystem.
+                    _dt_map = {
+                        DataType.SINT:   TypeSystem(base_type=DataType.SINT,   is_signed=True),
+                        DataType.UINT:   TypeSystem(base_type=DataType.UINT,   is_signed=False),
+                        DataType.SLONG:  TypeSystem(base_type=DataType.SLONG,  is_signed=True),
+                        DataType.ULONG:  TypeSystem(base_type=DataType.ULONG,  is_signed=False),
+                        DataType.FLOAT:  TypeSystem(base_type=DataType.FLOAT),
+                        DataType.DOUBLE: TypeSystem(base_type=DataType.DOUBLE),
+                        DataType.CHAR:   TypeSystem(base_type=DataType.CHAR,   is_signed=True),
+                        DataType.BOOL:   TypeSystem(base_type=DataType.BOOL),
+                        DataType.BYTE:   TypeSystem(base_type=DataType.BYTE),
+                    }
+                    inferred_ts = _dt_map.get(arg.type)
+
+                if inferred_ts is not None:
+                    inferred[param_tname] = inferred_ts
+
+            # Only proceed with implicit instantiation if every template param was resolved.
+            if len(inferred) == len(template_param_names):
+                type_names = [self._type_system_to_mangle_str(inferred[p]) for p in template_param_names]
+                type_specs = [inferred[p] for p in template_param_names]
+                mangled = self._resolve_template_call(expr.name, type_names, type_specs)
+                expr = FunctionCall(mangled, args).set_location(tok.line, tok.column)
+            else:
+                # Inference incomplete — emit a plain FunctionCall and let the
+                # codegen/type-checker surface a more descriptive error.
+                expr = FunctionCall(expr.name, args).set_location(tok.line, tok.column)
+
         while True:
             if self.expect(TokenType.LEFT_BRACKET):
                 # Array access or array slice [start:end]
