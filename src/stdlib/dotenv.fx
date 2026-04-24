@@ -13,7 +13,7 @@ Functions:
         parsing details are printed to stdout. Returns dotenv::err::OK
         on success, or an error code otherwise.
 
-    fsetenv(name, value, overwrite) -> int
+    setenv(name, value, overwrite) -> int
         Sets an environment variable. If `overwrite` is falsey, then
         an existing variable with the same name will be replaced.
 
@@ -30,6 +30,10 @@ Example:
     #import "standard.fx";
     #import "dotenv.fx";
 
+    extern {
+        def !!getenv(byte* name) -> byte*;
+    };
+
     // args: file, overwrite, verbose
     int result = dotenv::loadenv(".env\0", true, false);
     if (result != dotenv::err::OK) {
@@ -42,15 +46,13 @@ Example:
         println(host);
     };
 
-    dotenv::fsetenv("BASE_PATH\0", "/tmp\0", 1);
+    dotenv::setenv("BASE_PATH\0", "/tmp\0", 1);
 ///
 #ifndef FLUX_STANDARD
 #import "standard.fx";
 #endif;
 
-#ifndef __STANDARD_STRINGS__
 #import "string_utilities.fx";
-#endif;
 
 #ifndef FLUX_DOTENV
 #def FLUX_DOTENV 1;
@@ -68,7 +70,11 @@ extern
 {
     // Standard C
     def !!
-        getenv(byte* name) -> byte*;
+        getenv(byte* name) -> byte*,
+        fgets(byte* str, int n, byte* stream) -> byte*,
+        strtok(byte* str, byte* delim) -> byte*,
+        fopen(byte* filename, byte* mode) -> byte*,
+        fclose(byte* stream) -> int;
 };
 
 using standard::io::file;
@@ -79,12 +85,14 @@ using standard::strings;
     {
         def !!
             getenv_s(u64* pReturnValue, byte* buf, u64 numOfElements, byte* name) -> int,
-            _putenv_s(byte* name, byte* value) -> int;
+            _putenv_s(byte* name, byte* value) -> int,
+            strtok_s(byte* str, byte* delim, byte** saveptr) -> byte*,
+            _strdup(byte* str) -> byte*;
     };
 
     #def strdup _strdup;
 
-    def _setenv(byte* name, byte* value, int overwrite) -> int
+    def _setenv(byte* name, byte* value, bool overwrite) -> int
     {
         int errcode = 0;
         if (overwrite is 0) {
@@ -103,7 +111,7 @@ using standard::strings;
 
     // Derived from https://dev.w3.org/libwww/Library/src/vms/getline.c
     byte[256] _win_line_buffer;
-    def fgetline(byte** lineptr, u64* n, byte* stream) -> int
+    def _getline(byte** lineptr, u64* n, byte* stream) -> int
     {
         byte* new_ptr;
         u64 len;
@@ -152,7 +160,7 @@ using standard::strings;
     extern
     {
         def !!
-            setenv(byte* name, byte* value, int overwrite) -> int,
+            setenv(byte* name, byte* value, bool overwrite) -> int,
             getline(byte** lineptr, u64* n, byte* stream) -> i64,
             strtok_r(byte* str, byte* delim, byte** saveptr) -> byte*,
             strdup(byte* str) -> byte*;
@@ -161,7 +169,7 @@ using standard::strings;
     #def strdup strdup;
     #def strtok_s strtok_r;
 
-    def _setenv(byte* name, byte* value, int overwrite) -> int
+    def _setenv(byte* name, byte* value, bool overwrite) -> int
     {
         if (setenv(name, value, overwrite) != 0) {
             return _DE_ERR_SETENV_FAILED;
@@ -169,7 +177,7 @@ using standard::strings;
         return _DE_OK;
     };
 
-    def fgetline(byte** lineptr, u64* n, byte* stream) -> int
+    def _getline(byte** lineptr, u64* n, byte* stream) -> int
     {
         if ((u64)lineptr == 0 | (u64)n == 0 | (u64)stream == 0) {
             return _DE_ERR_NULL_POINTER;
@@ -311,7 +319,7 @@ namespace dotenv
             #endif;
                 
             int read_result;
-            while((read_result = fgetline(pLineBuf, @len, file)) >= 0) {
+            while((read_result = _getline(pLineBuf, @len, file)) >= 0) {
                 byte* line_buf = pLineBuf[0];
                     
                 #ifdef DEBUG
@@ -373,7 +381,7 @@ namespace dotenv
         return result;
     };
 
-    def fsetenv(byte* name, byte* value, int overwrite) -> int {
+    def setenv(byte* name, byte* value, bool overwrite) -> int {
         return _setenv(name, value, overwrite);
     };
 };
