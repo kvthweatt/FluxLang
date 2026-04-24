@@ -87,6 +87,9 @@ def resolve_llvm_tool(tool_name: str) -> str:
     Raises:
         FileNotFoundError: if the tool cannot be found by any method
     """
+    if tool_name is None or str(tool_name).lower() == "none":
+        tool_name = "llc"
+
     exe = tool_name + ".exe"
 
     # 1. Explicit path from config
@@ -472,6 +475,9 @@ class FluxCompiler:
                 
                 # Use configuration to determine desired compiler.
                 compiler = config.get('compiler')
+                if not compiler or compiler.lower() == "none":
+                    compiler = "llc"
+
                 # Resolve full path to the compiler so non-default LLVM installs work.
                 compiler_exe = resolve_llvm_tool(compiler)
                 # TODO:
@@ -641,7 +647,7 @@ class FluxCompiler:
                     "/dynamicbase:no" if int(config['aslr']) == 1 else "",             # Disable ASLR (for smaller size)
                     #"/highentropyva:no" if int(config['no_default_libraries']) == 0 else "",           # Disable high entropy ASLR
                     "/nxcompat:no" if int(config['dep_compatibility']) == 1 else "",                # Disable DEP compatibility
-                    "/opt:lldlto=" + config['lto_optimization_level'],               # Aggressive LTO optimization if available
+                    f"/opt:lldlto={config.get('lto_optimization_level', 3)}",               # Aggressive LTO optimization if available
                     "/opt:lldltojobs=all" if int(config['all_cores_for_lto']) == 1 else "",         # Use all cores for LTO
                     str(obj_file),
                     # Only link essential libraries
