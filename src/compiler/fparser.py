@@ -143,10 +143,8 @@ class ParseError(Exception):
         line_no = self.token.line
         col    = self.token.column  # 1-based
 
-        header = f"{self.message} at {line_no}:{col}"
-
         if not self.source_lines:
-            return header
+            return f"{self.message} at {line_no}:{col}"
 
         # For tokens like ';' that should appear at the end of the previous
         # statement, point to the end of that line instead of the start of the
@@ -162,11 +160,39 @@ class ParseError(Exception):
             prev_src = self.source_lines[show_line_no - 1].rstrip('\n')
             show_col = len(prev_src) + 1  # one past the last real character
 
+        # Header now uses the resolved show_line_no/show_col, not the raw token position
+        header = f"{self.message} at {show_line_no}:{show_col}"
+
         if not (1 <= show_line_no <= len(self.source_lines)):
             return header
 
-        src_line = self.source_lines[show_line_no - 1].rstrip('\n')
-        dash_count = max(0, show_col - 1)
+        raw_line = self.source_lines[show_line_no - 1].rstrip('\n')
+
+        # Expand tabs to 4 spaces and adjust show_col to match the expanded line.
+        # Tabs before the caret shift the visual column, so we must track how many
+        # extra spaces each tab added up to (but not including) the caret position.
+        TAB_WIDTH = 4
+        expanded = ''
+        expanded_col = 1  # visual column of the caret after expansion (1-based)
+        for i, ch in enumerate(raw_line):
+            col_in_raw = i + 1  # 1-based position in the original line
+            if ch == '\t':
+                # How many spaces this tab expands to
+                spaces = TAB_WIDTH - (len(expanded) % TAB_WIDTH)
+                expanded += ' ' * spaces
+                if col_in_raw < show_col:
+                    expanded_col += spaces - 1  # -1 because the tab itself counted as 1
+            else:
+                expanded += ch
+
+        src_line = expanded
+        # In the semicolon-redirect case show_col was set to one past the end of
+        # the raw line, so the caret should land after the last visible character
+        # of the *expanded* line rather than using the raw column arithmetic.
+        if show_col > len(raw_line):
+            dash_count = len(src_line)
+        else:
+            dash_count = max(0, expanded_col - 1)
         hint = ''
         if self.expected_type is not None:
             sym = _TOKEN_SYMBOL_MAP.get(self.expected_type)
