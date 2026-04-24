@@ -1312,6 +1312,72 @@ def main() -> int
 };
 ```
 
+## Templating operators:
+```
+operator<T, K>(T t, K k)[+] -> int
+{
+    return t + k;
+};
+```
+
+## Combining templates, contracts, and operators:
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+struct myStru<T>
+{
+    T a, b;
+};
+
+def foo<T, U>(T a, U b) -> U
+{
+    return a.a * b;
+};
+
+def bar(myStru<int> a, int b) -> int
+{
+    return foo(a, 3); // Template inferred from parameter
+};
+
+macro macNZ(x)
+{
+    x != 0
+};
+
+contract ctNonZero(a,b)
+{
+    assert(macNZ(a), "a must be nonzero");
+    assert(macNZ(b), "b must be nonzero");
+};
+
+contract ctGreaterThanZero
+{
+    assert(x > 0, "a must be greater than zero");
+    assert(y > 0, "b must be greater than zero");
+};
+
+operator<T, K>(T t, K k)[+] -> int : ctNonZero(a,b)
+{
+    return t + k;
+} : ctGreaterThanZero;
+
+def main() -> int
+{
+    myStru<int> ms = {10,20};
+
+    int x = foo(ms, 3); // Template inferred from myStru<int> above
+
+    i32 y = bar(ms, 3);
+
+    println(x + y);
+
+    return 0;
+};
+```
+Result: `60`
+
 ---
 
 ## **Expression-based macros with `macro`:**
@@ -1333,6 +1399,10 @@ def main() -> int
 
     return 0;
 };
+```
+- The `println` string turns into:
+```
+println(f"xyz(abc) = {(1 + 2) ^ 3}");
 ```
 Result:
 `xyz(abc) = 27`
@@ -1447,7 +1517,6 @@ def main() -> int
 ```
 Result at runtime:
 `a must be nonzero`
-
 ---
 
 ## **Variadic functions**

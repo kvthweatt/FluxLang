@@ -2,7 +2,8 @@
 
 ~$"int x = 10;";
 
-byte* t = "int y = 5;";
+byte* = "int y = 5;";
+
 ~$i"{}":{t;};
 
 byte* str = "using standard::io::console;
