@@ -7,6 +7,7 @@ Copyright (C) 2025 Karac Thweatt
 Contributors:
 
     Piotr Bednarski
+    reinitd <molliver@aurictradecollective.org>
 """
 
 import sys, os, subprocess
@@ -123,6 +124,7 @@ def resolve_llvm_tool(tool_name: str) -> str:
 class FluxCompiler:
     def __init__(self, /, 
                  verbosity: int = None, 
+                 llc_config: dict = None,
                  logger: FluxLogger = None,
                  **logger_kwargs):
         """
@@ -131,6 +133,7 @@ class FluxCompiler:
         Args:
             verbosity: Legacy verbosity level (0-5) - maps to new logging system
             logger: Custom FluxLogger instance (overrides verbosity)
+            llc_config: Dict with optional 'march', 'mcpu', 'mattr' keys for llc
             **logger_kwargs: Additional arguments for FluxLogger creation
         """
         # Initialize logger
@@ -138,6 +141,7 @@ class FluxCompiler:
         logger_kwargs['level'] = min(0, 5)
         self.logger = FluxLoggerConfig.create_logger(**logger_kwargs)
 
+        self.llc_config = llc_config or {}
         self.temp_files = []
         
         # Store legacy verbosity for backward compatibility
@@ -202,6 +206,38 @@ class FluxCompiler:
             
         debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
                                               f"Module triple: {self.module_triple}"])
+    
+    def _get_llc_target_flags(self) -> list:
+        """
+        Build command-line flags for llc from llc_config, falling back to
+        flux_config.cfg values when the CLI didn't supply them.
+
+        CLI flags take precedence over config file values. Returns an
+        empty list if nothing is set, so llc uses its own defaults. 
+        """
+        flags = []
+
+        # --march
+        march = self.llc_config.get('march') or config.get('architecture', '').strip()
+        if march and march.lower() != 'none':
+            flags.append(f"-march={march}")
+        
+        # --mcpu
+        mcpu = self.llc_config.get('mcpu') or config.get('cpu', '').strip()
+        if mcpu and mcpu.lower() != 'none':
+            flags.append(f"-mcpu={mcpu}")
+        
+        # --mattr
+        mattr = self.llc_config.get('mattr')
+        if mattr and mattr.lower() != 'none':
+            flags.append(f"-mattr={mattr}")
+        
+        if flags:
+            self.logger.debug(f"LLC target flags: {' '.join(flags)}", "compiler")
+        
+        return flags
+        
+
 
     def compile_file(self, filename: str, output_bin: str = None, extra_libs: list = None) -> str:
         """
@@ -392,6 +428,7 @@ class FluxCompiler:
                             "-O" + config['lto_optimization_level'],  # Aggressive optimization level
                             "-filetype=obj",                    # Direct object file output
                             "-mtriple=" + self.module_triple,   # Target triple
+                            *self._get_llc_target_flags(),   # march/mcpu/mattr
                             #"-march=" + config['architecture'], # Architecture
                             #"-mcpu=" + config['cpu'],           # Target CPU
                             "-enable-misched",                  # Enable machine instruction scheduler
@@ -443,6 +480,7 @@ class FluxCompiler:
                     #"-O" + config['lto_optimization_level'],  # Aggressive optimization level
                     "-filetype=obj",                    # Direct object file output
                     "-mtriple=" + self.module_triple,   # Target triple
+                    *self._get_llc_target_flags(),   # march/mcpu/mattr
                     #"-march=" + config['architecture'], # Architecture
                     #"-mcpu=" + config['cpu'],           # Target CPU
                     "-enable-misched",                  # Enable machine instruction scheduler
@@ -483,9 +521,8 @@ class FluxCompiler:
                 cmd = [
                     "llc",
                     "-O3",                        # Maximum optimization level
+                    *self._get_llc_target_flags(),   # march/mcpu/mattr
                     #"-mtriple=x86_64-linux",      # Explicit target triple
-                    "-march=x86-64",
-                    "-mcpu=native",               # Optimize for current CPU
                     "-enable-misched",            # Enable machine instruction scheduler
                     "-enable-tail-merge",         # Merge similar tail code
                     "-disable-verify",            # Disable verification for speed
@@ -501,6 +538,14 @@ class FluxCompiler:
                     "-o",
                     str(asm_file)                 # Output to assembly file
                 ]
+
+                # If user/config didn't specify march/mcpu, fall back to x86-64/native
+                if not any(f.startswith('-march=') for f in cmd):
+                    cmd.insert(2, '--march=x84-64')
+                
+                if not any(f.startswith('-mcpu=') for f in cmd):
+                    cmd.insert(3, '-mcpu=native')
+
                 self.logger.debug(f"Running: {' '.join(cmd)}", "llc")
                 
                 try:
@@ -531,6 +576,16 @@ class FluxCompiler:
 
             self.temp_files.append(obj_file)
             self.logger.debug(f"Object file created: {obj_file}", "build")
+
+            # For Library
+            if getattr(self, "compile_only", False):
+                self.logger.success(f"Object file compiled: {obj_file}")
+                if output_bin:
+                    import shutil
+                    Path(output_bin).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy(obj_file, output_bin)
+                    return output_bin
+                return str(obj_file)
             
             # Legacy verbosity level 4 - show everything
             if self.verbosity == 4:
@@ -1058,6 +1113,14 @@ class FluxCompiler:
         
         self.temp_files.append(modified_asm_file)
         return modified_asm_file
+    
+    def compile_library(self, filename: str, output_bin: str = None) -> str:
+        """Compile to object file only. Skips linking."""
+        self.compile_only = True
+        try:
+            return self.compile_file(filename, output_bin)
+        finally:
+            self.compile_only = False
 
     def compile_bootloader(self, filename: str, output_bin: str = None) -> str:
         """
@@ -1148,6 +1211,9 @@ class FluxCompiler:
                 "-o",
                 str(asm_file)
             ]
+
+            if self.llc_config.get('mattr'):
+                llc_cmd.insert(-3, f"-mattr={self.llc_config['mattr']}")
             
             self.logger.debug(f"Running: {' '.join(llc_cmd)}", "llc")
             

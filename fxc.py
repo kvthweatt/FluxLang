@@ -7,6 +7,7 @@ Copyright (C) 2026 Karac Thweatt
 Contributors:
 
     Piotr Maciej Bednarski
+    reinitd <molliver@aurictradecollective.org>
 
 
 USAGE:
@@ -98,6 +99,11 @@ def main():
             print("  --library           Compile as static library instead of executable")
             print("  -lib <libs...>      Link extra libraries (e.g. -lib lib1.a lib2.a lib3.lib)")
             print("")
+            print("LLVM Options:")
+            print("  --march <arch>      Target architecture (e.g. x86-64, arm64, riscv64)")
+            print("  --mcpu <cpu>        Target CPU (e.g. native, apple-m1, skylake)")
+            print("  --mattr <attrs>     Target attributes (comma-separated, e.g. +avx2,+sse4.2)")
+            print("")
             print("Advanced Logging Options:")
             print("  --log-level <n>     Logging level: 0=silent, 1=error, 2=warning, 3=info, 4=debug, 5=trace")
             print("  --log-file <path>   Write logs to file")
@@ -130,6 +136,7 @@ def main():
         compile_as_library = False
         extra_libs = []
         logger_config = {}
+        llc_config = {}
     
         i = 0
         while i < len(args):
@@ -173,6 +180,18 @@ def main():
                 components = [c.strip() for c in args[i + 1].split(',')]
                 logger_config['component_filter'] = components
                 i += 2
+            elif arg == "--mcpu" and i + 1 < len(args):
+                # TODO Implement in fc.py
+                llc_config['mcpu'] = args[i + 1]
+                i += 2
+            elif arg == "--march" and i + 1 < len(args):
+                # TODO Implement in fc.py
+                llc_config['march'] = args[i + 1]
+                i += 2
+            elif arg == "--mattr" and i + 1 < len(args):
+                # TODO Implement in fc.py
+                llc_config['mattr'] = args[i + 1]
+                i += 2
             else:
                 # Positional argument - should be input file
                 if input_file is None:
@@ -195,7 +214,7 @@ def main():
             logger_config["output_stream"] = sys.stdout  # This is now our TeeOutput
             logger_config["error_stream"] = sys.stderr   # Keep stderr separate for errors
         
-            compiler = FluxCompiler(verbosity=verbosity, **logger_config)
+            compiler = FluxCompiler(verbosity=verbosity, llc_config=llc_config, **logger_config)
         
             # Show configuration if debug level or higher
             if logger_config.get('level', 0) >= 4:
