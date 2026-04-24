@@ -11,7 +11,7 @@ def main(int argc, byte** argv) -> int
 {
     println("Attempting to load .env file...\0");
 
-    int result = dotenv::floadenv(".env\0", true, true);
+    int result = dotenv::loadenv(".env\0", true, true);
 
     if (result != dotenv::err::OK) {
         if (result == dotenv::err::ERR_FILE_NOT_FOUND) {
@@ -49,7 +49,7 @@ def main(int argc, byte** argv) -> int
     };
 
     println("Setting BASE_PATH to /tmp... \0");
-    dotenv::fsetenv("BASE_PATH\0", "/tmp\0", 1);
+    dotenv::setenv("BASE_PATH\0", "/tmp\0", 1);
 
     byte* base_path = getenv("BASE_PATH\0");
     if ((u64)base_path == 0) {

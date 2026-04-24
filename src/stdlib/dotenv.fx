@@ -7,13 +7,13 @@ Loads key=value pairs from a .env file into the process environment,
 where they can be read with getenv and modified with fsetenv.
 
 Functions:
-    floadenv(file, overwrite, verbose) -> int
+    loadenv(file, overwrite, verbose) -> int
         Loads the given .env file. If `overwrite` is true, existing
         environment variables will be replaced. If `verbose` is true,
         parsing details are printed to stdout. Returns dotenv::err::OK
         on success, or an error code otherwise.
 
-    fsetenv(name, value, overwrite) -> int
+    setenv(name, value, overwrite) -> int
         Sets an environment variable. If `overwrite` is falsey, then
         an existing variable with the same name will be replaced.
 
@@ -35,7 +35,7 @@ Example:
     };
 
     // args: file, overwrite, verbose
-    int result = dotenv::floadenv(".env\0", true, false);
+    int result = dotenv::loadenv(".env\0", true, false);
     if (result != dotenv::err::OK) {
         // Handle error
     };
@@ -46,7 +46,7 @@ Example:
         println(host);
     };
 
-    dotenv::fsetenv("BASE_PATH\0", "/tmp\0", 1);
+    dotenv::setenv("BASE_PATH\0", "/tmp\0", 1);
 ///
 #ifndef FLUX_STANDARD
 #import "standard.fx";
@@ -111,7 +111,7 @@ using standard::strings;
 
     // Derived from https://dev.w3.org/libwww/Library/src/vms/getline.c
     byte[256] _win_line_buffer;
-    def fgetline(byte** lineptr, u64* n, byte* stream) -> int
+    def _getline(byte** lineptr, u64* n, byte* stream) -> int
     {
         byte* new_ptr;
         u64 len;
@@ -177,7 +177,7 @@ using standard::strings;
         return _DE_OK;
     };
 
-    def fgetline(byte** lineptr, u64* n, byte* stream) -> int
+    def _getline(byte** lineptr, u64* n, byte* stream) -> int
     {
         if ((u64)lineptr == 0 | (u64)n == 0 | (u64)stream == 0) {
             return _DE_ERR_NULL_POINTER;
@@ -319,7 +319,7 @@ namespace dotenv
             #endif;
                 
             int read_result;
-            while((read_result = fgetline(pLineBuf, @len, file)) >= 0) {
+            while((read_result = _getline(pLineBuf, @len, file)) >= 0) {
                 byte* line_buf = pLineBuf[0];
                     
                 #ifdef DEBUG
@@ -357,7 +357,7 @@ namespace dotenv
         };
     };
 
-    def floadenv(byte* path, bool overwrite, bool verbose) -> int {
+    def loadenv(byte* path, bool overwrite, bool verbose) -> int {
         using dotenv::internal;
         using dotenv::err;
 
@@ -381,7 +381,7 @@ namespace dotenv
         return result;
     };
 
-    def fsetenv(byte* name, byte* value, bool overwrite) -> int {
+    def setenv(byte* name, byte* value, bool overwrite) -> int {
         return _setenv(name, value, overwrite);
     };
 };
