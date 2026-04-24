@@ -28,11 +28,16 @@ import os
 from pathlib import Path
 #from fconfig import *
 
-# Add src/compiler and src/stdlib to Python path
-sys.path.insert(0, str(Path(__file__).parent / "src" / "compiler"))
-sys.path.insert(0, str(Path(__file__).parent / "src" / "stdlib"))
-sys.path.insert(0, str(Path(__file__).parent / "src" / "stdlib" / "runtime"))
+# Resolve compiler root: prefer FLUXC_SRCDIR env var, fall back to script location
+FLUXC_SRCDIR = Path(os.environ.get("FLUXC_SRCDIR", Path(__file__).parent)).resolve()
 
+# Write it back so fc.py and fconfig.py see the same root when they're imported
+os.environ["FLUXC_SRCDIR"] = str(FLUXC_SRCDIR)
+
+# Add src/compiler and src/stdlib to Python path
+sys.path.insert(0, str(FLUXC_SRCDIR / "src" / "compiler"))
+sys.path.insert(0, str(FLUXC_SRCDIR / "src" / "stdlib"))
+sys.path.insert(0, str(FLUXC_SRCDIR / "src" / "stdlib" / "runtime"))
 # Import compiler components
 from fc import FluxCompiler # type: ignore
 from fc import config
@@ -67,7 +72,7 @@ def main():
     
     try:
         # Create build directory if it doesn't exist
-        build_dir = Path.cwd() / "build"
+        build_dir = FLUXC_SRCDIR / "build"
         build_dir.mkdir(exist_ok=True)
         
         # Open debug.txt for writing
@@ -84,13 +89,13 @@ def main():
         # First line in debug file
         print(f"=== Flux Compiler Debug Log ===")
         print(f"Debug file location: {debug_path.absolute()}")
-        print(f"Working directory: {Path.cwd()}")
+        print(f"Working directory: {FLUXC_SRCDIR}")
         print(f"Arguments: {' '.join(sys.argv)}")
         print("=" * 40)
         
         if len(sys.argv) < 2:
             print("Flux Language Compiler")
-            print("Usage: python3 fc.py <input.fx> [options]\n")
+            print("Usage: python fxc.py <input.fx> [options]\n")
             print("Basic Options:")
             print("  -o <output>         Output binary name")
             print("  -v <level>          Legacy verbosity level (0-5)")
@@ -120,11 +125,11 @@ def main():
             print("  FLUX_LOG_COMPONENTS Filter components (comma-separated)")
             print("")
             print("Examples:")
-            print("  python3 fc.py hello.fx")
-            print("  python3 fc.py hello.fx -o hello --log-level 4")
-            print("  python3 fc.py hello.fx -dos -com        # Create DOS COM file")
-            print("  python3 fc.py hello.fx -dos -o hello.exe # Create DOS EXE file")
-            print("  python3 fc.py hello.fx --log-filter lexer,parser --log-timestamp")
+            print("  python fxc.py hello.fx")
+            print("  python fxc.py hello.fx -o hello --log-level 4")
+            print("  python fxc.py hello.fx -dos -com        # Create DOS COM file")
+            print("  python fxc.py hello.fx -dos -o hello.exe # Create DOS EXE file")
+            print("  python fxc.py hello.fx --log-filter lexer,parser --log-timestamp")
             sys.exit(1)
     
         args = sys.argv[1:]  # Skip script name

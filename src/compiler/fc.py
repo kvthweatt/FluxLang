@@ -7,7 +7,6 @@ Copyright (C) 2025 Karac Thweatt
 Contributors:
 
     Piotr Bednarski
-    reinitd <molliver@aurictradecollective.org>
 """
 
 import sys, os, subprocess
@@ -18,6 +17,9 @@ from fast import *
 from fcodegen import visitor as _codegen_visitor
 from flogger import FluxLogger, FluxLoggerConfig, LogLevel
 from fconfig import *
+
+# Resolve compiler root: prefer FLUXC_SRCDIR env var, fall back to script location
+FLUXC_SRCDIR = Path(os.environ.get("FLUXC_SRCDIR", Path(__file__).parent)).resolve()
 
 def get_debug_level(level: str):
     match(level):
@@ -89,7 +91,7 @@ def resolve_llvm_tool(tool_name: str) -> str:
     """
     if tool_name is None or str(tool_name).lower() == "none":
         tool_name = "llc"
-
+        
     exe = tool_name + ".exe"
 
     # 1. Explicit path from config
@@ -127,8 +129,8 @@ def resolve_llvm_tool(tool_name: str) -> str:
 class FluxCompiler:
     def __init__(self, /, 
                  verbosity: int = None, 
-                 llc_config: dict = None,
                  logger: FluxLogger = None,
+                 llc_config: dict = None,
                  **logger_kwargs):
         """
         Initialize the Flux compiler with configurable logging
@@ -136,12 +138,11 @@ class FluxCompiler:
         Args:
             verbosity: Legacy verbosity level (0-5) - maps to new logging system
             logger: Custom FluxLogger instance (overrides verbosity)
-            llc_config: Dict with optional 'march', 'mcpu', 'mattr' keys for llc
             **logger_kwargs: Additional arguments for FluxLogger creation
         """
         # Initialize logger
         self.debug_levels = set_debug_level()
-        logger_kwargs['level'] = min(0, 5)
+        logger_kwargs['level'] = min(verbosity if verbosity is not None else logger_kwargs.get('level', 3), 5)
         self.logger = FluxLoggerConfig.create_logger(**logger_kwargs)
 
         self.llc_config = llc_config or {}
@@ -160,7 +161,7 @@ class FluxCompiler:
         # Store config platform for DOS detection
         self.cfg_platform = config.get('operating_system', '')
 
-        if config['target'] == "bootloader":
+        if config.get('target') == "bootloader":
             # intentionally break this for the else coming after this.
             self.platform = None
             # heheh yeah qemu time
@@ -209,7 +210,7 @@ class FluxCompiler:
             
         debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
                                               f"Module triple: {self.module_triple}"])
-    
+
     def _get_llc_target_flags(self) -> list:
         """
         Build command-line flags for llc from llc_config, falling back to
@@ -239,7 +240,6 @@ class FluxCompiler:
             self.logger.debug(f"LLC target flags: {' '.join(flags)}", "compiler")
         
         return flags
-        
 
 
     def compile_file(self, filename: str, output_bin: str = None, extra_libs: list = None) -> str:
@@ -477,7 +477,6 @@ class FluxCompiler:
                 compiler = config.get('compiler')
                 if not compiler or compiler.lower() == "none":
                     compiler = "llc"
-
                 # Resolve full path to the compiler so non-default LLVM installs work.
                 compiler_exe = resolve_llvm_tool(compiler)
                 # TODO:
@@ -486,7 +485,6 @@ class FluxCompiler:
                     #"-O" + config['lto_optimization_level'],  # Aggressive optimization level
                     "-filetype=obj",                    # Direct object file output
                     "-mtriple=" + self.module_triple,   # Target triple
-                    *self._get_llc_target_flags(),   # march/mcpu/mattr
                     #"-march=" + config['architecture'], # Architecture
                     #"-mcpu=" + config['cpu'],           # Target CPU
                     "-enable-misched",                  # Enable machine instruction scheduler
@@ -527,8 +525,8 @@ class FluxCompiler:
                 cmd = [
                     "llc",
                     "-O3",                        # Maximum optimization level
-                    *self._get_llc_target_flags(),   # march/mcpu/mattr
                     #"-mtriple=x86_64-linux",      # Explicit target triple
+                    *self._get_llc_target_flags(),   # march/mcpu/mattr
                     "-enable-misched",            # Enable machine instruction scheduler
                     "-enable-tail-merge",         # Merge similar tail code
                     "-disable-verify",            # Disable verification for speed
@@ -1119,7 +1117,7 @@ class FluxCompiler:
         
         self.temp_files.append(modified_asm_file)
         return modified_asm_file
-    
+
     def compile_library(self, filename: str, output_bin: str = None) -> str:
         """Compile to object file only. Skips linking."""
         self.compile_only = True
@@ -1448,8 +1446,8 @@ def main():
     debug_file = None
     
     try:
-        # Create build directory if it doesn't exist
-        build_dir = Path.cwd() / "build"
+        # Create build directory under the compiler root, not CWD
+        build_dir = FLUXC_SRCDIR / "build"
         build_dir.mkdir(exist_ok=True)
         
         # Open debug.txt for writing
@@ -1502,7 +1500,7 @@ def main():
         
         compiler = FluxCompiler(verbosity=verbosity)
         try:
-            match (config['target']):
+            match (config.get('target', '')):
                 case "bootloader":
                     print("BOOTLOADER")
                     binary_path = compiler.compile_bootloader(input_file, output_bin)

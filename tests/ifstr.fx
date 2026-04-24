@@ -7,7 +7,7 @@ def main() -> int
     byte* p = "x";
 	if (p)
 	{
-		print("x")
+		print("x");
 	};
 
 	return 0;
