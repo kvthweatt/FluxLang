@@ -7,7 +7,7 @@ Loads key=value pairs from a .env file into the process environment,
 where they can be read with getenv and modified with fsetenv.
 
 Functions:
-    loadenv(file, overwrite, verbose) -> int
+    floadenv(file, overwrite, verbose) -> int
         Loads the given .env file. If `overwrite` is true, existing
         environment variables will be replaced. If `verbose` is true,
         parsing details are printed to stdout. Returns dotenv::err::OK
@@ -30,8 +30,12 @@ Example:
     #import "standard.fx";
     #import "dotenv.fx";
 
+    extern {
+        def !!getenv(byte* name) -> byte*;
+    };
+
     // args: file, overwrite, verbose
-    int result = dotenv::loadenv(".env\0", true, false);
+    int result = dotenv::floadenv(".env\0", true, false);
     if (result != dotenv::err::OK) {
         // Handle error
     };
@@ -48,9 +52,7 @@ Example:
 #import "standard.fx";
 #endif;
 
-#ifndef __STANDARD_STRINGS__
 #import "string_utilities.fx";
-#endif;
 
 #ifndef FLUX_DOTENV
 #def FLUX_DOTENV 1;
@@ -68,7 +70,11 @@ extern
 {
     // Standard C
     def !!
-        getenv(byte* name) -> byte*;
+        getenv(byte* name) -> byte*,
+        fgets(byte* str, int n, byte* stream) -> byte*,
+        strtok(byte* str, byte* delim) -> byte*,
+        fopen(byte* filename, byte* mode) -> byte*,
+        fclose(byte* stream) -> int;
 };
 
 using standard::io::file;
@@ -79,12 +85,14 @@ using standard::strings;
     {
         def !!
             getenv_s(u64* pReturnValue, byte* buf, u64 numOfElements, byte* name) -> int,
-            _putenv_s(byte* name, byte* value) -> int;
+            _putenv_s(byte* name, byte* value) -> int,
+            strtok_s(byte* str, byte* delim, byte** saveptr) -> byte*,
+            _strdup(byte* str) -> byte*;
     };
 
     #def strdup _strdup;
 
-    def _setenv(byte* name, byte* value, int overwrite) -> int
+    def _setenv(byte* name, byte* value, bool overwrite) -> int
     {
         int errcode = 0;
         if (overwrite is 0) {
@@ -152,7 +160,7 @@ using standard::strings;
     extern
     {
         def !!
-            setenv(byte* name, byte* value, int overwrite) -> int,
+            setenv(byte* name, byte* value, bool overwrite) -> int,
             getline(byte** lineptr, u64* n, byte* stream) -> i64,
             strtok_r(byte* str, byte* delim, byte** saveptr) -> byte*,
             strdup(byte* str) -> byte*;
@@ -161,7 +169,7 @@ using standard::strings;
     #def strdup strdup;
     #def strtok_s strtok_r;
 
-    def _setenv(byte* name, byte* value, int overwrite) -> int
+    def _setenv(byte* name, byte* value, bool overwrite) -> int
     {
         if (setenv(name, value, overwrite) != 0) {
             return _DE_ERR_SETENV_FAILED;
@@ -349,7 +357,7 @@ namespace dotenv
         };
     };
 
-    def loadenv(byte* path, bool overwrite, bool verbose) -> int {
+    def floadenv(byte* path, bool overwrite, bool verbose) -> int {
         using dotenv::internal;
         using dotenv::err;
 
@@ -373,7 +381,7 @@ namespace dotenv
         return result;
     };
 
-    def fsetenv(byte* name, byte* value, int overwrite) -> int {
+    def fsetenv(byte* name, byte* value, bool overwrite) -> int {
         return _setenv(name, value, overwrite);
     };
 };

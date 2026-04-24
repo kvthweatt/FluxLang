@@ -541,7 +541,7 @@ class FluxCompiler:
 
                 # If user/config didn't specify march/mcpu, fall back to x86-64/native
                 if not any(f.startswith('-march=') for f in cmd):
-                    cmd.insert(2, '--march=x84-64')
+                    cmd.insert(2, '--march=x86-64')
                 
                 if not any(f.startswith('-mcpu=') for f in cmd):
                     cmd.insert(3, '-mcpu=native')
