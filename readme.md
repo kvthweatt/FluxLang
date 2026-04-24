@@ -7,9 +7,35 @@
 </p>
 
 ## What is Flux?
-<img width="1043" height="224" alt="image" src="https://github.com/user-attachments/assets/393e35fc-aefc-4076-b9b8-4518fcf98bcd" />
 
-<img width="1121" height="654" alt="image" src="https://github.com/user-attachments/assets/d2f63634-5242-4fb0-93ce-4acf588a778a" />
+Flux is a new language that combines the performance and power of C with the readability of Python.   
+Flux resembles the C-family of languages.  
+It is neither C, nor a derivative of C.  
+It has a fundamentally different type system while still being C ABI compatible.
+
+
+**Characteristics:**
+- Unique type system allowing creation of primitive integer types
+- Manual memory management
+- Compiler that does not fight you
+- First class data control features
+- Consistent grammar and syntax constructs throughout
+- Rich operator set with distinct bitwise set
+- Everything stack allocated unless otherwise specified
+- Everything is zero initialized unless otherwise specified
+- Custom infix operator support
+- Templates without SFINAE or noise
+- Opt-in ownership without a borrow checker
+- Designed so you don't need to repeat yourself so much when coding
+
+
+## Design Philosophy
+
+Flux follows a "high-trust" model:
+- The language provides powerful tools
+- The programmer is responsible for using them correctly
+- Explicit is better than implicit
+- Performance and control over safety guarantees
 
 ## Ideal Use Cases
 
@@ -20,9 +46,6 @@ Flux is well-suited for:
 - **Game engines** - Memory-efficient entity systems
 - **Device drivers** - Memory-mapped I/O
 - **Performance-critical code** - When you need C-level control
-
-<img width="1085" height="773" alt="image" src="https://github.com/user-attachments/assets/098e54d9-6135-4ab4-af46-2f3560c6a3a6" />
-
 
 ## Current Status
 
@@ -63,17 +86,41 @@ Flux is in active development. The syntax and grammar will not change. The [stan
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=kvthweatt/FluxLang&type=date&legend=top-left)](https://www.star-history.com/#kvthweatt/FluxLang&type=date&legend=top-left)
-----
 
-<img width="1060" height="984" alt="image" src="https://github.com/user-attachments/assets/11384acf-f178-4613-af4f-3db62642b5b9" />
 
-<img width="1054" height="771" alt="image" src="https://github.com/user-attachments/assets/b99c58b1-bda4-48e8-829e-866c76bb0b80" />
+## Example: Complete Program
 
-<img width="1373" height="742" alt="image" src="https://github.com/user-attachments/assets/72d5a82f-af55-4b89-b1a1-d414462d0db9" />
+```
+#import "standard.fx";
 
-<img width="1347" height="169" alt="image" src="https://github.com/user-attachments/assets/3835c4ad-2965-47e2-bf4b-6b5e73085b5c" />
+struct Packet
+{
+    data{8} type;
+    data{16} length;
+    data{32} timestamp;
+};
+
+def main() -> int
+{
+    byte[7] bytes = [0x01, 0x00, 0x20, 0x5F, 0x12, 0x34, 0x56];
+    Packet pkt from bytes;
+    
+    println(f"Type: {int(pkt.type)}");
+    println(f"Length: {pkt.length}");
+    println(f"Time: {pkt.timestamp}");
+    
+    return 0;
+};
+```
 
 **Note:** Flux is a systems programming language that assumes you understand memory management and low-level programming concepts. If you're new to systems programming, work through the tutorial documentation carefully.
+
+## 🤝 **Contributing**
+
+Flux is actively developed and approaching self-hosting.  
+
+**Current Status:** Working compiler, real programs running.  
+There are still some small compiler issues here and there.
 
 ## ⚖️ **License**
 
