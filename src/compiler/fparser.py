@@ -143,7 +143,7 @@ class ParseError(Exception):
         line_no = self.token.line
         col    = self.token.column  # 1-based
 
-        header = f"Parse error: {self.message}  Line {line_no}:{col}"
+        header = f"{self.message} at {line_no}:{col}"
 
         if not self.source_lines:
             return header
@@ -170,7 +170,7 @@ class ParseError(Exception):
         hint = ''
         if self.expected_type is not None:
             sym = _TOKEN_SYMBOL_MAP.get(self.expected_type)
-            hint = f' {sym} here' if sym else f' {self.expected_type.name} here'
+            hint = f' {sym} expected here' if sym else f' {self.expected_type.name} expected here'
         caret_line = '-' * dash_count + '^' + hint
 
         return f"{header}\n{src_line}\n{caret_line}"
@@ -572,10 +572,8 @@ class FluxParser:
                 elif stmt:
                     statements.append(stmt)
             except ParseError as e:
-                error_msg = f"Parse error: {e}"
-                print(error_msg, file=sys.stdout)
-                self.parse_errors.append(error_msg)
-                self.synchronize()
+                error_msg = f"\nParse error: {e}"
+                raise ValueError(error_msg)
         # Prepend template instantiations so they are emitted before any call site
         if self._template_struct_instances:
             statements = self._template_struct_instances + statements
@@ -776,7 +774,7 @@ class FluxParser:
             return self.variable_declaration_statement()
         elif self.expect(TokenType.SIGNED):
             return self.variable_declaration_statement()
-        elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.DATA, TokenType.CHAR, 
+        elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.DATA, TokenType.CHAR, TokenType.BYTE, 
                          TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.BOOL_KW, TokenType.VOID,
                          TokenType.SLONG, TokenType.ULONG):
             return self.variable_declaration_statement()
@@ -5322,7 +5320,7 @@ def main():
         print(f"Error: File '{filename}' not found")
         sys.exit(1)
     except ParseError as e:
-        print(f"Parse error: {e}")
+        print(e)
         sys.exit(1)
     except Exception as e:
         print(f"Unexpected error: {e}")

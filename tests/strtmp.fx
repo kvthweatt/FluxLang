@@ -28,16 +28,18 @@ contract ctNonZero(a,b)
     assert(macNZ(b), "b must be nonzero");
 };
 
-contract ctGreaterThanZero
+contract ctGreaterThanZero(a,b)
 {
-    assert(x > 0, "a must be greater than zero");
-    assert(y > 0, "b must be greater than zero");
+    assert(a > 0, "a must be greater than zero");
+    assert(b > 0, "b must be greater than zero");
 };
 
-operator<T, K>(T t, K k)[+] -> int : ctNonZero(a,b)
+operator<T, K> (T t, K k)[+] -> int
+:     ctNonZero(  c,   d), // works on arity and position, not identifier name.
+ctGreaterThanZero(e,   f)
 {
     return t + k;
-} : ctGreaterThanZero;
+};
 
 def main() -> int
 {
