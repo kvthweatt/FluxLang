@@ -4878,17 +4878,6 @@ class CodegenVisitor:
                     raise RuntimeError(f"Internal error: missing function for method {method.name} [{node.source_line}:{node.source_col}]")
                 self._emit_method_body(method, func, node.name, module)
 
-        if node.traits and hasattr(module, 'symbol_table'):
-            implemented_names = {m.name for m in node.methods}
-            for trait_name in node.traits:
-                required = module.symbol_table._trait_registry.get(trait_name)
-                if required is None:
-                    raise ValueError(f"Object '{node.name}' does not implement required functions from '{trait_name}' trait [{node.source_line}:{node.source_col}]")
-                for proto in required:
-                    if proto.name not in implemented_names:
-                        raise ValueError(
-                            f"Object '{node.name}' does not implement required functions from '{trait_name}' trait [{node.source_line}:{node.source_col}]")
-
         return struct_type
 
     def visit_ExternBlock(self, node, builder, module):
@@ -6119,6 +6108,30 @@ class CodegenVisitor:
         for stmt in node.statements:
             if not isinstance(stmt, (UsingStatement, NotUsingStatement, ExternBlock, StructDef, StructDefStatement, ObjectDef, ObjectDefStatement, _ContractDef)):
                 self.visit(stmt, builder, module)
+
+        # Pass 3.5: Verify trait compliance now that all TraitDefs are registered.
+        from fast import ObjectDef as _ObjectDef, ObjectDefStatement as _ObjectDefStatement
+        for stmt in node.statements:
+            obj_def = None
+            if isinstance(stmt, _ObjectDef):
+                obj_def = stmt
+            elif isinstance(stmt, _ObjectDefStatement):
+                obj_def = stmt.object_def
+            if obj_def is None or not obj_def.traits:
+                continue
+            implemented_names = {m.name for m in obj_def.methods}
+            for trait_name in obj_def.traits:
+                required = module.symbol_table._trait_registry.get(trait_name)
+                if required is None:
+                    raise ValueError(
+                        f"Trait '{trait_name}' used by object '{obj_def.name}' is not defined "
+                        f"[{obj_def.source_line}:{obj_def.source_col}]")
+                for proto in required:
+                    if proto.name not in implemented_names:
+                        raise ValueError(
+                            f"Object '{obj_def.name}' does not implement required function "
+                            f"'{proto.name}' from '{trait_name}' trait "
+                            f"[{obj_def.source_line}:{obj_def.source_col}]")
 
         # Pass 4: Re-emit object method bodies that were skipped or partially emitted
         # during the pre-pass (e.g. because using-namespace functions such as println()

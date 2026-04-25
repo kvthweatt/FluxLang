@@ -1,5 +1,4 @@
 {
-  "package": "gzip",
   "test-pack": {
     "version": "0.0.1",
     "description": "Pack to test wizard.",

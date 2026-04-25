@@ -181,9 +181,11 @@ class ParseError(Exception):
                 spaces = TAB_WIDTH - (len(expanded) % TAB_WIDTH)
                 expanded += ' ' * spaces
                 if col_in_raw < show_col:
-                    expanded_col += spaces - 1  # -1 because the tab itself counted as 1
+                    expanded_col += spaces  # tab counts as `spaces` visual columns
             else:
                 expanded += ch
+                if col_in_raw < show_col:
+                    expanded_col += 1  # regular character counts as 1 visual column
 
         src_line = expanded
         # In the semicolon-redirect case show_col was set to one past the end of
@@ -199,6 +201,19 @@ class ParseError(Exception):
             hint = f' {sym} expected here' if sym else f' {self.expected_type.name} expected here'
         caret_line = '-' * dash_count + '^' + hint
 
+        # Suggestion line: only for cases where the fix is a simple symbol insertion.
+        #   • END_OF_PREV_LINE_TYPES (SEMICOLON, COMMA): append the symbol at the end.
+        #   • RETURN_ARROW: insert '->' at the caret column in the source line.
+        suggestion = ''
+        fix_sym = _TOKEN_SYMBOL_MAP.get(self.expected_type) if self.expected_type is not None else None
+        if fix_sym is not None:
+            if self.expected_type in self._END_OF_PREV_LINE_TYPES:
+                suggestion = src_line + fix_sym + '  // try this'
+            elif self.expected_type == TokenType.RETURN_ARROW:
+                suggestion = src_line[:dash_count] + fix_sym + ' ' + src_line[dash_count:].lstrip() + '  // try this'
+
+        if suggestion:
+            return f"{header}\n{src_line}\n{caret_line}\n{suggestion}"
         return f"{header}\n{src_line}\n{caret_line}"
 
 class FluxParser:
@@ -227,6 +242,7 @@ class FluxParser:
         self._contracts: Dict[str, Block] = {}  # name -> Block of statements to inject
         self._function_depth = 0  # Tracks nesting depth; nested function defs are illegal
         self._loop_depth = 0      # Tracks nesting depth of for/while/do-while loops
+        self._in_trait = 0        # Tracks nesting depth inside trait bodies (prototypes only)
         self._default_byte_width = default_byte_width if default_byte_width is not None else _get_byte_width(_flux_config)
         self._comptime_strings: Dict[str, str] = {}  # var_name -> string value, for ~$ codify splicing
 
@@ -1550,6 +1566,15 @@ class FluxParser:
             self.advance()
             body = Block([])
         else:
+            # Inside a trait body only prototypes are allowed — a missing ';' would
+            # otherwise fall through to block() and emit a confusing LEFT_BRACE error.
+            if self._in_trait and not self.expect(TokenType.LEFT_BRACE):
+                prev = self.tokens[self.position - 1] if self.position > 0 else None
+                self.error(
+                    f"Expected {TokenType.SEMICOLON.name}, got {self.current_token.type.name}",
+                    expected_type=TokenType.SEMICOLON,
+                    prev_token=prev,
+                )
             # If any real parameter lacks a name, this is an error for a definition
             for param in real_parameters:
                 if param.name is None:
@@ -2140,6 +2165,7 @@ class FluxParser:
         name = self.consume(TokenType.IDENTIFIER).value
         self.consume(TokenType.LEFT_BRACE)
         prototypes = []
+        self._in_trait += 1
         while not self.expect(TokenType.RIGHT_BRACE):
             if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                 proto = self.function_def()
@@ -2149,6 +2175,7 @@ class FluxParser:
                     prototypes.append(proto)
             else:
                 self.error(f"Expected 'def' inside trait '{name}'")
+        self._in_trait -= 1
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
         return TraitDef(name, prototypes).set_location(tok.line, tok.column)

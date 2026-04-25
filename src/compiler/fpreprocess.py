@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 from typing import Set, Dict, Optional, List
 
+FLUXC_SRCDIR = Path(os.environ.get("FLUXC_SRCDIR", Path(__file__).parent)).resolve()
+
 class FXPreprocessor:
     def __init__(self, source_file, compiler_macros=None):
         self.source_file = source_file
@@ -115,7 +117,7 @@ class FXPreprocessor:
             return path
         
         # Try relative to current directory
-        cwd = Path.cwd()
+        cwd = FLUXC_SRCDIR
         
         # Common locations to check
         locations = [
