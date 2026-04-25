@@ -165,10 +165,10 @@ def main() -> int
 #import "standard.fx";
 
 #ifdef __WINDOWS__
-def some_win_generic() -> LPCSTR*;
+#def DEFAULT_CONFIG_FLAG 0x4000;
 #else
 #ifdef __LINUX__
-def some_nix_generic() -> void*;
+#def DEFAULT_CONFIG_FLAG 0x8000;
 #endif;
 #endif;
 
@@ -179,6 +179,8 @@ def some_nix_generic() -> void*;
 #dir "C:\\path\\to\\some\\lib";
 // Adds a path to the preprocessor's search list
 ```
+
+`#def` defines a preprocessor constant. This is not a functional macro, just a replacement.
 
 ---
 

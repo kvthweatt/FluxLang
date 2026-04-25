@@ -212,19 +212,36 @@ enum Color { RED, GREEN, BLUE };
 
 **`export`:
 Define a function as external for linkage. Used when creating libraries or to allow a function to be   
-seen from outside the program's compilation unit.
+seen from outside the program's compilation unit.  
+Only definitions are used with `export`.
 ```
 export
 {
-    
-}
+    def !!foo() -> int
+    {
+        int a = 1, b = 10;
+        int[10] x = [y for (int y in a..b)];
+        return x[5];
+    };
+};
 ```
 
 ---
 
 **`extern`**:
-External FFI
-TODO
+External FFI - reference a function from a library.
+Only prototypes are used with `extern`.
+```
+extern
+{
+    def !!foo() -> int;
+};
+```
+
+---
+
+`extern` and `export` are mutually exclusive, you cannot do:
+`extern export { ... };` or `export extern def ...;`
 
 ---
 

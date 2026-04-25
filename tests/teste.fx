@@ -13,7 +13,7 @@ trait Shape
 
 trait Scalable
 {
-    def scale(float factor) -> void
+    def scale(float factor) -> void;
 };
 
 // ─── Circle ───────────────────────────────────────────────────────────────────

@@ -267,7 +267,7 @@ class FluxParser:
         print(f"[INFO] [parser] ► AST generated.")
 
         # Expose final macro set to parser/codegen if needed
-        parser._preprocessor_macros = dict(preprocessor.macros)
+        parser._preprocessor_macros = dict(preprocessor.constants)
 
         return parser
 

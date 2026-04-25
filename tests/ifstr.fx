@@ -1,5 +1,5 @@
 #import "standard.fx";
-#import "testpack.fx";
+#import "test_package.fx";
 
 using standard::io::console;
 

@@ -15,77 +15,6 @@ from enum import Enum
 from llvmlite import ir
 from flexer import TokenType
 
-class TypeSysError(Exception):
-    """
-    Raised when the Flux type system encounters an invalid type usage.
-
-    Mirrors ParseError's source-context display: prints the offending source
-    line followed by a caret pointing at the column where the bad type appears.
-
-    Parameters
-    ----------
-    message:
-        Human-readable description of the error.
-    line:
-        1-based source line number (0 = unknown).
-    col:
-        1-based source column number (0 = unknown).
-    source_lines:
-        The full list of source lines (as returned by str.splitlines(keepends=True)).
-        When supplied, the formatted error includes the offending line and caret.
-    """
-
-    def __init__(self, message: str, line: int = 0, col: int = 0,
-                 source_lines: Optional[List[str]] = None):
-        self.message      = message
-        self.line         = line
-        self.col          = col
-        self.source_lines = source_lines or []
-        super().__init__(self._format())
-
-    def _format(self) -> str:
-        if not self.line:
-            return self.message
-
-        header = f"{self.message} [{self.line}:{self.col}]"
-
-        if not self.source_lines or not (1 <= self.line <= len(self.source_lines)):
-            return header
-
-        TAB_WIDTH = 4
-        raw_line  = self.source_lines[self.line - 1].rstrip('\n')
-
-        # Expand tabs so the caret lands on the correct visual column.
-        expanded     = ''
-        expanded_col = 1
-        for i, ch in enumerate(raw_line):
-            if ch == '\t':
-                spaces = TAB_WIDTH - (len(expanded) % TAB_WIDTH)
-                expanded += ' ' * spaces
-                if i + 1 < self.col:
-                    expanded_col += spaces - 1
-            else:
-                expanded += ch
-
-        if self.col > len(raw_line):
-            dash_count = len(expanded)
-        else:
-            dash_count = max(0, expanded_col - 1)
-
-        caret_line = '-' * dash_count + '^'
-        return f"{header}\n{expanded}\n{caret_line}"
-
-    def with_location(self, line: int, col: int,
-                      source_lines: Optional[List[str]] = None) -> 'TypeSysError':
-        """Return a copy of this error enriched with source location."""
-        return TypeSysError(
-            self.message,
-            line=line,
-            col=col,
-            source_lines=source_lines if source_lines is not None else self.source_lines,
-        )
-
-
 class Operator(Enum):
     # Regular operators
     ADD = "+" #
@@ -1140,12 +1069,7 @@ class TypeResolver:
                     if entry.llvm_type is not None:
                         return entry.llvm_type
                 elif entry.kind == SymbolKind.TRAIT:
-                    # Traits have no concrete layout and cannot be used as types.
-                    # Raise without location here; get_llvm_type will catch and
-                    # re-raise with the AST node's source position attached.
-                    raise TypeSysError(
-                        f"trait {typename} cannot be used in type contexts"
-                    )
+                    raise TypeError(f"trait {typename} cannot be used in type contexts.")
         return TypeResolver.resolve_type(module, typename, current_namespace)
     
     @staticmethod
@@ -1274,20 +1198,10 @@ class TypeSystem:
             # Get the current namespace context
             current_namespace = getattr(module, '_current_namespace', '')
             
-            try:
-                resolved_type = TypeResolver.resolve_custom_type(
-                    module, type_spec.custom_typename, current_namespace
-                )
-            except TypeSysError as _e:
-                # Re-raise with source location from the TypeSystem node if the
-                # error was raised without one (e.g. from resolve_custom_type).
-                src_line = getattr(type_spec, 'source_line', 0) or 0
-                src_col  = getattr(type_spec, 'source_col',  0) or 0
-                src_lines = getattr(module, '_source_lines', [])
-                if not _e.line and (src_line or src_lines):
-                    raise _e.with_location(src_line, src_col, src_lines) from None
-                raise
-
+            resolved_type = TypeResolver.resolve_custom_type(
+                module, type_spec.custom_typename, current_namespace
+            )
+            
             if resolved_type is not None:
                 # Handle array types that shouldn't be returned as-is
                 if isinstance(resolved_type, ir.ArrayType) and not type_spec.is_array:
@@ -1298,12 +1212,7 @@ class TypeSystem:
                 else:
                     base_type = resolved_type
             else:
-                raise TypeSysError(
-                    f"Unknown type '{type_spec.custom_typename}'",
-                    line=getattr(type_spec, 'source_line', 0) or 0,
-                    col=getattr(type_spec, 'source_col',  0) or 0,
-                    source_lines=getattr(module, '_source_lines', []),
-                )
+                raise NameError(f"TypeSystem.get_llvm_type: Unknown type: {type_spec.custom_typename}")
         elif type_spec.base_type == DataType.SINT:
             base_type = ir.IntType(32)
         elif type_spec.base_type == DataType.UINT:
