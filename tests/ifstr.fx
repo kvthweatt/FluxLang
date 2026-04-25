@@ -6,7 +6,9 @@ using standard::io::console;
 def main() -> int
 {
     byte* p = "x";
-	if ("")
+
+    what x = 5;
+	if (p)
 	{
 		print("x");
 	};

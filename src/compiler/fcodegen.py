@@ -154,7 +154,7 @@ def _coerce_to_bool(builder: ir.IRBuilder, val: ir.Value) -> ir.Value:
     return builder.icmp_signed('!=', val, ir.Constant(t, 0), name='tobool')
 
 
-def _check_not_string_literal(expr_node, context: str = 'condition') -> None:
+def _check_not_string_literal(expr_node, context: str = 'condition', module: ir.Module = None) -> None:
     """Raise a compile-time TypeError if *expr_node* is a string or f-string literal.
 
     This enforces the Flux rule that string literals may not be used directly
@@ -169,6 +169,9 @@ def _check_not_string_literal(expr_node, context: str = 'condition') -> None:
     context:
         A short description of where the check is being applied, used in the
         error message (e.g. ``'if'``, ``'while'``, ``'elif'``).
+    module:
+        The ir.Module being compiled; used to resolve accurate source locations
+        via the attached ``_flux_line_map``.
     """
     try:
         from fast import StringLiteral as _SL, FStringLiteral as _FSL
@@ -176,10 +179,9 @@ def _check_not_string_literal(expr_node, context: str = 'condition') -> None:
         return  # If fast module not available, skip (will be caught later)
 
     if isinstance(expr_node, (_SL, _FSL)):
-        line = getattr(expr_node, 'source_line', '?')
-        col  = getattr(expr_node, 'source_col',  '?')
+        loc = _src_loc_with_source(expr_node, module)
         raise TypeError(
-            f"String literal cannot be used as a boolean {context} [{line}:{col}]. "
+            f"String literal cannot be used as a boolean {context} {loc}. "
             f"A string literal is always a non-null pointer and its truthiness is "
             f"meaningless in Flux. Store it in a pointer variable first: "
             f"`byte* p = \"...\"; if (p) {{ ... }};`"
@@ -202,6 +204,68 @@ def get_struct_vtable(module: ir.Module, struct_name: str):
     if not hasattr(module, '_struct_vtables'):
         return None
     return module._struct_vtables.get(struct_name)
+
+
+# ---------------------------------------------------------------------------
+# Source location helper
+# ---------------------------------------------------------------------------
+
+def _src_loc(node, module: ir.Module) -> str:
+    """
+    Return a human-readable source location string for *node*.
+
+    When a line map is attached to the module (``module._flux_line_map``),
+    the global merged-source line number stored on the node is translated
+    back to the original filename and its local line number so error messages
+    point at the actual file the user wrote, not the preprocessed tmp.fx.
+
+    Format when map is available:  ``filename.fx:6:1``
+    Fallback (no map / out of range):  ``6:1``
+    """
+    line = getattr(node, 'source_line', '?')
+    col  = getattr(node, 'source_col',  '?')
+
+    line_map = getattr(module, '_flux_line_map', None) if module is not None else None
+    if line_map and isinstance(line, int) and 1 <= line <= len(line_map):
+        filename, local_line = line_map[line - 1]
+        if filename:
+            import os
+            short_name = os.path.basename(filename)
+            return f"[{short_name}:{local_line}:{col}]"
+
+    return f"[{line}:{col}]"
+
+
+def _src_loc_with_source(node, module: ir.Module, source_lines=None) -> str:
+    """
+    Like _src_loc but also appends the relevant source line text when available,
+    to give the user the same context as a parser error.
+    """
+    loc = _src_loc(node, module)
+
+    # Try to pull the actual source line text
+    line = getattr(node, 'source_line', None)
+    col  = getattr(node, 'source_col', 1) or 1
+    src_text = None
+
+    line_map = getattr(module, '_flux_line_map', None) if module is not None else None
+    if line_map and isinstance(line, int) and 1 <= line <= len(line_map):
+        filename, local_line = line_map[line - 1]
+        if filename:
+            try:
+                with open(filename, 'r', encoding='utf-8') as fh:
+                    file_lines = fh.readlines()
+                if 1 <= local_line <= len(file_lines):
+                    src_text = file_lines[local_line - 1].rstrip('\n')
+            except OSError:
+                pass
+    elif source_lines and isinstance(line, int) and 1 <= line <= len(source_lines):
+        src_text = source_lines[line - 1].rstrip('\n')
+
+    if src_text is not None:
+        pointer = ' ' * (col - 1) + '^'
+        return f"{loc}\n    {src_text}\n    {pointer}"
+    return loc
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +296,7 @@ class CodegenVisitor:
             return node.codegen(builder, module)
 
         raise NotImplementedError(
-            f"CodegenVisitor: no visit method for {type(node).__name__} "
+            f"\nCodegenVisitor: no visit method for {type(node).__name__} "
             f"and node has no codegen() [{getattr(node, 'source_line', '?')}:"
             f"{getattr(node, 'source_col', '?')}]"
         )
@@ -243,7 +307,7 @@ class CodegenVisitor:
 
     def visit_NoInit(self, node, builder, module):
         raise RuntimeError(
-            f"noinit is a compile-time marker and should not generate code directly. "
+            f"\nnoinit is a compile-time marker and should not generate code directly. "
             f"It should only be used as an initializer in variable declarations. "
             f"[{node.source_line}:{node.source_col}]"
         )
@@ -1630,7 +1694,7 @@ class CodegenVisitor:
         builder.call(ir.InlineAsm(asm_type, asm_code, constraints, side_effect=True), [void_ptr])
 
     def visit_TernaryOp(self, node, builder, module):
-        _check_not_string_literal(node.condition, 'ternary condition')
+        _check_not_string_literal(node.condition, 'ternary condition', module)
         cond_val = self.visit(node.condition, builder, module)
         cond_val = _coerce_to_bool(builder, cond_val)
         func = builder.block.function
@@ -3494,8 +3558,8 @@ class CodegenVisitor:
                         #print("--- END REAL EXCEPTION ---")
                         loc = ""
                         if hasattr(stmt, 'source_line') and stmt.source_line:
-                            loc = f" [{module.name}:{stmt.source_line}:{stmt.source_col}]"
-                        raise ValueError(f"Block{{}} Debug: Error in statement {stmt_i} ({type(stmt).__name__}){loc}: {e} \n\n {stmt} \n\n {module.name}")
+                            loc = f" {_src_loc(stmt, module)}"
+                        raise ValueError(f"Block{{}} Debug: Error in statement {stmt_i} ({type(stmt).__name__}){loc}: {e}")
 
             if builder._flux_defer_stack and not builder.block.is_terminated:
                 for deferred_expr in reversed(builder._flux_defer_stack):
@@ -3509,7 +3573,7 @@ class CodegenVisitor:
         if builder.block is None:
             return self._visit_IfStatement_global_scope(node, builder, module)
 
-        _check_not_string_literal(node.condition, 'if')
+        _check_not_string_literal(node.condition, 'if', module)
 
         try:
             cond_val = self.visit(node.condition, builder, module)
@@ -3534,7 +3598,7 @@ class CodegenVisitor:
 
         current_block = else_block
         for i, (elif_cond, elif_body) in enumerate(node.elif_blocks):
-            _check_not_string_literal(elif_cond, 'elif')
+            _check_not_string_literal(elif_cond, 'elif', module)
             elif_cond_val = self.visit(elif_cond, builder, module)
             elif_cond_val = _coerce_to_bool(builder, elif_cond_val)
             elif_then = func.append_basic_block(f'elif_then_{i}')
@@ -3557,7 +3621,7 @@ class CodegenVisitor:
         return None
 
     def _visit_IfStatement_global_scope(self, node, builder, module):
-        _check_not_string_literal(node.condition, 'if')
+        _check_not_string_literal(node.condition, 'if', module)
         try:
             cond_val = self.visit(node.condition, builder, module)
         except Exception as e:
@@ -3599,7 +3663,7 @@ class CodegenVisitor:
                 return ir.Constant(ir.IntType(64), int(expr))
             return self.visit(expr, builder, module)
 
-        _check_not_string_literal(node.condition, 'if-expression condition')
+        _check_not_string_literal(node.condition, 'if-expression condition', module)
         cond_val = self.visit(node.condition, builder, module)
         cond_val = _coerce_to_bool(builder, cond_val)
 
@@ -3691,7 +3755,7 @@ class CodegenVisitor:
         builder.branch(cond_block)
 
         builder.position_at_start(cond_block)
-        _check_not_string_literal(node.condition, 'while')
+        _check_not_string_literal(node.condition, 'while', module)
         cond_val = self.visit(node.condition, builder, module)
         cond_val = _coerce_to_bool(builder, cond_val)
         builder.cbranch(cond_val, body_block, end_block)
@@ -3771,7 +3835,7 @@ class CodegenVisitor:
             builder.branch(cond_block)
 
         builder.position_at_start(cond_block)
-        _check_not_string_literal(node.condition, 'do-while')
+        _check_not_string_literal(node.condition, 'do-while', module)
         cond_val = self.visit(node.condition, builder, module)
         builder.cbranch(cond_val, body_block, end_block)
 
@@ -3795,7 +3859,7 @@ class CodegenVisitor:
 
         builder.position_at_start(cond_block)
         if node.condition:
-            _check_not_string_literal(node.condition, 'for')
+            _check_not_string_literal(node.condition, 'for', module)
             cond_val = self.visit(node.condition, builder, module)
             cond_val = _coerce_to_bool(builder, cond_val)
             builder.cbranch(cond_val, body_block, end_block)
@@ -4475,7 +4539,7 @@ class CodegenVisitor:
                     call_instr.tail = "musttail"
                 builder.ret_void()
             else:
-                raise RuntimeError(f"Function '{node.name}' must end with return statement [{node.source_line}:{node.source_col}]")
+                raise RuntimeError(f"Function '{node.name}' must end with return statement {_src_loc_with_source(node, module)}")
 
         return func
 
@@ -5491,7 +5555,7 @@ class CodegenVisitor:
     def visit_VariableDeclaration(self, node, builder, module):
         # Resolve type (with automatic array size inference if needed)
         resolved_type_spec = VariableTypeHandler.infer_array_size(node.type_spec, node.initial_value, module)
-        llvm_type = TypeSystem.get_llvm_type(resolved_type_spec, module, include_array=True)
+        llvm_type = TypeSystem.get_llvm_type(resolved_type_spec, module, include_array=True, node=node)
         #print(f"[VAR DECL] name={node.name}, type_spec={resolved_type_spec}, llvm_type={llvm_type}", file=sys.stdout)
 
         # Check if this is global scope

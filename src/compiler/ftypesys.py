@@ -8,12 +8,58 @@ Contributors:
     Piotr Bednarski
 """
 
-import sys, traceback, faulthandler, inspect
+import sys, traceback, faulthandler, inspect, os
 from dataclasses import dataclass, field
 from typing import List, Any, Optional, Union, Dict, Tuple
 from enum import Enum
 from llvmlite import ir
 from flexer import TokenType
+
+
+def _typesys_src_loc(node, module: ir.Module) -> str:
+    """
+    Translate a node's global merged-source line number back to the original
+    filename and local line, using the ``_flux_line_map`` attached to *module*
+    by fc.py after preprocessing.
+
+    Returns a formatted block:
+
+        [filename.fx:6:5]
+            asdf a = 3;
+        ----^
+
+    Falls back to ``[global_line:col]`` with no source snippet when the map
+    or the original file is unavailable.
+    """
+    line = getattr(node, 'source_line', None)
+    col  = getattr(node, 'source_col',  1) or 1
+
+    line_map = getattr(module, '_flux_line_map', None) if module is not None else None
+
+    src_text  = None
+    loc_label = f"[{line}:{col}]"
+
+    if line_map and isinstance(line, int) and 1 <= line <= len(line_map):
+        filename, local_line = line_map[line - 1]
+        if filename:
+            loc_label = f"[{os.path.basename(filename)}:{local_line}:{col}]"
+            try:
+                with open(filename, 'r', encoding='utf-8') as fh:
+                    file_lines = fh.readlines()
+                if 1 <= local_line <= len(file_lines):
+                    src_text = file_lines[local_line - 1].rstrip('\n')
+            except OSError:
+                pass
+
+    if src_text is not None:
+        # Strip leading whitespace from the display line so tabs/spaces in the
+        # source don't push the caret further right than the column says.
+        stripped = src_text.lstrip()
+        indent = '    '  # 4-space prefix applied to the source line
+        pointer = '-' * (col - 1) + '^'
+        return f"{loc_label}\n\n{indent}{stripped}\n{pointer}"
+
+    return loc_label
 
 class Operator(Enum):
     # Regular operators
@@ -1134,7 +1180,7 @@ class TypeSystem:
 
     @staticmethod
     def get_llvm_type(type_spec: Union['TypeSystem', 'FunctionPointerType', DataType], module: ir.Module, 
-                      literal_value: Any = None, include_array: bool = False) -> ir.Type:
+                      literal_value: Any = None, include_array: bool = False, node=None) -> ir.Type:
         # Handle FunctionPointerType
         if hasattr(type_spec, 'return_type') and hasattr(type_spec, 'parameter_types'):
             ret_type = TypeSystem.get_llvm_type(type_spec.return_type, module)
@@ -1212,7 +1258,8 @@ class TypeSystem:
                 else:
                     base_type = resolved_type
             else:
-                raise NameError(f"TypeSystem.get_llvm_type: Unknown type: {type_spec.custom_typename}")
+                loc = _typesys_src_loc(node, module) if node is not None else f"[{getattr(node, 'source_line', '?')}:{getattr(node, 'source_col', '?')}]"
+                raise NameError(f"TypeSystem.get_llvm_type: Unknown type: {type_spec.custom_typename}\n{loc}")
         elif type_spec.base_type == DataType.SINT:
             base_type = ir.IntType(32)
         elif type_spec.base_type == DataType.UINT:

@@ -245,6 +245,18 @@ class FluxParser:
         self._in_trait = 0        # Tracks nesting depth inside trait bodies (prototypes only)
         self._default_byte_width = default_byte_width if default_byte_width is not None else _get_byte_width(_flux_config)
         self._comptime_strings: Dict[str, str] = {}  # var_name -> string value, for ~$ codify splicing
+        # Populated by from_file after preprocessing; maps global line index (0-based) -> (filename, local_line 1-based)
+        self._line_map: List[tuple] = []
+
+    def resolve_source_location(self, global_line: int) -> tuple:
+        """
+        Translate a 1-based global (merged) line number to (filename, local_line).
+        Falls back to (None, global_line) when no map is available or the line is
+        out of range (e.g. it came from an import that produced no output lines).
+        """
+        if self._line_map and 1 <= global_line <= len(self._line_map):
+            return self._line_map[global_line - 1]
+        return (None, global_line)
 
     @classmethod
     def from_file(self, source_file: str, compiler_macros: Optional[Dict[str, str]] = None):
@@ -268,6 +280,12 @@ class FluxParser:
 
         # Expose final macro set to parser/codegen if needed
         parser._preprocessor_macros = dict(preprocessor.constants)
+
+        # Expose line map so error reporting can translate global -> (file, local_line)
+        # line_map[i] = (filename, local_line_number) for output_lines[i] (0-based)
+        # The merged source has one extra '\n' join between each line, so global line N
+        # (1-based) corresponds to line_map[N-1] when N <= len(line_map).
+        parser._line_map = preprocessor.line_map
 
         return parser
 

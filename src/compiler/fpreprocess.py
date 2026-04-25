@@ -11,7 +11,9 @@ class FXPreprocessor:
         self.output_lines = []
         self.constants: Dict[str, str] = {}
         self.lib_dirs: List[str] = []
-        
+        # Maps each output line index (0-based) -> (filename, local_line_number 1-based)
+        self.line_map: List[tuple] = []
+
         if compiler_constants:
             self.constants.update(compiler_constants)
     
@@ -182,11 +184,18 @@ class FXPreprocessor:
                     directive = s.split()[0]
                     raise SyntaxError(f"[PREPROCESSOR] {directive} directive missing semicolon in {filepath} at line {lineno}")
         
-        # Process line by line
+        # Process line by line, tracking current file and local line number
         lines = content.splitlines()
+        prev_current_file = getattr(self, '_current_file', None)
+        prev_current_lines = getattr(self, '_current_lines', None)
+        self._current_file = str(resolved_path)
+        self._current_lines = lines
         i = 0
         while i < len(lines):
+            self._current_local_lineno = i + 1  # 1-based
             i = self._process_line(lines, i)
+        self._current_file = prev_current_file
+        self._current_lines = prev_current_lines
     
     def _process_line(self, lines: List[str], i: int) -> int:
         """Process a single line, return next line index"""
@@ -311,6 +320,7 @@ class FXPreprocessor:
         
         # Regular line - do constant substitution
         processed_line = self._substitute_constants(line)
+        self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
         self.output_lines.append(processed_line)
         return i + 1
     
@@ -329,8 +339,9 @@ class FXPreprocessor:
         in_else = False
         else_seen = False
         
-        # Store lines that should be included
+        # Store lines that should be included, paired with their original local line numbers
         lines_to_include = []
+        origins_to_include = []  # parallel list: local line number (1-based) for each entry
         
         while i < len(lines):
             line = lines[i]
@@ -357,6 +368,7 @@ class FXPreprocessor:
                     if lines_to_include:
                         j = 0
                         while j < len(lines_to_include):
+                            self._current_local_lineno = origins_to_include[j]
                             j = self._process_line(lines_to_include, j)
                     return i + 1
             
@@ -365,10 +377,12 @@ class FXPreprocessor:
                 # Inside nested block - always include
                 if (condition_true and not in_else) or (not condition_true and in_else):
                     lines_to_include.append(line)
+                    origins_to_include.append(i + 1)
             else:
                 # Our depth level
                 if (condition_true and not in_else) or (not condition_true and in_else):
                     lines_to_include.append(line)
+                    origins_to_include.append(i + 1)
             
             i += 1
         

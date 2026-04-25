@@ -363,6 +363,10 @@ class FluxCompiler:
             if parser.parse_errors:
                 exit()
 
+            # Attach the line map to the module so codegen can produce accurate
+            # per-file error locations instead of global merged-source line numbers.
+            self.module._flux_line_map = parser._line_map
+
             #print("*"*40)
             #print("==== PARSER GENERATED SYMBOL TABLE ====")
             #print(parser.symbol_table.scopes)
