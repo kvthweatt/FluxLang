@@ -210,6 +210,18 @@ enum Color { RED, GREEN, BLUE };
 
 ---
 
+**`export`:
+Define a function as external for linkage. Used when creating libraries or to allow a function to be   
+seen from outside the program's compilation unit.
+```
+export
+{
+    
+}
+```
+
+---
+
 **`extern`**:
 External FFI
 TODO

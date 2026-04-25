@@ -4923,8 +4923,30 @@ class CodegenVisitor:
                         param.name = f"arg{i}"
 
     # ------------------------------------------------------------------
-    # Namespace codegen helpers (moved from NamespaceTypeHandler)
+    # Export block codegen
     # ------------------------------------------------------------------
+
+    def visit_ExportBlock(self, node, builder, module):
+        """
+        Generate code for an 'export' block.
+
+        Each declaration is a full function definition (not a prototype).
+        We delegate to visit_FunctionDef for body emission, then force
+        'external' linkage so the symbol is visible to the linker /
+        dynamic loader (equivalent to __declspec(dllexport) or
+        __attribute__((visibility("default")))).
+        """
+        for func_def in node.definitions:
+            if func_def.is_prototype:
+                raise ValueError(
+                    f"'export' requires a full definition, not a prototype: '{func_def.name}' "
+                    f"[{node.source_line}:{node.source_col}]"
+                )
+            func = self.visit_FunctionDef(func_def, builder, module)
+            # Override the default internal/private linkage set by visit_FunctionDef
+            # so that this symbol is exported from the shared library.
+            if func is not None:
+                func.linkage = 'external'
 
     def _create_static_init_builder(self, module: ir.Module) -> ir.IRBuilder:
         init_func_name = "__static_init"
@@ -5973,7 +5995,7 @@ class CodegenVisitor:
     def visit_Program(self, node, builder, module):
         from fast import (UsingStatement, NotUsingStatement, NamespaceDef,
                           StructDef, StructDefStatement, ObjectDef, ObjectDefStatement,
-                          ExternBlock, NamespaceDefStatement)
+                          ExternBlock, ExportBlock, NamespaceDefStatement)
         print("[AST] Begining codegen for Flux program ...")
         print(f"[AST] Total statements in AST: {len(node.statements)}", file=sys.stdout)
         namespace_count = sum(1 for s in node.statements if isinstance(s, NamespaceDef))

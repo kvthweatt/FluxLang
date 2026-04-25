@@ -69,9 +69,9 @@ class TokenType(Enum):
     DOUBLE_KW = auto()    # "        double
     ELIF = auto()         # "        elif | else if
     ELSE = auto()         # "        else
-    MACRO = auto()        # "        macro
     ENUM = auto()         # "        enum
     ESCAPE_KW = auto()    # "        escape
+    EXPORT = auto()       # "        export
     EXTERN = auto()       # "        extern
     FALSE = auto()        # "        false
     FASTNODE = auto()     # "        fastnode
@@ -91,6 +91,7 @@ class TokenType(Enum):
     ULONG = auto()        # "        ulong
     SINT = auto()         # "        int
     UINT = auto()         # "        uint
+    MACRO = auto()        # "        macro
     NAMESPACE = auto()    # "        namespace
     NOT = auto()          # "        not            Represents operator: !
     NO_INIT = auto()      # "        noinit
@@ -381,6 +382,7 @@ _TOKEN_TYPE_TO_STR: dict = {
     TokenType.MACRO:      'macro',
     TokenType.ENUM:       'enum',
     TokenType.ESCAPE_KW:  'escape',
+    TokenType.EXPORT:     'export',
     TokenType.EXTERN:     'extern',
     TokenType.FALSE:      'false',
     TokenType.FASTNODE:   'fastnode',
@@ -513,6 +515,7 @@ class FluxLexer:
             'endianof': TokenType.ENDIANOF,
             'enum': TokenType.ENUM,
             'escape': TokenType.ESCAPE_KW,
+            'export': TokenType.EXPORT,
             'extern': TokenType.EXTERN,
             'false': TokenType.FALSE,
             'fastnode': TokenType.FASTNODE,

@@ -1,3 +1,14 @@
 {
-	"package": "gzip"
+  "package": "gzip",
+  "test-pack": {
+    "version": "0.0.1",
+    "description": "Pack to test wizard.",
+    "path": "",
+    "author": "Karac Thweatt",
+    "license": "MIT",
+    "entry": "testpack.fx",
+    "dependencies": {
+      "flux-types": ">=1.0.0"
+    }
+  }
 }

@@ -182,46 +182,6 @@ def some_nix_generic() -> void*;
 
 ---
 
-## **External Functions (FFI):**
-Single-line:
-```
-extern def foo() -> void;
-extern def !!foo() -> void;  // !! tells the compiler do not mangle this function name
-```
-Block-based:
-```
-extern
-{
-    def foo() -> void;
-    def bar() -> void;
-    def !!zed() -> void;
-};
-```
-Or multiple prototypes at once:
-```
-extern
-{
-    // Memory allocation
-    def !!
-        malloc(size_t) -> void*,
-        memcpy(void*, void*, size_t) -> void*,
-        free(void*) -> void,
-        calloc(size_t, size_t) -> void*,
-        realloc(void*, size_t) -> void*,
-        memcpy(void*, void*, size_t) -> void*,
-        memmove(void*, void*, size_t) -> void*,
-        memset(void*, int, size_t) -> void*,
-        memcmp(void*, void*, size_t) -> int,
-        abort() -> void,
-        exit(int) -> void,
-        atexit(void*) -> int;
-};
-```
-String-literal based function name support to target any compiled library function:
-```
-def "??foo@"()->void;
-```
-
 ## **Namespaces:**
 
 Prototype: `namespace myNamespace;`
@@ -1551,6 +1511,64 @@ Result:
 3
 4
 ```
+
+---
+
+## **External Functions (FFI):**
+Single-line:
+```
+extern def foo() -> void;
+extern def !!foo() -> void;  // !! tells the compiler do not mangle this function name
+```
+Block-based:
+```
+extern
+{
+    def foo() -> void;
+    def bar() -> void;
+    def !!zed() -> void;
+};
+```
+Or multiple prototypes at once:
+```
+extern
+{
+    // Memory allocation
+    def !!
+        malloc(size_t) -> void*,
+        memcpy(void*, void*, size_t) -> void*,
+        free(void*) -> void,
+        calloc(size_t, size_t) -> void*,
+        realloc(void*, size_t) -> void*,
+        memcpy(void*, void*, size_t) -> void*,
+        memmove(void*, void*, size_t) -> void*,
+        memset(void*, int, size_t) -> void*,
+        memcmp(void*, void*, size_t) -> int,
+        abort() -> void,
+        exit(int) -> void,
+        atexit(void*) -> int;
+};
+```
+String-literal based function name support to target any compiled library function:
+```
+def "??foo@"()->void;
+```
+
+## **Exporting Functions with `export`:**
+Using `export` will cause a function to be marked as external for linkage.  
+Use this when writing libraries, or to allow a function to be "seen".
+```
+#import "types.fx";
+
+export
+{
+    def !!stub() -> void {};
+};
+```
+This is a valid library and will compile if you do:
+`python fxc.py tests\testlib.fx --library -o mylib.dll` on Windows,
+and
+`python3 fxc.py tests/testlib.fx --library -o testlib.so` on Linux.
 
 ---
 

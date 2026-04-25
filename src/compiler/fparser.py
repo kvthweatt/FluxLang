@@ -732,6 +732,8 @@ class FluxParser:
             return self.operator_def()
         elif self.expect(TokenType.EXTERN):
             return self.extern_statement()
+        elif self.expect(TokenType.EXPORT):
+            return self.export_statement()
         elif self.expect(TokenType.CONTRACT):
             return self.contract_def()
         elif self.expect(TokenType.DEF):
@@ -975,7 +977,68 @@ class FluxParser:
             self.error("Expected '{' or 'def' after 'extern'")
         
         return ExternBlock(declarations).set_location(tok.line, tok.column)
-    
+
+    def export_statement(self) -> 'ExportBlock':
+        """
+        export_statement -> 'export' '{' export_function_def* '}' ';'
+                         | 'export' 'def' function_def ';'
+
+        Marks functions as externally visible (dllexport / ELF global).
+        Unlike 'extern', exported functions must have full definitions (bodies).
+        Supports the same inline and block forms as 'extern':
+
+            export def !!some_func() -> rtype { ... };
+
+            export
+            {
+                def !!some_func() -> rtype { ... };
+            };
+        """
+        tok = self.current_token
+        self.consume(TokenType.EXPORT)
+
+        definitions = []
+
+        if self.expect(TokenType.LEFT_BRACE):
+            # Block form: export { ... };
+            self.advance()
+
+            while not self.expect(TokenType.RIGHT_BRACE):
+                if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
+                    func_def = self.function_def()
+                    if isinstance(func_def, list):
+                        for fd in func_def:
+                            if fd.is_prototype:
+                                self.error("'export' requires a full definition, not a prototype")
+                            definitions.append(fd)
+                    else:
+                        if func_def.is_prototype:
+                            self.error("'export' requires a full definition, not a prototype")
+                        definitions.append(func_def)
+                else:
+                    self.error("Expected function definition inside export block")
+
+            self.consume(TokenType.RIGHT_BRACE)
+            self.consume(TokenType.SEMICOLON)
+            return ExportBlock(definitions).set_location(tok.line, tok.column)
+
+        elif self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
+            # Single form: export def ...;
+            func_def = self.function_def()
+            if isinstance(func_def, list):
+                for fd in func_def:
+                    if fd.is_prototype:
+                        self.error("'export' requires a full definition, not a prototype")
+                    definitions.append(fd)
+            else:
+                if func_def.is_prototype:
+                    self.error("'export' requires a full definition, not a prototype")
+                definitions.append(func_def)
+        else:
+            self.error("Expected '{' or 'def' after 'export'")
+
+        return ExportBlock(definitions).set_location(tok.line, tok.column)
+
     def _parse_contract_ref(self):
         """
         Parse a contract reference at an attachment site.

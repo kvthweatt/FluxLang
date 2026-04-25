@@ -1309,7 +1309,17 @@ class ExternBlock(Statement):
         extern def function_name(params) -> return_type;
     """
     declarations: List['FunctionDef']  # List of function prototypes
-    
+
+
+class ExportBlock(ASTNode):
+    """
+    AST node for an 'export' block: functions made externally visible for linkage.
+    Same stucture as extern, except definitions go here.
+    """
+    definitions: List['FunctionDef'] # Collection of function definitions
+
+    def __init__(self, definitions):
+        self.definitions = definitions  # List[FunctionDef]
 
 # Namespace definition
 @dataclass

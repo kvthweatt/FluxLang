@@ -1119,12 +1119,107 @@ class FluxCompiler:
         return modified_asm_file
 
     def compile_library(self, filename: str, output_bin: str = None) -> str:
-        """Compile to object file only. Skips linking."""
-        self.compile_only = True
+        """
+        Compile a Flux source file to a shared library (DLL on Windows, .so on Linux, .dylib on macOS).
+        """
         try:
-            return self.compile_file(filename, output_bin)
-        finally:
-            self.compile_only = False
+            self.logger.section(f"COMPILING {filename.upper()} AS SHARED LIBRARY", LogLevel.INFO)
+            base_name = Path(filename).stem
+
+            # ── Steps 1–4: preprocess / lex / parse / codegen ──────────────────
+            # Reuse compile_file's pipeline up to the object file by setting
+            # compile_only, then immediately clearing it so we can do our own link.
+            self.compile_only = True
+            try:
+                obj_path = self.compile_file(filename, output_bin=None)
+            finally:
+                self.compile_only = False
+
+            obj_file = Path(obj_path)
+
+            # ── Determine output name ───────────────────────────────────────────
+            if self.platform == "Windows":
+                out_name = output_bin or f"{base_name}.dll"
+                if not out_name.endswith(".dll"):
+                    out_name += ".dll"
+            elif self.platform == "Darwin":
+                out_name = output_bin or f"lib{base_name}.dylib"
+                if not out_name.endswith(".dylib"):
+                    out_name += ".dylib"
+            else:  # Linux / default
+                out_name = output_bin or f"lib{base_name}.so"
+                if not out_name.endswith(".so"):
+                    out_name += ".so"
+
+            output_dir = Path(f"build/{base_name}")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            out_path = output_dir / out_name
+
+            # ── Link ────────────────────────────────────────────────────────────
+            self.logger.step(f"Linking shared library: {out_name}", LogLevel.INFO, "linker")
+
+            if self.platform == "Windows":
+                linker_name = config.get('linker', 'lld-link')
+                try:
+                    linker_exe = resolve_llvm_tool(linker_name)
+                except FileNotFoundError as e:
+                    self.logger.error(str(e), "linker")
+                    raise
+
+                link_cmd = [
+                    linker_exe,
+                    "/DLL",                          # <-- This is the key flag
+                    "/NOENTRY",                      # DLLs don't need an entrypoint by default;
+                                                     # remove this line and add /ENTRY:DllMain
+                                                     # if your library defines DllMain
+                    "/nodefaultlib" if int(config.get('no_default_libraries', 0)) == 1 else "",
+                    "/opt:ref" if int(config.get('remove_unused_funcs', 0)) == 1 else "",
+                    "/opt:icf" if int(config.get('comdat_folding', 0)) == 1 else "",
+                    "/section:.text,ERW",
+                    f"/opt:lldlto={config.get('lto_optimization_level', 3)}",
+                    str(obj_file),
+                    "kernel32.lib",
+                    "ucrt.lib",
+                    "user32.lib",
+                    "gdi32.lib",
+                    f"/out:{out_path}",
+                    f"/implib:{output_dir / (base_name + '.lib')}",  # import lib for linking against
+                ]
+                # Strip empty strings left by disabled flags
+                link_cmd = [x for x in link_cmd if x]
+
+            elif self.platform == "Darwin":
+                link_cmd = [
+                    "clang",
+                    "-dynamiclib",
+                    "-o", str(out_path),
+                    str(obj_file),
+                ]
+
+            else:  # Linux
+                link_cmd = [
+                    "ld",
+                    "-shared",
+                    "-o", str(out_path),
+                    str(obj_file),
+                ]
+
+            self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
+            try:
+                result = subprocess.run(link_cmd, check=True, capture_output=True, text=True)
+                self.logger.trace(f"Linker output: {result.stdout}", "linker")
+                if result.stderr:
+                    self.logger.warning(f"Linker stderr: {result.stderr}", "linker")
+            except subprocess.CalledProcessError as e:
+                self.logger.error(f"DLL linking failed: {e.stderr}", "linker")
+                raise RuntimeError(f"Library link step failed: {e.stderr}")
+
+            self.logger.success(f"Library compiled: {out_path}")
+            return str(out_path)
+
+        except Exception as e:
+            self.logger.error(f"Library compilation failed: {e}", "compiler")
+            raise
 
     def compile_bootloader(self, filename: str, output_bin: str = None) -> str:
         """
