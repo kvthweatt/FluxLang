@@ -386,7 +386,7 @@ class FluxCompiler:
                     self.logger.log_data(LogLevel.TRACE, "Generated LLVM IR", llvm_ir, "codegen")
                     
             except Exception as e:
-                self.logger.error(f"Code generation failed: {e}", "codegen")
+                #self.logger.error(f"Code generation failed: {e}", "codegen")
                 raise
 
             source_path = Path(filename)

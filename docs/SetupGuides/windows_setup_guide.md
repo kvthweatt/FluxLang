@@ -9,8 +9,9 @@ Flux compilation on Windows involves several components working together:
 1. **Python 3.13+** - Runs the Flux compiler itself
 2. **LLVM v21** - Full LLVM pipeline
 - if your LLVM does not come with `llc`, you will need **MSYS2 MinGW64** for `llc`
+- Enter MSYS2 MINGw64 and run `pacman -S mingw-w64-x86_64-llvm`, this will give you `llc`
 3. **Clang v21** - Compiles LLVM IR to object files
-- if `llc` fails to compile, Flux falls back to `clang` to compile the LLVM IR
+- if `lld` or `lld-link` fails to link, Flux falls back to `clang` to link the object file(s)
 4. **Visual Studio/MSVC** - Provides a linker and the Windows SDK
 5. **llvmlite** - Python bindings to LLVM for code generation
 
@@ -99,6 +100,12 @@ clang --print-targets | findstr x86_64  # Should show x86_64 targets
 ```
 llc --version
 ```
+- If this fails, you'll need step 3.5
+
+### 3.5 Install LLVM toolchain for MSYS2
+If you had to install MSYS2, follow these steps:
+- Inside MSYS2 MinGW64, run `pacman -S mingw-w64-x86_64-llvm`
+- Add `C:\mingw64\mingw64\bin` to your system or user `PATH` environment variable.
 
 ### 4. Create `FLUXC_SRCDIR` as an environment variable
 Set it to wherever you installed Flux, where the compiler entrypoint `fxc.py` lives.
@@ -120,7 +127,7 @@ python fxc.py tests\test.fx
 2. Ensure Visual Studio includes the "Desktop development with C++" workload
 3. Verify environment variables are set: `echo $env:VCINSTALLDIR`
 
-### "Module 'llvmlite' not found"
+### "Module `llvmlite` not found"
 **Cause:** Python dependencies not installed.
 
 **Solutions:**

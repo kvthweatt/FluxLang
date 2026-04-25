@@ -6,7 +6,7 @@ using standard::io::console;
 def main() -> int
 {
     byte* p = "x";
-	if (p)
+	if ("")
 	{
 		print("x");
 	};
