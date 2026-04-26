@@ -4,9 +4,9 @@ using standard::io::console;
 
 def main() -> int
 {
-    int[4] y = [10, 20, 30, 40];
+    int[] y = [10, 20, 30, 40, 0];
 
-    int[2] x = [20, 30];
+    int[] x = [20, 30, 0];
 
     if (x in y)
     {

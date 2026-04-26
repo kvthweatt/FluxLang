@@ -1527,6 +1527,32 @@ class VariableTypeHandler:
         # Import here to avoid circular dependency
         from fast import StringLiteral, ArrayLiteral
         
+        # Handle ArrayLiteral initializer for bare array types (e.g. int[] y = [...])
+        # where is_array is already True but array_size was left as None.
+        # Count elements; if the last element is a zero literal, exclude it from the
+        # logical size (NUL/sentinel terminator convention).
+        if (initial_value and isinstance(initial_value, ArrayLiteral)
+                and type_spec.is_array and type_spec.array_size is None):
+            from fast import Literal as _Lit
+            elems = initial_value.elements
+            elem_count = len(elems)
+            if elem_count and isinstance(elems[-1], _Lit) and elems[-1].value == 0:
+                elem_count -= 1
+            return TypeSystem(
+                base_type=type_spec.base_type,
+                is_signed=type_spec.is_signed,
+                is_const=type_spec.is_const,
+                is_volatile=type_spec.is_volatile,
+                is_local=type_spec.is_local,
+                bit_width=type_spec.bit_width,
+                alignment=type_spec.alignment,
+                endianness=type_spec.endianness,
+                is_array=True,
+                array_size=elem_count,
+                is_pointer=type_spec.is_pointer,
+                pointer_depth=getattr(type_spec, 'pointer_depth', 0),
+                custom_typename=type_spec.custom_typename)
+
         # Handle ArrayLiteral initializer for pointer types (e.g. noopstr* strarr = [...])
         # When a pointer type is initialized with an array literal, infer the array size
         # and convert the type to an array of the pointer's element type.
