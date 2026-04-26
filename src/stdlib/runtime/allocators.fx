@@ -1146,6 +1146,11 @@ namespace standard
                             default {};
                         };
                     };
+
+                    def __expr() -> u64
+                    {
+                        return (u64)@this.buffer;
+                    };
                     
                     def allocate(size_t size) -> void_ptr
                     {
@@ -1253,6 +1258,11 @@ namespace standard
                             }
                             default {};
                         };
+                    };
+
+                    def __expr() -> u64
+                    {
+                        return (u64)@this.buffer;
                     };
 
                     // Returns a pointer to a free block, or null if the pool is
@@ -1629,6 +1639,11 @@ namespace standard
                             }
                             default {};
                         };
+                    };
+
+                    def __expr() -> u64
+                    {
+                        return (u64)@this.buffer;
                     };
 
                     // Allocate `size` bytes from the ring.

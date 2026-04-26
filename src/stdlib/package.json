@@ -233,7 +233,7 @@
       "dependencies": {}
     },
     "flux-file": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "file_object_raw.fx",
       "path": "builtins",
       "description": "Raw file object",
@@ -247,14 +247,14 @@
       "dependencies": {}
     },
     "flux-string": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "string_object_raw.fx",
       "path": "builtins",
       "description": "Raw string object",
       "dependencies": {}
     },
     "flux-allocators": {
-      "version": "1.0.5",
+      "version": "1.0.6",
       "entry": "allocators.fx",
       "path": "runtime",
       "description": "Standard memory allocators",

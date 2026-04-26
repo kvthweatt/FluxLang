@@ -1169,11 +1169,13 @@ class CodegenVisitor:
         elif not might_be_ptr_arithmetic:
             if isinstance(lhs.type, ir.PointerType):
                 pointee = lhs.type.pointee
-                if not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType)):
+                if (not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType))
+                        and not getattr(lhs, '_from_expr_method', False)):
                     lhs = builder.load(lhs, name="auto_deref_lhs")
             if isinstance(rhs.type, ir.PointerType):
                 pointee = rhs.type.pointee
-                if not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType)):
+                if (not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType))
+                        and not getattr(rhs, '_from_expr_method', False)):
                     rhs = builder.load(rhs, name="auto_deref_rhs")
         else:
             lhs_is_int_type = isinstance(lhs.type, ir.IntType)
@@ -1188,6 +1190,17 @@ class CodegenVisitor:
             if (ArrayTypeHandler.is_array_or_array_pointer(lhs) and
                     ArrayTypeHandler.is_array_or_array_pointer(rhs)):
                 return ArrayTypeHandler.concatenate(builder, module, lhs, rhs, node.operator)
+
+        # i8* + i8* — both sides came from __expr() or are raw byte pointers.
+        # auto_deref was suppressed above for __expr results, so the pointers
+        # are still live here. Route to the standard string concat function.
+        if (node.operator == Operator.ADD and
+                getattr(lhs, '_from_expr_method', False) and
+                getattr(rhs, '_from_expr_method', False)):
+            concat_name = "standard__strings__manip__concat__2__byteE1_ptr1__byteE1_ptr1__ret_byteE1_ptr1"
+            concat_func = module.globals.get(concat_name)
+            if concat_func is not None:
+                return builder.call(concat_func, [lhs, rhs], name="str_concat")
 
         # Pointer arithmetic
         lhs_ptr = isinstance(lhs.type, ir.PointerType)
@@ -2790,8 +2803,31 @@ class CodegenVisitor:
                 zero = ir.Constant(ir.IntType(32), 0)
                 arg_val = builder.gep(gv, [zero, zero], name=f"arg{i}_str_ptr")
             if param_index < len(func.args):
+                expected = func.args[param_index].type
+                # If the argument is a struct/object type and the parameter is not,
+                # the user passed an object in expression context without defining __expr().
+                # Give a clear error instead of the generic type-mismatch message.
+                if (isinstance(arg_val.type, (ir.IdentifiedStructType, ir.LiteralStructType)) or
+                        (isinstance(arg_val.type, ir.PointerType) and
+                         isinstance(arg_val.type.pointee, ir.IdentifiedStructType) and
+                         not isinstance(expected, ir.PointerType))):
+                    obj_type_name = None
+                    if hasattr(module, '_struct_types'):
+                        for tname, stype in module._struct_types.items():
+                            candidate = arg_val.type.pointee if isinstance(arg_val.type, ir.PointerType) else arg_val.type
+                            if stype == candidate:
+                                obj_type_name = tname
+                                break
+                    if obj_type_name is not None:
+                        raise TypeError(
+                            f"Object of type '{obj_type_name}' used in expression context "
+                            f"but has no __expr() method defined. "
+                            f"Define 'def __expr() -> <type> {{ return @this.<member>; }};' "
+                            f"inside the object to enable expression-context usage. "
+                            f"[{node.source_line}:{node.source_col}]"
+                        )
                 arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(
-                    builder, module, arg_val, func.args[param_index].type, i)
+                    builder, module, arg_val, expected, i)
             processed_args.append(arg_val)
         call_instr = builder.call(func, processed_args)
         current_func = builder.function
@@ -2813,25 +2849,32 @@ class CodegenVisitor:
                 for key in module._enum_types:
                     if key == type_name or key.endswith(suffix):
                         return ir.Constant(ir.IntType(32), MemberAccessTypeHandler.get_enum_value(key, node.member, module))
-        if hasattr(module, '_struct_types'):
-            obj = self.visit(node.object, builder, module)
-            if MemberAccessTypeHandler.is_struct_type(obj, module):
-                return self.visit(StructFieldAccess(node.object, node.member), builder, module)
-        if isinstance(node.object, Identifier):
-            type_name = node.object.name
-            if MemberAccessTypeHandler.is_static_struct_member(type_name, module):
-                global_name = f"{type_name}.{node.member}"
-                for global_var in module.global_values:
-                    if global_var.name == global_name:
-                        return builder.load(global_var)
-                raise NameError(f"Static member '{node.member}' not found in struct '{type_name}' [{node.source_line}:{node.source_col}]")
-            elif MemberAccessTypeHandler.is_static_union_member(type_name, module):
-                global_name = f"{type_name}.{node.member}"
-                for global_var in module.global_values:
-                    if global_var.name == global_name:
-                        return builder.load(global_var)
-                raise NameError(f"Static member '{node.member}' not found in union '{type_name}' [{node.source_line}:{node.source_col}]")
-        obj_val = self.visit(node.object, builder, module)
+        # Suppress __expr promotion: visiting the LHS of a member access must yield
+        # the raw struct pointer, not the promoted expression value.
+        prev_in_member_access = getattr(self, '_in_member_access', False)
+        self._in_member_access = True
+        try:
+            if hasattr(module, '_struct_types'):
+                obj = self.visit(node.object, builder, module)
+                if MemberAccessTypeHandler.is_struct_type(obj, module):
+                    return self.visit(StructFieldAccess(node.object, node.member), builder, module)
+            if isinstance(node.object, Identifier):
+                type_name = node.object.name
+                if MemberAccessTypeHandler.is_static_struct_member(type_name, module):
+                    global_name = f"{type_name}.{node.member}"
+                    for global_var in module.global_values:
+                        if global_var.name == global_name:
+                            return builder.load(global_var)
+                    raise NameError(f"Static member '{node.member}' not found in struct '{type_name}' [{node.source_line}:{node.source_col}]")
+                elif MemberAccessTypeHandler.is_static_union_member(type_name, module):
+                    global_name = f"{type_name}.{node.member}"
+                    for global_var in module.global_values:
+                        if global_var.name == global_name:
+                            return builder.load(global_var)
+                    raise NameError(f"Static member '{node.member}' not found in union '{type_name}' [{node.source_line}:{node.source_col}]")
+            obj_val = self.visit(node.object, builder, module)
+        finally:
+            self._in_member_access = prev_in_member_access
         if isinstance(node.object, Identifier) and node.object.name == "this" and MemberAccessTypeHandler.is_this_double_pointer(obj_val):
             obj_val = builder.load(obj_val, name="this_ptr")
         if (isinstance(obj_val.type, ir.PointerType) and isinstance(obj_val.type.pointee, ir.PointerType) and
@@ -4473,7 +4516,21 @@ class CodegenVisitor:
             if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
                 raise ValueError(f"Compile error: local variable '{node.value.name}' cannot leave its scope via return [{node.source_line}:{node.source_col}]")
 
-        ret_val = self.visit(node.value, builder, module)
+        # Suppress __expr promotion when the function's return type is itself a struct.
+        # Without this, "return str_var;" would call str_var.__expr() (yielding e.g. i8*)
+        # before coercion can check that the function actually wants the struct back.
+        func = builder.block.function
+        _ret_type = (func.type.return_type
+                     if hasattr(func.type, 'return_type')
+                     else func.type.pointee.return_type)
+        _suppress = isinstance(_ret_type, ir.IdentifiedStructType)
+        if _suppress:
+            self._in_member_access = True
+        try:
+            ret_val = self.visit(node.value, builder, module)
+        finally:
+            if _suppress:
+                self._in_member_access = False
 
         if hasattr(builder, '_flux_defer_stack') and builder._flux_defer_stack:
             for deferred_expr in reversed(builder._flux_defer_stack):
@@ -5872,6 +5929,72 @@ class CodegenVisitor:
         self.visit(node.namespace_def, builder, module)
         return None
 
+    def _try_expr_method(self, ptr, builder, module):
+        """
+        If the LLVM value `ptr` is a pointer to an object type that has a
+        __expr() method, call that method with `this = ptr` and return the
+        result.  Returns None if the object has no __expr, so the caller can
+        fall through to its normal behaviour.
+
+        This implements expression-context promotion:
+            print(str);   // calls str.__expr() transparently
+
+        NOT called when visiting the object of a member access (str.val) or
+        method call (str.foo()) — those need the raw struct pointer.
+
+        Handles two common alloca shapes:
+          1. alloca of struct:            ptr.type == %ObjName*   (this_ptr = ptr)
+          2. alloca of pointer to struct: ptr.type == %ObjName**  (this_ptr = load ptr)
+        """
+        # Suppressed when we're resolving the LHS of a member access or method call
+        if getattr(self, '_in_member_access', False):
+            return None
+
+        if not isinstance(ptr.type, ir.PointerType):
+            return None
+
+        pointee = ptr.type.pointee
+
+        # Shape 2: alloca holding a pointer to struct (e.g. heap-allocated object)
+        if isinstance(pointee, ir.PointerType) and isinstance(pointee.pointee, ir.IdentifiedStructType):
+            struct_type = pointee.pointee
+            this_ptr = builder.load(ptr, name="obj_this")
+        # Shape 1: alloca IS the struct (stack-allocated object, most common case)
+        elif isinstance(pointee, ir.IdentifiedStructType):
+            struct_type = pointee
+            this_ptr = ptr
+        else:
+            return None
+
+        # Use the struct's own LLVM name directly — it's always the canonical mangled
+        # key (e.g. "standard__strings__string") matching what predeclare_method
+        # registered.  Iterating _struct_types risks hitting a short alias (e.g.
+        # "string") before the fully-qualified name, producing the wrong lookup key.
+        obj_type_name = struct_type.name
+        if not obj_type_name:
+            return None
+
+        # __expr takes no user arguments (this is implicit and not counted in param_count).
+        # Pass [] for overload resolution so param_count==0 matches correctly.
+        expr_base_name = f"{obj_type_name}.__expr"
+        expr_func = TypeResolver.resolve_function(module, expr_base_name, "", [])
+
+        # Also try using-namespace mangled names
+        if expr_func is None and hasattr(module, '_using_namespaces'):
+            current_ns = TypeResolver.get_current_namespace(module)
+            for ns in module._using_namespaces:
+                mangled = f"{ns.replace('::', '__')}__{expr_base_name}"
+                expr_func = TypeResolver.resolve_function(module, mangled, current_ns, [])
+                if expr_func:
+                    break
+
+        if expr_func is None:
+            return None
+
+        result = builder.call(expr_func, [this_ptr], name=f"{obj_type_name}_expr")
+        result._from_expr_method = True
+        return result
+
     def visit_Identifier(self, node, builder, module):
         #print(f"[IDENTIFIER] Looking up '{node.name}'", file=sys.stdout)
         #print(f"[IDENTIFIER]   Scope level: {module.symbol_table.scope_level}", file=sys.stdout)
@@ -5891,6 +6014,14 @@ class CodegenVisitor:
             # Handle special case for 'this' pointer
             if node.name == "this":
                 return TypeSystem.attach_type_metadata(ptr, type_spec)
+
+            # Expression-context promotion: if this is an object variable with
+            # __expr() defined, call it and return its result transparently.
+            # We check here, before the load/pointer branching, so it fires
+            # regardless of how should_return_pointer classifies the variable.
+            expr_result = self._try_expr_method(ptr, builder, module)
+            if expr_result is not None:
+                return expr_result
 
             # For arrays and structs, return the pointer directly (don't load)
             if IdentifierTypeHandler.should_return_pointer(ptr, type_spec):
@@ -5921,6 +6052,11 @@ class CodegenVisitor:
             gvar = module.globals[node.name]
             type_spec = module.symbol_table.get_type_spec(node.name)
 
+            # Expression-context promotion for global object variables
+            expr_result = self._try_expr_method(gvar, builder, module)
+            if expr_result is not None:
+                return expr_result
+
             # For arrays and structs, return the pointer directly (don't load)
             if IdentifierTypeHandler.should_return_pointer(gvar, type_spec):
                 return TypeSystem.attach_type_metadata(gvar, type_spec)
@@ -5944,6 +6080,12 @@ class CodegenVisitor:
             if mangled_name in module.globals:
                 gvar = module.globals[mangled_name]
                 type_spec = module.symbol_table.get_type_spec(mangled_name)
+
+                # Expression-context promotion for namespace-mangled global object variables
+                expr_result = self._try_expr_method(gvar, builder, module)
+                if expr_result is not None:
+                    return expr_result
+
                 # For arrays and structs, return the pointer directly (don't load)
                 if IdentifierTypeHandler.should_return_pointer(gvar, type_spec):
                     return TypeSystem.attach_type_metadata(gvar, type_spec)

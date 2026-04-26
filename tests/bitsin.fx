@@ -10,7 +10,7 @@ def main() -> int
 
     u6 y = x[0``5];
 
-    if (y in x[0``5])
+    if (y in x)
     {
         println("Success!");
     };

@@ -2354,6 +2354,27 @@ class FluxParser:
                 self._object_init_params[name] = len(explicit_params)
                 break
 
+        # __expr is mandatory on every fully-defined object (not prototypes).
+        # Validate its signature if present; error if absent.
+        expr_method = next((m for m in methods if isinstance(m, FunctionDef) and m.name == '__expr'), None)
+        if expr_method is None:
+            self.error(
+                f"Object '{name}' is missing a __expr() method. "
+                f"Every object must define 'def __expr() -> <type> {{ ... }};' "
+                f"to specify its expression-context value."
+            )
+        else:
+            explicit_params = [p for p in expr_method.parameters if p.name != 'this']
+            if explicit_params:
+                self.error(
+                    f"Object '{name}': __expr() must take no parameters "
+                    f"(got {len(explicit_params)})"
+                )
+            if expr_method.return_type is None or expr_method.return_type.base_type == DataType.VOID:
+                self.error(
+                    f"Object '{name}': __expr() must have a non-void return type"
+                )
+
         obj_def = ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits).set_location(tok.line, tok.column)
         self._parsed_objects[name] = obj_def
         return obj_def

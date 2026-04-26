@@ -133,6 +133,11 @@ namespace standard
                 return;
             };
 
+            def __expr() -> byte*
+            {
+                return this.value;
+            };
+
             def val() -> byte*
             {
                 return this.value;
@@ -158,7 +163,7 @@ namespace standard
                 return false;
             };
 
-                def clear() -> void
+            def clear() -> void
             {
                 this.value[0] = (byte)0;
                 this.length = 0;
