@@ -7,7 +7,12 @@ def main() -> int
 {
     string str = "hello";
 
-    print("ll" in str);
+    str.printval(); print();
+    println(str.val());
+    println(str);
+    println(str[str.len()-1:0]);
+    println("ll" in str.val());
+    println("ll" in str);
 
     return 0;
 };

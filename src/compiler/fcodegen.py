@@ -4385,6 +4385,13 @@ class CodegenVisitor:
         # ══════════════════════════════════════════════════════════════════════
         else:
             ndl_ptr, ndl_elem, ndl_count = needle_seq
+            # For i8* (byte-string) needles, always use NUL-termination regardless
+            # of any compile-time count.  The stack alloca for a string literal
+            # "[N x i8]" includes the NUL terminator in N, so using ndl_count
+            # directly would require matching '\0' against a real haystack byte,
+            # causing a false "not found" result (e.g. "ll" in str → False).
+            if isinstance(ndl_elem, ir.IntType) and ndl_elem.width == 8:
+                ndl_count = None
             is_nul_needle = (ndl_count is None and
                              isinstance(ndl_elem, ir.IntType) and
                              ndl_elem.width == 8)
