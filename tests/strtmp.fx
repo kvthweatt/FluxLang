@@ -51,5 +51,5 @@ def main() -> int
 
     println(x + y);
 
-	return 0;
+    return 0;
 };

@@ -467,7 +467,6 @@ class FluxCompiler:
                     result = subprocess.run(command_line, check=True, capture_output=True, text=True)
                     success = True
                 except Exception as e:
-                    print(result)
                     self.logger.error(f"{compiler}: {e}", "compiler")
                 
                 if not success:
