@@ -20,7 +20,7 @@ It has a fundamentally different type system while still being C ABI compatible.
 </p>
 
 **Characteristics:**
-- Unique type system allowing creation of primitive integer types
+- Unique type system with endianness and alignment baked into types
 - Manual memory management
 - Compiler that does not fight you
 - First class data control features
