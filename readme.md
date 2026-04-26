@@ -13,6 +13,11 @@ Flux resembles the C-family of languages.
 It is neither C, nor a derivative of C.  
 It has a fundamentally different type system while still being C ABI compatible.
 
+## What does it look like?
+- Here's an example of shifting and masking, unavoidable in other languages turned into a one-liner in Flux
+<p align="center">
+<img width="800" height="449" alt="FluxRefactor-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/21ef2566-f213-4e08-b601-780b45eba2e7" />
+</p>
 
 **Characteristics:**
 - Unique type system allowing creation of primitive integer types
