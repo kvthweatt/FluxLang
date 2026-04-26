@@ -4191,6 +4191,68 @@ class CodegenVisitor:
         # hay_ptr   : iW* (decayed)
         # hay_elem  : element ir.Type
         # hay_count : int (None = NUL-terminated)
+        # hay_int   : iW scalar (set when haystack is an integer, for bit-window search)
+        hay_int = None
+        if isinstance(haystack_type, ir.IntType):
+            # Integer haystack: needle must also be a scalar integer.
+            # Emit a sliding bit-window: for pos in 0..(H-N) inclusive,
+            # check (haystack >> pos) & mask == needle  (mask = (1<<N)-1).
+            if needle_scalar is None:
+                raise ValueError(
+                    f"'in' operator: sequence needle not supported for integer haystack "
+                    f"[{node.source_line}:{node.source_col}]")
+            hay_w = haystack_type.width
+            ndl_w = needle_scalar.type.width
+            if ndl_w > hay_w:
+                raise ValueError(
+                    f"'in' operator: needle width {ndl_w} exceeds haystack width {hay_w} "
+                    f"[{node.source_line}:{node.source_col}]")
+            # Widen both to the haystack width for uniform arithmetic.
+            iHW   = haystack_type
+            hay_v = haystack_raw
+            ndl_v = builder.zext(needle_scalar, iHW) if ndl_w < hay_w else needle_scalar
+            mask  = ir.Constant(iHW, (1 << ndl_w) - 1)
+            positions = hay_w - ndl_w + 1   # number of positions to check
+
+            found_block  = func.append_basic_block('in.found')
+            notfound_blk = func.append_basic_block('in.notfound')
+            merge_block  = func.append_basic_block('in.merge')
+
+            pos_ptr  = builder.alloca(i32, name='in.pos')
+            builder.store(ir.Constant(i32, 0), pos_ptr)
+            cond_bb  = func.append_basic_block('in.bit.cond')
+            body_bb  = func.append_basic_block('in.bit.body')
+            builder.branch(cond_bb)
+
+            builder.position_at_start(cond_bb)
+            pos  = builder.load(pos_ptr, name='in.pos.v')
+            done = builder.icmp_unsigned('==', pos, ir.Constant(i32, positions), name='in.bit.done')
+            builder.cbranch(done, notfound_blk, body_bb)
+
+            builder.position_at_start(body_bb)
+            pos2    = builder.load(pos_ptr, name='in.pos2')
+            if hay_w < 32:
+                pos_hw = builder.trunc(pos2, iHW, name='in.pos.hw')
+            elif hay_w > 32:
+                pos_hw = builder.zext(pos2, iHW, name='in.pos.hw')
+            else:
+                pos_hw = pos2
+            shifted = builder.lshr(hay_v, pos_hw, name='in.shifted')
+            window  = builder.and_(shifted, mask, name='in.window')
+            hit     = builder.icmp_unsigned('==', window, ndl_v, name='in.hit')
+            builder.store(builder.add(pos2, ir.Constant(i32, 1)), pos_ptr)
+            builder.cbranch(hit, found_block, cond_bb)
+
+            builder.position_at_start(found_block)
+            builder.branch(merge_block)
+            builder.position_at_start(notfound_blk)
+            builder.branch(merge_block)
+            builder.position_at_start(merge_block)
+            phi = builder.phi(i1, name='in.result')
+            phi.add_incoming(ir.Constant(i1, 1), found_block)
+            phi.add_incoming(ir.Constant(i1, 0), notfound_blk)
+            return phi
+
         if isinstance(haystack_type, ir.PointerType):
             hay_ptr, hay_elem, hay_count = _decay(haystack_raw, node.haystack)
             if hay_elem is None:
