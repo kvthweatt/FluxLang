@@ -3088,9 +3088,13 @@ class CodegenVisitor:
         # Support backwards ranges: [high:low] reverses the result.
         is_backward = builder.icmp_signed('>', start_i32, end_i32, name="slice_is_backward")
         gep_start   = builder.select(is_backward, end_i32,   start_i32, name="slice_gep_start")
-        raw_len     = builder.sub(end_i32, start_i32, name="slice_raw_len")
-        neg_len     = builder.neg(raw_len, name="slice_neg_len")
-        dyn_len     = builder.select(is_backward, neg_len, raw_len, name="slice_len")
+        # [x:y] is inclusive on both ends: length = |start - end| + 1.
+        # Compute abs(start - end) first, then add 1 — negating after +1 was wrong
+        # for backward slices (e.g. [7:0] → 7-0=7, 7+1=8, not (0-7+1)=−6→6).
+        fwd_len  = builder.sub(end_i32,   start_i32, name="slice_fwd_raw")  # negative when backward
+        bwd_len  = builder.sub(start_i32, end_i32,   name="slice_bwd_raw")  # positive when backward
+        abs_len  = builder.select(is_backward, bwd_len, fwd_len, name="slice_abs_len")
+        dyn_len  = builder.add(abs_len, ir.Constant(i32, 1), name="slice_len")
         elem_ty = ArrayTypeHandler.get_element_type_from_array_value(array_val)
         if isinstance(array_val, ir.GlobalVariable) and isinstance(array_val.type.pointee, ir.ArrayType):
             src_ptr = builder.gep(array_val, [zero, gep_start], inbounds=True, name="slice_src")
@@ -3100,7 +3104,42 @@ class CodegenVisitor:
             src_ptr = builder.gep(array_val, [gep_start], inbounds=True, name="slice_src")
         else:
             raise ValueError(f"Cannot slice type: {array_val.type} [{node.source_line}:{node.source_col}]")
-        # If the length happens to be statically known and forward, use a fixed alloca (avoids VLA).
+
+        def _emit_inline_reverse(buf_ptr, byte_len_val):
+            """Emit an inline two-pointer byte-swap loop over buf_ptr[0..byte_len_val-1]."""
+            i8ptr = ir.PointerType(ir.IntType(8))
+            i32t  = ir.IntType(32)
+            i8t   = ir.IntType(8)
+            lo_ptr = builder.alloca(i32t, name="rev_lo")
+            hi_ptr = builder.alloca(i32t, name="rev_hi")
+            builder.store(ir.Constant(i32t, 0), lo_ptr)
+            hi_init = builder.sub(byte_len_val, ir.Constant(i32t, 1), name="rev_hi_init")
+            builder.store(hi_init, hi_ptr)
+            fn    = builder.function
+            cond_bb = fn.append_basic_block("rev_cond")
+            body_bb = fn.append_basic_block("rev_body")
+            end_bb  = fn.append_basic_block("rev_end")
+            builder.branch(cond_bb)
+            builder.position_at_end(cond_bb)
+            lo = builder.load(lo_ptr, name="rev_lo_v")
+            hi = builder.load(hi_ptr, name="rev_hi_v")
+            cond = builder.icmp_signed('<', lo, hi, name="rev_cond_v")
+            builder.cbranch(cond, body_bb, end_bb)
+            builder.position_at_end(body_bb)
+            lo2 = builder.load(lo_ptr, name="rev_lo2")
+            hi2 = builder.load(hi_ptr, name="rev_hi2")
+            p_lo = builder.gep(buf_ptr, [lo2], name="rev_p_lo")
+            p_hi = builder.gep(buf_ptr, [hi2], name="rev_p_hi")
+            a = builder.load(p_lo, name="rev_a")
+            b = builder.load(p_hi, name="rev_b")
+            builder.store(b, p_lo)
+            builder.store(a, p_hi)
+            builder.store(builder.add(lo2, ir.Constant(i32t, 1), name="rev_lo_inc"), lo_ptr)
+            builder.store(builder.sub(hi2, ir.Constant(i32t, 1), name="rev_hi_dec"), hi_ptr)
+            builder.branch(cond_bb)
+            builder.position_at_end(end_bb)
+
+        # If the length happens to be statically known, use a fixed alloca (avoids VLA).
         const_len = node._try_const_len()
         alloca_len = abs(const_len) if const_len is not None else None
         i8_ptr_ty = ir.PointerType(ir.IntType(8))
@@ -3113,11 +3152,8 @@ class CodegenVisitor:
             dst_ptr = builder.gep(dst_alloca, [zero, zero], inbounds=True, name="slice_dst")
             ArrayTypeHandler.emit_memcpy(builder, module, dst_ptr, src_ptr, alloca_len * elem_bytes)
             if const_len < 0:
-                reverse_fn_name = "standard__memory__reverse_bytes__2__byte_ptr1__data_ubits64__ret_void"
-                if reverse_fn_name in module.globals:
-                    buf_i8 = builder.bitcast(dst_ptr, i8_ptr_ty, name="slice_rev_ptr")
-                    builder.call(module.globals[reverse_fn_name],
-                                 [buf_i8, ir.Constant(ir.IntType(64), alloca_len * elem_bytes)])
+                buf_i8 = builder.bitcast(dst_ptr, i8_ptr_ty, name="slice_rev_ptr")
+                _emit_inline_reverse(buf_i8, ir.Constant(i32, alloca_len * elem_bytes))
             null_pos = builder.gep(dst_alloca, [zero, ir.Constant(i32, alloca_len)], inbounds=True, name="slice_null_pos")
             builder.store(null, null_pos)
             return builder.gep(dst_alloca, [zero, zero], inbounds=True, name="slice_ptr")
@@ -3128,11 +3164,8 @@ class CodegenVisitor:
             i8_alloca = builder.alloca(i8, size=byte_count_p1, name="slice_tmp")
             src_as_i8 = builder.bitcast(src_ptr, i8_ptr_ty, name="slice_src_i8")
             ArrayTypeHandler.emit_memcpy_dynamic(builder, module, i8_alloca, src_as_i8, byte_count)
-            reverse_fn_name = "standard__memory__reverse_bytes__2__byte_ptr1__data_ubits64__ret_void"
-            if reverse_fn_name in module.globals:
-                with builder.if_then(is_backward):
-                    count64 = builder.zext(byte_count, ir.IntType(64), name="slice_rev_count64")
-                    builder.call(module.globals[reverse_fn_name], [i8_alloca, count64])
+            with builder.if_then(is_backward):
+                _emit_inline_reverse(i8_alloca, byte_count)
             null_pos = builder.gep(i8_alloca, [byte_count], name="slice_null_pos")
             builder.store(null, null_pos)
             return builder.bitcast(i8_alloca, ir.PointerType(elem_ty), name="slice_ptr")
@@ -4077,7 +4110,7 @@ class CodegenVisitor:
         func = builder.block.function
         from fast import Identifier as _Ident
 
-        # ── Helper: resolve array size from symbol-table entry ────────────────
+        # ── Helper: resolve array size from symbol-table entry ────────────────────
         def _array_size_from_sym(ast_node):
             if isinstance(ast_node, _Ident):
                 entry = module.symbol_table.lookup_any(ast_node.name)
@@ -4088,20 +4121,36 @@ class CodegenVisitor:
                         if dim is not None:
                             return dim if isinstance(dim, int) else (
                                 dim.value if hasattr(dim, 'value') else int(dim))
+                # Fall back: symbol's llvm_value alloca may have [N x iW] allocated_type
+                if entry and entry.llvm_value is not None:
+                    lv = entry.llvm_value
+                    if hasattr(lv, 'allocated_type') and isinstance(lv.allocated_type, ir.ArrayType):
+                        return lv.allocated_type.count
             return None
 
         # ── Helper: decay [N x iW]* -> iW* via GEP [0,0] ─────────────────────
-        def _decay(ptr_val):
-            """Return (decayed_i8_or_iW_ptr, elem_type, count_or_None)."""
+        def _decay(ptr_val, ast_node=None):
+            """Return (decayed_iW_ptr, elem_type, count_or_None).
+
+            Tries three sources for count, in order:
+              1. LLVM array type on the pointer itself ([N x iW]*).
+              2. The alloca's allocated_type (int[] with inferred literal size).
+              3. Symbol-table type_spec (explicit array_size / array_dimensions).
+            """
             t = ptr_val.type
             if isinstance(t, ir.PointerType) and isinstance(t.pointee, ir.ArrayType):
                 arr  = t.pointee
                 zero = ir.Constant(i32, 0)
                 decayed = builder.gep(ptr_val, [zero, zero], name='decay.ptr')
                 return decayed, arr.element, arr.count
-            # Already a plain pointer (i8* or iW*)
+            # Already a plain pointer (iW*) -- recover count from alloca or sym table
             if isinstance(t, ir.PointerType) and isinstance(t.pointee, ir.IntType):
-                return ptr_val, t.pointee, None
+                count = None
+                if hasattr(ptr_val, 'allocated_type') and isinstance(ptr_val.allocated_type, ir.ArrayType):
+                    count = ptr_val.allocated_type.count
+                if count is None and ast_node is not None:
+                    count = _array_size_from_sym(ast_node)
+                return ptr_val, t.pointee, count
             return ptr_val, None, None
 
         # ══════════════════════════════════════════════════════════════════════
@@ -4118,7 +4167,7 @@ class CodegenVisitor:
         if isinstance(needle_type, ir.IntType):
             needle_scalar = needle_raw
         elif isinstance(needle_type, ir.PointerType):
-            dec_ptr, elem_ty, count = _decay(needle_raw)
+            dec_ptr, elem_ty, count = _decay(needle_raw, node.needle)
             if elem_ty is None:
                 raise ValueError(
                     f"'in' operator: unsupported needle type {needle_type} "
@@ -4143,7 +4192,7 @@ class CodegenVisitor:
         # hay_elem  : element ir.Type
         # hay_count : int (None = NUL-terminated)
         if isinstance(haystack_type, ir.PointerType):
-            hay_ptr, hay_elem, hay_count = _decay(haystack_raw)
+            hay_ptr, hay_elem, hay_count = _decay(haystack_raw, node.haystack)
             if hay_elem is None:
                 raise ValueError(
                     f"'in' operator: unsupported haystack type {haystack_type} "
