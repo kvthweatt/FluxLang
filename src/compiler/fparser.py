@@ -3881,24 +3881,34 @@ class FluxParser:
     
     def equality_expression(self) -> Expression:
         """
-        equality_expression -> chain_expression (('==' | '!=') chain_expression)*
+        equality_expression -> chain_expression (('==' | '!=' | 'in') chain_expression)*
+
+        'in' produces an InExpression (membership test): needle in haystack.
+        This allows 'x in y' in any expression context — if conditions, while
+        conditions, ternaries, assignments, etc. — mirroring the for-in syntax
+        but as a boolean operator rather than a loop head.
         """
         expr = self.chain_expression()
-        
-        while self.expect(TokenType.IS, TokenType.EQUAL, TokenType.NOT_EQUAL):
+
+        while self.expect(TokenType.IS, TokenType.EQUAL, TokenType.NOT_EQUAL, TokenType.IN):
             op_tok = self.current_token
-            if self.current_token.type == TokenType.EQUAL:
-                operator = Operator.EQUAL
-            elif self.current_token.type == TokenType.IS:
-                operator = Operator.EQUAL
-            elif self.current_token.type == TokenType.NOT_EQUAL:
-                operator = Operator.NOT_EQUAL
-            
-            self.advance()
-            right = self.chain_expression()
-            expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
-            self._try_instantiate_template_op(operator.value, expr.left, expr.right)
-        
+            if self.current_token.type == TokenType.IN:
+                self.advance()
+                haystack = self.chain_expression()
+                expr = InExpression(needle=expr, haystack=haystack).set_location(op_tok.line, op_tok.column)
+            else:
+                if self.current_token.type == TokenType.EQUAL:
+                    operator = Operator.EQUAL
+                elif self.current_token.type == TokenType.IS:
+                    operator = Operator.EQUAL
+                else:  # NOT_EQUAL
+                    operator = Operator.NOT_EQUAL
+
+                self.advance()
+                right = self.chain_expression()
+                expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
+                self._try_instantiate_template_op(operator.value, expr.left, expr.right)
+
         return expr
 
     def chain_expression(self) -> Expression:

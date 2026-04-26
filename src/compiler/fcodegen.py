@@ -4045,6 +4045,305 @@ class CodegenVisitor:
         builder.position_at_start(end_block)
         return None
 
+    def visit_InExpression(self, node, builder, module):
+        """
+        Codegen for 'needle in haystack' membership-test expressions.
+
+        Returns an i1 (bool): 1 if needle is found in haystack, 0 otherwise.
+
+        Needle shapes
+        -------------
+        - Scalar (iW)            : single-element membership test.
+        - i8*                    : null-terminated string — full substring search.
+        - [N x iW]* / iW* array  : contiguous sub-sequence search.
+
+        Haystack shapes
+        ---------------
+        - i8*       : null-terminated byte string.
+        - [N x iW]* : fixed-length array (element count known from type).
+        - iW*       : decayed array (element count recovered from symbol table).
+
+        Dispatch matrix
+        ---------------
+        scalar  needle + string   haystack -> single-char scan (stop at NUL)
+        scalar  needle + array    haystack -> single-element scan (bounded)
+        sequence needle + string  haystack -> NUL-terminated substring search
+        sequence needle + array   haystack -> bounded sub-sequence search
+        """
+        i1  = ir.IntType(1)
+        i8  = ir.IntType(8)
+        i32 = ir.IntType(32)
+
+        func = builder.block.function
+        from fast import Identifier as _Ident
+
+        # ── Helper: resolve array size from symbol-table entry ────────────────
+        def _array_size_from_sym(ast_node):
+            if isinstance(ast_node, _Ident):
+                entry = module.symbol_table.lookup_any(ast_node.name)
+                if entry and entry.type_spec is not None:
+                    ts = entry.type_spec
+                    for dim in (ts.array_size,
+                                ts.array_dimensions[0] if ts.array_dimensions else None):
+                        if dim is not None:
+                            return dim if isinstance(dim, int) else (
+                                dim.value if hasattr(dim, 'value') else int(dim))
+            return None
+
+        # ── Helper: decay [N x iW]* -> iW* via GEP [0,0] ─────────────────────
+        def _decay(ptr_val):
+            """Return (decayed_i8_or_iW_ptr, elem_type, count_or_None)."""
+            t = ptr_val.type
+            if isinstance(t, ir.PointerType) and isinstance(t.pointee, ir.ArrayType):
+                arr  = t.pointee
+                zero = ir.Constant(i32, 0)
+                decayed = builder.gep(ptr_val, [zero, zero], name='decay.ptr')
+                return decayed, arr.element, arr.count
+            # Already a plain pointer (i8* or iW*)
+            if isinstance(t, ir.PointerType) and isinstance(t.pointee, ir.IntType):
+                return ptr_val, t.pointee, None
+            return ptr_val, None, None
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Emit and classify NEEDLE
+        # ══════════════════════════════════════════════════════════════════════
+        needle_raw  = self.visit(node.needle, builder, module)
+        needle_type = needle_raw.type
+
+        # needle_scalar : iW value (single element), OR
+        # needle_seq    : (iW* ptr, elem_type, count_or_None)  (sequence)
+        needle_scalar = None
+        needle_seq    = None
+
+        if isinstance(needle_type, ir.IntType):
+            needle_scalar = needle_raw
+        elif isinstance(needle_type, ir.PointerType):
+            dec_ptr, elem_ty, count = _decay(needle_raw)
+            if elem_ty is None:
+                raise ValueError(
+                    f"'in' operator: unsupported needle type {needle_type} "
+                    f"[{node.source_line}:{node.source_col}]")
+            if count is None:
+                # Plain pointer needle (e.g. i8* string variable): treat as
+                # NUL-terminated sequence; count stays None (loop stops at NUL).
+                count = _array_size_from_sym(node.needle)
+            needle_seq = (dec_ptr, elem_ty, count)
+        else:
+            raise ValueError(
+                f"'in' operator: unsupported needle type {needle_type} "
+                f"[{node.source_line}:{node.source_col}]")
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Emit and classify HAYSTACK
+        # ══════════════════════════════════════════════════════════════════════
+        haystack_raw  = self.visit(node.haystack, builder, module)
+        haystack_type = haystack_raw.type
+
+        # hay_ptr   : iW* (decayed)
+        # hay_elem  : element ir.Type
+        # hay_count : int (None = NUL-terminated)
+        if isinstance(haystack_type, ir.PointerType):
+            hay_ptr, hay_elem, hay_count = _decay(haystack_raw)
+            if hay_elem is None:
+                raise ValueError(
+                    f"'in' operator: unsupported haystack type {haystack_type} "
+                    f"[{node.source_line}:{node.source_col}]")
+            if hay_count is None:
+                # Plain pointer — try symbol table
+                hay_count = _array_size_from_sym(node.haystack)
+                # If still None and element is i8, treat as NUL-terminated
+        else:
+            raise ValueError(
+                f"'in' operator: unsupported haystack type {haystack_type} "
+                f"[{node.source_line}:{node.source_col}]")
+
+        is_nul_haystack = (hay_count is None and
+                           isinstance(hay_elem, ir.IntType) and
+                           hay_elem.width == 8)
+
+        if hay_count is None and not is_nul_haystack:
+            raise ValueError(
+                f"'in' operator: cannot determine size of haystack "
+                f"'{getattr(node.haystack, 'name', '?')}' "
+                f"at compile time [{node.source_line}:{node.source_col}]")
+
+        # ── Common result blocks ───────────────────────────────────────────────
+        found_block  = func.append_basic_block('in.found')
+        notfound_blk = func.append_basic_block('in.notfound')
+        merge_block  = func.append_basic_block('in.merge')
+
+        # ══════════════════════════════════════════════════════════════════════
+        # SCALAR NEEDLE
+        # ══════════════════════════════════════════════════════════════════════
+        if needle_scalar is not None:
+            cond_block = func.append_basic_block('in.cond')
+            body_block = func.append_basic_block('in.body')
+
+            nv = needle_scalar
+            if isinstance(nv.type, ir.IntType) and nv.type != hay_elem:
+                nv = builder.trunc(nv, hay_elem) if nv.type.width > hay_elem.width \
+                    else builder.zext(nv, hay_elem)
+
+            if is_nul_haystack:
+                # Pointer-walk, stop at NUL
+                cur_ptr = builder.alloca(hay_ptr.type, name='in.cur')
+                builder.store(hay_ptr, cur_ptr)
+                builder.branch(cond_block)
+
+                builder.position_at_start(cond_block)
+                cur = builder.load(cur_ptr, name='cur')
+                ch  = builder.load(cur, name='ch')
+                builder.cbranch(
+                    builder.icmp_unsigned('==', ch, ir.Constant(hay_elem, 0), name='at.end'),
+                    notfound_blk, body_block)
+
+                builder.position_at_start(body_block)
+                cur2 = builder.load(cur_ptr, name='cur2')
+                ch2  = builder.load(cur2, name='ch2')
+                hit  = builder.icmp_unsigned('==', ch2, nv, name='hit')
+                builder.store(builder.gep(cur2, [ir.Constant(i32, 1)], name='nxt'), cur_ptr)
+                builder.cbranch(hit, found_block, cond_block)
+            else:
+                # Index-walk, bounded by hay_count
+                idx_ptr = builder.alloca(i32, name='in.idx')
+                builder.store(ir.Constant(i32, 0), idx_ptr)
+                builder.branch(cond_block)
+
+                builder.position_at_start(cond_block)
+                idx  = builder.load(idx_ptr, name='idx')
+                done = builder.icmp_unsigned('==', idx, ir.Constant(i32, hay_count), name='done')
+                builder.cbranch(done, notfound_blk, body_block)
+
+                builder.position_at_start(body_block)
+                idx2 = builder.load(idx_ptr, name='idx2')
+                ep   = builder.gep(hay_ptr, [idx2], name='ep')
+                elem = builder.load(ep, name='elem')
+                hit  = builder.icmp_unsigned('==', elem, nv, name='hit')
+                builder.store(builder.add(idx2, ir.Constant(i32, 1), name='nxt'), idx_ptr)
+                builder.cbranch(hit, found_block, cond_block)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # SEQUENCE NEEDLE
+        # Two-level loop:
+        #   Outer: slide a window over the haystack one element at a time.
+        #   Inner: compare each needle element against the window.
+        #   Match when all needle elements match (NUL-stop or count-bounded).
+        # ══════════════════════════════════════════════════════════════════════
+        else:
+            ndl_ptr, ndl_elem, ndl_count = needle_seq
+            is_nul_needle = (ndl_count is None and
+                             isinstance(ndl_elem, ir.IntType) and
+                             ndl_elem.width == 8)
+
+            outer_cond = func.append_basic_block('in.outer.cond')
+            outer_body = func.append_basic_block('in.outer.body')
+            inner_cond = func.append_basic_block('in.inner.cond')
+            inner_body = func.append_basic_block('in.inner.body')
+            inner_fail = func.append_basic_block('in.inner.fail')
+
+            # Outer state: current window start index into haystack
+            outer_idx_ptr = builder.alloca(i32, name='in.outer.idx')
+            builder.store(ir.Constant(i32, 0), outer_idx_ptr)
+            builder.branch(outer_cond)
+
+            # ── Outer cond ────────────────────────────────────────────────────
+            builder.position_at_start(outer_cond)
+            o_idx = builder.load(outer_idx_ptr, name='o.idx')
+            if is_nul_haystack:
+                # Stop when haystack[outer_idx] == NUL
+                hay_ep  = builder.gep(hay_ptr, [o_idx], name='hay.ep')
+                hay_ch  = builder.load(hay_ep, name='hay.ch')
+                at_end  = builder.icmp_unsigned('==', hay_ch,
+                                                ir.Constant(hay_elem, 0), name='hay.end')
+                builder.cbranch(at_end, notfound_blk, outer_body)
+            else:
+                # Stop when outer_idx == hay_count
+                done = builder.icmp_unsigned('==', o_idx,
+                                             ir.Constant(i32, hay_count), name='hay.done')
+                builder.cbranch(done, notfound_blk, outer_body)
+
+            # ── Outer body: reset inner state and start inner loop ────────────
+            builder.position_at_start(outer_body)
+            inner_ndl_idx_ptr = builder.alloca(i32, name='in.ndl.idx')
+            builder.store(ir.Constant(i32, 0), inner_ndl_idx_ptr)
+            inner_hay_idx_ptr = builder.alloca(i32, name='in.hay.idx')
+            o_idx2 = builder.load(outer_idx_ptr, name='o.idx2')
+            builder.store(o_idx2, inner_hay_idx_ptr)
+            builder.branch(inner_cond)
+
+            # ── Inner cond: have we exhausted the needle? ─────────────────────
+            builder.position_at_start(inner_cond)
+            n_idx = builder.load(inner_ndl_idx_ptr, name='n.idx')
+            if is_nul_needle:
+                # Check needle[n_idx] == NUL  ->  matched
+                ndl_ep  = builder.gep(ndl_ptr, [n_idx], name='ndl.ep')
+                ndl_ch  = builder.load(ndl_ep, name='ndl.ch')
+                ndl_end = builder.icmp_unsigned('==', ndl_ch,
+                                                ir.Constant(ndl_elem, 0), name='ndl.end')
+                builder.cbranch(ndl_end, found_block, inner_body)
+            else:
+                # Check n_idx == ndl_count  ->  matched
+                ndl_done = builder.icmp_unsigned('==', n_idx,
+                                                 ir.Constant(i32, ndl_count), name='ndl.done')
+                builder.cbranch(ndl_done, found_block, inner_body)
+
+            # ── Inner body: compare one element ───────────────────────────────
+            builder.position_at_start(inner_body)
+            n_idx2  = builder.load(inner_ndl_idx_ptr, name='n.idx2')
+            h_idx2  = builder.load(inner_hay_idx_ptr, name='h.idx2')
+
+            ndl_ep2 = builder.gep(ndl_ptr, [n_idx2], name='ndl.ep2')
+            ndl_el  = builder.load(ndl_ep2, name='ndl.el')
+
+            # Guard: if haystack index is out of bounds (or at NUL), fail
+            if is_nul_haystack:
+                hay_ep2  = builder.gep(hay_ptr, [h_idx2], name='hay.ep2')
+                hay_el   = builder.load(hay_ep2, name='hay.el')
+                hay_oob  = builder.icmp_unsigned('==', hay_el,
+                                                 ir.Constant(hay_elem, 0), name='hay.oob')
+            else:
+                hay_oob  = builder.icmp_unsigned('==', h_idx2,
+                                                 ir.Constant(i32, hay_count), name='hay.oob')
+                hay_ep2  = builder.gep(hay_ptr, [h_idx2], name='hay.ep2')
+                hay_el   = builder.load(hay_ep2, name='hay.el')
+
+            # Coerce types if needed (e.g. i8 needle vs i32 haystack)
+            if ndl_el.type != hay_el.type:
+                if isinstance(ndl_el.type, ir.IntType) and isinstance(hay_el.type, ir.IntType):
+                    if ndl_el.type.width < hay_el.type.width:
+                        ndl_el = builder.zext(ndl_el, hay_el.type)
+                    else:
+                        ndl_el = builder.trunc(ndl_el, hay_el.type)
+
+            mismatch = builder.or_(
+                hay_oob,
+                builder.icmp_unsigned('!=', hay_el, ndl_el, name='el.ne'),
+                name='mismatch')
+
+            # Advance both indices
+            builder.store(builder.add(n_idx2, ir.Constant(i32, 1)), inner_ndl_idx_ptr)
+            builder.store(builder.add(h_idx2, ir.Constant(i32, 1)), inner_hay_idx_ptr)
+            builder.cbranch(mismatch, inner_fail, inner_cond)
+
+            # ── Inner fail: advance outer window by 1 and retry ───────────────
+            builder.position_at_start(inner_fail)
+            o_idx3 = builder.load(outer_idx_ptr, name='o.idx3')
+            builder.store(builder.add(o_idx3, ir.Constant(i32, 1)), outer_idx_ptr)
+            builder.branch(outer_cond)
+
+        # ── Merge: phi i1 ─────────────────────────────────────────────────────
+        builder.position_at_start(found_block)
+        builder.branch(merge_block)
+
+        builder.position_at_start(notfound_blk)
+        builder.branch(merge_block)
+
+        builder.position_at_start(merge_block)
+        phi = builder.phi(i1, name='in.result')
+        phi.add_incoming(ir.Constant(i1, 1), found_block)
+        phi.add_incoming(ir.Constant(i1, 0), notfound_blk)
+        return phi
+
     def visit_ReturnStatement(self, node, builder, module):
         from fast import Identifier, IfExpression
         if builder.block.is_terminated:
