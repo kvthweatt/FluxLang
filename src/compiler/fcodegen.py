@@ -1380,6 +1380,9 @@ class CodegenVisitor:
                     operand_val = builder.load(operand_val, name=f"{node.operand.name}_loaded")
 
         if node.operator == Operator.NOT:
+            if isinstance(operand_val.type, ir.PointerType):
+                null = ir.Constant(operand_val.type, None)
+                return builder.icmp_unsigned('==', operand_val, null, name="is_null")
             if module.symbol_table.is_global_scope() and isinstance(operand_val, ir.Constant):
                 if isinstance(operand_val.type, ir.IntType):
                     return ir.Constant(operand_val.type, ~operand_val.constant)
