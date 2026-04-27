@@ -227,24 +227,46 @@ Member access: `newObj.x`
 **Object Methods:**  
 `this` never needs to be a parameter as it is always local to its object.
 
+### Required methods:
 ```
 __init()       -> this               Example: thisObj newObj();            // Constructor
 __exit()       -> void               Example: newObj.__exit();             // Destructor
+__expr()       -> any
 ```
 
 `__init` is always called on object instantiation.  
 `__exit` called manually to destroy the object.
+`__expr` is the instance's expression context method. This method cannot take arguments.
 
 If an object's `__init` method takes **only one parameter**, you may instance it like sO:
 ```
+#import "standard.fx";
+
+using standard::io::console;
+
 object SomeOBJ
 {
+    int val;
+
     def __init(int x) -> this { return this; };
 
     def __exit() -> void {};
+
+    def __expr() -> int { return this.val; };
 };
 
-SomeOBJ sobj = 5;
+def main() -> int
+{
+    SomeOBJ sobj = 5;
+
+    println(sobj.val);   // Direct access
+
+    println(sobj);  // Compiler detects object instance, emits print(sobj.__expr());
+
+    println(sobj + sobj); // 10
+
+    return 0;
+};
 ```
 It is syntactic sugar for `SomeObj sobj(5);`
 
@@ -265,7 +287,9 @@ object SomeOBJ
         return this;
     };
 
-    def __exit() -> void {};
+    def __exit() -> void { print("Cleaning up!"); };
+
+    def __expr() -> int { return this.val; };
 };
 
 def main() -> int
@@ -273,7 +297,7 @@ def main() -> int
     SomeOBJ sobj = 5;
     defer sobj.__exit();
 
-    print(sobj.val);
+    print(sobj);
     // deferred statements injected here
     return 0;
 };
@@ -293,6 +317,8 @@ trait Drawable
 // Implementation
 Drawable object myObj
 {
+    // ... required methods ...
+
     def draw() -> void
     {
         // Implementation code, if the block is empty the compiler throws an error.
@@ -362,40 +388,81 @@ struct BMP : Header, InfoHeader
 } : ExtraData;
 ```
 
+### You can template structs by using angle brackets `<`,`>`:
+```
+struct myStru<A,B>
+{
+    A ax, ay, az;
+    B bx, by, bz;
+};
+```
+Composition and templates can be combined, however they **will** shadow.
+```
+struct myStru1<A,B>
+{
+    A a1x, a1y;
+    B b1x, b1y;
+};
+
+struct myStru2<A,B,C> : myStru1
+{
+    A a2x, a2y, a2z;
+    B b2x, b2y, b2z;
+};
+
+// Becomes,
+
+struct myStru2<A,B,C>
+{
+    A a1x, a1y;
+    B b1x, b1y;
+    A a2x, a2y, a2z;
+    B b2x, b2y, b2z;
+};
+```
+If you intended for `a1x` to be a different type than `a2x`, you must use different parameter names.
 
 ---
 
-Objects are functional with behavior and are executable.  
-Structs cannot contain objects, but objects can contain structs. This means struct template parameters cannot be objects.
+Objects are functional with behavior and are "executable".  
+Structs cannot contain objects, but objects can contain structs. This means struct template parameters cannot be `object` type.
 
 ## **Public/Private with Objects/Structs:**  
 Struct public and private works by only allowing access to private sections by the parent object/struct that "owns" the struct.  
 The struct is still data where public members are visible anywhere, but its private members are only visible/modifiable by the object immediately containing it.
 
 ```
+struct myStruct
+{
+    int x, y;
+};
+
+object Obj2
+{
+    private
+    {
+        myStruct objStru;
+    };
+
+    // ... required methods ...
+
+    def get_y() -> int
+    {
+        return this.myStruct.y;             // Safe - Access is in the same scope (immediate `this` Obj2, not `super` Obj1)
+    };
+};
+
 object Obj1
 {
-    object Obj2
-    {
-        struct myStruct
-        {
-            public
-            {
-                int x = 10;
-            };
-
-            private
-            {
-                int y = 100;
-            };
-        };
-
-        myStruct.y;                  // Safe - Access is in the same scope (immediate `this` Obj2, not `super` Obj1)
-    };
 
     Obj2 myObject;
 
-    myObject.myStruct.y;             // ERROR - Need to use a public getter of Obj2
+    // ... required methods ...
+
+    def foo() -> int
+    {
+        return this.myObject.myStruct.y;    // ERROR - Need to use a getter of Obj2
+    };
 };
 ```
 
@@ -451,43 +518,43 @@ The brackets are replaced with the results of the statements in order respective
 **i-string Example:**
 
 ```
-#import "standard.fx";
+#import "standard.fx"; // imports types.fx
 
 using standard::io::console;
 
-unsigned data{8}[] as string;
-
-def bar() -> string { return "World\0"; };    // We get the basic string type from the types module
-print(i"Hello {} {}" : // whitespace is ignored
-              {
-                  bar() + "!\0";
-                "test\0";
-              }                             // Whitespace is ignored, this is just for positioning
-     );
-x = i"Bar {}":{bar()};                      // "Bar World!"
-
-string a = "Hello", b = "World!\0";
-string y = f"{a} {b}\0";                      // "Hello World!"
-```
-
-This allows you to write clean interpolated strings without strange formatting.  
-**f-string Example:**
-
-```
-#import "standard.fx";
-
-using standard::io::console;
-using standard::strings;
+def bar() -> noopstr { return "World"; };    // We get the non-OOP string type from the types library
 
 def main() -> int
 {
-    string h = "Hello\0";
-    string w = "World!\0";
-    print(f"{h} {w}\0");
+    println(i"Hello {} {}" : {bar() + "!"; "test";});
+
+    x = i"Bar {}":{bar()};     // "Bar World!"
+
+    noopstr a = "Hello", b = "World!",
+            c = f"{a} {b}";    / "Hello World!"
+
+    println(c);
+
     return 0;
 };
 ```
 
+This allows you to write clean interpolated strings without strange formatting.  
+**f-string Example:**
+```
+#import "standard.fx";
+
+using standard::io::console,
+      standard::strings;
+
+def main() -> int
+{
+    string h = "Hello";
+    string w = "World!";
+    print(f"{h} {w}");
+    return 0;
+};
+```
 `Result: Hello World!`
 
 ---

@@ -5,14 +5,8 @@ using standard::io::console,
 
 def main() -> int
 {
-    string str = "hello";
-
-    str.printval(); print();
-    println(str.val());
-    println(str);
-    println(str[str.len()-1:0]);
-    println("ll" in str.val());
-    println("ll" in str);
-
+    string h = "Hello";
+    string w = "World!";
+    print(f"{h} {w}");
     return 0;
 };
