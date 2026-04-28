@@ -6303,6 +6303,11 @@ class CodegenVisitor:
                 resolved_type_spec.storage_class == StorageClass.SINGINIT):
             return self._vardecl_singinit(node, builder, module, llvm_type, resolved_type_spec)
 
+        # Handle heap: allocate via fmalloc, variable becomes a T* pointer
+        if (resolved_type_spec is not None and
+                resolved_type_spec.storage_class == StorageClass.HEAP):
+            return self._vardecl_heap(node, builder, module, llvm_type, resolved_type_spec)
+
         # If this is a constructor call and llvm_type resolved to i8* (void pointer),
         # the type was polluted by a local variable named the same as the object type.
         # Recover the correct struct type from the constructor's this parameter.
@@ -6411,6 +6416,115 @@ class CodegenVisitor:
                 builder.store(zero, alloca)
 
         return alloca
+
+    def _vardecl_heap(self, node, builder, module, llvm_type, resolved_type_spec):
+        """Generate code for a heap-allocated variable (``heap T name = val;``).
+
+        Translates to:
+            T* name = (T*)fmalloc(sizeof(T));
+            *name = val;                       // if an initializer was given
+
+        The symbol is registered as a pointer-to-T so that subsequent reads,
+        writes, and address-of operations work exactly like a manually declared
+        ``T* ptr = (T*)fmalloc(...);``.
+        """
+        from fast import NoInit as _NoInit
+
+        i8_ptr_ty = ir.PointerType(ir.IntType(8))
+        i64_ty    = ir.IntType(64)
+        ptr_ty    = ir.PointerType(llvm_type)
+
+        # --- resolve / declare fmalloc -----------------------------------
+        # The canonical mangled name emitted by the standard library.
+        # Signature: u64 fmalloc(u64 size)  — takes and returns a raw address (u64).
+        _FMALLOC_MANGLED = (
+            'standard__memory__allocators__stdheap__fmalloc'
+            '__1__dataE1_ubits64__ret_dataE1_ubits64'
+        )
+        fmalloc_fn = module.globals.get(_FMALLOC_MANGLED)
+        if fmalloc_fn is None:
+            # Try any variant ending in 'fmalloc' (handles using-namespace aliases)
+            for gname, gval in module.globals.items():
+                if gname.endswith('fmalloc') and isinstance(gval, ir.Function):
+                    fmalloc_fn = gval
+                    break
+        if fmalloc_fn is None:
+            # Forward-declare using the canonical mangled name so the linker can
+            # resolve it against the standard library object.
+            fmalloc_ty = ir.FunctionType(i64_ty, [i64_ty])
+            fmalloc_fn = ir.Function(module, fmalloc_ty, name=_FMALLOC_MANGLED)
+
+        # --- compute sizeof(T) -------------------------------------------
+        # Use the standard GEP-from-null trick: sizeof(T) = (T*)null + 1 as int
+        null_ptr  = ir.Constant(ptr_ty, None)
+        size_ptr  = builder.gep(null_ptr, [ir.Constant(ir.IntType(32), 1)], name='sizeof_gep')
+        sizeof_val = builder.ptrtoint(size_ptr, i64_ty, name='sizeof_val')
+
+        # --- call fmalloc ------------------------------------------------
+        # fmalloc takes and returns a u64 raw address, so convert via inttoptr.
+        raw_addr  = builder.call(fmalloc_fn, [sizeof_val], name=f'{node.name}_raw')
+        typed_ptr = builder.inttoptr(raw_addr, ptr_ty, name=f'{node.name}_ptr')
+
+        # --- alloca to hold the pointer (so the symbol has an address) ---
+        # Hoist to entry block if inside a switch case body
+        alloca_block = getattr(builder, '_switch_case_alloca_block', None)
+        if alloca_block is not None:
+            current_block = builder.block
+            entry_term = alloca_block.terminator
+            if entry_term is not None:
+                builder.position_before(entry_term)
+            else:
+                builder.position_at_end(alloca_block)
+            ptr_alloca = builder.alloca(ptr_ty, name=node.name)
+            builder.position_at_end(current_block)
+        else:
+            ptr_alloca = builder.alloca(ptr_ty, name=node.name)
+
+        builder.store(typed_ptr, ptr_alloca)
+
+        # Annotate so callers know this alloca holds a heap pointer
+        ptr_alloca._flux_is_heap = True
+        if resolved_type_spec:
+            ptr_alloca._flux_type_spec = resolved_type_spec
+
+        # --- register *pointer* type in symbol table ---------------------
+        # Build a synthetic pointer type-spec so that loads of this symbol
+        # produce T* (not T), matching behaviour of ``T* p = fmalloc(...);``.
+        ptr_type_spec = None
+        if resolved_type_spec is not None:
+            try:
+                ptr_type_spec = resolved_type_spec.__class__(
+                    base_type=resolved_type_spec.base_type,
+                    pointer_depth=(getattr(resolved_type_spec, 'pointer_depth', 0) or 0) + 1,
+                    bit_width=getattr(resolved_type_spec, 'bit_width', None),
+                    custom_typename=getattr(resolved_type_spec, 'custom_typename', None),
+                    is_const=getattr(resolved_type_spec, 'is_const', False),
+                    is_volatile=getattr(resolved_type_spec, 'is_volatile', False),
+                    storage_class=None,   # strip heap modifier from the pointer itself
+                )
+            except TypeError:
+                ptr_type_spec = resolved_type_spec  # fallback: use original spec
+
+        module.symbol_table.define(
+            node.name, SymbolKind.VARIABLE,
+            type_spec=ptr_type_spec,
+            llvm_type=ptr_ty,
+            llvm_value=ptr_alloca,
+        )
+
+        # --- store initial value through the pointer ---------------------
+        if node.initial_value and not isinstance(node.initial_value, _NoInit):
+            init_val = self.visit(node.initial_value, builder, module)
+            if init_val is not None:
+                if hasattr(init_val, 'type') and init_val.type != llvm_type:
+                    init_val = TypeSystem.cast_value(builder, module, init_val, llvm_type, resolved_type_spec)
+                builder.store(init_val, typed_ptr)
+        else:
+            # Zero-initialise the heap allocation (mirrors stack zero-init)
+            zero = TypeSystem.get_default_initializer(llvm_type)
+            builder.store(zero, typed_ptr)
+
+        return ptr_alloca
 
     def _vardecl_initialize_local(self, node, builder, module, alloca, llvm_type, resolved_type_spec):
         """Initialize local variable with initial value."""

@@ -684,6 +684,14 @@ class FluxCompiler:
                         print(f"\n\nRESULT\n{result}\n\n")
                 except subprocess.CalledProcessError as e:
                     self.logger.error(f"Linking failed: {e.stderr}", "linker")
+                    if "undefined symbol:" in e.stderr and \
+                            "standard__memory__allocators__stdheap__fmalloc__1__dataE1_ubits64__ret_dataE1_ubits64" in e.stderr:
+                        self.logger.error(
+                            "Undefined symbol: fmalloc\n"
+                            "  'heap' requires the standard memory allocator. Add '#import \"standard.fx\";' to your source file.",
+                            "linker"
+                        )
+                        raise RuntimeError("Missing import: standard.fx required for 'heap' keyword")
                     if config['linker'] == "lld-link":
                         self.logger.step(f"Falling back to clang...", LogLevel.INFO, "linker")
                         try:
