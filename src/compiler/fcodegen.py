@@ -1486,6 +1486,16 @@ class CodegenVisitor:
 
         source_val = self.visit(node.expression, builder, module)
         if source_val.type == target_llvm_type:
+            # Even though the LLVM types are identical (e.g. le32 and uint are
+            # both i32), an explicit cast is a value-level reinterpretation: the
+            # caller expressed `uint(y)` specifically to shed the endianness tag
+            # on `y`.  Returning source_val unchanged would leave its
+            # _flux_type_spec pointing at the source type (e.g. le32), which
+            # causes a false endianness-mismatch error at the call site.
+            # We must stamp the target type spec onto the result so that the
+            # endianness check in visit_FunctionCall sees a neutral (non-endian)
+            # type rather than the source's endian annotation.
+            source_val._flux_type_spec = node.target_type
             return source_val
 
         void_ptr_type = ir.PointerType(ir.IntType(8))
