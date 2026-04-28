@@ -12,8 +12,6 @@ def main() -> int
     (void)z;
 
     print_hex(long(@x)); print();
-    //print_hex(long(@y)); print();
-    //print_hex(long(@z));
 
     return 0;
 };

@@ -312,6 +312,8 @@ Allocates a variable on the heap explicitly.
 ```
 heap int x = 10;
 ```
+This calls `fmalloc(sizeof(T))` where `T` is the type. `x` is a pointer of type `T`.  
+It is **not** the same as `int* x = @10;`, as this is a stack-allocated pointer & value.
 
 ---
 
@@ -362,7 +364,24 @@ jump @func;
 **`label`**
 Declares a jump target for `goto`.
 ```
-label myLabel;
+label myLabel:
+```
+Use like:
+```
+def foo() -> int
+{
+label j1:
+    // code
+    goto j3;
+label j2:
+    // code
+    goto final;
+label j3:
+    // code
+    goto j2;
+label final:
+    // return
+};
 ```
 
 ---
@@ -371,6 +390,18 @@ label myLabel;
 Explicitly marks a variable as local scope. Cannot escape its scope via return or by being passed to a function.
 ```
 local int x = 10;
+```
+Example:
+```
+def foo(int x) -> int { return x; };
+
+def baz() -> int { local int z = 50; return z; }; // Compile error, z cannot leave function.
+
+def bar() -> void
+{
+    local int x = 10;
+    int y = foo(x); // Compile error, x cannot leave scope.
+}
 ```
 
 ---
@@ -451,7 +482,7 @@ object Foo { private { int secret; }; };
 ---
 
 **`public`**
-Explicitly marks a member as externally accessible. Members must be wrapped in a block.
+Explicitly marks a member as externally accessible. Members must be wrapped in a block. Object members are public by default.
 ```
 object Foo { public { int value; }; };
 ```

@@ -1277,6 +1277,9 @@ heap int x = 5;      // Allocate
 
 `(void)` casting works on both stack and heap allocated items.  
 If you do this to a stack element, it is nulled, and all references invalidated. You will need to redeclare `x`.
+Doing this to a heap element will call `ffree()` under the hood.
+
+Allocating with `heap` calls `fmalloc(sizeof(T))` under the hood. `x` is a pointer.
 
 ---
 

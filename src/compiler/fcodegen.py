@@ -1685,10 +1685,28 @@ class CodegenVisitor:
             if (not module.symbol_table.is_global_scope() and
                     module.symbol_table.get_llvm_value(var_name) is not None):
                 var_ptr = module.symbol_table.get_llvm_value(var_name)
-                self._cast_runtime_free(builder, module, var_ptr, var_name)
+                # heap variable: the alloca holds a T* pointing into the heap.
+                # Call ffree(addr) where addr is the heap pointer cast to u64.
+                if getattr(var_ptr, '_flux_is_heap', False):
+                    # heap var: call ffree, then null the alloca
+                    heap_ptr = builder.load(var_ptr, name=f"{var_name}_heapptr")
+                    self._cast_ffree(builder, module, heap_ptr, var_name)
+                    builder.store(ir.Constant(heap_ptr.type, None), var_ptr)
+                else:
+                    # Stack/pointer var: null the alloca to invalidate -- cannot free stack memory
+                    if isinstance(var_ptr.type.pointee, ir.PointerType):
+                        null = ir.Constant(var_ptr.type.pointee, None)
+                    else:
+                        null = ir.Constant(var_ptr.type.pointee, 0)
+                    builder.store(null, var_ptr)
                 module.symbol_table.delete_variable(var_name)
             elif var_name in module.globals:
-                self._cast_runtime_free(builder, module, module.globals[var_name], var_name)
+                # Global pointer: null it out in place
+                gvar = module.globals[var_name]
+                if isinstance(gvar.type.pointee, ir.PointerType):
+                    builder.store(ir.Constant(gvar.type.pointee, None), gvar)
+                else:
+                    builder.store(ir.Constant(gvar.type.pointee, 0), gvar)
             else:
                 raise NameError(
                     f"Cannot void cast unknown variable: {var_name} "
@@ -1698,6 +1716,26 @@ class CodegenVisitor:
             if isinstance(expr_val.type, ir.PointerType):
                 self._cast_runtime_free(builder, module, expr_val, "<expression>")
         return None
+
+    def _cast_ffree(self, builder, module, heap_ptr, var_name):
+        """Emit a call to ffree for a heap-allocated variable."""
+        _FFREE_MANGLED = (
+            'standard__memory__allocators__stdheap__ffree'
+            '__1__dataE1_ubits64__ret_voidE1'
+        )
+        i64_ty = ir.IntType(64)
+        ffree_fn = module.globals.get(_FFREE_MANGLED)
+        if ffree_fn is None:
+            for gname, gval in module.globals.items():
+                if gname.endswith('ffree') and isinstance(gval, ir.Function):
+                    ffree_fn = gval
+                    break
+        if ffree_fn is None:
+            ffree_ty = ir.FunctionType(ir.VoidType(), [i64_ty])
+            ffree_fn = ir.Function(module, ffree_ty, name=_FFREE_MANGLED)
+        # ffree takes a u64 address
+        addr = builder.ptrtoint(heap_ptr, i64_ty, name=f"{var_name}_freeaddr")
+        builder.call(ffree_fn, [addr])
 
     def _cast_runtime_free(self, builder, module, ptr_value, var_name):
         i8_ptr = ir.PointerType(ir.IntType(8))
