@@ -1146,6 +1146,197 @@ def cmd_publish(args):
     print(f"\n  Done. {success} file(s) uploaded, {failed} failed.")
 
 
+# ─── Fix Dependencies ─────────────────────────────────────────────────────────
+
+def _scan_imports(fx_path: Path) -> list[str]:
+    """
+    Parse a .fx file and return a list of imported filenames.
+    Handles both single and multi-import forms:
+        #import "math.fx";
+        #import "math.fx", "vectors.fx";
+    Ignores lines inside block comments and skips #import inside #ifndef guards
+    that aren't terminated (best-effort; handles the common stdlib pattern).
+    """
+    import re
+    filenames = []
+    # Match one or more quoted filenames after #import
+    pattern = re.compile(r'#import\s+((?:"[^"]+"\s*,\s*)*"[^"]+")')
+    try:
+        text = fx_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return filenames
+    for line in text.splitlines():
+        stripped = line.strip()
+        # Skip blank lines and pure comments
+        if not stripped or stripped.startswith("//"):
+            continue
+        m = pattern.search(stripped)
+        if m:
+            # Extract every quoted token from the matched group
+            for fn in re.findall(r'"([^"]+)"', m.group(1)):
+                filenames.append(fn)
+    return filenames
+
+
+def _build_filename_to_package_map(packages: dict) -> dict[str, str]:
+    """
+    Build a reverse map: entry filename -> package name.
+    e.g. {"math.fx": "flux-math", "vectors.fx": "flux-vectors", ...}
+    Handles both single-entry and multi-entry packages.
+    """
+    mapping = {}
+    for pkg_name, pkg in packages.items():
+        if "entries" in pkg:
+            for fn in pkg["entries"].values():
+                mapping[fn] = pkg_name
+        elif "entry" in pkg:
+            mapping[pkg["entry"]] = pkg_name
+    return mapping
+
+
+def cmd_fixdeps(args):
+    """
+    Scan each package's .fx source file(s) for #import directives and
+    rewrite the 'dependencies' field in package.json to match what is
+    actually imported, using the versions already listed in the registry.
+    """
+    pack_name = args.pack_name  # e.g. "flux-stdlib"
+
+    # ── Locate package.json ───────────────────────────────────────────────────
+    # Prefer the local stdlib package.json; fall back to the fpm registry file.
+    stdlib_json_path = STDLIB_DIR / "package.json"
+    if stdlib_json_path.exists():
+        json_path = stdlib_json_path
+    elif REGISTRY_FILE.exists():
+        json_path = REGISTRY_FILE
+    else:
+        print(f"  ERROR: No package.json found. "
+              f"Expected at {stdlib_json_path} or {REGISTRY_FILE}")
+        return
+
+    with open(json_path) as f:
+        root = json.load(f)
+
+    # Support both flat {packages: {...}} and bare {pkg: {...}} layouts
+    if "packages" in root:
+        packages = root["packages"]
+        wrap_key = "packages"
+    else:
+        packages = root
+        wrap_key = None
+
+    # Verify the requested pack name is actually a key inside the JSON
+    # (for flux-stdlib this is the top-level "pack" field, not a package name;
+    # we use it only as a label — the command always operates on all packages
+    # in the file).
+    top_pack = root.get("pack", "")
+    if pack_name != top_pack and pack_name not in packages:
+        print(f"  ERROR: '{pack_name}' is not a known pack or package in {json_path}")
+        print(f"  Top-level pack name in that file: '{top_pack}'")
+        return
+
+    # ── Build filename → package-name reverse map ─────────────────────────────
+    fn_to_pkg = _build_filename_to_package_map(packages)
+
+    # ── Scan each package ─────────────────────────────────────────────────────
+    print(f"\n  fixdeps — scanning packages in '{json_path}'\n")
+
+    changed_count = 0
+    skipped_count = 0
+
+    for pkg_name, pkg in packages.items():
+        sub_path = pkg.get("path", "")
+
+        # Collect the .fx file(s) to scan
+        if "entries" in pkg:
+            base = STDLIB_DIR / sub_path if sub_path else STDLIB_DIR
+            fx_files = [base / fn for fn in pkg["entries"].values()]
+        else:
+            entry = pkg.get("entry", "")
+            if not entry:
+                continue
+            base = STDLIB_DIR / sub_path if sub_path else STDLIB_DIR
+            fx_files = [base / entry]
+
+        # Gather all imports across all files for this package
+        imported_filenames: set[str] = set()
+        for fx_path in fx_files:
+            if fx_path.exists():
+                for fn in _scan_imports(fx_path):
+                    imported_filenames.add(fn)
+            else:
+                print(f"  WARNING: Source file not found, skipping scan: {fx_path}")
+
+        if not imported_filenames:
+            # No imports found — clear deps only if there were some before
+            old_deps = pkg.get("dependencies", {})
+            if old_deps:
+                print(f"  {pkg_name}: no imports found — clearing {list(old_deps.keys())}")
+                pkg["dependencies"] = {}
+                changed_count += 1
+            else:
+                skipped_count += 1
+            continue
+
+        # Map filenames → package names, skip self-imports and unknowns
+        new_deps: dict[str, str] = {}
+        unknown_imports: list[str] = []
+        for fn in sorted(imported_filenames):
+            dep_pkg_name = fn_to_pkg.get(fn)
+            if dep_pkg_name is None:
+                unknown_imports.append(fn)
+                continue
+            if dep_pkg_name == pkg_name:
+                continue  # self-import, ignore
+            dep_version = packages[dep_pkg_name]["version"]
+            new_deps[dep_pkg_name] = f">={dep_version}"
+
+        old_deps = pkg.get("dependencies", {})
+
+        if unknown_imports:
+            print(f"  {pkg_name}: unrecognized import(s) (no matching package): "
+                  f"{', '.join(unknown_imports)}")
+
+        if new_deps == old_deps:
+            skipped_count += 1
+            continue
+
+        # Show a diff-style summary
+        added   = {k: v for k, v in new_deps.items() if k not in old_deps}
+        removed = {k: v for k, v in old_deps.items() if k not in new_deps}
+        updated = {k: v for k, v in new_deps.items()
+                   if k in old_deps and old_deps[k] != v}
+
+        print(f"  {pkg_name}:")
+        for k, v in added.items():
+            print(f"    + {k}: {v}")
+        for k, v in removed.items():
+            print(f"    - {k} (was {v})")
+        for k, v in updated.items():
+            print(f"    ~ {k}: {old_deps[k]} → {v}")
+
+        pkg["dependencies"] = new_deps
+        changed_count += 1
+
+    # ── Write back ────────────────────────────────────────────────────────────
+    if changed_count == 0:
+        print(f"  All {skipped_count} package(s) already up-to-date. Nothing to write.")
+        return
+
+    if wrap_key:
+        root[wrap_key] = packages
+    else:
+        root = packages
+
+    with open(json_path, "w") as f:
+        json.dump(root, f, indent=2)
+        f.write("\n")
+
+    print(f"\n✔  Updated {changed_count} package(s), "
+          f"{skipped_count} unchanged.")
+    print(f"   Written to: {json_path}")
+
+
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 def main():
@@ -1188,6 +1379,16 @@ def main():
     p_publish = subparsers.add_parser("publish", help="Publish a local package to the fpm server")
     p_publish.add_argument("package", help="Package name to publish")
     p_publish.add_argument("--source", required=True, help="Named source to publish to (from fpm sources)")
+
+    # fixdeps
+    p_fixdeps = subparsers.add_parser(
+        "fixdeps",
+        help="Scan .fx source files and fix dependencies in package.json"
+    )
+    p_fixdeps.add_argument(
+        "pack_name",
+        help="Pack name to fix (e.g. flux-stdlib)"
+    )
 
     # list
     p_list = subparsers.add_parser("list", help="List packages")
@@ -1233,6 +1434,8 @@ def main():
         cmd_listsources(sources)
     elif args.command == "publish":
         cmd_publish(args)
+    elif args.command == "fixdeps":
+        cmd_fixdeps(args)
 
 
 if __name__ == "__main__":

@@ -2265,6 +2265,16 @@ class CodegenVisitor:
                 else:
                     elem_val = self.visit(elem, builder, module)
             else:
+                # Propagate struct type context into StructLiteral elements so that
+                # bare struct literals inside array initialisers (e.g. POINT[] v = [{1,2}])
+                # have the required type context when visit_StructLiteral is called.
+                from fast import StructLiteral as _StructLiteral
+                if (isinstance(elem, _StructLiteral) and
+                        getattr(elem, 'struct_type', None) is None and
+                        node.element_type is not None):
+                    ctn = getattr(node.element_type, 'custom_typename', None)
+                    if ctn:
+                        elem.struct_type = ctn
                 elem_val = self.visit(elem, builder, module)
             if node.element_type is not None:
                 target_elem_llvm = TypeSystem.get_llvm_type(node.element_type, module)

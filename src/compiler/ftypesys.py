@@ -2547,6 +2547,56 @@ class ArrayTypeHandler:
                 
                 const_elements.append(llvm_val)
             
+            # StructLiteral elements in a global array (e.g. POINT[] glider_gun = [{1,5}, ...])
+            elif hasattr(elem, 'field_values') or hasattr(elem, 'positional_values'):
+                # Resolve the struct name from the LLVM element type
+                elem_struct_type = llvm_type.element
+                struct_name = None
+                if hasattr(module, '_struct_types'):
+                    for sname, stype in module._struct_types.items():
+                        if stype == elem_struct_type:
+                            struct_name = sname
+                            break
+                if struct_name is None:
+                    line = getattr(array_literal, 'source_line', 0)
+                    col  = getattr(array_literal, 'source_col',  0)
+                    elem_line = getattr(elem, 'source_line', line)
+                    elem_col  = getattr(elem, 'source_col',  col)
+                    raise ValueError(f"{elem_line}:{elem_col}: Cannot resolve struct type for array element")
+                # Seed struct_type on the StructLiteral so pack_struct_literal can resolve it
+                if getattr(elem, 'struct_type', None) is None:
+                    elem.struct_type = struct_name
+                # Build a constant struct value (builder=None is fine for all-constant structs)
+                vtable = module._struct_vtables.get(struct_name)
+                if vtable is None:
+                    line = getattr(array_literal, 'source_line', 0)
+                    col  = getattr(array_literal, 'source_col',  0)
+                    elem_line = getattr(elem, 'source_line', line)
+                    elem_col  = getattr(elem, 'source_col',  col)
+                    raise ValueError(f"{elem_line}:{elem_col}: Struct vtable not found for '{struct_name}'")
+                field_values = dict(getattr(elem, 'field_values', None) or {})
+                positional_values = list(getattr(elem, 'positional_values', None) or [])
+                # Map positional values to field names
+                if positional_values:
+                    for i, value in enumerate(positional_values):
+                        field_name_pos = vtable.fields[i][0]
+                        field_values[field_name_pos] = value
+                # Build constant field list
+                field_consts = []
+                for i, (fname, _, _, _) in enumerate(vtable.fields):
+                    if fname in field_values:
+                        fval_expr = field_values[fname]
+                        fval = fval_expr.codegen(None, module)
+                        # Cast to element type if needed
+                        expected = elem_struct_type.elements[i]
+                        if isinstance(fval, ir.Constant) and fval.type != expected:
+                            if isinstance(fval.type, ir.IntType) and isinstance(expected, ir.IntType):
+                                fval = ir.Constant(expected, fval.constant)
+                        field_consts.append(fval)
+                    else:
+                        field_consts.append(ir.Constant(elem_struct_type.elements[i], 0))
+                const_elements.append(ir.Constant(elem_struct_type, field_consts))
+
             else:
                 line = getattr(array_literal, 'source_line', 0)
                 col  = getattr(array_literal, 'source_col',  0)
@@ -2596,6 +2646,16 @@ class ArrayTypeHandler:
                     elem_val = ArrayTypeHandler.pack_array_to_integer(
                         builder, module, elem, llvm_type.element)
                 else:
+                    # Seed struct_type on StructLiteral elements so that bare struct
+                    # literals in local array initialisers have the required type context.
+                    if (getattr(elem, 'struct_type', None) is None and
+                            (hasattr(elem, 'field_values') or hasattr(elem, 'positional_values')) and
+                            isinstance(llvm_type.element, (ir.LiteralStructType, ir.IdentifiedStructType))):
+                        if hasattr(module, '_struct_types'):
+                            for sname, stype in module._struct_types.items():
+                                if stype == llvm_type.element:
+                                    elem.struct_type = sname
+                                    break
                     elem_val = elem.codegen(builder, module)
                     
                     # convert to pointer-to-element (for string literals in pointer arrays)
