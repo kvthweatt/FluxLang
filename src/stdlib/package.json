@@ -16,7 +16,7 @@
       }
     },
     "flux-collections": {
-      "version": "1.0.0",
+      "version": "1.0.2",
       "entry": "collections.fx",
       "path": "",
       "description": "Generic collections: lists, maps, sets, queues, stacks",
@@ -70,7 +70,7 @@
       "description": "Environment variable loading from .env files",
       "dependencies": {
         "flux-standard": ">=1.0.0",
-        "flux-string-utilities": ">=1.0.2"
+        "flux-string-utilities": ">=1.0.3"
       }
     },
     "flux-format": {
@@ -119,7 +119,7 @@
       "path": "",
       "description": "JSON parsing and serialization",
       "dependencies": {
-        "flux-allocators": ">=1.0.6",
+        "flux-allocators": ">=1.0.7",
         "flux-standard": ">=1.0.0"
       }
     },
@@ -199,7 +199,7 @@
       "path": "",
       "description": "Ray tracing primitives and utilities",
       "dependencies": {
-        "flux-allocators": ">=1.0.6",
+        "flux-allocators": ">=1.0.7",
         "flux-math": ">=1.0.1",
         "flux-memory": ">=1.0.2",
         "flux-random": ">=1.0.0",
@@ -213,7 +213,7 @@
       "path": "",
       "description": "Run-length encoding compression",
       "dependencies": {
-        "flux-string-utilities": ">=1.0.2"
+        "flux-string-utilities": ">=1.0.3"
       }
     },
     "flux-standard": {
@@ -222,7 +222,7 @@
       "path": "",
       "description": "Standard import for any Flux program",
       "dependencies": {
-        "flux-runtime": ">=1.0.0"
+        "flux-runtime": ">=1.0.1"
       }
     },
     "flux-sys": {
@@ -256,7 +256,10 @@
       "entry": "uuid.fx",
       "path": "",
       "description": "UUID generation",
-      "dependencies": {}
+      "dependencies": {
+        "flux-random": ">=1.0.0",
+        "flux-types": ">=1.0.0"
+      }
     },
     "flux-vectors": {
       "version": "1.0.0",
@@ -308,16 +311,17 @@
       }
     },
     "flux-string": {
-      "version": "1.0.1",
+      "version": "1.0.2",
       "entry": "string_object_raw.fx",
       "path": "builtins",
       "description": "Raw string object",
       "dependencies": {
-        "flux-io": ">=1.0.1"
+        "flux-io": ">=1.0.1",
+        "flux-string-utilities": ">=1.0.3"
       }
     },
     "flux-allocators": {
-      "version": "1.0.6",
+      "version": "1.0.7",
       "entry": "allocators.fx",
       "path": "runtime",
       "description": "Standard memory allocators",
@@ -350,7 +354,7 @@
       "path": "runtime",
       "description": "Memory management primitives",
       "dependencies": {
-        "flux-allocators": ">=1.0.6",
+        "flux-allocators": ">=1.0.7",
         "flux-types": ">=1.0.0"
       }
     },
@@ -364,7 +368,7 @@
       }
     },
     "flux-runtime": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "runtime.fx",
       "path": "runtime",
       "description": "Flux runtime core",
@@ -373,8 +377,8 @@
         "flux-file": ">=1.0.1",
         "flux-io": ">=1.0.1",
         "flux-memory": ">=1.0.2",
-        "flux-string": ">=1.0.1",
-        "flux-string-utilities": ">=1.0.2",
+        "flux-string": ">=1.0.2",
+        "flux-string-utilities": ">=1.0.3",
         "flux-sys": ">=1.0.0",
         "flux-types": ">=1.0.0"
       }
@@ -416,7 +420,7 @@
       "dependencies": {}
     },
     "flux-string-utilities": {
-      "version": "1.0.2",
+      "version": "1.0.3",
       "entry": "string_utilities.fx",
       "path": "utility",
       "description": "String manipulation utilities",

@@ -8,7 +8,7 @@
 
 ## What is Flux?
 
-Flux is a new language that combines the performance and power of C with the readability of Python.   
+Flux is a new programming language that combines the performance and power of C with the readability of Python.   
 Flux resembles the C-family of languages.  
 It is neither C, nor a derivative of C.  
 It has a fundamentally different type system while still being C ABI compatible.

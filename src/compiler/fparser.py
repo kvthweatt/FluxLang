@@ -242,6 +242,7 @@ class FluxParser:
         self._contracts: Dict[str, Block] = {}  # name -> Block of statements to inject
         self._function_depth = 0  # Tracks nesting depth; nested function defs are illegal
         self._loop_depth = 0      # Tracks nesting depth of for/while/do-while loops
+        self._in_for_init = False # True while parsing the init clause of a for(...) header
         self._in_trait = 0        # Tracks nesting depth inside trait bodies (prototypes only)
         self._default_byte_width = default_byte_width if default_byte_width is not None else _get_byte_width(_flux_config)
         self._comptime_strings: Dict[str, str] = {}  # var_name -> string value, for ~$ codify splicing
@@ -302,7 +303,38 @@ class FluxParser:
     def error(self, message: str, expected_type=None, prev_token=None) -> None:
         """Raise a parse error with current token context"""
         raise ParseError(message, self.current_token, self._source_lines, expected_type, prev_token)
-    
+
+    def warn(self, message: str) -> None:
+        """Emit a non-fatal compiler warning to stderr with source location context."""
+        tok = self.current_token
+        if tok is not None:
+            line_no = tok.line
+            col = tok.column
+            header = f"Warning: {message} at {line_no}:{col}"
+            if self._source_lines and 1 <= line_no <= len(self._source_lines):
+                raw_line = self._source_lines[line_no - 1].rstrip('\n')
+                TAB_WIDTH = 4
+                expanded = ''
+                expanded_col = 1
+                for i, ch in enumerate(raw_line):
+                    col_in_raw = i + 1
+                    if ch == '\t':
+                        spaces = TAB_WIDTH - (len(expanded) % TAB_WIDTH)
+                        expanded += ' ' * spaces
+                        if col_in_raw < col:
+                            expanded_col += spaces
+                    else:
+                        expanded += ch
+                        if col_in_raw < col:
+                            expanded_col += 1
+                dash_count = max(0, expanded_col - 1)
+                caret_line = '-' * dash_count + '^'
+                print(f"{header}\n{expanded}\n{caret_line}", file=sys.stderr)
+            else:
+                print(header, file=sys.stderr)
+        else:
+            print(f"Warning: {message}", file=sys.stderr)
+
     def advance(self) -> Token:
         """Move to the next token"""
         if self.position < len(self.tokens) - 1:
@@ -1748,6 +1780,8 @@ class FluxParser:
         Returns a single FunctionPointerDeclaration or a list when multiple
         declarations are chained with commas.
         """
+        if self._loop_depth > 0 and not self._in_for_init:
+            self.warn("pointer declaration inside a loop body, this will continually allocate new slots on the stack each iteration.")
         def _parse_one_fp() -> 'FunctionPointerDeclaration':
             """Parse a single name + type + optional initializer."""
             name = self.consume(TokenType.IDENTIFIER).value
@@ -3012,6 +3046,8 @@ class FluxParser:
     
     def variable_declaration(self) -> Union[VariableDeclaration, TypeDeclaration, List[VariableDeclaration]]:
         tok = self.current_token
+        if self._loop_depth > 0 and not self._in_for_init:
+            self.warn("variable declaration inside a loop body - this will continually allocate new slots on the stack each iteration.")
         # Capture the raw identifier used as a type name before alias resolution wipes custom_typename
         raw_type_identifier = None
         if self.expect(TokenType.IDENTIFIER):
@@ -3527,7 +3563,9 @@ class FluxParser:
             init = None
             if not self.expect(TokenType.SEMICOLON):
                 if self.is_variable_declaration():
+                    self._in_for_init = True
                     var_decl = self.variable_declaration()
+                    self._in_for_init = False
                     # If multiple declarations, wrap in a Block
                     if isinstance(var_decl, list):
                         init = Block(var_decl)

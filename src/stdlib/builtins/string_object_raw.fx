@@ -5,7 +5,7 @@
 #endif;
 
 #ifndef FLUX_STANDARD_STRINGS
-#def FLUX_STANDARD_STRINGS 1;
+#import "string_utilities.fx";
 #endif;
 
 #ifdef FLUX_STANDARD_STRINGS
@@ -357,7 +357,9 @@ namespace standard
             def replace_all(byte* find, byte* replace) -> byte*
             {
                 // Replace all occurrences
-                byte* result = manip::copy_string(this.value);
+                byte* result = manip::copy_string(this.value),
+                      temp;
+                int pos;
                 if (result == 0)
                 {
                     return (byte*)0;
@@ -371,13 +373,13 @@ namespace standard
 
                 while (true)
                 {
-                    int pos = helpers::find_substring(result, find, 0);
+                    pos = helpers::find_substring(result, find, 0);
                     if (pos == -1)
                     {
                         break;
                     };
                     
-                    byte* temp = replace_first(result, find, replace);
+                    temp = replace_first(result, find, replace);
                     ffree(long(result));
                     result = temp;
                     

@@ -365,8 +365,3 @@ def !!FRTStartup() -> int
 };
 #endif; // __MACOS__
 #endif; // FLUX_RUNTIME
-///
-#ifndef FLUX_STANDARD_EXCEPTIONS
-#import "redexceptions.fx";
-#endif;
-///
