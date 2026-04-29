@@ -110,6 +110,11 @@ namespace standard
             return b;
         };
 
+        def max<T>(T a, T b) -> T
+        {
+            return a > b ? a : b;
+        };
+///
         // Maximum overloads
         def max(i8 a, i8 b) -> i8
         {
@@ -140,7 +145,7 @@ namespace standard
             if (a > b) {return a;};
             return b;
         };
-
+///
         // Clamp overloads
         def clamp(i8 value, i8 low, i8 high) -> i8
         {
