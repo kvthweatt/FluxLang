@@ -6,12 +6,10 @@ def main() -> int
 {
     int x = 10;
     heap int y = 5;
-    int* z = (int*)fmalloc(32);
+    int* z = (int*)fmalloc(sizeof(int));
 
     (void)y;
     (void)z;
-
-    print_hex(long(@x)); print();
 
     return 0;
 };

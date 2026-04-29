@@ -2870,23 +2870,28 @@ class CodegenVisitor:
                 # Give a clear error instead of the generic type-mismatch message.
                 if (isinstance(arg_val.type, (ir.IdentifiedStructType, ir.LiteralStructType)) or
                         (isinstance(arg_val.type, ir.PointerType) and
-                         isinstance(arg_val.type.pointee, ir.IdentifiedStructType) and
+                         isinstance(arg_val.type.pointee, (ir.IdentifiedStructType, ir.LiteralStructType)) and
                          not isinstance(expected, ir.PointerType))):
-                    obj_type_name = None
-                    if hasattr(module, '_struct_types'):
-                        for tname, stype in module._struct_types.items():
-                            candidate = arg_val.type.pointee if isinstance(arg_val.type, ir.PointerType) else arg_val.type
-                            if stype == candidate:
-                                obj_type_name = tname
-                                break
-                    if obj_type_name is not None:
-                        raise TypeError(
-                            f"Object of type '{obj_type_name}' used in expression context "
-                            f"but has no __expr() method defined. "
-                            f"Define 'def __expr() -> <type> {{ return @this.<member>; }};' "
-                            f"inside the object to enable expression-context usage. "
-                            f"[{node.source_line}:{node.source_col}]"
-                        )
+                    # Only raise if the struct type doesn't match what's expected.
+                    # A matching type is a legitimate by-value struct pass — not an object misuse.
+                    candidate = arg_val.type.pointee if isinstance(arg_val.type, ir.PointerType) else arg_val.type
+                    if candidate == expected:
+                        pass  # let convert_argument_to_parameter_type handle it
+                    else:
+                        obj_type_name = None
+                        if hasattr(module, '_struct_types'):
+                            for tname, stype in module._struct_types.items():
+                                if stype == candidate:
+                                    obj_type_name = tname
+                                    break
+                        if obj_type_name is not None:
+                            raise TypeError(
+                                f"Object of type '{obj_type_name}' used in expression context "
+                                f"but has no __expr() method defined. "
+                                f"Define 'def __expr() -> <type> {{ return @this.<member>; }};' "
+                                f"inside the object to enable expression-context usage. "
+                                f"[{node.source_line}:{node.source_col}]"
+                            )
                 arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(
                     builder, module, arg_val, expected, i)
             processed_args.append(arg_val)
@@ -3529,7 +3534,8 @@ class CodegenVisitor:
 
         elif isinstance(node.target, MemberAccess):
             return AssignmentTypeHandler.handle_member_assignment(
-                builder, module, node.target.object, node.target.member, val)
+                builder, module, node.target.object, node.target.member, val,
+                value_expr=node.value)
 
         elif isinstance(node.target, ArrayAccess):
             if isinstance(node.target.array, MemberAccess):
@@ -4591,7 +4597,7 @@ class CodegenVisitor:
         _ret_type = (func.type.return_type
                      if hasattr(func.type, 'return_type')
                      else func.type.pointee.return_type)
-        _suppress = isinstance(_ret_type, ir.IdentifiedStructType)
+        _suppress = isinstance(_ret_type, (ir.IdentifiedStructType, ir.LiteralStructType))
         if _suppress:
             self._in_member_access = True
         try:

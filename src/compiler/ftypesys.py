@@ -4298,7 +4298,7 @@ class AssignmentTypeHandler:
         return val
     
     @staticmethod
-    def handle_member_assignment(builder, module, target_obj_expr, member_name: str, val):
+    def handle_member_assignment(builder, module, target_obj_expr, member_name: str, val, value_expr=None):
         from fast import Identifier, MemberAccess
         
         # For member access, we need the pointer, not the loaded value
@@ -4377,6 +4377,18 @@ class AssignmentTypeHandler:
                 )
                 # Convert value type to match target member type if needed
                 member_type = member_ptr.type.pointee
+                # If the RHS is an ArrayLiteral and the member is an array type,
+                # bypass the generic codegen path (which produces pointer-of-pointers
+                # for nested array literals) and initialize directly into member_ptr.
+                # This fixes 2-D array assignment to struct members, e.g.:
+                #   t.a = [[1,2,3],[4,5,6],[7,8,9]];  // int[3][3] a
+                from fast import ArrayLiteral as _FastArrayLiteral
+                if (value_expr is not None and
+                        isinstance(value_expr, _FastArrayLiteral) and
+                        isinstance(member_type, ir.ArrayType)):
+                    ArrayTypeHandler.initialize_local_array(
+                        builder, module, member_ptr, member_type, value_expr)
+                    return member_ptr
                 # Array-widening assignment: assigning a smaller array (or noopstr pointer) into
                 # a larger array field.  Zero the destination, then memcpy the source bytes in.
                 # e.g. noopstr [12 x i8]* -> byte[256] ([256 x i8]) widens with zero-fill.
@@ -4722,7 +4734,10 @@ class AssignmentTypeHandler:
             # Handle void** case: array was over-loaded from T** to T*, so element_type
             # ended up as T (e.g. i8) but val is actually a pointer (e.g. i8*).
             # Bitcast elem_ptr to val.type* so the store matches.
-            if isinstance(val.type, ir.PointerType) and not isinstance(element_type, ir.PointerType):
+            # Guard: do NOT fire when val is a pointer-to-element-type (e.g. RCSprite* being
+            # assigned into an RCSprite* array — val needs to be loaded, not elem_ptr bitcast).
+            if (isinstance(val.type, ir.PointerType) and not isinstance(element_type, ir.PointerType)
+                    and str(val.type.pointee) != str(element_type)):
                 elem_ptr = builder.bitcast(elem_ptr, ir.PointerType(val.type), name="void_arr_elem_ptr")
             
             # Coerce val to match element_type (e.g. float literal -> double*, int width)
