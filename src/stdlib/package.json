@@ -29,7 +29,7 @@
       "version": "1.0.0",
       "entry": "console.fx",
       "path": "",
-      "description": "Console I/O utilities",
+      "description": "Console graphics utilties for TUI environments",
       "dependencies": {
         "flux-types": ">=1.0.0"
       }
