@@ -421,6 +421,30 @@ def main() -> int
 };
 ```
 
+### You can also defer in blocks:
+```
+#import "standard.fx";
+
+using standard::io::console;
+
+def main() -> int
+{
+    println("Hello!");
+    defer
+    {
+        println("Test1!");
+        println("Test2!");
+    };
+    return 0;
+};
+```
+Result:
+```
+Hello!
+Test2!
+Test1!
+```
+
 ---
 
 <a id="traits"></a>

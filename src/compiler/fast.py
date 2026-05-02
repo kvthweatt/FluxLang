@@ -805,9 +805,13 @@ class ContinueStatement(Statement):
 
 @dataclass
 class DeferStatement(Statement):
-    expression: 'Expression'
+    expression: 'Optional[Expression]'
+    body: 'Optional[List[Statement]]' = None  # block form: defer { ... };
 
     def __repr__(self) -> str:
+        if self.body is not None:
+            stmts = ' '.join(repr(s) for s in self.body)
+            return f"defer {{ {stmts} }};"
         return f"defer {self.expression};"
 
 

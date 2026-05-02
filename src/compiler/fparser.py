@@ -3778,12 +3778,30 @@ class FluxParser:
     def defer_statement(self) -> DeferStatement:
         """
         defer_statement -> 'defer' expression ';'
+                         | 'defer' '{' statement* '}' ';'
         """
         tok = self.current_token
         self.consume(TokenType.DEFER)
+
+        if self.expect(TokenType.LEFT_BRACE):
+            # Block form: defer { stmt1; stmt2; };
+            self.advance()
+            statements = []
+            while not self.expect(TokenType.RIGHT_BRACE):
+                stmt = self.statement()
+                if stmt:
+                    if isinstance(stmt, list):
+                        statements.extend(stmt)
+                    else:
+                        statements.append(stmt)
+            self.consume(TokenType.RIGHT_BRACE)
+            self.consume(TokenType.SEMICOLON)
+            return DeferStatement(expression=None, body=statements).set_location(tok.line, tok.column)
+
+        # Single expression form: defer expr;
         expr = self.expression()
         self.consume(TokenType.SEMICOLON)
-        return DeferStatement(expr).set_location(tok.line, tok.column)
+        return DeferStatement(expression=expr, body=None).set_location(tok.line, tok.column)
 
     def escape_statement(self) -> EscapeStatement:
         """

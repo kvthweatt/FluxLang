@@ -354,7 +354,10 @@ class CodegenVisitor:
     def visit_DeferStatement(self, node, builder, module):
         if not hasattr(builder, '_flux_defer_stack'):
             builder._flux_defer_stack = []
-        builder._flux_defer_stack.append(node.expression)
+        if node.body is not None:
+            builder._flux_defer_stack.append(node.body)
+        else:
+            builder._flux_defer_stack.append(node.expression)
         return None
 
     def visit_NoreturnStatement(self, node, builder, module):
@@ -3733,8 +3736,12 @@ class CodegenVisitor:
                         raise ValueError(f"Block{{}} Debug: Error in statement {stmt_i} ({type(stmt).__name__}){loc}: {e}")
 
             if builder._flux_defer_stack and not builder.block.is_terminated:
-                for deferred_expr in reversed(builder._flux_defer_stack):
-                    self.visit(deferred_expr, builder, module)
+                for deferred in reversed(builder._flux_defer_stack):
+                    if isinstance(deferred, list):
+                        for stmt in reversed(deferred):
+                            self.visit(stmt, builder, module)
+                    else:
+                        self.visit(deferred, builder, module)
         finally:
             builder._flux_defer_stack = outer_defer_stack if outer_defer_stack is not None else []
 
@@ -4635,8 +4642,12 @@ class CodegenVisitor:
                 self._in_member_access = False
 
         if hasattr(builder, '_flux_defer_stack') and builder._flux_defer_stack:
-            for deferred_expr in reversed(builder._flux_defer_stack):
-                self.visit(deferred_expr, builder, module)
+            for deferred in reversed(builder._flux_defer_stack):
+                if isinstance(deferred, list):
+                    for stmt in reversed(deferred):
+                        self.visit(stmt, builder, module)
+                else:
+                    self.visit(deferred, builder, module)
 
         if ret_val is None:
             builder.ret_void()
