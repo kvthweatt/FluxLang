@@ -6391,11 +6391,13 @@ class CodegenVisitor:
                 )
                 # Invalidate the source identifier, mirroring void cast:
                 # delete it from scope so any further use is a compile-time error.
-                src = node.initial_value.source_expr
-                if isinstance(src, _ArraySlice) and isinstance(src.array, _Identifier):
-                    module.symbol_table.delete_variable(src.array.name)
-                elif isinstance(src, _Identifier):
-                    module.symbol_table.delete_variable(src.name)
+                # Suppressed when the `from` declaration used a trailing `!`.
+                if not getattr(node.initial_value, 'suppress_invalidate', False):
+                    src = node.initial_value.source_expr
+                    if isinstance(src, _ArraySlice) and isinstance(src.array, _Identifier):
+                        module.symbol_table.delete_variable(src.array.name)
+                    elif isinstance(src, _Identifier):
+                        module.symbol_table.delete_variable(src.name)
                 return recast_ptr
 
         # Handle singinit: single-init, program-lifetime, function-scoped variable

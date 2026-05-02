@@ -3132,12 +3132,19 @@ class FluxParser:
                 initializers.append(AddressOf(rhs).set_location(addr_tok.line, addr_tok.column))
             elif self.expect(TokenType.FROM):
                 # Syntactic sugar: Type name from source; => Type name = Type from source;
+                # Optionally: Type name from source!; suppresses invalidation of source.
                 self.advance()
                 source_expr = self.expression()
                 # Create StructRecast with the type from type_spec
                 if type_spec.custom_typename:
                     from fast import StructRecast, Identifier
                     recast = StructRecast(type_spec.custom_typename, source_expr)
+                    # `!` after RHS suppresses invalidation of the source reference
+                    if self.expect(TokenType.NOT):
+                        self.advance()
+                        recast.suppress_invalidate = True
+                    else:
+                        recast.suppress_invalidate = False
                     initializers.append(recast)
                 else:
                     self.error("FROM syntax requires a custom type (struct)")
