@@ -6371,21 +6371,25 @@ class CodegenVisitor:
         """Generate code for local variable."""
         from fast import NoInit as _NoInit, FunctionCall as _FunctionCall, ArrayLiteral as _ArrayLiteral, ArrayComprehension as _ArrayComprehension, StringLiteral as _StringLiteral, Identifier as _Identifier
 
-        # Zero-copy struct recast: `T t from src[start:end]`
-        # visit_StructRecast now returns a T* pointer directly into the source buffer.
+        # Zero-copy struct recast: `T t from src[start:end]` or `T t from arr`
+        # visit_StructRecast returns a T* pointer directly into the source buffer
+        # whenever the source is a pointer (slice GEP, array alloca, etc.).
         # Register that pointer as the variable — no alloca, no load, no store.
         from fast import StructRecast as _StructRecast, ArraySlice as _ArraySlice
-        if (isinstance(node.initial_value, _StructRecast) and
-                isinstance(node.initial_value.source_expr, _ArraySlice)):
+        if isinstance(node.initial_value, _StructRecast):
             recast_ptr = self.visit(node.initial_value, builder, module)
-            if resolved_type_spec:
-                recast_ptr._flux_type_spec = resolved_type_spec
-            module.symbol_table.define(
-                node.name, SymbolKind.VARIABLE,
-                type_spec=resolved_type_spec,
-                llvm_value=recast_ptr,
-            )
-            return recast_ptr
+            # perform_struct_recast returns a pointer when it can alias in-place.
+            # If it returned a non-pointer (e.g. byte-extraction path), fall
+            # through to the normal alloca+store path below.
+            if isinstance(recast_ptr.type, ir.PointerType):
+                if resolved_type_spec:
+                    recast_ptr._flux_type_spec = resolved_type_spec
+                module.symbol_table.define(
+                    node.name, SymbolKind.VARIABLE,
+                    type_spec=resolved_type_spec,
+                    llvm_value=recast_ptr,
+                )
+                return recast_ptr
 
         # Handle singinit: single-init, program-lifetime, function-scoped variable
         if (resolved_type_spec is not None and
