@@ -16,10 +16,10 @@ def main() -> int
     Test t from str[0:4];
     Test v from bytes;
 
-    println(long((@)str));
+    //println(long((@)str));
     println(long(@t.x));
 
-    println(long((@)bytes));
+    //println(long((@)bytes));
     println(long(@v.x));
 
     return 0;
