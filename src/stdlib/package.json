@@ -311,7 +311,7 @@
       }
     },
     "flux-string": {
-      "version": "1.0.2",
+      "version": "1.0.4",
       "entry": "string_object_raw.fx",
       "path": "builtins",
       "description": "Raw string object",
@@ -377,7 +377,7 @@
         "flux-file": ">=1.0.1",
         "flux-io": ">=1.0.1",
         "flux-memory": ">=1.0.2",
-        "flux-string": ">=1.0.2",
+        "flux-string": ">=1.0.4",
         "flux-string-utilities": ">=1.0.3",
         "flux-sys": ">=1.0.0",
         "flux-types": ">=1.0.0"

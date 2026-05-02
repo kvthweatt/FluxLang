@@ -3445,6 +3445,34 @@ class CodegenVisitor:
         raise NotImplementedError(f"Unaligned field access not yet supported [{node.source_line}:{node.source_col}]")
 
     def visit_StructRecast(self, node, builder, module):
+        from fast import ArraySlice as _ArraySlice
+        # Zero-copy path: `T t from src[start:end]` — source_expr is an ArraySlice.
+        # Do NOT call visit_ArraySlice which allocates a copy; instead emit a bare
+        # GEP into the source buffer at the start offset and let perform_struct_recast
+        # bitcast that pointer in-place, returning a Test* directly into src.
+        if isinstance(node.source_expr, _ArraySlice):
+            sl = node.source_expr
+            array_val = self.visit(sl.array, builder, module)
+            # Unwrap alloca-of-pointer (e.g. noopstr variable: [5xi8]** → [5xi8]*)
+            if (isinstance(array_val.type, ir.PointerType) and
+                    isinstance(array_val.type.pointee, ir.PointerType) and
+                    not isinstance(array_val.type.pointee.pointee, ir.ArrayType)):
+                array_val = builder.load(array_val, name="recast_arr_load")
+            start_val = self.visit(sl.start, builder, module)
+            i32 = ir.IntType(32)
+            if start_val.type != i32:
+                start_val = (builder.trunc(start_val, i32, name="recast_start_trunc")
+                             if isinstance(start_val.type, ir.IntType) and start_val.type.width > 32
+                             else builder.sext(start_val, i32, name="recast_start_ext"))
+            zero = ir.Constant(i32, 0)
+            # GEP to the first byte of the slice within the source — no copy
+            if isinstance(array_val, ir.GlobalVariable) and isinstance(array_val.type.pointee, ir.ArrayType):
+                src_ptr = builder.gep(array_val, [zero, start_val], inbounds=True, name="recast_src_ptr")
+            elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
+                src_ptr = builder.gep(array_val, [zero, start_val], inbounds=True, name="recast_src_ptr")
+            else:
+                src_ptr = builder.gep(array_val, [start_val], inbounds=True, name="recast_src_ptr")
+            return StructTypeHandler.perform_struct_recast(builder, module, node.target_type, src_ptr)
         source_value = self.visit(node.source_expr, builder, module)
         return StructTypeHandler.perform_struct_recast(builder, module, node.target_type, source_value)
 
@@ -6342,6 +6370,23 @@ class CodegenVisitor:
     def _vardecl_local(self, node, builder, module, llvm_type, resolved_type_spec):
         """Generate code for local variable."""
         from fast import NoInit as _NoInit, FunctionCall as _FunctionCall, ArrayLiteral as _ArrayLiteral, ArrayComprehension as _ArrayComprehension, StringLiteral as _StringLiteral, Identifier as _Identifier
+
+        # Zero-copy struct recast: `T t from src[start:end]`
+        # visit_StructRecast now returns a T* pointer directly into the source buffer.
+        # Register that pointer as the variable — no alloca, no load, no store.
+        from fast import StructRecast as _StructRecast, ArraySlice as _ArraySlice
+        if (isinstance(node.initial_value, _StructRecast) and
+                isinstance(node.initial_value.source_expr, _ArraySlice)):
+            recast_ptr = self.visit(node.initial_value, builder, module)
+            if resolved_type_spec:
+                recast_ptr._flux_type_spec = resolved_type_spec
+            module.symbol_table.define(
+                node.name, SymbolKind.VARIABLE,
+                type_spec=resolved_type_spec,
+                llvm_value=recast_ptr,
+            )
+            return recast_ptr
+
         # Handle singinit: single-init, program-lifetime, function-scoped variable
         if (resolved_type_spec is not None and
                 resolved_type_spec.storage_class == StorageClass.SINGINIT):

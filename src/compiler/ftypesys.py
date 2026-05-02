@@ -5378,14 +5378,18 @@ class StructTypeHandler:
         
         llvm_target_type = module._struct_types[target_type]
         
-        # If source is a pointer to an array, load it first
-        actual_source = source_value
+        # Zero-copy pointer path: source is already a raw pointer into the buffer
+        # (e.g. an i8* from a GEP into the source array).  Bitcast to Target* and
+        # return the pointer — no load, no alloca, no copy.
         if isinstance(source_value.type, ir.PointerType):
-            pointee = source_value.type.pointee
-            if isinstance(pointee, ir.ArrayType):
-                actual_source = builder.load(source_value, name="array_load")
-            else:
-                actual_source = source_value
+            if source_value.type.pointee == llvm_target_type:
+                return source_value  # already the right pointer type
+            casted_ptr = builder.bitcast(
+                source_value, ir.PointerType(llvm_target_type), name="recast_ptr")
+            return casted_ptr
+
+        # Non-pointer path: work with the value directly.
+        actual_source = source_value
         
         # Compile-time size check if source size is known
         if hasattr(actual_source.type, 'count'):
