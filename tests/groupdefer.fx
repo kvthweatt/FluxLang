@@ -11,5 +11,7 @@ def main() -> int
         println("Test2!");
     };
 
+    def <> # p {} <- int;
+
     return 0;
 };
