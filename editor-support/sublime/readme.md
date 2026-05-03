@@ -34,3 +34,7 @@ Here's how to set it up:
 ```
 
 Simply replace all occurances of `__YOUR_PATH_TO_FLUX_HERE__`.
+
+---
+
+# To use the `LSP.sublime-settings` copy it into your User packages folder.

@@ -1,0 +1,9 @@
+{
+    "clients": {
+        "flux": {
+            "enabled": true,
+            "command": ["python", "C:\\Users\\kvthw\\Flux\\scripts\\flsp.py"],
+            "selector": "source.flux"
+        }
+    }
+}

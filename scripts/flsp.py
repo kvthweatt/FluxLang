@@ -153,6 +153,106 @@ def _diagnostic_from_exc(exc: Exception) -> lsp.Diagnostic:
     )
 
 
+def _semantic_diagnostics(program, symbol_table) -> List[lsp.Diagnostic]:
+    """
+    Walk the AST and emit diagnostics for semantic issues the parser doesn't
+    catch — currently: calls to functions that were never declared/defined.
+
+    Strategy
+    --------
+    1. Collect every 'using' namespace path from UsingStatement nodes so we
+       can replicate the namespace resolution that the real compiler does at
+       codegen time.
+    2. Walk every node recursively.  For each FunctionCall whose name is a
+       plain string (not a MethodCall / member-access), ask the parser's
+       own SymbolTable whether a FUNCTION entry exists under that name or
+       any of the active using-namespaces.
+    3. Skip names that look like template instantiations (contain '<') or
+       constructors (contain '__init') — those are resolved later.
+    """
+    diags: List[lsp.Diagnostic] = []
+
+    # ── imports we need from the compiler modules ──────────────────────────
+    try:
+        from fast import FunctionCall, UsingStatement, MethodCall
+        from ftypesys import SymbolKind
+    except Exception as exc:
+        log.debug("_semantic_diagnostics: cannot import fast/ftypesys: %s", exc)
+        return diags
+
+    # ── 1. gather active using-namespaces from the AST ─────────────────────
+    using_namespaces: List[str] = []
+
+    def _collect_using(node):
+        if isinstance(node, UsingStatement):
+            # UsingStatement stores the path as a double-underscore mangled
+            # string, e.g. "standard__io__console".
+            ns = getattr(node, 'namespace', None) or getattr(node, 'path', None)
+            if ns and ns not in using_namespaces:
+                using_namespaces.append(ns)
+
+    _walk_ast(program, _collect_using)
+
+    # ── 2. helper: is 'name' resolvable as a function? ─────────────────────
+    def _is_known_function(name: str) -> bool:
+        # Direct lookup (handles builtins, top-level defs, already-mangled names)
+        if symbol_table.lookup_function(name) is not None:
+            return True
+        # Try each active using-namespace (e.g. "standard__io__console__println")
+        for ns in using_namespaces:
+            qualified = f"{ns}__{name}"
+            if symbol_table.lookup_function(qualified) is not None:
+                return True
+        return False
+
+    # ── 3. walk and check every FunctionCall ───────────────────────────────
+    def _check_node(node):
+        if not isinstance(node, FunctionCall):
+            return
+        # name can be a str or an Identifier/expression node
+        raw = getattr(node, 'name', None) or getattr(node, 'func_name', None)
+        if not isinstance(raw, str):
+            return  # complex callee (e.g. function pointer) — skip
+        name = raw
+        # Skip special / compiler-generated names
+        if '<' in name or '__init' in name or '__exit' in name:
+            return
+        # Strip leading namespace prefix already embedded in the mangled name
+        # (the parser sometimes pre-mangles template/overload names)
+        if not _is_known_function(name):
+            line = getattr(node, 'line', 1)
+            col  = getattr(node, 'column', 1)
+            end_col = col + len(name)
+            diags.append(lsp.Diagnostic(
+                range    = _make_range(line, col, end_col),
+                message  = f"Undefined function: '{name}'",
+                severity = lsp.DiagnosticSeverity.Error,
+                source   = SERVER_NAME,
+            ))
+
+    _walk_ast(program, _check_node)
+    return diags
+
+
+def _walk_ast(node, visitor_fn) -> None:
+    """
+    Generic depth-first AST walk.  Calls visitor_fn(node) on every node.
+    Understands dataclass nodes (recurse into fields), lists, and tuples.
+    """
+    if node is None:
+        return
+    visitor_fn(node)
+    if isinstance(node, list):
+        for child in node:
+            _walk_ast(child, visitor_fn)
+    elif isinstance(node, tuple):
+        for child in node:
+            _walk_ast(child, visitor_fn)
+    elif hasattr(node, '__dataclass_fields__'):
+        for field_name in node.__dataclass_fields__:
+            _walk_ast(getattr(node, field_name, None), visitor_fn)
+
+
 def _parse_diagnostics(source: str, file_path: str) -> List[lsp.Diagnostic]:
     diags: List[lsp.Diagnostic] = []
     try:
@@ -174,7 +274,10 @@ def _parse_diagnostics(source: str, file_path: str) -> List[lsp.Diagnostic]:
         tokens       = lexer.tokenize()
         source_lines = preprocessed.splitlines(keepends=True)
         parser       = FluxParser(tokens, source_lines=source_lines)
-        parser.parse()
+        program      = parser.parse()
+
+        # Syntax clean — now do semantic checks
+        diags.extend(_semantic_diagnostics(program, parser.symbol_table))
 
     except ParseError as exc:
         diags.append(_diagnostic_from_exc(exc))
