@@ -10,5 +10,6 @@ def main() -> int
         println("Test1!");
         println("Test2!");
     };
+
     return 0;
 };
