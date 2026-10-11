@@ -201,6 +201,12 @@ extern
         LocalFree(void* x) -> void*,
         RtlExitUserProcess(u32 code) -> void;
 #endif;
+
+#ifdef __MACOS__
+    def !!
+        _NSGetArgc() -> int*,
+        _NSGetArgv() -> byte***;
+#endif;
 };
 
 #ifdef __LINUX__
@@ -302,10 +308,21 @@ def !!FRTStartup() -> int; // GO AWAY, SHOO
 ///                                       ///
 
 #ifdef __LINUX__
+global i64 FRT_ENTRY_SP;    // rsp captured at the top of _start
+
 def !!_start() -> void;
 
 def !!_start() -> void
 {
+    i64* slot = @FRT_ENTRY_SP;
+#ifdef __ARCH_X86_64__
+    // The offset FRTStartup applies to the captured value assumes the single 8-byte
+    // alignment push the compiler emits for this function. Do not add stack locals here.
+    volatile asm
+    {
+        movq %rsp, ($0)
+    } : : "r"(slot) : "memory";
+#endif;
     exit(FRTStartup());
     abort();
     noreturn;
@@ -488,6 +505,10 @@ def !!FRTStartup() -> int
 #ifdef __LINUX__
 def !!FRTStartup() -> int
 {
+    int return_code, argc;
+    i64* pargc;
+    byte** argv;
+
     // Initialize the Flux standard heap allocator
     // For reference, see runtime/redallocators.fx
     standard::memory::allocators::stdheap::table_init();
@@ -499,7 +520,22 @@ def !!FRTStartup() -> int
     };
 #endif; // FLUX_SHADOW_STACK
 
-    int return_code = main__0__ret_intE1();
+#ifdef __ARCH_X86_64__
+    // The kernel leaves argc at the entry rsp, followed by the argv pointers.
+    // FRT_ENTRY_SP was captured after _start's 8-byte alignment push.
+    pargc = (i64*)(FRT_ENTRY_SP + 8);
+    argc  = (int)*pargc;
+    argv  = (byte**)(FRT_ENTRY_SP + 16);
+#endif;
+
+    if (argc > 1)
+    {
+        return_code = main__2__intE1__byteE1_ptr2__ret_intE1(argc, argv);
+    }
+    else
+    {
+        return_code = main__0__ret_intE1();
+    };
 
 #ifdef FLUX_SHADOW_STACK
     fss_teardown();
@@ -520,7 +556,36 @@ def !!FRTStartup() -> int
 #ifdef __MACOS__
 def !!FRTStartup() -> int
 {
-    int return_code = main__0__ret_intE1();
+    int return_code, argc;
+    byte** argv;
+
+    // Initialize the Flux standard heap allocator
+    standard::memory::allocators::stdheap::table_init();
+
+#ifdef FLUX_SHADOW_STACK
+    if (!fss_init())
+    {
+        standard::io::console::print("WARNING: shadow stack allocation failed, continuing unprotected\n\0");
+    };
+#endif; // FLUX_SHADOW_STACK
+
+    // dyld has initialized libSystem before it calls the entry point
+    argc = *_NSGetArgc();
+    argv = *_NSGetArgv();
+
+    if (argc > 1)
+    {
+        return_code = main__2__intE1__byteE1_ptr2__ret_intE1(argc, argv);
+    }
+    else
+    {
+        return_code = main__0__ret_intE1();
+    };
+
+#ifdef FLUX_SHADOW_STACK
+    fss_teardown();
+#endif; // FLUX_SHADOW_STACK
+
     if (return_code != 0)
     {
         // Handle error
