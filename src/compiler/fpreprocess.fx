@@ -1,1701 +1,3113 @@
-// fpreprocess.fx
-// Flux source preprocessor -- translated from fpreprocess.py
+// Author: Karac V. Thweatt
+//
+// fpreprocess.fx - Flux preprocessor library (port of fpreprocess.py and fmacros.py)
+//
+// Usage from fxc.fx:
+//
+//     #import "fpreprocess.fx";
+//     using flux::preprocessor;
+//
+//     Preprocessor pp(path);
+//     defer pp.__exit();
+//     pp.set_srcdir(srcdir);        // FLUXC_SRCDIR, stdlib is searched under it
+//     pp.add_default_macros();      // fmacros.py predefined table
+//     if (!pp.process())
+//     {
+//         // pp.err_kind (PPError), pp.err_text() holds the message
+//     };
+//     pp.text_ptr(), pp.text_len()  // combined, substituted source
+//     pp.line_count                 // number of output lines
+//     pp.map_path(i), pp.map_lineno(i)   // line_map entry of output line i (0 based)
+//
+// The result of process() is the same text FXPreprocessor.process() returns.
+// The output is owned by the Preprocessor and stays valid until __exit().
 
-#import <standard.fx>, <types.fx>, <string_utilities.fx>, <argparse.fx>;
+#ifndef FLUX_STANDARD
+#import <standard.fx>;
+#endif;
 
-using standard::io::console,
-      standard::io::file,
-      standard::strings,
-      standard::strings::helpers,
-      standard::strings::manip,
-      argparse;
+#ifndef FLUX_STANDARD_FFI_FIO
+#import <runtime\ffifio.fx>;
+#endif;
 
-// ---------------------------------------------------------------------------
-// Capacity limits
-// ---------------------------------------------------------------------------
-#def MAX_FILES       256;
-#def MAX_LINES       65536;
-#def MAX_CONSTANTS   512;
-#def MAX_PSUBS       128;
-#def MAX_LIB_DIRS    64;
-#def MAX_DIR_STACK   64;
-#def MAX_BRANCHES    32;
-#def MAX_PSUB_PARAMS 16;
+using standard::io::file;
 
-// ---------------------------------------------------------------------------
-// Data structures
-// ---------------------------------------------------------------------------
+#ifndef FLUX_PREPROCESSOR
+#def FLUX_PREPROCESSOR 1;
 
-struct KVEntry
+#ifdef __WINDOWS__
+#def FLUX_PP_SEP 92;
+#else
+#def FLUX_PP_SEP 47;
+#endif;
+
+#def FLUX_PP_STRIDE 8;
+#def FLUX_PP_PATH_MAX 4096;
+#def FLUX_PP_MAX_DEPTH 64;
+
+namespace flux
 {
-    byte* key, value;
-};
-
-struct PSubParam
-{
-    byte* name;
-};
-
-struct PSub
-{
-    byte*                      name;
-    int                        param_count;
-    PSubParam[MAX_PSUB_PARAMS] params;
-    byte*                      body;
-};
-
-struct LineOrigin
-{
-    byte* filename;
-    int   lineno;
-};
-
-// ---------------------------------------------------------------------------
-// FXPreprocessor object
-// ---------------------------------------------------------------------------
-object FXPreprocessor
-{
-    byte* source_file;
-
-    byte*[MAX_FILES]     processed_files;
-    int                  processed_count;
-
-    byte*[MAX_LINES]     output_lines;
-    int                  output_count;
-
-    KVEntry[MAX_CONSTANTS] constants;
-    int                    constant_count;
-
-    PSub[MAX_PSUBS]      psubs;
-    int                  psub_count;
-
-    byte*[MAX_LIB_DIRS]  lib_dirs;
-    int                  lib_dir_count;
-
-    LineOrigin[MAX_LINES] line_map;
-
-    byte*[MAX_DIR_STACK] dir_stack;
-    int                  dir_stack_top;
-
-    byte* current_file;
-    int   current_local_lineno;
-
-    // -----------------------------------------------------------------------
-    def __init(byte* src) -> this
+    namespace preprocessor
     {
-        this.source_file  = src;
-        this.current_file = src;
-        return this;
-    };
-
-    def __expr() -> FXPreprocessor* { return this; };
-    def __exit() -> void { return; };
-
-    // -----------------------------------------------------------------------
-    // add_constant: register a compiler-injected constant before processing
-    // -----------------------------------------------------------------------
-    def add_constant(byte* key, byte* value) -> void
-    {
-        if (this.constant_count >= MAX_CONSTANTS) { return; };
-        this.constants[this.constant_count].key   = key;
-        this.constants[this.constant_count].value = value;
-        this.constant_count = this.constant_count + 1;
-    };
-
-    // -----------------------------------------------------------------------
-    // process: main entry point. Returns 0 on success.
-    // -----------------------------------------------------------------------
-    def process() -> int
-    {
-        if (this._process_file(this.source_file, 0) != 0)
+        extern
         {
-            return 1;
+            def !!getenv(byte* name) -> byte*;
         };
 
-        // Constant substitution passes until stable
-        bool replaced = true;
-        int  iteration;
-        byte* new_line;
-
-        while (replaced)
+        #ifdef __WINDOWS__
+        extern
         {
-            replaced  = false;
-            iteration = iteration + 1;
-            print(g"[PREPROCESSOR] constant substitution passes: ");
-            println(iteration);
+            def !!
+                _access(byte* path, int mode) -> int,
+                _fullpath(byte* absbuf, byte* relpath, size_t maxlen) -> byte*;
+        };
+        #else
+        extern
+        {
+            def !!
+                access(byte* path, int mode) -> int,
+                realpath(byte* path, byte* resolved) -> byte*;
+        };
+        #endif;
 
-            for (int li; li < this.output_count; li = li + 1)
+        enum PPError
+        {
+            NONE,
+            SYNTAX,
+            NOT_FOUND,
+            KEY,
+            RECURSION,
+            STOP,
+            ALLOC,
+            IO
+        };
+
+        // A list of source lines as (offset, length) slices over one text block.
+        struct LineList
+        {
+            byte* text;
+            int* off;
+            int* len;
+            int n;
+        };
+
+        // ===== BYTE HELPERS =====
+
+        def pp_cstrlen(byte* s) -> int
+        {
+            int n;
+            while (s[n] != 0) { n++; };
+            return n;
+        };
+
+        def pp_eq(byte* a, byte* b, int n) -> bool
+        {
+            int i;
+            while (i < n)
             {
-                new_line = this._substitute_constants(this.output_lines[li]);
-                if (strcmp(new_line, this.output_lines[li]) != 0)
-                {
-                    replaced = true;
-                    this.output_lines[li] = new_line;
-                };
+                if (a[i] != b[i]) { return false; };
+                i++;
             };
+            return true;
         };
 
-        if (iteration == 1)
+        // Byte at i, or -1 outside [0, n)
+        def pp_at(byte* s, int n, int i) -> int
         {
-            println(g"[PREPROCESSOR] Completed after 1 constant pass.");
-        }
-        else
-        {
-            print(g"[PREPROCESSOR] Completed after ");
-            print(iteration);
-            println(g" constant passes.");
+            if (i < 0) { return -1; };
+            if (i >= n) { return -1; };
+            return (int)s[i];
         };
 
-        // Write build/tmp.fx
-        file fh(g"build/tmp.fx\0", g"wb\0");
-        if (!fh.is_open())
+        def pp_find(byte* t, int lo, int hi, int ch) -> int
         {
-            println(g"[PREPROCESSOR] ERROR: Cannot open build/tmp.fx for writing");
-            return 1;
-        };
-
-        for (int li; li < this.output_count; li = li + 1)
-        {
-            fh.write_line(this.output_lines[li]);
-        };
-        fh.close();
-
-        println(g"[PREPROCESSOR] Generated: build/tmp.fx");
-        print(g"[PREPROCESSOR] Processed ");
-        print(this.processed_count);
-        println(g" file(s)");
-
-        return 0;
-    };
-
-    // -----------------------------------------------------------------------
-    // Internal: dedup guard
-    // -----------------------------------------------------------------------
-    def _already_processed(byte* path) -> bool
-    {
-        for (int k; k < this.processed_count; k = k + 1)
-        {
-            if (strcmp(this.processed_files[k], path) == 0) { return true; };
-        };
-        return false;
-    };
-
-    // -----------------------------------------------------------------------
-    // Path resolution
-    // mode: 0 = auto, 1 = local only, 2 = stdlib only
-    // Returns allocated resolved path, or null on failure.
-    // -----------------------------------------------------------------------
-    def _resolve(byte* filepath, int mode) -> byte*
-    {
-        // Stdlib search paths
-        byte* stdlib_root = g"src/stdlib\0";
-        byte*[5] subdirs;
-        subdirs[0] = g"src/stdlib\0";
-        subdirs[1] = g"src/stdlib/runtime\0";
-        subdirs[2] = g"src/stdlib/functions\0";
-        subdirs[3] = g"src/stdlib/builtins\0";
-        subdirs[4] = g"src/stdlib/utility\0";
-
-        if (mode == 2)
-        {
-            // Stdlib only
-            byte* candidate;
-            byte* full;
-            for (int k; k < 5; k = k + 1)
+            int i = lo;
+            while (i < hi)
             {
-                candidate = manip::concat(subdirs[k], g"/\0");
-                full = manip::concat(candidate, filepath);
-                ffree((u64)candidate);
-                if (fopen(full, g"rb\0") != (void*)0)
-                {
-                    return full;
-                };
-                ffree((u64)full);
+                if ((int)t[i] == ch) { return i; };
+                i++;
             };
-            return (byte*)0;
-        };
-
-        if (mode == 1 | mode == 0)
-        {
-            // 1. Top of dir_stack
-            if (this.dir_stack_top > 0)
-            {
-                byte* base = this.dir_stack[this.dir_stack_top - 1];
-                byte* sep  = manip::concat(base, g"/\0");
-                byte* full = manip::concat(sep, filepath);
-                ffree((u64)sep);
-                void* fh = fopen(full, g"rb\0");
-                if ((u64)fh != 0)
-                {
-                    fclose(fh);
-                    return full;
-                };
-                ffree((u64)full);
-            };
-
-            // 2. Root source file directory
-            int last_sep = helpers::find_char_last(this.source_file, '/');
-            if (last_sep >= 0)
-            {
-                byte* root_dir = manip::copy_n(this.source_file, last_sep + 1);
-                byte* full = manip::concat(root_dir, filepath);
-                ffree((u64)root_dir);
-                void* fh = fopen(full, g"rb\0");
-                if ((u64)fh != 0)
-                {
-                    fclose(fh);
-                    return full;
-                };
-                ffree((u64)full);
-            };
-
-            // 3. Direct path (CWD-relative)
-            void* fh = fopen(filepath, g"rb\0");
-            if ((u64)fh != 0)
-            {
-                fclose(fh);
-                return manip::copy_string(filepath);
-            };
-
-            // 4. Extra lib_dirs
-            byte* sep;
-            byte* full;
-            for (int k; k < this.lib_dir_count; k = k + 1)
-            {
-                sep  = manip::concat(this.lib_dirs[k], g"/\0");
-                full = manip::concat(sep, filepath);
-                ffree((u64)sep);
-                fh = fopen(full, g"rb\0");
-                if ((u64)fh != 0)
-                {
-                    fclose(fh);
-                    return full;
-                };
-                ffree((u64)full);
-            };
-
-            if (mode == 1) { return (byte*)0; };
-
-            // mode 0: fall through to stdlib
-            byte* sep2;
-            byte* full2;
-            for (int k; k < 5; k = k + 1)
-            {
-                sep2  = manip::concat(subdirs[k], g"/\0");
-                full2 = manip::concat(sep2, filepath);
-                ffree((u64)sep2);
-                fh = fopen(full2, g"rb\0");
-                if ((u64)fh != 0)
-                {
-                    fclose(fh);
-                    return full2;
-                };
-                ffree((u64)full2);
-            };
-        };
-
-        return (byte*)0;
-    };
-
-    // -----------------------------------------------------------------------
-    // _process_package: resolve .fpm/packages/<name>/package.json and process
-    // -----------------------------------------------------------------------
-    def _process_package(byte* pkg_name) -> int
-    {
-        byte* pkg_base = manip::concat(g".fpm/packages/\0", pkg_name);
-        byte* manifest = manip::concat(pkg_base, g"/package.json\0");
-
-        void* fh = fopen(manifest, g"rb\0");
-        if ((u64)fh == 0)
-        {
-            print(g"[PREPROCESSOR] ERROR: Package not found: ");
-            println(pkg_name);
-            ffree((u64)pkg_base);
-            ffree((u64)manifest);
-            return 1;
-        };
-
-        // Read package.json
-        fseek(fh, 0, SEEK_END);
-        int sz = ftell(fh);
-        fseek(fh, 0, SEEK_SET);
-        byte* buf = (byte*)fmalloc((u64)sz + 1);
-        fread(buf, 1, sz, fh);
-        fclose(fh);
-        buf[sz] = 0;
-        ffree((u64)manifest);
-
-        // Extract "entrypoint": "..." from JSON (simple scan)
-        byte* ep_key = strstr(buf, g"\"entrypoint\"\0");
-        if ((u64)ep_key == 0)
-        {
-            print(g"[PREPROCESSOR] ERROR: No entrypoint in package: ");
-            println(pkg_name);
-            ffree((u64)buf);
-            ffree((u64)pkg_base);
-            return 1;
-        };
-
-        byte* colon = strchr(ep_key, ':');
-        if ((u64)colon == 0)
-        {
-            ffree((u64)buf);
-            ffree((u64)pkg_base);
-            return 1;
-        };
-
-        colon = colon + 1;
-        while (colon[0] == ' ' | colon[0] == '\t') { colon = colon + 1; };
-        if (colon[0] != '"')
-        {
-            ffree((u64)buf);
-            ffree((u64)pkg_base);
-            return 1;
-        };
-        colon = colon + 1;  // skip opening quote
-
-        int eplen;
-        while (colon[eplen] != 0 & colon[eplen] != '"') { eplen = eplen + 1; };
-        byte* ep_rel = manip::copy_n(colon, eplen);
-        ffree((u64)buf);
-
-        byte* sep       = manip::concat(pkg_base, g"/\0");
-        byte* ep_full   = manip::concat(sep, ep_rel);
-        ffree((u64)sep);
-        ffree((u64)ep_rel);
-
-        if (this._already_processed(ep_full))
-        {
-            ffree((u64)pkg_base);
-            ffree((u64)ep_full);
-            return 0;
-        };
-
-        print(g"[PREPROCESSOR] Package import: ");
-        print(pkg_name);
-        print(g" -> ");
-        println(ep_full);
-
-        if (this.dir_stack_top < MAX_DIR_STACK)
-        {
-            this.dir_stack[this.dir_stack_top] = pkg_base;
-            this.dir_stack_top = this.dir_stack_top + 1;
-        };
-
-        int rc = this._process_file(ep_full, 1);
-
-        this.dir_stack_top = this.dir_stack_top - 1;
-        ffree((u64)ep_full);
-        return rc;
-    };
-
-    // -----------------------------------------------------------------------
-    // _process_file: read, strip comments, and process one file
-    // mode: 0 = auto, 1 = local, 2 = stdlib
-    // -----------------------------------------------------------------------
-    def _process_file(byte* filepath, int mode) -> int
-    {
-        byte* resolved = this._resolve(filepath, mode);
-        if ((u64)resolved == 0)
-        {
-            // Hint for local imports that should be stdlib
-            if (mode == 1)
-            {
-                byte* stdlib_check = this._resolve(filepath, 2);
-                if ((u64)stdlib_check != 0)
-                {
-                    print(g"[PREPROCESSOR] Could not find local import: ");
-                    println(filepath);
-                    print(g"#import \"");
-                    print(filepath);
-                    println(g"\";");
-                    println(g"--------^");
-                    print(g"#import <");
-                    print(filepath);
-                    println(g">; // try this");
-                    ffree((u64)stdlib_check);
-                    return 1;
-                };
-            };
-            print(g"[PREPROCESSOR] ERROR: File not found: ");
-            println(filepath);
-            return 1;
-        };
-
-        if (this._already_processed(resolved))
-        {
-            ffree((u64)resolved);
-            return 0;
-        };
-
-        if (this.processed_count < MAX_FILES)
-        {
-            this.processed_files[this.processed_count] = resolved;
-            this.processed_count = this.processed_count + 1;
-        };
-
-        print(g"[PREPROCESSOR] Processing: ");
-        println(filepath);
-
-        // Read file
-        void* fh = fopen(resolved, g"rb\0");
-        fseek(fh, 0, SEEK_END);
-        int sz = ftell(fh);
-        fseek(fh, 0, SEEK_SET);
-
-        byte* raw = (byte*)fmalloc((u64)sz + 2);
-        int bytes_read = fread(raw, 1, sz, fh);
-        fclose(fh);
-        raw[bytes_read] = 0;
-
-        // Strip UTF-8 BOM
-        byte* content = raw;
-        if ((byte)content[0] == (byte)0xEFb &
-            (byte)content[1] == (byte)0xBBb &
-            (byte)content[2] == (byte)0xBFb)
-        {
-            content = content + 3;
-        };
-
-        // Strip comments
-        byte* stripped = this._strip_comments(content);
-        ffree((u64)raw);
-
-        // Enforce semicolons on directives
-        if (this._check_directive_semicolons(stripped, resolved) != 0)
-        {
-            ffree((u64)stripped);
-            return 1;
-        };
-
-        // Save/restore context
-        byte* prev_file    = this.current_file;
-        int   prev_lineno  = this.current_local_lineno;
-        this.current_file  = resolved;
-
-        // Push this file's directory
-        int last_sep = helpers::find_char_last(resolved, '/');
-        if (last_sep >= 0 & this.dir_stack_top < MAX_DIR_STACK)
-        {
-            this.dir_stack[this.dir_stack_top] = manip::copy_n(resolved, last_sep + 1);
-            this.dir_stack_top = this.dir_stack_top + 1;
-        };
-
-        // Split into lines and process
-        string s(stripped, strlen(stripped));
-        byte** lines = s.split('\n');
-        ffree((u64)stripped);
-
-        int rc = 0;
-        int i  = 0;
-        int next;
-        while ((u64)lines[i] != 0)
-        {
-            this.current_local_lineno = i + 1;
-            next = this._process_line(lines, i);
-            if (next < 0) { rc = 1; break; };
-            i = next;
-        };
-
-        // Free split lines
-        for (int k; (u64)lines[k] != 0; k = k + 1) { ffree((u64)lines[k]); };
-        ffree((u64)lines);
-
-        if (last_sep >= 0)
-        {
-            ffree((u64)this.dir_stack[this.dir_stack_top - 1]);
-            this.dir_stack_top = this.dir_stack_top - 1;
-        };
-
-        this.current_file             = prev_file;
-        this.current_local_lineno     = prev_lineno;
-
-        return rc;
-    };
-
-    // -----------------------------------------------------------------------
-    // _check_directive_semicolons: pre-scan stripped content for missing ;
-    // -----------------------------------------------------------------------
-    def _check_directive_semicolons(byte* content, byte* filepath) -> int
-    {
-        string s(content, strlen(content));
-        byte** lines = s.split('\n');
-        int rc = 0;
-
-        string line;
-        byte* t;
-        bool is_directive;
-        byte[32] num;
-        for (int i; (u64)lines[i] != 0; i = i + 1)
-        {
-            line.set(lines[i]);
-            line.trim();
-            t = line.val();
-
-            is_directive =
-                helpers::starts_with(t, g"#import\0")  |
-                helpers::starts_with(t, g"#package\0") |
-                helpers::starts_with(t, g"#warn\0")    |
-                helpers::starts_with(t, g"#stop\0")    |
-                helpers::starts_with(t, g"#def\0")     |
-                helpers::starts_with(t, g"#dir\0");
-
-            if (is_directive & !helpers::ends_with(t, g";\0"))
-            {
-                i32str(i + 1, @num[0]);
-                print(g"[PREPROCESSOR] ERROR: Directive missing semicolon in ");
-                print(filepath);
-                print(g" at line ");
-                println(@num[0]);
-                rc = 1;
-                break;
-            };
-        };
-
-        for (int k; (u64)lines[k] != 0; k = k + 1) { ffree((u64)lines[k]); };
-        ffree((u64)lines);
-        return rc;
-    };
-
-    // -----------------------------------------------------------------------
-    // _emit_blank / _emit_line
-    // -----------------------------------------------------------------------
-    def _emit_blank() -> void
-    {
-        if (this.output_count >= MAX_LINES) { return; };
-        this.output_lines[this.output_count]          = g"\0";
-        this.line_map[this.output_count].filename     = this.current_file;
-        this.line_map[this.output_count].lineno       = this.current_local_lineno;
-        this.output_count = this.output_count + 1;
-    };
-
-    def _emit_line(byte* line) -> void
-    {
-        if (this.output_count >= MAX_LINES) { return; };
-        this.output_lines[this.output_count]          = manip::copy_string(line);
-        this.line_map[this.output_count].filename     = this.current_file;
-        this.line_map[this.output_count].lineno       = this.current_local_lineno;
-        this.output_count = this.output_count + 1;
-    };
-
-    // -----------------------------------------------------------------------
-    // _process_line: dispatch one line. Returns next index or -1 on error.
-    // lines is a null-terminated byte** from split('\n').
-    // -----------------------------------------------------------------------
-    def _process_line(byte** lines, int i) -> int
-    {
-        byte* line = lines[i];
-        string s(line);
-        s.trim();
-        byte* t = s.val();
-
-        // Empty line
-        if (t[0] == 0)
-        {
-            this._emit_blank();
-            return i + 1;
-        };
-
-        // #dir
-        if (helpers::starts_with(t, g"#dir\0"))
-        {
-            this._handle_dir(line);
-            this._emit_blank();
-            return i + 1;
-        };
-
-        // #psub  (collect continuation lines ending with #)
-        if (helpers::starts_with(t, g"#psub\0"))
-        {
-            byte* rest = manip::copy_string(t + 5);
-
-            string rs(rest);
-            rs.trim();
-            ffree((u64)rest);
-            rest = rs.val();
-
-            string next_s;
-            byte* joined;
-            byte* joined2;
-            while (helpers::ends_with(rest, g"#\0"))
-            {
-                // drop trailing #
-                rest[strlen(rest) - 1] = 0;
-                this._emit_blank();
-                i = i + 1;
-                if ((u64)lines[i] == 0) { break; };
-                this.current_local_lineno = i + 1;
-                next_s.set(lines[i]);
-                next_s.trim();
-                joined = manip::concat(rest, g" \0");
-                joined2 = manip::concat(joined, next_s.val());
-                ffree((u64)joined);
-                rest = joined2;
-            };
-
-            if (this._handle_psub(rest, i + 1) != 0) { return -1; };
-            this._emit_blank();
-            return i + 1;
-        };
-
-        // #def
-        if (helpers::starts_with(t, g"#def\0"))
-        {
-            this._handle_def(t);
-            this._emit_blank();
-            return i + 1;
-        };
-
-        // #ifnpsub (before #ifpsub to avoid prefix clash)
-        if (helpers::starts_with(t, g"#ifnpsub\0"))
-        {
-            byte* name = this._parse_cond_name(t + 8);
-            int next = this._process_conditional(lines, i, name, true, true);
-            ffree((u64)name);
-            return next;
-        };
-
-        // #ifpsub
-        if (helpers::starts_with(t, g"#ifpsub\0"))
-        {
-            byte* name = this._parse_cond_name(t + 7);
-            int next = this._process_conditional(lines, i, name, false, true);
-            ffree((u64)name);
-            return next;
-        };
-
-        // #ifdef
-        if (helpers::starts_with(t, g"#ifdef\0"))
-        {
-            byte* name = this._parse_cond_name(t + 6);
-            int next = this._process_conditional(lines, i, name, false, false);
-            ffree((u64)name);
-            return next;
-        };
-
-        // #ifndef
-        if (helpers::starts_with(t, g"#ifndef\0"))
-        {
-            byte* name = this._parse_cond_name(t + 7);
-            int next = this._process_conditional(lines, i, name, true, false);
-            ffree((u64)name);
-            return next;
-        };
-
-        // #package
-        if (helpers::starts_with(t, g"#package\0"))
-        {
-            byte* rest = manip::copy_string(t + 8);
-            helpers::trim_end(rest);
-            // strip trailing ;
-            int rlen = strlen(rest);
-            if (rlen > 0 & rest[rlen - 1] == ';') { rest[rlen - 1] = 0; };
-            string rs(rest);
-            rs.trim();
-            // comma-separated package names
-            byte** pkgs = rs.split(',');
-            string pname;
-            for (int k; (u64)pkgs[k] != 0; k = k + 1)
-            {
-                pname.set(pkgs[k]);
-                pname.trim();
-                if (pname.len() > 0)
-                {
-                    if (this._process_package(pname.val()) != 0)
-                    {
-                        ffree((u64)rest);
-                        for (int m; (u64)pkgs[m] != 0; m = m + 1) { ffree((u64)pkgs[m]); };
-                        ffree((u64)pkgs);
-                        return -1;
-                    };
-                };
-            };
-            for (int k; (u64)pkgs[k] != 0; k = k + 1) { ffree((u64)pkgs[k]); };
-            ffree((u64)pkgs);
-            ffree((u64)rest);
-            this._emit_blank();
-            return i + 1;
-        };
-
-        // #import
-        if (helpers::starts_with(t, g"#import\0"))
-        {
-            if (this._handle_import(line, i + 1) != 0) { return -1; };
-            this._emit_blank();
-            return i + 1;
-        };
-
-        // #warn
-        if (helpers::starts_with(t, g"#warn\0"))
-        {
-            byte* msg = this._extract_quoted(line);
-            if ((u64)msg != 0)
-            {
-                print(g"[PREPROCESSOR] ");
-                println(msg);
-                ffree((u64)msg);
-            };
-            this._emit_blank();
-            return i + 1;
-        };
-
-        // #stop
-        if (helpers::starts_with(t, g"#stop\0"))
-        {
-            byte* msg = this._extract_quoted(line);
-            if ((u64)msg != 0)
-            {
-                print(g"[PREPROCESSOR] ");
-                println(msg);
-                ffree((u64)msg);
-            };
-            println(g"Compilation failed, preprocessor stopped by constant.");
             return -1;
         };
 
-        // #endif
-        if (helpers::starts_with(t, g"#endif;\0"))
+        def pp_starts(byte* t, int lo, int hi, byte* lit, int ln) -> bool
         {
-            this._emit_blank();
-            return i + 1;
+            if (hi - lo < ln) { return false; };
+            return pp_eq(t + lo, lit, ln);
         };
 
-        // stray #else (handled inside _process_conditional)
-        if (strcmp(t, g"#else\0") == 0 | strcmp(t, g"#else;\0") == 0)
+        def pp_is_alpha_us(int c) -> bool
         {
-            this._emit_blank();
-            return i + 1;
+            return (c >= 'a' & c <= 'z') | (c >= 'A' & c <= 'Z') | c == '_';
         };
 
-        // Regular line
-        byte* sub = this._substitute_constants(line);
-        this._emit_line(sub);
-        ffree((u64)sub);
-        return i + 1;
-    };
-
-    // -----------------------------------------------------------------------
-    // _handle_dir
-    // -----------------------------------------------------------------------
-    def _handle_dir(byte* line) -> void
-    {
-        byte* path = this._extract_quoted(line);
-        if ((u64)path == 0) { return; };
-
-        // Normalize backslashes to forward slashes
-        for (int k; path[k] != 0; k = k + 1)
+        def pp_is_word(int c) -> bool
         {
-            if (path[k] == '\\') { path[k] = '/'; };
+            return (c >= 'a' & c <= 'z') | (c >= 'A' & c <= 'Z') | (c >= '0' & c <= '9') | c == '_';
         };
 
-        for (int k; k < this.lib_dir_count; k = k + 1)
+        // Characters that end a token in _substitute_constants
+        def pp_is_delim(int c) -> bool
         {
-            if (strcmp(this.lib_dirs[k], path) == 0) { ffree((u64)path); return; };
+            return c == '.' | c == ',' | c == ';' | c == ':' | c == '(' | c == ')'
+                 | c == '[' | c == ']' | c == '{' | c == '}' | c == '+' | c == '-'
+                 | c == '*' | c == '/' | c == '%' | c == '=' | c == '!' | c == '<'
+                 | c == '>' | c == '|' | c == '&' | c == '^' | c == '~';
         };
 
-        if (this.lib_dir_count < MAX_LIB_DIRS)
+        // Length in bytes of the Unicode whitespace character at s[i], 0 if none
+        // (the set str.isspace() accepts).
+        def pp_ws_fwd(byte* s, int n, int i) -> int
         {
-            this.lib_dirs[this.lib_dir_count] = path;
-            this.lib_dir_count = this.lib_dir_count + 1;
-            print(g"[PREPROCESSOR] Added library directory: ");
-            println(path);
-        };
-    };
-
-    // -----------------------------------------------------------------------
-    // _handle_def
-    // -----------------------------------------------------------------------
-    def _handle_def(byte* t) -> void
-    {
-        // t starts with "#def", already trimmed
-        byte* rest = t + 4;
-        while (rest[0] == ' ' | rest[0] == '\t') { rest = rest + 1; };
-
-        // name: first word
-        int ni;
-        while (rest[ni] != 0 & rest[ni] != ' ' & rest[ni] != '\t') { ni = ni + 1; };
-        byte* name = manip::copy_n(rest, ni);
-        rest = rest + ni;
-        while (rest[0] == ' ' | rest[0] == '\t') { rest = rest + 1; };
-
-        // value: remainder up to ;
-        int vi;
-        while (rest[vi] != 0 & rest[vi] != ';') { vi = vi + 1; };
-        byte* value = manip::copy_n(rest, vi);
-        string vs(value);
-        vs.trim();
-        ffree((u64)value);
-        value = manip::copy_string(vs.val());
-
-        if (name[0] == 0) { ffree((u64)name); ffree((u64)value); return; };
-
-        if (this.constant_count < MAX_CONSTANTS)
-        {
-            this.constants[this.constant_count].key   = name;
-            this.constants[this.constant_count].value = value;
-            this.constant_count = this.constant_count + 1;
-            print(g"[PREPROCESSOR] Defined constant: ");
-            print(name);
-            print(g" = ");
-            println(value);
-        };
-    };
-
-    // -----------------------------------------------------------------------
-    // _handle_psub
-    // -----------------------------------------------------------------------
-    def _handle_psub(byte* rest, int lineno) -> int
-    {
-        while (rest[0] == ' ' | rest[0] == '\t') { rest = rest + 1; };
-
-        int popen = helpers::find_char(rest, '(', 0);
-        if (popen == -1)
-        {
-            println(g"[PREPROCESSOR] ERROR: #psub missing parameter list");
-            return 1;
-        };
-
-        if (this.psub_count >= MAX_PSUBS) { return 0; };
-
-        PSub* pe = @this.psubs[this.psub_count];
-
-        byte* raw_name = manip::copy_n(rest, popen);
-        string ns(raw_name);
-        ns.trim();
-        ffree((u64)raw_name);
-        pe.name = manip::copy_string(ns.val());
-
-        int pclose = helpers::find_char(rest + popen, ')', 0);
-        if (pclose == -1)
-        {
-            println(g"[PREPROCESSOR] ERROR: #psub unclosed parameter list");
-            return 1;
-        };
-        pclose = pclose + popen;
-
-        byte* raw_params = manip::copy_n(rest + popen + 1, pclose - popen - 1);
-        string ps_str(raw_params);
-        ffree((u64)raw_params);
-        byte** param_tokens = ps_str.split(',');
-
-        pe.param_count = 0;
-        string pt;
-        for (int k; (u64)param_tokens[k] != 0; k = k + 1)
-        {
-            pt.set(param_tokens[k]);
-            pt.trim();
-            if (pt.len() > 0 & pe.param_count < MAX_PSUB_PARAMS)
+            if (i >= n) { return 0; };
+            int c = (int)s[i];
+            if (c == 32 | (c >= 9 & c <= 13) | (c >= 28 & c <= 31)) { return 1; };
+            if (c < 128) { return 0; };
+            int c1 = pp_at(s, n, i + 1);
+            int c2 = pp_at(s, n, i + 2);
+            if (c == 0xC2)
             {
-                pe.params[pe.param_count].name = manip::copy_string(pt.val());
-                pe.param_count = pe.param_count + 1;
+                if (c1 == 0x85 | c1 == 0xA0) { return 2; };
+                return 0;
             };
-            ffree((u64)param_tokens[k]);
-        };
-        ffree((u64)param_tokens);
-
-        byte* body_ptr = rest + pclose + 1;
-        while (body_ptr[0] == ' ' | body_ptr[0] == '\t') { body_ptr = body_ptr + 1; };
-        string bs(body_ptr);
-        bs.trim();
-        pe.body = manip::copy_string(bs.val());
-
-        this.psub_count = this.psub_count + 1;
-
-        print(g"[PREPROCESSOR] Defined PSUB: ");
-        print(pe.name);
-        print(g"(");
-        for (int k; k < pe.param_count; k = k + 1)
-        {
-            if (k > 0) { print(g", "); };
-            print(pe.params[k].name);
-        };
-        print(g") = ");
-        println(pe.body);
-
-        return 0;
-    };
-
-    // -----------------------------------------------------------------------
-    // _handle_import: dispatch #import <...> and #import "..."
-    // -----------------------------------------------------------------------
-    def _handle_import(byte* line, int lineno) -> int
-    {
-        // Find "#import" then scan rest of line for <> or "" tokens
-        byte* p = strstr(line, g"#import\0");
-        p = p + 7;
-
-        // Strip trailing semicolon and whitespace
-        byte* rest = manip::copy_string(p);
-        int rlen = strlen(rest);
-        if (rlen > 0 & rest[rlen - 1] == ';') { rest[rlen - 1] = 0; };
-        string rs(rest);
-        rs.trim();
-        ffree((u64)rest);
-        rest = rs.val();
-
-        int j    = 0;
-        int rlen2 = strlen(rest);
-        byte c;
-        int end;
-        byte* std_path;
-        string sp;
-        byte* local_path;
-        string lp;
-
-        while (j < rlen2)
-        {
-            c = rest[j];
-
-            if (c == '<')
+            if (c == 0xE1)
             {
-                j = j + 1;
-                end = helpers::find_char(rest, '>', j);
-                if (end == -1)
+                if (c1 == 0x9A & c2 == 0x80) { return 3; };
+                return 0;
+            };
+            if (c == 0xE2)
+            {
+                if (c1 == 0x80)
                 {
-                    println(g"[PREPROCESSOR] ERROR: Unterminated <> in #import");
-                    return 1;
+                    if ((c2 >= 0x80 & c2 <= 0x8A) | c2 == 0xA8 | c2 == 0xA9 | c2 == 0xAF) { return 3; };
+                    return 0;
                 };
-                std_path = manip::copy_n(rest + j, end - j);
-                sp.set(std_path);
-                sp.trim();
-                ffree((u64)std_path);
-                print(g"[PREPROCESSOR] Stdlib import: ");
-                println(sp.val());
-                if (this._process_file(sp.val(), 2) != 0) { return 1; };
-                j = end + 1;
-            }
-            elif (c == '"')
-            {
-                j = j + 1;
-                end = helpers::find_char(rest, '"', j);
-                if (end == -1)
-                {
-                    println(g"[PREPROCESSOR] ERROR: Unterminated \"\" in #import");
-                    return 1;
-                };
-                local_path = manip::copy_n(rest + j, end - j);
-                lp.set(local_path);
-                lp.trim();
-                ffree((u64)local_path);
-                print(g"[PREPROCESSOR] Local import: ");
-                println(lp.val());
-                if (this._process_file(lp.val(), 1) != 0) { return 1; };
-                j = end + 1;
-            }
-            else
-            {
-                j = j + 1;
+                if (c1 == 0x81 & c2 == 0x9F) { return 3; };
+                return 0;
             };
+            if (c == 0xE3)
+            {
+                if (c1 == 0x80 & c2 == 0x80) { return 3; };
+                return 0;
+            };
+            return 0;
         };
 
-        return 0;
-    };
-
-    // -----------------------------------------------------------------------
-    // _process_conditional: handle #ifdef/#ifndef/#ifpsub/#ifnpsub blocks
-    // Returns next line index past #endif, or -1 on error.
-    // -----------------------------------------------------------------------
-    def _process_conditional(byte** lines, int start_i,
-                              byte* cond_name, bool is_ifndef, bool check_macros) -> int
-    {
-        int entry_lineno = this.current_local_lineno;
-        this._emit_blank();
-
-        // Parallel branch storage: each branch has a bool condition and a
-        // range [start, start+len) into a flat collected array.
-        bool[MAX_BRANCHES] branch_cond;
-        int[MAX_BRANCHES]  branch_start;
-        int[MAX_BRANCHES]  branch_len;
-        int                branch_count;
-
-        byte*[MAX_LINES] collected;
-        int[MAX_LINES]   collected_origins;
-        int              collected_count = 0;
-
-        bool cur_cond        = this._eval_cond(cond_name, is_ifndef, check_macros);
-        int  cur_start       = 0;
-        int  depth           = 1;
-        bool has_else        = false;
-
-        int i = start_i + 1;
-        byte* line;
-        string s;
-        byte* t;
-        int orig_lineno;
-        bool branch_taken;
-        int bstart;
-        int bend;
-        int bj;
-        byte*[2] sub;
-        int next_inner;
-        byte* elif_rest;
-        int erlen;
-        string ers;
-        byte* elif_name;
-        bool  elif_invert;
-        while ((u64)lines[i] != 0)
+        // Length of the whitespace character that ends at s[j - 1], never reading below lo
+        def pp_ws_back(byte* s, int lo, int j) -> int
         {
-            line = lines[i];
-            s.set(line);
-            s.trim();
-            t = s.val();
-            orig_lineno = entry_lineno + (i - start_i);
-
-            // Track nesting
-            if (helpers::starts_with(t, g"#ifdef\0")   |
-                helpers::starts_with(t, g"#ifndef\0")  |
-                helpers::starts_with(t, g"#ifnpsub\0") |
-                helpers::starts_with(t, g"#ifpsub\0"))
+            if (j <= lo) { return 0; };
+            int c = (int)s[j - 1];
+            if (c == 32 | (c >= 9 & c <= 13) | (c >= 28 & c <= 31)) { return 1; };
+            if (c < 128) { return 0; };
+            int b1, b2;
+            if (j - 2 >= lo)
             {
-                depth = depth + 1;
+                b1 = (int)s[j - 2];
+                if (b1 == 0xC2 & (c == 0x85 | c == 0xA0)) { return 2; };
             };
-
-            if (helpers::starts_with(t, g"#endif;\0"))
+            if (j - 3 >= lo)
             {
-                depth = depth - 1;
-                if (depth == 0)
+                b2 = (int)s[j - 3];
+                b1 = (int)s[j - 2];
+                if (b2 == 0xE1 & b1 == 0x9A & c == 0x80) { return 3; };
+                if (b2 == 0xE2 & b1 == 0x80)
                 {
-                    // Flush last branch
-                    if (branch_count < MAX_BRANCHES)
-                    {
-                        branch_cond[branch_count]  = cur_cond;
-                        branch_start[branch_count] = cur_start;
-                        branch_len[branch_count]   = collected_count - cur_start;
-                        branch_count = branch_count + 1;
-                    };
-
-                    this._emit_blank();  // blank for #endif
-
-                    // Find first true branch and process it
-                    branch_taken = false;
-                    for (int bi; bi < branch_count; bi = bi + 1)
-                    {
-                        bstart = branch_start[bi];
-                        bend   = bstart + branch_len[bi];
-
-                        if (!branch_taken & branch_cond[bi])
-                        {
-                            branch_taken = true;
-                            bj = 0;
-                            while (bj < branch_len[bi])
-                            {
-                                this.current_local_lineno = collected_origins[bstart + bj];
-                                // Build a temporary null-terminated sub-array for _process_line
-                                sub[0] = collected[bstart + bj];
-                                sub[1] = (byte*)0;
-                                next_inner = this._process_line(@sub[0], 0);
-                                if (next_inner < 0) { return -1; };
-                                bj = bj + 1;
-                            };
-                        }
-                        else
-                        {
-                            // Excluded: emit blanks
-                            for (int bk = bstart; bk < bend; bk = bk + 1)
-                            {
-                                this.current_local_lineno = collected_origins[bk];
-                                this._emit_blank();
-                            };
-                        };
-                    };
-
-                    return i + 1;
-                }
-                else
-                {
-                    // Inner #endif -- collect as content
-                    if (collected_count < MAX_LINES)
-                    {
-                        collected[collected_count]         = line;
-                        collected_origins[collected_count] = orig_lineno;
-                        collected_count = collected_count + 1;
-                    };
-                    i = i + 1;
-                    continue;
+                    if ((c >= 0x80 & c <= 0x8A) | c == 0xA8 | c == 0xA9 | c == 0xAF) { return 3; };
                 };
+                if (b2 == 0xE2 & b1 == 0x81 & c == 0x9F) { return 3; };
+                if (b2 == 0xE3 & b1 == 0x80 & c == 0x80) { return 3; };
             };
-
-            if (depth == 1)
-            {
-                if (helpers::starts_with(t, g"#elif\0"))
-                {
-                    if (has_else)
-                    {
-                        println(g"[PREPROCESSOR] ERROR: #elif after #else");
-                        return -1;
-                    };
-                    // Flush current branch
-                    if (branch_count < MAX_BRANCHES)
-                    {
-                        branch_cond[branch_count]  = cur_cond;
-                        branch_start[branch_count] = cur_start;
-                        branch_len[branch_count]   = collected_count - cur_start;
-                        branch_count = branch_count + 1;
-                    };
-                    cur_start = collected_count;
-
-                    elif_rest = manip::copy_string(t + 5);
-                    helpers::trim_end(elif_rest);
-                    erlen = strlen(elif_rest);
-                    if (erlen > 0 & elif_rest[erlen - 1] == ';') { elif_rest[erlen - 1] = 0; };
-                    ers.set(elif_rest);
-                    ers.trim();
-                    ffree((u64)elif_rest);
-
-                    this._parse_ifdef_condition(ers.val(), @elif_name, @elif_invert);
-                    cur_cond = this._eval_cond(elif_name, elif_invert, check_macros);
-                    ffree((u64)elif_name);
-
-                    this._emit_blank();
-                    i = i + 1;
-                    continue;
-                };
-
-                if (strcmp(t, g"#else\0") == 0 | strcmp(t, g"#else;\0") == 0)
-                {
-                    if (has_else)
-                    {
-                        println(g"[PREPROCESSOR] ERROR: Multiple #else in one block");
-                        return -1;
-                    };
-                    has_else = true;
-                    if (branch_count < MAX_BRANCHES)
-                    {
-                        branch_cond[branch_count]  = cur_cond;
-                        branch_start[branch_count] = cur_start;
-                        branch_len[branch_count]   = collected_count - cur_start;
-                        branch_count = branch_count + 1;
-                    };
-                    cur_start = collected_count;
-                    cur_cond  = true;
-                    this._emit_blank();
-                    i = i + 1;
-                    continue;
-                };
-            };
-
-            // Ordinary content line
-            if (collected_count < MAX_LINES)
-            {
-                collected[collected_count]         = line;
-                collected_origins[collected_count] = orig_lineno;
-                collected_count = collected_count + 1;
-            };
-            i = i + 1;
+            return 0;
         };
 
-        println(g"[PREPROCESSOR] ERROR: Unclosed conditional block");
-        return -1;
-    };
-
-    // -----------------------------------------------------------------------
-    // _eval_cond: test cond_name defined/undefined
-    // -----------------------------------------------------------------------
-    def _eval_cond(byte* cond_name, bool is_ifndef, bool check_macros) -> bool
-    {
-        bool defined = false;
-        if (check_macros)
+        // str.strip() on t[*lo, *hi)
+        def pp_trim(byte* t, int* lo, int* hi) -> void
         {
-            for (int k; k < this.psub_count; k = k + 1)
+            int a = *lo;
+            int b = *hi;
+            int w;
+            while (a < b)
             {
-                if (strcmp(this.psubs[k].name, cond_name) == 0)
-                {
-                    defined = true;
-                    break;
-                };
+                w = pp_ws_fwd(t, b, a);
+                if (w == 0) { break; };
+                a = a + w;
             };
-        }
-        else
-        {
-            for (int k; k < this.constant_count; k = k + 1)
+            while (b > a)
             {
-                if (strcmp(this.constants[k].key, cond_name) == 0)
-                {
-                    defined = strcmp(this.constants[k].value, g"0\0") != 0;
-                    break;
-                };
+                w = pp_ws_back(t, a, b);
+                if (w == 0) { break; };
+                b = b - w;
             };
-        };
-        return is_ifndef ? !defined : defined;
-    };
-
-    // -----------------------------------------------------------------------
-    // _parse_ifdef_condition: parse SYMBOL / defined(SYMBOL) / !defined(SYMBOL)
-    // Writes allocated name into *out_name, sets *out_invert.
-    // -----------------------------------------------------------------------
-    def _parse_ifdef_condition(byte* expr, byte** out_name, bool* out_invert) -> void
-    {
-        string es(expr);
-        es.trim();
-        byte* e = es.val();
-        *out_invert = false;
-
-        if (e[0] == '!')
-        {
-            *out_invert = true;
-            e = e + 1;
-            while (e[0] == ' ' | e[0] == '\t') { e = e + 1; };
-        };
-
-        if (helpers::starts_with(e, g"defined\0"))
-        {
-            e = e + 7;
-            while (e[0] == ' ' | e[0] == '\t') { e = e + 1; };
-            if (e[0] == '(') { e = e + 1; };
-            int ci;
-            while (e[ci] != 0 & e[ci] != ')') { ci = ci + 1; };
-            byte* n = manip::copy_n(e, ci);
-            string ns(n);
-            ns.trim();
-            ffree((u64)n);
-            *out_name = manip::copy_string(ns.val());
+            *lo = a;
+            *hi = b;
             return;
         };
 
-        // Plain identifier
-        *out_name = manip::copy_string(e);
-    };
-
-    // -----------------------------------------------------------------------
-    // _parse_cond_name: extract bare name from "#ifdef FOO" or "#ifpsub FOO(...)"
-    // -----------------------------------------------------------------------
-    def _parse_cond_name(byte* rest) -> byte*
-    {
-        string s(rest);
-        s.trim();
-        byte* t = s.val();
-        int ci;
-        while (t[ci] != 0 & t[ci] != '(' & t[ci] != ' ' & t[ci] != '\t')
+        // Next whitespace separated token in t[pos, hi) (str.split()).
+        // Returns the end of the token, or -1 when there is none.
+        def pp_next_tok(byte* t, int hi, int pos, int* ts, int* te) -> int
         {
-            ci = ci + 1;
-        };
-        byte* n = manip::copy_n(t, ci);
-        string ns(n);
-        ns.trim();
-        ffree((u64)n);
-        return manip::copy_string(ns.val());
-    };
-
-    // -----------------------------------------------------------------------
-    // _strip_comments: strip // line comments and /// block comments.
-    // Preserves newlines inside block comments for accurate line numbers.
-    // Returns allocated string.
-    // -----------------------------------------------------------------------
-    def _strip_comments(byte* src) -> byte*
-    {
-        int n   = strlen(src);
-        byte* dst = (byte*)fmalloc((u64)n + 1);
-        int i = 0, di = 0;
-        bool in_string = false;
-        byte string_char = 0;
-
-        byte c;
-        while (i < n)
-        {
-            c = src[i];
-
-            if (in_string)
+            int p = pos;
+            int w;
+            while (p < hi)
             {
-                dst[di] = c; di = di + 1;
-                if (c == '\\' & i + 1 < n)
-                {
-                    i = i + 1;
-                    dst[di] = src[i]; di = di + 1;
-                }
-                elif (c == string_char)
-                {
-                    in_string = false;
-                };
-                i = i + 1;
-                continue;
+                w = pp_ws_fwd(t, hi, p);
+                if (w == 0) { break; };
+                p = p + w;
             };
-
-            if (c == '"' | c == '\'')
+            if (p >= hi) { return -1; };
+            *ts = p;
+            while (p < hi)
             {
-                in_string   = true;
-                string_char = c;
-                dst[di] = c; di = di + 1;
-                i = i + 1;
-                continue;
+                w = pp_ws_fwd(t, hi, p);
+                if (w != 0) { break; };
+                p++;
             };
-
-            // Block comment: ///
-            if (i + 2 < n & c == '/' & src[i+1] == '/' & src[i+2] == '/')
-            {
-                i = i + 3;
-                while (i < n)
-                {
-                    if (i + 2 < n & src[i] == '/' & src[i+1] == '/' & src[i+2] == '/')
-                    {
-                        i = i + 3;
-                        break;
-                    };
-                    if (src[i] == '\n') { dst[di] = '\n'; di = di + 1; };
-                    i = i + 1;
-                };
-                continue;
-            };
-
-            // Line comment: //
-            if (i + 1 < n & c == '/' & src[i+1] == '/')
-            {
-                while (i < n & src[i] != '\n') { i = i + 1; };
-                continue;
-            };
-
-            dst[di] = c; di = di + 1;
-            i = i + 1;
+            *te = p;
+            return p;
         };
 
-        dst[di] = 0;
-        return dst;
-    };
-
-    // -----------------------------------------------------------------------
-    // _expand_macros: expand #psub parameterized macros in a line.
-    // Returns allocated result string.
-    // -----------------------------------------------------------------------
-    def _expand_macros(byte* line, int depth) -> byte*
-    {
-        if (depth > 64 | this.psub_count == 0)
+        // End of the line that starts at p, following str.splitlines().
+        // *tl receives the terminator length (0 at end of text).
+        def pp_eol(byte* t, int n, int p, int* tl) -> int
         {
-            return manip::copy_string(line);
+            int j = p;
+            int c, c1, c2;
+            while (j < n)
+            {
+                c = (int)t[j];
+                if (c == 10 | c == 11 | c == 12 | c == 28 | c == 29 | c == 30)
+                {
+                    *tl = 1;
+                    return j;
+                };
+                if (c == 13)
+                {
+                    *tl = 1;
+                    if (pp_at(t, n, j + 1) == 10) { *tl = 2; };
+                    return j;
+                };
+                if (c == 0xC2)
+                {
+                    if (pp_at(t, n, j + 1) == 0x85)
+                    {
+                        *tl = 2;
+                        return j;
+                    };
+                };
+                if (c == 0xE2)
+                {
+                    c1 = pp_at(t, n, j + 1);
+                    c2 = pp_at(t, n, j + 2);
+                    if (c1 == 0x80 & (c2 == 0xA8 | c2 == 0xA9))
+                    {
+                        *tl = 3;
+                        return j;
+                    };
+                };
+                j++;
+            };
+            *tl = 0;
+            return n;
         };
 
-        int n       = strlen(line),
-            di, i,
-            j_em,
-            psub_idx,
-            k_em,
-            pdepth,
-            arg_count,
-            elen;
-
-        byte* dst    = (byte*)fmalloc((u64)(n * 4 + 256)),
-              name_em,
-              raw_args,
-              replaced_em,
-              expanded_em;
-
-        bool changed, in_str_em;
-        byte c_em,
-             str_ch_em,
-             ck_em;
-        PSub* pe_em;
-        byte** args_em;
-        string expanded_s,
-               arg_s;
-        while (i < n)
+        // Regex style \b between s[pos - 1] and s[pos] over ASCII word characters
+        def pp_boundary(byte* s, int n, int pos) -> bool
         {
-            c_em = line[i];
+            bool a = false;
+            bool b = false;
+            if (pos > 0) { a = pp_is_word((int)s[pos - 1]); };
+            if (pos < n) { b = pp_is_word((int)s[pos]); };
+            return (a & !b) | (!a & b);
+        };
 
-            if (c_em == '_' | helpers::is_alpha(c_em))
+        def pp_is_abs(byte* r, int n) -> bool
+        {
+            if (n <= 0) { return false; };
+            if ((int)r[0] == FLUX_PP_SEP) { return true; };
+            #ifdef __WINDOWS__
+            if (n >= 2)
             {
-                j_em = i;
-                while (j_em < n & (line[j_em] == '_' | helpers::is_alnum(line[j_em])))
+                if (r[1] == ':') { return true; };
+            };
+            #endif;
+            return false;
+        };
+
+        // Length of Path(p).parent for an absolute path (0 for a bare name)
+        def pp_parent_len(byte* p, int n) -> int
+        {
+            int i = n - 1;
+            while (i >= 0)
+            {
+                if ((int)p[i] == FLUX_PP_SEP) { break; };
+                i--;
+            };
+            if (i < 0) { return 0; };
+            if (i == 0) { return 1; };
+            #ifdef __WINDOWS__
+            if (i == 2)
+            {
+                if (p[1] == ':') { return 3; };
+            };
+            #endif;
+            return i;
+        };
+
+        def pp_exists(byte* p) -> bool
+        {
+            #ifdef __WINDOWS__
+            return _access(p, 0) == 0;
+            #else
+            return access(p, 0) == 0;
+            #endif;
+        };
+
+        def pp_hash(byte* s, int n) -> u64
+        {
+            u64 h = (u64)5381;
+            int i;
+            while (i < n)
+            {
+                h = h * (u64)33 + (u64)s[i];
+                i++;
+            };
+            return h;
+        };
+
+        // ===== GROWABLE BYTE BUFFER =====
+        // mem is always null terminated while it is allocated; len excludes the terminator.
+        // ok turns false once an allocation fails and stays false.
+
+        object Buf
+        {
+            byte* mem;
+            int len, cap;
+            bool ok;
+
+            def __init() -> this
+            {
+                this.len = 0;
+                this.cap = 256;
+                this.ok = true;
+                this.mem = (byte*)fmalloc((u64)this.cap);
+                if (this.mem == (byte*)0)
                 {
-                    j_em = j_em + 1;
-                };
-
-                name_em = manip::copy_n(line + i, j_em - i);
-
-                psub_idx = -1;
-                for (int pk; pk < this.psub_count; pk = pk + 1)
-                {
-                    if (strcmp(this.psubs[pk].name, name_em) == 0)
-                    {
-                        psub_idx = pk;
-                        break;
-                    };
-                };
-
-                if (psub_idx >= 0 & j_em < n & line[j_em] == '(')
-                {
-                    pe_em = @this.psubs[psub_idx];
-
-                    // Find matching closing paren
-                    k_em      = j_em + 1;
-                    pdepth = 1;
-                    in_str_em = false;
-                    str_ch_em = 0;
-                    while (k_em < n & pdepth > 0)
-                    {
-                        ck_em = line[k_em];
-                        if (in_str_em)
-                        {
-                            if (ck_em == '\\') { k_em = k_em + 1; }
-                            elif (ck_em == str_ch_em) { in_str_em = false; };
-                        }
-                        else
-                        {
-                            if (ck_em == '"' | ck_em == '\'') { in_str_em = true; str_ch_em = ck_em; }
-                            elif (ck_em == '(') { pdepth = pdepth + 1; }
-                            elif (ck_em == ')') { pdepth = pdepth - 1; };
-                        };
-                        k_em = k_em + 1;
-                    };
-
-                    // Split args on top-level commas
-                    raw_args = manip::copy_n(line + j_em + 1, k_em - 1 - (j_em + 1));
-                    args_em = this._split_macro_args(raw_args);
-                    ffree((u64)raw_args);
-
-                    arg_count = 0;
-                    while ((u64)args_em[arg_count] != 0) { arg_count = arg_count + 1; };
-
-                    if (arg_count != pe_em.param_count)
-                    {
-                        println(g"[PREPROCESSOR] ERROR: Macro argument count mismatch");
-                        for (int m; (u64)args_em[m] != 0; m = m + 1) { ffree((u64)args_em[m]); };
-                        ffree((u64)args_em);
-                        ffree((u64)name_em);
-                        // emit as-is
-                        for (int m = i; m < k_em; m = m + 1) { dst[di] = line[m]; di = di + 1; };
-                        i = k_em;
-                        continue;
-                    };
-
-                    // Substitute params into body (whole-word replacement)
-                    expanded_s.set(pe_em.body);
-                    for (int ai; ai < arg_count; ai = ai + 1)
-                    {
-                        arg_s.set(args_em[ai]);
-                        arg_s.trim();
-                        replaced_em = expanded_s.replace_all(pe_em.params[ai].name, arg_s.val());
-                        expanded_s.set(replaced_em);
-                        ffree((u64)replaced_em);
-                    };
-
-                    expanded_em = expanded_s.val();
-                    elen = strlen(expanded_em);
-                    for (int m; m < elen; m = m + 1) { dst[di] = expanded_em[m]; di = di + 1; };
-                    changed = true;
-
-                    for (int m; (u64)args_em[m] != 0; m = m + 1) { ffree((u64)args_em[m]); };
-                    ffree((u64)args_em);
-                    ffree((u64)name_em);
-                    i = k_em;
+                    this.ok = false;
+                    this.cap = 0;
                 }
                 else
                 {
-                    for (int m = i; m < j_em; m = m + 1) { dst[di] = line[m]; di = di + 1; };
-                    ffree((u64)name_em);
-                    i = j_em;
+                    this.mem[0] = (byte)0;
                 };
-            }
-            else
-            {
-                dst[di] = c_em; di = di + 1;
-                i = i + 1;
+                return this;
             };
-        };
 
-        dst[di] = 0;
-
-        if (changed)
-        {
-            byte* result = this._expand_macros(dst, depth + 1);
-            ffree((u64)dst);
-            return result;
-        };
-
-        return dst;
-    };
-
-    // -----------------------------------------------------------------------
-    // _split_macro_args: split raw arg string on top-level commas.
-    // Returns null-terminated byte** (caller frees each element and the array).
-    // -----------------------------------------------------------------------
-    def _split_macro_args(byte* raw) -> byte**
-    {
-        // Count top-level commas to size the result
-        int n     = strlen(raw);
-        int depth = 0;
-        bool in_str = false;
-        byte str_ch = 0;
-        int comma_count = 0;
-
-        byte c_sa;
-        for (int k; k < n; k = k + 1)
-        {
-            c_sa = raw[k];
-            if (in_str)
+            def __expr() -> Buf*
             {
-                if (c_sa == str_ch) { in_str = false; };
-            }
-            elif (c_sa == '"' | c_sa == '\'') { in_str = true; str_ch = c_sa; }
-            elif (c_sa == '(') { depth = depth + 1; }
-            elif (c_sa == ')') { depth = depth - 1; }
-            elif (c_sa == ',' & depth == 0) { comma_count = comma_count + 1; };
-        };
-
-        int capacity = comma_count + 2;
-        byte** result = (byte**)fmalloc((u64)capacity * 8);
-
-        int   part_idx = 0;
-        int   start    = 0;
-        depth = 0; in_str = false; str_ch = 0;
-
-        byte c_sa2;
-        for (int k; k <= n; k = k + 1)
-        {
-            c_sa2 = raw[k];
-            if (in_str)
-            {
-                if (c_sa2 == str_ch) { in_str = false; };
-            }
-            elif (c_sa2 == '"' | c_sa2 == '\'') { in_str = true; str_ch = c_sa2; }
-            elif (c_sa2 == '(') { depth = depth + 1; }
-            elif (c_sa2 == ')') { depth = depth - 1; }
-            elif ((c_sa2 == ',' & depth == 0) | c_sa2 == 0)
-            {
-                result[part_idx] = manip::copy_n(raw + start, k - start);
-                part_idx = part_idx + 1;
-                start    = k + 1;
+                return this;
             };
-        };
 
-        result[part_idx] = (byte*)0;
-        return result;
-    };
-
-    // -----------------------------------------------------------------------
-    // _substitute_constants: expand macros then substitute scalar constants.
-    // Returns allocated result string.
-    // -----------------------------------------------------------------------
-    def _substitute_constants(byte* line) -> byte*
-    {
-        // Expand parameterized macros first
-        byte* expanded = this._expand_macros(line, 0);
-
-        int n = strlen(expanded);
-        if (n == 0 | (n == 1 & expanded[0] == ';'))
-        {
-            return expanded;
-        };
-
-        byte* dst = (byte*)fmalloc((u64)n * 4 + 256),
-              tok_sc,
-              cv_sc,
-              clean_sc,
-              token_start = (byte*)0;
-        int di, token_pos,
-            clen_sc,
-            cvl_sc;
-        bool in_quotes,
-             is_delim_sc,
-             subbed_sc;
-
-        byte c_sc;
-
-        string cvs_sc;
-        // Walk char by char; flush identifier tokens at delimiters
-        for (int k; k <= n; k = k + 1)
-        {
-            c_sc = expanded[k];  // 0 at k==n
-
-            if (c_sc == '"') { in_quotes = !in_quotes; };
-
-            is_delim_sc = !in_quotes & (c_sc == 0 | c_sc == ' ' | c_sc == '\t' |
-                c_sc == '.' | c_sc == ',' | c_sc == ';' | c_sc == ':' |
-                c_sc == '(' | c_sc == ')' | c_sc == '[' | c_sc == ']' |
-                c_sc == '{' | c_sc == '}' | c_sc == '+' | c_sc == '-' |
-                c_sc == '*' | c_sc == '/' | c_sc == '%' | c_sc == '=' |
-                c_sc == '!' | c_sc == '<' | c_sc == '>' | c_sc == '|' |
-                c_sc == '&' | c_sc == '^' | c_sc == '~');
-
-            if (is_delim_sc)
+            def __exit() -> void
             {
-                if (token_pos > 0)
+                if (this.mem != (byte*)0) { ffree(this.mem); };
+                this.mem = (byte*)0;
+                this.len = 0;
+                this.cap = 0;
+                return;
+            };
+
+            def reserve(int extra) -> bool
+            {
+                if (!this.ok) { return false; };
+                int need = this.len + extra + 1;
+                if (need <= this.cap) { return true; };
+                int nc = this.cap;
+                if (nc < 256) { nc = 256; };
+                while (nc < need) { nc = nc * 2; };
+                u64 np;
+                if (this.mem == (byte*)0)
                 {
-                    // We have a token: token is expanded[k-token_pos .. k-1]
-                    tok_sc = manip::copy_n(expanded + k - token_pos, token_pos);
-                    subbed_sc = false;
-                    for (int ck; ck < this.constant_count; ck = ck + 1)
+                    np = (u64)fmalloc((u64)nc);
+                }
+                else
+                {
+                    np = frealloc((u64)this.mem, (size_t)nc);
+                };
+                if (np == (u64)0)
+                {
+                    this.ok = false;
+                    return false;
+                };
+                this.mem = (byte*)np;
+                this.cap = nc;
+                return true;
+            };
+
+            def put(int b) -> void
+            {
+                if (!this.reserve(1)) { return; };
+                this.mem[this.len] = (byte)b;
+                this.len++;
+                this.mem[this.len] = (byte)0;
+                return;
+            };
+
+            // s must not point into this buffer
+            def put_n(byte* s, int n) -> void
+            {
+                if (n <= 0) { return; };
+                if (!this.reserve(n)) { return; };
+                int i;
+                while (i < n)
+                {
+                    this.mem[this.len + i] = s[i];
+                    i++;
+                };
+                this.len = this.len + n;
+                this.mem[this.len] = (byte)0;
+                return;
+            };
+
+            def put_str(byte* s) -> void
+            {
+                this.put_n(s, pp_cstrlen(s));
+                return;
+            };
+
+            def put_int(int v) -> void
+            {
+                byte[16] tmp = noinit;
+                int n, k;
+                if (v < 0)
+                {
+                    this.put(45);
+                    v = 0 - v;
+                };
+                if (v == 0)
+                {
+                    this.put(48);
+                    return;
+                };
+                while (v > 0)
+                {
+                    tmp[n] = (byte)(48 + v % 10);
+                    v = v / 10;
+                    n++;
+                };
+                k = n;
+                while (k > 0)
+                {
+                    k--;
+                    this.put((int)tmp[k]);
+                };
+                return;
+            };
+
+            def clear() -> void
+            {
+                this.len = 0;
+                if (this.mem != (byte*)0) { this.mem[0] = (byte)0; };
+                return;
+            };
+
+            def pop() -> void
+            {
+                if (this.len > 0)
+                {
+                    this.len--;
+                    this.mem[this.len] = (byte)0;
+                };
+                return;
+            };
+
+            // str.rstrip()
+            def rstrip_ws() -> void
+            {
+                if (this.mem == (byte*)0) { return; };
+                int w;
+                while (this.len > 0)
+                {
+                    w = pp_ws_back(this.mem, 0, this.len);
+                    if (w == 0) { break; };
+                    this.len = this.len - w;
+                };
+                this.mem[this.len] = (byte)0;
+                return;
+            };
+
+            // FXPreprocessor._strip_comments. Appends the stripped text of c[0, n).
+            def put_stripped(byte* c, int n) -> void
+            {
+                int i, ch, string_char;
+                bool in_string = false;
+                while (i < n)
+                {
+                    ch = (int)c[i];
+                    if (in_string)
                     {
-                        if (strcmp(this.constants[ck].key, tok_sc) == 0)
+                        this.put(ch);
+                        if (ch == 92 & i + 1 < n)
                         {
-                            // Copy value, strip trailing ;
-                            cv_sc = manip::copy_string(this.constants[ck].value);
-                            cvl_sc = strlen(cv_sc);
-                            while (cvl_sc > 0 & cv_sc[cvl_sc - 1] == ';')
+                            i++;
+                            this.put((int)c[i]);
+                        }
+                        elif (ch == string_char)
+                        {
+                            in_string = false;
+                        };
+                        i++;
+                        continue;
+                    };
+
+                    if (ch == 34 | ch == 39)
+                    {
+                        in_string = true;
+                        string_char = ch;
+                        this.put(ch);
+                        i++;
+                        continue;
+                    };
+
+                    if (i + 2 < n)
+                    {
+                        if (ch == 47 & c[i + 1] == 47 & c[i + 2] == 47)
+                        {
+                            i = i + 3;
+                            while (i < n)
                             {
-                                cv_sc[cvl_sc - 1] = 0;
-                                cvl_sc = cvl_sc - 1;
+                                if (i + 2 < n)
+                                {
+                                    if (c[i] == 47 & c[i + 1] == 47 & c[i + 2] == 47)
+                                    {
+                                        i = i + 3;
+                                        break;
+                                    };
+                                };
+                                if (c[i] == 10) { this.put(10); };
+                                i++;
                             };
-                            cvs_sc.set(cv_sc);
-                            cvs_sc.trim();
-                            clean_sc = cvs_sc.val();
-                            clen_sc = strlen(clean_sc);
-                            for (int m; m < clen_sc; m = m + 1) { dst[di] = clean_sc[m]; di = di + 1; };
-                            ffree((u64)cv_sc);
-                            subbed_sc = true;
+                            continue;
+                        };
+                    };
+
+                    if (i + 1 < n)
+                    {
+                        if (ch == 47 & c[i + 1] == 47)
+                        {
+                            while (i < n)
+                            {
+                                if (c[i] == 10) { break; };
+                                i++;
+                            };
+                            continue;
+                        };
+                    };
+
+                    this.put(ch);
+                    i++;
+                };
+                return;
+            };
+
+            // re.sub(r'\b' + re.escape(pat) + r'\b', rep, src), literal replacement text
+            def put_replaced_word(byte* src, int sn, byte* pat, int pn, byte* rep, int rn) -> void
+            {
+                int i;
+                bool hit;
+                while (i < sn)
+                {
+                    hit = false;
+                    if (i + pn <= sn)
+                    {
+                        if (pp_eq(src + i, pat, pn))
+                        {
+                            if (pp_boundary(src, sn, i))
+                            {
+                                if (pp_boundary(src, sn, i + pn)) { hit = true; };
+                            };
+                        };
+                    };
+                    if (hit)
+                    {
+                        this.put_n(rep, rn);
+                        i = i + pn;
+                    }
+                    else
+                    {
+                        this.put((int)src[i]);
+                        i++;
+                    };
+                };
+                return;
+            };
+
+            // Replaces the content with a source file read the way
+            // _read_source_file does: UTF-8 with BOM removed, invalid sequences
+            // replaced by U+FFFD, CRLF and CR translated to LF.
+            // Returns -1 when the file cannot be read, 1 when replacements were
+            // made, 0 otherwise.
+            def load_file(byte* path) -> int
+            {
+                void* f = fopen(path, g"rb\0");
+                if (f == (void*)0) { return -1; };
+
+                fseek(f, 0, SEEK_END);
+                int size = ftell(f);
+                fseek(f, 0, SEEK_SET);
+                if (size < 0)
+                {
+                    fclose(f);
+                    return -1;
+                };
+
+                byte* raw = (byte*)fmalloc((u64)size + (u64)1);
+                if (raw == (byte*)0)
+                {
+                    fclose(f);
+                    return -1;
+                };
+                int got = fread(raw, 1, size, f);
+                fclose(f);
+                if (got < 0)
+                {
+                    ffree(raw);
+                    return -1;
+                };
+
+                this.clear();
+                int i, bad, c, need, lo, hi, k, b1;
+                if (got >= 3)
+                {
+                    if (raw[0] == 0xEF & raw[1] == 0xBB & raw[2] == 0xBF) { i = 3; };
+                };
+
+                while (i < got)
+                {
+                    c = (int)raw[i];
+                    if (c < 0x80)
+                    {
+                        if (c == 13)
+                        {
+                            this.put(10);
+                            if (pp_at(raw, got, i + 1) == 10) { i++; };
+                        }
+                        else
+                        {
+                            this.put(c);
+                        };
+                        i++;
+                        continue;
+                    };
+
+                    need = 0;
+                    lo = 0x80;
+                    hi = 0xBF;
+                    if (c >= 0xC2 & c <= 0xDF) { need = 1; }
+                    elif (c == 0xE0) { need = 2; lo = 0xA0; }
+                    elif (c >= 0xE1 & c <= 0xEC) { need = 2; }
+                    elif (c == 0xED) { need = 2; hi = 0x9F; }
+                    elif (c >= 0xEE & c <= 0xEF) { need = 2; }
+                    elif (c == 0xF0) { need = 3; lo = 0x90; }
+                    elif (c >= 0xF1 & c <= 0xF3) { need = 3; }
+                    elif (c == 0xF4) { need = 3; hi = 0x8F; };
+
+                    if (need == 0)
+                    {
+                        this.put(0xEF);
+                        this.put(0xBF);
+                        this.put(0xBD);
+                        bad = 1;
+                        i++;
+                        continue;
+                    };
+
+                    k = 1;
+                    while (k <= need)
+                    {
+                        b1 = pp_at(raw, got, i + k);
+                        if (b1 < lo | b1 > hi) { break; };
+                        lo = 0x80;
+                        hi = 0xBF;
+                        k++;
+                    };
+
+                    if (k > need)
+                    {
+                        this.put_n(raw + i, need + 1);
+                        i = i + need + 1;
+                    }
+                    else
+                    {
+                        this.put(0xEF);
+                        this.put(0xBF);
+                        this.put(0xBD);
+                        bad = 1;
+                        i = i + k;
+                    };
+                };
+
+                ffree(raw);
+                return bad;
+            };
+        };
+
+        // ===== GROWABLE INT ARRAY =====
+
+        object IntVec
+        {
+            int* arr;
+            int len, cap;
+            bool ok;
+
+            def __init() -> this
+            {
+                this.len = 0;
+                this.cap = 64;
+                this.ok = true;
+                this.arr = (int*)fmalloc((u64)this.cap * (u64)(sizeof(int) / 8));
+                if (this.arr == (int*)0)
+                {
+                    this.ok = false;
+                    this.cap = 0;
+                };
+                return this;
+            };
+
+            def __expr() -> IntVec*
+            {
+                return this;
+            };
+
+            def __exit() -> void
+            {
+                if (this.arr != (int*)0) { ffree((byte*)this.arr); };
+                this.arr = (int*)0;
+                this.len = 0;
+                this.cap = 0;
+                return;
+            };
+
+            def push(int v) -> void
+            {
+                if (!this.ok) { return; };
+                if (this.len >= this.cap)
+                {
+                    int nc = this.cap * 2;
+                    if (nc < 64) { nc = 64; };
+                    u64 np;
+                    if (this.arr == (int*)0)
+                    {
+                        np = (u64)fmalloc((u64)nc * (u64)(sizeof(int) / 8));
+                    }
+                    else
+                    {
+                        np = frealloc((u64)this.arr, (size_t)((u64)nc * (u64)(sizeof(int) / 8)));
+                    };
+                    if (np == (u64)0)
+                    {
+                        this.ok = false;
+                        return;
+                    };
+                    this.arr = (int*)np;
+                    this.cap = nc;
+                };
+                this.arr[this.len] = v;
+                this.len++;
+                return;
+            };
+
+            def pop() -> void
+            {
+                if (this.len > 0) { this.len--; };
+                return;
+            };
+
+            def clear() -> void
+            {
+                this.len = 0;
+                return;
+            };
+        };
+
+        // ===== STRING KEYED TABLE =====
+        // Open addressing over entries of FLUX_PP_STRIDE ints:
+        //   [0] key offset in keys   [1] key length
+        //   [2] value offset in vals [3] value length
+        //   [4] params offset in vals (psub parameters, each null terminated)
+        //   [5] params byte length   [6] params count   [7] unused
+
+        object SymTab
+        {
+            int* slots;
+            int* ents;
+            int slot_cap, ent_cap, count;
+            Buf keys;
+            Buf vals;
+            bool ok;
+
+            def __init() -> this
+            {
+                this.keys.__init();
+                this.vals.__init();
+                this.count = 0;
+                this.ok = true;
+                this.slot_cap = 256;
+                this.ent_cap = 64;
+                this.slots = (int*)fmalloc((u64)this.slot_cap * (u64)(sizeof(int) / 8));
+                this.ents = (int*)fmalloc((u64)this.ent_cap * (u64)FLUX_PP_STRIDE * (u64)(sizeof(int) / 8));
+                if (this.slots == (int*)0 | this.ents == (int*)0)
+                {
+                    this.ok = false;
+                    return this;
+                };
+                int z;
+                while (z < this.slot_cap)
+                {
+                    this.slots[z] = 0;
+                    z++;
+                };
+                return this;
+            };
+
+            def __expr() -> SymTab*
+            {
+                return this;
+            };
+
+            def __exit() -> void
+            {
+                if (this.slots != (int*)0) { ffree((byte*)this.slots); };
+                if (this.ents != (int*)0) { ffree((byte*)this.ents); };
+                this.slots = (int*)0;
+                this.ents = (int*)0;
+                this.keys.__exit();
+                this.vals.__exit();
+                return;
+            };
+
+            // Entry index of s[0, n), or -1
+            def find(byte* s, int n) -> int
+            {
+                if (!this.ok) { return -1; };
+                u64 h = pp_hash(s, n);
+                int idx = (int)(h % (u64)this.slot_cap);
+                int e, base, j;
+                bool same;
+                while (true)
+                {
+                    e = this.slots[idx];
+                    if (e == 0) { return -1; };
+                    e = e - 1;
+                    base = e * FLUX_PP_STRIDE;
+                    if (this.ents[base + 1] == n)
+                    {
+                        same = true;
+                        j = 0;
+                        while (j < n)
+                        {
+                            if (this.keys.mem[this.ents[base] + j] != s[j])
+                            {
+                                same = false;
+                                break;
+                            };
+                            j++;
+                        };
+                        if (same) { return e; };
+                    };
+                    idx++;
+                    if (idx >= this.slot_cap) { idx = 0; };
+                };
+                return -1;
+            };
+
+            // Links entry e into slots
+            def place(int e) -> void
+            {
+                int base = e * FLUX_PP_STRIDE;
+                u64 h = pp_hash(this.keys.mem + this.ents[base], this.ents[base + 1]);
+                int idx = (int)(h % (u64)this.slot_cap);
+                while (this.slots[idx] != 0)
+                {
+                    idx++;
+                    if (idx >= this.slot_cap) { idx = 0; };
+                };
+                this.slots[idx] = e + 1;
+                return;
+            };
+
+            def grow_slots() -> bool
+            {
+                int nc = this.slot_cap * 2;
+                int* ns = (int*)fmalloc((u64)nc * (u64)(sizeof(int) / 8));
+                if (ns == (int*)0)
+                {
+                    this.ok = false;
+                    return false;
+                };
+                int z, e;
+                while (z < nc)
+                {
+                    ns[z] = 0;
+                    z++;
+                };
+                ffree((byte*)this.slots);
+                this.slots = ns;
+                this.slot_cap = nc;
+                while (e < this.count)
+                {
+                    this.place(e);
+                    e++;
+                };
+                return true;
+            };
+
+            def grow_ents() -> bool
+            {
+                int nc = this.ent_cap * 2;
+                u64 np = frealloc((u64)this.ents, (size_t)((u64)nc * (u64)FLUX_PP_STRIDE * (u64)(sizeof(int) / 8)));
+                if (np == (u64)0)
+                {
+                    this.ok = false;
+                    return false;
+                };
+                this.ents = (int*)np;
+                this.ent_cap = nc;
+                return true;
+            };
+
+            // Entry index of s[0, n), created when missing. -1 on allocation failure.
+            // s must not point into this table.
+            def intern(byte* s, int n) -> int
+            {
+                int e = this.find(s, n);
+                if (e >= 0) { return e; };
+                if (!this.ok) { return -1; };
+                if (this.count + 1 > this.ent_cap)
+                {
+                    if (!this.grow_ents()) { return -1; };
+                };
+                if ((this.count + 1) * 2 > this.slot_cap)
+                {
+                    if (!this.grow_slots()) { return -1; };
+                };
+                e = this.count;
+                int base = e * FLUX_PP_STRIDE;
+                this.ents[base] = this.keys.len;
+                this.ents[base + 1] = n;
+                this.ents[base + 2] = 0;
+                this.ents[base + 3] = 0;
+                this.ents[base + 4] = 0;
+                this.ents[base + 5] = 0;
+                this.ents[base + 6] = 0;
+                this.ents[base + 7] = 0;
+                this.keys.put_n(s, n);
+                this.keys.put(0);
+                this.count++;
+                this.place(e);
+                return e;
+            };
+
+            def set_val(int e, byte* v, int n) -> void
+            {
+                int base = e * FLUX_PP_STRIDE;
+                this.ents[base + 2] = this.vals.len;
+                this.ents[base + 3] = n;
+                this.vals.put_n(v, n);
+                this.vals.put(0);
+                return;
+            };
+
+            // pcount parameter names stored as consecutive null terminated strings,
+            // plen bytes in total including the terminators
+            def set_params(int e, byte* p, int plen, int pcount) -> void
+            {
+                int base = e * FLUX_PP_STRIDE;
+                this.ents[base + 4] = this.vals.len;
+                this.ents[base + 5] = plen;
+                this.ents[base + 6] = pcount;
+                this.vals.put_n(p, plen);
+                return;
+            };
+
+            def val_ptr(int e) -> byte*
+            {
+                return this.vals.mem + this.ents[e * FLUX_PP_STRIDE + 2];
+            };
+
+            def val_len(int e) -> int
+            {
+                return this.ents[e * FLUX_PP_STRIDE + 3];
+            };
+
+            def par_ptr(int e) -> byte*
+            {
+                return this.vals.mem + this.ents[e * FLUX_PP_STRIDE + 4];
+            };
+
+            def par_count(int e) -> int
+            {
+                return this.ents[e * FLUX_PP_STRIDE + 6];
+            };
+        };
+
+        // ===== PREPROCESSOR =====
+
+        object Preprocessor
+        {
+            bool verbose;
+
+            Buf pool;       // persistent null terminated strings (paths), addressed by offset
+            Buf outb;       // output lines joined with LF
+            Buf errb;       // error message
+            Buf srcpath;
+            Buf fbuf;
+            Buf sc;         // _substitute_constants result
+            Buf ma;         // macro expansion, current text
+            Buf mc;         // macro expansion, pass output
+            Buf x1;
+            Buf x2;
+            Buf psb;        // #psub definition being collected
+            Buf pb;         // #psub parameter names
+            Buf tmp;
+            Buf passb;
+            Buf rbuf;       // last resolved path
+            Buf jb;         // last joined path
+            Buf js;         // json string value
+            Buf jv;         // package entrypoint
+
+            IntVec files;       // pool offset of every processed file, index is the file id
+            IntVec lib_dirs;    // pool offsets
+            IntVec dir_stack;   // pool offsets
+            IntVec map_file;    // line_map: file id per output line
+            IntVec map_line;    // line_map: local line number per output line
+            IntVec aoff;
+            IntVec alen;
+
+            SymTab processed;
+            SymTab consts;
+            SymTab psubs;
+
+            int line_count, cur_file, cur_lineno, err_kind;
+            int srcdir_off, cwd_off, root_dir_off;
+            int pc_off, pc_len;
+            bool pc_inv;
+            byte* pathbuf;
+            byte* sub_ptr;
+            byte* ex_ptr;
+            int sub_len, ex_len;
+
+            def __init(byte* source_file) -> this
+            {
+                this.pool.__init();
+                this.outb.__init();
+                this.errb.__init();
+                this.srcpath.__init();
+                this.fbuf.__init();
+                this.sc.__init();
+                this.ma.__init();
+                this.mc.__init();
+                this.x1.__init();
+                this.x2.__init();
+                this.psb.__init();
+                this.pb.__init();
+                this.tmp.__init();
+                this.passb.__init();
+                this.rbuf.__init();
+                this.jb.__init();
+                this.js.__init();
+                this.jv.__init();
+                this.files.__init();
+                this.lib_dirs.__init();
+                this.dir_stack.__init();
+                this.map_file.__init();
+                this.map_line.__init();
+                this.aoff.__init();
+                this.alen.__init();
+                this.processed.__init();
+                this.consts.__init();
+                this.psubs.__init();
+
+                this.verbose = false;
+                this.line_count = 0;
+                this.cur_file = -1;
+                this.cur_lineno = 0;
+                this.err_kind = 0;
+                this.root_dir_off = -1;
+                this.srcdir_off = -1;
+                this.cwd_off = -1;
+                this.sub_ptr = (byte*)0;
+                this.ex_ptr = (byte*)0;
+                this.sub_len = 0;
+                this.ex_len = 0;
+
+                this.srcpath.put_str(source_file);
+                this.pathbuf = (byte*)fmalloc((u64)FLUX_PP_PATH_MAX);
+                if (this.pathbuf == (byte*)0)
+                {
+                    this.err_kind = PPError.ALLOC;
+                    return this;
+                };
+
+                if (this.realpath_into(g".\0"))
+                {
+                    this.cwd_off = this.pool_add(this.rbuf.mem, this.rbuf.len);
+                }
+                else
+                {
+                    this.cwd_off = this.pool_add(g".\0", 1);
+                };
+                this.srcdir_off = this.cwd_off;
+                return this;
+            };
+
+            def __expr() -> Preprocessor*
+            {
+                return this;
+            };
+
+            def __exit() -> void
+            {
+                if (this.pathbuf != (byte*)0) { ffree(this.pathbuf); };
+                this.pathbuf = (byte*)0;
+                this.pool.__exit();
+                this.outb.__exit();
+                this.errb.__exit();
+                this.srcpath.__exit();
+                this.fbuf.__exit();
+                this.sc.__exit();
+                this.ma.__exit();
+                this.mc.__exit();
+                this.x1.__exit();
+                this.x2.__exit();
+                this.psb.__exit();
+                this.pb.__exit();
+                this.tmp.__exit();
+                this.passb.__exit();
+                this.rbuf.__exit();
+                this.jb.__exit();
+                this.js.__exit();
+                this.jv.__exit();
+                this.files.__exit();
+                this.lib_dirs.__exit();
+                this.dir_stack.__exit();
+                this.map_file.__exit();
+                this.map_line.__exit();
+                this.aoff.__exit();
+                this.alen.__exit();
+                this.processed.__exit();
+                this.consts.__exit();
+                this.psubs.__exit();
+                return;
+            };
+
+            // ===== ACCESSORS =====
+
+            def text_ptr() -> byte*
+            {
+                return this.outb.mem;
+            };
+
+            def text_len() -> int
+            {
+                return this.outb.len;
+            };
+
+            def err_text() -> byte*
+            {
+                return this.errb.mem;
+            };
+
+            // Resolved path of the file output line i came from
+            def map_path(int i) -> byte*
+            {
+                return this.pool.mem + this.files.arr[this.map_file.arr[i]];
+            };
+
+            // Local line number of output line i inside map_path(i)
+            def map_lineno(int i) -> int
+            {
+                return this.map_line.arr[i];
+            };
+
+            // Number of files processed
+            def file_count() -> int
+            {
+                return this.processed.count;
+            };
+
+            // ===== CONFIGURATION =====
+
+            def set_srcdir(byte* dir) -> void
+            {
+                this.srcdir_off = this.pool_add(dir, pp_cstrlen(dir));
+                return;
+            };
+
+            // compiler_constants[name] = value
+            def define(byte* name, byte* value) -> void
+            {
+                int e = this.consts.intern(name, pp_cstrlen(name));
+                if (e < 0) { return; };
+                this.consts.set_val(e, value, pp_cstrlen(value));
+                return;
+            };
+
+            // fmacros.build_compiler_macros with the host as target and the
+            // flux_config.cfg defaults (default_byte_width 8, debug and
+            // optimization_level unset).
+            def add_default_macros() -> void
+            {
+                this.define(g"__FLUX__\0", g"1\0");
+                this.define(g"__FLUX_MAJOR__\0", g"1\0");
+                this.define(g"__FLUX_MINOR__\0", g"0\0");
+                this.define(g"__FLUX_PATCH__\0", g"0\0");
+                this.define(g"__FLUX_VERSION__\0", g"1\0");
+                this.define(g"__LLVM__\0", g"1\0");
+
+                this.define(g"__ARCH_X86__\0", g"0\0");
+                this.define(g"__ARCH_X86_64__\0", g"0\0");
+                this.define(g"__ARCH_ARM__\0", g"0\0");
+                this.define(g"__ARCH_ARM64__\0", g"0\0");
+                this.define(g"__ARCH_RISCV__\0", g"0\0");
+
+                this.define(g"__WINDOWS__\0", g"0\0");
+                this.define(g"__LINUX__\0", g"0\0");
+                this.define(g"__MACOS__\0", g"0\0");
+                this.define(g"__POSIX__\0", g"0\0");
+
+                this.define(g"__LITTLE_ENDIAN__\0", g"0\0");
+                this.define(g"__BIG_ENDIAN__\0", g"1\0");
+                this.define(g"__SIZEOF_PTR__\0", g"8\0");
+                this.define(g"__SIZEOF_INT__\0", g"4\0");
+                this.define(g"__SIZEOF_LONG__\0", g"8\0");
+                this.define(g"__BYTE_WIDTH__\0", g"8\0");
+
+                this.define(g"__DEBUG__\0", g"0\0");
+                this.define(g"__RELEASE__\0", g"0\0");
+                this.define(g"__OPTIMIZE__\0", g"0\0");
+
+                #ifdef __WINDOWS__
+                this.define(g"__WINDOWS__\0", g"1\0");
+                this.define(g"__WIN32__\0", g"1\0");
+                    #ifdef __ARCH_X86_64__
+                    this.define(g"__WIN64__\0", g"1\0");
+                    #else
+                    this.define(g"__WIN64__\0", g"0\0");
+                    #endif;
+                #elif __MACOS__
+                this.define(g"__MACOS__\0", g"1\0");
+                this.define(g"__APPLE__\0", g"1\0");
+                this.define(g"__MACH__\0", g"1\0");
+                this.define(g"__POSIX__\0", g"1\0");
+                #else
+                this.define(g"__LINUX__\0", g"1\0");
+                this.define(g"__UNIX__\0", g"1\0");
+                this.define(g"__POSIX__\0", g"1\0");
+                this.define(g"__gnu_linux__\0", g"1\0");
+                #endif;
+
+                #ifdef __ARCH_X86_64__
+                this.define(g"__ARCH_X86_64__\0", g"1\0");
+                this.define(g"__x86_64__\0", g"1\0");
+                this.define(g"__amd64__\0", g"1\0");
+                #elif __ARCH_X86__
+                this.define(g"__ARCH_X86__\0", g"1\0");
+                this.define(g"__i386__\0", g"1\0");
+                this.define(g"__i686__\0", g"1\0");
+                #elif __ARCH_ARM64__
+                this.define(g"__ARCH_ARM64__\0", g"1\0");
+                this.define(g"__arm64__\0", g"1\0");
+                this.define(g"__aarch64__\0", g"1\0");
+                #endif;
+                return;
+            };
+
+            // ===== STRINGS, ERRORS, OUTPUT =====
+
+            // Appends s[0, n) to the pool as a null terminated string, returns its offset.
+            // s must not point into the pool.
+            def pool_add(byte* s, int n) -> int
+            {
+                int off = this.pool.len;
+                this.pool.put_n(s, n);
+                this.pool.put(0);
+                return off;
+            };
+
+            def e_begin(int kind) -> void
+            {
+                this.err_kind = kind;
+                this.errb.clear();
+                return;
+            };
+
+            // Prints a + s[0, n) + b on one line
+            def vline(byte* a, byte* s, int n, byte* b) -> void
+            {
+                this.tmp.clear();
+                this.tmp.put_str(a);
+                this.tmp.put_n(s, n);
+                this.tmp.put_str(b);
+                standard::io::console::println(this.tmp.mem);
+                return;
+            };
+
+            // Appends a line to the output together with its line_map entry
+            def emit(byte* s, int n, int lineno) -> void
+            {
+                if (this.line_count > 0) { this.outb.put(10); };
+                this.outb.put_n(s, n);
+                this.map_file.push(this.cur_file);
+                this.map_line.push(lineno);
+                this.line_count++;
+                return;
+            };
+
+            def emit_blank(int lineno) -> void
+            {
+                this.emit(g"\0", 0, lineno);
+                return;
+            };
+
+            def alloc_ok() -> bool
+            {
+                if (!this.pool.ok | !this.outb.ok | !this.errb.ok | !this.fbuf.ok | !this.sc.ok) { return false; };
+                if (!this.ma.ok | !this.mc.ok | !this.x1.ok | !this.x2.ok | !this.psb.ok) { return false; };
+                if (!this.pb.ok | !this.tmp.ok | !this.passb.ok | !this.rbuf.ok | !this.jb.ok) { return false; };
+                if (!this.js.ok | !this.jv.ok | !this.files.ok | !this.lib_dirs.ok | !this.dir_stack.ok) { return false; };
+                if (!this.map_file.ok | !this.map_line.ok | !this.aoff.ok | !this.alen.ok) { return false; };
+                if (!this.processed.ok | !this.consts.ok | !this.psubs.ok) { return false; };
+                return true;
+            };
+
+            // ===== PATHS =====
+
+            // Path.resolve() of p into rbuf. False when p does not exist.
+            #ifdef __WINDOWS__
+            def realpath_into(byte* p) -> bool
+            {
+                byte* r = _fullpath(this.pathbuf, p, (size_t)FLUX_PP_PATH_MAX);
+                if (r == (byte*)0) { return false; };
+                this.rbuf.clear();
+                this.rbuf.put_str(this.pathbuf);
+                return true;
+            };
+            #else
+            def realpath_into(byte* p) -> bool
+            {
+                byte* r = realpath(p, this.pathbuf);
+                if (r == (byte*)0) { return false; };
+                this.rbuf.clear();
+                this.rbuf.put_str(this.pathbuf);
+                return true;
+            };
+            #endif;
+
+            // Path(base) / rel into jb
+            def join_to(byte* base, int bn, byte* rel, int rn) -> void
+            {
+                this.jb.clear();
+                if (pp_is_abs(rel, rn))
+                {
+                    this.jb.put_n(rel, rn);
+                    return;
+                };
+                this.jb.put_n(base, bn);
+                if (bn > 0)
+                {
+                    if ((int)base[bn - 1] != FLUX_PP_SEP) { this.jb.put(FLUX_PP_SEP); };
+                };
+                this.jb.put_n(rel, rn);
+                return;
+            };
+
+            // (base / rel).exists() then resolve into rbuf
+            def try_candidate(byte* base, int bn, byte* rel, int rn) -> bool
+            {
+                this.join_to(base, bn, rel, rn);
+                if (!pp_exists(this.jb.mem)) { return false; };
+                return this.realpath_into(this.jb.mem);
+            };
+
+            // FXPreprocessor._resolve_path_local
+            def resolve_local(byte* fp, int n) -> bool
+            {
+                byte* d;
+                int k;
+                if (this.dir_stack.len > 0)
+                {
+                    d = this.pool.mem + this.dir_stack.arr[this.dir_stack.len - 1];
+                    if (this.try_candidate(d, pp_cstrlen(d), fp, n)) { return true; };
+                };
+
+                d = this.pool.mem + this.root_dir_off;
+                if (this.try_candidate(d, pp_cstrlen(d), fp, n)) { return true; };
+
+                d = this.pool.mem + this.cwd_off;
+                if (this.try_candidate(d, pp_cstrlen(d), fp, n)) { return true; };
+
+                while (k < this.lib_dirs.len)
+                {
+                    d = this.pool.mem + this.lib_dirs.arr[k];
+                    if (this.try_candidate(d, pp_cstrlen(d), fp, n)) { return true; };
+                    k++;
+                };
+                return false;
+            };
+
+            // FXPreprocessor._resolve_path_stdlib: srcdir/src/stdlib and its
+            // runtime, functions, builtins and utility folders
+            def resolve_stdlib(byte* fp, int n) -> bool
+            {
+                byte* sd = this.pool.mem + this.srcdir_off;
+                int w;
+                while (w < 5)
+                {
+                    this.x1.clear();
+                    this.x1.put_str(sd);
+                    this.x1.put(FLUX_PP_SEP);
+                    this.x1.put_str(g"src\0");
+                    this.x1.put(FLUX_PP_SEP);
+                    this.x1.put_str(g"stdlib\0");
+                    if (w > 0)
+                    {
+                        this.x1.put(FLUX_PP_SEP);
+                        if (w == 1) { this.x1.put_str(g"runtime\0"); }
+                        elif (w == 2) { this.x1.put_str(g"functions\0"); }
+                        elif (w == 3) { this.x1.put_str(g"builtins\0"); }
+                        else { this.x1.put_str(g"utility\0"); };
+                    };
+                    if (this.try_candidate(this.x1.mem, this.x1.len, fp, n)) { return true; };
+                    w++;
+                };
+                return false;
+            };
+
+            // FXPreprocessor._resolve_path
+            def resolve_default(byte* fp, int n) -> bool
+            {
+                if (pp_exists(fp))
+                {
+                    if (this.realpath_into(fp)) { return true; };
+                };
+                if (this.resolve_local(fp, n)) { return true; };
+                return this.resolve_stdlib(fp, n);
+            };
+
+            // ===== #package =====
+
+            def json_ws(byte* t, int n, int p) -> int
+            {
+                int c = pp_at(t, n, p);
+                while (c == 32 | c == 9 | c == 10 | c == 13)
+                {
+                    p++;
+                    c = pp_at(t, n, p);
+                };
+                return p;
+            };
+
+            def json_hex4(byte* t, int n, int p) -> int
+            {
+                int v, k, c;
+                while (k < 4)
+                {
+                    c = pp_at(t, n, p + k);
+                    v = v * 16;
+                    if (c >= '0' & c <= '9') { v = v + (c - 48); }
+                    elif (c >= 'A' & c <= 'F') { v = v + (c - 55); }
+                    elif (c >= 'a' & c <= 'f') { v = v + (c - 87); }
+                    else { return -1; };
+                    k++;
+                };
+                return v;
+            };
+
+            // Reads the JSON string whose opening quote is at t[p] into js.
+            // Returns the position after the closing quote, or -1.
+            def json_string(byte* t, int n, int p) -> int
+            {
+                this.js.clear();
+                if (pp_at(t, n, p) != 34) { return -1; };
+                p++;
+                int c, h, lo;
+                while (p < n)
+                {
+                    c = (int)t[p];
+                    if (c == 34) { return p + 1; };
+                    if (c == 92)
+                    {
+                        p++;
+                        c = pp_at(t, n, p);
+                        if (c == 'n') { this.js.put(10); }
+                        elif (c == 't') { this.js.put(9); }
+                        elif (c == 'r') { this.js.put(13); }
+                        elif (c == 'b') { this.js.put(8); }
+                        elif (c == 'f') { this.js.put(12); }
+                        elif (c == 'u')
+                        {
+                            h = this.json_hex4(t, n, p + 1);
+                            if (h < 0) { return -1; };
+                            p = p + 4;
+                            if (h >= 0xD800 & h <= 0xDBFF)
+                            {
+                                if (pp_at(t, n, p + 1) == 92 & pp_at(t, n, p + 2) == 'u')
+                                {
+                                    lo = this.json_hex4(t, n, p + 3);
+                                    if (lo >= 0xDC00 & lo <= 0xDFFF)
+                                    {
+                                        h = 0x10000 + (h - 0xD800) * 0x400 + (lo - 0xDC00);
+                                        p = p + 6;
+                                    };
+                                };
+                            };
+                            if (h < 0x80) { this.js.put(h); }
+                            elif (h < 0x800)
+                            {
+                                this.js.put(0xC0 + h / 64);
+                                this.js.put(0x80 + h % 64);
+                            }
+                            elif (h < 0x10000)
+                            {
+                                this.js.put(0xE0 + h / 4096);
+                                this.js.put(0x80 + (h / 64) % 64);
+                                this.js.put(0x80 + h % 64);
+                            }
+                            else
+                            {
+                                this.js.put(0xF0 + h / 262144);
+                                this.js.put(0x80 + (h / 4096) % 64);
+                                this.js.put(0x80 + (h / 64) % 64);
+                                this.js.put(0x80 + h % 64);
+                            };
+                        }
+                        elif (c < 0) { return -1; }
+                        else { this.js.put(c); };
+                        p++;
+                        continue;
+                    };
+                    this.js.put(c);
+                    p++;
+                };
+                return -1;
+            };
+
+            // Position after the JSON value starting at t[p], or -1
+            def json_skip(byte* t, int n, int p) -> int
+            {
+                p = this.json_ws(t, n, p);
+                int c = pp_at(t, n, p);
+                int depth;
+                if (c == 34) { return this.json_string(t, n, p); };
+                if (c == '{' | c == '[')
+                {
+                    depth = 0;
+                    while (p < n)
+                    {
+                        c = (int)t[p];
+                        if (c == 34)
+                        {
+                            p = this.json_string(t, n, p);
+                            if (p < 0) { return -1; };
+                            continue;
+                        };
+                        if (c == '{' | c == '[') { depth++; };
+                        if (c == '}' | c == ']')
+                        {
+                            depth--;
+                            if (depth == 0) { return p + 1; };
+                        };
+                        p++;
+                    };
+                    return -1;
+                };
+                while (p < n)
+                {
+                    c = (int)t[p];
+                    if (c == ',' | c == '}' | c == ']' | c == 32 | c == 9 | c == 10 | c == 13) { break; };
+                    p++;
+                };
+                return p;
+            };
+
+            // Scans the JSON object at t[p] for the keys "entries" and "entrypoint".
+            // Sets jv to the string value of "entrypoint" when present as a string.
+            // want_entries = 1 also returns the offset of the "entries" value in this.pc_off
+            // (-1 when absent). Returns 0 on a malformed object.
+            def json_object(byte* t, int n, int p, int want_entries) -> int
+            {
+                int vs, nx;
+                bool is_ep, is_en;
+                this.jv.clear();
+                this.pc_off = -1;
+                p = this.json_ws(t, n, p);
+                if (pp_at(t, n, p) != '{') { return 0; };
+                p++;
+                while (true)
+                {
+                    p = this.json_ws(t, n, p);
+                    if (pp_at(t, n, p) == '}') { return 1; };
+                    if (pp_at(t, n, p) == ',')
+                    {
+                        p++;
+                        continue;
+                    };
+                    p = this.json_string(t, n, p);
+                    if (p < 0) { return 0; };
+                    is_ep = this.js.len == 10 & pp_eq(this.js.mem, g"entrypoint\0", 10);
+                    is_en = this.js.len == 7 & pp_eq(this.js.mem, g"entries\0", 7);
+                    p = this.json_ws(t, n, p);
+                    if (pp_at(t, n, p) != ':') { return 0; };
+                    p = this.json_ws(t, n, p + 1);
+                    vs = p;
+                    if (is_ep)
+                    {
+                        this.jv.clear();
+                        if (pp_at(t, n, p) == 34)
+                        {
+                            nx = this.json_string(t, n, p);
+                            if (nx < 0) { return 0; };
+                            this.jv.put_n(this.js.mem, this.js.len);
+                            p = nx;
+                            continue;
+                        };
+                    };
+                    if (is_en)
+                    {
+                        this.pc_off = vs;
+                    };
+                    p = this.json_skip(t, n, p);
+                    if (p < 0) { return 0; };
+                };
+                return 0;
+            };
+
+            // FXPreprocessor._process_package. name is name_len bytes at text + name_off.
+            def process_package(byte* text, int name_off, int name_len) -> bool
+            {
+                Buf man();
+                defer man.__exit();
+                int pk, ep_off, en_off, ok2, w;
+
+                // cwd/.fpm/packages/<name> into x1, packages dir length in w
+                byte* cwd = this.pool.mem + this.cwd_off;
+                this.x1.clear();
+                this.x1.put_str(cwd);
+                this.x1.put(FLUX_PP_SEP);
+                this.x1.put_str(g".fpm\0");
+                this.x1.put(FLUX_PP_SEP);
+                this.x1.put_str(g"packages\0");
+                w = this.x1.len;
+                this.x1.put(FLUX_PP_SEP);
+                this.x1.put_n(text + name_off, name_len);
+
+                this.x2.clear();
+                this.x2.put_n(this.x1.mem, this.x1.len);
+                this.x2.put(FLUX_PP_SEP);
+                this.x2.put(46);
+                if (!pp_exists(this.x2.mem))
+                {
+                    this.e_begin(PPError.NOT_FOUND);
+                    this.errb.put_str(g"[PREPROCESSOR] Package '\0");
+                    this.errb.put_n(text + name_off, name_len);
+                    this.errb.put_str(g"' not found in \0");
+                    this.errb.put_n(this.x1.mem, w);
+                    return false;
+                };
+
+                this.x2.clear();
+                this.x2.put_n(this.x1.mem, this.x1.len);
+                this.x2.put(FLUX_PP_SEP);
+                this.x2.put_str(g"package.json\0");
+                if (!pp_exists(this.x2.mem))
+                {
+                    this.e_begin(PPError.NOT_FOUND);
+                    this.errb.put_str(g"[PREPROCESSOR] Package '\0");
+                    this.errb.put_n(text + name_off, name_len);
+                    this.errb.put_str(g"' is missing package.json\0");
+                    return false;
+                };
+
+                ok2 = man.load_file(this.x2.mem);
+                if (ok2 < 0)
+                {
+                    this.e_begin(PPError.IO);
+                    this.errb.put_str(g"[PREPROCESSOR] Could not read \0");
+                    this.errb.put_n(this.x2.mem, this.x2.len);
+                    return false;
+                };
+
+                // entries = manifest.get("entries", manifest)
+                if (this.json_object(man.mem, man.len, 0, 1) == 0)
+                {
+                    this.e_begin(PPError.KEY);
+                    this.errb.put_str(g"[PREPROCESSOR] Package '\0");
+                    this.errb.put_n(text + name_off, name_len);
+                    this.errb.put_str(g"' package.json is not a valid JSON object\0");
+                    return false;
+                };
+                en_off = this.pc_off;
+                if (en_off >= 0)
+                {
+                    if (this.json_object(man.mem, man.len, en_off, 0) == 0)
+                    {
+                        this.jv.clear();
+                    };
+                };
+
+                if (this.jv.len == 0)
+                {
+                    this.e_begin(PPError.KEY);
+                    this.errb.put_str(g"[PREPROCESSOR] Package '\0");
+                    this.errb.put_n(text + name_off, name_len);
+                    this.errb.put_str(g"' package.json has no 'entrypoint' field\0");
+                    return false;
+                };
+
+                // (package_dir / entrypoint)
+                this.join_to(this.x1.mem, this.x1.len, this.jv.mem, this.jv.len);
+                if (!pp_exists(this.jb.mem))
+                {
+                    this.e_begin(PPError.NOT_FOUND);
+                    this.errb.put_str(g"[PREPROCESSOR] Package '\0");
+                    this.errb.put_n(text + name_off, name_len);
+                    this.errb.put_str(g"' entrypoint '\0");
+                    this.errb.put_n(this.jv.mem, this.jv.len);
+                    this.errb.put_str(g"' not found\0");
+                    return false;
+                };
+                if (!this.realpath_into(this.jb.mem))
+                {
+                    this.e_begin(PPError.NOT_FOUND);
+                    this.errb.put_str(g"[PREPROCESSOR] Package '\0");
+                    this.errb.put_n(text + name_off, name_len);
+                    this.errb.put_str(g"' entrypoint '\0");
+                    this.errb.put_n(this.jv.mem, this.jv.len);
+                    this.errb.put_str(g"' not found\0");
+                    return false;
+                };
+
+                if (this.processed.find(this.rbuf.mem, this.rbuf.len) >= 0) { return true; };
+
+                if (this.verbose)
+                {
+                    this.tmp.clear();
+                    this.tmp.put_str(g"[PREPROCESSOR] Package import: \0");
+                    this.tmp.put_n(text + name_off, name_len);
+                    this.tmp.put_str(g" -> \0");
+                    this.tmp.put_n(this.jv.mem, this.jv.len);
+                    standard::io::console::println(this.tmp.mem);
+                };
+
+                // The package directory is pushed so relative imports inside it resolve
+                pk = this.pool_add(this.x1.mem, this.x1.len);
+                this.dir_stack.push(pk);
+                this.x2.clear();
+                this.x2.put_n(this.rbuf.mem, this.rbuf.len);
+                if (!this.process_file(this.x2.mem, this.x2.len, 1)) { return false; };
+                this.dir_stack.pop();
+                return true;
+            };
+
+            // ===== FILES =====
+
+            // FXPreprocessor._process_file. resolver: 0 default, 1 local, 2 stdlib.
+            // fp_in must not point into the pool.
+            def process_file(byte* fp_in, int fp_n, int resolver) -> bool
+            {
+                Buf raw();
+                Buf content();
+                IntVec loff();
+                IntVec llen();
+                defer raw.__exit();
+                defer content.__exit();
+                defer loff.__exit();
+                defer llen.__exit();
+                LineList ll;
+
+                int fp_off = this.pool.len;
+                int k, c, rc, pos, e0, tl, q, lo, hi, ts, te, fid, path_off, dir_off, pl, prev_file, i;
+                bool found;
+
+                while (k < fp_n)
+                {
+                    c = (int)fp_in[k];
+                    if (c == 92 | c == 47) { c = FLUX_PP_SEP; };
+                    this.pool.put(c);
+                    k++;
+                };
+                this.pool.put(0);
+
+                if (resolver == 1) { found = this.resolve_local(this.pool.mem + fp_off, fp_n); }
+                elif (resolver == 2) { found = this.resolve_stdlib(this.pool.mem + fp_off, fp_n); }
+                else { found = this.resolve_default(this.pool.mem + fp_off, fp_n); };
+
+                if (!found)
+                {
+                    if (resolver == 1)
+                    {
+                        if (this.resolve_stdlib(this.pool.mem + fp_off, fp_n))
+                        {
+                            this.vline(g"[PREPROCESSOR] Could not find local import: \0", this.pool.mem + fp_off, fp_n, g"\0");
+                            this.vline(g"#import \"\0", this.pool.mem + fp_off, fp_n, g"\";\0");
+                            standard::io::console::println(g"--------^\0");
+                            this.vline(g"#import <\0", this.pool.mem + fp_off, fp_n, g">; // try this\0");
+                        };
+                    };
+                    this.e_begin(PPError.NOT_FOUND);
+                    this.errb.put_str(g"Could not find import: \0");
+                    this.errb.put_n(this.pool.mem + fp_off, fp_n);
+                    return false;
+                };
+
+                if (this.processed.find(this.rbuf.mem, this.rbuf.len) >= 0) { return true; };
+                this.processed.intern(this.rbuf.mem, this.rbuf.len);
+                fid = this.files.len;
+                path_off = this.pool_add(this.rbuf.mem, this.rbuf.len);
+                this.files.push(path_off);
+                pl = pp_parent_len(this.rbuf.mem, this.rbuf.len);
+                dir_off = this.pool_add(this.rbuf.mem, pl);
+
+                if (this.verbose)
+                {
+                    this.vline(g"[PREPROCESSOR] Processing: \0", this.pool.mem + fp_off, fp_n, g"\0");
+                };
+
+                rc = raw.load_file(this.pool.mem + path_off);
+                if (rc < 0)
+                {
+                    this.e_begin(PPError.IO);
+                    this.errb.put_str(g"[PREPROCESSOR] Could not read file: \0");
+                    this.errb.put_str(this.pool.mem + path_off);
+                    return false;
+                };
+                if (rc == 1)
+                {
+                    this.vline(g"[PREPROCESSOR] WARNING: '\0", this.pool.mem + path_off, pp_cstrlen(this.pool.mem + path_off),
+                               g"' contains invalid UTF-8 sequences. Replacement characters (U+FFFD) have been substituted. Save the file as UTF-8 to silence this warning.\0");
+                };
+
+                content.put_stripped(raw.mem, raw.len);
+                if (!raw.ok | !content.ok | !this.alloc_ok())
+                {
+                    this.e_begin(PPError.ALLOC);
+                    this.errb.put_str(g"[PREPROCESSOR] allocation failed\0");
+                    return false;
+                };
+
+                while (pos < content.len)
+                {
+                    e0 = pp_eol(content.mem, content.len, pos, @tl);
+                    loff.push(pos);
+                    llen.push(e0 - pos);
+                    pos = e0 + tl;
+                };
+                ll.text = content.mem;
+                ll.off = loff.arr;
+                ll.len = llen.arr;
+                ll.n = loff.len;
+
+                // Directives must end with a semicolon
+                while (q < ll.n)
+                {
+                    lo = ll.off[q];
+                    hi = lo + ll.len[q];
+                    pp_trim(content.mem, @lo, @hi);
+                    if (hi > lo)
+                    {
+                        if (pp_starts(content.mem, lo, hi, g"#import\0", 7) | pp_starts(content.mem, lo, hi, g"#package\0", 8)
+                            | pp_starts(content.mem, lo, hi, g"#warn\0", 5) | pp_starts(content.mem, lo, hi, g"#stop\0", 5)
+                            | pp_starts(content.mem, lo, hi, g"#def\0", 4) | pp_starts(content.mem, lo, hi, g"#dir\0", 4))
+                        {
+                            if (content.mem[hi - 1] != 59)
+                            {
+                                pp_next_tok(content.mem, hi, lo, @ts, @te);
+                                this.e_begin(PPError.SYNTAX);
+                                this.errb.put_str(g"[PREPROCESSOR] \0");
+                                this.errb.put_n(content.mem + ts, te - ts);
+                                this.errb.put_str(g" directive missing semicolon in \0");
+                                this.errb.put_n(this.pool.mem + fp_off, fp_n);
+                                this.errb.put_str(g" at line \0");
+                                this.errb.put_int(q + 1);
+                                return false;
+                            };
+                        };
+                    };
+                    q++;
+                };
+
+                prev_file = this.cur_file;
+                this.cur_file = fid;
+                this.dir_stack.push(dir_off);
+                i = 0;
+                while (i < ll.n)
+                {
+                    this.cur_lineno = i + 1;
+                    i = this.process_line(@ll, i);
+                    if (i < 0) { return false; };
+                };
+                this.dir_stack.pop();
+                this.cur_file = prev_file;
+                return true;
+            };
+
+            // ===== LINES =====
+
+            // FXPreprocessor._process_line. Returns the next line index, or -1 on error.
+            def process_line(LineList* ll, int i) -> int
+            {
+                byte* text = ll.text;
+                int lo = ll.off[i];
+                int hi = lo + ll.len[i];
+                int s = lo;
+                int e = hi;
+                int a, b, ts, te, nx, semi, q1, q2, j, k, np, w, pl, tcount;
+                int name_off, name_len, paren_open, paren_close, body_off, body_len;
+                bool more, have;
+                int ent;
+
+                pp_trim(text, @s, @e);
+
+                if (s >= e)
+                {
+                    this.emit_blank(this.cur_lineno);
+                    return i + 1;
+                };
+
+                // #dir
+                if (pp_starts(text, s, e, g"#dir\0", 4))
+                {
+                    if (text[e - 1] != 59)
+                    {
+                        this.e_begin(PPError.SYNTAX);
+                        this.errb.put_str(g"[PREPROCESSOR] #dir directive missing semicolon at line \0");
+                        this.errb.put_int(i + 1);
+                        return -1;
+                    };
+                    q1 = pp_find(text, lo, hi, 34);
+                    if (q1 != -1)
+                    {
+                        q2 = pp_find(text, q1 + 1, hi, 34);
+                        if (q2 != -1)
+                        {
+                            this.tmp.clear();
+                            j = q1 + 1;
+                            while (j < q2)
+                            {
+                                k = (int)text[j];
+                                if (k == 92) { k = 47; };
+                                this.tmp.put(k);
+                                j++;
+                            };
+                            have = false;
+                            k = 0;
+                            while (k < this.lib_dirs.len)
+                            {
+                                if (pp_cstrlen(this.pool.mem + this.lib_dirs.arr[k]) == this.tmp.len)
+                                {
+                                    if (pp_eq(this.pool.mem + this.lib_dirs.arr[k], this.tmp.mem, this.tmp.len)) { have = true; };
+                                };
+                                k++;
+                            };
+                            if (!have)
+                            {
+                                this.lib_dirs.push(this.pool_add(this.tmp.mem, this.tmp.len));
+                                if (this.verbose)
+                                {
+                                    this.x1.clear();
+                                    this.x1.put_n(this.tmp.mem, this.tmp.len);
+                                    this.vline(g"[PREPROCESSOR] Added library directory: \0", this.x1.mem, this.x1.len, g"\0");
+                                };
+                            };
+                        };
+                    };
+                    this.emit_blank(this.cur_lineno);
+                    return i + 1;
+                };
+
+                // #psub
+                if (pp_starts(text, s, e, g"#psub\0", 5))
+                {
+                    a = s + 5;
+                    b = e;
+                    pp_trim(text, @a, @b);
+                    this.psb.clear();
+                    this.psb.put_n(text + a, b - a);
+                    more = true;
+                    while (more)
+                    {
+                        more = false;
+                        if (this.psb.len > 0)
+                        {
+                            if (this.psb.mem[this.psb.len - 1] == '#') { more = true; };
+                        };
+                        if (!more) { break; };
+                        this.psb.pop();
+                        i++;
+                        if (i >= ll.n) { break; };
+                        this.emit_blank(this.cur_lineno);
+                        this.cur_lineno = i + 1;
+                        this.psb.rstrip_ws();
+                        this.psb.put(32);
+                        a = ll.off[i];
+                        b = a + ll.len[i];
+                        pp_trim(text, @a, @b);
+                        this.psb.put_n(text + a, b - a);
+                    };
+
+                    // rest = collected.strip()
+                    a = 0;
+                    b = this.psb.len;
+                    pp_trim(this.psb.mem, @a, @b);
+                    paren_open = pp_find(this.psb.mem, a, b, 40);
+                    if (paren_open == -1)
+                    {
+                        this.e_begin(PPError.SYNTAX);
+                        this.errb.put_str(g"[PREPROCESSOR] #psub missing parameter list at line \0");
+                        this.errb.put_int(i + 1);
+                        return -1;
+                    };
+                    name_off = a;
+                    name_len = paren_open;
+                    pp_trim(this.psb.mem, @name_off, @name_len);
+                    paren_close = pp_find(this.psb.mem, paren_open, b, 41);
+                    if (paren_close == -1)
+                    {
+                        this.e_begin(PPError.SYNTAX);
+                        this.errb.put_str(g"[PREPROCESSOR] #psub unclosed parameter list at line \0");
+                        this.errb.put_int(i + 1);
+                        return -1;
+                    };
+
+                    // params = [p.strip() for p in raw_params.split(',') if p.strip()]
+                    this.pb.clear();
+                    np = 0;
+                    j = paren_open + 1;
+                    while (j <= paren_close)
+                    {
+                        k = j;
+                        while (k < paren_close)
+                        {
+                            if (this.psb.mem[k] == ',') { break; };
+                            k++;
+                        };
+                        ts = j;
+                        te = k;
+                        pp_trim(this.psb.mem, @ts, @te);
+                        if (te > ts)
+                        {
+                            this.pb.put_n(this.psb.mem + ts, te - ts);
+                            this.pb.put(0);
+                            np++;
+                        };
+                        j = k + 1;
+                    };
+
+                    body_off = paren_close + 1;
+                    body_len = b;
+                    pp_trim(this.psb.mem, @body_off, @body_len);
+
+                    ent = this.psubs.intern(this.psb.mem + name_off, name_len - name_off);
+                    if (ent < 0)
+                    {
+                        this.e_begin(PPError.ALLOC);
+                        this.errb.put_str(g"[PREPROCESSOR] allocation failed\0");
+                        return -1;
+                    };
+                    this.psubs.set_val(ent, this.psb.mem + body_off, body_len - body_off);
+                    this.psubs.set_params(ent, this.pb.mem, this.pb.len, np);
+
+                    if (this.verbose)
+                    {
+                        this.x1.clear();
+                        this.x1.put_n(this.psb.mem + name_off, name_len - name_off);
+                        this.x1.put(40);
+                        k = 0;
+                        j = 0;
+                        while (j < np)
+                        {
+                            if (j > 0) { this.x1.put_str(g", \0"); };
+                            this.x1.put_str(this.pb.mem + k);
+                            k = k + pp_cstrlen(this.pb.mem + k) + 1;
+                            j++;
+                        };
+                        this.x1.put_str(g") = \0");
+                        this.x1.put_n(this.psb.mem + body_off, body_len - body_off);
+                        this.vline(g"[PREPROCESSOR] Defined PSUB: \0", this.x1.mem, this.x1.len, g"\0");
+                    };
+
+                    this.emit_blank(this.cur_lineno);
+                    return i + 1;
+                };
+
+                // #def
+                if (pp_starts(text, s, e, g"#def\0", 4))
+                {
+                    semi = pp_find(text, lo, hi, 59);
+                    if (semi == -1) { semi = hi; };
+                    a = lo;
+                    b = semi;
+                    pp_trim(text, @a, @b);
+                    tcount = 0;
+                    this.tmp.clear();
+                    name_off = 0;
+                    name_len = 0;
+                    nx = a;
+                    while (true)
+                    {
+                        nx = pp_next_tok(text, b, nx, @ts, @te);
+                        if (nx < 0) { break; };
+                        if (tcount == 1)
+                        {
+                            name_off = ts;
+                            name_len = te;
+                        };
+                        if (tcount >= 2)
+                        {
+                            if (tcount > 2) { this.tmp.put(32); };
+                            this.tmp.put_n(text + ts, te - ts);
+                        };
+                        tcount++;
+                    };
+                    if (tcount >= 3)
+                    {
+                        ent = this.consts.intern(text + name_off, name_len - name_off);
+                        if (ent < 0)
+                        {
+                            this.e_begin(PPError.ALLOC);
+                            this.errb.put_str(g"[PREPROCESSOR] allocation failed\0");
+                            return -1;
+                        };
+                        w = this.tmp.len;
+                        if (w > 0)
+                        {
+                            if (this.tmp.mem[w - 1] == 59)
+                            {
+                                while (w > 0)
+                                {
+                                    if (this.tmp.mem[w - 1] != 59) { break; };
+                                    w--;
+                                };
+                                a = 0;
+                                b = w;
+                                pp_trim(this.tmp.mem, @a, @b);
+                                this.consts.set_val(ent, this.tmp.mem + a, b - a);
+                            }
+                            else
+                            {
+                                this.consts.set_val(ent, this.tmp.mem, w);
+                            };
+                        }
+                        else
+                        {
+                            this.consts.set_val(ent, this.tmp.mem, 0);
+                        };
+                        if (this.verbose)
+                        {
+                            this.x1.clear();
+                            this.x1.put_n(text + name_off, name_len - name_off);
+                            this.x1.put_str(g" = \0");
+                            this.x1.put_n(this.consts.val_ptr(ent), this.consts.val_len(ent));
+                            this.vline(g"[PREPROCESSOR] Defined constant: \0", this.x1.mem, this.x1.len, g"\0");
+                        };
+                    };
+                    this.emit_blank(this.cur_lineno);
+                    return i + 1;
+                };
+
+                // #ifnpsub, #ifpsub, #ifdef, #ifndef. Each needs a second token.
+                if (pp_starts(text, s, e, g"#ifnpsub\0", 8) | pp_starts(text, s, e, g"#ifpsub\0", 7)
+                    | pp_starts(text, s, e, g"#ifdef\0", 6) | pp_starts(text, s, e, g"#ifndef\0", 7))
+                {
+                    nx = pp_next_tok(text, hi, lo, @ts, @te);
+                    if (nx >= 0) { nx = pp_next_tok(text, hi, nx, @ts, @te); };
+                    if (nx >= 0)
+                    {
+                        if (pp_starts(text, s, e, g"#ifnpsub\0", 8) | pp_starts(text, s, e, g"#ifpsub\0", 7))
+                        {
+                            k = pp_find(text, ts, te, 40);
+                            if (k != -1) { te = k; };
+                            a = ts;
+                            b = te;
+                            pp_trim(text, @a, @b);
+                            return this.process_conditional(ll, i, a, b - a, pp_starts(text, s, e, g"#ifnpsub\0", 8), true);
+                        };
+                        return this.process_conditional(ll, i, ts, te - ts, pp_starts(text, s, e, g"#ifndef\0", 7), false);
+                    };
+                };
+
+                // #package
+                if (pp_starts(text, s, e, g"#package\0", 8))
+                {
+                    if (text[e - 1] != 59)
+                    {
+                        this.e_begin(PPError.SYNTAX);
+                        this.errb.put_str(g"[PREPROCESSOR] #package directive missing semicolon at line \0");
+                        this.errb.put_int(i + 1);
+                        return -1;
+                    };
+                    a = s + 8;
+                    b = e;
+                    while (b > a)
+                    {
+                        if (text[b - 1] != 59) { break; };
+                        b--;
+                    };
+                    pp_trim(text, @a, @b);
+                    j = a;
+                    while (j <= b)
+                    {
+                        k = j;
+                        while (k < b)
+                        {
+                            if (text[k] == ',') { break; };
+                            k++;
+                        };
+                        ts = j;
+                        te = k;
+                        pp_trim(text, @ts, @te);
+                        if (te > ts)
+                        {
+                            if (!this.process_package(text, ts, te - ts)) { return -1; };
+                        };
+                        j = k + 1;
+                    };
+                    this.emit_blank(this.cur_lineno);
+                    return i + 1;
+                };
+
+                // #import
+                if (pp_starts(text, s, e, g"#import\0", 7))
+                {
+                    if (text[e - 1] != 59)
+                    {
+                        this.e_begin(PPError.SYNTAX);
+                        this.errb.put_str(g"[PREPROCESSOR] #import directive missing semicolon at line \0");
+                        this.errb.put_int(i + 1);
+                        return -1;
+                    };
+                    a = s + 7;
+                    b = e;
+                    while (b > a)
+                    {
+                        if (text[b - 1] != 59) { break; };
+                        b--;
+                    };
+                    pp_trim(text, @a, @b);
+                    j = a;
+                    while (j < b)
+                    {
+                        k = (int)text[j];
+                        if (k == '<')
+                        {
+                            j++;
+                            q2 = pp_find(text, j, b, '>');
+                            if (q2 == -1)
+                            {
+                                this.e_begin(PPError.SYNTAX);
+                                this.errb.put_str(g"[PREPROCESSOR] Unterminated <> in #import at line \0");
+                                this.errb.put_int(i + 1);
+                                return -1;
+                            };
+                            ts = j;
+                            te = q2;
+                            pp_trim(text, @ts, @te);
+                            if (this.verbose) { this.vline(g"[PREPROCESSOR] Stdlib import: \0", text + ts, te - ts, g"\0"); };
+                            if (!this.process_file(text + ts, te - ts, 2)) { return -1; };
+                            j = q2 + 1;
+                        }
+                        elif (k == 34)
+                        {
+                            j++;
+                            q2 = pp_find(text, j, b, 34);
+                            if (q2 == -1)
+                            {
+                                this.e_begin(PPError.SYNTAX);
+                                this.errb.put_str(g"[PREPROCESSOR] Unterminated \"\" in #import at line \0");
+                                this.errb.put_int(i + 1);
+                                return -1;
+                            };
+                            ts = j;
+                            te = q2;
+                            pp_trim(text, @ts, @te);
+                            if (this.verbose) { this.vline(g"[PREPROCESSOR] Local import: \0", text + ts, te - ts, g"\0"); };
+                            if (!this.process_file(text + ts, te - ts, 1)) { return -1; };
+                            j = q2 + 1;
+                        }
+                        else
+                        {
+                            j++;
+                        };
+                    };
+                    this.emit_blank(this.cur_lineno);
+                    return i + 1;
+                };
+
+                // #warn
+                if (pp_starts(text, s, e, g"#warn\0", 5))
+                {
+                    if (text[e - 1] != 59)
+                    {
+                        this.e_begin(PPError.SYNTAX);
+                        this.errb.put_str(g"[PREPROCESSOR] #warn directive missing semicolon at line \0");
+                        this.errb.put_int(i + 1);
+                        return -1;
+                    };
+                    q1 = pp_find(text, lo, hi, 34);
+                    if (q1 != -1)
+                    {
+                        q2 = pp_find(text, q1 + 1, hi, 34);
+                        if (q2 != -1)
+                        {
+                            this.vline(g"[PREPROCESSOR] \0", text + q1 + 1, q2 - q1 - 1, g"\0");
+                        };
+                    };
+                    this.emit_blank(this.cur_lineno);
+                    return i + 1;
+                };
+
+                // #stop
+                if (pp_starts(text, s, e, g"#stop\0", 5))
+                {
+                    if (text[e - 1] != 59)
+                    {
+                        this.e_begin(PPError.SYNTAX);
+                        this.errb.put_str(g"[PREPROCESSOR] #stop directive missing semicolon at line \0");
+                        this.errb.put_int(i + 1);
+                        return -1;
+                    };
+                    q1 = pp_find(text, lo, hi, 34);
+                    if (q1 != -1)
+                    {
+                        q2 = pp_find(text, q1 + 1, hi, 34);
+                        if (q2 != -1)
+                        {
+                            this.vline(g"[PREPROCESSOR] \0", text + q1 + 1, q2 - q1 - 1, g"\0");
+                        };
+                    };
+                    standard::io::console::println(g"Compilation failed, preprocessor stopped by constant.\0");
+                    this.e_begin(PPError.STOP);
+                    return -1;
+                };
+
+                // #endif;
+                if (pp_starts(text, s, e, g"#endif;\0", 7))
+                {
+                    this.emit_blank(this.cur_lineno);
+                    return i + 1;
+                };
+
+                // #else
+                if (e - s == 5)
+                {
+                    if (pp_eq(text + s, g"#else\0", 5))
+                    {
+                        this.emit_blank(this.cur_lineno);
+                        return i + 1;
+                    };
+                };
+
+                // Regular line
+                if (!this.substitute_constants(text + lo, hi - lo)) { return -1; };
+                this.emit(this.sub_ptr, this.sub_len, this.cur_lineno);
+                return i + 1;
+            };
+
+            // ===== CONDITIONALS =====
+
+            // True when branch condition (name at text + off, len n) holds
+            def cond_true(byte* text, int off, int n, bool invert, bool check_macros) -> bool
+            {
+                bool defined = false;
+                int e;
+                if (check_macros)
+                {
+                    defined = this.psubs.find(text + off, n) >= 0;
+                }
+                else
+                {
+                    e = this.consts.find(text + off, n);
+                    if (e >= 0)
+                    {
+                        defined = true;
+                        if (this.consts.val_len(e) == 1)
+                        {
+                            if (this.consts.val_ptr(e)[0] == '0') { defined = false; };
+                        };
+                    };
+                };
+                if (invert) { return !defined; };
+                return defined;
+            };
+
+            // FXPreprocessor._parse_ifdef_condition on text[lo, hi). On success the
+            // name is pc_off/pc_len and the negation flag pc_inv.
+            def parse_condition(byte* text, int lo, int hi, int lineno) -> bool
+            {
+                int p, q, n, w;
+                bool inv = false;
+                bool ok3 = false;
+
+                // defined(X) and !defined(X)
+                p = lo;
+                if (pp_at(text, hi, p) == '!')
+                {
+                    inv = true;
+                    p++;
+                    while (true)
+                    {
+                        w = pp_ws_fwd(text, hi, p);
+                        if (w == 0) { break; };
+                        p = p + w;
+                    };
+                };
+                if (pp_starts(text, p, hi, g"defined\0", 7))
+                {
+                    p = p + 7;
+                    while (true)
+                    {
+                        w = pp_ws_fwd(text, hi, p);
+                        if (w == 0) { break; };
+                        p = p + w;
+                    };
+                    if (pp_at(text, hi, p) == '(')
+                    {
+                        p++;
+                        while (true)
+                        {
+                            w = pp_ws_fwd(text, hi, p);
+                            if (w == 0) { break; };
+                            p = p + w;
+                        };
+                        q = p;
+                        while (q < hi)
+                        {
+                            if (!pp_is_word((int)text[q])) { break; };
+                            q++;
+                        };
+                        if (q > p)
+                        {
+                            n = q;
+                            while (true)
+                            {
+                                w = pp_ws_fwd(text, hi, n);
+                                if (w == 0) { break; };
+                                n = n + w;
+                            };
+                            if (pp_at(text, hi, n) == ')')
+                            {
+                                n++;
+                                if (n == hi)
+                                {
+                                    this.pc_off = p;
+                                    this.pc_len = q - p;
+                                    this.pc_inv = inv;
+                                    return true;
+                                };
+                            };
+                        };
+                    };
+                };
+
+                // plain identifier
+                if (hi > lo)
+                {
+                    ok3 = true;
+                    p = lo;
+                    while (p < hi)
+                    {
+                        if (!pp_is_word((int)text[p]))
+                        {
+                            ok3 = false;
                             break;
                         };
+                        p++;
                     };
-                    if (!subbed_sc)
+                };
+                if (ok3)
+                {
+                    this.pc_off = lo;
+                    this.pc_len = hi - lo;
+                    this.pc_inv = false;
+                    return true;
+                };
+
+                this.e_begin(PPError.SYNTAX);
+                this.errb.put_str(g"[PREPROCESSOR] Unsupported #elif condition '\0");
+                this.errb.put_n(text + lo, hi - lo);
+                this.errb.put_str(g"' at line \0");
+                this.errb.put_int(lineno);
+                this.errb.put_str(g". Only 'SYMBOL', 'defined(SYMBOL)', and '!defined(SYMBOL)' are supported.\0");
+                return false;
+            };
+
+            // FXPreprocessor._process_conditional_block. The condition name is
+            // name_n bytes at ll.text + name_off. Returns the index after #endif, or -1.
+            def process_conditional(LineList* ll, int start_i, int name_off, int name_n, bool is_ifndef, bool check_macros) -> int
+            {
+                IntVec c_off();
+                IntVec c_len();
+                IntVec c_orig();
+                IntVec b_start();
+                IntVec b_name();
+                IntVec b_nlen();
+                IntVec b_inv();
+                IntVec b_always();
+                defer c_off.__exit();
+                defer c_len.__exit();
+                defer c_orig.__exit();
+                defer b_start.__exit();
+                defer b_name.__exit();
+                defer b_nlen.__exit();
+                defer b_inv.__exit();
+                defer b_always.__exit();
+                LineList sub;
+
+                byte* text = ll.text;
+                int entry_local = this.cur_lineno;
+                int i, depth, lo, hi, s, e, orig, a, b, ch, bs, be, bi, j, w, nb;
+                bool has_else;
+
+                this.emit_blank(this.cur_lineno);
+
+                b_start.push(0);
+                b_name.push(name_off);
+                b_nlen.push(name_n);
+                if (is_ifndef) { b_inv.push(1); } else { b_inv.push(0); };
+                b_always.push(0);
+                has_else = false;
+
+                i = start_i + 1;
+                depth = 1;
+
+                while (i < ll.n)
+                {
+                    lo = ll.off[i];
+                    hi = lo + ll.len[i];
+                    s = lo;
+                    e = hi;
+                    pp_trim(text, @s, @e);
+                    orig = entry_local + (i - start_i);
+
+                    if (pp_starts(text, s, e, g"#ifdef\0", 6) | pp_starts(text, s, e, g"#ifndef\0", 7)
+                        | pp_starts(text, s, e, g"#ifnpsub\0", 8) | pp_starts(text, s, e, g"#ifpsub\0", 7))
                     {
-                        for (int m; m < token_pos; m = m + 1)
+                        depth++;
+                    };
+
+                    if (pp_starts(text, s, e, g"#endif;\0", 7))
+                    {
+                        depth--;
+                        if (depth == 0)
                         {
-                            dst[di] = expanded[k - token_pos + m]; di = di + 1;
+                            this.emit_blank(orig);
+
+                            nb = b_start.len;
+                            ch = -1;
+                            bi = 0;
+                            while (bi < nb)
+                            {
+                                if (b_always.arr[bi] == 1)
+                                {
+                                    ch = bi;
+                                    break;
+                                };
+                                if (this.cond_true(text, b_name.arr[bi], b_nlen.arr[bi], b_inv.arr[bi] == 1, check_macros))
+                                {
+                                    ch = bi;
+                                    break;
+                                };
+                                bi++;
+                            };
+
+                            // Excluded lines become blanks, in branch order
+                            bi = 0;
+                            while (bi < nb)
+                            {
+                                if (bi != ch)
+                                {
+                                    bs = b_start.arr[bi];
+                                    be = c_off.len;
+                                    if (bi + 1 < nb) { be = b_start.arr[bi + 1]; };
+                                    j = bs;
+                                    while (j < be)
+                                    {
+                                        this.emit_blank(c_orig.arr[j]);
+                                        j++;
+                                    };
+                                };
+                                bi++;
+                            };
+
+                            if (ch >= 0)
+                            {
+                                bs = b_start.arr[ch];
+                                be = c_off.len;
+                                if (ch + 1 < nb) { be = b_start.arr[ch + 1]; };
+                                if (be > bs)
+                                {
+                                    sub.text = text;
+                                    sub.off = c_off.arr + bs;
+                                    sub.len = c_len.arr + bs;
+                                    sub.n = be - bs;
+                                    j = 0;
+                                    while (j < sub.n)
+                                    {
+                                        this.cur_lineno = c_orig.arr[bs + j];
+                                        j = this.process_line(@sub, j);
+                                        if (j < 0) { return -1; };
+                                    };
+                                };
+                            };
+                            return i + 1;
+                        };
+                        c_off.push(lo);
+                        c_len.push(hi - lo);
+                        c_orig.push(orig);
+                        i++;
+                        continue;
+                    };
+
+                    if (depth == 1)
+                    {
+                        if (pp_starts(text, s, e, g"#elif\0", 5))
+                        {
+                            if (has_else)
+                            {
+                                this.e_begin(PPError.SYNTAX);
+                                this.errb.put_str(g"[PREPROCESSOR] #elif after #else at line \0");
+                                this.errb.put_int(i + 1);
+                                return -1;
+                            };
+                            a = s + 5;
+                            b = e;
+                            while (b > a)
+                            {
+                                if (text[b - 1] != 59) { break; };
+                                b--;
+                            };
+                            pp_trim(text, @a, @b);
+                            if (!this.parse_condition(text, a, b, i + 1)) { return -1; };
+                            b_start.push(c_off.len);
+                            b_name.push(this.pc_off);
+                            b_nlen.push(this.pc_len);
+                            if (this.pc_inv) { b_inv.push(1); } else { b_inv.push(0); };
+                            b_always.push(0);
+                            this.emit_blank(orig);
+                            i++;
+                            continue;
+                        };
+
+                        w = e - s;
+                        if (pp_eq(text + s, g"#else\0", 5) & w == 5 | pp_eq(text + s, g"#else;\0", 6) & w == 6)
+                        {
+                            if (has_else)
+                            {
+                                this.e_begin(PPError.SYNTAX);
+                                this.errb.put_str(g"[PREPROCESSOR] Multiple #else in same conditional block at line \0");
+                                this.errb.put_int(i + 1);
+                                return -1;
+                            };
+                            has_else = true;
+                            b_start.push(c_off.len);
+                            b_name.push(0);
+                            b_nlen.push(0);
+                            b_inv.push(0);
+                            b_always.push(1);
+                            this.emit_blank(orig);
+                            i++;
+                            continue;
                         };
                     };
-                    ffree((u64)tok_sc);
-                    token_pos = 0;
+
+                    c_off.push(lo);
+                    c_len.push(hi - lo);
+                    c_orig.push(orig);
+                    i++;
                 };
-                if (c_sc != 0) { dst[di] = c_sc; di = di + 1; };
-            }
-            else
+
+                this.e_begin(PPError.SYNTAX);
+                this.errb.put_str(g"Unclosed conditional block starting at line \0");
+                this.errb.put_int(start_i + 1);
+                return -1;
+            };
+
+            // ===== MACROS AND CONSTANTS =====
+
+            // One scan of FXPreprocessor._expand_macros over src[0, n) into mc.
+            // Returns 1 when a macro was expanded, 0 when not, -1 on error.
+            def macro_pass(byte* src, int n) -> int
             {
-                token_pos = token_pos + 1;
+                int i, j, k, c, depth, rs, re, ent, np, na, cstart, p, plen, a, b, d, ra, rb;
+                bool in_str, changed;
+                int str_char;
+                byte* ppar;
+
+                this.mc.clear();
+                while (i < n)
+                {
+                    c = (int)src[i];
+                    if (!pp_is_alpha_us(c))
+                    {
+                        this.mc.put(c);
+                        i++;
+                        continue;
+                    };
+
+                    j = i;
+                    while (j < n)
+                    {
+                        if (!pp_is_word((int)src[j])) { break; };
+                        j++;
+                    };
+
+                    ent = this.psubs.find(src + i, j - i);
+                    if (ent < 0)
+                    {
+                        this.mc.put_n(src + i, j - i);
+                        i = j;
+                        continue;
+                    };
+                    if (pp_at(src, n, j) != '(')
+                    {
+                        this.mc.put_n(src + i, j - i);
+                        i = j;
+                        continue;
+                    };
+
+                    // matching close paren, respecting nesting and strings
+                    k = j + 1;
+                    depth = 1;
+                    in_str = false;
+                    str_char = 0;
+                    while (k < n & depth > 0)
+                    {
+                        c = (int)src[k];
+                        if (in_str)
+                        {
+                            if (c == 92) { k++; }
+                            elif (c == str_char) { in_str = false; };
+                        }
+                        else
+                        {
+                            if (c == 34 | c == 39)
+                            {
+                                in_str = true;
+                                str_char = c;
+                            }
+                            elif (c == '(') { depth++; }
+                            elif (c == ')') { depth--; };
+                        };
+                        k++;
+                    };
+
+                    rs = j + 1;
+                    re = k - 1;
+                    if (re > n) { re = n; };
+                    if (re < rs) { re = rs; };
+
+                    // _split_macro_args
+                    this.aoff.clear();
+                    this.alen.clear();
+                    depth = 0;
+                    in_str = false;
+                    str_char = 0;
+                    cstart = rs;
+                    na = 0;
+                    p = rs;
+                    while (p < re)
+                    {
+                        c = (int)src[p];
+                        if (in_str)
+                        {
+                            if (c == str_char) { in_str = false; };
+                        }
+                        elif (c == 34 | c == 39)
+                        {
+                            in_str = true;
+                            str_char = c;
+                        }
+                        elif (c == '(') { depth++; }
+                        elif (c == ')') { depth--; }
+                        elif (c == ',' & depth == 0)
+                        {
+                            this.aoff.push(cstart);
+                            this.alen.push(p - cstart);
+                            na++;
+                            cstart = p + 1;
+                        };
+                        p++;
+                    };
+                    if (re - cstart > 0 | na > 0)
+                    {
+                        this.aoff.push(cstart);
+                        this.alen.push(re - cstart);
+                        na++;
+                    };
+
+                    np = this.psubs.par_count(ent);
+                    if (na != np)
+                    {
+                        this.e_begin(PPError.SYNTAX);
+                        this.errb.put_str(g"[PREPROCESSOR] Macro '\0");
+                        this.errb.put_n(src + i, j - i);
+                        this.errb.put_str(g"' expects \0");
+                        this.errb.put_int(np);
+                        this.errb.put_str(g" argument(s), got \0");
+                        this.errb.put_int(na);
+                        this.errb.put_str(g": '\0");
+                        d = k;
+                        if (d > n) { d = n; };
+                        this.errb.put_n(src + i, d - i);
+                        this.errb.put_str(g"'\0");
+                        return -1;
+                    };
+
+                    // Substitute each parameter into the body in order
+                    this.x1.clear();
+                    this.x1.put_n(this.psubs.val_ptr(ent), this.psubs.val_len(ent));
+                    ppar = this.psubs.par_ptr(ent);
+                    p = 0;
+                    while (p < np)
+                    {
+                        plen = pp_cstrlen(ppar);
+                        ra = this.aoff.arr[p];
+                        rb = ra + this.alen.arr[p];
+                        pp_trim(src, @ra, @rb);
+                        this.x2.clear();
+                        this.x2.put_replaced_word(this.x1.mem, this.x1.len, ppar, plen, src + ra, rb - ra);
+                        this.x1.clear();
+                        this.x1.put_n(this.x2.mem, this.x2.len);
+                        ppar = ppar + plen + 1;
+                        p++;
+                    };
+                    this.mc.put_n(this.x1.mem, this.x1.len);
+                    changed = true;
+                    i = k;
+                };
+
+                if (changed) { return 1; };
+                return 0;
+            };
+
+            // FXPreprocessor._expand_macros. The result is ex_ptr/ex_len, valid until
+            // the next call.
+            def expand_macros(byte* s, int n) -> bool
+            {
+                int depth, rc;
+                this.ex_ptr = s;
+                this.ex_len = n;
+                if (this.psubs.count == 0) { return true; };
+                while (true)
+                {
+                    if (depth > FLUX_PP_MAX_DEPTH)
+                    {
+                        this.e_begin(PPError.RECURSION);
+                        this.errb.put_str(g"[PREPROCESSOR] Macro expansion exceeded depth limit (64). Possible infinite recursion.\0");
+                        return false;
+                    };
+                    rc = this.macro_pass(this.ex_ptr, this.ex_len);
+                    if (rc < 0) { return false; };
+                    if (rc == 0) { return true; };
+                    this.ma.clear();
+                    this.ma.put_n(this.mc.mem, this.mc.len);
+                    this.ex_ptr = this.ma.mem;
+                    this.ex_len = this.ma.len;
+                    depth++;
+                };
+                return true;
+            };
+
+            // Appends token s[ts, te) to sc, replaced by its constant when it names one
+            def flush_token(byte* s, int ts, int te, bool in_quotes) -> void
+            {
+                int e = -1;
+                int w, a, b;
+                byte* v;
+                if (!in_quotes) { e = this.consts.find(s + ts, te - ts); };
+                if (e < 0)
+                {
+                    this.sc.put_n(s + ts, te - ts);
+                    return;
+                };
+                v = this.consts.val_ptr(e);
+                w = this.consts.val_len(e);
+                if (w > 0)
+                {
+                    if (v[w - 1] == 59)
+                    {
+                        while (w > 0)
+                        {
+                            if (v[w - 1] != 59) { break; };
+                            w--;
+                        };
+                        a = 0;
+                        b = w;
+                        pp_trim(v, @a, @b);
+                        this.sc.put_n(v + a, b - a);
+                        return;
+                    };
+                };
+                this.sc.put_n(v, w);
+                return;
+            };
+
+            // FXPreprocessor._substitute_constants. The result is sub_ptr/sub_len,
+            // valid until the next call.
+            def substitute_constants(byte* s, int n) -> bool
+            {
+                int i, w, ts, a, b, c;
+                bool in_quotes;
+                if (!this.expand_macros(s, n)) { return false; };
+
+                byte* t = this.ex_ptr;
+                int tn = this.ex_len;
+                this.sub_ptr = t;
+                this.sub_len = tn;
+                if (tn == 0) { return true; };
+                a = 0;
+                b = tn;
+                pp_trim(t, @a, @b);
+                if (b - a == 1)
+                {
+                    if (t[a] == 59) { return true; };
+                };
+
+                this.sc.clear();
+                ts = -1;
+                in_quotes = false;
+                while (i < tn)
+                {
+                    c = (int)t[i];
+                    if (c == 34)
+                    {
+                        in_quotes = !in_quotes;
+                        if (ts < 0) { ts = i; };
+                        i++;
+                        continue;
+                    };
+                    w = pp_ws_fwd(t, tn, i);
+                    if (w == 0)
+                    {
+                        if (pp_is_delim(c)) { w = 1; };
+                    };
+                    if (w > 0)
+                    {
+                        if (ts >= 0)
+                        {
+                            this.flush_token(t, ts, i, in_quotes);
+                            ts = -1;
+                        };
+                        this.sc.put_n(t + i, w);
+                        i = i + w;
+                    }
+                    else
+                    {
+                        if (ts < 0) { ts = i; };
+                        i++;
+                    };
+                };
+                if (ts >= 0) { this.flush_token(t, ts, tn, in_quotes); };
+
+                this.sub_ptr = this.sc.mem;
+                this.sub_len = this.sc.len;
+                return true;
+            };
+
+            // ===== DRIVER =====
+
+            // FXPreprocessor.process. The combined source is text_ptr()/text_len().
+            def process() -> bool
+            {
+                int pl, iteration, ls, le;
+                bool replaced, first;
+
+                if (this.err_kind != 0) { return false; };
+
+                if (this.realpath_into(this.srcpath.mem))
+                {
+                    pl = pp_parent_len(this.rbuf.mem, this.rbuf.len);
+                    this.root_dir_off = this.pool_add(this.rbuf.mem, pl);
+                }
+                else
+                {
+                    pl = pp_parent_len(this.srcpath.mem, this.srcpath.len);
+                    this.root_dir_off = this.pool_add(this.srcpath.mem, pl);
+                };
+
+                if (!this.process_file(this.srcpath.mem, this.srcpath.len, 0)) { return false; };
+
+                replaced = true;
+                while (replaced)
+                {
+                    iteration++;
+                    if (this.verbose)
+                    {
+                        standard::io::console::print(g"[PREPROCESSOR] constant substitution passes: \0");
+                        standard::io::console::println(iteration);
+                    };
+                    replaced = false;
+                    this.passb.clear();
+                    first = true;
+                    ls = 0;
+                    while (true)
+                    {
+                        le = ls;
+                        while (le < this.outb.len)
+                        {
+                            if (this.outb.mem[le] == 10) { break; };
+                            le++;
+                        };
+                        if (!this.substitute_constants(this.outb.mem + ls, le - ls)) { return false; };
+                        if (!first) { this.passb.put(10); };
+                        first = false;
+                        this.passb.put_n(this.sub_ptr, this.sub_len);
+                        if (this.sub_len != le - ls)
+                        {
+                            replaced = true;
+                        }
+                        elif (!pp_eq(this.sub_ptr, this.outb.mem + ls, this.sub_len))
+                        {
+                            replaced = true;
+                        };
+                        if (le >= this.outb.len) { break; };
+                        ls = le + 1;
+                    };
+                    this.outb.clear();
+                    this.outb.put_n(this.passb.mem, this.passb.len);
+                };
+
+                if (this.verbose)
+                {
+                    if (iteration > 1)
+                    {
+                        standard::io::console::print(g"[PREPROCESSOR] Completed after \0");
+                        standard::io::console::print(iteration);
+                        standard::io::console::println(g" constant passes.\0");
+                    }
+                    else
+                    {
+                        standard::io::console::print(g"[PREPROCESSOR] Completed after \0");
+                        standard::io::console::print(iteration);
+                        standard::io::console::println(g" constant pass.\0");
+                    };
+                    standard::io::console::print(g"[PREPROCESSOR] Processed \0");
+                    standard::io::console::print(this.processed.count);
+                    standard::io::console::println(g" file(s)\0");
+                };
+
+                if (!this.alloc_ok())
+                {
+                    this.e_begin(PPError.ALLOC);
+                    this.errb.put_str(g"[PREPROCESSOR] allocation failed\0");
+                    return false;
+                };
+                return true;
             };
         };
-
-        dst[di] = 0;
-        ffree((u64)expanded);
-        return dst;
-    };
-
-    // -----------------------------------------------------------------------
-    // _extract_quoted: return the content of the first "..." in a line.
-    // Returns allocated string or null.
-    // -----------------------------------------------------------------------
-    def _extract_quoted(byte* line) -> byte*
-    {
-        int start = helpers::find_char(line, '"', 0);
-        if (start == -1) { return (byte*)0; };
-        start = start + 1;
-        int end = helpers::find_char(line, '"', start);
-        if (end == -1) { return (byte*)0; };
-        return manip::copy_n(line + start, end - start);
     };
 };
 
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
-def main(int argc, byte** argv) -> int
-{
-    argparse::Parser parser();
-
-    parser.add_value("--src\0",    "-s\0",    "Source .fx file to preprocess\0", true);
-    parser.add_value("--srcdir\0", "\0",       "Override FLUXC_SRCDIR\0",         false);
-
-    if (!parser.parse(argc, argv))
-    {
-        parser.print_help();
-        return 1;
-    };
-
-    byte* src_file = parser.get_value("--src\0");
-    //FXPreprocessor pp(src_file);
-
-///
-    if (parser.is_present("--srcdir\0"))
-    {
-        pp.lib_dirs[pp.lib_dir_count] = parser.get_value("--srcdir\0");
-        pp.lib_dir_count = pp.lib_dir_count + 1;
-    };
-///
-    return 0;
-};
+#endif;

@@ -708,47 +708,36 @@ def _compute_live_functions(program, ns_func_index: Dict[str, List[Any]],
     #   (a) the bare method name is in live, AND
     #   (b) the object type name (from obj_method_owner) is in live
     # This prevents dead objects from having their method bodies walked.
-    bare_frontier: Set[str] = set()
-    for bare_name, methods in obj_method_index.items():
-        if '__' in bare_name:
-            continue  # qualified key, already handled
-        if bare_name not in live:
-            continue
-        for method in methods:
-            obj_name = obj_method_owner.get(id(method))
-            if obj_name and obj_name not in live:
-                continue  # object type not live, skip
-            for ref in _collect_refs(method):
-                if ref not in live:
-                    bare_frontier.add(ref)
+    def _expand_frontier(frontier: Set[str]) -> None:
+        while frontier:
+            new_frontier: Set[str] = set()
+            for name in frontier:
+                if name in live:
+                    continue
+                live.add(name)
+                funcs = ns_func_index.get(name)
+                if funcs:
+                    for func in funcs:
+                        for ref in _collect_refs(func):
+                            if ref not in live:
+                                new_frontier.add(ref)
+                tl_funcs = toplevel_func_index.get(name)
+                if tl_funcs:
+                    for func in tl_funcs:
+                        for ref in _collect_refs(func):
+                            if ref not in live:
+                                new_frontier.add(ref)
+                methods = obj_method_index_qualified.get(name)
+                if methods:
+                    for method in methods:
+                        for ref in _collect_refs(method):
+                            if ref not in live:
+                                new_frontier.add(ref)
+            frontier = new_frontier
 
-    frontier = bare_frontier
-    while frontier:
-        new_frontier = set()
-        for name in frontier:
-            if name in live:
-                continue
-            live.add(name)
-            funcs = ns_func_index.get(name)
-            if funcs:
-                for func in funcs:
-                    for ref in _collect_refs(func):
-                        if ref not in live:
-                            new_frontier.add(ref)
-            tl_funcs = toplevel_func_index.get(name)
-            if tl_funcs:
-                for func in tl_funcs:
-                    for ref in _collect_refs(func):
-                        if ref not in live:
-                            new_frontier.add(ref)
-            methods = obj_method_index_qualified.get(name)
-            if methods:
-                for method in methods:
-                    for ref in _collect_refs(method):
-                        if ref not in live:
-                            new_frontier.add(ref)
-        frontier = new_frontier
-
+    # The scan repeats until no further method body is walked: a method reached
+    # only through a bare name that became live during an earlier scan (for
+    # example a helper called from another object's method) must be walked too.
     # Third pass: walk field type specs of live struct and object definitions.
     # A struct like MSG contains a field of type POINT. When MSG is live, POINT
     # must also be live. But struct field types are TypeSystem nodes inside
@@ -773,36 +762,45 @@ def _compute_live_functions(program, ns_func_index: Dict[str, List[Any]],
             refs |= _collect_type_field_refs(nested, cur_prefix)
         return refs
 
-    type_frontier: Set[str] = set()
-    for stmt in program.statements:
-        ns = None
-        if isinstance(stmt, NamespaceDef):
-            ns = stmt
-        elif isinstance(stmt, NamespaceDefStatement):
-            ns = getattr(stmt, 'namespace_def', None)
-        if ns is not None:
-            type_frontier |= _collect_type_field_refs(ns, '')
+    while True:
+        live_before = len(live)
+        walked_methods: Set[int] = set()
+        progressed = True
+        while progressed:
+            progressed = False
+            bare_frontier: Set[str] = set()
+            for bare_name, methods in obj_method_index.items():
+                if '__' in bare_name:
+                    continue  # qualified key, already handled
+                if bare_name not in live:
+                    continue
+                for method in methods:
+                    if id(method) in walked_methods:
+                        continue
+                    obj_name = obj_method_owner.get(id(method))
+                    if obj_name and obj_name not in live:
+                        continue  # object type not live, skip
+                    walked_methods.add(id(method))
+                    progressed = True
+                    for ref in _collect_refs(method):
+                        if ref not in live:
+                            bare_frontier.add(ref)
+            _expand_frontier(bare_frontier)
 
-    frontier = type_frontier
-    while frontier:
-        new_frontier = set()
-        for name in frontier:
-            if name in live:
-                continue
-            live.add(name)
-            funcs = ns_func_index.get(name)
-            if funcs:
-                for func in funcs:
-                    for ref in _collect_refs(func):
-                        if ref not in live:
-                            new_frontier.add(ref)
-            tl_funcs = toplevel_func_index.get(name)
-            if tl_funcs:
-                for func in tl_funcs:
-                    for ref in _collect_refs(func):
-                        if ref not in live:
-                            new_frontier.add(ref)
-        frontier = new_frontier
+        type_frontier: Set[str] = set()
+        for stmt in program.statements:
+            ns = None
+            if isinstance(stmt, NamespaceDef):
+                ns = stmt
+            elif isinstance(stmt, NamespaceDefStatement):
+                ns = getattr(stmt, 'namespace_def', None)
+            if ns is not None:
+                type_frontier |= _collect_type_field_refs(ns, '')
+
+        _expand_frontier(type_frontier)
+
+        if len(live) == live_before:
+            break
 
     return live, obj_method_index
 

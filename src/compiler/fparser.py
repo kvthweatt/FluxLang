@@ -112,6 +112,7 @@ _TOKEN_SYMBOL_MAP = {
     TokenType.SCOPE:              '::',
     TokenType.BACKSLASH:          '\\',
     TokenType.STRINGIFY:          '$',
+    TokenType.TAG:                '#',
 }
 
 _SYMBOL_MANGLE = {
@@ -476,6 +477,8 @@ class FluxParser:
         self._custom_postfix_ops: Dict[str, str] = {}  # symbol string -> func_name (postfix unary)
         self._custom_ternary_ops: Dict[tuple, str] = {}   # (left_sym, right_sym) -> func_name (ternary)
         self._custom_circumfix_ops: Dict[tuple, str] = {} # (left_sym, right_sym) -> func_name (circumfix)
+        self._custom_variadic_ops: Dict[str, str] = {}    # symbol string -> func_name (variadic infix)
+        self._variadic_op_body_symbol: str = None          # set while parsing a variadic operator body
         self._active_template_params: set = set()  # template param names in scope during current def/struct parse
         self._contracts: Dict[str, Block] = {}  # name -> Block of statements to inject
         self._contract_bindings: Dict[str, dict] = {}  # name -> binding spec dict from # binding { ... }
@@ -955,6 +958,18 @@ class FluxParser:
                 _pre_contract_arities.append(len(call_args) if call_args is not None else None)
 
         unary_binding = None  # None | 'prefix' | 'postfix' -- set in non-prototype path
+
+        # For variadic operators, append a hidden __op_count parameter so the body
+        # can read the operator-token count via the operator's own symbol.
+        _is_variadic_op = any(getattr(p, '_is_variadic_sentinel', False) for p in params)
+        if _is_variadic_op and symbol2 is None and unary_binding is None:
+            from ftypesys import TypeSystem, DataType as _DT
+            _count_ts = TypeSystem(base_type=_DT.SINT)
+            _count_param = Parameter('__op_count', _count_ts)
+            # __op_count is the one fixed parameter; operands are passed as C variadic args.
+            # Keep is_variadic=True so codegen emits a proper vararg function.
+            params = [_count_param] + [p for p in params if not getattr(p, '_is_variadic_sentinel', False)]
+
         if self.expect(TokenType.SEMICOLON):
             self.advance()
             body = Block([])
@@ -967,13 +982,21 @@ class FluxParser:
             for param in params:
                 if param.name:
                     self.symbol_table.define(param.name, SymbolKind.VARIABLE, param.type_spec)
+            _prev_vop_sym = self._variadic_op_body_symbol
+            if _is_variadic_op and symbol2 is None:
+                self._variadic_op_body_symbol = symbol
             self.advance()  # consume '->'
             expr = self.expression()
+            self._variadic_op_body_symbol = _prev_vop_sym
             self.consume(TokenType.SEMICOLON)
             body = Block([ReturnStatement(expr)])
             is_prototype = False
         else:
+            _prev_vop_sym = self._variadic_op_body_symbol
+            if _is_variadic_op and symbol2 is None:
+                self._variadic_op_body_symbol = symbol
             body = self.block()
+            self._variadic_op_body_symbol = _prev_vop_sym
             if contract_stmts:
                 body.statements = contract_stmts + body.statements
             # Post-contracts: } : Post1, Post2;
@@ -1036,6 +1059,7 @@ class FluxParser:
         _tmpl_scope_ctx.__exit__(None, None, None)
         from ftypesys import Operator as _Operator
         _builtin_op_values = {op.value for op in _Operator}
+        # _is_variadic_op was already computed and the sentinel stripped above; reuse it.
         if unary_binding is not None:
             # Unary custom operator -- register in prefix or postfix table only.
             if unary_binding == 'prefix':
@@ -1050,6 +1074,9 @@ class FluxParser:
                 # Ternary custom operator: a [lop] b [rop] c
                 self._custom_ternary_ops[(symbol, symbol2)] = func_name
             self.symbol_table.define(symbol2, SymbolKind.OPERATOR)
+        elif _is_variadic_op:
+            # Variadic infix operator: a [sym] b [sym] c [sym] ...
+            self._custom_variadic_ops[symbol] = func_name
         elif symbol in _builtin_op_values:
             # Overloading a built-in operator is only permitted when at least one
             # parameter is an object or struct type - OR the overload is templated
@@ -1090,7 +1117,8 @@ class FluxParser:
             return_type=return_type,
             body=body,
             is_prototype=is_prototype,
-            no_mangle=False
+            no_mangle=False,
+            is_variadic=_is_variadic_op,
         ).set_location(tok.line, tok.column)
 
     def _match_custom_ternary_left(self):
@@ -1106,12 +1134,36 @@ class FluxParser:
         custom_op_expression -> multiplicative_expression
                                   ( custom_binary_op multiplicative_expression
                                   | custom_ternary_left multiplicative_expression custom_ternary_right multiplicative_expression
+                                  | (multiplicative_expression custom_variadic_op)+ -- variadic chain
                                   )*
         """
         expr = self.multiplicative_expression()
 
         while True:
-            # Check ternary operators first (longer patterns take precedence).
+            # Check variadic operators first.
+            if self._custom_variadic_ops:
+                matched_vsym, matched_vlen = self._match_custom_unary_op(self._custom_variadic_ops)
+                if matched_vsym is not None:
+                    tok = self.current_token
+                    func_name = self._custom_variadic_ops[matched_vsym]
+                    operands = [expr]
+                    op_count = 0
+                    while True:
+                        _m, _l = self._match_custom_unary_op({matched_vsym: matched_vsym})
+                        if _m is None:
+                            break
+                        for _ in range(_l):
+                            self.advance()
+                        op_count += 1
+                        # Check if an expression follows
+                        _expr_start_types = _EXPRESSION_START_TOKENS
+                        if self.current_token.type not in _expr_start_types:
+                            break
+                        operands.append(self.multiplicative_expression())
+                    expr = FunctionCall(func_name, [Literal(op_count, DataType.SINT)] + operands).set_location(tok.line, tok.column)
+                    continue
+
+            # Check ternary operators next (longer patterns take precedence).
             if self._custom_ternary_ops:
                 matched_left, left_len = self._match_custom_ternary_left()
                 if matched_left is not None:
@@ -2870,6 +2922,8 @@ class FluxParser:
         # Parse optional error channel type: -> int ^| ErrType
         error_type = None
         if self.expect(TokenType.XOR_OP):
+            if calling_conv == 'cdecl':
+                self.error(f"Function '{name}' declared with 'cdecl' cannot have a dual return type: a C ABI function can only return a single value")
             self.advance()
             error_type = self.type_spec()
 
@@ -2999,6 +3053,8 @@ class FluxParser:
                         # Parse optional error channel type for this prototype
                         proto_error_type = None
                         if self.expect(TokenType.XOR_OP):
+                            if calling_conv == 'cdecl':
+                                self.error("A 'cdecl' function cannot have a dual return type: a C ABI function can only return a single value")
                             self.advance()
                             proto_error_type = self.type_spec()
 
@@ -6315,7 +6371,7 @@ class FluxParser:
                     initializers.append(recast)
                 else:
                     # Primitive type: treat as bit reinterpretation via CastExpression
-                    initializers.append(CastExpression(type_spec, source_expr).set_location(tok.line, tok.column))
+                    initializers.append(CastExpression(type_spec, source_expr, is_bitcast=True).set_location(tok.line, tok.column))
             elif self.expect(TokenType.ASSIGN):
                 self.advance()
                 init_expr = self.expression()
@@ -10134,6 +10190,7 @@ class FluxParser:
                 expr_parser._custom_postfix_ops = self._custom_postfix_ops
                 expr_parser._custom_operators = self._custom_operators
                 expr_parser._custom_ternary_ops = self._custom_ternary_ops
+                expr_parser._custom_variadic_ops = self._custom_variadic_ops
                 expression = expr_parser.expression()
                 
                 parts.append(expression)
@@ -10194,6 +10251,7 @@ class FluxParser:
                 expr_parser._custom_postfix_ops = self._custom_postfix_ops
                 expr_parser._custom_operators = self._custom_operators
                 expr_parser._custom_ternary_ops = self._custom_ternary_ops
+                expr_parser._custom_variadic_ops = self._custom_variadic_ops
                 expressions.append(expr_parser.expression())
 
         # Build FStringLiteral parts, substituting {} placeholders positionally
@@ -10232,6 +10290,15 @@ class FluxParser:
                            | array_literal
                            | struct_literal  # Returns StructLiteral, not old Literal
         """
+        # Inside a variadic operator body, the operator's own symbol reads as the op-count.
+        if self._variadic_op_body_symbol is not None:
+            _sym_map = {self._variadic_op_body_symbol: self._variadic_op_body_symbol}
+            _vm, _vl = self._match_custom_unary_op(_sym_map)
+            if _vm is not None:
+                tok = self.current_token
+                for _ in range(_vl):
+                    self.advance()
+                return Identifier('__op_count').set_location(tok.line, tok.column)
         if self.expect(TokenType.IDENTIFIER):
             return self.scoped_identifier()
         elif self.expect(TokenType.SINT_LITERAL):
@@ -10876,7 +10943,11 @@ def main():
         # Parse
         parser = FluxParser(tokens, source_lines=result.splitlines(keepends=True))
         parser._line_map = preprocessor.line_map
+        from fmacros import build_compiler_macros
+        parser = FluxParser.from_file(filename, compiler_macros=build_compiler_macros())
         ast = parser.parse()
+        from collections import Counter
+        print(Counter(type(s).__name__ for s in ast.statements))
         
         if show_ast:
             print("AST:")

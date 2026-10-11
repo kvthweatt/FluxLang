@@ -4075,6 +4075,9 @@ class CodegenVisitor:
             # If the receiver is a known object type, give a clear "method not found" error
             # rather than falling through to type function dispatch (which produces a misleading message).
             if hasattr(module, "_object_type_names") and obj_type_name in module._object_type_names:
+                print("[DBG] method_func_name:", method_func_name, file=sys.stdout)
+                print("[DBG] overload keys:", [k for k in getattr(module, '_function_overloads', {}) if k.startswith(obj_type_name + '.')], file=sys.stdout)
+                print("[DBG] globals:", [k for k in module.globals.keys() if k.startswith(obj_type_name + '.')], file=sys.stdout)
                 raise FluxCodegenError(
                     f"Object '{obj_type_name}' has no method '{node.method_name}'", node, module)
             # No object method found - try type func on the struct type name
@@ -7065,8 +7068,7 @@ class CodegenVisitor:
     def visit_FunctionDef(self, node, builder, module):
         # Functions defined inside comptime blocks belong only to the VM;
         # they must not be emitted as LLVM IR.
-        if (getattr(node, '_is_comptime_only', False) or
-                getattr(node, 'name', None) in self._comptime_functions):
+        if getattr(node, '_is_comptime_only', False):
             return None
         # Resolve f-string function names at compile time.
         # A plain string literal name (e.g. def "foo"()) is already resolved to a

@@ -2419,6 +2419,8 @@ class FVMCodegen:
                 and getattr(ts, 'custom_typename', None)
                 and ts.custom_typename in self._struct_layouts):
             self._emit(_instr(Op.CAST, target_ttag, ts.custom_typename))
+        elif getattr(node, 'is_bitcast', False) and target_ttag != TTag.PTR:
+            self._emit(_instr(Op.BITCAST, target_ttag))
         else:
             self._emit(_instr(Op.CAST, target_ttag))
         return True

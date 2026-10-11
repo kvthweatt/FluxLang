@@ -814,16 +814,21 @@ class TypeResolver:
         if arg_vals is not None:
             matching_count = None
             for overload in overloads:
-                if overload['param_count'] != len(arg_vals):
-                    continue
-                if matching_count is None:
-                    matching_count = overload['function']
-
                 func = overload['function']
+                _is_vararg = getattr(func.ftype, 'var_arg', False)
+                if _is_vararg:
+                    if len(arg_vals) < overload['param_count']:
+                        continue
+                else:
+                    if overload['param_count'] != len(arg_vals):
+                        continue
+                if matching_count is None:
+                    matching_count = func
+
                 param_types = [p.type for p in func.args]
                 arg_types   = [arg.type for arg in arg_vals]
 
-                if len(param_types) != len(arg_types):
+                if not _is_vararg and len(param_types) != len(arg_types):
                     continue
 
                 types_match = True
@@ -873,13 +878,13 @@ class TypeResolver:
         """
         THE SINGLE SOURCE OF TRUTH FOR ALL FUNCTION RESOLUTION.
         Handles both regular functions and overloaded functions.
-        
+
         Args:
             module: LLVM module
             func_name: Function name to resolve
             current_namespace: Current namespace context
             arg_vals: Optional list of argument values for overload resolution
-            
+
         Returns:
             ir.Function object if found, None otherwise
         """
@@ -888,7 +893,7 @@ class TypeResolver:
             obj = module.globals[func_name]
             if isinstance(obj, ir.Function):
                 return obj
-        
+
         # Step 2: Check for overloaded functions
         if hasattr(module, '_function_overloads') and func_name in module._function_overloads:
             result = TypeResolver._resolve_from_overloads(
@@ -982,14 +987,19 @@ class TypeResolver:
                 return overloads[0]
             matching = None
             for ov in overloads:
-                if ov['param_count'] != len(arg_vals):
-                    continue
+                func = ov['function']
+                _is_vararg = getattr(func.ftype, 'var_arg', False)
+                if _is_vararg:
+                    if len(arg_vals) < ov['param_count']:
+                        continue
+                else:
+                    if ov['param_count'] != len(arg_vals):
+                        continue
                 if matching is None:
                     matching = ov
-                func = ov['function']
                 param_types = [p.type for p in func.args]
                 arg_types   = [a.type for a in arg_vals]
-                if len(param_types) != len(arg_types):
+                if not _is_vararg and len(param_types) != len(arg_types):
                     continue
                 if all(pt == at for pt, at in zip(param_types, arg_types)):
                     return ov

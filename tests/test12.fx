@@ -4,7 +4,7 @@
 using standard::io::console,
       standard::random;
 
-def grade(int score) -> byte*
+grade(int score) -> byte*
 {
     if   (score >= 90) -> "A"
     elif (score >= 80) -> "B"
@@ -13,8 +13,13 @@ def grade(int score) -> byte*
     else               -> "F";
 };
 
+cdecl baz() -> int;
+
 comptime
 {
+    operator (...) [##] -> void { compiler.io.console.println(##); };
+
+    1 ## 2 ##;
 
     operator (i32 a) [&] -> int
     {
@@ -33,9 +38,9 @@ comptime
 
     compiler.io.console.println("True" if (5 < 10 < 20) else "False");
 
-    def add(int,i32) -> int as operator[\];
+    add(int,i32) -> int as operator[\];
 
-    def add(int a, i32 b) -> int
+    add(int a, i32 b) -> int
     {
         return a+b;
     };
@@ -83,11 +88,15 @@ f() -> int -> 42;
 
 operator (int x) [|][|] -> int -> x < void ? -x : x;
 
+operator (...) [##] -> void { println(##); };
+
 main() -> int : FSS_Protect_Frame
 {
     int result = f();
 
     int a = -1;
+
+    1 ## 2 ##;
 
     println(5 * |a|);
 

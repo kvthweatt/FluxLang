@@ -67,6 +67,22 @@ struct FXC_FUNCINFO
                post_contracts; // count of post-contracts
 };
 
+struct PtrVec
+{
+    void** items;
+    int len, cap;
+};
+
+// String keyed hash map. Keys are copied, values are borrowed.
+// Deleted entries keep their slot with a null value.
+struct NameMap
+{
+    byte** keys;
+    void** vals;
+    int* slots;
+    int count, ent_cap, slot_cap;
+};
+
 struct FXC_SYMENTRY
 {
     byte* name,        // unmangled name
@@ -76,12 +92,26 @@ struct FXC_SYMENTRY
     FXC_TYPESYS* type; // underlying type for everything,
                        // empty string for kinds that have no single type (struct, trait, etc.)
     byte* ns;          // fully qualified namespace path, empty string if top-level
+    int   kind_id,     // compiler SymbolKind
+          flags;
+    void* ts,          // TypeSpec*, borrowed
+          node;        // declaring Node*, borrowed, may be null
 };
 
 struct FXC_SYMTABLE
 {
     int entries;
     FXC_SYMENTRY* entry;
+    PtrVec* scopes,         // NameMap* per scope, index 0 is global
+            owned,          // every FXC_SYMENTRY created
+            owned_ts,       // TypeSpec clones created by the table
+            using_ns,       // byte*
+            registered_ns,  // byte*
+            overload_lists; // PtrVec* of Overload*, owned
+    NameMap* globals,       // mangled and bare names of top level symbols
+             overloads,     // base name -> PtrVec* of Overload*
+             nofunc;        // type names declared data!{N}
+    byte* current_ns;
 };
 
 //def !!__chkstk() -> void {};

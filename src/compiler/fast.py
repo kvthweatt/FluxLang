@@ -253,6 +253,7 @@ class UnaryOp(Expression):
 class CastExpression(Expression):
     target_type: TypeSystem
     expression: Expression
+    is_bitcast: bool = False
 
     def __repr__(self) -> str:
         return f"({self.target_type.custom_typename if self.target_type.custom_typename else self.target_type.base_type}){self.expression}"
