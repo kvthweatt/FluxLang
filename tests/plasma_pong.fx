@@ -825,11 +825,6 @@ def dispatch_project_div(double* u, double* v, double* p, double* div,
 
     for (t = 0; t < g_num_threads; t++)
     {
-        g_slices[t]
-        {
-            .phase = PHASE_PROJECT_DIV;
-
-        }
         g_slices[t].phase    = PHASE_PROJECT_DIV;
         g_slices[t].proj_u   = u;
         g_slices[t].proj_v   = v;

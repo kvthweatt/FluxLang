@@ -44,11 +44,16 @@
 #import "ftypesys.fx";
 #endif;
 
+#ifndef FLUX_CHECK
+#import "fcheck.fx";
+#endif;
+
 using standard::io::console;
 using flux::lexer;
 using flux::ast;
 using flux::preprocessor;
 using flux::types;
+using flux::check;
 
 #ifndef FLUX_PARSER
 #def FLUX_PARSER 1;
@@ -114,12 +119,10 @@ namespace flux
             FSTRING_EXPR,
             ISTRING_EXPR,
             CODIFY_EXPR,
-            ACCEPTOR_PLACEHOLDER,
             TEMPLATE_FUNCTION,
             FUNCTION_CONTRACT,
             TEMPLATE_STRUCT,
             TEMPLATE_OBJECT,
-            OBJECT_INHERITANCE,
             AS_OPERATOR,
             TEMPLATE_OPERATOR,
             CONTRACT_BINDING,
@@ -185,12 +188,10 @@ namespace flux
                 case (Feat.FSTRING_EXPR) { return g"f-string Expression\0"; }
                 case (Feat.ISTRING_EXPR) { return g"i-string Expression\0"; }
                 case (Feat.CODIFY_EXPR) { return g"Codify Expression\0"; }
-                case (Feat.ACCEPTOR_PLACEHOLDER) { return g"Acceptor Placeholder\0"; }
                 case (Feat.TEMPLATE_FUNCTION) { return g"Template Function\0"; }
                 case (Feat.FUNCTION_CONTRACT) { return g"Function Contract\0"; }
                 case (Feat.TEMPLATE_STRUCT) { return g"Template Struct\0"; }
                 case (Feat.TEMPLATE_OBJECT) { return g"Template Object\0"; }
-                case (Feat.OBJECT_INHERITANCE) { return g"Object Inheritance Resolution\0"; }
                 case (Feat.AS_OPERATOR) { return g"Operator Binding (as operator)\0"; }
                 case (Feat.TEMPLATE_OPERATOR) { return g"Template Operator\0"; }
                 case (Feat.CONTRACT_BINDING) { return g"Contract Binding Spec\0"; }
@@ -396,6 +397,68 @@ namespace flux
             byte* func;
         };
 
+        // One registered template (fparser.py TemplateEntry plus the registry bookkeeping)
+        struct TemplateEntry
+        {
+            int kind;               // 0 function, 1 struct, 2 object, 3 operator
+            PtrVec* params;         // byte* names in declaration order
+            PtrVec* cparam;         // allowed-type lists, flattened: parameter name,
+            PtrVec* cts;            //   TypeSpec* (owned) and
+            PtrVec* ctext;          //   source text, one triple per alternative
+            PtrVec* dparam;         // defaults: parameter name and
+            PtrVec* dts;            //   TypeSpec* (owned)
+            Node* node;             // the template node (owned)
+            Node* rels;             // holder: CONSTRA_RELATION nodes in l1
+            NameMap* no_default;    // parameters marked '!+'
+            NameMap* emitted;       // mangled names already instantiated
+        };
+
+        def te_new() -> TemplateEntry*
+        {
+            TemplateEntry* e = (TemplateEntry*)fmalloc((u64)((sizeof(TemplateEntry) + 7) / 8));
+            e.kind = 0;
+            e.params = pv_new();
+            e.cparam = pv_new();
+            e.cts = pv_new();
+            e.ctext = pv_new();
+            e.dparam = pv_new();
+            e.dts = pv_new();
+            e.node = (Node*)0;
+            e.rels = node_new(NodeKind.CONSTRA_DEF, 0, 0);
+            e.no_default = nm_new();
+            e.emitted = nm_new();
+            return e;
+        };
+
+        def te_free(TemplateEntry* e) -> void
+        {
+            int i;
+            if (e == (TemplateEntry*)0) { return; };
+            while (i < e.cts.len)
+            {
+                typespec_free((TypeSpec*)e.cts.items[i]);
+                i++;
+            };
+            i = 0;
+            while (i < e.dts.len)
+            {
+                typespec_free((TypeSpec*)e.dts.items[i]);
+                i++;
+            };
+            pv_free(e.params);
+            pv_free(e.cparam);
+            pv_free(e.cts);
+            pv_free(e.ctext);
+            pv_free(e.dparam);
+            pv_free(e.dts);
+            node_free(e.node);
+            node_free(e.rels);
+            nm_free(e.no_default);
+            nm_free(e.emitted);
+            ffree((byte*)e);
+            return;
+        };
+
         object Parser
         {
             Lexer* lx;
@@ -424,6 +487,24 @@ namespace flux
             byte* last_template;    // name of the last template function skipped by function_def
             PtrVec* trait_defs;     // TRAIT_DEF nodes defined so far (owned by the tree)
             byte* ns_path;          // enclosing namespaces joined with __, null at file scope
+            NameMap* cstrs;         // byte* string literal initializers by variable name (~$name splicing)
+            PtrVec* subparsers;     // fresh parsers made for codify statements (nodes borrow their strings)
+            NameMap* constras;      // constra sets defined so far (value is the CONSTRA_DEF node)
+            NameMap* templates;     // template name (and aliases) to TemplateEntry*
+            PtrVec* tentries;       // every TemplateEntry made (owned)
+            NameMap* pobjs;         // fully defined objects by name (fparser._parsed_objects)
+            NameMap* oinit;         // objects (and template objects) that define __init
+            PtrVec* inh_clone;      // inherited method clones and the node each came from
+            PtrVec* inh_orig;
+            NameMap* tobj_fwd;      // template objects whose body is being parsed (forward declarations)
+            NameMap* active_tp;     // template parameter names in scope while a template is parsed
+            TemplateEntry* tmpl_cur; // entry parsed by the function being defined
+            PtrVec* tinst_s;        // instantiated template structs (appended after the program)
+            PtrVec* tinst_o;        // instantiated template objects
+            PtrVec* tinst_f;        // instantiated template functions
+            PtrVec* tmp_ts;         // TypeSpecs made while inferring, freed on exit
+            Checker* chk; // template constraint checker (created on first use)
+            NameMap* macros;        // names of the macros defined so far (the value is only a marker)
 
             def __init(Lexer* lexer) -> this
             {
@@ -463,7 +544,25 @@ namespace flux
                 this.vop_sym = (OpSym*)0;
                 this.contracts = pv_new();
                 this.sublex = pv_new();
-                this.feat_hits = (int*)fmalloc((u64)Feat.COUNT * (u64)(sizeof(int) / 8));
+                this.cstrs = nm_new();
+                this.subparsers = pv_new();
+                this.macros = nm_new();
+                this.constras = nm_new();
+                this.templates = nm_new();
+                this.tentries = pv_new();
+                this.active_tp = nm_new();
+                this.tobj_fwd = nm_new();
+                this.pobjs = nm_new();
+                this.oinit = nm_new();
+                this.inh_clone = pv_new();
+                this.inh_orig = pv_new();
+                this.tmpl_cur = (TemplateEntry*)0;
+                this.tinst_s = pv_new();
+                this.tinst_o = pv_new();
+                this.tinst_f = pv_new();
+                this.tmp_ts = pv_new();
+                this.chk = (Checker*)0;
+                this.feat_hits = (int*)fmalloc((u64)Feat.COUNT * (u64)((sizeof(int) + 7) / 8));
                 if (this.feat_hits == (int*)0)
                 {
                     this.failed = true;
@@ -519,6 +618,67 @@ namespace flux
                     li++;
                 };
                 pv_free(this.sublex);
+                int pi;
+                Parser* sp;
+                while (pi < this.subparsers.len)
+                {
+                    sp = (Parser*)this.subparsers.items[pi];
+                    if (sp.st != (FXC_SYMTABLE*)0) { st_free(sp.st); };
+                    sp.__exit();
+                    ffree((byte*)sp);
+                    pi++;
+                };
+                pv_free(this.subparsers);
+                nm_free(this.cstrs);
+                nm_free(this.macros);
+                nm_free(this.constras);
+                nm_free(this.templates);
+                nm_free(this.active_tp);
+                nm_free(this.tobj_fwd);
+                nm_free(this.pobjs);
+                nm_free(this.oinit);
+                pv_free(this.inh_clone);
+                pv_free(this.inh_orig);
+                pi = 0;
+                while (pi < this.tentries.len)
+                {
+                    te_free((TemplateEntry*)this.tentries.items[pi]);
+                    pi++;
+                };
+                pv_free(this.tentries);
+                pi = 0;
+                while (pi < this.tinst_s.len)
+                {
+                    node_free((Node*)this.tinst_s.items[pi]);
+                    pi++;
+                };
+                pi = 0;
+                while (pi < this.tinst_o.len)
+                {
+                    node_free((Node*)this.tinst_o.items[pi]);
+                    pi++;
+                };
+                pi = 0;
+                while (pi < this.tinst_f.len)
+                {
+                    node_free((Node*)this.tinst_f.items[pi]);
+                    pi++;
+                };
+                pv_free(this.tinst_s);
+                pv_free(this.tinst_o);
+                pv_free(this.tinst_f);
+                pi = 0;
+                while (pi < this.tmp_ts.len)
+                {
+                    typespec_free((TypeSpec*)this.tmp_ts.items[pi]);
+                    pi++;
+                };
+                pv_free(this.tmp_ts);
+                if (this.chk != (Checker*)0)
+                {
+                    this.chk.__exit();
+                    ffree((byte*)this.chk);
+                };
                 this.sb.__exit();
                 return;
             };
@@ -1212,44 +1372,3104 @@ namespace flux
 
             // ===== GRAMMAR RULES (STUBS) =====
 
+            // macro_def -> 'macro' IDENTIFIER '(' (IDENTIFIER (',' IDENTIFIER)*)? ')' '{' expression ';'? '}' ';'
+            // The name is registered before the body is parsed so a recursive call in the body
+            // becomes a MACRO_CALL. The ';' inside the braces is a terminator, not part of the body.
             def macro_def() -> Node*
             {
-                return this.stub(Feat.MACRO_DEF, NodeKind.MACRO_DEF_STATEMENT);
+                int line = this.cur_line();
+                int col = this.cur_col();
+                Node* s = this.mk(NodeKind.MACRO_DEF_STATEMENT, line, col);
+                if (this.failed) { return s; };
+                Node* d = this.mk(NodeKind.MACRO_DEF, line, col);
+                if (this.failed)
+                {
+                    node_free(s);
+                    return d;
+                };
+                s.a = d;
+                Node* p;
+                bool more;
+                this.advance();
+                d.text = this.ident();
+                if (this.failed) { return this.done(s); };
+                if (!this.consume(TokenType.LEFT_PAREN)) { return this.done(s); };
+                if (!this.expect(TokenType.RIGHT_PAREN))
+                {
+                    more = true;
+                    while (more & !this.failed)
+                    {
+                        p = this.mk(NodeKind.IDENTIFIER, this.cur_line(), this.cur_col());
+                        if (this.failed) { break; };
+                        node_push(d, 0, p);
+                        p.text = this.ident();
+                        if (this.failed) { break; };
+                        more = this.expect(TokenType.COMMA);
+                        if (more) { this.advance(); };
+                    };
+                };
+                if (!this.failed) { this.consume(TokenType.RIGHT_PAREN); };
+                if (this.failed) { return this.done(s); };
+                nm_put(this.macros, d.text, (void*)this.macros);
+                if (!this.consume(TokenType.LEFT_BRACE)) { return this.done(s); };
+                d.a = this.expression();
+                if (this.failed) { return this.done(s); };
+                if (this.expect(TokenType.SEMICOLON)) { this.advance(); };
+                if (!this.consume(TokenType.RIGHT_BRACE)) { return this.done(s); };
+                this.consume(TokenType.SEMICOLON);
+                return this.done(s);
             };
 
+            // effect_def -> 'effect' IDENTIFIER ('.' IDENTIFIER)* '{' effect_expr '}' ';'
             def effect_def() -> Node*
             {
-                return this.stub(Feat.EFFECT_DEF, NodeKind.EFFECT_DEF);
+                Node* n = this.mk(NodeKind.EFFECT_DEF, this.cur_line(), this.cur_col());
+                if (this.failed) { return n; };
+                byte* sub;
+                this.advance();
+                byte* name = this.ident();
+                if (this.failed) { return this.done(n); };
+                while (this.expect(TokenType.DOT))
+                {
+                    this.advance();
+                    sub = this.ident();
+                    if (this.failed) { break; };
+                    name = this.cat2(this.cat2(name, g".\0"), sub);
+                };
+                if (!this.failed) { this.consume(TokenType.LEFT_BRACE); };
+                if (!this.failed) { n.a = this.effect_expr(); };
+                if (!this.failed) { this.consume(TokenType.RIGHT_BRACE); };
+                if (!this.failed) { this.consume(TokenType.SEMICOLON); };
+                n.text = name;
+                return this.done(n);
             };
 
+            // Error text of the form "<msg> [line:col]" at the current token (fparser.py raises SyntaxError)
+            def interface_error(byte* head, byte* name, byte* tail) -> void
+            {
+                this.sb.len = 0;
+                this.sb.put_str(head);
+                if (name != (byte*)0)
+                {
+                    this.sb.put_str(name);
+                    this.sb.put_str(g"' must have a trait constraint (e.g. \0");
+                    this.sb.put_str(name);
+                    this.sb.put_str(tail);
+                }
+                else
+                {
+                    this.sb.put_str(tail);
+                };
+                this.sb.put_str(g" [\0");
+                this.sb.put_int(this.cur_line());
+                this.sb.put(':');
+                this.sb.put_int(this.cur_col());
+                this.sb.put(']');
+                this.error(this.own_n(this.sb.mem, this.sb.len));
+                return;
+            };
+
+            // '{' prototype (',' prototype)* '}'  with  prototype -> IDENTIFIER '(' (type IDENTIFIER (',' type IDENTIFIER)*)? ')' '->' type
+            // Each prototype is a FUNCTION_DEF flagged NF_PROTOTYPE with an empty body, pushed to holder.l0.
+            def interface_protos(Node* holder) -> void
+            {
+                int pl, pc;
+                Node* f;
+                Node* prm;
+                bool more;
+                if (!this.consume(TokenType.LEFT_BRACE)) { return; };
+                while (!this.failed & !this.expect(TokenType.RIGHT_BRACE))
+                {
+                    pl = this.cur_line();
+                    pc = this.cur_col();
+                    f = this.mk(NodeKind.FUNCTION_DEF, pl, pc);
+                    if (this.failed) { return; };
+                    node_push(holder, 0, f);
+                    f.text = this.ident();
+                    if (!this.failed) { this.consume(TokenType.LEFT_PAREN); };
+                    if (!this.failed & !this.expect(TokenType.RIGHT_PAREN))
+                    {
+                        more = true;
+                        while (more & !this.failed)
+                        {
+                            prm = this.mk(NodeKind.PARAMETER, pl, pc);
+                            if (this.failed) { break; };
+                            node_push(f, 0, prm);
+                            prm.ts = this.type_spec();
+                            if (this.failed) { break; };
+                            prm.text = this.ident();
+                            if (this.failed) { break; };
+                            more = this.expect(TokenType.COMMA);
+                            if (more) { this.advance(); };
+                        };
+                    };
+                    if (!this.failed) { this.consume(TokenType.RIGHT_PAREN); };
+                    if (!this.failed) { this.consume(TokenType.RETURN_ARROW); };
+                    if (!this.failed) { f.ts = this.type_spec(); };
+                    if (this.failed) { return; };
+                    this.mark_proto(f);
+                    if (this.failed) { return; };
+                    if (this.expect(TokenType.COMMA)) { this.advance(); }
+                    else { break; };
+                };
+                if (!this.failed) { this.consume(TokenType.RIGHT_BRACE); };
+                return;
+            };
+
+            // interface_def -> 'interface' IDENTIFIER '(' (IDENTIFIER ':' IDENTIFIER (',' ...)*)? ')'
+            //                  '{' (protocol ';')* '}' ('#' ('effect' | 'attenuate') '{' effect_expr '}')* ';'
+            //   protocol -> IDENTIFIER ':' IDENTIFIER protos      A : B   CALL_ON
+            //             | IDENTIFIER '(' IDENTIFIER ')' protos  B(A)    PASS_INTO (caller A, callee B)
+            //             | IDENTIFIER '->' IDENTIFIER protos     A -> B  RETURN_TO
             def interface_def() -> Node*
             {
-                return this.stub(Feat.INTERFACE_DEF, NodeKind.INTERFACE_DEF);
+                int line = this.cur_line();
+                int col = this.cur_col();
+                Node* n = this.mk(NodeKind.INTERFACE_DEF, line, col);
+                if (this.failed) { return n; };
+                Node* p;
+                Node* pr;
+                byte* first;
+                bool more;
+                this.advance();
+                n.text = this.ident();
+                if (!this.failed) { this.consume(TokenType.LEFT_PAREN); };
+                if (!this.failed & !this.expect(TokenType.RIGHT_PAREN))
+                {
+                    more = true;
+                    while (more & !this.failed)
+                    {
+                        p = this.mk(NodeKind.IDENTIFIER, this.cur_line(), this.cur_col());
+                        if (this.failed) { break; };
+                        node_push(n, 0, p);
+                        p.text = this.ident();
+                        if (this.failed) { break; };
+                        if (!this.expect(TokenType.COLON))
+                        {
+                            this.interface_error(g"Interface parameter '\0", p.text, g": SomeTrait)\0");
+                            break;
+                        };
+                        this.advance();
+                        p.text2 = this.ident();
+                        if (this.failed) { break; };
+                        more = this.expect(TokenType.COMMA);
+                        if (more) { this.advance(); };
+                    };
+                };
+                if (!this.failed) { this.consume(TokenType.RIGHT_PAREN); };
+                if (!this.failed) { this.consume(TokenType.LEFT_BRACE); };
+                while (!this.failed & !this.expect(TokenType.RIGHT_BRACE))
+                {
+                    pr = this.mk(NodeKind.INTERFACE_PROTOCOL, line, col);
+                    if (this.failed) { break; };
+                    node_push(n, 1, pr);
+                    first = this.ident();
+                    if (this.failed) { break; };
+                    if (this.expect(TokenType.COLON))
+                    {
+                        this.advance();
+                        pr.text = first;
+                        pr.text2 = this.ident();
+                        pr.op = ProtocolKind.CALL_ON;
+                    }
+                    elif (this.expect(TokenType.LEFT_PAREN))
+                    {
+                        this.advance();
+                        pr.text = this.ident();
+                        if (!this.failed) { this.consume(TokenType.RIGHT_PAREN); };
+                        pr.text2 = first;
+                        pr.op = ProtocolKind.PASS_INTO;
+                    }
+                    elif (this.expect(TokenType.RETURN_ARROW))
+                    {
+                        this.advance();
+                        pr.text = first;
+                        pr.text2 = this.ident();
+                        pr.op = ProtocolKind.RETURN_TO;
+                    }
+                    else
+                    {
+                        this.interface_error(g"Expected ':', '(' or '->' in interface protocol block\0", (byte*)0, g"\0");
+                        break;
+                    };
+                    if (this.failed) { break; };
+                    this.interface_protos(pr);
+                    if (!this.failed) { this.consume(TokenType.SEMICOLON); };
+                };
+                if (!this.failed) { this.consume(TokenType.RIGHT_BRACE); };
+                while (!this.failed & this.expect(TokenType.TAG))
+                {
+                    this.advance();
+                    if (this.expect(TokenType.EFFECT))
+                    {
+                        node_free(n.b);
+                        n.b = this.effect_annotation(NodeKind.EFFECT_ANNOTATION);
+                    }
+                    elif (this.expect(TokenType.IDENTIFIER) & this.val_is(g"attenuate\0", 9))
+                    {
+                        node_free(n.a);
+                        n.a = this.effect_annotation(NodeKind.ATTENUATE_ANNOTATION);
+                    }
+                    else
+                    {
+                        this.error(g"Expected 'effect' or 'attenuate' after '#' in interface definition\0");
+                    };
+                };
+                if (!this.failed) { this.consume(TokenType.SEMICOLON); };
+                return this.done(n);
             };
 
+            // deprecate_statement -> 'deprecate' IDENTIFIER ('::' IDENTIFIER)* ';'
+            // The path keeps "::" separators, as in fparser.py.
             def deprecate_statement() -> Node*
             {
-                return this.stub(Feat.DEPRECATE_STATEMENT, NodeKind.DEPRECATE_STATEMENT);
+                Node* n = this.mk(NodeKind.DEPRECATE_STATEMENT, this.cur_line(), this.cur_col());
+                if (this.failed) { return n; };
+                this.advance();
+                byte* path = this.ident();
+                byte* part;
+                while (!this.failed & this.expect(TokenType.SCOPE))
+                {
+                    this.advance();
+                    part = this.ident();
+                    if (this.failed) { break; };
+                    path = this.cat2(this.cat2(path, g"::\0"), part);
+                };
+                if (!this.failed) { this.consume(TokenType.SEMICOLON); };
+                n.text = path;
+                return this.done(n);
             };
 
+            // ----- templates: registry and parameter lists -----
+
+            // Active template parameter names while a template definition is parsed
+            def tp_active(byte* name) -> bool
+            {
+                if (this.active_tp == (NameMap*)0) { return false; };
+                return nm_has(this.active_tp, name);
+            };
+
+            def tp_activate(TemplateEntry* e) -> void
+            {
+                NameMap* a = nm_new();
+                int i;
+                while (i < e.params.len)
+                {
+                    nm_put(a, (byte*)e.params.items[i], (void*)a);
+                    i++;
+                };
+                this.active_tp = a;
+                return;
+            };
+
+            // IDENTIFIER, or a codify splice when allowed
+            def tp_id(bool cg) -> byte*
+            {
+                if (cg & this.expect(TokenType.CODIFY)) { return this.consume_codify(); };
+                return this.ident();
+            };
+
+            // names joined by '&'
+            def tp_idlist(bool cg) -> PtrVec*
+            {
+                PtrVec* v = pv_new();
+                pv_push(v, (void*)this.tp_id(cg));
+                while (!this.failed & this.expect(TokenType.LOGICAL_AND))
+                {
+                    this.advance();
+                    pv_push(v, (void*)this.tp_id(cg));
+                };
+                return v;
+            };
+
+            // Source-like text of a type for constraint messages (fparser._ts_repr_simple)
+            def tp_repr(TypeSpec* t) -> byte*
+            {
+                int i;
+                this.sb.len = 0;
+                if (t.custom_typename != (byte*)0) { this.sb.put_str(t.custom_typename); }
+                else { this.sb.put_str(datatype_text(t.base_type)); };
+                if (ts_is_pointer(t))
+                {
+                    while (i < t.pointer_depth)
+                    {
+                        this.sb.put('*');
+                        i++;
+                    };
+                };
+                if (ts_is_array(t)) { this.sb.put_str(g"[]\0"); };
+                return this.own_n(this.sb.mem, this.sb.len);
+            };
+
+            // Name mapped through the zip of from and to (the last duplicate wins)
+            def tp_map_name(PtrVec* fnames, PtrVec* to, byte* n) -> byte*
+            {
+                int i = fnames.len;
+                if (to.len < i) { i = to.len; };
+                while (i > 0)
+                {
+                    i--;
+                    if (cstr_eq((byte*)fnames.items[i], n)) { return (byte*)to.items[i]; };
+                };
+                return n;
+            };
+
+            // Copies the relations of constra set cs into e, mapping its formals onto to
+            def tp_copy_rels(TemplateEntry* e, Node* cs, PtrVec* to) -> void
+            {
+                PtrVec* fnames = pv_new();
+                PtrVec* lhs;
+                PtrVec* rhs;
+                Node* rel;
+                int i, k, n;
+                while (i < node_count(cs, 0))
+                {
+                    pv_push(fnames, (void*)node_child(cs, 0, i).text);
+                    i++;
+                };
+                i = 0;
+                n = node_count(cs, 1);
+                while (i < n & !this.failed)
+                {
+                    rel = node_child(cs, 1, i);
+                    lhs = pv_new();
+                    rhs = pv_new();
+                    k = 0;
+                    while (k < node_count(rel, 0))
+                    {
+                        pv_push(lhs, (void*)this.tp_map_name(fnames, to, node_child(rel, 0, k).text));
+                        k++;
+                    };
+                    k = 0;
+                    while (k < node_count(rel, 1))
+                    {
+                        pv_push(rhs, (void*)this.tp_map_name(fnames, to, node_child(rel, 1, k).text));
+                        k++;
+                    };
+                    this.cs_emit(e.rels, lhs, rel.text, rhs, rel.line, rel.col);
+                    pv_free(lhs);
+                    pv_free(rhs);
+                    i++;
+                };
+                pv_free(fnames);
+                return;
+            };
+
+            def tp_has_param(TemplateEntry* e, byte* n) -> bool
+            {
+                int i;
+                while (i < e.params.len)
+                {
+                    if (cstr_eq((byte*)e.params.items[i], n)) { return true; };
+                    i++;
+                };
+                return false;
+            };
+
+            // One entry of ':{ ... }': a named constra (with or without arguments) or a raw relation
+            def tp_cs_entry(TemplateEntry* e, bool cg) -> void
+            {
+                int m = this.mark();
+                int line = this.cur_line();
+                int col = this.cur_col();
+                bool codify = false;
+                byte* name;
+                Node* csd;
+                PtrVec* args;
+                PtrVec* lhs;
+                PtrVec* rhs;
+                byte* op;
+                int i;
+                if (cg & this.expect(TokenType.CODIFY))
+                {
+                    name = this.consume_codify();
+                    codify = true;
+                }
+                else
+                {
+                    name = this.ident();
+                };
+                if (this.failed) { return; };
+                if (!codify & this.expect(TokenType.LEFT_PAREN))
+                {
+                    if (!nm_has(this.constras, name))
+                    {
+                        this.sb.len = 0;
+                        this.sb.put_str(g"Unknown named constraint set '\0");
+                        this.sb.put_str(name);
+                        this.sb.put('\'');
+                        this.cs_error_at(m);
+                        return;
+                    };
+                    csd = (Node*)nm_get(this.constras, name);
+                    this.advance();
+                    args = pv_new();
+                    if (!this.expect(TokenType.RIGHT_PAREN))
+                    {
+                        pv_push(args, (void*)this.ident());
+                        while (!this.failed & this.expect(TokenType.COMMA))
+                        {
+                            this.advance();
+                            pv_push(args, (void*)this.ident());
+                        };
+                    };
+                    if (!this.failed) { this.consume(TokenType.RIGHT_PAREN); };
+                    if (this.failed)
+                    {
+                        pv_free(args);
+                        return;
+                    };
+                    if (args.len != node_count(csd, 0))
+                    {
+                        this.sb.len = 0;
+                        this.sb.put_str(g"Named constraint set '\0");
+                        this.sb.put_str(name);
+                        this.sb.put_str(g"' expects \0");
+                        this.sb.put_int(node_count(csd, 0));
+                        this.sb.put_str(g" argument(s), got \0");
+                        this.sb.put_int(args.len);
+                        this.cs_error_at(m);
+                        pv_free(args);
+                        return;
+                    };
+                    i = 0;
+                    while (i < args.len)
+                    {
+                        if (!this.tp_has_param(e, (byte*)args.items[i]))
+                        {
+                            this.sb.len = 0;
+                            this.sb.put('\'');
+                            this.sb.put_str((byte*)args.items[i]);
+                            this.sb.put_str(g"' is not a template parameter; valid parameters are: \0");
+                            this.tp_put_params(e);
+                            this.error(this.own_n(this.sb.mem, this.sb.len));
+                            pv_free(args);
+                            return;
+                        };
+                        i++;
+                    };
+                    this.tp_copy_rels(e, csd, args);
+                    pv_free(args);
+                    return;
+                };
+                if (!codify & nm_has(this.constras, name) & !(this.expect(TokenType.LOGICAL_AND) | this.is_relop()))
+                {
+                    csd = (Node*)nm_get(this.constras, name);
+                    if (e.params.len != node_count(csd, 0))
+                    {
+                        this.sb.len = 0;
+                        this.sb.put_str(g"Named constraint set '\0");
+                        this.sb.put_str(name);
+                        this.sb.put_str(g"' has \0");
+                        this.sb.put_int(node_count(csd, 0));
+                        this.sb.put_str(g" parameter(s) but the template has \0");
+                        this.sb.put_int(e.params.len);
+                        this.sb.put_str(g" parameter(s); use explicit arguments: '\0");
+                        this.sb.put_str(name);
+                        this.sb.put_str(g"(...)'\0");
+                        this.cs_error_at(m);
+                        return;
+                    };
+                    this.tp_copy_rels(e, csd, e.params);
+                    return;
+                };
+                lhs = pv_new();
+                pv_push(lhs, (void*)name);
+                while (!this.failed & this.expect(TokenType.LOGICAL_AND))
+                {
+                    this.advance();
+                    pv_push(lhs, (void*)this.tp_id(cg));
+                };
+                if (!this.failed)
+                {
+                    op = this.consume_relop();
+                    if (!this.failed)
+                    {
+                        rhs = this.tp_idlist(cg);
+                        if (!this.failed) { this.cs_emit(e.rels, lhs, op, rhs, line, col); };
+                        pv_free(rhs);
+                    };
+                };
+                pv_free(lhs);
+                return;
+            };
+
+            // Template parameter names joined with ", " into sb
+            def tp_put_params(TemplateEntry* e) -> void
+            {
+                int i;
+                while (i < e.params.len)
+                {
+                    if (i > 0) { this.sb.put_str(g", \0"); };
+                    this.sb.put_str((byte*)e.params.items[i]);
+                    i++;
+                };
+                return;
+            };
+
+            // ':' '{' entry (',' entry)* '}'
+            def tp_constraint_set(TemplateEntry* e, bool cg) -> void
+            {
+                this.consume(TokenType.COLON);
+                if (!this.failed) { this.consume(TokenType.LEFT_BRACE); };
+                if (!this.failed) { this.tp_cs_entry(e, cg); };
+                while (!this.failed & this.expect(TokenType.COMMA))
+                {
+                    this.advance();
+                    this.tp_cs_entry(e, cg);
+                };
+                if (!this.failed) { this.consume(TokenType.RIGHT_BRACE); };
+                return;
+            };
+
+            // name (':' ['+'] type ('|' ['+'] type)*)?
+            def tp_param_entry(TemplateEntry* e, byte* name) -> void
+            {
+                pv_push(e.params, (void*)name);
+                if (!this.expect(TokenType.COLON)) { return; };
+                this.advance();
+                bool saw_default = false;
+                bool is_def, more;
+                int dm = -1;
+                TypeSpec* ts;
+                TypeSpec* dts = (TypeSpec*)0;
+                byte* src;
+                more = true;
+                while (more & !this.failed)
+                {
+                    is_def = this.expect(TokenType.PLUS);
+                    if (is_def)
+                    {
+                        if (dm < 0) { dm = this.mark(); };
+                        this.advance();
+                        saw_default = true;
+                    };
+                    src = (byte*)0;
+                    if (this.expect(TokenType.STRING_LITERAL)) { src = g"\"\"\0"; };
+                    ts = this.type_spec();
+                    if (this.failed)
+                    {
+                        if (ts != (TypeSpec*)0) { typespec_free(ts); };
+                        return;
+                    };
+                    if (src == (byte*)0) { src = this.tp_repr(ts); };
+                    pv_push(e.cparam, (void*)name);
+                    pv_push(e.cts, (void*)ts);
+                    pv_push(e.ctext, (void*)src);
+                    if (is_def) { dts = ts; };
+                    more = this.expect(TokenType.LOGICAL_OR);
+                    if (more) { this.advance(); };
+                };
+                if (this.failed | !saw_default) { return; };
+                if (nm_has(e.no_default, name))
+                {
+                    this.reset(dm);
+                    this.sb.len = 0;
+                    this.sb.put_str(g"Template parameter '\0");
+                    this.sb.put_str(name);
+                    this.sb.put_str(g"' is marked '!+' (no default) but a default type was supplied with '+'\0");
+                    this.error(this.own_n(this.sb.mem, this.sb.len));
+                    return;
+                };
+                pv_push(e.dparam, (void*)name);
+                pv_push(e.dts, (void*)typespec_copy(dts));
+                return;
+            };
+
+            // The relational-constraint-in-the-wrong-place error of a parameter list
+            def tp_rel_misplaced(byte* id, bool first) -> void
+            {
+                this.sb.len = 0;
+                this.sb.put_str(g"Relational template constraints must be wrapped in a constraint set\0");
+                if (first) { this.sb.put_str(g" as :{T ~= U}. Did you mean :{\0"); }
+                else { this.sb.put_str(g": :{T ~= U}. Did you mean :{\0"); };
+                this.sb.put_str(id);
+                this.sb.put_str(g" ~= ...}, or did you intend a type constraint \0");
+                this.sb.put_str(id);
+                this.sb.put_str(g": ?\0");
+                this.error(this.own_n(this.sb.mem, this.sb.len));
+                return;
+            };
+
+            // One list entry after the cursor: ':{...}' or ['!+'] name constraint
+            def tp_entry(TemplateEntry* e, bool cg, bool first) -> void
+            {
+                bool nd = false;
+                byte* id;
+                if (this.expect(TokenType.COLON))
+                {
+                    this.tp_constraint_set(e, cg);
+                    return;
+                };
+                if (this.expect(TokenType.NOT))
+                {
+                    this.advance();
+                    this.consume(TokenType.PLUS);
+                    nd = true;
+                };
+                if (this.failed) { return; };
+                id = this.tp_id(cg);
+                if (this.failed) { return; };
+                if (nd) { nm_put(e.no_default, id, (void*)e); };
+                if (this.expect(TokenType.LOGICAL_AND) | this.is_relop())
+                {
+                    this.tp_rel_misplaced(id, first);
+                    return;
+                };
+                this.tp_param_entry(e, id);
+                return;
+            };
+
+            // '<' entries '>' (cursor on '<'). Returns a new entry without a node, or null on error.
+            def template_params(bool cg) -> TemplateEntry*
+            {
+                TemplateEntry* e = te_new();
+                this.advance();
+                this.tp_entry(e, cg, true);
+                while (!this.failed & this.expect(TokenType.COMMA))
+                {
+                    this.advance();
+                    this.tp_entry(e, cg, false);
+                };
+                if (!this.failed) { this.consume(TokenType.GREATER_THAN); };
+                if (this.failed)
+                {
+                    te_free(e);
+                    return (TemplateEntry*)0;
+                };
+                return e;
+            };
+
+            def template_lookup(byte* name) -> TemplateEntry*
+            {
+                if (name == (byte*)0) { return (TemplateEntry*)0; };
+                if (!nm_has(this.templates, name)) { return (TemplateEntry*)0; };
+                return (TemplateEntry*)nm_get(this.templates, name);
+            };
+
+            def template_alias(byte* alias, byte* original) -> void
+            {
+                if (!nm_has(this.templates, original)) { return; };
+                nm_put(this.templates, this.own(ts_dup(alias)), nm_get(this.templates, original));
+                return;
+            };
+
+            // Registers e (parsed parameters) with its template node under name.
+            // Mirrors TemplateRegistry.register: an entry of the same kind is updated in place.
+            def register_template(byte* name, int kind, TemplateEntry* e, Node* node) -> void
+            {
+                TemplateEntry* ex = this.template_lookup(name);
+                PtrVec* tv;
+                Node* tn;
+                NameMap* tm;
+                int i;
+                if (ex != (TemplateEntry*)0 & ex.kind == kind)
+                {
+                    tv = ex.params; ex.params = e.params; e.params = tv;
+                    tn = ex.node; ex.node = node; node_free(tn);
+                    if (e.cparam.len > 0)
+                    {
+                        tv = ex.cparam; ex.cparam = e.cparam; e.cparam = tv;
+                        tv = ex.cts; ex.cts = e.cts; e.cts = tv;
+                        tv = ex.ctext; ex.ctext = e.ctext; e.ctext = tv;
+                    };
+                    if (node_count(e.rels, 1) > 0)
+                    {
+                        tn = ex.rels; ex.rels = e.rels; e.rels = tn;
+                    };
+                    if (e.dparam.len > 0)
+                    {
+                        tv = ex.dparam; ex.dparam = e.dparam; e.dparam = tv;
+                        tv = ex.dts; ex.dts = e.dts; e.dts = tv;
+                    };
+                    if (e.no_default.count > 0)
+                    {
+                        tm = ex.no_default; ex.no_default = e.no_default; e.no_default = tm;
+                    };
+                    te_free(e);
+                    return;
+                };
+                e.kind = kind;
+                e.node = node;
+                nm_put(this.templates, this.own(ts_dup(name)), (void*)e);
+                pv_push(this.tentries, (void*)e);
+                return;
+            };
+
+            // ----- templates: instantiation -----
+
+            // Records an error at an explicit position
+            def error_at(byte* msg, int line, int col) -> void
+            {
+                if (this.failed) { return; };
+                this.failed = true;
+                this.err_kind = ParseErr.MESSAGE;
+                this.err_msg = msg;
+                this.err_line = line;
+                this.err_col = col;
+                return;
+            };
+
+            // The shared checker used for template constraints (created on first use)
+            def chk_get() -> Checker*
+            {
+                if (this.chk == (Checker*)0)
+                {
+                    this.chk = (Checker*)fmalloc((u64)((sizeof(Checker) + 7) / 8));
+                    this.chk.__init(this.st);
+                };
+                return this.chk;
+            };
+
+            // Reports the diagnostic number first (and later ones are ignored) as the parse error
+            def chk_fail(int first) -> void
+            {
+                Diag* d = (Diag*)this.chk.diags.items[first];
+                this.error_at(this.own(ts_dup(d.msg)), d.line, d.col);
+                return;
+            };
+
+            // Short identifying text of a type for name mangling (fparser._type_system_to_mangle_str)
+            def ts_mangle(TypeSpec* t) -> byte*
+            {
+                TypeSpec* inner;
+                byte* s;
+                if (t.custom_typename != (byte*)0) { return t.custom_typename; };
+                if (ts_is_pointer(t))
+                {
+                    inner = typespec_new();
+                    inner.base_type = t.base_type;
+                    inner.bit_width = t.bit_width;
+                    inner.flags = TS_SIGNED;
+                    s = this.ts_mangle(inner);
+                    typespec_free(inner);
+                    return this.cat2(g"ptr_\0", s);
+                };
+                if (t.base_type == DataType.DATA & t.bit_width > 0)
+                {
+                    this.sb.len = 0;
+                    this.sb.put_str(g"data_\0");
+                    if (ts_is_signed(t)) { this.sb.put('i'); }
+                    else { this.sb.put('u'); };
+                    this.sb.put_int(t.bit_width);
+                    return this.own_n(this.sb.mem, this.sb.len);
+                };
+                return datatype_text(t.base_type);
+            };
+
+            // A TypeSpec owned by the parser until it exits
+            def tmp_type() -> TypeSpec*
+            {
+                TypeSpec* t = typespec_new();
+                pv_push(this.tmp_ts, (void*)t);
+                return t;
+            };
+
+            // Parameter name to TypeSpec* mapping (fparser._build_template_mapping)
+            def tp_mapping(TemplateEntry* te, PtrVec* names, PtrVec* specs) -> NameMap*
+            {
+                NameMap* m = nm_new();
+                int i, k;
+                TypeSpec* r;
+                byte* tn;
+                while (i < te.params.len & i < names.len)
+                {
+                    tn = (byte*)names.items[i];
+                    r = (TypeSpec*)0;
+                    if (specs != (PtrVec*)0)
+                    {
+                        if (i < specs.len) { r = (TypeSpec*)specs.items[i]; };
+                    };
+                    if (r == (TypeSpec*)0 & this.st != (FXC_SYMTABLE*)0) { r = st_get_type_spec(this.st, tn); };
+                    k = 0;
+                    while (r == (TypeSpec*)0 & k < 18)
+                    {
+                        if (cstr_eq(datatype_text(k), tn))
+                        {
+                            r = this.tmp_type();
+                            r.base_type = k;
+                            if (k == DataType.SINT | k == DataType.CHAR) { r.flags = TS_SIGNED; };
+                        };
+                        k++;
+                    };
+                    if (r == (TypeSpec*)0)
+                    {
+                        r = this.tmp_type();
+                        r.base_type = DataType.DATA;
+                        r.custom_typename = tn;
+                    };
+                    nm_put(m, (byte*)te.params.items[i], (void*)r);
+                    i++;
+                };
+                return m;
+            };
+
+            // Substitutes template parameters in t. Frees t and returns the replacement
+            // (fparser._substitute_type).
+            def subst_ts(TypeSpec* t, NameMap* map) -> TypeSpec*
+            {
+                TypeSpec* r;
+                if (t == (TypeSpec*)0) { return t; };
+                if (t.base_type == DataType.DICT)
+                {
+                    t.dict_key = this.subst_ts(t.dict_key, map);
+                    t.dict_value = this.subst_ts(t.dict_value, map);
+                    return t;
+                };
+                if (t.custom_typename == (byte*)0) { return t; };
+                if (!nm_has(map, t.custom_typename))
+                {
+                    t.custom_typename = this.subst_deferred_type(t.custom_typename, map);
+                    return t;
+                };
+                r = typespec_copy((TypeSpec*)nm_get(map, t.custom_typename));
+                if (ts_is_pointer(t))
+                {
+                    r.flags = r.flags `| TS_POINTER;
+                    r.pointer_depth = r.pointer_depth + t.pointer_depth;
+                };
+                if (ts_is_array(t))
+                {
+                    r.flags = r.flags `| TS_ARRAY;
+                    r.array_dims = nv_clone(t.array_dims);
+                    if (r.array_dims != (NodeVec*)0)
+                    {
+                        if (r.array_dims.len > 0) { r.array_size = r.array_dims.items[0]; };
+                    }
+                    else
+                    {
+                        r.array_size = node_clone(t.array_size);
+                    };
+                };
+                if ((t.flags `& TS_CONST) != 0) { r.flags = r.flags `| TS_CONST; };
+                if ((t.flags `& TS_VOLATILE) != 0) { r.flags = r.flags `| TS_VOLATILE; };
+                typespec_free(t);
+                return r;
+            };
+
+            // Splits the arguments of a deferred "name<a,b>" text. Returns the byte index of '<' or -1.
+            def tp_split_deferred(byte* s, PtrVec* out) -> int
+            {
+                int i, lt, start, e;
+                int n = pp_cstrlen(s);
+                lt = -1;
+                while (i < n & lt < 0)
+                {
+                    if (s[i] == '<') { lt = i; };
+                    i++;
+                };
+                if (lt < 0) { return -1; };
+                if (s[n - 1] != '>') { return -1; };
+                start = lt + 1;
+                i = start;
+                while (i <= n - 1)
+                {
+                    if (i == n - 1 | s[i] == ',')
+                    {
+                        e = i;
+                        while (start < e & s[start] == ' ') { start++; };
+                        while (e > start & s[e - 1] == ' ') { e--; };
+                        pv_push(out, (void*)this.own_n(s + start, e - start));
+                        start = i + 1;
+                    };
+                    i++;
+                };
+                return lt;
+            };
+
+            // Rewrites a deferred call "f<T,U>" whose arguments are now known (fparser._substitute_node)
+            def subst_deferred_call(Node* n, NameMap* map) -> void
+            {
+                PtrVec* raw = pv_new();
+                PtrVec* names = pv_new();
+                PtrVec* specs = pv_new();
+                int lt = this.tp_split_deferred(n.text, raw);
+                int i;
+                bool any = false;
+                byte* base;
+                TemplateEntry* fe;
+                TypeSpec* c;
+                byte* a;
+                if (lt > 0)
+                {
+                    base = this.own_n(n.text, lt);
+                    fe = this.template_lookup(base);
+                    while (i < raw.len)
+                    {
+                        if (nm_has(map, (byte*)raw.items[i])) { any = true; };
+                        i++;
+                    };
+                    if (fe != (TemplateEntry*)0 & any & fe.kind == 0)
+                    {
+                        i = 0;
+                        while (i < raw.len)
+                        {
+                            a = (byte*)raw.items[i];
+                            if (nm_has(map, a))
+                            {
+                                c = (TypeSpec*)nm_get(map, a);
+                                pv_push(names, (void*)this.ts_mangle(c));
+                                pv_push(specs, (void*)c);
+                            }
+                            else
+                            {
+                                c = this.tmp_type();
+                                c.base_type = DataType.DATA;
+                                c.custom_typename = a;
+                                pv_push(names, (void*)a);
+                                pv_push(specs, (void*)c);
+                            };
+                            i++;
+                        };
+                        n.text = this.resolve_template_call(base, names, specs, (PtrVec*)0);
+                    };
+                };
+                pv_free(raw);
+                pv_free(names);
+                pv_free(specs);
+                return;
+            };
+
+            // Deep substitution over a cloned template tree (fparser._substitute_node)
+            def subst_node(Node* n, NameMap* map) -> void
+            {
+                int s, i, c;
+                if (n == (Node*)0 | this.failed) { return; };
+                n.ts = this.subst_ts(n.ts, map);
+                n.ts2 = this.subst_ts(n.ts2, map);
+                if (n.kind == NodeKind.SIZE_OF | n.kind == NodeKind.ALIGN_OF | n.kind == NodeKind.ENDIAN_OF)
+                {
+                    if (n.a != (Node*)0 & n.ts == (TypeSpec*)0)
+                    {
+                        if (n.a.kind == NodeKind.IDENTIFIER)
+                        {
+                            if (nm_has(map, n.a.text))
+                            {
+                                n.ts = typespec_copy((TypeSpec*)nm_get(map, n.a.text));
+                                node_free(n.a);
+                                n.a = (Node*)0;
+                            };
+                        };
+                    };
+                };
+                if (n.kind == NodeKind.FUNCTION_CALL & n.text != (byte*)0)
+                {
+                    this.subst_deferred_call(n, map);
+                };
+                this.subst_node(n.a, map);
+                this.subst_node(n.b, map);
+                this.subst_node(n.c, map);
+                this.subst_node(n.d, map);
+                this.subst_node(n.e, map);
+                s = 0;
+                while (s < 6)
+                {
+                    c = node_count(n, s);
+                    i = 0;
+                    while (i < c)
+                    {
+                        this.subst_node(node_child(n, s, i), map);
+                        i++;
+                    };
+                    s++;
+                };
+                return;
+            };
+
+            // The registry entry holding the constraints for fname: the entry itself, or the
+            // entry of the bare name when fname is namespace qualified (name__bare).
+            def tp_constraint_entry(byte* fname, TemplateEntry* te, bool want_rels) -> TemplateEntry*
+            {
+                int i, ln, lk, k;
+                bool found;
+                bool suffix;
+                TemplateEntry* ce;
+                byte* key;
+                if (want_rels) { found = node_count(te.rels, 1) > 0; } else { found = te.cparam.len > 0; };
+                if (found) { return te; };
+                ln = pp_cstrlen(fname);
+                while (i < this.templates.count)
+                {
+                    key = this.templates.keys[i];
+                    ce = (TemplateEntry*)this.templates.vals[i];
+                    i++;
+                    if (key == (byte*)0 | ce == (TemplateEntry*)0) { continue; };
+                    lk = pp_cstrlen(key);
+                    suffix = cstr_eq(fname, key);
+                    if (!suffix & ln > lk + 2)
+                    {
+                        suffix = true;
+                        k = 0;
+                        while (k < lk)
+                        {
+                            if (fname[ln - lk + k] != key[k]) { suffix = false; };
+                            k++;
+                        };
+                        if (fname[ln - lk - 1] != '_' | fname[ln - lk - 2] != '_') { suffix = false; };
+                    };
+                    if (!suffix) { continue; };
+                    if (want_rels) { found = node_count(ce.rels, 1) > 0; } else { found = ce.cparam.len > 0; };
+                    if (found) { return ce; };
+                };
+                return te;
+            };
+
+            // Allowed-type lists of every parameter against the concrete types
+            def tp_check_allowed(byte* fname, TemplateEntry* ce, TemplateEntry* te, PtrVec* specs, PtrVec* poss) -> void
+            {
+                int i, j, cnt, line, col, first;
+                byte* pname;
+                TypeSpec** allowed;
+                PtrVec* texts;
+                TypeSpec* concrete;
+                Node* at;
+                Checker* k;
+                while (i < te.params.len & !this.failed)
+                {
+                    pname = (byte*)te.params.items[i];
+                    cnt = 0;
+                    j = 0;
+                    while (j < ce.cparam.len)
+                    {
+                        if (cstr_eq((byte*)ce.cparam.items[j], pname)) { cnt++; };
+                        j++;
+                    };
+                    concrete = (TypeSpec*)0;
+                    if (specs != (PtrVec*)0)
+                    {
+                        if (i < specs.len) { concrete = (TypeSpec*)specs.items[i]; };
+                    };
+                    if (cnt > 0 & concrete != (TypeSpec*)0)
+                    {
+                        allowed = (TypeSpec**)fmalloc((u64)cnt * (u64)((sizeof(TypeSpec*) + 7) / 8));
+                        this.sb.len = 0;
+                        cnt = 0;
+                        j = 0;
+                        while (j < ce.cparam.len)
+                        {
+                            if (cstr_eq((byte*)ce.cparam.items[j], pname))
+                            {
+                                allowed[cnt] = (TypeSpec*)ce.cts.items[j];
+                                if (cnt > 0) { this.sb.put_str(g" | \0"); };
+                                this.sb.put_str((byte*)ce.ctext.items[j]);
+                                cnt++;
+                            };
+                            j++;
+                        };
+                        line = this.cur_line();
+                        col = this.cur_col();
+                        if (poss != (PtrVec*)0)
+                        {
+                            if (i < poss.len)
+                            {
+                                at = (Node*)poss.items[i];
+                                if (at != (Node*)0)
+                                {
+                                    line = at.line;
+                                    col = at.col;
+                                };
+                            };
+                        };
+                        k = this.chk_get();
+                        first = k.diags.len;
+                        if (!k.check_allowed(fname, pname, concrete, allowed, cnt, this.own_n(this.sb.mem, this.sb.len), line, col))
+                        {
+                            this.chk_fail(first);
+                        };
+                        ffree((byte*)allowed);
+                    };
+                    i++;
+                };
+                return;
+            };
+
+            // Instantiates the template function fname with the given concrete types and returns the
+            // name to call (fparser._resolve_template_call). poss holds, per parameter, the argument
+            // node the type came from (null entries or a null vector use the current token).
+            def resolve_template_call(byte* fname, PtrVec* names, PtrVec* specs, PtrVec* poss) -> byte*
+            {
+                TemplateEntry* te = this.template_lookup(fname);
+                TemplateEntry* ce;
+                NameMap* map;
+                Node* concrete;
+                TypeSpec** argv;
+                byte* mangled;
+                int i, first;
+                Checker* k;
+                if (te == (TemplateEntry*)0)
+                {
+                    this.error(this.cat2(this.cat2(g"Unknown template function '\0", fname), g"'\0"));
+                    return fname;
+                };
+                if (te.kind != 0)
+                {
+                    this.error(this.cat2(this.cat2(g"Unknown template function '\0", fname), g"'\0"));
+                    return fname;
+                };
+                if (names.len != te.params.len)
+                {
+                    this.sb.len = 0;
+                    this.sb.put_str(g"Template function '\0");
+                    this.sb.put_str(fname);
+                    this.sb.put_str(g"' expects \0");
+                    this.sb.put_int(te.params.len);
+                    this.sb.put_str(g" type argument(s), got \0");
+                    this.sb.put_int(names.len);
+                    this.error(this.own_n(this.sb.mem, this.sb.len));
+                    return fname;
+                };
+                ce = this.tp_constraint_entry(fname, te, false);
+                this.tp_check_allowed(fname, ce, te, specs, poss);
+                if (this.failed) { return fname; };
+
+                this.sb.len = 0;
+                this.sb.put_str(fname);
+                this.sb.put_str(g"__tmpl__\0");
+                i = 0;
+                while (i < names.len)
+                {
+                    if (i > 0) { this.sb.put_str(g"__\0"); };
+                    this.sb.put_str((byte*)names.items[i]);
+                    i++;
+                };
+                mangled = this.own_n(this.sb.mem, this.sb.len);
+                if (nm_has(te.emitted, mangled)) { return fname; };
+                nm_put(te.emitted, mangled, (void*)te);
+
+                map = this.tp_mapping(te, names, specs);
+                concrete = node_clone(te.node);
+                this.subst_node(concrete, map);
+                if (this.failed)
+                {
+                    nm_free(map);
+                    node_free(concrete);
+                    return fname;
+                };
+
+                ce = this.tp_constraint_entry(fname, te, true);
+                if (node_count(ce.rels, 1) > 0)
+                {
+                    argv = (TypeSpec**)fmalloc((u64)te.params.len * (u64)((sizeof(TypeSpec*) + 7) / 8));
+                    i = 0;
+                    while (i < te.params.len)
+                    {
+                        argv[i] = (TypeSpec*)nm_get(map, (byte*)te.params.items[i]);
+                        i++;
+                    };
+                    k = this.chk_get();
+                    first = k.diags.len;
+                    if (k.check_relations(te.params, argv, te.params.len, ce.rels.l1, te.node, concrete) > 0)
+                    {
+                        this.chk_fail(first);
+                    };
+                    ffree((byte*)argv);
+                };
+                nm_free(map);
+                if (this.failed)
+                {
+                    node_free(concrete);
+                    return fname;
+                };
+                concrete.text = fname;
+                if ((concrete.flags `& NF_NO_MANGLE) != 0) { concrete.flags = concrete.flags - NF_NO_MANGLE; };
+                pv_push(this.tinst_f, (void*)concrete);
+                return fname;
+            };
+
+            // Called after every binary expression: instantiates a template operator registered for
+            // the operator symbol when both operand types are known (fparser._try_instantiate_template_op)
+            def try_template_op(Node* n) -> void
+            {
+                byte* key = operator_text(n.op);
+                TemplateEntry* te = this.template_lookup(key);
+                TypeSpec* lts;
+                TypeSpec* rts;
+                if (te == (TemplateEntry*)0) { return; };
+                if (te.kind != 3) { return; };
+                lts = this.infer_arg_type(n.a);
+                if (lts == (TypeSpec*)0) { return; };
+                rts = this.infer_arg_type(n.b);
+                if (rts == (TypeSpec*)0) { return; };
+                this.resolve_template_operator(key, te, lts, rts);
+                return;
+            };
+
+            // Binds template parameter pn from the concrete operand type c (fparser._resolve_template_operator)
+            def op_infer_param(TemplateEntry* te, NameMap* inferred, TypeSpec* decl, TypeSpec* c) -> void
+            {
+                PtrVec* raw;
+                TypeSpec* r;
+                TypeSpec* res;
+                byte* dn = decl.custom_typename;
+                byte* cn;
+                byte* base;
+                byte* rem;
+                byte* pname;
+                int lt, bl, k, dd, cd;
+                bool pre;
+                if (dn == (byte*)0) { return; };
+                if (this.tp_has_param(te, dn))
+                {
+                    r = c;
+                    if (ts_is_pointer(c) & ts_is_pointer(decl))
+                    {
+                        r = typespec_copy(c);
+                        pv_push(this.tmp_ts, (void*)r);
+                        cd = c.pointer_depth;
+                        if (cd == 0) { cd = 1; };
+                        dd = decl.pointer_depth;
+                        if (dd == 0) { dd = 1; };
+                        r.pointer_depth = cd - dd;
+                        if (r.pointer_depth < 0) { r.pointer_depth = 0; };
+                        if (r.pointer_depth == 0 & (r.flags `& TS_POINTER) != 0) { r.flags = r.flags - TS_POINTER; };
+                    };
+                    if (!nm_has(inferred, dn)) { nm_put(inferred, dn, (void*)r); };
+                    return;
+                };
+                raw = pv_new();
+                lt = this.tp_split_deferred(dn, raw);
+                if (lt > 0)
+                {
+                    base = this.own_n(dn, lt);
+                    cn = c.custom_typename;
+                    bl = pp_cstrlen(base);
+                    pre = false;
+                    if (cn != (byte*)0)
+                    {
+                        pre = pp_cstrlen(cn) > bl + 2;
+                        k = 0;
+                        while (pre & k < bl)
+                        {
+                            if (cn[k] != base[k]) { pre = false; };
+                            k++;
+                        };
+                        if (pre)
+                        {
+                            if (cn[bl] != '_' | cn[bl + 1] != '_') { pre = false; };
+                        };
+                    };
+                    if (pre & raw.len == 1)
+                    {
+                        pname = (byte*)raw.items[0];
+                        if (this.tp_has_param(te, pname) & !nm_has(inferred, pname))
+                        {
+                            rem = cn + bl + 2;
+                            res = (TypeSpec*)0;
+                            if (this.st != (FXC_SYMTABLE*)0) { res = st_get_type_spec(this.st, rem); };
+                            k = 0;
+                            while (res == (TypeSpec*)0 & k < 18)
+                            {
+                                if (cstr_eq(datatype_text(k), rem))
+                                {
+                                    res = this.tmp_type();
+                                    res.base_type = k;
+                                };
+                                k++;
+                            };
+                            if (res == (TypeSpec*)0)
+                            {
+                                res = this.tmp_type();
+                                res.base_type = DataType.DATA;
+                                res.custom_typename = rem;
+                            };
+                            nm_put(inferred, pname, (void*)res);
+                        };
+                    };
+                };
+                pv_free(raw);
+                return;
+            };
+
+            def op_is_non_builtin(TypeSpec* t) -> bool
+            {
+                if (t.custom_typename != (byte*)0) { return true; };
+                if (t.base_type == DataType.STRUCT | t.base_type == DataType.OBJECT) { return true; };
+                return ts_is_pointer(t);
+            };
+
+            def resolve_template_operator(byte* key, TemplateEntry* te, TypeSpec* lts, TypeSpec* rts) -> void
+            {
+                Node* f = te.node;
+                PtrVec* names;
+                PtrVec* specs;
+                NameMap* inferred;
+                NameMap* map;
+                Node* concrete;
+                TypeSpec* c;
+                byte* mangled;
+                int i;
+                if (f == (Node*)0) { return; };
+                if (node_count(f, 0) != 2) { return; };
+                specs = pv_new();
+                names = pv_new();
+                if (te.params.len != 2)
+                {
+                    inferred = nm_new();
+                    i = 0;
+                    while (i < 2)
+                    {
+                        c = lts;
+                        if (i == 1) { c = rts; };
+                        if (node_child(f, 0, i).ts != (TypeSpec*)0) { this.op_infer_param(te, inferred, node_child(f, 0, i).ts, c); };
+                        i++;
+                    };
+                    i = 0;
+                    while (i < te.params.len)
+                    {
+                        if (!nm_has(inferred, (byte*)te.params.items[i]))
+                        {
+                            nm_free(inferred);
+                            pv_free(specs);
+                            pv_free(names);
+                            return;
+                        };
+                        pv_push(specs, nm_get(inferred, (byte*)te.params.items[i]));
+                        i++;
+                    };
+                    nm_free(inferred);
+                }
+                else
+                {
+                    pv_push(specs, (void*)lts);
+                    pv_push(specs, (void*)rts);
+                };
+                if (!this.op_is_non_builtin(lts) & !this.op_is_non_builtin(rts))
+                {
+                    pv_free(specs);
+                    pv_free(names);
+                    return;
+                };
+                this.sb.len = 0;
+                this.sb.mem[0] = (byte)0;
+                this.sb.put_str(f.text);
+                this.sb.put_str(g"__tmpl__\0");
+                i = 0;
+                while (i < specs.len)
+                {
+                    if (i > 0) { this.sb.put_str(g"__\0"); };
+                    this.sb.put_str(this.ts_mangle((TypeSpec*)specs.items[i]));
+                    i++;
+                };
+                mangled = this.own_n(this.sb.mem, this.sb.len);
+                i = 0;
+                while (i < specs.len)
+                {
+                    pv_push(names, (void*)this.ts_mangle((TypeSpec*)specs.items[i]));
+                    i++;
+                };
+                if (nm_has(te.emitted, mangled))
+                {
+                    pv_free(specs);
+                    pv_free(names);
+                    return;
+                };
+                nm_put(te.emitted, mangled, (void*)te);
+                map = this.tp_mapping(te, names, specs);
+                pv_free(specs);
+                pv_free(names);
+                concrete = node_clone(f);
+                this.subst_node(concrete, map);
+                nm_free(map);
+                if (this.failed)
+                {
+                    node_free(concrete);
+                    return;
+                };
+                if ((concrete.flags `& NF_NO_MANGLE) != 0) { concrete.flags = concrete.flags - NF_NO_MANGLE; };
+                pv_push(this.tinst_f, (void*)concrete);
+                return;
+            };
+
+            // Type implied by one call argument: identifier (symbol table), literal or string
+            def infer_arg_type(Node* arg) -> TypeSpec*
+            {
+                TypeSpec* t;
+                int dt;
+                if (arg.kind == NodeKind.IDENTIFIER)
+                {
+                    if (this.st == (FXC_SYMTABLE*)0) { return (TypeSpec*)0; };
+                    return st_get_type_spec(this.st, arg.text);
+                };
+                if (arg.kind == NodeKind.LITERAL)
+                {
+                    dt = arg.op;
+                    if (dt == DataType.SINT | dt == DataType.UINT | dt == DataType.SLONG | dt == DataType.ULONG |
+                        dt == DataType.FLOAT | dt == DataType.DOUBLE | dt == DataType.CHAR | dt == DataType.BOOL |
+                        dt == DataType.BYTE)
+                    {
+                        t = this.tmp_type();
+                        t.base_type = dt;
+                        if (dt == DataType.SINT | dt == DataType.SLONG | dt == DataType.CHAR) { t.flags = TS_SIGNED; };
+                        return t;
+                    };
+                    return (TypeSpec*)0;
+                };
+                if (arg.kind == NodeKind.STRING_LITERAL)
+                {
+                    t = this.tmp_type();
+                    t.base_type = DataType.BYTE;
+                    t.flags = TS_SIGNED `| TS_POINTER;
+                    t.bit_width = 8;
+                    t.pointer_depth = 1;
+                    return t;
+                };
+                return (TypeSpec*)0;
+            };
+
+            // Parameter name to type from the call arguments (fparser._infer_template_params).
+            // Dict parameters and template struct parameters are not inferred here yet.
+            // Concrete type named carg (symbol table alias, builtin name, or a named type)
+            def tp_type_by_name(byte* carg) -> TypeSpec*
+            {
+                TypeSpec* r = (TypeSpec*)0;
+                int k;
+                if (this.st != (FXC_SYMTABLE*)0) { r = st_get_type_spec(this.st, carg); };
+                while (r == (TypeSpec*)0 & k < 18)
+                {
+                    if (cstr_eq(datatype_text(k), carg))
+                    {
+                        r = this.tmp_type();
+                        r.base_type = k;
+                        if (k == DataType.SINT | k == DataType.CHAR) { r.flags = TS_SIGNED; };
+                    };
+                    k++;
+                };
+                if (r == (TypeSpec*)0)
+                {
+                    r = this.tmp_type();
+                    r.base_type = DataType.DATA;
+                    r.custom_typename = carg;
+                };
+                return r;
+            };
+
+            // Binds the parameters of a declared Name<T,U> parameter from the mangled type of arg
+            def infer_struct_param(TemplateEntry* te, PtrVec* raw, Node* arg, NameMap* out) -> void
+            {
+                TypeSpec* at;
+                byte* ctn;
+                byte* key;
+                byte* sep;
+                TemplateEntry* ce;
+                PtrVec* cargs;
+                int i, j, kl, cl, st0, pos;
+                bool match;
+                if (arg.kind != NodeKind.IDENTIFIER) { return; };
+                if (this.st == (FXC_SYMTABLE*)0) { return; };
+                at = st_get_type_spec(this.st, arg.text);
+                if (at == (TypeSpec*)0) { return; };
+                ctn = at.custom_typename;
+                if (ctn == (byte*)0) { return; };
+                cl = pp_cstrlen(ctn);
+                while (i < this.templates.count)
+                {
+                    key = this.templates.keys[i];
+                    ce = (TemplateEntry*)this.templates.vals[i];
+                    i++;
+                    if (key == (byte*)0 | ce == (TemplateEntry*)0) { continue; };
+                    if (ce.kind != 1 & ce.kind != 2) { continue; };
+                    kl = pp_cstrlen(key);
+                    match = cstr_eq(ctn, key);
+                    if (!match & cl > kl + 2)
+                    {
+                        match = true;
+                        j = 0;
+                        while (j < kl)
+                        {
+                            if (ctn[j] != key[j]) { match = false; };
+                            j++;
+                        };
+                        if (ctn[kl] != '_' | ctn[kl + 1] != '_') { match = false; };
+                    };
+                    if (!match) { continue; };
+                    // concrete arguments: the text after "key__" split on "__"
+                    cargs = pv_new();
+                    if (cl > kl + 2)
+                    {
+                        st0 = kl + 2;
+                        j = st0;
+                        while (j <= cl)
+                        {
+                            if (j == cl)
+                            {
+                                pv_push(cargs, (void*)this.own_n(ctn + st0, j - st0));
+                            }
+                            elif (ctn[j] == '_' & j + 1 < cl)
+                            {
+                                if (ctn[j + 1] == '_')
+                                {
+                                    pv_push(cargs, (void*)this.own_n(ctn + st0, j - st0));
+                                    st0 = j + 2;
+                                    j++;
+                                };
+                            };
+                            j++;
+                        };
+                    };
+                    pos = 0;
+                    while (pos < raw.len)
+                    {
+                        if (this.tp_has_param(te, (byte*)raw.items[pos]) & pos < cargs.len)
+                        {
+                            if (!nm_has(out, (byte*)raw.items[pos]))
+                            {
+                                nm_put(out, (byte*)raw.items[pos], (void*)this.tp_type_by_name((byte*)cargs.items[pos]));
+                            };
+                        };
+                        pos++;
+                    };
+                    pv_free(cargs);
+                    return;
+                };
+                return;
+            };
+
+            def infer_template_params(TemplateEntry* te, Node* holder, bool skip_first, NameMap* out) -> void
+            {
+                int i, first, nargs;
+                Node* dp;
+                Node* arg;
+                byte* pt;
+                byte* kp;
+                byte* vp;
+                TypeSpec* t;
+                TypeSpec* at;
+                PtrVec* raw;
+                Node* decl = te.node;
+                nargs = node_count(holder, 0);
+                first = 0;
+                if (skip_first) { first = 1; };
+                i = first;
+                while (i < node_count(decl, 0))
+                {
+                    if (i - first >= nargs) { break; };
+                    dp = node_child(decl, 0, i);
+                    i++;
+                    if (dp.ts == (TypeSpec*)0) { continue; };
+                    arg = node_child(holder, 0, i - 1 - first);
+                    if (dp.ts.base_type == DataType.DICT)
+                    {
+                        at = (TypeSpec*)0;
+                        if (arg.kind == NodeKind.IDENTIFIER & this.st != (FXC_SYMTABLE*)0) { at = st_get_type_spec(this.st, arg.text); };
+                        if (at != (TypeSpec*)0)
+                        {
+                            if (at.base_type == DataType.DICT)
+                            {
+                                kp = (byte*)0;
+                                vp = (byte*)0;
+                                if (dp.ts.dict_key != (TypeSpec*)0) { kp = dp.ts.dict_key.custom_typename; };
+                                if (dp.ts.dict_value != (TypeSpec*)0) { vp = dp.ts.dict_value.custom_typename; };
+                                if (kp != (byte*)0)
+                                {
+                                    if (this.tp_has_param(te, kp) & !nm_has(out, kp)) { nm_put(out, kp, (void*)at.dict_key); };
+                                };
+                                if (vp != (byte*)0)
+                                {
+                                    if (this.tp_has_param(te, vp) & !nm_has(out, vp)) { nm_put(out, vp, (void*)at.dict_value); };
+                                };
+                            };
+                        };
+                        continue;
+                    };
+                    pt = dp.ts.custom_typename;
+                    if (pt == (byte*)0) { continue; };
+                    if (arg.kind == NodeKind.ADDRESS_OF)
+                    {
+                        if (arg.a != (Node*)0)
+                        {
+                            if (arg.a.kind == NodeKind.IDENTIFIER) { arg = arg.a; };
+                        };
+                    };
+                    raw = pv_new();
+                    if (this.tp_split_deferred(pt, raw) > 0)
+                    {
+                        this.infer_struct_param(te, raw, arg, out);
+                        pv_free(raw);
+                        continue;
+                    };
+                    pv_free(raw);
+                    if (!this.tp_has_param(te, pt)) { continue; };
+                    t = this.infer_arg_type(arg);
+                    if (t != (TypeSpec*)0) { nm_put(out, pt, (void*)t); };
+                };
+                return;
+            };
+
+            // "name<a,b>" for a call whose type arguments are still template parameters
+            def deferred_name(byte* fname, PtrVec* names) -> byte*
+            {
+                int i;
+                this.sb.len = 0;
+                this.sb.put_str(fname);
+                this.sb.put('<');
+                while (i < names.len)
+                {
+                    if (i > 0) { this.sb.put(','); };
+                    this.sb.put_str((byte*)names.items[i]);
+                    i++;
+                };
+                this.sb.put('>');
+                return this.own_n(this.sb.mem, this.sb.len);
+            };
+
+            def tp_free_specs(PtrVec* specs) -> void
+            {
+                int i;
+                while (i < specs.len)
+                {
+                    typespec_free((TypeSpec*)specs.items[i]);
+                    i++;
+                };
+                pv_free(specs);
+                return;
+            };
+
+            // foo<int, T>(args)
+            def template_call_explicit(Node* expr, TemplateEntry* te) -> Node*
+            {
+                int line = this.cur_line();
+                int col = this.cur_col();
+                PtrVec* names = pv_new();
+                PtrVec* specs = pv_new();
+                Node* holder = this.mk(NodeKind.NODE_LIST, line, col);
+                Node* n;
+                TypeSpec* ts;
+                bool more = true;
+                bool deferred = false;
+                int i;
+                this.advance();
+                while (more & !this.failed)
+                {
+                    ts = this.type_spec();
+                    if (this.failed)
+                    {
+                        typespec_free(ts);
+                        break;
+                    };
+                    pv_push(names, (void*)this.ts_mangle(ts));
+                    pv_push(specs, (void*)ts);
+                    more = this.expect(TokenType.COMMA);
+                    if (more) { this.advance(); };
+                };
+                if (!this.failed) { this.consume(TokenType.GREATER_THAN); };
+                if (!this.failed) { this.consume(TokenType.LEFT_PAREN); };
+                if (!this.failed & !this.expect(TokenType.RIGHT_PAREN)) { this.argument_list(holder, expr.text); };
+                if (!this.failed) { this.consume(TokenType.RIGHT_PAREN); };
+                if (this.failed)
+                {
+                    this.tp_free_specs(specs);
+                    pv_free(names);
+                    node_free(holder);
+                    return expr;
+                };
+                while (i < names.len)
+                {
+                    if (this.tp_active((byte*)names.items[i])) { deferred = true; };
+                    i++;
+                };
+                n = this.mk(NodeKind.FUNCTION_CALL, line, col);
+                if (this.failed)
+                {
+                    this.tp_free_specs(specs);
+                    pv_free(names);
+                    node_free(holder);
+                    return expr;
+                };
+                this.take_args(n, holder);
+                if (deferred) { n.text = this.deferred_name(expr.text, names); }
+                else { n.text = this.resolve_template_call(expr.text, names, specs, (PtrVec*)0); };
+                this.tp_free_specs(specs);
+                pv_free(names);
+                node_free(expr);
+                return n;
+            };
+
+            // foo(args): the type arguments are inferred from the argument types
+            def template_call_implicit(Node* expr, TemplateEntry* te) -> Node*
+            {
+                int line = this.cur_line();
+                int col = this.cur_col() + 1;
+                Node* holder = this.mk(NodeKind.NODE_LIST, line, col);
+                Node* n;
+                Node* dp;
+                NameMap* inferred = nm_new();
+                PtrVec* names = pv_new();
+                PtrVec* specs = pv_new();
+                PtrVec* poss = pv_new();
+                PtrVec* unresolved = pv_new();
+                int i, j, got;
+                bool all_active, abstract;
+                byte* p;
+                TypeSpec* t;
+                this.advance();
+                if (!this.failed & !this.expect(TokenType.RIGHT_PAREN)) { this.argument_list(holder, expr.text); };
+                if (!this.failed) { this.consume(TokenType.RIGHT_PAREN); };
+                if (this.failed)
+                {
+                    nm_free(inferred);
+                    pv_free(names);
+                    pv_free(specs);
+                    pv_free(poss);
+                    pv_free(unresolved);
+                    node_free(holder);
+                    return expr;
+                };
+                this.infer_template_params(te, holder, false, inferred);
+
+                // argument each parameter was inferred from (for error positions)
+                i = 0;
+                while (i < te.params.len)
+                {
+                    pv_push(poss, (void*)0);
+                    i++;
+                };
+                i = 0;
+                while (i < node_count(te.node, 0) & i < node_count(holder, 0))
+                {
+                    dp = node_child(te.node, 0, i);
+                    if (dp.ts != (TypeSpec*)0)
+                    {
+                        if (dp.ts.custom_typename != (byte*)0)
+                        {
+                            j = 0;
+                            while (j < te.params.len)
+                            {
+                                if (cstr_eq((byte*)te.params.items[j], dp.ts.custom_typename) & poss.items[j] == (void*)0)
+                                {
+                                    poss.items[j] = (void*)node_child(holder, 0, i);
+                                };
+                                j++;
+                            };
+                        };
+                    };
+                    i++;
+                };
+
+                // defaults for what was not inferred
+                i = 0;
+                while (i < te.dparam.len)
+                {
+                    p = (byte*)te.dparam.items[i];
+                    if (!nm_has(inferred, p)) { nm_put(inferred, p, te.dts.items[i]); };
+                    i++;
+                };
+                i = 0;
+                while (i < te.no_default.count)
+                {
+                    p = te.no_default.keys[i];
+                    i++;
+                    if (p == (byte*)0) { continue; };
+                    if (!nm_has(inferred, p))
+                    {
+                        this.sb.len = 0;
+                        this.sb.put_str(g"Template parameter '\0");
+                        this.sb.put_str(p);
+                        this.sb.put_str(g"' of '\0");
+                        this.sb.put_str(expr.text);
+                        this.sb.put_str(g"' has no default and could not be inferred - it must be supplied explicitly\0");
+                        this.error_at(this.own_n(this.sb.mem, this.sb.len), line, col);
+                        break;
+                    };
+                };
+
+                n = (Node*)0;
+                if (!this.failed)
+                {
+                    got = 0;
+                    i = 0;
+                    while (i < te.params.len)
+                    {
+                        if (nm_has(inferred, (byte*)te.params.items[i])) { got++; }
+                        else { pv_push(unresolved, te.params.items[i]); };
+                        i++;
+                    };
+                    n = this.mk(NodeKind.FUNCTION_CALL, line, col);
+                };
+                if (!this.failed)
+                {
+                    this.take_args(n, holder);
+                    holder = (Node*)0;
+                    n.text = expr.text;
+                    if (got == te.params.len)
+                    {
+                        abstract = false;
+                        i = 0;
+                        while (i < te.params.len)
+                        {
+                            t = (TypeSpec*)nm_get(inferred, (byte*)te.params.items[i]);
+                            pv_push(specs, (void*)t);
+                            p = this.ts_mangle(t);
+                            pv_push(names, (void*)p);
+                            if (this.tp_has_param(te, p)) { abstract = true; };
+                            i++;
+                        };
+                        if (!abstract) { n.text = this.resolve_template_call(expr.text, names, specs, poss); };
+                    }
+                    else
+                    {
+                        all_active = unresolved.len > 0;
+                        i = 0;
+                        while (i < unresolved.len)
+                        {
+                            if (!this.tp_active((byte*)unresolved.items[i])) { all_active = false; };
+                            i++;
+                        };
+                        if (all_active)
+                        {
+                            i = 0;
+                            while (i < te.params.len)
+                            {
+                                p = (byte*)te.params.items[i];
+                                if (nm_has(inferred, p)) { pv_push(names, (void*)this.ts_mangle((TypeSpec*)nm_get(inferred, p))); }
+                                else { pv_push(names, (void*)p); };
+                                i++;
+                            };
+                            n.text = this.deferred_name(expr.text, names);
+                        };
+                    };
+                };
+                nm_free(inferred);
+                pv_free(names);
+                pv_free(specs);
+                pv_free(poss);
+                pv_free(unresolved);
+                if (holder != (Node*)0) { node_free(holder); };
+                if (this.failed)
+                {
+                    node_free(n);
+                    return expr;
+                };
+                node_free(expr);
+                return n;
+            };
+
+            // Explicit or inferred call of a template function name
+            // Registry key of the type function template implied by receiver expr and member, or null
+            def typefunc_key(Node* expr, byte* member) -> byte*
+            {
+                Node* id = (Node*)0;
+                bool tied = false;
+                TypeSpec* rt;
+                byte* rn;
+                byte* cand;
+                byte* un;
+                int pd, i;
+                if (this.st == (FXC_SYMTABLE*)0) { return (byte*)0; };
+                if (expr.kind == NodeKind.IDENTIFIER) { id = expr; }
+                elif (expr.kind == NodeKind.TIE_EXPRESSION)
+                {
+                    if (expr.a != (Node*)0)
+                    {
+                        if (expr.a.kind == NodeKind.IDENTIFIER)
+                        {
+                            id = expr.a;
+                            tied = true;
+                        };
+                    };
+                }
+                elif (expr.kind == NodeKind.STRING_LITERAL | expr.kind == NodeKind.F_STRING_LITERAL)
+                {
+                    cand = this.cat2(g"__typefunc__string__\0", member);
+                    if (this.template_lookup(cand) != (TemplateEntry*)0) { return cand; };
+                    return (byte*)0;
+                };
+                if (id == (Node*)0) { return (byte*)0; };
+                rt = st_get_type_spec(this.st, id.text);
+                if (rt == (TypeSpec*)0) { return (byte*)0; };
+                pd = rt.pointer_depth;
+                if (rt.custom_typename != (byte*)0) { rn = rt.custom_typename; }
+                elif (pd > 0 & rt.base_type == DataType.BYTE) { rn = g"string\0"; }
+                elif (pd > 0)
+                {
+                    rn = datatype_text(rt.base_type);
+                    while (i < pd)
+                    {
+                        rn = this.cat2(rn, g"_ptr\0");
+                        i++;
+                    };
+                }
+                else { rn = datatype_text(rt.base_type); };
+                if ((rt.flags `& TS_TIED) != 0) { tied = true; };
+                if (tied) { cand = this.cat2(this.cat2(this.cat2(g"__typefunc__tied_\0", rn), g"__\0"), member); }
+                else { cand = this.cat2(this.cat2(this.cat2(g"__typefunc__\0", rn), g"__\0"), member); };
+                if (this.template_lookup(cand) != (TemplateEntry*)0) { return cand; };
+                if (tied)
+                {
+                    un = this.cat2(this.cat2(this.cat2(g"__typefunc__\0", rn), g"__\0"), member);
+                    if (this.template_lookup(un) != (TemplateEntry*)0) { return un; };
+                };
+                return (byte*)0;
+            };
+
+            // recv.member<types>(args) for a method or type function template registered under key
+            def template_method_explicit(Node* recv, byte* key, bool as_typefunc) -> Node*
+            {
+                int line = this.cur_line();
+                int col = this.cur_col();
+                PtrVec* names = pv_new();
+                PtrVec* specs = pv_new();
+                Node* holder = this.mk(NodeKind.NODE_LIST, line, col);
+                Node* n;
+                TypeSpec* ts;
+                bool more = true;
+                this.advance();
+                while (more & !this.failed)
+                {
+                    ts = this.type_spec();
+                    if (this.failed)
+                    {
+                        typespec_free(ts);
+                        break;
+                    };
+                    pv_push(names, (void*)this.ts_mangle(ts));
+                    pv_push(specs, (void*)ts);
+                    more = this.expect(TokenType.COMMA);
+                    if (more) { this.advance(); };
+                };
+                if (!this.failed) { this.consume(TokenType.GREATER_THAN); };
+                if (!this.failed) { this.consume(TokenType.LEFT_PAREN); };
+                if (!this.failed & !this.expect(TokenType.RIGHT_PAREN)) { this.argument_list(holder, (byte*)0); };
+                if (!this.failed) { this.consume(TokenType.RIGHT_PAREN); };
+                n = (Node*)0;
+                if (!this.failed) { n = this.mk(NodeKind.FUNCTION_CALL, line, col); };
+                if (this.failed)
+                {
+                    this.tp_free_specs(specs);
+                    pv_free(names);
+                    node_free(holder);
+                    return recv;
+                };
+                this.take_args(n, holder);
+                n.text = this.resolve_template_call(key, names, specs, (PtrVec*)0);
+                this.tp_free_specs(specs);
+                pv_free(names);
+                if (as_typefunc) { this.push_front(n, recv); }
+                else { node_free(recv); };
+                return n;
+            };
+
+            // obj.member(args) tagged as a type function template: infers the parameters from the
+            // arguments. Returns the FUNCTION_CALL, or null when not every parameter was inferred.
+            def typefunc_call_implicit(Node* ma, Node* holder, int line, int col) -> Node*
+            {
+                TemplateEntry* te = this.template_lookup(ma.text2);
+                NameMap* inferred;
+                PtrVec* names;
+                PtrVec* specs;
+                Node* n = (Node*)0;
+                TypeSpec* t;
+                int i;
+                bool all = true;
+                if (te == (TemplateEntry*)0) { return n; };
+                inferred = nm_new();
+                this.infer_template_params(te, holder, true, inferred);
+                i = 0;
+                while (i < te.params.len)
+                {
+                    if (!nm_has(inferred, (byte*)te.params.items[i])) { all = false; };
+                    i++;
+                };
+                if (all)
+                {
+                    names = pv_new();
+                    specs = pv_new();
+                    i = 0;
+                    while (i < te.params.len)
+                    {
+                        t = (TypeSpec*)nm_get(inferred, (byte*)te.params.items[i]);
+                        pv_push(specs, (void*)t);
+                        pv_push(names, (void*)this.ts_mangle(t));
+                        i++;
+                    };
+                    n = this.mk(NodeKind.FUNCTION_CALL, line, col);
+                    if (!this.failed)
+                    {
+                        n.text = this.resolve_template_call(ma.text2, names, specs, (PtrVec*)0);
+                    };
+                    pv_free(names);
+                    pv_free(specs);
+                };
+                nm_free(inferred);
+                return n;
+            };
+
+            def template_call(Node* expr) -> Node*
+            {
+                TemplateEntry* te;
+                if (expr.kind != NodeKind.IDENTIFIER) { return expr; };
+                te = this.template_lookup(expr.text);
+                if (te == (TemplateEntry*)0) { return expr; };
+                if (te.kind != 0) { return expr; };
+                if (this.expect(TokenType.LESS_THAN)) { return this.template_call_explicit(expr, te); };
+                if (this.expect(TokenType.LEFT_PAREN)) { return this.template_call_implicit(expr, te); };
+                return expr;
+            };
+
+            // ----- constra -----
+
+            // True when the cursor starts a relational constraint operator
+            def is_relop() -> bool
+            {
+                int t0 = this.cur();
+                int t1 = this.type_at(1);
+                int t2 = this.type_at(2);
+                if (t0 == TokenType.TIE) { return t1 == TokenType.ASSIGN; };
+                if (t0 != TokenType.NOT) { return false; };
+                if (t1 == TokenType.TIE) { return t2 == TokenType.ASSIGN; };
+                if (t1 == TokenType.ADDRESS_OF) { return true; };
+                if (t1 == TokenType.MINUS_ASSIGN) { return true; };
+                if (t1 == TokenType.BACKTICK)
+                {
+                    return t2 == TokenType.LESS_THAN | t2 == TokenType.LESS_EQUAL |
+                           t2 == TokenType.GREATER_THAN | t2 == TokenType.GREATER_EQUAL;
+                };
+                return false;
+            };
+
+            // Consumes the operator tokens and returns the operator text
+            def consume_relop() -> byte*
+            {
+                if (this.expect(TokenType.TIE))
+                {
+                    this.advance();
+                    this.consume(TokenType.ASSIGN);
+                    return g"~=\0";
+                };
+                this.consume(TokenType.NOT);
+                if (this.expect(TokenType.TIE))
+                {
+                    this.advance();
+                    this.consume(TokenType.ASSIGN);
+                    return g"!~=\0";
+                };
+                if (this.expect(TokenType.ADDRESS_OF)) { this.advance(); return g"!@\0"; };
+                if (this.expect(TokenType.MINUS_ASSIGN)) { this.advance(); return g"!-=\0"; };
+                this.consume(TokenType.BACKTICK);
+                if (this.expect(TokenType.LESS_EQUAL)) { this.advance(); return g"!`<=\0"; };
+                if (this.expect(TokenType.LESS_THAN)) { this.advance(); return g"!`<\0"; };
+                if (this.expect(TokenType.GREATER_EQUAL)) { this.advance(); return g"!`>=\0"; };
+                if (this.expect(TokenType.GREATER_THAN)) { this.advance(); return g"!`>\0"; };
+                this.error(g"Unknown constraint operator after '!`'\0");
+                return (byte*)0;
+            };
+
+            // Appends a CONSTRA_RELATION (l0 = lhs names, text = op, l1 = rhs names) to d.l1
+            def cs_emit(Node* d, PtrVec* lhs, byte* op, PtrVec* rhs, int line, int col) -> void
+            {
+                Node* rel = this.mk(NodeKind.CONSTRA_RELATION, line, col);
+                if (this.failed) { return; };
+                node_push(d, 1, rel);
+                rel.text = op;
+                Node* id;
+                int i;
+                while (i < lhs.len)
+                {
+                    id = this.mk(NodeKind.IDENTIFIER, line, col);
+                    if (this.failed) { return; };
+                    id.text = (byte*)lhs.items[i];
+                    node_push(rel, 0, id);
+                    i++;
+                };
+                i = 0;
+                while (i < rhs.len)
+                {
+                    id = this.mk(NodeKind.IDENTIFIER, line, col);
+                    if (this.failed) { return; };
+                    id.text = (byte*)rhs.items[i];
+                    node_push(rel, 1, id);
+                    i++;
+                };
+                return;
+            };
+
+            // One element of a name list: IDENTIFIER, or '[' names (op names)? ']'
+            // A bracket group emits its own relation into d and yields the names of its last side.
+            def cs_element(Node* d, PtrVec* out) -> void
+            {
+                PtrVec* ns;
+                PtrVec* rhs;
+                byte* op;
+                int line, col, i;
+                PtrVec* res;
+                if (!this.expect(TokenType.LEFT_BRACKET))
+                {
+                    pv_push(out, (void*)this.ident());
+                    return;
+                };
+                line = this.cur_line();
+                col = this.cur_col();
+                this.advance();
+                ns = pv_new();
+                pv_push(ns, (void*)this.ident());
+                while (!this.failed & this.expect(TokenType.LOGICAL_AND) & this.type_at(1) == TokenType.IDENTIFIER)
+                {
+                    this.advance();
+                    pv_push(ns, (void*)this.ident());
+                };
+                res = ns;
+                if (!this.failed & this.is_relop())
+                {
+                    op = this.consume_relop();
+                    rhs = pv_new();
+                    pv_push(rhs, (void*)this.ident());
+                    while (!this.failed & this.expect(TokenType.LOGICAL_AND) & this.type_at(1) == TokenType.IDENTIFIER)
+                    {
+                        this.advance();
+                        pv_push(rhs, (void*)this.ident());
+                    };
+                    if (!this.failed) { this.cs_emit(d, ns, op, rhs, line, col); };
+                    res = rhs;
+                };
+                if (!this.failed) { this.consume(TokenType.RIGHT_BRACKET); };
+                while (i < res.len)
+                {
+                    pv_push(out, res.items[i]);
+                    i++;
+                };
+                if (res != ns) { pv_free(res); };
+                pv_free(ns);
+                return;
+            };
+
+            // names joined by '&'
+            def cs_idlist(Node* d, PtrVec* out) -> void
+            {
+                int t1;
+                this.cs_element(d, out);
+                while (!this.failed & this.expect(TokenType.LOGICAL_AND))
+                {
+                    t1 = this.type_at(1);
+                    if (t1 != TokenType.IDENTIFIER & t1 != TokenType.LEFT_BRACKET) { break; };
+                    this.advance();
+                    this.cs_element(d, out);
+                };
+                return;
+            };
+
+            // Chained relation: names op names op names ...
+            def cs_rel_expr(Node* d) -> void
+            {
+                PtrVec* lhs = pv_new();
+                PtrVec* rhs;
+                byte* op;
+                int line = this.cur_line();
+                int col = this.cur_col();
+                this.cs_idlist(d, lhs);
+                while (!this.failed & this.is_relop())
+                {
+                    op = this.consume_relop();
+                    rhs = pv_new();
+                    this.cs_idlist(d, rhs);
+                    if (!this.failed) { this.cs_emit(d, lhs, op, rhs, line, col); };
+                    pv_free(lhs);
+                    lhs = rhs;
+                };
+                pv_free(lhs);
+                return;
+            };
+
+            def cs_less(byte* a, byte* b) -> bool
+            {
+                int i;
+                while (a[i] != (byte)0 & a[i] == b[i]) { i++; };
+                return a[i] < b[i];
+            };
+
+            // Same set of names (duplicates ignored)
+            def cs_same_set(Node* x, int lx, Node* y, int ly) -> bool
+            {
+                int i, j;
+                bool hit;
+                int nx = node_count(x, lx);
+                int ny = node_count(y, ly);
+                while (i < nx)
+                {
+                    hit = false;
+                    j = 0;
+                    while (j < ny & !hit)
+                    {
+                        if (cstr_eq(node_child(x, lx, i).text, node_child(y, ly, j).text)) { hit = true; };
+                        j++;
+                    };
+                    if (!hit) { return false; };
+                    i++;
+                };
+                i = 0;
+                while (i < ny)
+                {
+                    hit = false;
+                    j = 0;
+                    while (j < nx & !hit)
+                    {
+                        if (cstr_eq(node_child(y, ly, i).text, node_child(x, lx, j).text)) { hit = true; };
+                        j++;
+                    };
+                    if (!hit) { return false; };
+                    i++;
+                };
+                return true;
+            };
+
+            // Writes the names of side l of rel to sb sorted and joined by " & "
+            def cs_put_sorted(Node* rel, int l) -> void
+            {
+                int n = node_count(rel, l);
+                PtrVec* v = pv_new();
+                int i, j;
+                byte* t;
+                while (i < n)
+                {
+                    pv_push(v, (void*)node_child(rel, l, i).text);
+                    i++;
+                };
+                i = 1;
+                while (i < v.len)
+                {
+                    j = i;
+                    while (j > 0 & this.cs_less((byte*)v.items[j], (byte*)v.items[j - 1]))
+                    {
+                        t = (byte*)v.items[j];
+                        v.items[j] = v.items[j - 1];
+                        v.items[j - 1] = (void*)t;
+                        j--;
+                    };
+                    i++;
+                };
+                i = 0;
+                while (i < v.len)
+                {
+                    if (i > 0) { this.sb.put_str(g" & \0"); };
+                    this.sb.put_str((byte*)v.items[i]);
+                    i++;
+                };
+                pv_free(v);
+                return;
+            };
+
+            // Mutex partner of op, or null
+            def cs_mutex(byte* op) -> byte*
+            {
+                if (cstr_eq(op, g"~=\0")) { return g"!~=\0"; };
+                if (cstr_eq(op, g"!~=\0")) { return g"~=\0"; };
+                if (cstr_eq(op, g"!`<=\0")) { return g"!`>=\0"; };
+                if (cstr_eq(op, g"!`>=\0")) { return g"!`<=\0"; };
+                return (byte*)0;
+            };
+
+            // Error at the position m (the 'constra' token) with the text in sb
+            def cs_error_at(int m) -> void
+            {
+                this.reset(m);
+                this.error(this.own_n(this.sb.mem, this.sb.len));
+                return;
+            };
+
+            // Merge form after '=': constra A = B + C;  (rename = optional param list, else null)
+            def constra_merge(Node* d, int m0, PtrVec* rename) -> void
+            {
+                PtrVec* srcs = pv_new();
+                int m, i, j, k, base, nsrc, nrel, rn;
+                byte* sname;
+                byte* mapped;
+                byte* mx;
+                Node* src;
+                Node* rel;
+                Node* nrelnode;
+                Node* id;
+                Node* prev;
+                PtrVec* finals = pv_new();
+                bool more = true;
+                while (more & !this.failed)
+                {
+                    m = this.mark();
+                    sname = this.ident();
+                    if (this.failed) { break; };
+                    if (!nm_has(this.constras, sname))
+                    {
+                        this.reset(m);
+                        this.sb.len = 0;
+                        this.sb.put_str(g"Unknown constraint set '\0");
+                        this.sb.put_str(sname);
+                        this.sb.put_str(g"' in constra merge\0");
+                        this.cs_error_at(m);
+                        break;
+                    };
+                    pv_push(srcs, nm_get(this.constras, sname));
+                    more = this.expect(TokenType.PLUS);
+                    if (more) { this.advance(); };
+                };
+                if (!this.failed) { this.consume(TokenType.SEMICOLON); };
+                if (this.failed)
+                {
+                    pv_free(srcs);
+                    pv_free(finals);
+                    return;
+                };
+                src = (Node*)srcs.items[0];
+                base = node_count(src, 0);
+                i = 1;
+                while (i < srcs.len & !this.failed)
+                {
+                    prev = (Node*)srcs.items[i];
+                    if (node_count(prev, 0) != base)
+                    {
+                        this.sb.len = 0;
+                        this.sb.put_str(g"Cannot merge constraint sets of different arity: '\0");
+                        this.sb.put_str(src.text);
+                        this.sb.put_str(g"' has \0");
+                        this.sb.put_int(base);
+                        this.sb.put_str(g" parameter(s) but '\0");
+                        this.sb.put_str(prev.text);
+                        this.sb.put_str(g"' has \0");
+                        this.sb.put_int(node_count(prev, 0));
+                        this.cs_error_at(m0);
+                    };
+                    i++;
+                };
+                if (!this.failed & rename != (PtrVec*)0)
+                {
+                    if (rename.len != base)
+                    {
+                        this.sb.len = 0;
+                        this.sb.put_str(g"Rename parameter list has \0");
+                        this.sb.put_int(rename.len);
+                        this.sb.put_str(g" name(s) but merged constraint sets have arity \0");
+                        this.sb.put_int(base);
+                        this.cs_error_at(m0);
+                    };
+                };
+                if (this.failed)
+                {
+                    pv_free(srcs);
+                    pv_free(finals);
+                    return;
+                };
+                i = 0;
+                while (i < base)
+                {
+                    if (rename != (PtrVec*)0) { pv_push(finals, rename.items[i]); }
+                    else { pv_push(finals, (void*)node_child(src, 0, i).text); };
+                    id = this.mk(NodeKind.IDENTIFIER, d.line, d.col);
+                    if (this.failed) { break; };
+                    id.text = (byte*)finals.items[i];
+                    node_push(d, 0, id);
+                    i++;
+                };
+                // remap each source's formals onto the final names
+                i = 0;
+                while (i < srcs.len & !this.failed)
+                {
+                    src = (Node*)srcs.items[i];
+                    nrel = node_count(src, 1);
+                    j = 0;
+                    while (j < nrel & !this.failed)
+                    {
+                        rel = node_child(src, 1, j);
+                        nrelnode = this.mk(NodeKind.CONSTRA_RELATION, rel.line, rel.col);
+                        if (this.failed) { break; };
+                        node_push(d, 1, nrelnode);
+                        nrelnode.text = rel.text;
+                        rn = 0;
+                        while (rn < 2)
+                        {
+                            k = 0;
+                            while (k < node_count(rel, rn) & !this.failed)
+                            {
+                                mapped = node_child(rel, rn, k).text;
+                                base = node_count(src, 0) - 1;
+                                while (base >= 0)
+                                {
+                                    if (cstr_eq(node_child(src, 0, base).text, mapped))
+                                    {
+                                        mapped = (byte*)finals.items[base];
+                                        break;
+                                    };
+                                    base--;
+                                };
+                                id = this.mk(NodeKind.IDENTIFIER, rel.line, rel.col);
+                                if (this.failed) { break; };
+                                id.text = mapped;
+                                node_push(nrelnode, rn, id);
+                                k++;
+                            };
+                            rn++;
+                        };
+                        j++;
+                    };
+                    i++;
+                };
+                // mutex check: a relation conflicts with an earlier one on the same sides with the partner op
+                nrel = node_count(d, 1);
+                i = 0;
+                while (i < nrel & !this.failed)
+                {
+                    rel = node_child(d, 1, i);
+                    mx = this.cs_mutex(rel.text);
+                    j = 0;
+                    while (mx != (byte*)0 & j < i & !this.failed)
+                    {
+                        prev = node_child(d, 1, j);
+                        if (cstr_eq(prev.text, mx) &
+                            this.cs_same_set(prev, 0, rel, 0) & this.cs_same_set(prev, 1, rel, 1))
+                        {
+                            this.sb.len = 0;
+                            this.sb.put_str(g"Conflicting constraints in merge '\0");
+                            this.sb.put_str(d.text);
+                            this.sb.put_str(g"': '\0");
+                            this.cs_put_sorted(rel, 0);
+                            this.sb.put(' ');
+                            this.sb.put_str(mx);
+                            this.sb.put(' ');
+                            this.cs_put_sorted(rel, 1);
+                            this.sb.put_str(g"' and '\0");
+                            this.cs_put_sorted(rel, 0);
+                            this.sb.put(' ');
+                            this.sb.put_str(rel.text);
+                            this.sb.put(' ');
+                            this.cs_put_sorted(rel, 1);
+                            this.sb.put_str(g"' cannot be true simultaneously\0");
+                            this.cs_error_at(m0);
+                        };
+                        j++;
+                    };
+                    i++;
+                };
+                pv_free(srcs);
+                pv_free(finals);
+                return;
+            };
+
+            // constra_def -> 'constra' IDENTIFIER ('(' names ')')? ( '=' names_merge | '{' relations '}' ) ';'
             def constra_def() -> Node*
             {
-                return this.stub(Feat.CONSTRA_DEF, NodeKind.CONSTRA_DEF);
+                int m0 = this.mark();
+                Node* d = this.mk(NodeKind.CONSTRA_DEF, this.cur_line(), this.cur_col());
+                if (this.failed) { return d; };
+                Node* id;
+                PtrVec* rename;
+                int m;
+                bool more;
+                this.advance();
+                d.text = this.ident();
+                if (!this.failed & this.expect(TokenType.LEFT_PAREN))
+                {
+                    m = this.mark();
+                    this.advance();
+                    rename = pv_new();
+                    if (!this.expect(TokenType.RIGHT_PAREN))
+                    {
+                        more = true;
+                        while (more & !this.failed)
+                        {
+                            pv_push(rename, (void*)this.ident());
+                            more = this.expect(TokenType.COMMA);
+                            if (more) { this.advance(); };
+                        };
+                    };
+                    if (!this.failed) { this.consume(TokenType.RIGHT_PAREN); };
+                    if (!this.failed & !this.expect(TokenType.ASSIGN))
+                    {
+                        pv_free(rename);
+                        rename = (PtrVec*)0;
+                        this.reset(m);
+                    };
+                };
+                if (!this.failed & this.expect(TokenType.ASSIGN))
+                {
+                    this.advance();
+                    this.constra_merge(d, m0, rename);
+                    if (rename != (PtrVec*)0) { pv_free(rename); };
+                    if (this.failed) { return this.done(d); };
+                    nm_put(this.constras, d.text, (void*)d);
+                    return d;
+                };
+                if (rename != (PtrVec*)0) { pv_free(rename); };
+                if (!this.failed & this.expect(TokenType.LEFT_PAREN))
+                {
+                    this.advance();
+                    if (!this.expect(TokenType.RIGHT_PAREN))
+                    {
+                        more = true;
+                        while (more & !this.failed)
+                        {
+                            id = this.mk(NodeKind.IDENTIFIER, this.cur_line(), this.cur_col());
+                            if (this.failed) { break; };
+                            node_push(d, 0, id);
+                            id.text = this.ident();
+                            more = this.expect(TokenType.COMMA);
+                            if (more) { this.advance(); };
+                        };
+                    };
+                    if (!this.failed) { this.consume(TokenType.RIGHT_PAREN); };
+                };
+                if (!this.failed) { this.consume(TokenType.LEFT_BRACE); };
+                if (!this.failed) { this.cs_rel_expr(d); };
+                while (!this.failed & !this.expect(TokenType.RIGHT_BRACE))
+                {
+                    if (this.expect(TokenType.COMMA)) { this.advance(); };
+                    this.cs_rel_expr(d);
+                };
+                if (!this.failed) { this.consume(TokenType.RIGHT_BRACE); };
+                if (!this.failed) { this.consume(TokenType.SEMICOLON); };
+                if (this.failed) { return this.done(d); };
+                nm_put(this.constras, d.text, (void*)d);
+                return d;
             };
 
+            // Canonical receiver type name of the token at the cursor, or null when it is not a receiver
+            def tf_receiver_name() -> byte*
+            {
+                int t = this.cur();
+                if (t == TokenType.BYTE) { return g"byte\0"; };
+                if (t == TokenType.SINT | t == TokenType.SINT_LITERAL) { return g"int\0"; };
+                if (t == TokenType.UINT | t == TokenType.UINT_LITERAL) { return g"uint\0"; };
+                if (t == TokenType.SLONG | t == TokenType.SLONG_LITERAL) { return g"long\0"; };
+                if (t == TokenType.ULONG | t == TokenType.ULONG_LITERAL) { return g"ulong\0"; };
+                if (t == TokenType.FLOAT_KW | t == TokenType.FLOAT) { return g"float\0"; };
+                if (t == TokenType.DOUBLE_KW | t == TokenType.DOUBLE) { return g"double\0"; };
+                if (t == TokenType.BOOL_KW | t == TokenType.TRUE | t == TokenType.FALSE) { return g"bool\0"; };
+                if (t == TokenType.STRING_LITERAL | t == TokenType.F_STRING | t == TokenType.I_STRING) { return g"string\0"; };
+                if (t == TokenType.CHAR) { return g"char\0"; };
+                if (t == TokenType.IDENTIFIER) { return this.cur_value(); };
+                return (byte*)0;
+            };
+
+            // Type of the implicit receiver parameter (fparser.py _type_func_receiver_type_spec)
+            def tf_receiver_ts(byte* tn, int depth, bool is_array) -> TypeSpec*
+            {
+                TypeSpec* t = typespec_new();
+                int base = -1;
+                if (cstr_eq(tn, g"string\0") | (cstr_eq(tn, g"byte\0") & depth >= 1))
+                {
+                    if (depth < 1) { depth = 1; };
+                    t.base_type = DataType.BYTE;
+                    t.pointer_depth = depth;
+                    t.flags = t.flags `| TS_POINTER;
+                    return t;
+                };
+                if (cstr_eq(tn, g"byte\0")) { base = DataType.BYTE; }
+                elif (cstr_eq(tn, g"int\0")) { base = DataType.SINT; }
+                elif (cstr_eq(tn, g"uint\0")) { base = DataType.UINT; }
+                elif (cstr_eq(tn, g"long\0")) { base = DataType.SLONG; }
+                elif (cstr_eq(tn, g"ulong\0")) { base = DataType.ULONG; }
+                elif (cstr_eq(tn, g"float\0")) { base = DataType.FLOAT; }
+                elif (cstr_eq(tn, g"double\0")) { base = DataType.DOUBLE; }
+                elif (cstr_eq(tn, g"bool\0")) { base = DataType.BOOL; }
+                elif (cstr_eq(tn, g"char\0")) { base = DataType.CHAR; };
+                if (base < 0)
+                {
+                    t.base_type = DataType.DATA;
+                    t.custom_typename = tn;
+                }
+                else
+                {
+                    t.base_type = base;
+                };
+                if (is_array) { t.flags = t.flags `| TS_ARRAY; }
+                elif (depth > 0)
+                {
+                    t.pointer_depth = depth;
+                    t.flags = t.flags `| TS_POINTER;
+                };
+                return t;
+            };
+
+            // type_func_def -> '~'? receiver '*'* ('[' ']')? '.' name ('<' ... '>')? '(' params ')' '->' type (';' | block ';')
             def type_func_def() -> Node*
             {
-                return this.stub(Feat.TYPE_FUNC_DEF, NodeKind.TYPE_FUNC_DEF);
+                NameMap* prev_act = this.active_tp;
+                TemplateEntry* prev_cur = this.tmpl_cur;
+                this.tmpl_cur = (TemplateEntry*)0;
+                Node* d = this.type_func_def_inner();
+                TemplateEntry* te = this.tmpl_cur;
+                this.tmpl_cur = prev_cur;
+                if (this.active_tp != prev_act)
+                {
+                    nm_free(this.active_tp);
+                    this.active_tp = prev_act;
+                };
+                if (te == (TemplateEntry*)0) { return d; };
+                if (this.failed | d == (Node*)0)
+                {
+                    te_free(te);
+                    return d;
+                };
+                this.tf_to_function(d);
+                this.last_template = d.text;
+                this.register_template(d.text, 0, te, d);
+                return (Node*)0;
             };
 
+            // Turns a type function into the synthetic FUNCTION_DEF the Python registers:
+            // __typefunc__<type>__<name>(_ receiver, params...)
+            def tf_to_function(Node* d) -> void
+            {
+                PtrVec* tmp = pv_new();
+                Node* p0 = this.mk(NodeKind.PARAMETER, d.line, d.col);
+                int i, n;
+                if (this.failed) { pv_free(tmp); return; };
+                p0.text = g"_\0";
+                p0.ts = d.ts2;
+                d.ts2 = (TypeSpec*)0;
+                n = node_count(d, 0);
+                while (i < n)
+                {
+                    pv_push(tmp, (void*)node_child(d, 0, i));
+                    i++;
+                };
+                if (n > 0) { d.l0.len = 0; };
+                node_push(d, 0, p0);
+                i = 0;
+                while (i < n)
+                {
+                    node_push(d, 0, (Node*)tmp.items[i]);
+                    i++;
+                };
+                pv_free(tmp);
+                d.text = this.cat2(this.cat2(this.cat2(g"__typefunc__\0", d.text), g"__\0"), d.text2);
+                d.text2 = (byte*)0;
+                d.kind = NodeKind.FUNCTION_DEF;
+                return;
+            };
+
+            def type_func_def_inner() -> Node*
+            {
+                int m = this.mark();
+                Node* d = this.mk(NodeKind.TYPE_FUNC_DEF, this.cur_line(), this.cur_col());
+                if (this.failed) { return d; };
+                bool tied = false;
+                bool is_array = false;
+                int depth = 0;
+                byte* tn;
+                byte* eff;
+                int k;
+                TypeSpec* rts;
+                Node* fl;
+                if (this.expect(TokenType.TIE)) { tied = true; this.advance(); };
+                tn = this.tf_receiver_name();
+                if (tn == (byte*)0)
+                {
+                    this.error(g"Expected a type keyword, literal, or struct name as type function receiver\0");
+                    return this.done(d);
+                };
+                if (this.st != (FXC_SYMTABLE*)0)
+                {
+                    if (st_is_nofunc(this.st, tn))
+                    {
+                        this.error(this.cat2(this.cat2(g"Type \0", tn), g" is non-functional (declared with data!) and cannot have type functions defined on it\0"));
+                        return this.done(d);
+                    };
+                };
+                this.advance();
+                while (this.expect(TokenType.MULTIPLY)) { depth++; this.advance(); };
+                if (this.expect(TokenType.LEFT_BRACKET))
+                {
+                    this.advance();
+                    this.consume(TokenType.RIGHT_BRACKET);
+                    is_array = true;
+                };
+                if (!this.failed) { this.consume(TokenType.DOT); };
+                if (this.failed) { return this.done(d); };
+                if (this.expect2(TokenType.F_STRING, TokenType.I_STRING))
+                {
+                    fl = this.fstr_node();
+                    if (this.failed) { return this.done(d); };
+                    d.text2 = this.fstr_resolve(fl);
+                    node_free(fl);
+                    if (d.text2 == (byte*)0)
+                    {
+                        this.error(g"The type function name could not be resolved at parse time\0");
+                        return this.done(d);
+                    };
+                }
+                elif (this.expect(TokenType.STRING_LITERAL))
+                {
+                    d.text2 = this.cur_value();
+                    this.advance();
+                }
+                else
+                {
+                    d.text2 = this.ident();
+                };
+                if (this.failed) { return this.done(d); };
+                if (this.expect(TokenType.RECURSE_ARROW))
+                {
+                    // the Python parser splits '<~' into '<' and '~', which is not a template list
+                    this.fail_expected(TokenType.LEFT_PAREN);
+                    this.err_got = TokenType.LESS_THAN;
+                    return this.done(d);
+                };
+                if (this.expect(TokenType.LESS_THAN))
+                {
+                    this.tmpl_cur = this.template_params(true);
+                    if (this.failed) { return this.done(d); };
+                    this.tp_activate(this.tmpl_cur);
+                };
+                this.consume(TokenType.LEFT_PAREN);
+                if (!this.failed & !this.expect(TokenType.RIGHT_PAREN)) { this.parameter_list(d); };
+                if (!this.failed) { this.consume(TokenType.RIGHT_PAREN); };
+                if (!this.failed) { this.consume(TokenType.RETURN_ARROW); };
+                if (!this.failed) { d.ts = this.type_spec(); };
+                if (this.failed) { return this.done(d); };
+                rts = this.tf_receiver_ts(tn, depth, is_array);
+                if (tied) { rts.flags = rts.flags `| TS_TIED; };
+                d.ts2 = rts;
+                // canonical name used for mangling
+                eff = tn;
+                if (depth > 0 & cstr_eq(tn, g"byte\0")) { eff = g"string\0"; }
+                elif (depth > 0)
+                {
+                    k = 0;
+                    while (k < depth) { eff = this.cat2(eff, g"_ptr\0"); k++; };
+                }
+                elif (is_array) { eff = this.cat2(tn, g"_arr\0"); };
+                if (tied) { eff = this.cat2(g"tied_\0", eff); };
+                d.text = eff;
+                if (this.expect(TokenType.SEMICOLON))
+                {
+                    this.advance();
+                    d.flags = NF_PROTOTYPE;
+                    d.a = this.mk(NodeKind.BLOCK, d.line, d.col);
+                    return this.done(d);
+                };
+                d.a = this.block();
+                if (!this.failed) { this.consume(TokenType.SEMICOLON); };
+                return this.done(d);
+            };
+
+            // Appends the source text of the current token to sb (mirrors _token_to_source).
+            // Quoted forms are rebuilt, every other token value is already its source text.
+            def token_source() -> void
+            {
+                int tt = this.cur();
+                byte* v = this.cur_value();
+                int n = this.cur_value_len();
+                int i;
+                int b;
+                if (tt == TokenType.STRING_LITERAL | tt == TokenType.G_STRING)
+                {
+                    if (tt == TokenType.G_STRING) { this.sb.put('g'); };
+                    this.sb.put('"');
+                    while (i < n)
+                    {
+                        b = (int)v[i];
+                        if (b == 92 | b == '"') { this.sb.put(92); };
+                        this.sb.put(b);
+                        i++;
+                    };
+                    this.sb.put('"');
+                    return;
+                };
+                if (tt == TokenType.CHAR)
+                {
+                    if (this.toks[this.pos].numeric_char != 0)
+                    {
+                        this.sb.put_n(v, n);
+                        this.sb.put('c');
+                        return;
+                    };
+                    this.sb.put(39);
+                    while (i < n)
+                    {
+                        b = (int)v[i];
+                        if (b == 92 | b == 39) { this.sb.put(92); };
+                        this.sb.put(b);
+                        i++;
+                    };
+                    this.sb.put(39);
+                    return;
+                };
+                if (tt == TokenType.BYTE_LITERAL)
+                {
+                    this.sb.put_n(v, n);
+                    this.sb.put('b');
+                    return;
+                };
+                this.sb.put_n(v, n);
+                return;
+            };
+
+            // Separator before an emitflux part: a space between parts, none after '~$'
+            def ef_begin(bool glue) -> void
+            {
+                if (this.sb.len > 0 & !glue) { this.sb.put(' '); };
+                return;
+            };
+
+            // emitflux_statement -> 'emitflux' '{' <raw source text> '}' ';'
+            // Captures the raw source between the braces, with nested braces counted.
+            // '#};' is captured as '}' ';' without changing the depth, and '} #' ends
+            // the block at any depth. Parts are joined by one space, '~$' fuses with the next part.
             def emitflux_statement() -> Node*
             {
-                return this.stub(Feat.EMITFLUX_STATEMENT, NodeKind.EMIT_FLUX);
+                Node* n = this.mk(NodeKind.EMIT_FLUX, this.cur_line(), this.cur_col());
+                if (this.failed) { return n; };
+                this.advance();
+                if (!this.consume(TokenType.LEFT_BRACE)) { return this.done(n); };
+                this.sb.len = 0;
+                this.sb.mem[0] = (byte)0;
+                int depth = 1;
+                int c;
+                bool glue = false;
+                bool stop = false;
+                while (depth > 0 & !stop & !this.failed)
+                {
+                    c = this.cur();
+                    if (c == TokenType.EOF)
+                    {
+                        this.error(g"Unexpected EOF inside 'emitflux' block\0");
+                        break;
+                    };
+                    if (c == TokenType.TAG)
+                    {
+                        if (this.type_at(1) == TokenType.RIGHT_BRACE & this.type_at(2) == TokenType.SEMICOLON)
+                        {
+                            this.advance();
+                            this.ef_begin(glue);
+                            this.sb.put('}');
+                            this.advance();
+                            this.ef_begin(false);
+                            this.sb.put(';');
+                            this.advance();
+                            glue = false;
+                            continue;
+                        };
+                        this.ef_begin(glue);
+                        this.token_source();
+                        glue = false;
+                        this.advance();
+                        continue;
+                    };
+                    if (c == TokenType.LEFT_BRACE)
+                    {
+                        depth++;
+                        this.ef_begin(glue);
+                        this.sb.put('{');
+                        glue = false;
+                    }
+                    elif (c == TokenType.RIGHT_BRACE)
+                    {
+                        if (this.type_at(1) == TokenType.TAG)
+                        {
+                            this.advance();
+                            this.advance();
+                            stop = true;
+                        }
+                        else
+                        {
+                            depth--;
+                            if (depth > 0)
+                            {
+                                this.ef_begin(glue);
+                                this.sb.put('}');
+                                glue = false;
+                            }
+                            else
+                            {
+                                this.advance();
+                                stop = true;
+                            };
+                        };
+                    }
+                    else
+                    {
+                        this.ef_begin(glue);
+                        this.token_source();
+                        glue = (c == TokenType.CODIFY);
+                    };
+                    if (!stop) { this.advance(); };
+                };
+                if (!this.failed) { this.consume(TokenType.SEMICOLON); };
+                n.text = this.own_n(this.sb.mem, this.sb.len);
+                return this.done(n);
             };
 
+            // ===== CODIFY (~$) =====
+
+            // Records a byte* string literal initializer so ~$name can splice it
+            // (fparser._comptime_strings). The text is borrowed from the token.
+            def note_comptime_string(byte* name, TypeSpec* ts, Node* init) -> void
+            {
+                if (init == (Node*)0) { return; };
+                if (init.kind != NodeKind.STRING_LITERAL) { return; };
+                if ((ts.flags `& TS_POINTER) == 0) { return; };
+                if (ts.base_type != DataType.BYTE) { return; };
+                nm_put(this.cstrs, name, (void*)init.text);
+                return;
+            };
+
+            def codify_unknown(byte* name) -> void
+            {
+                this.error3(g"~$: '\0", name, g"' is not a compile-time-known byte* string literal. Only variables declared as 'byte* name = \"...\";' are supported.\0");
+                return;
+            };
+
+            // Text of the f-string or i-string token at the cursor with each {name} replaced by the
+            // string recorded for name. strict reports an unrecorded name, otherwise it stands for
+            // itself. Returns an owned string, or null with the error recorded.
+            def codify_text_of(bool strict) -> byte*
+            {
+                Node* fl;
+                Node* p;
+                byte* val;
+                int k, cnt;
+                if (this.expect(TokenType.F_STRING)) { fl = this.f_string_node(); }
+                else { fl = this.i_string_node(); };
+                if (this.failed) { return (byte*)0; };
+                this.sb.len = 0;
+                this.sb.mem[0] = (byte)0;
+                cnt = node_count(fl, 0);
+                while (k < cnt & !this.failed)
+                {
+                    p = node_child(fl, 0, k);
+                    if (p.kind == NodeKind.STRING_LITERAL)
+                    {
+                        this.sb.put_str(p.text);
+                    }
+                    elif (p.kind == NodeKind.IDENTIFIER)
+                    {
+                        val = (byte*)nm_get(this.cstrs, p.text);
+                        if (val != (byte*)0) { this.sb.put_str(val); }
+                        elif (strict) { this.codify_unknown(p.text); }
+                        else { this.sb.put_str(p.text); };
+                    }
+                    else
+                    {
+                        this.error(g"~$: an interpolated expression must be an identifier\0");
+                    };
+                    k++;
+                };
+                node_free(fl);
+                if (this.failed) { return (byte*)0; };
+                return this.own_n(this.sb.mem, this.sb.len);
+            };
+
+            // ~$ followed by an f-string, i-string or identifier (fparser._consume_codify).
+            // An identifier without a recorded string stands for itself.
+            def consume_codify() -> byte*
+            {
+                this.advance();
+                if (this.expect2(TokenType.F_STRING, TokenType.I_STRING)) { return this.codify_text_of(false); };
+                byte* name = this.ident();
+                if (this.failed) { return (byte*)0; };
+                byte* val = (byte*)nm_get(this.cstrs, name);
+                if (val != (byte*)0) { return val; };
+                return name;
+            };
+
+            // Parses src with a fresh parser (no shared state, as in fparser.py) and returns its
+            // statements: the first is returned, the rest are queued in pending. Null when empty.
+            def splice_source(byte* src) -> Node*
+            {
+                int n = pp_cstrlen(src);
+                byte* text = this.own_n(src, n);
+                Lexer* sl = (Lexer*)fmalloc((u64)((sizeof(Lexer) + 7) / 8));
+                if (sl == (Lexer*)0)
+                {
+                    this.fail_alloc();
+                    return (Node*)0;
+                };
+                sl.__init(text, n);
+                pv_push(this.sublex, (void*)sl);
+                if (!sl.tokenize())
+                {
+                    this.error(flux::lexer::error_message(sl.err_code));
+                    return (Node*)0;
+                };
+                Parser* sp = (Parser*)fmalloc((u64)((sizeof(Parser) + 7) / 8));
+                if (sp == (Parser*)0)
+                {
+                    this.fail_alloc();
+                    return (Node*)0;
+                };
+                sp.__init(sl);
+                pv_push(this.subparsers, (void*)sp);
+                sp.st = st_new();
+                sp.default_byte_width = this.default_byte_width;
+                sp.verbose = this.verbose;
+                sp.toks = sl.tokens;
+                sp.count = sl.count;
+                sp.pos = 0;
+
+                Node* first = (Node*)0;
+                Node* stmt;
+                int k, f;
+                while (!sp.failed & !sp.expect(TokenType.EOF))
+                {
+                    stmt = sp.statement();
+                    if (sp.failed) { break; };
+                    if (stmt != (Node*)0)
+                    {
+                        if (first == (Node*)0) { first = stmt; }
+                        else { nv_push(this.pending, stmt); };
+                    };
+                    k = 0;
+                    while (k < sp.pending.len)
+                    {
+                        if (first == (Node*)0) { first = (Node*)sp.pending.items[k]; }
+                        else { nv_push(this.pending, sp.pending.items[k]); };
+                        k++;
+                    };
+                    sp.pending.len = 0;
+                };
+
+                // stubs hit while parsing the spliced source count toward this parser
+                while (f < Feat.COUNT)
+                {
+                    if (sp.feat_hits[f] != 0)
+                    {
+                        if (this.feat_hits[f] == 0) { this.stub_features++; };
+                        this.feat_hits[f] = this.feat_hits[f] + sp.feat_hits[f];
+                    };
+                    f++;
+                };
+                this.stub_total = this.stub_total + sp.stub_total;
+
+                if (sp.failed)
+                {
+                    node_free(first);
+                    this.failed = true;
+                    this.err_kind = sp.err_kind;
+                    this.err_expected = sp.err_expected;
+                    this.err_got = sp.err_got;
+                    this.err_line = sp.err_line;
+                    this.err_col = sp.err_col;
+                    this.err_msg = sp.err_msg;
+                    return (Node*)0;
+                };
+                return first;
+            };
+
+            // ~$ (STRING_LITERAL | F_STRING | I_STRING | IDENTIFIER) ';'
+            // The string is parsed as statements that stand in place of this one.
             def codify_statement() -> Node*
             {
-                return this.stub(Feat.CODIFY_STATEMENT, NodeKind.CODIFY);
+                byte* src = (byte*)0;
+                byte* name;
+                this.advance();
+                if (this.expect(TokenType.STRING_LITERAL))
+                {
+                    src = this.cur_value();
+                    this.advance();
+                }
+                elif (this.expect2(TokenType.F_STRING, TokenType.I_STRING))
+                {
+                    src = this.codify_text_of(true);
+                }
+                elif (this.expect(TokenType.IDENTIFIER))
+                {
+                    name = this.cur_value();
+                    this.advance();
+                    src = (byte*)nm_get(this.cstrs, name);
+                    if (src == (byte*)0) { this.codify_unknown(name); };
+                }
+                else
+                {
+                    this.error(g"~$: expected identifier, string literal, f-string, or i-string after codify operator\0");
+                };
+                if (!this.failed) { this.consume(TokenType.SEMICOLON); };
+                if (this.failed) { return (Node*)0; };
+                return this.splice_source(src);
             };
 
             // ===== SUPPORT FOR TYPES AND EXPRESSIONS =====
@@ -1431,6 +4651,234 @@ namespace flux
 
             // Name used when a type argument list is folded into a type name
             // (fparser._type_system_to_mangle_str)
+            // "NS::x" to "NS__x"
+            def tp_unqual(byte* s) -> byte*
+            {
+                int i;
+                int n = pp_cstrlen(s);
+                this.sb.len = 0;
+                this.sb.mem[0] = (byte)0;
+                while (i < n)
+                {
+                    if (s[i] == ':' & i + 1 < n)
+                    {
+                        if (s[i + 1] == ':')
+                        {
+                            this.sb.put_str(g"__\0");
+                            i = i + 2;
+                            continue;
+                        };
+                    };
+                    this.sb.put(s[i]);
+                    i++;
+                };
+                return this.own_n(this.sb.mem, this.sb.len);
+            };
+
+            // The registry key when name (bare, or NS::x as NS__x) is a template struct or object
+            def tmpl_type_key(byte* name) -> byte*
+            {
+                TemplateEntry* e = this.template_lookup(name);
+                byte* q;
+                if (e != (TemplateEntry*)0)
+                {
+                    if (e.kind == 1 | e.kind == 2) { return name; };
+                };
+                if (nm_has(this.tobj_fwd, name)) { return name; };
+                q = this.tp_unqual(name);
+                e = this.template_lookup(q);
+                if (e != (TemplateEntry*)0)
+                {
+                    if (e.kind == 1 | e.kind == 2) { return q; };
+                };
+                if (nm_has(this.tobj_fwd, q)) { return q; };
+                return (byte*)0;
+            };
+
+            // Name<args> after a named type (cursor on '<'): resolves the instance, or defers
+            // as "Key<a,b>" while an argument is still an active template parameter.
+            def template_type_use(TypeSpec* t, byte* key) -> void
+            {
+                PtrVec* names = pv_new();
+                PtrVec* specs = pv_new();
+                TypeSpec* a;
+                bool postpone = false;
+                int i;
+                this.advance();
+                a = this.type_spec();
+                pv_push(specs, (void*)a);
+                if (!this.failed) { pv_push(names, (void*)this.type_mangle_str(a)); };
+                while (!this.failed & this.expect(TokenType.COMMA))
+                {
+                    this.advance();
+                    a = this.type_spec();
+                    pv_push(specs, (void*)a);
+                    if (!this.failed) { pv_push(names, (void*)this.type_mangle_str(a)); };
+                };
+                if (!this.failed) { this.consume(TokenType.GREATER_THAN); };
+                if (!this.failed)
+                {
+                    while (i < names.len)
+                    {
+                        if (this.tp_active((byte*)names.items[i])) { postpone = true; };
+                        i++;
+                    };
+                    if (postpone)
+                    {
+                        t.custom_typename = this.deferred_name(key, names);
+                    }
+                    else
+                    {
+                        t.custom_typename = this.resolve_template_type(key, names, specs);
+                    };
+                };
+                i = 0;
+                while (i < specs.len)
+                {
+                    typespec_free((TypeSpec*)specs.items[i]);
+                    i++;
+                };
+                pv_free(names);
+                pv_free(specs);
+                return;
+            };
+
+            // Instantiates a template struct (kind 1) or object (kind 2); returns the mangled name
+            // (fparser._resolve_template_struct / _resolve_template_object / _instantiate_template_node)
+            def resolve_template_type(byte* key, PtrVec* names, PtrVec* specs) -> byte*
+            {
+                TemplateEntry* te = this.template_lookup(key);
+                NameMap* map;
+                Node* concrete;
+                byte* mangled;
+                byte* what;
+                int i;
+                if (te == (TemplateEntry*)0) { what = g"struct\0"; }
+                elif (te.kind == 1) { what = g"struct\0"; }
+                else { what = g"object\0"; };
+                if (te == (TemplateEntry*)0)
+                {
+                    this.error(this.cat2(this.cat2(g"Unknown template struct '\0", key), g"'\0"));
+                    return key;
+                };
+                if (te.kind != 1 & te.kind != 2)
+                {
+                    this.error(this.cat2(this.cat2(g"Unknown template struct '\0", key), g"'\0"));
+                    return key;
+                };
+                if (names.len != te.params.len)
+                {
+                    this.sb.len = 0;
+                    this.sb.put_str(g"Template \0");
+                    this.sb.put_str(what);
+                    this.sb.put_str(g" '\0");
+                    this.sb.put_str(key);
+                    this.sb.put_str(g"' expects \0");
+                    this.sb.put_int(te.params.len);
+                    this.sb.put_str(g" type argument(s), got \0");
+                    this.sb.put_int(names.len);
+                    this.error(this.own_n(this.sb.mem, this.sb.len));
+                    return key;
+                };
+                this.sb.len = 0;
+                this.sb.mem[0] = (byte)0;
+                this.sb.put_str(key);
+                this.sb.put_str(g"__\0");
+                while (i < names.len)
+                {
+                    if (i > 0) { this.sb.put_str(g"_\0"); };
+                    this.sb.put_str((byte*)names.items[i]);
+                    i++;
+                };
+                mangled = this.own_n(this.sb.mem, this.sb.len);
+                if (nm_has(te.emitted, mangled)) { return mangled; };
+                nm_put(te.emitted, mangled, (void*)te);
+                map = this.tp_mapping(te, names, specs);
+                concrete = node_clone(te.node);
+                this.subst_node(concrete, map);
+                nm_free(map);
+                if (this.failed)
+                {
+                    node_free(concrete);
+                    return mangled;
+                };
+                concrete.text = mangled;
+                if (te.kind == 1)
+                {
+                    if (concrete.l4 != (NodeVec*)0) { concrete.l4.len = 0; };
+                    pv_push(this.tinst_s, (void*)concrete);
+                }
+                else
+                {
+                    if (concrete.d != (Node*)0)
+                    {
+                        node_free(concrete.d);
+                        concrete.d = (Node*)0;
+                    };
+                    pv_push(this.tinst_o, (void*)concrete);
+                    nm_put(this.pobjs, mangled, (void*)concrete);
+                    if (nm_has(this.oinit, key)) { nm_put(this.oinit, mangled, (void*)concrete); };
+                };
+                return mangled;
+            };
+
+            // "Key<T,U>" inside an instantiated template body whose arguments are now known
+            def subst_deferred_type(byte* s, NameMap* map) -> byte*
+            {
+                PtrVec* raw = pv_new();
+                PtrVec* names = pv_new();
+                PtrVec* specs = pv_new();
+                int lt = this.tp_split_deferred(s, raw);
+                int i;
+                bool any = false;
+                byte* base;
+                byte* r = s;
+                TemplateEntry* te;
+                TypeSpec* c;
+                byte* a;
+                if (lt > 0)
+                {
+                    base = this.own_n(s, lt);
+                    te = this.template_lookup(base);
+                    while (i < raw.len)
+                    {
+                        if (nm_has(map, (byte*)raw.items[i])) { any = true; };
+                        i++;
+                    };
+                    if (te != (TemplateEntry*)0 & any)
+                    {
+                        if (te.kind == 1 | te.kind == 2)
+                        {
+                            i = 0;
+                            while (i < raw.len)
+                            {
+                                a = (byte*)raw.items[i];
+                                if (nm_has(map, a))
+                                {
+                                    c = (TypeSpec*)nm_get(map, a);
+                                    pv_push(names, (void*)this.ts_mangle(c));
+                                    pv_push(specs, (void*)c);
+                                }
+                                else
+                                {
+                                    c = this.tmp_type();
+                                    c.base_type = DataType.DATA;
+                                    c.custom_typename = a;
+                                    pv_push(names, (void*)a);
+                                    pv_push(specs, (void*)c);
+                                };
+                                i++;
+                            };
+                            r = this.resolve_template_type(base, names, specs);
+                        };
+                    };
+                };
+                pv_free(raw);
+                pv_free(names);
+                pv_free(specs);
+                return r;
+            };
+
             def type_mangle_str(TypeSpec* t) -> byte*
             {
                 this.sb.len = 0;
@@ -1522,12 +4970,37 @@ namespace flux
                 };
                 if (c == TokenType.CODIFY)
                 {
-                    this.note_feat(Feat.CODIFY_EXPR);
-                    this.error(g"codify in a type is not supported by the bootstrap parser\0");
-                    return 0;
+                    // ~$name / ~$f"..." as a type: the resolved string names a builtin or a custom type
+                    byte* resolved = this.consume_codify();
+                    if (this.failed) { return 0; };
+                    int bt = this.codify_builtin(resolved);
+                    if (bt >= 0)
+                    {
+                        t.base_type = bt;
+                        return 1;
+                    };
+                    t.base_type = DataType.DATA;
+                    t.custom_typename = resolved;
+                    return 2;
                 };
                 this.error(g"Expected type specifier\0");
                 return 0;
+            };
+
+            // DataType named by a codified type string, -1 when it is not a builtin type name
+            def codify_builtin(byte* s) -> int
+            {
+                if (cstr_eq(s, g"byte\0")) { return DataType.BYTE; };
+                if (cstr_eq(s, g"int\0")) { return DataType.SINT; };
+                if (cstr_eq(s, g"uint\0")) { return DataType.UINT; };
+                if (cstr_eq(s, g"long\0")) { return DataType.SLONG; };
+                if (cstr_eq(s, g"ulong\0")) { return DataType.ULONG; };
+                if (cstr_eq(s, g"float\0")) { return DataType.FLOAT; };
+                if (cstr_eq(s, g"double\0")) { return DataType.DOUBLE; };
+                if (cstr_eq(s, g"bool\0")) { return DataType.BOOL; };
+                if (cstr_eq(s, g"char\0")) { return DataType.CHAR; };
+                if (cstr_eq(s, g"void\0")) { return DataType.VOID; };
+                return -1;
             };
 
             // Scalar fields of s into d (no shared children)
@@ -1625,7 +5098,14 @@ namespace flux
 
                 // Template arguments Name<T, U>: with no template registry yet, an angle
                 // list that parses as types is folded into the type name.
-                if (kind == 2 & this.expect(TokenType.LESS_THAN))
+                byte* tkey = (byte*)0;
+                if (kind == 2 & this.expect(TokenType.LESS_THAN)) { tkey = this.tmpl_type_key(t.custom_typename); };
+                if (tkey != (byte*)0)
+                {
+                    this.template_type_use(t, tkey);
+                    if (this.failed) { return t; };
+                }
+                elif (kind == 2 & this.expect(TokenType.LESS_THAN))
                 {
                     int m = this.mark();
                     this.advance();
@@ -1767,9 +5247,9 @@ namespace flux
                     TypeSpec* rs = st_get_type_spec(this.st, t.custom_typename);
                     if (rs != (TypeSpec*)0)
                     {
-                        if ((rs.flags `& TS_ARRAY) == 0 & rs.base_type != DataType.DICT &
-                            rs.base_type != DataType.FUNC_PTR & rs.array_elem == (TypeSpec*)0)
+                        if (rs.base_type != DataType.DICT & rs.base_type != DataType.FUNC_PTR)
                         {
+                            bool alias_arr = (rs.flags `& TS_ARRAY) != 0;
                             int keep_sc = t.storage_class;
                             int keep_flags = t.flags;
                             this.copy_scalar_type(t, rs);
@@ -1785,7 +5265,44 @@ namespace flux
                                 if (is_signed) { t.flags = t.flags `| TS_SIGNED; }
                                 elif ((t.flags `& TS_SIGNED) != 0) { t.flags = t.flags - TS_SIGNED; };
                             };
-                            if (is_array)
+                            if (alias_arr)
+                            {
+                                // Use-site dimensions come first, then the alias dimensions
+                                NodeVec* nd = nv_new();
+                                int di;
+                                if (is_array)
+                                {
+                                    while (di < dims.len)
+                                    {
+                                        nv_push(nd, dims.items[di]);
+                                        di++;
+                                    };
+                                    dims.len = 0;
+                                    nv_free(dims);
+                                };
+                                if (rs.array_dims != (NodeVec*)0)
+                                {
+                                    di = 0;
+                                    while (di < rs.array_dims.len)
+                                    {
+                                        nv_push(nd, node_clone(rs.array_dims.items[di]));
+                                        di++;
+                                    };
+                                };
+                                t.flags = t.flags `| TS_ARRAY;
+                                t.array_dims = nd;
+                                if (nd.len > 0) { t.array_size = nd.items[0]; };
+                                if (rs.array_elem != (TypeSpec*)0) { t.array_elem = typespec_copy(rs.array_elem); }
+                                else
+                                {
+                                    TypeSpec* ael = typespec_new();
+                                    this.copy_scalar_type(ael, t);
+                                    ael.flags = ael.flags `& (TS_SIGNED `| TS_CONST `| TS_VOLATILE);
+                                    ael.pointer_depth = 0;
+                                    t.array_elem = ael;
+                                };
+                            }
+                            elif (is_array)
                             {
                                 t.flags = t.flags `| TS_ARRAY;
                                 t.array_dims = dims;
@@ -2092,6 +5609,8 @@ namespace flux
                     n.a = expr;
                     n.b = right;
                     expr = n;
+                    this.try_template_op(n);
+                    if (this.failed) { return expr; };
                     op = this.bin_match(lv);
                 };
                 if (lv >= 8 & this.starts_operand() & !this.at_custom_op())
@@ -2166,6 +5685,8 @@ namespace flux
                         n.a = expr;
                         n.b = r;
                         expr = n;
+                        this.try_template_op(n);
+                        if (this.failed) { return expr; };
                     }
                     else { break; };
                 };
@@ -2419,6 +5940,10 @@ namespace flux
                     expr = n;
                 };
 
+                // explicit foo<int>(x) or inferred foo(x) call of a template function
+                expr = this.template_call(expr);
+                if (this.failed) { return expr; };
+
                 int line, col;
                 Node* idx;
                 Node* end;
@@ -2431,6 +5956,9 @@ namespace flux
                 Node* src;
                 Node* cond;
                 Node* els;
+                byte* tkey;
+                byte* qkey;
+                Node* fsn;
                 while (true)
                 {
                     line = this.cur_line();
@@ -2523,7 +6051,9 @@ namespace flux
                         if (!this.consume(TokenType.RIGHT_PAREN)) { return expr; };
                         if (expr.kind == NodeKind.IDENTIFIER)
                         {
-                            n = this.mk(NodeKind.FUNCTION_CALL, line, col);
+                            // a defined macro name makes a macro invocation, not a function call
+                            if (nm_has(this.macros, expr.text)) { n = this.mk(NodeKind.MACRO_CALL, line, col); }
+                            else { n = this.mk(NodeKind.FUNCTION_CALL, line, col); };
                             if (this.failed) { return expr; };
                             n.text = expr.text;
                             this.take_args(n, holder);
@@ -2545,12 +6075,24 @@ namespace flux
                         }
                         elif (expr.kind == NodeKind.MEMBER_ACCESS)
                         {
-                            n = this.mk(NodeKind.METHOD_CALL, line, col);
+                            n = (Node*)0;
+                            if (expr.text2 != (byte*)0) { n = this.typefunc_call_implicit(expr, holder, line, col); };
                             if (this.failed) { return expr; };
-                            n.a = expr.a;
-                            n.text = expr.text;
-                            expr.a = (Node*)0;
-                            this.take_args(n, holder);
+                            if (n != (Node*)0)
+                            {
+                                this.take_args(n, holder);
+                                this.push_front(n, expr.a);
+                                expr.a = (Node*)0;
+                            }
+                            else
+                            {
+                                n = this.mk(NodeKind.METHOD_CALL, line, col);
+                                if (this.failed) { return expr; };
+                                n.a = expr.a;
+                                n.text = expr.text;
+                                expr.a = (Node*)0;
+                                this.take_args(n, holder);
+                            };
                         }
                         else
                         {
@@ -2566,9 +6108,15 @@ namespace flux
                         member = (byte*)0;
                         if (this.expect(TokenType.F_STRING) | this.expect(TokenType.I_STRING))
                         {
-                            this.note_feat(Feat.FSTRING_EXPR);
-                            this.error(g"f-string member names are not supported by the bootstrap parser\0");
-                            return expr;
+                            fsn = this.fstr_node();
+                            if (this.failed) { return expr; };
+                            member = this.fstr_resolve(fsn);
+                            node_free(fsn);
+                            if (member == (byte*)0)
+                            {
+                                this.error(g"The member name could not be resolved at parse time\0");
+                                return expr;
+                            };
                         }
                         elif (this.expect(TokenType.STRING_LITERAL))
                         {
@@ -2590,10 +6138,33 @@ namespace flux
                             member = this.cur_value();
                             this.advance();
                         };
+                        tkey = this.typefunc_key(expr, member);
+                        if (this.expect(TokenType.LESS_THAN))
+                        {
+                            qkey = (byte*)0;
+                            if (expr.kind == NodeKind.IDENTIFIER)
+                            {
+                                qkey = this.cat2(this.cat2(expr.text, g".\0"), member);
+                                if (this.template_lookup(qkey) == (TemplateEntry*)0) { qkey = (byte*)0; };
+                            };
+                            if (qkey != (byte*)0)
+                            {
+                                expr = this.template_method_explicit(expr, qkey, false);
+                                if (this.failed) { return expr; };
+                                continue;
+                            };
+                            if (tkey != (byte*)0)
+                            {
+                                expr = this.template_method_explicit(expr, tkey, true);
+                                if (this.failed) { return expr; };
+                                continue;
+                            };
+                        };
                         n = this.mk(NodeKind.MEMBER_ACCESS, line, col);
                         if (this.failed) { return expr; };
                         n.a = expr;
                         n.text = member;
+                        if (tkey != (byte*)0 & this.expect(TokenType.LEFT_PAREN)) { n.text2 = tkey; };
                         expr = n;
                     }
                     elif (this.expect(TokenType.INCREMENT) | this.expect(TokenType.DECREMENT))
@@ -2968,9 +6539,14 @@ namespace flux
                 Node* n;
                 if (this.expect(TokenType.CODIFY))
                 {
-                    this.note_feat(Feat.CODIFY_EXPR);
-                    this.error(g"codify is not supported by the bootstrap parser\0");
-                    return (Node*)0;
+                    // $~$expr: the codify result becomes the stringified name
+                    byte* resolved = this.consume_codify();
+                    if (this.failed) { return (Node*)0; };
+                    n = this.mk(NodeKind.STRING_LITERAL, line, col);
+                    if (this.failed) { return n; };
+                    n.text = resolved;
+                    n.op = -1;
+                    return n;
                 };
                 byte* kw = (byte*)0;
                 int c = this.cur();
@@ -3079,6 +6655,7 @@ namespace flux
                     n = this.mk(NodeKind.STRING_LITERAL, line, col);
                     if (this.failed) { return n; };
                     n.text = this.cur_value();
+                    n.ival = (i64)this.cur_value_len();
                     n.op = -1;
                     if (c == TokenType.G_STRING) { n.op = StorageClass.GLOBAL; };
                     this.advance();
@@ -3123,12 +6700,6 @@ namespace flux
                     n.a = ix;
                     return n;
                 };
-                if (c == TokenType.COLON)
-                {
-                    this.note_feat(Feat.ACCEPTOR_PLACEHOLDER);
-                    this.error(g"acceptor placeholders are not supported by the bootstrap parser\0");
-                    return (Node*)0;
-                };
                 if (c == TokenType.DICT_LITERAL) { return this.dict_literal(); };
                 if (c == TokenType.LEFT_BRACE) { return this.struct_literal(); };
                 if (c == TokenType.SIZEOF) { return this.type_query(NodeKind.SIZE_OF, c); };
@@ -3153,9 +6724,31 @@ namespace flux
                 if (c == TokenType.STRINGIFY) { return this.stringify_expr(); };
                 if (c == TokenType.CODIFY)
                 {
-                    this.note_feat(Feat.CODIFY_EXPR);
-                    this.error(g"codify is not supported by the bootstrap parser\0");
-                    return (Node*)0;
+                    // ~$f"..." / ~$i"..." is the string expression itself, ~$name the recorded string
+                    this.advance();
+                    if (this.expect(TokenType.F_STRING))
+                    {
+                        n = this.f_string_node();
+                    }
+                    elif (this.expect(TokenType.I_STRING))
+                    {
+                        n = this.i_string_node();
+                    }
+                    else
+                    {
+                        byte* cname = this.ident();
+                        if (this.failed) { return (Node*)0; };
+                        byte* cval = (byte*)nm_get(this.cstrs, cname);
+                        if (cval == (byte*)0) { cval = cname; };
+                        n = this.mk(NodeKind.STRING_LITERAL, line, col);
+                        if (this.failed) { return n; };
+                        n.text = cval;
+                        n.op = -1;
+                    };
+                    if (this.failed) { return (Node*)0; };
+                    n.line = line;
+                    n.col = col;
+                    return n;
                 };
 
                 // int(x) float(x) ... type conversion
@@ -3604,8 +7197,6 @@ namespace flux
             //                                   | name ( '(' args ')' | '@=' expr | 'from' expr | '=' expr | '{' dict '}' )
             //                                     (',' name ...)* )
             // Several names make several declarations: the first is returned, the rest are queued.
-            // Not mirrored: the one-argument constructor rewrite (needs the object registry) and the
-            // codify string table (needs codify).
             def variable_declaration() -> Node*
             {
                 int line = this.cur_line();
@@ -3771,6 +7362,22 @@ namespace flux
                             return this.decl_abort(ts, inits, (NodeVec*)0);
                         };
                     };
+                    if (this.ctor_sugar(raw, rhs))
+                    {
+                        call = this.mk(NodeKind.FUNCTION_CALL, line, col);
+                        if (this.failed)
+                        {
+                            node_free(rhs);
+                            pv_free(names);
+                            return this.decl_abort(ts, inits, (NodeVec*)0);
+                        };
+                        call.text = this.cat2(raw, g".__init\0");
+                        node_push(call, 0, rhs);
+                        pv_free(names);
+                        pv_free(inits);
+                        return this.var_decl_node(name, ts, call, line, col, true);
+                    };
+                    this.note_comptime_string(name, ts, rhs);
                     pv_push(inits, (void*)rhs);
                 }
                 elif (this.expect(TokenType.LEFT_BRACE))
@@ -3854,6 +7461,7 @@ namespace flux
                             {
                                 rhs = this.expression();
                                 if (this.failed) { pv_free(names); return this.decl_abort(ts, inits, (NodeVec*)0); };
+                                this.note_comptime_string(name, ts, rhs);
                                 pv_push(inits, (void*)rhs);
                             };
                         }
@@ -5492,7 +9100,7 @@ namespace flux
                 };
                 if (tmp.len > 0)
                 {
-                    t.fp_params = (TypeSpec**)fmalloc((u64)(tmp.len + 1) * (u64)(sizeof(TypeSpec*) / 8));
+                    t.fp_params = (TypeSpec**)fmalloc((u64)(tmp.len + 1) * (u64)((sizeof(TypeSpec*) + 7) / 8));
                     while (i < tmp.len)
                     {
                         t.fp_params[i] = (TypeSpec*)tmp.items[i];
@@ -5627,23 +9235,60 @@ namespace flux
                 return;
             };
 
+            // The f-string or i-string token at the cursor as a node
+            def fstr_node() -> Node*
+            {
+                if (this.expect(TokenType.F_STRING)) { return this.f_string_node(); };
+                return this.i_string_node();
+            };
+
+            // Text of an f-string node when every part is text or a known compile-time string
+            // (fparser._resolve_fstring_name), otherwise null
+            def fstr_resolve(Node* fl) -> byte*
+            {
+                Node* p;
+                byte* val;
+                int k, cnt;
+                this.sb.len = 0;
+                this.sb.mem[0] = (byte)0;
+                cnt = node_count(fl, 0);
+                while (k < cnt)
+                {
+                    p = node_child(fl, 0, k);
+                    k++;
+                    if (p.kind == NodeKind.STRING_LITERAL)
+                    {
+                        this.sb.put_str(p.text);
+                    }
+                    elif (p.kind == NodeKind.IDENTIFIER)
+                    {
+                        val = (byte*)nm_get(this.cstrs, p.text);
+                        if (val == (byte*)0) { return (byte*)0; };
+                        this.sb.put_str(val);
+                    }
+                    else { return (byte*)0; };
+                };
+                return this.own_n(this.sb.mem, this.sb.len);
+            };
+
             // IDENTIFIER | STRING_LITERAL | STRINGIFY name of f
             def fn_name(Node* f) -> void
             {
+                Node* fs;
                 if (this.expect(TokenType.STRING_LITERAL))
                 {
                     f.text = this.cur_value();
                     this.advance();
                 }
-                elif (this.expect(TokenType.F_STRING))
+                elif (this.expect2(TokenType.F_STRING, TokenType.I_STRING))
                 {
-                    this.note_feat(Feat.FSTRING_EXPR);
-                    this.error(g"f-string function names are not supported by the bootstrap parser\0");
-                }
-                elif (this.expect(TokenType.I_STRING))
-                {
-                    this.note_feat(Feat.ISTRING_EXPR);
-                    this.error(g"i-string function names are not supported by the bootstrap parser\0");
+                    fs = this.fstr_node();
+                    if (!this.failed)
+                    {
+                        f.text = this.fstr_resolve(fs);
+                        if (f.text == (byte*)0) { f.d = fs; }
+                        else { node_free(fs); };
+                    };
                 }
                 elif (this.expect(TokenType.STRINGIFY))
                 {
@@ -5719,6 +9364,18 @@ namespace flux
                 return;
             };
 
+            // Ends the template scope of an extra prototype that failed early
+            def proto_scope_end(Node* p, TemplateEntry* pte, NameMap* prev_act) -> Node*
+            {
+                if (pte != (TemplateEntry*)0)
+                {
+                    nm_free(this.active_tp);
+                    this.active_tp = prev_act;
+                    te_free(pte);
+                };
+                return this.done(p);
+            };
+
             // Additional prototype of a comma separated list: name(params) -> type tags
             def fn_extra_proto(int m, int base_flags, byte* conv, bool is_cdecl) -> Node*
             {
@@ -5728,15 +9385,38 @@ namespace flux
                 p.text2 = conv;
                 this.fn_name(p);
                 if (this.failed) { return this.done(p); };
-                if (this.expect(TokenType.LESS_THAN))
+                NameMap* prev_act = this.active_tp;
+                TemplateEntry* pte = (TemplateEntry*)0;
+                if (this.expect(TokenType.LESS_THAN) & this.is_template_list())
                 {
-                    return this.func_unsupported(m, Feat.TEMPLATE_FUNCTION, p);
+                    pte = te_new();
+                    this.advance();
+                    pv_push(pte.params, (void*)this.own(ts_dup(this.ident())));
+                    while (!this.failed & this.expect(TokenType.COMMA))
+                    {
+                        this.advance();
+                        pv_push(pte.params, (void*)this.own(ts_dup(this.ident())));
+                    };
+                    if (!this.failed) { this.consume(TokenType.GREATER_THAN); };
+                    if (this.failed)
+                    {
+                        te_free(pte);
+                        return this.done(p);
+                    };
+                    this.tp_activate(pte);
+                    p.flags = p.flags `| NF_TEMPLATE;
                 };
-                if (!this.consume(TokenType.LEFT_PAREN)) { return this.done(p); };
+                if (!this.consume(TokenType.LEFT_PAREN)) { return this.proto_scope_end(p, pte, prev_act); };
                 if (!this.expect(TokenType.RIGHT_PAREN)) { this.parameter_list(p); };
                 if (!this.failed) { this.consume(TokenType.RIGHT_PAREN); };
                 if (!this.failed) { this.consume(TokenType.RETURN_ARROW); };
                 if (!this.failed) { this.fn_return(p, is_cdecl); };
+                if (pte != (TemplateEntry*)0)
+                {
+                    nm_free(this.active_tp);
+                    this.active_tp = prev_act;
+                    te_free(pte);
+                };
                 if (!this.failed) { this.fn_tags(p); };
                 if (this.failed) { return this.done(p); };
                 this.strip_variadic(p);
@@ -5751,6 +9431,36 @@ namespace flux
             // (extra prototypes go to the pending queue).
             // Template functions, contracts and 'as operator' are reported and skipped (null).
             def function_def() -> Node*
+            {
+                NameMap* prev_act = this.active_tp;
+                TemplateEntry* prev_cur = this.tmpl_cur;
+                this.tmpl_cur = (TemplateEntry*)0;
+                Node* f = this.function_def_inner();
+                TemplateEntry* te = this.tmpl_cur;
+                this.tmpl_cur = prev_cur;
+                if (this.active_tp != prev_act)
+                {
+                    nm_free(this.active_tp);
+                    this.active_tp = prev_act;
+                };
+                if (te == (TemplateEntry*)0) { return f; };
+                if (this.failed | f == (Node*)0)
+                {
+                    te_free(te);
+                    return f;
+                };
+                if (f.text == (byte*)0) { f.text = g"\0"; };
+                this.last_template = f.text;
+                if (this.in_comptime > 0)
+                {
+                    this.register_template(f.text, 0, te, node_clone(f));
+                    return f;
+                };
+                this.register_template(f.text, 0, te, f);
+                return (Node*)0;
+            };
+
+            def function_def_inner() -> Node*
             {
                 int m = this.mark();
                 int line = this.cur_line();
@@ -5797,8 +9507,9 @@ namespace flux
 
                 if (this.expect(TokenType.LESS_THAN))
                 {
-                    this.last_template = f.text;
-                    return this.func_unsupported(m, Feat.TEMPLATE_FUNCTION, f);
+                    this.tmpl_cur = this.template_params(false);
+                    if (this.failed) { return this.done(f); };
+                    this.tp_activate(this.tmpl_cur);
                 };
 
                 if (!this.consume(TokenType.LEFT_PAREN)) { return this.done(f); };
@@ -6182,22 +9893,47 @@ namespace flux
                 node_push(holder, slot, r);
                 byte* name = this.ident();
                 if (this.failed) { return false; };
+                byte* arg;
                 bool generic = false;
                 if (this.expect(TokenType.LESS_THAN) & this.is_template_list())
                 {
                     generic = true;
                     this.advance();
-                    name = this.cat2(this.cat2(name, g"<\0"), this.ident());
+                    arg = this.ident();
+                    this.sd_param_add(holder, arg);
+                    name = this.cat2(this.cat2(name, g"<\0"), arg);
                     while (!this.failed & this.expect(TokenType.COMMA))
                     {
                         this.advance();
-                        name = this.cat2(this.cat2(name, g",\0"), this.ident());
+                        arg = this.ident();
+                        this.sd_param_add(holder, arg);
+                        name = this.cat2(this.cat2(name, g",\0"), arg);
                     };
                     if (!this.failed) { this.consume(TokenType.GREATER_THAN); };
                     name = this.cat2(name, g">\0");
                 };
                 r.text = name;
                 return generic;
+            };
+
+            // Adds a template parameter name to a struct node (l4) unless already declared
+            def sd_param_add(Node* h, byte* s) -> void
+            {
+                int i;
+                int c;
+                Node* x;
+                if (this.failed | s == (byte*)0) { return; };
+                c = node_count(h, 4);
+                while (i < c)
+                {
+                    if (cstr_eq(node_child(h, 4, i).text, s)) { return; };
+                    i++;
+                };
+                x = this.mk(NodeKind.IDENTIFIER, h.line, h.col);
+                if (this.failed) { return; };
+                x.text = s;
+                node_push(h, 4, x);
+                return;
             };
 
             // base_ref (',' base_ref)* into holder.l<slot>
@@ -6334,11 +10070,18 @@ namespace flux
 
                 if (this.expect(TokenType.LESS_THAN) & this.is_template_list())
                 {
-                    return this.skip_unsupported(m, Feat.TEMPLATE_STRUCT, n, NodeKind.STRUCT_DEF, false);
+                    this.advance();
+                    this.sd_param_add(n, this.ident());
+                    while (!this.failed & this.expect(TokenType.COMMA))
+                    {
+                        this.advance();
+                        this.sd_param_add(n, this.ident());
+                    };
+                    if (!this.failed) { this.consume(TokenType.GREATER_THAN); };
+                    if (this.failed) { return this.done(n); };
                 };
 
                 PtrVec* names = pv_new();
-                bool generic = false;
                 while (this.expect(TokenType.COMMA))
                 {
                     this.advance();
@@ -6349,18 +10092,17 @@ namespace flux
                 if (this.expect(TokenType.COLON))
                 {
                     this.advance();
-                    generic = this.struct_base_list(n, 1);
+                    this.struct_base_list(n, 1);
                     if (!this.failed & this.expect(TokenType.COLON))
                     {
                         this.advance();
-                        if (this.struct_base_list(n, 2)) { generic = true; };
+                        this.struct_base_list(n, 2);
                     };
                     if (this.failed) { pv_free(names); return this.done(n); };
                     if (this.expect(TokenType.SEMICOLON))
                     {
                         this.advance();
                         pv_free(names);
-                        if (generic) { return this.skip_unsupported(m, Feat.TEMPLATE_STRUCT, n, NodeKind.STRUCT_DEF, false); };
                         return n;
                     };
                 };
@@ -6374,6 +10116,7 @@ namespace flux
                 if (this.expect(TokenType.SEMICOLON) & !has_base)
                 {
                     this.advance();
+                    if (n.l4 != (NodeVec*)0) { n.l4.len = 0; };
                     while (k < names.len)
                     {
                         x = this.mk(NodeKind.STRUCT_DEF, line, col);
@@ -6422,11 +10165,29 @@ namespace flux
                 if (!this.failed & this.expect(TokenType.COLON))
                 {
                     this.advance();
-                    if (this.struct_base_list(n, 2)) { generic = true; };
+                    this.struct_base_list(n, 2);
                 };
                 if (!this.failed) { this.consume(TokenType.SEMICOLON); };
                 if (this.failed) { return this.done(n); };
-                if (generic) { return this.skip_unsupported(m, Feat.TEMPLATE_STRUCT, n, NodeKind.STRUCT_DEF, false); };
+                if (node_count(n, 4) > 0)
+                {
+                    TemplateEntry* te = te_new();
+                    int ti;
+                    int tc = node_count(n, 4);
+                    while (ti < tc)
+                    {
+                        pv_push(te.params, (void*)this.own(ts_dup(node_child(n, 4, ti).text)));
+                        ti++;
+                    };
+                    this.last_template = n.text;
+                    if (this.in_comptime > 0)
+                    {
+                        this.register_template(n.text, 1, te, node_clone(n));
+                        return n;
+                    };
+                    this.register_template(n.text, 1, te, n);
+                    return (Node*)0;
+                };
                 return n;
             };
 
@@ -6582,6 +10343,16 @@ namespace flux
             };
 
             // One entry of a namespace body
+            // A template registered inside a namespace is also reachable as ns__name and ns::name
+            def ns_tmpl_alias(Node* x) -> void
+            {
+                byte* bare = this.last_template;
+                if (x != (Node*)0 | bare == (byte*)0 | this.ns_path == (byte*)0) { return; };
+                this.template_alias(this.cat2(this.cat2(this.ns_path, g"__\0"), bare), bare);
+                this.template_alias(this.cat2(this.cat2(this.ns_path, g"::\0"), bare), bare);
+                return;
+            };
+
             def ns_item(Node* ns) -> void
             {
                 int c = this.cur();
@@ -6596,20 +10367,24 @@ namespace flux
                 }
                 elif (this.expect3(TokenType.INLINE, TokenType.DEF, TokenType.NO_MANGLE) | this.is_calling_conv(c) | this.is_bare_function_def())
                 {
+                    this.last_template = (byte*)0;
                     x = this.function_def();
                     if (this.failed) { return; };
+                    this.ns_tmpl_alias(x);
                     this.ns_add_all(ns, x);
                 }
                 elif (c == TokenType.STRUCT)
                 {
                     x = this.struct_def();
                     if (this.failed) { return; };
+                    this.ns_tmpl_alias(x);
                     this.ns_add_all(ns, x);
                 }
                 elif (c == TokenType.OBJECT)
                 {
                     x = this.object_def();
                     if (this.failed) { return; };
+                    this.ns_tmpl_alias(x);
                     this.ns_add_all(ns, x);
                 }
                 elif (c == TokenType.TRAIT)
@@ -6628,6 +10403,7 @@ namespace flux
                 {
                     x = this.trait_prefixed_object();
                     if (this.failed) { return; };
+                    this.ns_tmpl_alias(x);
                     this.ns_add_all(ns, x);
                 }
                 elif (c == TokenType.ENUM | this.type_at(1) == TokenType.ENUM)
@@ -6970,6 +10746,14 @@ namespace flux
                 Node* s = this.mk(NodeKind.FUNCTION_DEF, this.cur_line(), this.cur_col());
                 if (this.failed) { return s; };
                 s.text = this.last_template;
+                TemplateEntry* te = this.template_lookup(this.last_template);
+                if (te != (TemplateEntry*)0)
+                {
+                    if (te.node != (Node*)0)
+                    {
+                        if (te.node.ts != (TypeSpec*)0) { s.ts = typespec_copy(te.node.ts); };
+                    };
+                };
                 this.mark_proto(s);
                 s.flags = s.flags `| NF_TEMPLATE;
                 return s;
@@ -6997,6 +10781,10 @@ namespace flux
                     {
                         this.error(g"Internal: template method registered no name\0");
                         return;
+                    };
+                    if (o.text != (byte*)0)
+                    {
+                        this.template_alias(this.cat2(this.cat2(o.text, g".\0"), this.last_template), this.last_template);
                     };
                     m = this.template_stub();
                     if (this.failed) { return; };
@@ -7308,10 +11096,62 @@ namespace flux
                 return;
             };
 
+            // One object template parameter: IDENTIFIER into o.d and te.params
+            def object_tparam(Node* o, TemplateEntry* te) -> void
+            {
+                Node* x = this.mk(NodeKind.IDENTIFIER, this.cur_line(), this.cur_col());
+                if (this.failed) { return; };
+                x.text = this.ident();
+                if (this.failed)
+                {
+                    node_free(x);
+                    return;
+                };
+                node_push(o.d, 0, x);
+                pv_push(te.params, (void*)this.own(ts_dup(x.text)));
+                return;
+            };
+
             // object_def -> 'object' IDENTIFIER (',' IDENTIFIER)* (':' bases)? (';' | '{' body '}' (':' interface attachments)? ';')
             // m is the mark of the start of the construct (before any trait names).
             // Template objects and objects with base objects are reported (no inheritance resolution).
             def object_with_traits(int m, PtrVec* tnames) -> Node*
+            {
+                NameMap* prev_act = this.active_tp;
+                TemplateEntry* prev_cur = this.tmpl_cur;
+                TemplateEntry* te;
+                Node* o;
+                this.tmpl_cur = (TemplateEntry*)0;
+                o = this.object_with_traits_inner(m, tnames);
+                te = this.tmpl_cur;
+                this.tmpl_cur = prev_cur;
+                if (this.active_tp != prev_act)
+                {
+                    nm_free(this.active_tp);
+                    this.active_tp = prev_act;
+                };
+                if (te == (TemplateEntry*)0) { return o; };
+                if (this.failed | o == (Node*)0)
+                {
+                    te_free(te);
+                    return o;
+                };
+                if ((o.flags `& NF_PROTOTYPE) != 0)
+                {
+                    te_free(te);
+                    return o;
+                };
+                this.last_template = o.text;
+                if (this.in_comptime > 0)
+                {
+                    this.register_template(o.text, 2, te, node_clone(o));
+                    return o;
+                };
+                this.register_template(o.text, 2, te, o);
+                return (Node*)0;
+            };
+
+            def object_with_traits_inner(int m, PtrVec* tnames) -> Node*
             {
                 Node* o = this.mk(NodeKind.OBJECT_DEF, this.cur_line(), this.cur_col());
                 if (this.failed) { return o; };
@@ -7321,7 +11161,29 @@ namespace flux
 
                 if (this.expect(TokenType.LESS_THAN) & this.is_template_list())
                 {
-                    return this.skip_unsupported(m, Feat.TEMPLATE_OBJECT, o, NodeKind.OBJECT_DEF, false);
+                    TemplateEntry* te = te_new();
+                    Node* pl = this.mk(NodeKind.NODE_LIST, o.line, o.col);
+                    if (this.failed)
+                    {
+                        te_free(te);
+                        return this.done(o);
+                    };
+                    o.d = pl;
+                    this.advance();
+                    this.object_tparam(o, te);
+                    while (!this.failed & this.expect(TokenType.COMMA))
+                    {
+                        this.advance();
+                        this.object_tparam(o, te);
+                    };
+                    if (!this.failed) { this.consume(TokenType.GREATER_THAN); };
+                    if (this.failed)
+                    {
+                        te_free(te);
+                        return this.done(o);
+                    };
+                    this.tmpl_cur = te;
+                    this.tp_activate(te);
                 };
                 this.object_traits(o, tnames);
 
@@ -7367,6 +11229,11 @@ namespace flux
                 {
                     this.advance();
                     o.flags = NF_PROTOTYPE;
+                    if (o.d != (Node*)0)
+                    {
+                        node_free(o.d);
+                        o.d = (Node*)0;
+                    };
                     while (k < names.len)
                     {
                         x = this.mk(NodeKind.OBJECT_DEF, o.line, o.col);
@@ -7388,24 +11255,493 @@ namespace flux
                 };
                 pv_free(names);
 
+                if (o.d != (Node*)0) { nm_put(this.tobj_fwd, o.text, (void*)o); };
                 if (!this.consume(TokenType.LEFT_BRACE)) { return this.done(o); };
                 if (this.st != (FXC_SYMTABLE*)0) { st_enter_scope(this.st); };
                 this.object_body(o);
                 if (this.st != (FXC_SYMTABLE*)0) { st_exit_scope(this.st); };
+                if (o.d != (Node*)0) { nm_del(this.tobj_fwd, o.text); };
                 if (this.failed) { return this.done(o); };
                 this.consume(TokenType.RIGHT_BRACE);
                 if (!this.failed & this.expect(TokenType.COLON)) { this.iface_attachments(o); };
                 if (!this.failed) { this.consume(TokenType.SEMICOLON); };
                 if (this.failed) { return this.done(o); };
 
-                if (o.l2 != (NodeVec*)0)
-                {
-                    this.note_feat(Feat.OBJECT_INHERITANCE);
-                    return o;
-                };
+                if (node_count(o, 2) > 0) { this.resolve_inheritance(o); };
+                if (this.failed) { return this.done(o); };
+                if (this.find_method(o, g"__init\0") != (Node*)0) { nm_put(this.oinit, o.text, (void*)o); };
                 this.check_object_methods(o);
                 if (!this.failed) { this.check_object_traits(o); };
+                if (!this.failed & o.d == (Node*)0) { nm_put(this.pobjs, o.text, (void*)o); };
                 return this.done(o);
+            };
+
+            // ----- object inheritance (fparser._resolve_inheritance) -----
+
+            def inh_in_path(PtrVec* path, byte* n) -> bool
+            {
+                int i;
+                while (i < path.len)
+                {
+                    if (cstr_eq((byte*)path.items[i], n)) { return true; };
+                    i++;
+                };
+                return false;
+            };
+
+            // Members of the parent chain of obj, parents first, each paired with its origin object
+            def inh_members(byte* obj, PtrVec* path, PtrVec* outm, PtrVec* outo, byte* child) -> void
+            {
+                Node* ob;
+                Node* m;
+                int i, c;
+                if (this.failed) { return; };
+                if (this.inh_in_path(path, obj)) { return; };
+                pv_push(path, (void*)obj);
+                if (!nm_has(this.pobjs, obj))
+                {
+                    this.error(this.cat2(this.cat2(this.cat2(this.cat2(g"Inheritance error: '\0", obj), g"' must be fully defined before '\0"), child), g"' can inherit from it\0"));
+                    path.len--;
+                    return;
+                };
+                ob = (Node*)nm_get(this.pobjs, obj);
+                c = node_count(ob, 2);
+                while (i < c)
+                {
+                    this.inh_members(node_child(ob, 2, i).text, path, outm, outo, child);
+                    i++;
+                };
+                i = 0;
+                c = node_count(ob, 0);
+                while (i < c)
+                {
+                    m = node_child(ob, 0, i);
+                    i++;
+                    if ((m.flags `& NF_PRIVATE) != 0)
+                    {
+                        if (m.text2 != (byte*)0)
+                        {
+                            if (cstr_eq(m.text2, child))
+                            {
+                                pv_push(outm, (void*)m);
+                                pv_push(outo, (void*)obj);
+                            };
+                        };
+                    }
+                    else
+                    {
+                        pv_push(outm, (void*)m);
+                        pv_push(outo, (void*)obj);
+                    };
+                };
+                path.len--;
+                return;
+            };
+
+            def inh_methods(byte* obj, PtrVec* path, PtrVec* outm, byte* child) -> void
+            {
+                Node* ob;
+                Node* m;
+                int i, c;
+                if (this.inh_in_path(path, obj)) { return; };
+                pv_push(path, (void*)obj);
+                if (!nm_has(this.pobjs, obj))
+                {
+                    path.len--;
+                    return;
+                };
+                ob = (Node*)nm_get(this.pobjs, obj);
+                c = node_count(ob, 2);
+                while (i < c)
+                {
+                    this.inh_methods(node_child(ob, 2, i).text, path, outm, child);
+                    i++;
+                };
+                i = 0;
+                c = node_count(ob, 1);
+                while (i < c)
+                {
+                    m = node_child(ob, 1, i);
+                    i++;
+                    if (m.kind != NodeKind.FUNCTION_DEF | m.text == (byte*)0) { continue; };
+                    if (cstr_eq(m.text, g"__init\0") | cstr_eq(m.text, g"__exit\0") | cstr_eq(m.text, g"__expr\0")) { continue; };
+                    if ((m.flags `& NF_PRIVATE) != 0)
+                    {
+                        if (m.text3 != (byte*)0)
+                        {
+                            if (cstr_eq(m.text3, child)) { pv_push(outm, (void*)m); };
+                        };
+                    }
+                    else { pv_push(outm, (void*)m); };
+                };
+                path.len--;
+                return;
+            };
+
+            // The node an inherited clone was copied from (fparser compares the FunctionDef objects)
+            def inh_origin(Node* m) -> Node*
+            {
+                int i;
+                while (i < this.inh_clone.len)
+                {
+                    if ((Node*)this.inh_clone.items[i] == m) { return (Node*)this.inh_orig.items[i]; };
+                    i++;
+                };
+                return m;
+            };
+
+            def inh_clone_of(Node* m) -> Node*
+            {
+                Node* c = node_clone(m);
+                pv_push(this.inh_clone, (void*)c);
+                pv_push(this.inh_orig, (void*)this.inh_origin(m));
+                return c;
+            };
+
+            def method_has_body(Node* m) -> bool
+            {
+                if (m.a == (Node*)0) { return false; };
+                return node_count(m.a, 0) > 0;
+            };
+
+            // name(type, type) of a method without its 'this' parameter
+            def sig_key(Node* m, bool for_message) -> byte*
+            {
+                int i;
+                int c = node_count(m, 0);
+                Node* p;
+                bool first = true;
+                byte* t;
+                PtrVec* parts = pv_new();
+                while (i < c)
+                {
+                    p = node_child(m, 0, i);
+                    i++;
+                    if (p.text != (byte*)0)
+                    {
+                        if (cstr_eq(p.text, g"this\0")) { continue; };
+                    };
+                    if (p.ts == (TypeSpec*)0) { t = g"\0"; }
+                    else { t = this.tp_repr(p.ts); };
+                    pv_push(parts, (void*)t);
+                };
+                this.sb.len = 0;
+                this.sb.mem[0] = (byte)0;
+                if (!for_message)
+                {
+                    this.sb.put_str(m.text);
+                    this.sb.put_str(g"(\0");
+                };
+                i = 0;
+                while (i < parts.len)
+                {
+                    if (i > 0)
+                    {
+                        if (for_message) { this.sb.put_str(g", \0"); }
+                        else { this.sb.put_str(g",\0"); };
+                    };
+                    this.sb.put_str((byte*)parts.items[i]);
+                    i++;
+                };
+                pv_free(parts);
+                return this.own_n(this.sb.mem, this.sb.len);
+            };
+
+            def inh_key_has(PtrVec* keys, byte* k) -> int
+            {
+                int i;
+                while (i < keys.len)
+                {
+                    if (cstr_eq((byte*)keys.items[i], k)) { return i; };
+                    i++;
+                };
+                return -1;
+            };
+
+            // Name of the object whose method list holds exactly m, or "?"
+            def inh_source(Node* m) -> byte*
+            {
+                int i, j, c;
+                Node* ob;
+                while (i < this.pobjs.count)
+                {
+                    ob = (Node*)this.pobjs.vals[i];
+                    i++;
+                    if (ob == (Node*)0) { continue; };
+                    c = node_count(ob, 1);
+                    j = 0;
+                    while (j < c)
+                    {
+                        if (node_child(ob, 1, j) == m) { return ob.text; };
+                        j++;
+                    };
+                };
+                return g"?\0";
+            };
+
+            def resolve_inheritance(Node* o) -> void
+            {
+                byte* child = o.text;
+                PtrVec* path = pv_new();
+                PtrVec* pm = pv_new();
+                PtrVec* po = pv_new();
+                PtrVec* seen_n = pv_new();
+                PtrVec* seen_o = pv_new();
+                PtrVec* dedup = pv_new();
+                PtrVec* own_m = pv_new();
+                PtrVec* own_f = pv_new();
+                PtrVec* inh = pv_new();
+                PtrVec* ukeys = pv_new();
+                PtrVec* ucands = pv_new();
+                PtrVec* okeys = pv_new();
+                PtrVec* final_inh = pv_new();
+                PtrVec* fkeys = pv_new();
+                PtrVec* kept = pv_new();
+                PtrVec* cand;
+                Node* m;
+                Node* x;
+                byte* k;
+                byte* prev;
+                byte* msg;
+                int i, j, c, nb, idx;
+                bool dup, wins;
+                nb = node_count(o, 2);
+                i = 0;
+                while (i < nb & !this.failed)
+                {
+                    pv_free(path);
+                    path = pv_new();
+                    this.inh_members(node_child(o, 2, i).text, path, pm, po, child);
+                    i++;
+                };
+                // members: duplicates of one origin are dropped, different origins conflict
+                i = 0;
+                while (i < pm.len & !this.failed)
+                {
+                    m = (Node*)pm.items[i];
+                    idx = this.inh_key_has(seen_n, m.text);
+                    if (idx >= 0)
+                    {
+                        prev = (byte*)seen_o.items[idx];
+                        if (!cstr_eq(prev, (byte*)po.items[i]))
+                        {
+                            this.error(this.cat2(this.cat2(this.cat2(this.cat2(this.cat2(this.cat2(this.cat2(g"Inheritance conflict: member '\0", m.text), g"' is defined in both '\0"), prev), g"' and '\0"), (byte*)po.items[i]), g"', inherited by '\0"), this.cat2(child, g"'\0")));
+                        };
+                    }
+                    else
+                    {
+                        pv_push(seen_n, (void*)m.text);
+                        pv_push(seen_o, po.items[i]);
+                        pv_push(dedup, (void*)m);
+                    };
+                    i++;
+                };
+                c = node_count(o, 0);
+                i = 0;
+                while (i < c)
+                {
+                    pv_push(own_m, (void*)node_child(o, 0, i));
+                    i++;
+                };
+                i = 0;
+                while (i < dedup.len & !this.failed)
+                {
+                    m = (Node*)dedup.items[i];
+                    j = 0;
+                    while (j < own_m.len)
+                    {
+                        if (cstr_eq(((Node*)own_m.items[j]).text, m.text))
+                        {
+                            this.error(this.cat2(this.cat2(this.cat2(this.cat2(g"Inheritance conflict: member '\0", m.text), g"' is defined in both a parent of '\0"), child), g"' itself\0"));
+                            break;
+                        };
+                        j++;
+                    };
+                    i++;
+                };
+                // methods
+                if (!this.failed)
+                {
+                    i = 0;
+                    while (i < nb)
+                    {
+                        pv_free(path);
+                        path = pv_new();
+                        this.inh_methods(node_child(o, 2, i).text, path, inh, child);
+                        i++;
+                    };
+                    i = 0;
+                    while (i < inh.len)
+                    {
+                        m = (Node*)inh.items[i];
+                        k = this.sig_key(m, false);
+                        idx = this.inh_key_has(ukeys, k);
+                        if (idx < 0)
+                        {
+                            pv_push(ukeys, (void*)k);
+                            cand = pv_new();
+                            pv_push(ucands, (void*)cand);
+                            idx = ukeys.len - 1;
+                        };
+                        cand = (PtrVec*)ucands.items[idx];
+                        dup = false;
+                        j = 0;
+                        while (j < cand.len)
+                        {
+                            if (this.inh_origin((Node*)cand.items[j]) == this.inh_origin(m)) { dup = true; };
+                            j++;
+                        };
+                        if (!dup) { pv_push(cand, (void*)m); };
+                        i++;
+                    };
+                    c = node_count(o, 1);
+                    i = 0;
+                    while (i < c)
+                    {
+                        pv_push(own_f, (void*)node_child(o, 1, i));
+                        i++;
+                    };
+                    // signatures the child wins: explicit override or a real body
+                    i = 0;
+                    while (i < own_f.len)
+                    {
+                        m = (Node*)own_f.items[i];
+                        i++;
+                        if (m.kind != NodeKind.FUNCTION_DEF) { continue; };
+                        if ((m.flags `& NF_OVERRIDE) != 0 | this.method_has_body(m)) { pv_push(okeys, (void*)this.sig_key(m, false)); };
+                    };
+                    i = 0;
+                    while (i < okeys.len & !this.failed)
+                    {
+                        idx = this.inh_key_has(ukeys, (byte*)okeys.items[i]);
+                        i++;
+                        if (idx < 0) { continue; };
+                        cand = (PtrVec*)ucands.items[idx];
+                        j = 0;
+                        while (j < cand.len)
+                        {
+                            x = (Node*)cand.items[j];
+                            if ((x.flags `& NF_NO_OVERRIDE) != 0)
+                            {
+                                this.error(this.cat2(this.cat2(this.cat2(this.cat2(this.cat2(g"Override error: method '\0", x.text), g"(\0"), this.sig_key(x, true)), g")' is marked no-override in a parent of '\0"), this.cat2(child, g"'\0")));
+                                break;
+                            };
+                            j++;
+                        };
+                    };
+                    i = 0;
+                    while (i < ukeys.len & !this.failed)
+                    {
+                        idx = i;
+                        i++;
+                        if (this.inh_key_has(okeys, (byte*)ukeys.items[idx]) >= 0) { continue; };
+                        cand = (PtrVec*)ucands.items[idx];
+                        if (cand.len == 1)
+                        {
+                            pv_push(final_inh, cand.items[0]);
+                            pv_push(fkeys, ukeys.items[idx]);
+                        }
+                        else
+                        {
+                            x = (Node*)cand.items[0];
+                            msg = this.cat2(g"Inheritance conflict: method '\0", x.text);
+                            msg = this.cat2(this.cat2(msg, g"(\0"), this.sig_key(x, true));
+                            msg = this.cat2(this.cat2(msg, g")' has different implementations in '\0"), this.inh_source(x));
+                            msg = this.cat2(this.cat2(msg, g"' and '\0"), this.inh_source((Node*)cand.items[1]));
+                            msg = this.cat2(this.cat2(msg, g"'. Object '\0"), child);
+                            this.error(this.cat2(msg, g"' must override it.\0"));
+                        };
+                    };
+                };
+                if (!this.failed)
+                {
+                    // rebuild the member and method lists of o
+                    if (o.l0 != (NodeVec*)0) { o.l0.len = 0; };
+                    i = 0;
+                    while (i < dedup.len)
+                    {
+                        node_push(o, 0, node_clone((Node*)dedup.items[i]));
+                        i++;
+                    };
+                    i = 0;
+                    while (i < own_m.len)
+                    {
+                        node_push(o, 0, (Node*)own_m.items[i]);
+                        i++;
+                    };
+                    if (o.l1 != (NodeVec*)0) { o.l1.len = 0; };
+                    i = 0;
+                    while (i < own_f.len)
+                    {
+                        m = (Node*)own_f.items[i];
+                        i++;
+                        if (m.kind != NodeKind.FUNCTION_DEF)
+                        {
+                            node_push(o, 1, m);
+                            continue;
+                        };
+                        if ((m.flags `& NF_OVERRIDE) != 0 | this.method_has_body(m) | this.inh_key_has(fkeys, this.sig_key(m, false)) < 0)
+                        {
+                            node_push(o, 1, m);
+                        }
+                        else { node_free(m); };
+                    };
+                    i = 0;
+                    while (i < final_inh.len)
+                    {
+                        node_push(o, 1, this.inh_clone_of((Node*)final_inh.items[i]));
+                        i++;
+                    };
+                };
+                i = 0;
+                while (i < ucands.len)
+                {
+                    pv_free((PtrVec*)ucands.items[i]);
+                    i++;
+                };
+                pv_free(path);
+                pv_free(pm);
+                pv_free(po);
+                pv_free(seen_n);
+                pv_free(seen_o);
+                pv_free(dedup);
+                pv_free(own_m);
+                pv_free(own_f);
+                pv_free(inh);
+                pv_free(ukeys);
+                pv_free(ucands);
+                pv_free(okeys);
+                pv_free(final_inh);
+                pv_free(fkeys);
+                pv_free(kept);
+                return;
+            };
+
+            // True when `Type name = expr` is rewritten as the constructor call Type.__init(expr)
+            def ctor_sugar(byte* raw, Node* rhs) -> bool
+            {
+                Node* ob;
+                Node* ini;
+                COp* c;
+                int i;
+                if (raw == (byte*)0) { return false; };
+                if (!nm_has(this.oinit, raw)) { return false; };
+                if (rhs.kind == NodeKind.FUNCTION_CALL & rhs.text != (byte*)0)
+                {
+                    while (i < this.cops.len)
+                    {
+                        c = (COp*)this.cops.items[i];
+                        i++;
+                        if (c.kind == 0)
+                        {
+                            if (cstr_eq(c.func, rhs.text)) { return false; };
+                        };
+                    };
+                };
+                ob = (Node*)nm_get(this.oinit, raw);
+                ini = this.find_method(ob, g"__init\0");
+                if (ini == (Node*)0) { return false; };
+                return this.explicit_params(ini) == 1;
             };
 
             def object_def() -> Node*
@@ -7658,7 +11994,7 @@ namespace flux
             // '[' symbol tokens ']'
             def op_bracket() -> OpSym*
             {
-                OpSym* s = (OpSym*)fmalloc((u64)(sizeof(OpSym) / 8));
+                OpSym* s = (OpSym*)fmalloc((u64)((sizeof(OpSym) + 7) / 8));
                 if (s == (OpSym*)0)
                 {
                     this.fail_alloc();
@@ -7682,8 +12018,8 @@ namespace flux
                     this.advance();
                 };
                 this.reset(m);
-                s.t = (int*)fmalloc((u64)(cnt + 1) * (u64)(sizeof(int) / 8));
-                s.v = (byte**)fmalloc((u64)(cnt + 1) * (u64)(sizeof(byte*) / 8));
+                s.t = (int*)fmalloc((u64)(cnt + 1) * (u64)((sizeof(int) + 7) / 8));
+                s.v = (byte**)fmalloc((u64)(cnt + 1) * (u64)((sizeof(byte*) + 7) / 8));
                 while (i < cnt)
                 {
                     tt = this.cur();
@@ -7821,7 +12157,7 @@ namespace flux
                     };
                     i++;
                 };
-                c = (COp*)fmalloc((u64)(sizeof(COp) / 8));
+                c = (COp*)fmalloc((u64)((sizeof(COp) + 7) / 8));
                 c.kind = kind;
                 c.left = left;
                 c.right = right;
@@ -8180,15 +12516,58 @@ namespace flux
             //                 (':' contracts)? (';' | '->' expression ';' | block (':' contracts)? ('# binding {..}')? ';')
             def operator_def() -> Node*
             {
-                int m = this.mark();
+                NameMap* prev_act = this.active_tp;
+                TemplateEntry* prev_cur = this.tmpl_cur;
+                TemplateEntry* te;
+                Node* f;
+                this.tmpl_cur = (TemplateEntry*)0;
+                f = this.operator_def_inner();
+                te = this.tmpl_cur;
+                this.tmpl_cur = prev_cur;
+                if (this.active_tp != prev_act)
+                {
+                    nm_free(this.active_tp);
+                    this.active_tp = prev_act;
+                };
+                if (te != (TemplateEntry*)0) { te_free(te); };
+                return f;
+            };
+
+            // Registers the template operator and gives up ownership of f (the call returns null)
+            def op_template_done(Node* f, TemplateEntry* te, byte* key) -> Node*
+            {
+                this.tmpl_cur = (TemplateEntry*)0;
+                this.register_template(key, 3, te, f);
+                return (Node*)0;
+            };
+
+            def operator_def_inner() -> Node*
+            {
                 Node* f = this.mk(NodeKind.FUNCTION_DEF, this.cur_line(), this.cur_col());
+                TemplateEntry* te = (TemplateEntry*)0;
+                byte* opkey = (byte*)0;
                 if (this.failed) { return f; };
                 this.advance();
                 if (this.expect(TokenType.LESS_THAN) & this.is_template_list())
                 {
-                    return this.skip_unsupported(m, Feat.TEMPLATE_OPERATOR, f, NodeKind.FUNCTION_DEF, false);
+                    te = te_new();
+                    this.advance();
+                    pv_push(te.params, (void*)this.own(ts_dup(this.ident())));
+                    while (!this.failed & this.expect(TokenType.COMMA))
+                    {
+                        this.advance();
+                        pv_push(te.params, (void*)this.own(ts_dup(this.ident())));
+                    };
+                    if (!this.failed) { this.consume(TokenType.GREATER_THAN); };
+                    if (this.failed)
+                    {
+                        te_free(te);
+                        return this.done(f);
+                    };
+                    this.tmpl_cur = te;
                 };
                 if (!this.consume(TokenType.LEFT_PAREN)) { return this.done(f); };
+                if (te != (TemplateEntry*)0) { this.tp_activate(te); };
                 this.parameter_list(f);
                 if (this.failed) { return this.done(f); };
                 if (!this.consume(TokenType.RIGHT_PAREN)) { return this.done(f); };
@@ -8197,6 +12576,7 @@ namespace flux
                 OpSym* r = (OpSym*)0;
                 if (!this.failed & this.expect(TokenType.LEFT_BRACKET)) { r = this.op_bracket(); };
                 if (this.failed) { return this.op_abort(f, l, r); };
+                if (te != (TemplateEntry*)0) { opkey = this.opsym_text(l); };
 
                 if (r != (OpSym*)0)
                 {
@@ -8317,7 +12697,12 @@ namespace flux
                     {
                         bind = this.unary_binding(f, g"an operator definition\0");
                         if (!this.failed) { this.consume(TokenType.SEMICOLON); };
-                        if (!this.failed) { this.register_operator(f, l, r, bind, variadic, false); return f; };
+                        if (!this.failed)
+                        {
+                            this.register_operator(f, l, r, bind, variadic, te != (TemplateEntry*)0);
+                            if (te != (TemplateEntry*)0) { return this.op_template_done(f, te, opkey); };
+                            return f;
+                        };
                     };
                     node_free(pre);
                     return this.op_abort(f, l, r);
@@ -8325,7 +12710,8 @@ namespace flux
                 node_free(pre);
                 if (this.failed) { return this.op_abort(f, l, r); };
                 if (variadic) { f.flags = f.flags `| NF_VARIADIC; };
-                this.register_operator(f, l, r, 0, variadic, false);
+                this.register_operator(f, l, r, 0, variadic, te != (TemplateEntry*)0);
+                if (te != (TemplateEntry*)0) { return this.op_template_done(f, te, opkey); };
                 return this.done(f);
             };
 
@@ -8812,7 +13198,7 @@ namespace flux
             def sub_expr(byte* text, int n) -> Node*
             {
                 byte* src = this.own_n(text, n);
-                Lexer* sl = (Lexer*)fmalloc((u64)(sizeof(Lexer) / 8));
+                Lexer* sl = (Lexer*)fmalloc((u64)((sizeof(Lexer) + 7) / 8));
                 if (sl == (Lexer*)0)
                 {
                     this.fail_alloc();
@@ -9608,6 +13994,29 @@ namespace flux
                     if (this.pending.len > 0) { this.last_stmt = this.pending.items[this.pending.len - 1]; };
                     this.pending.len = 0;
                 };
+                if (this.failed) { return prog; };
+                // template instances go after everything else: structs, objects, then functions
+                k = 0;
+                while (k < this.tinst_s.len)
+                {
+                    node_push(prog, 0, (Node*)this.tinst_s.items[k]);
+                    k++;
+                };
+                k = 0;
+                while (k < this.tinst_o.len)
+                {
+                    node_push(prog, 0, (Node*)this.tinst_o.items[k]);
+                    k++;
+                };
+                k = 0;
+                while (k < this.tinst_f.len)
+                {
+                    node_push(prog, 0, (Node*)this.tinst_f.items[k]);
+                    k++;
+                };
+                this.tinst_s.len = 0;
+                this.tinst_o.len = 0;
+                this.tinst_f.len = 0;
                 return prog;
             };
         };

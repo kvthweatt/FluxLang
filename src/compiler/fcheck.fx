@@ -620,22 +620,107 @@ namespace flux
                     return;
                 };
 
+                if (k == NodeKind.EXTERN_BLOCK | k == NodeKind.EXPORT_BLOCK)
+                {
+                    int bi;
+                    int bc = node_count(n, 0);
+                    while (bi < bc)
+                    {
+                        this.declare_node(node_child(n, 0, bi), ns);
+                        bi++;
+                    };
+                    return;
+                };
+
                 // Stubbed constructs from the bootstrap parser carry no name
                 if (n.text == (byte*)0) { return; };
 
                 if (k == NodeKind.FUNCTION_DEF)
                 {
                     st_define(this.st, n.text, SymbolKind.FUNCTION, n.ts, n);
+                    if ((n.flags `& NF_TEMPLATE) == 0)
+                    {
+                        byte* fkey = mangle_namespace_name(ns, n.text);
+                        this.reg_overload(fkey, n);
+                        ffree(fkey);
+                    };
+                    this.decls++;
+                }
+                elif (k == NodeKind.TYPE_FUNC_DEF)
+                {
+                    if (n.text2 != (byte*)0)
+                    {
+                        byte* tmid = join3(g"__typefunc__\0", n.text, g"__\0");
+                        byte* tkey = join3(tmid, n.text2, g"\0");
+                        this.reg_overload(tkey, n);
+                        ffree(tmid);
+                        ffree(tkey);
+                    };
+                }
+                elif (k == NodeKind.TYPE_DECLARATION)
+                {
+                    st_define(this.st, n.text, SymbolKind.TYPE, n.ts, n);
+                    this.decls++;
+                }
+                elif (k == NodeKind.UNION_DEF)
+                {
+                    st_define(this.st, n.text, SymbolKind.UNION, (TypeSpec*)0, n);
+                    this.decls++;
+                }
+                elif (k == NodeKind.FUNCTION_POINTER_DECLARATION)
+                {
+                    st_define(this.st, n.text, SymbolKind.VARIABLE, n.ts, n);
                     this.decls++;
                 }
                 elif (k == NodeKind.STRUCT_DEF)
                 {
                     st_define(this.st, n.text, SymbolKind.STRUCT, (TypeSpec*)0, n);
+                    int si;
+                    int sc = node_count(n, 3);
+                    while (si < sc)
+                    {
+                        this.declare_node(node_child(n, 3, si), ns);
+                        si++;
+                    };
                     this.decls++;
                 }
                 elif (k == NodeKind.OBJECT_DEF)
                 {
                     st_define(this.st, n.text, SymbolKind.OBJECT, (TypeSpec*)0, n);
+                    if (n.d == (Node*)0)
+                    {
+                        byte* okey = mangle_namespace_name(ns, n.text);
+                        int mi;
+                        int mc = node_count(n, 1);
+                        Node* meth;
+                        byte* mkey;
+                        while (mi < mc)
+                        {
+                            meth = node_child(n, 1, mi);
+                            if (meth.text != (byte*)0 & (meth.flags `& NF_TEMPLATE) == 0)
+                            {
+                                mkey = join3(okey, g".\0", meth.text);
+                                this.reg_overload(mkey, meth);
+                                ffree(mkey);
+                            };
+                            mi++;
+                        };
+                        ffree(okey);
+                        mi = 0;
+                        mc = node_count(n, 3);
+                        while (mi < mc)
+                        {
+                            this.declare_node(node_child(n, 3, mi), ns);
+                            mi++;
+                        };
+                        mi = 0;
+                        mc = node_count(n, 4);
+                        while (mi < mc)
+                        {
+                            this.declare_node(node_child(n, 4, mi), ns);
+                            mi++;
+                        };
+                    };
                     this.decls++;
                 }
                 elif (k == NodeKind.ENUM_DEF)
@@ -711,6 +796,37 @@ namespace flux
                     ffree(prev);
                     ffree(full);
                 };
+                return;
+            };
+
+            // Registers fn as an overload of key (parameter types from its declaration)
+            def reg_overload(byte* key, Node* fn) -> void
+            {
+                int i;
+                int cnt = node_count(fn, 0);
+                Node* p;
+                TypeSpec** ps = (TypeSpec**)fmalloc((u64)(cnt + 1) * (u64)(sizeof(TypeSpec*) / 8));
+                while (i < cnt)
+                {
+                    p = node_child(fn, 0, i);
+                    if (p.ts == (TypeSpec*)0)
+                    {
+                        ffree((byte*)ps);
+                        return;
+                    };
+                    ps[i] = p.ts;
+                    i++;
+                };
+                if (fn.ts == (TypeSpec*)0)
+                {
+                    ffree((byte*)ps);
+                    return;
+                };
+                this.clear_msg();
+                mangle_function(@this.mb, key, ps, cnt, fn.ts);
+                st_register_function_overload(this.st, key, this.mb.mem, ps, cnt, fn.ts, fn,
+                                              (fn.flags `& NF_DEPRECATED) != 0);
+                ffree((byte*)ps);
                 return;
             };
 

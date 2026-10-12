@@ -374,6 +374,7 @@ namespace flux
             NodeVec* l5;
             TypeSpec* ts;
             TypeSpec* ts2;
+            TypeSpec* ety;          // expression type set by ExprTyper, borrowed, never freed
         };
 
         // ===== NODE VECTORS =====
@@ -510,6 +511,7 @@ namespace flux
             n.l5 = (NodeVec*)0;
             n.ts = (TypeSpec*)0;
             n.ts2 = (TypeSpec*)0;
+            n.ety = (TypeSpec*)0;
             return n;
         };
 

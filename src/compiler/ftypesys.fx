@@ -264,6 +264,33 @@ namespace flux
         // Small containers (heap, plain structs)
         // ------------------------------------------------------------------
 
+        // Heap string a + b + c
+        def join3(byte* a, byte* b, byte* c) -> byte*
+        {
+            int la = pp_cstrlen(a);
+            int lb = pp_cstrlen(b);
+            int lc = pp_cstrlen(c);
+            byte* r = (byte*)fmalloc((u64)(la + lb + lc + 1));
+            int i, j, k;
+            while (i < la)
+            {
+                r[i] = a[i];
+                i++;
+            };
+            while (j < lb)
+            {
+                r[la + j] = b[j];
+                j++;
+            };
+            while (k < lc)
+            {
+                r[la + lb + k] = c[k];
+                k++;
+            };
+            r[la + lb + lc] = (byte)0;
+            return r;
+        };
+
         // Heap copy of a null terminated string
         def ts_dup(byte* s) -> byte*
         {
@@ -299,6 +326,20 @@ namespace flux
             };
             v.items[v.len] = p;
             v.len++;
+            return;
+        };
+
+        def pv_insert(PtrVec* v, int at, void* p) -> void
+        {
+            int i;
+            pv_push(v, p);
+            i = v.len - 1;
+            while (i > at)
+            {
+                v.items[i] = v.items[i - 1];
+                i--;
+            };
+            v.items[at] = p;
             return;
         };
 
