@@ -1,4 +1,4 @@
-<h1 align="center">Flux</h1>
+<h1 align="center">Flux v2 "Dangling Ditto"</h1>
 
 <p align="center">
     <img width="512" height="512" alt="Flux Logo" src="https://github.com/user-attachments/assets/58da57a7-1924-48a2-ba29-c2040d9343eb" />
@@ -18,6 +18,8 @@ Flux is a compiled, statically typed systems programming language. It has the pe
 It is not a C derivative. It is not a safe language in the Rust sense. It is a high-trust language that gives you sharp tools and expects you to use them correctly.
 
 It's designed for power, terseness, and readability. It is a dense language with a low learning curve but high skill ceiling. You can write powerful and expressive programs without needing to know the guts of the language.
+
+As of 10/12/2026, **Flux is bootstrapped and can compile itself**. It is recommended you bootstrap your compiler by running `python fxc.py fxc.fx` for faster compile times.
 
 ---
 
@@ -394,7 +396,8 @@ fp();
 The syntax and grammar are stable and will not change. The compiler works. Real programs run. The standard library is the current focus of development.
 
 **What exists:**
-- Full compiler (LLVM backend)
+- Base compiler (LLVM backend)
+- Bootstrapped compiler source
 - Language Server Protocol (LSP)
 - Package Manager (FPM)
 - [Online Compiler / IDE](https://fluxspl.org/ide)
@@ -413,7 +416,7 @@ The syntax and grammar are stable and will not change. The compiler works. Real 
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.12+ (can be removed once you bootstrap Flux)
 - LLVM 21+
 
 ---
