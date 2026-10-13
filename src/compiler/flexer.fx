@@ -252,192 +252,607 @@ namespace flux
 
         // ===== CHARACTER CLASSES (ASCII) =====
 
-        def is_digit(int c) -> bool
+        is_digit(int c) -> bool
         {
             -> c >= '0' & c <= '9';
         };
 
-        def is_alpha(int c) -> bool
+        is_alpha(int c) -> bool
         {
             -> (c >= 'a' & c <= 'z') | (c >= 'A' & c <= 'Z');
         };
 
-        def is_ident_char(int c) -> bool
+        is_ident_char(int c) -> bool
         {
             -> is_alpha(c) | is_digit(c) | c == '_';
         };
 
-        def is_hex_upper(int c) -> bool
+        is_hex_upper(int c) -> bool
         {
             -> is_digit(c) | (c >= 'A' & c <= 'F');
         };
 
-        def is_hex_any(int c) -> bool
+        is_hex_any(int c) -> bool
         {
             -> is_digit(c) | (c >= 'A' & c <= 'F') | (c >= 'a' & c <= 'f');
         };
 
-        def hex_value(int c) -> int
+        hex_value(int c) -> int
         {
-            if (c >= '0' & c <= '9') { -> c - 48; };
-            if (c >= 'A' & c <= 'F') { -> c - 55; };
+            switch (c >= '0' & c <= '9')
+            {
+                case (true) { -> c - 48; }
+                default {};
+            };
+            switch (c >= 'A' & c <= 'F')
+            {
+                case (true) { -> c - 55; }
+                default {};
+            };
             -> c - 87;
         };
 
-        def is_base32_digit(int c) -> bool
+        is_base32_digit(int c) -> bool
         {
             -> is_digit(c) | (c >= 'A' & c <= 'V');
         };
 
-        def is_space(int c) -> bool
+        is_space(int c) -> bool
         {
             -> c == 32 | (c >= 9 & c <= 13) | (c >= 28 & c <= 31);
         };
 
-        def is_continuation(int c) -> bool
+        is_continuation(int c) -> bool
         {
             -> c >= 0x80 & c < 0xC0;
         };
 
-        def bytes_eq(byte* a, byte* b, int n) -> bool
+        bytes_eq(byte* a, byte* b, int n) -> bool
         {
             int i;
             while (i < n)
             {
-                if (a[i] != b[i]) { -> false; };
+                switch (a[i] != b[i])
+                {
+                    case (true) { -> false; }
+                    default {};
+                };
                 i++;
             };
             -> true;
         };
 
         // Keyword table. Returns TokenType.IDENTIFIER when s[0..n) is not a keyword.
-        def keyword_type(byte* s, int n) -> int
+        keyword_type(byte* s, int n) -> int
         {
-            if (n == 2)
+            switch (n == 2)
             {
-                if (bytes_eq(s, g"as", 2)) { -> TokenType.AS; };
-                if (bytes_eq(s, g"do", 2)) { -> TokenType.DO; };
-                if (bytes_eq(s, g"if", 2)) { -> TokenType.IF; };
-                if (bytes_eq(s, g"in", 2)) { -> TokenType.IN; };
-                if (bytes_eq(s, g"is", 2)) { -> TokenType.IS; };
-                if (bytes_eq(s, g"or", 2)) { -> TokenType.OR; };
+                case (true) {
+                switch (bytes_eq(s, g"as", 2))
+                {
+                    case (true) { -> TokenType.AS; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"do", 2))
+                {
+                    case (true) { -> TokenType.DO; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"if", 2))
+                {
+                    case (true) { -> TokenType.IF; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"in", 2))
+                {
+                    case (true) { -> TokenType.IN; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"is", 2))
+                {
+                    case (true) { -> TokenType.IS; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"or", 2))
+                {
+                    case (true) { -> TokenType.OR; }
+                    default {};
+                };
+            }
+                default {};
             };
-            if (n == 3)
+            switch (n == 3)
             {
-                if (bytes_eq(s, g"and", 3)) { -> TokenType.AND; };
-                if (bytes_eq(s, g"asm", 3)) { -> TokenType.ASM; };
-                if (bytes_eq(s, g"def", 3)) { -> TokenType.DEF; };
-                if (bytes_eq(s, g"for", 3)) { -> TokenType.FOR; };
-                if (bytes_eq(s, g"has", 3)) { -> TokenType.HAS; };
-                if (bytes_eq(s, g"int", 3)) { -> TokenType.SINT; };
-                if (bytes_eq(s, g"not", 3)) { -> TokenType.NOT; };
-                if (bytes_eq(s, g"try", 3)) { -> TokenType.TRY; };
-                if (bytes_eq(s, g"xor", 3)) { -> TokenType.XOR; };
+                case (true) {
+                switch (bytes_eq(s, g"and", 3))
+                {
+                    case (true) { -> TokenType.AND; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"asm", 3))
+                {
+                    case (true) { -> TokenType.ASM; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"def", 3))
+                {
+                    case (true) { -> TokenType.DEF; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"for", 3))
+                {
+                    case (true) { -> TokenType.FOR; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"has", 3))
+                {
+                    case (true) { -> TokenType.HAS; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"int", 3))
+                {
+                    case (true) { -> TokenType.SINT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"not", 3))
+                {
+                    case (true) { -> TokenType.NOT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"try", 3))
+                {
+                    case (true) { -> TokenType.TRY; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"xor", 3))
+                {
+                    case (true) { -> TokenType.XOR; }
+                    default {};
+                };
+            }
+                default {};
             };
-            if (n == 4)
+            switch (n == 4)
             {
-                if (bytes_eq(s, g"auto", 4)) { -> TokenType.AUTO; };
-                if (bytes_eq(s, g"bool", 4)) { -> TokenType.BOOL_KW; };
-                if (bytes_eq(s, g"byte", 4)) { -> TokenType.BYTE; };
-                if (bytes_eq(s, g"case", 4)) { -> TokenType.CASE; };
-                if (bytes_eq(s, g"char", 4)) { -> TokenType.CHAR; };
-                if (bytes_eq(s, g"data", 4)) { -> TokenType.DATA; };
-                if (bytes_eq(s, g"dict", 4)) { -> TokenType.DICT; };
-                if (bytes_eq(s, g"elif", 4)) { -> TokenType.ELIF; };
-                if (bytes_eq(s, g"else", 4)) { -> TokenType.ELSE; };
-                if (bytes_eq(s, g"enum", 4)) { -> TokenType.ENUM; };
-                if (bytes_eq(s, g"from", 4)) { -> TokenType.FROM; };
-                if (bytes_eq(s, g"goto", 4)) { -> TokenType.GOTO; };
-                if (bytes_eq(s, g"heap", 4)) { -> TokenType.HEAP; };
-                if (bytes_eq(s, g"jump", 4)) { -> TokenType.JUMP; };
-                if (bytes_eq(s, g"long", 4)) { -> TokenType.SLONG; };
-                if (bytes_eq(s, g"this", 4)) { -> TokenType.THIS; };
-                if (bytes_eq(s, g"true", 4)) { -> TokenType.TRUE; };
-                if (bytes_eq(s, g"uint", 4)) { -> TokenType.UINT; };
-                if (bytes_eq(s, g"void", 4)) { -> TokenType.VOID; };
+                case (true) {
+                switch (bytes_eq(s, g"auto", 4))
+                {
+                    case (true) { -> TokenType.AUTO; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"bool", 4))
+                {
+                    case (true) { -> TokenType.BOOL_KW; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"byte", 4))
+                {
+                    case (true) { -> TokenType.BYTE; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"case", 4))
+                {
+                    case (true) { -> TokenType.CASE; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"char", 4))
+                {
+                    case (true) { -> TokenType.CHAR; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"data", 4))
+                {
+                    case (true) { -> TokenType.DATA; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"dict", 4))
+                {
+                    case (true) { -> TokenType.DICT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"elif", 4))
+                {
+                    case (true) { -> TokenType.ELIF; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"else", 4))
+                {
+                    case (true) { -> TokenType.ELSE; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"enum", 4))
+                {
+                    case (true) { -> TokenType.ENUM; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"from", 4))
+                {
+                    case (true) { -> TokenType.FROM; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"goto", 4))
+                {
+                    case (true) { -> TokenType.GOTO; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"heap", 4))
+                {
+                    case (true) { -> TokenType.HEAP; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"jump", 4))
+                {
+                    case (true) { -> TokenType.JUMP; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"long", 4))
+                {
+                    case (true) { -> TokenType.SLONG; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"this", 4))
+                {
+                    case (true) { -> TokenType.THIS; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"true", 4))
+                {
+                    case (true) { -> TokenType.TRUE; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"uint", 4))
+                {
+                    case (true) { -> TokenType.UINT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"void", 4))
+                {
+                    case (true) { -> TokenType.VOID; }
+                    default {};
+                };
+            }
+                default {};
             };
-            if (n == 5)
+            switch (n == 5)
             {
-                if (bytes_eq(s, g"break", 5)) { -> TokenType.BREAK; };
-                if (bytes_eq(s, g"catch", 5)) { -> TokenType.CATCH; };
-                if (bytes_eq(s, g"compt", 5)) { -> TokenType.COMPT; };
-                if (bytes_eq(s, g"const", 5)) { -> TokenType.CONST; };
-                if (bytes_eq(s, g"defer", 5)) { -> TokenType.DEFER; };
-                if (bytes_eq(s, g"macro", 5)) { -> TokenType.MACRO; };
-                if (bytes_eq(s, g"false", 5)) { -> TokenType.FALSE; };
-                if (bytes_eq(s, g"float", 5)) { -> TokenType.FLOAT_KW; };
-                if (bytes_eq(s, g"label", 5)) { -> TokenType.LABEL; };
-                if (bytes_eq(s, g"local", 5)) { -> TokenType.LOCAL; };
-                if (bytes_eq(s, g"ulong", 5)) { -> TokenType.ULONG; };
-                if (bytes_eq(s, g"stack", 5)) { -> TokenType.STACK; };
-                if (bytes_eq(s, g"throw", 5)) { -> TokenType.THROW; };
-                if (bytes_eq(s, g"trait", 5)) { -> TokenType.TRAIT; };
-                if (bytes_eq(s, g"union", 5)) { -> TokenType.UNION; };
-                if (bytes_eq(s, g"using", 5)) { -> TokenType.USING; };
-                if (bytes_eq(s, g"while", 5)) { -> TokenType.WHILE; };
-                if (bytes_eq(s, g"cdecl", 5)) { -> TokenType.CDECL; };
+                case (true) {
+                switch (bytes_eq(s, g"break", 5))
+                {
+                    case (true) { -> TokenType.BREAK; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"catch", 5))
+                {
+                    case (true) { -> TokenType.CATCH; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"compt", 5))
+                {
+                    case (true) { -> TokenType.COMPT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"const", 5))
+                {
+                    case (true) { -> TokenType.CONST; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"defer", 5))
+                {
+                    case (true) { -> TokenType.DEFER; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"macro", 5))
+                {
+                    case (true) { -> TokenType.MACRO; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"false", 5))
+                {
+                    case (true) { -> TokenType.FALSE; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"float", 5))
+                {
+                    case (true) { -> TokenType.FLOAT_KW; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"label", 5))
+                {
+                    case (true) { -> TokenType.LABEL; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"local", 5))
+                {
+                    case (true) { -> TokenType.LOCAL; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"ulong", 5))
+                {
+                    case (true) { -> TokenType.ULONG; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"stack", 5))
+                {
+                    case (true) { -> TokenType.STACK; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"throw", 5))
+                {
+                    case (true) { -> TokenType.THROW; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"trait", 5))
+                {
+                    case (true) { -> TokenType.TRAIT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"union", 5))
+                {
+                    case (true) { -> TokenType.UNION; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"using", 5))
+                {
+                    case (true) { -> TokenType.USING; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"while", 5))
+                {
+                    case (true) { -> TokenType.WHILE; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"cdecl", 5))
+                {
+                    case (true) { -> TokenType.CDECL; }
+                    default {};
+                };
+            }
+                default {};
             };
-            if (n == 6)
+            switch (n == 6)
             {
-                if (bytes_eq(s, g"assert", 6)) { -> TokenType.ASSERT; };
-                if (bytes_eq(s, g"double", 6)) { -> TokenType.DOUBLE_KW; };
-                if (bytes_eq(s, g"effect", 6)) { -> TokenType.EFFECT; };
-                if (bytes_eq(s, g"escape", 6)) { -> TokenType.ESCAPE_KW; };
-                if (bytes_eq(s, g"export", 6)) { -> TokenType.EXPORT; };
-                if (bytes_eq(s, g"extern", 6)) { -> TokenType.EXTERN; };
-                if (bytes_eq(s, g"global", 6)) { -> TokenType.GLOBAL; };
-                if (bytes_eq(s, g"inline", 6)) { -> TokenType.INLINE; };
-                if (bytes_eq(s, g"noinit", 6)) { -> TokenType.NO_INIT; };
-                if (bytes_eq(s, g"object", 6)) { -> TokenType.OBJECT; };
-                if (bytes_eq(s, g"public", 6)) { -> TokenType.PUBLIC; };
-                if (bytes_eq(s, g"return", 6)) { -> TokenType.RETURN; };
-                if (bytes_eq(s, g"signed", 6)) { -> TokenType.SIGNED; };
-                if (bytes_eq(s, g"sizeof", 6)) { -> TokenType.SIZEOF; };
-                if (bytes_eq(s, g"struct", 6)) { -> TokenType.STRUCT; };
-                if (bytes_eq(s, g"switch", 6)) { -> TokenType.SWITCH; };
-                if (bytes_eq(s, g"typeof", 6)) { -> TokenType.TYPEOF; };
-                if (bytes_eq(s, g"vector", 6)) { -> TokenType.VECTOR; };
-                if (bytes_eq(s, g"fluxvm", 6)) { -> TokenType.FLUXVM; };
+                case (true) {
+                switch (bytes_eq(s, g"assert", 6))
+                {
+                    case (true) { -> TokenType.ASSERT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"double", 6))
+                {
+                    case (true) { -> TokenType.DOUBLE_KW; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"effect", 6))
+                {
+                    case (true) { -> TokenType.EFFECT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"escape", 6))
+                {
+                    case (true) { -> TokenType.ESCAPE_KW; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"export", 6))
+                {
+                    case (true) { -> TokenType.EXPORT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"extern", 6))
+                {
+                    case (true) { -> TokenType.EXTERN; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"global", 6))
+                {
+                    case (true) { -> TokenType.GLOBAL; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"inline", 6))
+                {
+                    case (true) { -> TokenType.INLINE; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"noinit", 6))
+                {
+                    case (true) { -> TokenType.NO_INIT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"object", 6))
+                {
+                    case (true) { -> TokenType.OBJECT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"public", 6))
+                {
+                    case (true) { -> TokenType.PUBLIC; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"return", 6))
+                {
+                    case (true) { -> TokenType.RETURN; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"signed", 6))
+                {
+                    case (true) { -> TokenType.SIGNED; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"sizeof", 6))
+                {
+                    case (true) { -> TokenType.SIZEOF; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"struct", 6))
+                {
+                    case (true) { -> TokenType.STRUCT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"switch", 6))
+                {
+                    case (true) { -> TokenType.SWITCH; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"typeof", 6))
+                {
+                    case (true) { -> TokenType.TYPEOF; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"vector", 6))
+                {
+                    case (true) { -> TokenType.VECTOR; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"fluxvm", 6))
+                {
+                    case (true) { -> TokenType.FLUXVM; }
+                    default {};
+                };
+            }
+                default {};
             };
-            if (n == 7)
+            switch (n == 7)
             {
-                if (bytes_eq(s, g"alignof", 7)) { -> TokenType.ALIGNOF; };
-                if (bytes_eq(s, g"default", 7)) { -> TokenType.DEFAULT; };
-                if (bytes_eq(s, g"private", 7)) { -> TokenType.PRIVATE; };
-                if (bytes_eq(s, g"stdcall", 7)) { -> TokenType.STDCALL; };
+                case (true) {
+                switch (bytes_eq(s, g"alignof", 7))
+                {
+                    case (true) { -> TokenType.ALIGNOF; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"default", 7))
+                {
+                    case (true) { -> TokenType.DEFAULT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"private", 7))
+                {
+                    case (true) { -> TokenType.PRIVATE; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"stdcall", 7))
+                {
+                    case (true) { -> TokenType.STDCALL; }
+                    default {};
+                };
+            }
+                default {};
             };
-            if (n == 8)
+            switch (n == 8)
             {
-                if (bytes_eq(s, g"continue", 8)) { -> TokenType.CONTINUE; };
-                if (bytes_eq(s, g"contract", 8)) { -> TokenType.CONTRACT; };
-                if (bytes_eq(s, g"endianof", 8)) { -> TokenType.ENDIANOF; };
-                if (bytes_eq(s, g"fastnode", 8)) { -> TokenType.FASTNODE; };
-                if (bytes_eq(s, g"noreturn", 8)) { -> TokenType.NORET; };
-                if (bytes_eq(s, g"operator", 8)) { -> TokenType.OPERATOR; };
-                if (bytes_eq(s, g"register", 8)) { -> TokenType.REGISTER; };
-                if (bytes_eq(s, g"singinit", 8)) { -> TokenType.SINGINIT; };
-                if (bytes_eq(s, g"unsigned", 8)) { -> TokenType.UNSIGNED; };
-                if (bytes_eq(s, g"volatile", 8)) { -> TokenType.VOLATILE; };
-                if (bytes_eq(s, g"fastcall", 8)) { -> TokenType.FASTCALL; };
-                if (bytes_eq(s, g"thiscall", 8)) { -> TokenType.THISCALL; };
-                if (bytes_eq(s, g"comptime", 8)) { -> TokenType.COMPTIME; };
-                if (bytes_eq(s, g"emitflux", 8)) { -> TokenType.EMITFLUX; };
+                case (true) {
+                switch (bytes_eq(s, g"continue", 8))
+                {
+                    case (true) { -> TokenType.CONTINUE; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"contract", 8))
+                {
+                    case (true) { -> TokenType.CONTRACT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"endianof", 8))
+                {
+                    case (true) { -> TokenType.ENDIANOF; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"fastnode", 8))
+                {
+                    case (true) { -> TokenType.FASTNODE; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"noreturn", 8))
+                {
+                    case (true) { -> TokenType.NORET; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"operator", 8))
+                {
+                    case (true) { -> TokenType.OPERATOR; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"register", 8))
+                {
+                    case (true) { -> TokenType.REGISTER; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"singinit", 8))
+                {
+                    case (true) { -> TokenType.SINGINIT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"unsigned", 8))
+                {
+                    case (true) { -> TokenType.UNSIGNED; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"volatile", 8))
+                {
+                    case (true) { -> TokenType.VOLATILE; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"fastcall", 8))
+                {
+                    case (true) { -> TokenType.FASTCALL; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"thiscall", 8))
+                {
+                    case (true) { -> TokenType.THISCALL; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"comptime", 8))
+                {
+                    case (true) { -> TokenType.COMPTIME; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"emitflux", 8))
+                {
+                    case (true) { -> TokenType.EMITFLUX; }
+                    default {};
+                };
+            }
+                default {};
             };
-            if (n == 9)
+            switch (n == 9)
             {
-                if (bytes_eq(s, g"deprecate", 9)) { -> TokenType.DEPRECATE; };
-                if (bytes_eq(s, g"interface", 9)) { -> TokenType.INTERFACE; };
-                if (bytes_eq(s, g"namespace", 9)) { -> TokenType.NAMESPACE; };
+                case (true) {
+                switch (bytes_eq(s, g"deprecate", 9))
+                {
+                    case (true) { -> TokenType.DEPRECATE; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"interface", 9))
+                {
+                    case (true) { -> TokenType.INTERFACE; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"namespace", 9))
+                {
+                    case (true) { -> TokenType.NAMESPACE; }
+                    default {};
+                };
+            }
+                default {};
             };
-            if (n == 10)
+            switch (n == 10)
             {
-                if (bytes_eq(s, g"constraint", 10)) { -> TokenType.CONSTRAINT; };
-                if (bytes_eq(s, g"vectorcall", 10)) { -> TokenType.VECTORCALL; };
+                case (true) {
+                switch (bytes_eq(s, g"constraint", 10))
+                {
+                    case (true) { -> TokenType.CONSTRAINT; }
+                    default {};
+                };
+                switch (bytes_eq(s, g"vectorcall", 10))
+                {
+                    case (true) { -> TokenType.VECTORCALL; }
+                    default {};
+                };
+            }
+                default {};
             };
             -> TokenType.IDENTIFIER;
         };
 
-        def error_message(int code) -> byte*
+        error_message(int code) -> byte*
         {
             switch (code)
             {
@@ -448,7 +863,7 @@ namespace flux
             };
         };
 
-        def token_name(int t) -> byte*
+        token_name(int t) -> byte*
         {
             switch (t)
             {
@@ -668,7 +1083,7 @@ namespace flux
             // warning in flexer.py. The first occurrence is recorded here.
             int warn_count, warn_line, warn_col, warn_cp;
 
-            def __init(byte* source, int len) -> this
+            __init(byte* source, int len) -> this
             {
                 this.src = source;
                 this.length = len;
@@ -679,12 +1094,18 @@ namespace flux
                 this.err_code = 0;
 
                 // Skip a UTF-8 BOM if present
-                if (len >= 3)
+                switch (len >= 3)
                 {
-                    if (source[0] == 0xEF & source[1] == 0xBB & source[2] == 0xBF)
+                    case (true) {
+                    switch (source[0] == 0xEF & source[1] == 0xBB & source[2] == 0xBF)
                     {
+                        case (true) {
                         this.position = 3;
+                    }
+                        default {};
                     };
+                }
+                    default {};
                 };
 
                 // Every token consumes at least one source byte, plus EOF.
@@ -695,81 +1116,110 @@ namespace flux
                 this.arena_len = 0;
                 this.arena = (byte*)fmalloc((u64)this.arena_cap);
 
-                if (this.tokens == (Token*)0 | this.arena == (byte*)0)
+                switch (this.tokens == (Token*)0 | this.arena == (byte*)0)
                 {
+                    case (true) {
                     this.err_code = LexError.ALLOC_FAILED;
                     this.err_line = 1;
                     this.err_col = 1;
+                }
+                    default {};
                 };
                 -> this;
             };
 
-            def __expr() -> Lexer*
+            __expr() -> Lexer*
             {
                 -> this;
             };
 
-            def __exit() -> void
+            __exit() -> void
             {
-                if (this.tokens != (Token*)0) { ffree((byte*)this.tokens); };
-                if (this.arena != (byte*)0) { ffree(this.arena); };
+                switch (this.tokens != (Token*)0)
+                {
+                    case (true) { ffree((byte*)this.tokens); }
+                    default {};
+                };
+                switch (this.arena != (byte*)0)
+                {
+                    case (true) { ffree(this.arena); }
+                    default {};
+                };
                 this.tokens = (Token*)0;
                 this.arena = (byte*)0;
-                return;
+                ->;
             };
 
             // ===== SOURCE CURSOR =====
 
             // Current byte as 0..255, or -1 at end of input
-            def cur() -> int
+            cur() -> int
             {
-                if (this.position >= this.length) { -> -1; };
+                switch (this.position >= this.length)
+                {
+                    case (true) { -> -1; }
+                    default {};
+                };
                 -> (int)this.src[this.position];
             };
 
-            def peek(int offset) -> int
+            peek(int offset) -> int
             {
                 int p = this.position + offset;
-                if (p >= this.length) { -> -1; };
+                switch (p >= this.length)
+                {
+                    case (true) { -> -1; }
+                    default {};
+                };
                 -> (int)this.src[p];
             };
 
             // Mirrors FluxLexer.advance. Newline resets the column, a single
             // tab advances to 4 columns, UTF-8 continuation bytes do not add a
             // column so columns count characters like the Python lexer does.
-            def adv(int n) -> void
+            adv(int n) -> void
             {
                 int c;
-                if (this.position < this.length)
+                switch (this.position < this.length)
                 {
+                    case (true) {
                     c = (int)this.src[this.position];
-                    if (c == 10)
+                    switch (c == 10)
                     {
+                        case (true) {
                         this.line++;
                         this.column = 1;
                     }
-                    elif (n == 1 & c == 9)
-                    {
+                        default {
+                            switch (n == 1 & c == 9)
+                            {
+                                case (true) {
                         this.column += 4;
                     }
-                    elif (n == 1 & is_continuation(c))
-                    {
+                                default {
+                                    switch (n == 1 & is_continuation(c))
+                                    {
+                                        case (true) {
                         this.column += 0;
                     }
-                    else
-                    {
+                                        default {
                         this.column += n;
                     };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 }
-                else
-                {
+                    default {
                     this.column += n;
                 };
+                };
                 this.position += n;
-                return;
+                ->;
             };
 
-            def skip_whitespace() -> bool
+            skip_whitespace() -> bool
             {
                 bool skipped = false;
                 while (this.cur() != -1 & is_space(this.cur()))
@@ -781,13 +1231,21 @@ namespace flux
             };
 
             // Does the source at the current position start with lit[0..n)?
-            def match(byte* lit, int n) -> bool
+            match(byte* lit, int n) -> bool
             {
                 int i;
                 while (i < n)
                 {
-                    if (this.position + i >= this.length) { -> false; };
-                    if (this.src[this.position + i] != lit[i]) { -> false; };
+                    switch (this.position + i >= this.length)
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
+                    switch (this.src[this.position + i] != lit[i])
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
                     i++;
                 };
                 -> true;
@@ -795,76 +1253,98 @@ namespace flux
 
             // ===== ERRORS =====
 
-            def fail(int code, int ln, int col) -> void
+            fail(int code, int ln, int col) -> void
             {
-                if (this.err_code == 0)
+                switch (this.err_code == 0)
                 {
+                    case (true) {
                     this.err_code = code;
                     this.err_line = ln;
                     this.err_col = col;
+                }
+                    default {};
                 };
-                return;
+                ->;
             };
 
             // ===== VALUE ARENA =====
 
-            def grow() -> void
+            grow() -> void
             {
                 int new_cap = this.arena_cap * 2;
                 u64 np = frealloc((u64)this.arena, (size_t)new_cap);
-                if (np == (u64)0)
+                switch (np == (u64)0)
                 {
+                    case (true) {
                     this.fail(LexError.ALLOC_FAILED, this.line, this.column);
-                    return;
+                    ->;
+                }
+                    default {};
                 };
                 this.arena = (byte*)np;
                 this.arena_cap = new_cap;
-                return;
+                ->;
             };
 
-            def vbegin() -> int
+            vbegin() -> int
             {
                 -> this.arena_len;
             };
 
-            def vput(int b) -> void
+            vput(int b) -> void
             {
-                if (this.arena_len + 2 > this.arena_cap) { this.grow(); };
-                if (this.err_code != 0) { return; };
+                switch (this.arena_len + 2 > this.arena_cap)
+                {
+                    case (true) { this.grow(); }
+                    default {};
+                };
+                switch (this.err_code != 0)
+                {
+                    case (true) { ->; }
+                    default {};
+                };
                 this.arena[this.arena_len] = (byte)b;
                 this.arena_len++;
-                return;
+                ->;
             };
 
             // UTF-8 encode a codepoint below 0x800
-            def vput_cp(int v) -> void
+            vput_cp(int v) -> void
             {
-                if (v < 128)
+                switch (v < 128)
                 {
+                    case (true) {
                     this.vput(v);
                 }
-                else
-                {
+                    default {
                     this.vput(0xC0 | (v >> 6));
                     this.vput(0x80 | (v & 0x3F));
                 };
-                return;
+                };
+                ->;
             };
 
             // Null terminate the value that started at `start`. Returns its length.
-            def vend(int start) -> int
+            vend(int start) -> int
             {
                 this.vput(0);
                 -> this.arena_len - 1 - start;
             };
 
-            def emit(int tt, int ln, int col, int voff, int vlen, int numeric) -> void
+            emit(int tt, int ln, int col, int voff, int vlen, int numeric) -> void
             {
-                if (this.err_code != 0) { return; };
-                if (this.count >= this.cap)
+                switch (this.err_code != 0)
                 {
+                    case (true) { ->; }
+                    default {};
+                };
+                switch (this.count >= this.cap)
+                {
+                    case (true) {
                     this.fail(LexError.ALLOC_FAILED, ln, col);
-                    return;
+                    ->;
+                }
+                    default {};
                 };
                 this.tokens[this.count].type = tt;
                 this.tokens[this.count].line = ln;
@@ -873,10 +1353,10 @@ namespace flux
                 this.tokens[this.count].vlen = vlen;
                 this.tokens[this.count].numeric_char = numeric;
                 this.count++;
-                return;
+                ->;
             };
 
-            def emit_text(int tt, int ln, int col, byte* s, int n) -> void
+            emit_text(int tt, int ln, int col, byte* s, int n) -> void
             {
                 int vb = this.vbegin();
                 int i;
@@ -887,10 +1367,10 @@ namespace flux
                 };
                 int vl = this.vend(vb);
                 this.emit(tt, ln, col, vb, vl, 0);
-                return;
+                ->;
             };
 
-            def token_value(int i) -> byte*
+            token_value(int i) -> byte*
             {
                 -> this.arena + this.tokens[i].voff;
             };
@@ -898,7 +1378,7 @@ namespace flux
             // ===== BLOCKS =====
 
             // asm"..." form: current character is the opening quote
-            def read_asm_quoted() -> void
+            read_asm_quoted() -> void
             {
                 int ln = this.line;
                 int col = this.column;
@@ -909,15 +1389,19 @@ namespace flux
                     this.vput(this.cur());
                     this.adv(1);
                 };
-                if (this.cur() == '"' & this.peek(1) == '"') { this.adv(2); };
+                switch (this.cur() == '"' & this.peek(1) == '"')
+                {
+                    case (true) { this.adv(2); }
+                    default {};
+                };
                 int vl = this.vend(vb);
                 this.emit(TokenType.ASM_BLOCK, ln, col, vb, vl, 0);
-                return;
+                ->;
             };
 
             // { ... } block after the asm or fluxvm keyword. Content is raw
             // text with nested braces balanced, outer whitespace stripped.
-            def read_brace_block(int tt) -> void
+            read_brace_block(int tt) -> void
             {
                 int ln = this.line;
                 int col = this.column;
@@ -926,7 +1410,11 @@ namespace flux
                 {
                     this.adv(1);
                 };
-                if (this.cur() != '{') { return; };
+                switch (this.cur() != '{')
+                {
+                    case (true) { ->; }
+                    default {};
+                };
                 this.adv(1);
 
                 int depth = 1;
@@ -934,9 +1422,17 @@ namespace flux
                 while (this.cur() != -1 & depth > 0)
                 {
                     c = this.cur();
-                    if (c == '{') { depth++; }
-                    elif (c == '}') { depth--; };
-                    if (depth > 0) { this.vput(c); };
+                    switch (c)
+                    {
+                        case ('{') { depth++; }
+                        case ('}') { depth--; }
+                        default {};
+                    };
+                    switch (depth > 0)
+                    {
+                        case (true) { this.vput(c); }
+                        default {};
+                    };
                     this.adv(1);
                 };
 
@@ -954,14 +1450,14 @@ namespace flux
                 this.arena_len = vb + n;
                 int vl = this.vend(vb);
                 this.emit(tt, ln, col, vb, vl, 0);
-                return;
+                ->;
             };
 
             // ===== STRINGS =====
 
             // Reads a quoted string with escape processing into the arena.
             // The current character is the opening quote.
-            def read_string(int quote) -> void
+            read_string(int quote) -> void
             {
                 int e, hv, hn;
                 bool stop = false;
@@ -970,111 +1466,153 @@ namespace flux
                 while (!stop & this.cur() != -1 & this.cur() != quote)
                 {
                     skip = false;
-                    if (this.cur() == '\\')
+                    switch (this.cur() == '\\')
                     {
+                        case (true) {
                         this.adv(1);
                         e = this.cur();
-                        if (e == -1)
+                        switch (e)
                         {
-                            stop = true;
-                        }
-                        elif (e == 'n') { this.vput(10); }
-                        elif (e == 't') { this.vput(9); }
-                        elif (e == 'r') { this.vput(13); }
-                        elif (e == '0') { this.vput(0); }
-                        elif (e == '\\') { this.vput(92); }
-                        elif (e == '"') { this.vput(34); }
-                        elif (e == 'x')
-                        {
-                            this.adv(1);
-                            hv = 0;
-                            hn = 0;
-                            while (hn < 2 & is_hex_any(this.cur()))
+                            case (-1)
                             {
-                                hv = hv * 16 + hex_value(this.cur());
+                                stop = true;
+                            }
+                            case ('n') { this.vput(10); }
+                            case ('t') { this.vput(9); }
+                            case ('r') { this.vput(13); }
+                            case ('0') { this.vput(0); }
+                            case ('\\') { this.vput(92); }
+                            case ('"') { this.vput(34); }
+                            case ('x')
+                            {
                                 this.adv(1);
-                                hn++;
-                            };
-                            if (hn > 0)
+                                hv = 0;
+                                hn = 0;
+                                while (hn < 2 & is_hex_any(this.cur()))
+                                {
+                                    hv = hv * 16 + hex_value(this.cur());
+                                    this.adv(1);
+                                    hn++;
+                                };
+                                switch (hn > 0)
+                                {
+                                    case (true) {
+                                    this.vput_cp(hv);
+                                    skip = true;
+                                }
+                                    default {};
+                                };
+                            }
+                            default
                             {
-                                this.vput_cp(hv);
-                                skip = true;
+                                this.vput(e);
                             };
-                        }
-                        else
-                        {
-                            this.vput(e);
                         };
                     }
-                    else
-                    {
+                        default {
                         this.vput(this.cur());
                     };
-                    if (!stop & !skip) { this.adv(1); };
+                    };
+                    switch (!stop & !skip)
+                    {
+                        case (true) { this.adv(1); }
+                        default {};
+                    };
                 };
-                if (this.cur() == quote) { this.adv(1); };
-                return;
+                switch (this.cur() == quote)
+                {
+                    case (true) { this.adv(1); }
+                    default {};
+                };
+                ->;
             };
 
             // f-string body. Embedded { ... } expressions are copied verbatim.
             // Returns false (and sets the error) on an unterminated interpolation.
-            def read_f_string_body() -> bool
+            read_f_string_body() -> bool
             {
                 int e, depth;
                 bool stop = false;
                 this.adv(1);
                 while (!stop & this.cur() != -1 & this.cur() != '"')
                 {
-                    if (this.cur() == '{')
+                    switch (this.cur() == '{')
                     {
+                        case (true) {
                         this.vput('{');
                         this.adv(1);
                         depth = 1;
                         while (this.cur() != -1 & depth > 0)
                         {
-                            if (this.cur() == '"')
+                            switch (this.cur() == '"')
                             {
+                                case (true) {
                                 this.fail(LexError.FSTRING_UNTERMINATED, this.line, this.column);
                                 -> false;
+                            }
+                                default {};
                             };
-                            if (this.cur() == '{') { depth++; }
-                            elif (this.cur() == '}') { depth--; };
+                            switch (this.cur() == '{')
+                            {
+                                case (true) { depth++; }
+                                default {
+                                    switch (this.cur() == '}')
+                                    {
+                                        case (true) { depth--; }
+                                        default {};
+                                    };
+                                };
+                            };
                             this.vput(this.cur());
                             this.adv(1);
                         };
                     }
-                    elif (this.cur() == '\\')
-                    {
+                        default {
+                            switch (this.cur() == '\\')
+                            {
+                                case (true) {
                         this.adv(1);
                         e = this.cur();
-                        if (e == -1)
+                        switch (e)
                         {
-                            stop = true;
-                        }
-                        else
-                        {
-                            if (e == 'n') { this.vput(10); }
-                            elif (e == 't') { this.vput(9); }
-                            elif (e == 'r') { this.vput(13); }
-                            elif (e == '0') { this.vput(0); }
-                            elif (e == '\\') { this.vput(92); }
-                            elif (e == '"') { this.vput(34); }
-                            else { this.vput(e); };
-                            this.adv(1);
+                            case (-1)
+                            {
+                                stop = true;
+                            }
+                            default
+                            {
+                                switch (e)
+                                {
+                                    case ('n') { this.vput(10); }
+                                    case ('t') { this.vput(9); }
+                                    case ('r') { this.vput(13); }
+                                    case ('0') { this.vput(0); }
+                                    case ('\\') { this.vput(92); }
+                                    case ('"') { this.vput(34); }
+                                    default { this.vput(e); };
+                                };
+                                this.adv(1);
+                            };
                         };
                     }
-                    else
-                    {
+                                default {
                         this.vput(this.cur());
                         this.adv(1);
                     };
+                            };
+                        };
+                    };
                 };
-                if (this.cur() == '"') { this.adv(1); };
+                switch (this.cur() == '"')
+                {
+                    case (true) { this.adv(1); }
+                    default {};
+                };
                 -> true;
             };
 
             // i"name":{ expr; ... }  The leading i is already consumed.
-            def read_i_string() -> void
+            read_i_string() -> void
             {
                 int ln = this.line;
                 int col = this.column;
@@ -1086,160 +1624,247 @@ namespace flux
                 this.vput('"');
 
                 this.skip_whitespace();
-                if (this.cur() == ':') { this.adv(1); };
-                this.skip_whitespace();
-                if (this.cur() == '{')
+                switch (this.cur() == ':')
                 {
+                    case (true) { this.adv(1); }
+                    default {};
+                };
+                this.skip_whitespace();
+                switch (this.cur() == '{')
+                {
+                    case (true) {
                     this.vput(':');
                     this.vput('{');
                     this.adv(1);
                     depth = 1;
                     while (this.cur() != -1 & depth > 0)
                     {
-                        if (this.cur() == '{') { depth++; }
-                        elif (this.cur() == '}') { depth--; };
+                        switch (this.cur() == '{')
+                        {
+                            case (true) { depth++; }
+                            default {
+                                switch (this.cur() == '}')
+                                {
+                                    case (true) { depth--; }
+                                    default {};
+                                };
+                            };
+                        };
                         this.vput(this.cur());
                         this.adv(1);
                     };
+                }
+                    default {};
                 };
                 int vl = this.vend(vb);
                 this.emit(TokenType.I_STRING, ln, col, vb, vl, 0);
-                return;
+                ->;
             };
 
             // ===== NUMBERS =====
 
             // Suffix handling shared by 0x / 0o / 0d / 0b literals
-            def finish_prefixed(int ln, int col, int vb, bool allow_byte) -> void
+            finish_prefixed(int ln, int col, int vb, bool allow_byte) -> void
             {
                 int tt = TokenType.SINT_LITERAL;
                 int c = this.cur();
-                if (c == 'u')
+                switch (c == 'u')
                 {
+                    case (true) {
                     this.adv(1);
-                    if (this.cur() == 'l')
+                    switch (this.cur() == 'l')
                     {
+                        case (true) {
                         this.adv(1);
                         tt = TokenType.ULONG_LITERAL;
                     }
-                    else
-                    {
+                        default {
                         tt = TokenType.UINT_LITERAL;
                     };
+                    };
                 }
-                elif (c == 'l')
-                {
+                    default {
+                        switch (c == 'l')
+                        {
+                            case (true) {
                     this.adv(1);
                     tt = TokenType.SLONG_LITERAL;
                 }
-                elif (allow_byte & c == 'b')
-                {
+                            default {
+                                switch (allow_byte & c == 'b')
+                                {
+                                    case (true) {
                     this.adv(1);
                     tt = TokenType.BYTE_LITERAL;
+                }
+                                    default {};
+                                };
+                            };
+                        };
+                    };
                 };
                 int vl = this.vend(vb);
                 this.emit(tt, ln, col, vb, vl, 0);
-                return;
+                ->;
             };
 
-            def digit_at(int vb, int int_len, int n, int i) -> int
+            digit_at(int vb, int int_len, int n, int i) -> int
             {
-                if (i >= n) { -> '0'; };
-                if (i < int_len) { -> (int)this.arena[vb + i]; };
+                switch (i >= n)
+                {
+                    case (true) { -> '0'; }
+                    default {};
+                };
+                switch (i < int_len)
+                {
+                    case (true) { -> (int)this.arena[vb + i]; }
+                    default {};
+                };
                 -> (int)this.arena[vb + i + 1];
             };
 
             // Mantissa digits are already in the arena at vb (integer part,
             // optional '.', fraction). The current character is the 'e'/'E'.
             // The value is rewritten as an exact plain decimal string.
-            def read_scientific(int ln, int col, int vb, int int_len, bool had_dot) -> void
+            read_scientific(int ln, int col, int vb, int int_len, bool had_dot) -> void
             {
                 this.adv(1);
                 int sign = 1;
-                if (this.cur() == '+' | this.cur() == '-')
+                switch (this.cur() == '+' | this.cur() == '-')
                 {
-                    if (this.cur() == '-') { sign = -1; };
+                    case (true) {
+                    switch (this.cur() == '-')
+                    {
+                        case (true) { sign = -1; }
+                        default {};
+                    };
                     this.adv(1);
+                }
+                    default {};
                 };
                 int exponent = 0;
                 bool too_big = false;
                 while (is_digit(this.cur()))
                 {
-                    if (exponent > 1000000) { too_big = true; }
-                    else { exponent = exponent * 10 + (this.cur() - 48); };
+                    switch (exponent > 1000000)
+                    {
+                        case (true) { too_big = true; }
+                        default { exponent = exponent * 10 + (this.cur() - 48); };
+                    };
                     this.adv(1);
                 };
-                if (too_big | exponent > 1000000)
+                switch (too_big | exponent > 1000000)
                 {
+                    case (true) {
                     this.fail(LexError.EXPONENT_RANGE, ln, col);
-                    return;
+                    ->;
+                }
+                    default {};
                 };
                 exponent = exponent * sign;
 
                 int n = this.arena_len - vb;
-                if (had_dot) { n = n - 1; };
+                switch (had_dot)
+                {
+                    case (true) { n = n - 1; }
+                    default {};
+                };
                 int point = int_len + exponent;
                 int out_start = this.arena_len;
 
                 // integer part
                 int ipart = 0;
-                if (point > 0) { ipart = point; };
+                switch (point > 0)
+                {
+                    case (true) { ipart = point; }
+                    default {};
+                };
                 int j, j0 = -1;
                 while (j < ipart)
                 {
-                    if (this.digit_at(vb, int_len, n, j) != '0')
+                    switch (this.digit_at(vb, int_len, n, j) != '0')
                     {
+                        case (true) {
                         j0 = j;
                         break;
+                    }
+                        default {};
                     };
                     j++;
                 };
-                if (j0 == -1)
+                switch (j0)
                 {
-                    this.vput('0');
-                }
-                else
-                {
-                    j = j0;
-                    while (j < ipart)
+                    case (-1)
                     {
-                        this.vput(this.digit_at(vb, int_len, n, j));
-                        j++;
+                        this.vput('0');
+                    }
+                    default
+                    {
+                        j = j0;
+                        while (j < ipart)
+                        {
+                            this.vput(this.digit_at(vb, int_len, n, j));
+                            j++;
+                        };
                     };
                 };
 
                 // fractional part
                 int z = 0;
-                if (point < 0) { z = 0 - point; };
+                switch (point < 0)
+                {
+                    case (true) { z = 0 - point; }
+                    default {};
+                };
                 int fstart = 0;
-                if (point > 0) { fstart = point; };
+                switch (point > 0)
+                {
+                    case (true) { fstart = point; }
+                    default {};
+                };
                 int flen = 0;
-                if (n > fstart) { flen = z + (n - fstart); };
+                switch (n > fstart)
+                {
+                    case (true) { flen = z + (n - fstart); }
+                    default {};
+                };
 
                 int lt, m = flen, idx, dch;
                 while (m > 0)
                 {
                     idx = m - 1;
-                    if (idx < z) { dch = '0'; }
-                    else { dch = this.digit_at(vb, int_len, n, fstart + (idx - z)); };
-                    if (dch != '0')
+                    switch (idx < z)
                     {
+                        case (true) { dch = '0'; }
+                        default { dch = this.digit_at(vb, int_len, n, fstart + (idx - z)); };
+                    };
+                    switch (dch != '0')
+                    {
+                        case (true) {
                         lt = m;
                         break;
+                    }
+                        default {};
                     };
                     m--;
                 };
-                if (lt > 0)
+                switch (lt > 0)
                 {
+                    case (true) {
                     this.vput('.');
                     m = 0;
                     while (m < lt)
                     {
-                        if (m < z) { dch = '0'; }
-                        else { dch = this.digit_at(vb, int_len, n, fstart + (m - z)); };
+                        switch (m < z)
+                        {
+                            case (true) { dch = '0'; }
+                            default { dch = this.digit_at(vb, int_len, n, fstart + (m - z)); };
+                        };
                         this.vput(dch);
                         m++;
                     };
+                }
+                    default {};
                 };
 
                 // move the expanded text down over the mantissa
@@ -1254,28 +1879,40 @@ namespace flux
                 int vl = this.vend(vb);
 
                 int tt;
-                if (this.cur() == 'f')
+                switch (this.cur() == 'f')
                 {
+                    case (true) {
                     this.adv(1);
                     tt = TokenType.FLOAT;
                 }
-                elif (this.cur() == 'd')
-                {
+                    default {
+                        switch (this.cur() == 'd')
+                        {
+                            case (true) {
                     this.adv(1);
                     tt = TokenType.DOUBLE;
                 }
-                else
-                {
+                            default {
                     int abs_exp = exponent;
-                    if (abs_exp < 0) { abs_exp = 0 - abs_exp; };
-                    if (abs_exp <= 5) { tt = TokenType.FLOAT; }
-                    else { tt = TokenType.DOUBLE; };
+                    switch (abs_exp < 0)
+                    {
+                        case (true) { abs_exp = 0 - abs_exp; }
+                        default {};
+                    };
+                    switch (abs_exp <= 5)
+                    {
+                        case (true) { tt = TokenType.FLOAT; }
+                        default { tt = TokenType.DOUBLE; };
+                    };
+                };
+                        };
+                    };
                 };
                 this.emit(tt, ln, col, vb, vl, 0);
-                return;
+                ->;
             };
 
-            def read_number() -> void
+            read_number() -> void
             {
                 int ln = this.line;
                 int col = this.column;
@@ -1283,14 +1920,16 @@ namespace flux
                 int c, vl;
                 bool is_float, is_double;
 
-                if (this.cur() == '0')
+                switch (this.cur() == '0')
                 {
+                    case (true) {
                     this.vput('0');
                     this.adv(1);
                     c = this.cur();
 
-                    if (c == 'd' | c == 'D')
+                    switch (c == 'd' | c == 'D')
                     {
+                        case (true) {
                         this.vput(c);
                         this.adv(1);
                         while (is_base32_digit(this.cur()))
@@ -1299,11 +1938,14 @@ namespace flux
                             this.adv(1);
                         };
                         this.finish_prefixed(ln, col, vb, true);
-                        return;
+                        ->;
+                    }
+                        default {};
                     };
 
-                    if (c == 'x' | c == 'X')
+                    switch (c == 'x' | c == 'X')
                     {
+                        case (true) {
                         this.vput(c);
                         this.adv(1);
                         while (is_hex_upper(this.cur()))
@@ -1312,11 +1954,14 @@ namespace flux
                             this.adv(1);
                         };
                         this.finish_prefixed(ln, col, vb, true);
-                        return;
+                        ->;
+                    }
+                        default {};
                     };
 
-                    if (c == 'o' | c == 'O')
+                    switch (c == 'o' | c == 'O')
                     {
+                        case (true) {
                         this.vput(c);
                         this.adv(1);
                         while (this.cur() >= '0' & this.cur() <= '7')
@@ -1325,11 +1970,14 @@ namespace flux
                             this.adv(1);
                         };
                         this.finish_prefixed(ln, col, vb, true);
-                        return;
+                        ->;
+                    }
+                        default {};
                     };
 
-                    if (c == 'b' | c == 'B')
+                    switch (c == 'b' | c == 'B')
                     {
+                        case (true) {
                         this.vput(c);
                         this.adv(1);
                         while (this.cur() == '0' | this.cur() == '1')
@@ -1338,17 +1986,24 @@ namespace flux
                             this.adv(1);
                         };
                         // `0b` with no digits is the byte-suffix form of 0
-                        if (c == 'b' & this.arena_len - vb == 2)
+                        switch (c == 'b' & this.arena_len - vb == 2)
                         {
+                            case (true) {
                             this.arena_len = vb;
                             this.vput('0');
                             vl = this.vend(vb);
                             this.emit(TokenType.BYTE_LITERAL, ln, col, vb, vl, 0);
-                            return;
+                            ->;
+                        }
+                            default {};
                         };
                         this.finish_prefixed(ln, col, vb, false);
-                        return;
+                        ->;
+                    }
+                        default {};
                     };
+                }
+                    default {};
                 };
 
                 // decimal digits
@@ -1361,8 +2016,9 @@ namespace flux
                 int int_len = this.arena_len - vb;
                 int dc = 0;
                 bool had_dot = false;
-                if (this.cur() == '.' & is_digit(this.peek(1)))
+                switch (this.cur() == '.' & is_digit(this.peek(1)))
                 {
+                    case (true) {
                     is_float = true;
                     had_dot = true;
                     this.vput('.');
@@ -1373,61 +2029,92 @@ namespace flux
                         this.vput(this.cur());
                         this.adv(1);
                     };
+                }
+                    default {};
                 };
 
                 // scientific notation: e/E, optional sign, digits
                 c = this.cur();
-                if (c == 'e' | c == 'E')
+                switch (c == 'e' | c == 'E')
                 {
+                    case (true) {
                     int n1 = this.peek(1);
                     int n2 = this.peek(2);
                     bool exp_valid = false;
-                    if (is_digit(n1)) { exp_valid = true; }
-                    elif ((n1 == '+' | n1 == '-') & is_digit(n2)) { exp_valid = true; };
-                    if (exp_valid)
+                    switch (is_digit(n1))
                     {
-                        this.read_scientific(ln, col, vb, int_len, had_dot);
-                        return;
+                        case (true) { exp_valid = true; }
+                        default {
+                            switch ((n1 == '+' | n1 == '-') & is_digit(n2))
+                            {
+                                case (true) { exp_valid = true; }
+                                default {};
+                            };
+                        };
                     };
+                    switch (exp_valid)
+                    {
+                        case (true) {
+                        this.read_scientific(ln, col, vb, int_len, had_dot);
+                        ->;
+                    }
+                        default {};
+                    };
+                }
+                    default {};
                 };
 
                 // suffixes
                 int tt = TokenType.SINT_LITERAL;
-                if (this.cur() == 'f')
+                switch (this.cur() == 'f')
                 {
+                    case (true) {
                     tt = TokenType.FLOAT;
                     is_float = true;
                     this.adv(1);
+                }
+                    default {};
                 };
                 c = this.cur();
-                if (c == 'd')
+                switch (c == 'd')
                 {
+                    case (true) {
                     tt = TokenType.DOUBLE;
                     is_double = true;
                     this.adv(1);
                 }
-                elif (!is_float & c == 'u' & this.peek(1) == 'l')
-                {
+                    default {
+                        switch (!is_float & c == 'u' & this.peek(1) == 'l')
+                        {
+                            case (true) {
                     tt = TokenType.ULONG_LITERAL;
                     this.adv(2);
                 }
-                elif (!is_float & c == 'u')
-                {
+                            default {
+                                switch (!is_float & c == 'u')
+                                {
+                                    case (true) {
                     tt = TokenType.UINT_LITERAL;
                     this.adv(1);
                 }
-                elif (!is_float & c == 'l')
-                {
+                                    default {
+                                        switch (!is_float & c == 'l')
+                                        {
+                                            case (true) {
                     tt = TokenType.SLONG_LITERAL;
                     this.adv(1);
                 }
-                elif (!is_float & c == 'b')
-                {
+                                            default {
+                                                switch (!is_float & c == 'b')
+                                                {
+                                                    case (true) {
                     tt = TokenType.BYTE_LITERAL;
                     this.adv(1);
                 }
-                elif (!is_float & c == 'c')
-                {
+                                                    default {
+                                                        switch (!is_float & c == 'c')
+                                                        {
+                                                            case (true) {
                     // numeric char literal: value is the codepoint in decimal
                     this.adv(1);
                     int s = vb;
@@ -1443,21 +2130,41 @@ namespace flux
                     this.arena_len = vb + n;
                     vl = this.vend(vb);
                     this.emit(TokenType.CHAR, ln, col, vb, vl, 1);
-                    return;
+                    ->;
+                }
+                                                            default {};
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
 
-                if (is_float & dc <= 5) { tt = TokenType.FLOAT; };
-                if (is_double | dc > 5) { tt = TokenType.DOUBLE; };
+                switch (is_float & dc <= 5)
+                {
+                    case (true) { tt = TokenType.FLOAT; }
+                    default {};
+                };
+                switch (is_double | dc > 5)
+                {
+                    case (true) { tt = TokenType.DOUBLE; }
+                    default {};
+                };
 
                 vl = this.vend(vb);
                 this.emit(tt, ln, col, vb, vl, 0);
-                return;
+                ->;
             };
 
             // ===== IDENTIFIERS =====
 
             // Reads an identifier or keyword, emits it, returns its token type
-            def read_identifier() -> int
+            read_identifier() -> int
             {
                 int ln = this.line;
                 int col = this.column;
@@ -1477,110 +2184,465 @@ namespace flux
             // Longest match first, 6 down to 1 characters, exactly the order of
             // the dictionaries in flexer.py. Returns the match length (0 if none)
             // and the token type through ttype.
-            def match_op(int* ttype) -> int
+            match_op(int* ttype) -> int
             {
                 int avail = this.length - this.position;
-            if (avail >= 6)
+            switch (avail >= 6)
             {
-                if (this.match(g"`^|!&=", 6)) { *ttype = TokenType.BITXNAND_ASSIGN; -> 6; };
-                if (this.match(g"`^|!|=", 6)) { *ttype = TokenType.BITXNOR_ASSIGN; -> 6; };
+                case (true) {
+                switch (this.match(g"`^|!&=", 6))
+                {
+                    case (true) { *ttype = TokenType.BITXNAND_ASSIGN; -> 6; }
+                    default {};
+                };
+                switch (this.match(g"`^|!|=", 6))
+                {
+                    case (true) { *ttype = TokenType.BITXNOR_ASSIGN; -> 6; }
+                    default {};
+                };
+            }
+                default {};
             };
-            if (avail >= 5)
+            switch (avail >= 5)
             {
-                if (this.match(g"`^|!&", 5)) { *ttype = TokenType.BITXNAND; -> 5; };
-                if (this.match(g"`^|!|", 5)) { *ttype = TokenType.BITXNOR; -> 5; };
-                if (this.match(g"`^|!=", 5)) { *ttype = TokenType.BITXNOT_ASSIGN; -> 5; };
+                case (true) {
+                switch (this.match(g"`^|!&", 5))
+                {
+                    case (true) { *ttype = TokenType.BITXNAND; -> 5; }
+                    default {};
+                };
+                switch (this.match(g"`^|!|", 5))
+                {
+                    case (true) { *ttype = TokenType.BITXNOR; -> 5; }
+                    default {};
+                };
+                switch (this.match(g"`^|!=", 5))
+                {
+                    case (true) { *ttype = TokenType.BITXNOT_ASSIGN; -> 5; }
+                    default {};
+                };
+            }
+                default {};
             };
-            if (avail >= 4)
+            switch (avail >= 4)
             {
-                if (this.match(g"`^|!", 4)) { *ttype = TokenType.BITXNOT; -> 4; };
-                if (this.match(g"`!&=", 4)) { *ttype = TokenType.BITNAND_ASSIGN; -> 4; };
-                if (this.match(g"`!|=", 4)) { *ttype = TokenType.BITNOR_ASSIGN; -> 4; };
-                if (this.match(g"`^|=", 4)) { *ttype = TokenType.BITXOR_ASSIGN; -> 4; };
+                case (true) {
+                switch (this.match(g"`^|!", 4))
+                {
+                    case (true) { *ttype = TokenType.BITXNOT; -> 4; }
+                    default {};
+                };
+                switch (this.match(g"`!&=", 4))
+                {
+                    case (true) { *ttype = TokenType.BITNAND_ASSIGN; -> 4; }
+                    default {};
+                };
+                switch (this.match(g"`!|=", 4))
+                {
+                    case (true) { *ttype = TokenType.BITNOR_ASSIGN; -> 4; }
+                    default {};
+                };
+                switch (this.match(g"`^|=", 4))
+                {
+                    case (true) { *ttype = TokenType.BITXOR_ASSIGN; -> 4; }
+                    default {};
+                };
+            }
+                default {};
             };
-            if (avail >= 3)
+            switch (avail >= 3)
             {
-                if (this.match(g"<<=", 3)) { *ttype = TokenType.BITSHIFT_LEFT_ASSIGN; -> 3; };
-                if (this.match(g">>=", 3)) { *ttype = TokenType.BITSHIFT_RIGHT_ASSIGN; -> 3; };
-                if (this.match(g"^|=", 3)) { *ttype = TokenType.XOR_ASSIGN; -> 3; };
-                if (this.match(g"{}*", 3)) { *ttype = TokenType.FUNCTION_POINTER; -> 3; };
-                if (this.match(g"(@)", 3)) { *ttype = TokenType.ADDRESS_CAST; -> 3; };
-                if (this.match(g"...", 3)) { *ttype = TokenType.ELLIPSIS; -> 3; };
-                if (this.match(g"`!&", 3)) { *ttype = TokenType.BITNAND_OP; -> 3; };
-                if (this.match(g"`!|", 3)) { *ttype = TokenType.BITNOR_OP; -> 3; };
-                if (this.match(g"`&=", 3)) { *ttype = TokenType.BITAND_ASSIGN; -> 3; };
-                if (this.match(g"`|=", 3)) { *ttype = TokenType.BITOR_ASSIGN; -> 3; };
-                if (this.match(g"`^|", 3)) { *ttype = TokenType.BITXOR_OP; -> 3; };
+                case (true) {
+                switch (this.match(g"<<=", 3))
+                {
+                    case (true) { *ttype = TokenType.BITSHIFT_LEFT_ASSIGN; -> 3; }
+                    default {};
+                };
+                switch (this.match(g">>=", 3))
+                {
+                    case (true) { *ttype = TokenType.BITSHIFT_RIGHT_ASSIGN; -> 3; }
+                    default {};
+                };
+                switch (this.match(g"^|=", 3))
+                {
+                    case (true) { *ttype = TokenType.XOR_ASSIGN; -> 3; }
+                    default {};
+                };
+                switch (this.match(g"{}*", 3))
+                {
+                    case (true) { *ttype = TokenType.FUNCTION_POINTER; -> 3; }
+                    default {};
+                };
+                switch (this.match(g"(@)", 3))
+                {
+                    case (true) { *ttype = TokenType.ADDRESS_CAST; -> 3; }
+                    default {};
+                };
+                switch (this.match(g"...", 3))
+                {
+                    case (true) { *ttype = TokenType.ELLIPSIS; -> 3; }
+                    default {};
+                };
+                switch (this.match(g"`!&", 3))
+                {
+                    case (true) { *ttype = TokenType.BITNAND_OP; -> 3; }
+                    default {};
+                };
+                switch (this.match(g"`!|", 3))
+                {
+                    case (true) { *ttype = TokenType.BITNOR_OP; -> 3; }
+                    default {};
+                };
+                switch (this.match(g"`&=", 3))
+                {
+                    case (true) { *ttype = TokenType.BITAND_ASSIGN; -> 3; }
+                    default {};
+                };
+                switch (this.match(g"`|=", 3))
+                {
+                    case (true) { *ttype = TokenType.BITOR_ASSIGN; -> 3; }
+                    default {};
+                };
+                switch (this.match(g"`^|", 3))
+                {
+                    case (true) { *ttype = TokenType.BITXOR_OP; -> 3; }
+                    default {};
+                };
+            }
+                default {};
             };
-            if (avail >= 2)
+            switch (avail >= 2)
             {
-                if (this.match(g"==", 2)) { *ttype = TokenType.EQUAL; -> 2; };
-                if (this.match(g"!=", 2)) { *ttype = TokenType.NOT_EQUAL; -> 2; };
-                if (this.match(g"<=", 2)) { *ttype = TokenType.LESS_EQUAL; -> 2; };
-                if (this.match(g">=", 2)) { *ttype = TokenType.GREATER_EQUAL; -> 2; };
-                if (this.match(g"<<", 2)) { *ttype = TokenType.BITSHIFT_LEFT; -> 2; };
-                if (this.match(g">>", 2)) { *ttype = TokenType.BITSHIFT_RIGHT; -> 2; };
-                if (this.match(g"++", 2)) { *ttype = TokenType.INCREMENT; -> 2; };
-                if (this.match(g"--", 2)) { *ttype = TokenType.DECREMENT; -> 2; };
-                if (this.match(g"+=", 2)) { *ttype = TokenType.PLUS_ASSIGN; -> 2; };
-                if (this.match(g"-=", 2)) { *ttype = TokenType.MINUS_ASSIGN; -> 2; };
-                if (this.match(g"*=", 2)) { *ttype = TokenType.MULTIPLY_ASSIGN; -> 2; };
-                if (this.match(g"/=", 2)) { *ttype = TokenType.DIVIDE_ASSIGN; -> 2; };
-                if (this.match(g"%=", 2)) { *ttype = TokenType.MODULO_ASSIGN; -> 2; };
-                if (this.match(g"^=", 2)) { *ttype = TokenType.EXPONENT_ASSIGN; -> 2; };
-                if (this.match(g"&=", 2)) { *ttype = TokenType.AND_ASSIGN; -> 2; };
-                if (this.match(g"|=", 2)) { *ttype = TokenType.OR_ASSIGN; -> 2; };
-                if (this.match(g"!&", 2)) { *ttype = TokenType.NAND_OP; -> 2; };
-                if (this.match(g"!|", 2)) { *ttype = TokenType.NOR_OP; -> 2; };
-                if (this.match(g"^|", 2)) { *ttype = TokenType.XOR_OP; -> 2; };
-                if (this.match(g"!!", 2)) { *ttype = TokenType.NO_MANGLE; -> 2; };
-                if (this.match(g"??", 2)) { *ttype = TokenType.NULL_COALESCE; -> 2; };
-                if (this.match(g"->", 2)) { *ttype = TokenType.RETURN_ARROW; -> 2; };
-                if (this.match(g"<-", 2)) { *ttype = TokenType.CHAIN_ARROW; -> 2; };
-                if (this.match(g"<~", 2)) { *ttype = TokenType.RECURSE_ARROW; -> 2; };
-                if (this.match(g"..", 2)) { *ttype = TokenType.RANGE; -> 2; };
-                if (this.match(g"::", 2)) { *ttype = TokenType.SCOPE; -> 2; };
-                if (this.match(g"?=", 2)) { *ttype = TokenType.TERNARY_ASSIGN; -> 2; };
-                if (this.match(g"!?", 2)) { *ttype = TokenType.NOT_NULL; -> 2; };
-                if (this.match(g"@=", 2)) { *ttype = TokenType.ADDRESS_ASSIGN; -> 2; };
-                if (this.match(g"``", 2)) { *ttype = TokenType.BITSLICE; -> 2; };
-                if (this.match(g"~$", 2)) { *ttype = TokenType.CODIFY; -> 2; };
-                if (this.match(g"#\"", 2)) { *ttype = TokenType.DITTO; -> 2; };
-                if (this.match(g"d{", 2)) { *ttype = TokenType.DICT_LITERAL; -> 2; };
-                if (this.match(g"`!", 2)) { *ttype = TokenType.BITNOT_OP; -> 2; };
-                if (this.match(g"`&", 2)) { *ttype = TokenType.BITAND_OP; -> 2; };
-                if (this.match(g"`|", 2)) { *ttype = TokenType.BITOR_OP; -> 2; };
+                case (true) {
+                switch (this.match(g"==", 2))
+                {
+                    case (true) { *ttype = TokenType.EQUAL; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"!=", 2))
+                {
+                    case (true) { *ttype = TokenType.NOT_EQUAL; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"<=", 2))
+                {
+                    case (true) { *ttype = TokenType.LESS_EQUAL; -> 2; }
+                    default {};
+                };
+                switch (this.match(g">=", 2))
+                {
+                    case (true) { *ttype = TokenType.GREATER_EQUAL; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"<<", 2))
+                {
+                    case (true) { *ttype = TokenType.BITSHIFT_LEFT; -> 2; }
+                    default {};
+                };
+                switch (this.match(g">>", 2))
+                {
+                    case (true) { *ttype = TokenType.BITSHIFT_RIGHT; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"++", 2))
+                {
+                    case (true) { *ttype = TokenType.INCREMENT; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"--", 2))
+                {
+                    case (true) { *ttype = TokenType.DECREMENT; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"+=", 2))
+                {
+                    case (true) { *ttype = TokenType.PLUS_ASSIGN; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"-=", 2))
+                {
+                    case (true) { *ttype = TokenType.MINUS_ASSIGN; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"*=", 2))
+                {
+                    case (true) { *ttype = TokenType.MULTIPLY_ASSIGN; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"/=", 2))
+                {
+                    case (true) { *ttype = TokenType.DIVIDE_ASSIGN; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"%=", 2))
+                {
+                    case (true) { *ttype = TokenType.MODULO_ASSIGN; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"^=", 2))
+                {
+                    case (true) { *ttype = TokenType.EXPONENT_ASSIGN; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"&=", 2))
+                {
+                    case (true) { *ttype = TokenType.AND_ASSIGN; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"|=", 2))
+                {
+                    case (true) { *ttype = TokenType.OR_ASSIGN; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"!&", 2))
+                {
+                    case (true) { *ttype = TokenType.NAND_OP; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"!|", 2))
+                {
+                    case (true) { *ttype = TokenType.NOR_OP; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"^|", 2))
+                {
+                    case (true) { *ttype = TokenType.XOR_OP; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"!!", 2))
+                {
+                    case (true) { *ttype = TokenType.NO_MANGLE; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"??", 2))
+                {
+                    case (true) { *ttype = TokenType.NULL_COALESCE; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"->", 2))
+                {
+                    case (true) { *ttype = TokenType.RETURN_ARROW; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"<-", 2))
+                {
+                    case (true) { *ttype = TokenType.CHAIN_ARROW; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"<~", 2))
+                {
+                    case (true) { *ttype = TokenType.RECURSE_ARROW; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"..", 2))
+                {
+                    case (true) { *ttype = TokenType.RANGE; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"::", 2))
+                {
+                    case (true) { *ttype = TokenType.SCOPE; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"?=", 2))
+                {
+                    case (true) { *ttype = TokenType.TERNARY_ASSIGN; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"!?", 2))
+                {
+                    case (true) { *ttype = TokenType.NOT_NULL; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"@=", 2))
+                {
+                    case (true) { *ttype = TokenType.ADDRESS_ASSIGN; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"``", 2))
+                {
+                    case (true) { *ttype = TokenType.BITSLICE; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"~$", 2))
+                {
+                    case (true) { *ttype = TokenType.CODIFY; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"#\"", 2))
+                {
+                    case (true) { *ttype = TokenType.DITTO; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"d{", 2))
+                {
+                    case (true) { *ttype = TokenType.DICT_LITERAL; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"`!", 2))
+                {
+                    case (true) { *ttype = TokenType.BITNOT_OP; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"`&", 2))
+                {
+                    case (true) { *ttype = TokenType.BITAND_OP; -> 2; }
+                    default {};
+                };
+                switch (this.match(g"`|", 2))
+                {
+                    case (true) { *ttype = TokenType.BITOR_OP; -> 2; }
+                    default {};
+                };
+            }
+                default {};
             };
             // single character tokens
-            if (this.match(g"+", 1)) { *ttype = TokenType.PLUS; -> 1; };
-            if (this.match(g"-", 1)) { *ttype = TokenType.MINUS; -> 1; };
-            if (this.match(g"*", 1)) { *ttype = TokenType.MULTIPLY; -> 1; };
-            if (this.match(g"/", 1)) { *ttype = TokenType.DIVIDE; -> 1; };
-            if (this.match(g"%", 1)) { *ttype = TokenType.MODULO; -> 1; };
-            if (this.match(g"^", 1)) { *ttype = TokenType.EXPONENT; -> 1; };
-            if (this.match(g"<", 1)) { *ttype = TokenType.LESS_THAN; -> 1; };
-            if (this.match(g">", 1)) { *ttype = TokenType.GREATER_THAN; -> 1; };
-            if (this.match(g"&", 1)) { *ttype = TokenType.LOGICAL_AND; -> 1; };
-            if (this.match(g"|", 1)) { *ttype = TokenType.LOGICAL_OR; -> 1; };
-            if (this.match(g"!", 1)) { *ttype = TokenType.NOT; -> 1; };
-            if (this.match(g"@", 1)) { *ttype = TokenType.ADDRESS_OF; -> 1; };
-            if (this.match(g"=", 1)) { *ttype = TokenType.ASSIGN; -> 1; };
-            if (this.match(g"?", 1)) { *ttype = TokenType.QUESTION; -> 1; };
-            if (this.match(g":", 1)) { *ttype = TokenType.COLON; -> 1; };
-            if (this.match(g"(", 1)) { *ttype = TokenType.LEFT_PAREN; -> 1; };
-            if (this.match(g")", 1)) { *ttype = TokenType.RIGHT_PAREN; -> 1; };
-            if (this.match(g"[", 1)) { *ttype = TokenType.LEFT_BRACKET; -> 1; };
-            if (this.match(g"]", 1)) { *ttype = TokenType.RIGHT_BRACKET; -> 1; };
-            if (this.match(g"{", 1)) { *ttype = TokenType.LEFT_BRACE; -> 1; };
-            if (this.match(g"}", 1)) { *ttype = TokenType.RIGHT_BRACE; -> 1; };
-            if (this.match(g";", 1)) { *ttype = TokenType.SEMICOLON; -> 1; };
-            if (this.match(g",", 1)) { *ttype = TokenType.COMMA; -> 1; };
-            if (this.match(g".", 1)) { *ttype = TokenType.DOT; -> 1; };
-            if (this.match(g"~", 1)) { *ttype = TokenType.TIE; -> 1; };
-            if (this.match(g"$", 1)) { *ttype = TokenType.STRINGIFY; -> 1; };
-            if (this.match(g"\\", 1)) { *ttype = TokenType.BACKSLASH; -> 1; };
-            if (this.match(g"`", 1)) { *ttype = TokenType.BACKTICK; -> 1; };
-            if (this.match(g"#", 1)) { *ttype = TokenType.TAG; -> 1; };
+            switch (this.match(g"+", 1))
+            {
+                case (true) { *ttype = TokenType.PLUS; -> 1; }
+                default {};
+            };
+            switch (this.match(g"-", 1))
+            {
+                case (true) { *ttype = TokenType.MINUS; -> 1; }
+                default {};
+            };
+            switch (this.match(g"*", 1))
+            {
+                case (true) { *ttype = TokenType.MULTIPLY; -> 1; }
+                default {};
+            };
+            switch (this.match(g"/", 1))
+            {
+                case (true) { *ttype = TokenType.DIVIDE; -> 1; }
+                default {};
+            };
+            switch (this.match(g"%", 1))
+            {
+                case (true) { *ttype = TokenType.MODULO; -> 1; }
+                default {};
+            };
+            switch (this.match(g"^", 1))
+            {
+                case (true) { *ttype = TokenType.EXPONENT; -> 1; }
+                default {};
+            };
+            switch (this.match(g"<", 1))
+            {
+                case (true) { *ttype = TokenType.LESS_THAN; -> 1; }
+                default {};
+            };
+            switch (this.match(g">", 1))
+            {
+                case (true) { *ttype = TokenType.GREATER_THAN; -> 1; }
+                default {};
+            };
+            switch (this.match(g"&", 1))
+            {
+                case (true) { *ttype = TokenType.LOGICAL_AND; -> 1; }
+                default {};
+            };
+            switch (this.match(g"|", 1))
+            {
+                case (true) { *ttype = TokenType.LOGICAL_OR; -> 1; }
+                default {};
+            };
+            switch (this.match(g"!", 1))
+            {
+                case (true) { *ttype = TokenType.NOT; -> 1; }
+                default {};
+            };
+            switch (this.match(g"@", 1))
+            {
+                case (true) { *ttype = TokenType.ADDRESS_OF; -> 1; }
+                default {};
+            };
+            switch (this.match(g"=", 1))
+            {
+                case (true) { *ttype = TokenType.ASSIGN; -> 1; }
+                default {};
+            };
+            switch (this.match(g"?", 1))
+            {
+                case (true) { *ttype = TokenType.QUESTION; -> 1; }
+                default {};
+            };
+            switch (this.match(g":", 1))
+            {
+                case (true) { *ttype = TokenType.COLON; -> 1; }
+                default {};
+            };
+            switch (this.match(g"(", 1))
+            {
+                case (true) { *ttype = TokenType.LEFT_PAREN; -> 1; }
+                default {};
+            };
+            switch (this.match(g")", 1))
+            {
+                case (true) { *ttype = TokenType.RIGHT_PAREN; -> 1; }
+                default {};
+            };
+            switch (this.match(g"[", 1))
+            {
+                case (true) { *ttype = TokenType.LEFT_BRACKET; -> 1; }
+                default {};
+            };
+            switch (this.match(g"]", 1))
+            {
+                case (true) { *ttype = TokenType.RIGHT_BRACKET; -> 1; }
+                default {};
+            };
+            switch (this.match(g"{", 1))
+            {
+                case (true) { *ttype = TokenType.LEFT_BRACE; -> 1; }
+                default {};
+            };
+            switch (this.match(g"}", 1))
+            {
+                case (true) { *ttype = TokenType.RIGHT_BRACE; -> 1; }
+                default {};
+            };
+            switch (this.match(g";", 1))
+            {
+                case (true) { *ttype = TokenType.SEMICOLON; -> 1; }
+                default {};
+            };
+            switch (this.match(g",", 1))
+            {
+                case (true) { *ttype = TokenType.COMMA; -> 1; }
+                default {};
+            };
+            switch (this.match(g".", 1))
+            {
+                case (true) { *ttype = TokenType.DOT; -> 1; }
+                default {};
+            };
+            switch (this.match(g"~", 1))
+            {
+                case (true) { *ttype = TokenType.TIE; -> 1; }
+                default {};
+            };
+            switch (this.match(g"$", 1))
+            {
+                case (true) { *ttype = TokenType.STRINGIFY; -> 1; }
+                default {};
+            };
+            switch (this.match(g"\\", 1))
+            {
+                case (true) { *ttype = TokenType.BACKSLASH; -> 1; }
+                default {};
+            };
+            switch (this.match(g"`", 1))
+            {
+                case (true) { *ttype = TokenType.BACKTICK; -> 1; }
+                default {};
+            };
+            switch (this.match(g"#", 1))
+            {
+                case (true) { *ttype = TokenType.TAG; -> 1; }
+                default {};
+            };
                 -> 0;
             };
 
@@ -1588,67 +2650,96 @@ namespace flux
 
             // Tokenizes the whole source. Returns false on error, in which case
             // err_code / err_line / err_col describe it.
-            def tokenize() -> bool
+            tokenize() -> bool
             {
                 int c, ln, col, tt, vb, vl, cnt, i, oplen, optype, cp, extra;
                 int saved_pos, saved_line, saved_col;
 
                 while (this.position < this.length)
                 {
-                    if (this.err_code != 0) { -> false; };
+                    switch (this.err_code != 0)
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
 
-                    if (this.skip_whitespace()) { continue; };
+                    switch (this.skip_whitespace())
+                    {
+                        case (true) { continue; }
+                        default {};
+                    };
 
                     c = this.cur();
-                    if (c == -1) { break; };
+                    switch (c == -1)
+                    {
+                        case (true) { break; }
+                        default {};
+                    };
                     ln = this.line;
                     col = this.column;
 
                     // i-string. Its token position is taken after the leading i.
-                    if (c == 'i' & this.peek(1) == '"')
+                    switch (c == 'i' & this.peek(1) == '"')
                     {
+                        case (true) {
                         this.adv(1);
                         this.read_i_string();
                         continue;
+                    }
+                        default {};
                     };
 
                     // f-string
-                    if (c == 'f' & this.peek(1) == '"')
+                    switch (c == 'f' & this.peek(1) == '"')
                     {
+                        case (true) {
                         this.adv(1);
                         vb = this.vbegin();
                         this.vput('f');
                         this.vput('"');
-                        if (!this.read_f_string_body()) { -> false; };
+                        switch (!this.read_f_string_body())
+                        {
+                            case (true) { -> false; }
+                            default {};
+                        };
                         this.vput('"');
                         vl = this.vend(vb);
                         this.emit(TokenType.F_STRING, ln, col, vb, vl, 0);
                         continue;
+                    }
+                        default {};
                     };
 
                     // g-string
-                    if (c == 'g' & this.peek(1) == '"')
+                    switch (c == 'g' & this.peek(1) == '"')
                     {
+                        case (true) {
                         this.adv(1);
                         vb = this.vbegin();
                         this.read_string('"');
                         vl = this.vend(vb);
                         this.emit(TokenType.G_STRING, ln, col, vb, vl, 0);
                         continue;
+                    }
+                        default {};
                     };
 
                     // string and char literals
-                    if (c == '"')
+                    switch (c == '"')
                     {
+                        case (true) {
                         vb = this.vbegin();
                         this.read_string('"');
                         vl = this.vend(vb);
                         this.emit(TokenType.STRING_LITERAL, ln, col, vb, vl, 0);
                         continue;
+                    }
+                        default {};
                     };
 
-                    if (c == 39)
+                    switch (c == 39)
                     {
+                        case (true) {
                         vb = this.vbegin();
                         this.read_string(39);
                         vl = this.vend(vb);
@@ -1658,64 +2749,90 @@ namespace flux
                         i = 0;
                         while (i < vl)
                         {
-                            if (!is_continuation((int)this.arena[vb + i])) { cnt++; };
+                            switch (!is_continuation((int)this.arena[vb + i]))
+                            {
+                                case (true) { cnt++; }
+                                default {};
+                            };
                             i++;
                         };
-                        if (cnt == 1)
+                        switch (cnt)
                         {
-                            this.emit(TokenType.CHAR, ln, col, vb, vl, 0);
-                        }
-                        else
-                        {
-                            this.emit(TokenType.STRING_LITERAL, ln, col, vb, vl, 0);
+                            case (1)
+                            {
+                                this.emit(TokenType.CHAR, ln, col, vb, vl, 0);
+                            }
+                            default
+                            {
+                                this.emit(TokenType.STRING_LITERAL, ln, col, vb, vl, 0);
+                            };
                         };
                         continue;
+                    }
+                        default {};
                     };
 
                     // asm"..." inline assembly
-                    if (c == 'a' & this.peek(1) == 's' & this.peek(2) == 'm' & this.peek(3) == '"')
+                    switch (c == 'a' & this.peek(1) == 's' & this.peek(2) == 'm' & this.peek(3) == '"')
                     {
+                        case (true) {
                         this.adv(3);
                         this.emit_text(TokenType.ASM, ln, col, "asm", 3);
                         this.read_asm_quoted();
                         continue;
+                    }
+                        default {};
                     };
 
                     // dict literal opener d{
-                    if (c == 'd' & this.peek(1) == '{')
+                    switch (c == 'd' & this.peek(1) == '{')
                     {
+                        case (true) {
                         this.adv(2);
                         this.emit_text(TokenType.DICT_LITERAL, ln, col, "d{", 2);
                         continue;
+                    }
+                        default {};
                     };
 
                     // numbers
-                    if (is_digit(c))
+                    switch (is_digit(c))
                     {
+                        case (true) {
                         this.read_number();
                         continue;
+                    }
+                        default {};
                     };
 
                     // identifiers and keywords
-                    if (is_alpha(c) | c == '_')
+                    switch (is_alpha(c) | c == '_')
                     {
+                        case (true) {
                         tt = this.read_identifier();
 
-                        if (tt == TokenType.ASM)
+                        switch (tt == TokenType.ASM)
                         {
+                            case (true) {
                             while (this.cur() == 32 | this.cur() == 9 | this.cur() == 13 | this.cur() == 10)
                             {
                                 this.adv(1);
                             };
-                            if (this.cur() == '{')
+                            switch (this.cur() == '{')
                             {
+                                case (true) {
                                 this.read_brace_block(TokenType.ASM_BLOCK);
                                 continue;
+                            }
+                                default {};
                             };
+                        }
+                            default {};
                         };
 
-                        if (tt == TokenType.FLUXVM)
+                        switch (tt == TokenType.FLUXVM)
                         {
+                            case (true) {
                             saved_pos = this.position;
                             saved_line = this.line;
                             saved_col = this.column;
@@ -1723,44 +2840,70 @@ namespace flux
                             {
                                 this.adv(1);
                             };
-                            if (this.cur() == '{')
+                            switch (this.cur() == '{')
                             {
+                                case (true) {
                                 this.read_brace_block(TokenType.FLUXVM_BLOCK);
                                 continue;
                             }
-                            else
-                            {
+                                default {
                                 this.position = saved_pos;
                                 this.line = saved_line;
                                 this.column = saved_col;
                             };
+                            };
+                        }
+                            default {};
                         };
                         continue;
+                    }
+                        default {};
                     };
 
                     // operators and delimiters
                     oplen = this.match_op(@optype);
-                    if (oplen > 0)
+                    switch (oplen > 0)
                     {
+                        case (true) {
                         this.emit_text(optype, ln, col, this.src + this.position, oplen);
                         this.adv(oplen);
                         continue;
+                    }
+                        default {};
                     };
 
                     // unknown character. Non-ASCII outside strings is recorded and skipped.
-                    if (c >= 128)
+                    switch (c >= 128)
                     {
+                        case (true) {
                         extra = 0;
                         cp = c;
-                        if (c >= 0xF0) { cp = c & 0x07; extra = 3; }
-                        elif (c >= 0xE0) { cp = c & 0x0F; extra = 2; }
-                        elif (c >= 0xC0) { cp = c & 0x1F; extra = 1; };
+                        switch (c >= 0xF0)
+                        {
+                            case (true) { cp = c & 0x07; extra = 3; }
+                            default {
+                                switch (c >= 0xE0)
+                                {
+                                    case (true) { cp = c & 0x0F; extra = 2; }
+                                    default {
+                                        switch (c >= 0xC0)
+                                        {
+                                            case (true) { cp = c & 0x1F; extra = 1; }
+                                            default {};
+                                        };
+                                    };
+                                };
+                            };
+                        };
 
                         this.warn_count++;
-                        if (this.warn_count == 1)
+                        switch (this.warn_count == 1)
                         {
+                            case (true) {
                             this.warn_line = ln;
                             this.warn_col = col;
+                        }
+                            default {};
                         };
 
                         this.adv(1);
@@ -1770,11 +2913,15 @@ namespace flux
                             this.adv(1);
                             extra--;
                         };
-                        if (this.warn_count == 1) { this.warn_cp = cp; };
+                        switch (this.warn_count == 1)
+                        {
+                            case (true) { this.warn_cp = cp; }
+                            default {};
+                        };
                     }
-                    else
-                    {
+                        default {
                         this.adv(1);
+                    };
                     };
                 };
 
