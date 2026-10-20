@@ -1,5 +1,5 @@
 // File Analyzer
-#import "standard.fx", "ffifio.fx";
+#import <standard.fx>, <ffifio.fx>;
 
 def count_lines(byte* buffer, int size) -> int
 {

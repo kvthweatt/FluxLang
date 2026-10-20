@@ -15,7 +15,7 @@
 //  11. Different salts produce different PRKs
 //  12. Throughput benchmark: N iterations of full HKDF on 32-byte IKM
 
-#import "standard.fx", "cryptography.fx", "timing.fx", "datautils.fx";
+#import <standard.fx>, <cryptography.fx>, <timing.fx>, <datautils.fx>;
 
 using standard::io::console,
       standard::crypto::KDF::HKDF,

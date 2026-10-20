@@ -1,5 +1,5 @@
-#import "standard.fx";
-#import "dotenv.fx";
+#import <standard.fx>;
+#import <dotenv.fx>;
 
 extern {
     def !!getenv(byte* name) -> byte*;

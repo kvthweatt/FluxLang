@@ -1,6 +1,6 @@
 // Base64 Encoding/Decoding for Flux
 // RFC 4648 compliant
-#import "standard.fx";
+#import <standard.fx>;
 
 namespace encoding
 {

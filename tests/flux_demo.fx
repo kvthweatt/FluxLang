@@ -4,7 +4,7 @@
 //
 // Build: fc flux_demo.fx -o flux_demo.exe
 
-#import "standard.fx", "math.fx", "windows.fx", "timing.fx", "gltextanim.fx";
+#import <standard.fx>, <math.fx>, <windows.fx>, <timing.fx>, "gltextanim.fx";
 
 using standard::math,
       standard::system::windows,

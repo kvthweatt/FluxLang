@@ -1,8 +1,8 @@
 // TCP Echo Server
 // Listens on port 8080 and echoes back any messages received
 
-#import "standard.fx";
-#import "socket_object_raw.fx";
+#import <standard.fx>;
+#import <socket_object_raw.fx>;
 
 using standard::io::console,
       standard::strings;

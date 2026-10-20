@@ -471,6 +471,8 @@ namespace flux
             TypeSpec* cur_ret;  // its return type
             int typed, untyped;
             bool raw;           // next type_of call skips __expr promotion
+            int ov_line;        // line of the call being resolved, 0 when every declaration is visible
+            int fs_line;        // line of the enclosing f-string, whose parts carry no line of their own
             bool null_term;     // config null_terminate_strings
             Checker* ck;        // receives diagnostics, null when none are wanted
             int* convs;         // count per Conv value
@@ -491,6 +493,8 @@ namespace flux
                 this.typed = 0;
                 this.untyped = 0;
                 this.raw = false;
+                this.ov_line = 0;
+                this.fs_line = 0;
                 this.null_term = false;
                 this.ck = (Checker*)0;
                 this.convs = (int*)fmalloc((u64)32 * (u64)(sizeof(int) / 8));
@@ -1466,6 +1470,53 @@ namespace flux
 
             // Overload list for name through the namespace walk
             // (the same order as st_resolve_with_namespaces)
+            // A function the base compiler has not registered yet at the call site, because it is
+            // declared on a later line, is not a candidate. Null when no candidate remains
+            vis_overloads(PtrVec* r) -> PtrVec*
+            {
+                int i;
+                int hidden;
+                Overload* o;
+                PtrVec* v;
+                switch (r == (PtrVec*)0 | this.ov_line <= 0)
+                {
+                    case (true) { -> r; }
+                    default {};
+                };
+                while (i < r.len)
+                {
+                    o = (Overload*)r.items[i];
+                    switch (o.func != (Node*)0)
+                    {
+                        case (true) {
+                        switch (o.func.line > this.ov_line) { case (true) { hidden++; } default {}; };
+                    }
+                        default {};
+                    };
+                    i++;
+                };
+                switch (hidden == 0)
+                {
+                    case (true) { -> r; }
+                    default {};
+                };
+                switch (hidden == r.len)
+                {
+                    case (true) { -> (PtrVec*)0; }
+                    default {};
+                };
+                v = pv_new();
+                pv_push(this.st.overload_lists, (void*)v);
+                i = 0;
+                while (i < r.len)
+                {
+                    o = (Overload*)r.items[i];
+                    switch (o.func == (Node*)0 | o.func.line <= this.ov_line) { case (true) { pv_push(v, (void*)o); } default {}; };
+                    i++;
+                };
+                -> v;
+            };
+
             ov_resolve(byte* name) -> PtrVec*
             {
                 PtrVec* r;
@@ -1480,7 +1531,7 @@ namespace flux
                 {
                     case (true) {
                     m = colons_to_underscores(name);
-                    r = st_overloads_of(this.st, m);
+                    r = this.vis_overloads(st_overloads_of(this.st, m));
                     ffree(m);
                     switch (r != (PtrVec*)0)
                     {
@@ -1491,7 +1542,7 @@ namespace flux
                     default {};
                 };
 
-                r = st_overloads_of(this.st, name);
+                r = this.vis_overloads(st_overloads_of(this.st, name));
                 switch (r != (PtrVec*)0)
                 {
                     case (true) { -> r; }
@@ -1502,7 +1553,7 @@ namespace flux
                 {
                     case (true) {
                     m = mangle_namespace_name(cur, name);
-                    r = st_overloads_of(this.st, m);
+                    r = this.vis_overloads(st_overloads_of(this.st, m));
                     ffree(m);
                     switch (r != (PtrVec*)0)
                     {
@@ -1517,7 +1568,7 @@ namespace flux
                         more = has_scope_sep(walk);
                         p = namespace_parent(walk);
                         m = mangle_namespace_name(p, name);
-                        r = st_overloads_of(this.st, m);
+                        r = this.vis_overloads(st_overloads_of(this.st, m));
                         ffree(m);
                         ffree(walk);
                         walk = p;
@@ -1538,7 +1589,7 @@ namespace flux
                 while (i < this.st.using_ns.len)
                 {
                     m = mangle_namespace_name((byte*)this.st.using_ns.items[i], name);
-                    r = st_overloads_of(this.st, m);
+                    r = this.vis_overloads(st_overloads_of(this.st, m));
                     ffree(m);
                     switch (r != (PtrVec*)0)
                     {
@@ -1552,7 +1603,7 @@ namespace flux
                 while (i < this.st.registered_ns.len)
                 {
                     m = mangle_namespace_name((byte*)this.st.registered_ns.items[i], name);
-                    r = st_overloads_of(this.st, m);
+                    r = this.vis_overloads(st_overloads_of(this.st, m));
                     ffree(m);
                     switch (r != (PtrVec*)0)
                     {
@@ -1568,11 +1619,47 @@ namespace flux
             // casts, members, elements). Literals and arithmetic results carry only
             // a DataType, calls carry nothing, so signedness, char and endianness
             // are not compared for them.
+            // A member access of an enum type name, whose value fcodegen builds from a constant
+            is_enum_member(Node* an) -> bool
+            {
+                FXC_SYMENTRY* e;
+                switch (an.a == (Node*)0)
+                {
+                    case (true) { -> false; }
+                    default {};
+                };
+                switch (an.a.kind != NodeKind.IDENTIFIER)
+                {
+                    case (true) { -> false; }
+                    default {};
+                };
+                switch (an.a.text == (byte*)0)
+                {
+                    case (true) { -> false; }
+                    default {};
+                };
+                e = st_lookup_type(this.st, an.a.text, (byte*)0);
+                switch (e == (FXC_SYMENTRY*)0)
+                {
+                    case (true) { -> false; }
+                    default {};
+                };
+                -> e.kind_id == SymbolKind.ENUM;
+            };
+
+            // Whether the value fcodegen produces for the argument carries a type spec.
+            // A struct or object field read does not, so overloads are picked by the
+            // IR type alone.
             has_spec(Node* an) -> bool
             {
                 int k = an.kind;
+                switch (k == NodeKind.MEMBER_ACCESS)
+                {
+                    case (true) { -> this.is_enum_member(an); }
+                    default {};
+                };
                 -> k == NodeKind.IDENTIFIER | k == NodeKind.CAST_EXPRESSION |
-                       k == NodeKind.TYPE_CONVERT_EXPRESSION | k == NodeKind.MEMBER_ACCESS |
+                       k == NodeKind.TYPE_CONVERT_EXPRESSION |
                        k == NodeKind.ARRAY_ACCESS | k == NodeKind.STRUCT_FIELD_ACCESS;
             };
 
@@ -1614,6 +1701,23 @@ namespace flux
                 -> an.ety;
             };
 
+            // True for a built-in arithmetic or bitwise binary operator whose result fcodegen
+            // stamps with a DataType (comparisons, NOR and NAND and overloaded operators do not)
+            dt_spec_op(Node* an) -> bool
+            {
+                int op = an.op;
+                switch (this.binary_overload(op, an.a.ety, an.b.ety) != (Overload*)0)
+                {
+                    case (true) { -> false; }
+                    default {};
+                };
+                -> op == Operator.ADD | op == Operator.SUB | op == Operator.MUL | op == Operator.DIV |
+                       op == Operator.MOD | op == Operator.POWER | op == Operator.BITAND | op == Operator.BITOR |
+                       op == Operator.BITXOR | op == Operator.AND | op == Operator.OR | op == Operator.XOR |
+                       op == Operator.BITSHIFT_LEFT | op == Operator.BITSHIFT_RIGHT | op == Operator.BITNAND |
+                       op == Operator.BITNOR | op == Operator.BITXNOR;
+            };
+
             exact_param(TypeSpec* pt, Node* an) -> bool
             {
                 TypeSpec* at = this.arg_type(an);
@@ -1637,6 +1741,27 @@ namespace flux
                 switch (this.kind_of(at) != TyKind.INT)
                 {
                     case (true) { -> true; }
+                    default {};
+                };
+                switch (an.kind == NodeKind.BINARY_OP)
+                {
+                    case (true) {
+                    switch (this.dt_spec_op(an))
+                    {
+                        case (true) {
+                        // Arithmetic results carry only a DataType in fcodegen, so the
+                        // char check rejects a CHAR parameter and nothing else is compared
+                        rp = this.resolve_alias(pt);
+                        switch (rp == (TypeSpec*)0)
+                        {
+                            case (true) { -> true; }
+                            default {};
+                        };
+                        -> rp.base_type != DataType.CHAR;
+                    }
+                        default {};
+                    };
+                }
                     default {};
                 };
                 switch (!this.has_spec(an))
@@ -1768,6 +1893,12 @@ namespace flux
                         case (true) { -> o; }
                         default {};
                     };
+                };
+                // resolve_function: a lone overload is taken whatever the argument count
+                switch (first == (Overload*)0 & list.len == 1)
+                {
+                    case (true) { -> (Overload*)list.items[0]; }
+                    default {};
                 };
                 -> first;
             };
@@ -2844,7 +2975,12 @@ namespace flux
                 }
                     default {};
                 };
+                // Method bodies are generated after every function is declared, free functions in order
+                switch (this.cur_obj != (byte*)0) { case (true) { this.ov_line = 0; } default {
+                    switch (this.fs_line > 0) { case (true) { this.ov_line = this.fs_line; } default { this.ov_line = n.line; }; };
+                }; };
                 list = this.ov_resolve(n.text);
+                this.ov_line = 0;
                 this.call_contracts(n, list);
                 o = this.pick_overload(list, n.l0);
                 switch (o != (Overload*)0)
@@ -3270,7 +3406,10 @@ namespace flux
                 switch (k == NodeKind.F_STRING_LITERAL)
                 {
                     case (true) {
+                    int sfl = this.fs_line;
+                    this.fs_line = n.line;
                     this.type_list(n, 0);
+                    this.fs_line = sfl;
                     -> this.byte_ptr();
                 }
                     default {};
@@ -4143,9 +4282,18 @@ namespace flux
                     case (true) { -> ts; }
                     default {};
                 };
+                // A first dimension without a size expression (T[]) leaves the size open, as kind_of reads it
                 switch (ts.array_dims != (NodeVec*)0)
                 {
-                    case (true) { -> ts; }
+                    case (true) {
+                    switch (ts.array_dims.len > 0)
+                    {
+                        case (true) {
+                        switch (ts.array_dims.items[0] != (Node*)0) { case (true) { -> ts; } default {}; };
+                    }
+                        default {};
+                    };
+                }
                     default {};
                 };
                 switch (init.kind)

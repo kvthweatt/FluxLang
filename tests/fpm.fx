@@ -15,7 +15,7 @@
 //   fpm removesource <url>
 //   fpm sources
 
-#import "standard.fx", "socket_object_raw.fx", "net_windows.fx", "json.fx";
+#import <standard.fx>, <socket_object_raw.fx>, <net_windows.fx>, <json.fx>;
 
 using standard::io::console,
       standard::io::file,

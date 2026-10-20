@@ -1,6 +1,6 @@
 // Big Integer Library for Flux - Foundation
 // Phase 1: Structure, initialization, and printing
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 

@@ -7,7 +7,8 @@
 using standard::io::console,
       standard::math,
       standard::strings,
-      standard::system::windows;
+      standard::system::windows,
+      FluxIDE;
 
 // ============================================================================
 // SUBLIME TEXT THEME COLORS  (COLORREF = 0x00BBGGRR)
@@ -53,7 +54,6 @@ UINT  ETO_OPAQUE    = 0x0002;
 DWORD SRCCOPY       = 0x00CC0020;
 int   TRANSPARENT_MODE = 1,
       OPAQUE_MODE      = 2;
-int   LINENO_WIDTH  = 52;
 
 // IDE-specific menu IDs
 int IDM_LANG_GUIDE = 3002;
@@ -302,10 +302,15 @@ def recreate_font(HWND hwnd) -> void
     TEXTMETRIC tm;
 
     DeleteObject((HDC)g_font);
-    g_font = CreateFontA(
-        g_font_size, 0, 0, 0, FW_NORMAL, 0, 0, 0,
+    g_font = CreateFontA
+    (
+        g_font_size, 0, 0, 0,
+        FW_NORMAL,   0, 0, 0,
         ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, (LPCSTR)font_face);
+        DEFAULT_QUALITY,
+        FIXED_PITCH | FF_MODERN,
+        (LPCSTR)font_face
+    );
 
     hdc_tmp = GetDC(hwnd);
     SelectObject(hdc_tmp, g_font);
@@ -324,16 +329,20 @@ def scroll_to_cursor(HWND hwnd) -> void
 {
     RECT rc;
     int  cur_line, vis_lines, cur_col, vis_cols;
+
     if (g_char_h == 0 | g_char_w == 0) { return; };
     GetClientRect(hwnd, @rc);
+    
     vis_lines = (rc.bottom - rc.top) / g_char_h;
     cur_line  = li_line_of(@g_li, g_cursor);
-    if (cur_line < g_scroll_line)                    { g_scroll_line = cur_line; };
-    if (cur_line >= g_scroll_line + vis_lines)       { g_scroll_line = cur_line - vis_lines + 1; };
+    if (cur_line < g_scroll_line) g_scroll_line = cur_line;
+    if (cur_line >= g_scroll_line + vis_lines) g_scroll_line = cur_line - vis_lines + 1;
+    
     cur_col  = li_col_of(@g_li, g_cursor);
     vis_cols = (rc.right - rc.left - LINENO_WIDTH) / g_char_w;
-    if (cur_col < g_scroll_col)                      { g_scroll_col = cur_col; };
-    if (cur_col >= g_scroll_col + vis_cols)          { g_scroll_col = cur_col - vis_cols + 1; };
+    if (cur_col < g_scroll_col) g_scroll_col = cur_col;
+    if (cur_col >= g_scroll_col + vis_cols) g_scroll_col = cur_col - vis_cols + 1;
+    
     clamp_scroll(hwnd);
     update_vscroll(hwnd);
     return;

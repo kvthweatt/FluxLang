@@ -25,7 +25,7 @@
 #ifndef HOTPATCH_PROTOCOL
 #def HOTPATCH_PROTOCOL 1;
 
-#import "cryptography.fx";
+#import <cryptography.fx>;
 
 using standard::crypto::hashing::SHA256;
 

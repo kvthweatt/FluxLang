@@ -1,4 +1,4 @@
-#import "standard.fx", "redmath.fx", "redwindows.fx", "vulkan.fx";
+#import <standard.fx>, "redmath.fx", "redwindows.fx", <vulkan.fx>;
 
 using standard::io::console;
 using standard::system::windows;

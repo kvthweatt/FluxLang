@@ -1,5 +1,5 @@
 // Example: Using the File I/O Library
-#import "standard.fx", "ffifio.fx";
+#import <standard.fx>, <ffifio.fx>;
 
 def main() -> int
 {

@@ -7,7 +7,7 @@
  - R key toggles bars / waveform mode
 ///
 
-#import "standard.fx", "math.fx", "windows.fx", "opengl.fx", "threading.fx", "fourier.fx", "wasapi.fx";
+#import <standard.fx>, <math.fx>, <windows.fx>, <opengl.fx>, <threading.fx>, <fourier.fx>, <wasapi.fx>;
 
 using standard::system::windows,
       standard::math,

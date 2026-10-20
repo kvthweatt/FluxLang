@@ -1,6 +1,6 @@
 // MD5 Implementation in Flux
 // Based on RFC 1321 specification
-#import "standard.fx", "cryptography.fx";
+#import <standard.fx>, <cryptography.fx>;
 
 using standard::io::console,
       standard::crypto::hashing::MD5;

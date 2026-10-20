@@ -1,4 +1,4 @@
 // Flux Compiler Version Information
-FLUX_COMPILER_VERSION      = 2.0.0;
+FLUX_COMPILER_VERSION      = 2.0.7;
 FLUX_VERSION_NAME          = "Dangling Ditto";
 FLUX_COMPILER_RELEASE_DATE = 20261012; // YYYYMMDD

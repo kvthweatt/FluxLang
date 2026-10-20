@@ -532,7 +532,7 @@ namespace standard
         
         // Socket options
                          SO_REUSEADDR = 0x0004,
-                         SO_KEEPALIVE = 0x0008.
+                         SO_KEEPALIVE = 0x0008,
                          SO_BROADCAST = 0x0020,
                          SO_RCVBUF = 0x1002,
                          SO_SNDBUF = 0x1001,

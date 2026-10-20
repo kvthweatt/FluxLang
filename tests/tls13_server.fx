@@ -7,9 +7,9 @@
 //
 // Run this before tls13_client.fx.
 
-#import "standard.fx";
-#import "net_windows.fx";
-#import "tls.fx";
+#import <standard.fx>;
+#import <net_windows.fx>;
+#import <tls.fx>;
 
 using standard::io::console,
       standard::net,

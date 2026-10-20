@@ -1,4 +1,4 @@
-#import "standard.fx";
+#import <standard.fx>;
 #import "redallocators.fx";
 
 def main() -> int

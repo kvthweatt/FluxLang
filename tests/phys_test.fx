@@ -1,10 +1,10 @@
 // physics_demo_canvas.fx - 2D projected physics demo using GDI Canvas
 
-#import "windows.fx";
-#import "physics.fx";
-#import "vectors.fx";
-#import "matrices.fx";
-#import "math.fx";
+#import <windows.fx>;
+#import <physics.fx>;
+#import <vectors.fx>;
+#import <matrices.fx>;
+#import <math.fx>;
 
 using standard::windows;
 using standard::physics;

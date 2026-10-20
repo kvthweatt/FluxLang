@@ -486,111 +486,108 @@ namespace flux
                         };
                     }
                         default {
-                            switch (n.kind == NodeKind.BINARY_OP)
+                        switch (n.kind)
+                        {
+                            case (NodeKind.BINARY_OP)
                             {
-                                case (true) {
-                        ls = this.type_of(n.a, locals);
-                        rs = this.type_of(n.b, locals);
-                        lw = bw(ls);
-                        rw = bw(rs);
-                        switch (lw == 0 | rw == 0)
-                        {
-                            case (true) { continue; }
-                            default {};
-                        };
-                        result_w = lw;
-                        max_w = rw;
-                        switch (rw < lw)
-                        {
-                            case (true) {
-                            result_w = rw;
-                            max_w = lw;
-                        }
-                            default {};
-                        };
-                        switch (result_w == max_w)
-                        {
-                            case (true) { continue; }
-                            default {};
-                        };
-                        // The result width is the narrower operand, so a binary operation
-                        // never widens (same as the Python: result_w <= min operand width).
-                        switch (!is_trunc)
-                        {
-                            case (true) { continue; }
-                            default {};
-                        };
-                        src_match = this.width_constrained(result_w, lts, rts);
-                        dst_match = this.width_constrained(max_w, lts, rts);
-                        switch (between)
-                        {
-                            case (true) { violated = src_match & dst_match; }
-                            default { violated = src_match | dst_match; };
-                        };
-                    }
-                                default {
-                                    switch (n.kind == NodeKind.RETURN_STATEMENT)
+                                ls = this.type_of(n.a, locals);
+                                rs = this.type_of(n.b, locals);
+                                lw = bw(ls);
+                                rw = bw(rs);
+                                switch (lw == 0 | rw == 0)
+                                {
+                                    case (true) { continue; }
+                                    default {};
+                                };
+                                result_w = lw;
+                                max_w = rw;
+                                switch (rw < lw)
+                                {
+                                    case (true) {
+                                    result_w = rw;
+                                    max_w = lw;
+                                }
+                                    default {};
+                                };
+                                switch (result_w == max_w)
+                                {
+                                    case (true) { continue; }
+                                    default {};
+                                };
+                                // The result width is the narrower operand, so a binary operation
+                                // never widens (same as the Python: result_w <= min operand width).
+                                switch (!is_trunc)
+                                {
+                                    case (true) { continue; }
+                                    default {};
+                                };
+                                src_match = this.width_constrained(result_w, lts, rts);
+                                dst_match = this.width_constrained(max_w, lts, rts);
+                                switch (between)
+                                {
+                                    case (true) { violated = src_match & dst_match; }
+                                    default { violated = src_match | dst_match; };
+                                };
+                            }
+                            case (NodeKind.RETURN_STATEMENT)
+                            {
+                                switch (n.a == (Node*)0)
+                                {
+                                    case (true) { continue; }
+                                    default {};
+                                };
+                                s = this.type_of(n.a, locals);
+                                switch (s == (TypeSpec*)0 & n.a.kind == NodeKind.BINARY_OP)
+                                {
+                                    case (true) {
+                                    ls = this.type_of(n.a.a, locals);
+                                    rs = this.type_of(n.a.b, locals);
+                                    lw = bw(ls);
+                                    rw = bw(rs);
+                                    expr_w = lw;
+                                    switch (rw > lw)
                                     {
-                                        case (true) {
-                        switch (n.a == (Node*)0)
-                        {
-                            case (true) { continue; }
-                            default {};
-                        };
-                        s = this.type_of(n.a, locals);
-                        switch (s == (TypeSpec*)0 & n.a.kind == NodeKind.BINARY_OP)
-                        {
-                            case (true) {
-                            ls = this.type_of(n.a.a, locals);
-                            rs = this.type_of(n.a.b, locals);
-                            lw = bw(ls);
-                            rw = bw(rs);
-                            expr_w = lw;
-                            switch (rw > lw)
-                            {
-                                case (true) { expr_w = rw; }
-                                default {};
-                            };
-                            switch (lw == 0 | rw == 0)
-                            {
-                                case (true) { expr_w = 0; }
-                                default {};
-                            };
-                        }
-                            default { expr_w = bw(s); };
-                        };
-                        ret_w = bw(fn.ts);
-                        switch (ret_w == 0 | expr_w == 0)
-                        {
-                            case (true) { continue; }
-                            default {};
-                        };
-                        switch (is_trunc)
-                        {
-                            case (true) { switch (expr_w <= ret_w)
+                                        case (true) { expr_w = rw; }
+                                        default {};
+                                    };
+                                    switch (lw == 0 | rw == 0)
+                                    {
+                                        case (true) { expr_w = 0; }
+                                        default {};
+                                    };
+                                }
+                                    default { expr_w = bw(s); };
+                                };
+                                ret_w = bw(fn.ts);
+                                switch (ret_w == 0 | expr_w == 0)
+                                {
+                                    case (true) { continue; }
+                                    default {};
+                                };
+                                switch (is_trunc)
+                                {
+                                    case (true) { switch (expr_w <= ret_w)
  {
      case (true) { continue; }
      default {};
  }; }
-                            default { switch (expr_w >= ret_w)
+                                    default { switch (expr_w >= ret_w)
  {
      case (true) { continue; }
      default {};
  }; };
-                        };
-                        src_match = this.width_constrained(expr_w, lts, rts);
-                        dst_match = this.width_constrained(ret_w, lts, rts);
-                        switch (between)
-                        {
-                            case (true) { violated = src_match & dst_match; }
-                            default { violated = src_match | dst_match; };
-                        };
-                    }
-                                        default {};
-                                    };
                                 };
-                            };
+                                src_match = this.width_constrained(expr_w, lts, rts);
+                                dst_match = this.width_constrained(ret_w, lts, rts);
+                                switch (between)
+                                {
+                                    case (true) { violated = src_match & dst_match; }
+                                    default { violated = src_match | dst_match; };
+                                };
+                            }
+                            default {};
                         };
+                    };
                     };
 
                     switch (violated)
@@ -896,7 +893,7 @@ namespace flux
                 };
                 int k = n.kind;
                 switch (k == NodeKind.FUNCTION_DEF_STATEMENT | k == NodeKind.STRUCT_DEF_STATEMENT |
-                    k == NodeKind.OBJECT_DEF_STATEMENT | k == NodeKind.ENUM_DEF_STATEMENT |
+                    k == NodeKind.OBJECT_DEF_STATEMENT | k == NodeKind.ENUM_DEF_STATEMENT | k == NodeKind.UNION_DEF_STATEMENT |
                     k == NodeKind.NAMESPACE_DEF_STATEMENT)
                 {
                     case (true) {

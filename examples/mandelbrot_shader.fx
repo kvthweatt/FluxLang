@@ -1,4 +1,4 @@
-#import "standard.fx", "redmath.fx", "redwindows.fx", "redopengl.fx";
+#import <standard.fx>, "redmath.fx", "redwindows.fx", "redopengl.fx";
 
 using standard::io::console;
 using standard::system::windows;

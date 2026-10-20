@@ -1,6 +1,6 @@
 // example_exceptions.fx - demonstrates exceptions.fx usage
 
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 

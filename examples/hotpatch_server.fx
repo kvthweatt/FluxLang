@@ -18,7 +18,7 @@
 // and ships them to the client.  The client receives real, already-compiled
 // machine code and executes it directly — no interpretation, no JIT.
 
-#import "standard.fx";
+#import <standard.fx>;
 #import "..\\..\\examples\\hotpatch_protocol.fx";
 #import "rednet_windows.fx";
 

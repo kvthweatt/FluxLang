@@ -7,7 +7,7 @@
 //   - Console animation
 //   - Timing with Sleep
 
-#import "standard.fx";
+#import <standard.fx>;
 #import "redconsole.fx";
 
 using standard::io::console;

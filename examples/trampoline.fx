@@ -27,7 +27,7 @@
 // work at the binary level — we're just building it from first principles
 // in a high level language.
 
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 

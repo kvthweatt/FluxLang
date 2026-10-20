@@ -1,4 +1,4 @@
-#import "standard.fx";
+#import <standard.fx>;
 
 #dir "C:\\path\\to\\your\\library";
 

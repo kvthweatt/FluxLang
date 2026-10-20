@@ -24,7 +24,7 @@
 //   fxc cube_demo.fx -o cube_demo.exe
 // ============================================================================
 
-#import "standard.fx", "math.fx", "vectors.fx", "matrices.fx", "windows.fx", "opengl.fx", "raycasting.fx";
+#import <standard.fx>, <math.fx>, <vectors.fx>, <matrices.fx>, <windows.fx>, <opengl.fx>, <raycasting.fx>;
 
 using standard::io::console,
       standard::system::windows,

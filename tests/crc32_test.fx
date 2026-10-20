@@ -1,7 +1,7 @@
 // crc32_test.fx — tests for crc32.fx
 
-#import "standard.fx";
-#import "crc32.fx";
+#import <standard.fx>;
+#import <crc32.fx>;
 
 using standard::io::console;
 

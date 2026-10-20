@@ -16,7 +16,7 @@
 //   fxc graph_3D_3_dx.fx -o graph_3D_3_dx.exe
 // ============================================================================
 
-#import "standard.fx", "math.fx", "vectors.fx", "matrices.fx", "windows.fx", "directx.fx";
+#import <standard.fx>, <math.fx>, <vectors.fx>, <matrices.fx>, <windows.fx>, <directx.fx>;
 
 using standard::io::console,
       standard::system::windows,

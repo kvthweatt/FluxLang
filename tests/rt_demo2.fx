@@ -13,7 +13,7 @@
 //   ESC - Quit
 //
 
-#import "standard.fx", "windows.fx", "opengl.fx", "threading.fx", "raytracing.fx";
+#import <standard.fx>, <windows.fx>, <opengl.fx>, <threading.fx>, <raytracing.fx>;
 
 using standard::system::windows;
 using standard::math;

@@ -322,6 +322,10 @@ def !!_start() -> void
     {
         movq %rsp, ($0)
     } : : "r"(slot) : "memory";
+    volatile asm
+    {
+        subq $$8, %rsp
+    } : : : "memory", "cc";
 #endif;
     exit(FRTStartup());
     abort();

@@ -3,10 +3,10 @@
 // Uses RK4 integration for accurate chaotic dynamics
 // Rendered via OpenGL fixed-function immediate mode on Win32
 
-#import "standard.fx";
-#import "math.fx";
-#import "windows.fx";
-#import "opengl.fx";
+#import <standard.fx>;
+#import <math.fx>;
+#import <windows.fx>;
+#import <opengl.fx>;
 
 using standard::system::windows,
       standard::math,

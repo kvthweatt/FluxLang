@@ -30,7 +30,7 @@
 //   fxc cube_stress.fx -o cube_stress.exe
 // ============================================================================
 
-#import "standard.fx", "math.fx", "vectors.fx", "matrices.fx", "windows.fx", "opengl.fx", "raycasting.fx";
+#import <standard.fx>, <math.fx>, <vectors.fx>, <matrices.fx>, <windows.fx>, <opengl.fx>, <raycasting.fx>;
 
 using standard::io::console,
       standard::system::windows,

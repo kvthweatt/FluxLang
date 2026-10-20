@@ -1,4 +1,4 @@
-#import "standard.fx", "math.fx", "windows.fx", "opengl.fx";
+#import <standard.fx>, <math.fx>, <windows.fx>, <opengl.fx>;
 
 using standard::system::windows,
       standard::math;

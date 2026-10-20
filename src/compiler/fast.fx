@@ -52,6 +52,7 @@
 #def NF_OVERRIDE 131072;
 #def NF_NO_OVERRIDE 262144;
 #def NF_TEMPLATE 524288;
+#def NF_INSTANCE 1048576;    // instantiated template function appended after the program
 
 #def TS_SIGNED 1;
 #def TS_CONST 2;

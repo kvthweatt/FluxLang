@@ -1,5 +1,5 @@
 // Number Guessing Game
-#import "standard.fx";
+#import <standard.fx>;
 
 def simple_random(int seed, int max) -> int
 {

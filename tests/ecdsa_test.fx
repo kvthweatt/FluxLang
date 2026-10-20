@@ -10,8 +10,8 @@
 //   6. bigint_modpow known-answer
 //   7. bigint_modinv known-answer + no-inverse detection
 
-#import "standard.fx";
-#import "cryptography.fx";
+#import <standard.fx>;
+#import <cryptography.fx>;
 
 using standard::io::console;
 using standard::crypto::hashing::SHA256;

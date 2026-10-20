@@ -1,6 +1,6 @@
 // Big Integer Library for Flux - Full Math Edition
 // Supports: init, print, copy, compare, add, subtract, multiply, divide, modulo, power, shift
-#import "standard.fx", "bigint.fx";
+#import <standard.fx>, <bigint.fx>;
 
 using standard::io::console;
 

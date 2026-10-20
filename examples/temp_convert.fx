@@ -1,5 +1,5 @@
 // Temperature Converter
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 

@@ -20,12 +20,12 @@
 // machine code, verifies the HMAC-SHA256 signature, and only then
 // executes it directly — no interpretation, no JIT.
 
-#import "standard.fx";
+#import <standard.fx>;
 #ifdef __WINDOWS__
-#import "net_windows.fx";
+#import <net_windows.fx>;
 #endif;
 #ifdef __LINUX__
-#import "net_linux.fx";
+#import <net_linux.fx>;
 #endif;
 #import "../../examples/hotpatch_protocol2.fx";
 

@@ -10,8 +10,8 @@
 //   - spinner helper
 //   - Screen save/restore (like old DOS programs)
 
-#import "standard.fx";
-#import "console.fx";
+#import <standard.fx>;
+#import <console.fx>;
 
 using standard::io::console;
 

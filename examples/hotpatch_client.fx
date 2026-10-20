@@ -18,7 +18,7 @@
 //   7. Call bad_compute() again - now routed through the fix
 //   8. Send ACK to server
 
-#import "standard.fx";
+#import <standard.fx>;
 #import "..\\..\\examples\\hotpatch_protocol.fx";
 #import "rednet_windows.fx";
 

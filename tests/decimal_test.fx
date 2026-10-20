@@ -1,6 +1,6 @@
 // Decimal Library for Flux - Arbitrary Precision Base-10 Floating Point
 // Supports: init, print, copy, compare, add, subtract, multiply, divide, modulo, power, sqrt, round
-#import "standard.fx", "decimal.fx";
+#import <standard.fx>, <decimal.fx>;
 
 // Decimal structure - stores arbitrary precision decimals as:
 //   value = (-1)^negative * coefficient * 10^exponent

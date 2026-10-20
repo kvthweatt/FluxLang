@@ -493,6 +493,7 @@ namespace flux
             PtrVec* named;      // identified struct types in creation order
             PtrVec* globals;    // IRGlobal*
             PtrVec* funcs;      // IRFunc*
+            bool must_tail;     // the next call is printed as musttail
             NameMap* gnames;    // global and function names in use
             NameMap* fmap;      // function name to IRFunc*
             NameMap* gmap;      // global name to IRGlobal*
@@ -527,6 +528,7 @@ namespace flux
                 this.cf = (IRFunc*)0;
                 this.cb = (IRBlock*)0;
                 this.entry_b = (IRBlock*)0;
+                this.must_tail = false;
                 this.ia = (IRValue**)fmalloc((u64)8 * (u64)((sizeof(IRValue*) + 7) / 8));
                 this.nul = this.new_type(LK.VOID);
                 this.nul.elem = this.nul;
@@ -865,6 +867,27 @@ namespace flux
                 bits = *bp;
                 this.tb.clear();
                 put_hex64(@this.tb, bits);
+                v = this.new_value(ty, this.tb.mem);
+                v.is_const = true;
+                -> v;
+            };
+
+            // Constant array literal [ty v, ty v, ...] as llvmlite prints it
+            c_array(IRType* ty, IRValue** elems, int n) -> IRValue*
+            {
+                IRValue* v;
+                int i;
+                this.tb.clear();
+                this.tb.put(91);
+                while (i < n)
+                {
+                    switch (i > 0) { case (true) { this.tb.put_str(g", \0"); } default {}; };
+                    lt_text(@this.tb, elems[i].ty);
+                    this.tb.put(32);
+                    this.tb.put_str(elems[i].text);
+                    i++;
+                };
+                this.tb.put(93);
                 v = this.new_value(ty, this.tb.mem);
                 v.is_const = true;
                 -> v;
@@ -1394,10 +1417,19 @@ namespace flux
                 int i;
                 IRType* fty = callee.ty.elem;
                 this.ib.clear();
-                switch (tail)
+                switch (this.must_tail)
                 {
-                    case (true) { this.ib.put_str(g"tail \0"); }
-                    default {};
+                    case (true) {
+                    this.ib.put_str(g"musttail \0");
+                    this.must_tail = false;
+                }
+                    default {
+                        switch (tail)
+                        {
+                            case (true) { this.ib.put_str(g"tail \0"); }
+                            default {};
+                        };
+                    };
                 };
                 this.ib.put_str(g"call \0");
                 switch (cconv != (byte*)0)
@@ -1478,6 +1510,17 @@ namespace flux
                     this.ib.put(93);
                     i++;
                 };
+                -> this.fin(ty, hint);
+            };
+
+            // va_arg <ptr type> <list>, <ty>
+            va_arg(IRValue* list, IRType* ty, byte* hint) -> IRValue*
+            {
+                this.ib.clear();
+                this.ib.put_str(g"va_arg \0");
+                this.op_text(@this.ib, list);
+                this.ib.put_str(g", \0");
+                lt_text(@this.ib, ty);
                 -> this.fin(ty, hint);
             };
 
@@ -1595,9 +1638,7 @@ namespace flux
 
             put_function(Buf* out, IRFunc* f) -> void
             {
-                int i;
-                int j;
-                int k;
+                int i, j, k;
                 IRBlock* bl;
                 IRType* ft = f.ftype;
                 switch (f.is_decl)
@@ -1688,8 +1729,7 @@ namespace flux
             // Prints the whole module into out
             emit(Buf* out) -> void
             {
-                int i;
-                int j;
+                int i, j;
                 IRType* t;
                 IRGlobal* g;
                 out.put_str(g"; ModuleID = \0");

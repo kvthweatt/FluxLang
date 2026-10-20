@@ -1,6 +1,6 @@
 // SHA-256 Implementation in Flux
 // Based on FIPS 180-4 specification
-#import "standard.fx", "cryptography.fx";
+#import <standard.fx>, <cryptography.fx>;
 
 using standard::io::console,
       standard::strings,

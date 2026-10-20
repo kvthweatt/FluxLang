@@ -1,5 +1,5 @@
 // Simple Calculator Program
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 

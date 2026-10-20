@@ -2070,102 +2070,79 @@ namespace flux
                         case (true) {
                         p++;
                         c = pp_at(t, n, p);
-                        switch (c == 'n')
+                        switch (c)
                         {
-                            case (true) { this.js.put(10); }
-                            default {
-                                switch (c == 't')
+                            case ('n') { this.js.put(10); }
+                            case ('t') { this.js.put(9); }
+                            case ('r') { this.js.put(13); }
+                            case ('b') { this.js.put(8); }
+                            case ('f') { this.js.put(12); }
+                            case ('u')
+                            {
+                                h = this.json_hex4(t, n, p + 1);
+                                switch (h < 0)
                                 {
-                                    case (true) { this.js.put(9); }
-                                    default {
-                                        switch (c == 'r')
-                                        {
-                                            case (true) { this.js.put(13); }
-                                            default {
-                                                switch (c == 'b')
-                                                {
-                                                    case (true) { this.js.put(8); }
-                                                    default {
-                                                        switch (c == 'f')
-                                                        {
-                                                            case (true) { this.js.put(12); }
-                                                            default {
-                                                                switch (c == 'u')
-                                                                {
-                                                                    case (true) {
-                            h = this.json_hex4(t, n, p + 1);
-                            switch (h < 0)
-                            {
-                                case (true) { -> -1; }
-                                default {};
-                            };
-                            p = p + 4;
-                            switch (h >= 0xD800 & h <= 0xDBFF)
-                            {
-                                case (true) {
-                                switch (pp_at(t, n, p + 1) == 92 & pp_at(t, n, p + 2) == 'u')
+                                    case (true) { -> -1; }
+                                    default {};
+                                };
+                                p = p + 4;
+                                switch (h >= 0xD800 & h <= 0xDBFF)
                                 {
                                     case (true) {
-                                    lo = this.json_hex4(t, n, p + 3);
-                                    switch (lo >= 0xDC00 & lo <= 0xDFFF)
+                                    switch (pp_at(t, n, p + 1) == 92 & pp_at(t, n, p + 2) == 'u')
                                     {
                                         case (true) {
-                                        h = 0x10000 + (h - 0xD800) * 0x400 + (lo - 0xDC00);
-                                        p = p + 6;
+                                        lo = this.json_hex4(t, n, p + 3);
+                                        switch (lo >= 0xDC00 & lo <= 0xDFFF)
+                                        {
+                                            case (true) {
+                                            h = 0x10000 + (h - 0xD800) * 0x400 + (lo - 0xDC00);
+                                            p = p + 6;
+                                        }
+                                            default {};
+                                        };
                                     }
                                         default {};
                                     };
                                 }
                                     default {};
                                 };
-                            }
-                                default {};
-                            };
-                            switch (h < 0x80)
-                            {
-                                case (true) { this.js.put(h); }
-                                default {
-                                    switch (h < 0x800)
-                                    {
-                                        case (true) {
-                                this.js.put(0xC0 + h / 64);
-                                this.js.put(0x80 + h % 64);
-                            }
-                                        default {
-                                            switch (h < 0x10000)
-                                            {
-                                                case (true) {
-                                this.js.put(0xE0 + h / 4096);
-                                this.js.put(0x80 + (h / 64) % 64);
-                                this.js.put(0x80 + h % 64);
-                            }
-                                                default {
-                                this.js.put(0xF0 + h / 262144);
-                                this.js.put(0x80 + (h / 4096) % 64);
-                                this.js.put(0x80 + (h / 64) % 64);
-                                this.js.put(0x80 + h % 64);
-                            };
-                                            };
-                                        };
-                                    };
+                                switch (h < 0x80)
+                                {
+                                    case (true) { this.js.put(h); }
+                                    default {
+                                        switch (h < 0x800)
+                                        {
+                                            case (true) {
+                                    this.js.put(0xC0 + h / 64);
+                                    this.js.put(0x80 + h % 64);
+                                }
+                                            default {
+                                                switch (h < 0x10000)
+                                                {
+                                                    case (true) {
+                                    this.js.put(0xE0 + h / 4096);
+                                    this.js.put(0x80 + (h / 64) % 64);
+                                    this.js.put(0x80 + h % 64);
+                                }
+                                                    default {
+                                    this.js.put(0xF0 + h / 262144);
+                                    this.js.put(0x80 + (h / 4096) % 64);
+                                    this.js.put(0x80 + (h / 64) % 64);
+                                    this.js.put(0x80 + h % 64);
                                 };
-                            };
-                        }
-                                                                    default {
-                                                                        switch (c < 0)
-                                                                        {
-                                                                            case (true) { -> -1; }
-                                                                            default { this.js.put(c); };
-                                                                        };
-                                                                    };
-                                                                };
-                                                            };
-                                                        };
-                                                    };
                                                 };
                                             };
                                         };
                                     };
+                                };
+                            }
+                            default
+                            {
+                                switch (c < 0)
+                                {
+                                    case (true) { -> -1; }
+                                    default { this.js.put(c); };
                                 };
                             };
                         };

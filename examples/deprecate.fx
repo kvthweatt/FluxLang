@@ -1,4 +1,4 @@
-#import "standard.fx";
+#import <standard.fx>;
 
 namespace test1
 {

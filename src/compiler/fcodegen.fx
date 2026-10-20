@@ -35,6 +35,7 @@
 
 #ifndef FLUX_CODEGEN
 #def FLUX_CODEGEN 1;
+#def VF_UNION_STRUCT 16;
 
 using flux::ast;
 using flux::preprocessor;
@@ -47,6 +48,121 @@ namespace flux
 {
     namespace codegen
     {
+        // MD5 round constants and shifts (RFC 1321), used for the .str.gsi.<hash> global names
+        i64[64] MD5K = [3614090360, 3905402710, 606105819, 3250441966, 4118548399, 1200080426, 2821735955, 4249261313, 1770035416, 2336552879, 4294925233, 2304563134, 1804603682, 4254626195, 2792965006, 1236535329, 4129170786, 3225465664, 643717713, 3921069994, 3593408605, 38016083, 3634488961, 3889429448, 568446438, 3275163606, 4107603335, 1163531501, 2850285829, 4243563512, 1735328473, 2368359562, 4294588738, 2272392833, 1839030562, 4259657740, 2763975236, 1272893353, 4139469664, 3200236656, 681279174, 3936430074, 3572445317, 76029189, 3654602809, 3873151461, 530742520, 3299628645, 4096336452, 1126891415, 2878612391, 4237533241, 1700485571, 2399980690, 4293915773, 2240044497, 1873313359, 4264355552, 2734768916, 1309151649, 4149444226, 3174756917, 718787259, 3951481745];
+        i64[64] MD5S = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21];
+
+        // First eight hex digits of the MD5 digest of data[0..len); out receives nine bytes
+        md5_hex8(byte* src, int len, byte* res) -> void
+        {
+            i64 m32 = (i64)65535 * (i64)65537;
+            i64[4] st;
+            i64[16] w;
+            i64 a, b, c, d, f, t;
+            int total = ((len + 8) / 64 + 1) * 64;
+            byte* buf = (byte*)fmalloc((u64)total);
+            int i, blk, g, j;
+            i64 bits = (i64)len * (i64)8;
+            while (i < total)
+            {
+                buf[i] = (byte)0;
+                i++;
+            };
+            i = 0;
+            while (i < len)
+            {
+                buf[i] = src[i];
+                i++;
+            };
+            buf[len] = (byte)128;
+            i = 0;
+            while (i < 8)
+            {
+                buf[total - 8 + i] = (byte)((bits >> (i * 8)) `& (i64)255);
+                i++;
+            };
+            st[0] = (i64)1732584193;
+            st[1] = (((i64)61389 << 16) `| (i64)43913);
+            st[2] = (((i64)39098 << 16) `| (i64)56574);
+            st[3] = (i64)271733878;
+            blk = 0;
+            while (blk < total / 64)
+            {
+                i = 0;
+                while (i < 16)
+                {
+                    j = blk * 64 + i * 4;
+                    w[i] = ((i64)buf[j] `& (i64)255) `| (((i64)buf[j + 1] `& (i64)255) << 8) `| (((i64)buf[j + 2] `& (i64)255) << 16) `| (((i64)buf[j + 3] `& (i64)255) << 24);
+                    i++;
+                };
+                a = st[0];
+                b = st[1];
+                c = st[2];
+                d = st[3];
+                i = 0;
+                while (i < 64)
+                {
+                    if (i < 16)
+                    {
+                        f = (b `& c) `| ((`!b) `& d);
+                        g = i;
+                    };
+                    if (i >= 16 & i < 32)
+                    {
+                        f = (d `& b) `| ((`!d) `& c);
+                        g = (5 * i + 1) % 16;
+                    };
+                    if (i >= 32 & i < 48)
+                    {
+                        f = b `^| c `^| d;
+                        g = (3 * i + 5) % 16;
+                    };
+                    if (i >= 48)
+                    {
+                        f = c `^| (b `| (`!d));
+                        g = (7 * i) % 16;
+                    };
+                    f = (f + a + MD5K[i] + w[g]) `& m32;
+                    a = d;
+                    d = c;
+                    c = b;
+                    t = MD5S[i];
+                    b = (b + (((f << t) `| (f >> ((i64)32 - t))) `& m32)) `& m32;
+                    i++;
+                };
+                st[0] = (st[0] + a) `& m32;
+                st[1] = (st[1] + b) `& m32;
+                st[2] = (st[2] + c) `& m32;
+                st[3] = (st[3] + d) `& m32;
+                blk++;
+            };
+            ffree((void*)buf);
+            i = 0;
+            while (i < 4)
+            {
+                j = (int)((st[0] >> (i * 8)) `& (i64)255);
+                g = j / 16;
+                switch (g < 10) { case (true) { res[i * 2] = (byte)(48 + g); } default { res[i * 2] = (byte)(87 + g); }; };
+                g = j % 16;
+                switch (g < 10) { case (true) { res[i * 2 + 1] = (byte)(48 + g); } default { res[i * 2 + 1] = (byte)(87 + g); }; };
+                i++;
+            };
+            res[8] = (byte)0;
+        };
+
+        // dict{K:V} layout bookkeeping, keyed by variable name like fcodegen's module._dict_types
+        struct DictInfo
+        {
+            TypeSpec* kts;
+            TypeSpec* vts;
+            IRType* kl;
+            IRType* vl;
+            int cap;
+            IRType* st;
+            byte** kc;      // constant text of each key slot (global dicts only)
+            byte** vc;      // constant text of each value slot (global dicts only)
+        };
+
         // Layout of a struct or object: field names, declared specs, LLVM types and
         // the vtable numbers (offset, width, alignment per field, in bits).
         struct SInfo
@@ -71,6 +187,7 @@ namespace flux
             IRValue* ptr;
             TypeSpec* ts;
             bool vol;
+            bool is_heap;
         };
 
         // Heap copy of s from index start
@@ -217,6 +334,13 @@ namespace flux
             IRModule* mod;
             FXC_SYMTABLE* st;
             NameMap* structs;       // mangled name to SInfo*
+            NameMap* tf_ast;        // unsized array type functions by __typefunc__<type>__<name>
+            PtrVec* tf_pend;        // size specialized type functions awaiting a body: node, function, concrete spec
+            bool tf_drain;
+            PtrVec* ext_fns;        // function nodes declared inside extern blocks
+            bool rec_fn;            // the function being generated is a <~ recursive function
+            bool fwd_hit;           // a struct member named a struct whose body is not set yet
+            bool retry_mode;        // re-running struct registration for forward references
             NameMap* unions;        // mangled name to IRType*
             NameMap* enums;         // mangled name to IRType*
             NameMap* aliases;       // mangled name to IRType*
@@ -252,22 +376,34 @@ namespace flux
             IRType* fret;
             IRBlock* brk;
             IRBlock* cont;
+            IRValue* exc_flag;      // innermost try block exception flag and value slots
+            IRValue* exc_value;
+            IRBlock* exc_handler;
             bool bad;           // the current body hit something not generated yet
             byte* bad_what;
             int bad_line;
             int body_errs;
             bool in_member;
+            IRValue* va_list_v;
+            IRValue* va_list_p;
             IRValue* nra;
             IRValue* nrb;
             TypeSpec** lspecs;
             NameMap* ucounts;   // construct name to count of bodies it stopped
             NameMap* gvars;     // mangled global name to its LVar
+            NameMap* labels;    // label name to its block in the current function
+            NameMap* untied;    // variables moved out by ~ in the current function
+            NameMap* dicts;     // DictInfo by variable name (module._dict_types)
+            PtrVec* inited_unions;   // union variables assigned in the current function
+            bool gmv_full;           // global_member_value text already carries its type
             NameMap* fdefs;     // function name to its FUNCTION_DEF
             int nbodies;
             int nskipped;
             NameMap* gcache;    // g-string bytes (escaped) to its global
             int nstr;           // .str.N counter
             bool null_term;     // config null_terminate_strings
+            i64 ct_v;           // f-string compile time value
+            int ct_k;           // 0 int, 1 bool, 2 char
             NameMap* enumvals;  // Enum.Item to i64 box
             NameMap* enum_defs; // mangled enum name to its ENUM_DEF node (borrowed)
             NameMap* union_defs; // mangled union name to its UNION_DEF node (borrowed)
@@ -286,6 +422,13 @@ namespace flux
                 this.mod = (IRModule*)fmalloc((u64)((sizeof(IRModule) + 7) / 8));
                 this.mod.__init(g"flux_module\0");
                 this.structs = nm_new();
+                this.fwd_hit = false;
+                this.rec_fn = false;
+                this.retry_mode = false;
+                this.ext_fns = pv_new();
+                this.tf_ast = nm_new();
+                this.tf_pend = pv_new();
+                this.tf_drain = false;
                 this.unions = nm_new();
                 this.enums = nm_new();
                 this.aliases = nm_new();
@@ -316,6 +459,9 @@ namespace flux
                 this.fnd = (Node*)0;
                 this.fret = (IRType*)0;
                 this.brk = (IRBlock*)0;
+                this.exc_flag = (IRValue*)0;
+                this.exc_value = (IRValue*)0;
+                this.exc_handler = (IRBlock*)0;
                 this.cont = (IRBlock*)0;
                 this.bad = false;
                 this.bad_what = (byte*)0;
@@ -334,12 +480,18 @@ namespace flux
                 };
                 this.ucounts = nm_new();
                 this.gvars = nm_new();
+                this.untied = nm_new();
+                this.dicts = nm_new();
+                this.labels = nm_new();
+                this.inited_unions = pv_new();
                 this.fdefs = nm_new();
                 this.nbodies = 0;
                 this.nskipped = 0;
                 this.gcache = nm_new();
                 this.nstr = 0;
                 this.null_term = false;
+                this.ct_v = (i64)0;
+                this.ct_k = 0;
                 this.enumvals = nm_new();
                 this.enum_defs = nm_new();
                 this.union_defs = nm_new();
@@ -365,6 +517,9 @@ namespace flux
                     i++;
                 };
                 pv_free(this.owned);
+                pv_free(this.ext_fns);
+                nm_free(this.tf_ast);
+                pv_free(this.tf_pend);
                 nm_free(this.structs);
                 nm_free(this.unions);
                 nm_free(this.enums);
@@ -373,6 +528,8 @@ namespace flux
                 nm_free(this.defined);
                 nm_free(this.ucounts);
                 nm_free(this.gvars);
+                nm_free(this.labels);
+                nm_free(this.untied);
                 nm_free(this.fdefs);
                 nm_free(this.gcache);
                 nm_free(this.enumvals);
@@ -385,6 +542,7 @@ namespace flux
                 pv_free(this.al_specs);
                 pv_free(this.al_idx);
                 pv_free(this.scopes);
+                pv_free(this.inited_unions);
                 ffree(this.cur_ns);
                 this.mod.__exit();
                 ffree((byte*)this.mod);
@@ -1177,6 +1335,14 @@ namespace flux
                 -> total;
             };
 
+            // True when t, or the element type of the array t, is an identified struct without a body
+            is_fwd_struct(IRType* t) -> bool
+            {
+                IRType* e = t;
+                while (e.kind == LK.ARRAY) { e = e.elem; };
+                -> e.kind == LK.ISTRUCT & !e.defined & e.nitems == 0;
+            };
+
             // visit_StructDef
             reg_struct(Node* sd, byte* ns) -> void
             {
@@ -1317,6 +1483,17 @@ namespace flux
                 {
                     ft = this.lower(si.specs[i], true, sd.line);
                     si.ftys[i] = ft;
+                    // A member naming a struct whose body is not set yet is a forward reference:
+                    // the struct stays opaque and registration is retried once the rest exist
+                    switch (this.is_fwd_struct(ft))
+                    {
+                        case (true) {
+                        this.fwd_hit = true;
+                        ffree(name);
+                        ->;
+                    }
+                        default {};
+                    };
                     switch (si.specs[i].bit_width > 0 & !ts_is_array(si.specs[i]))
                     {
                         case (true) {
@@ -1731,6 +1908,29 @@ namespace flux
                 -> ts_dup(this.sc.mem);
             };
 
+            // name_args for an assignment that finds earlier names taken: each repeat gets the next suffix
+            rename_args(IRFunc* f, Node* fd, int skip) -> void
+            {
+                int i;
+                Node* p;
+                while (i < f.nargs - skip)
+                {
+                    p = node_child(fd, 0, i);
+                    switch (p.text != (byte*)0)
+                    {
+                        case (true) { this.mod.rename_arg(f, i + skip, p.text); }
+                        default {
+                        this.sc.clear();
+                        this.sc.put_str(g"arg\0");
+                        this.sc.put_int(i);
+                        this.mod.rename_arg(f, i + skip, this.sc.mem);
+                    };
+                    };
+                    i++;
+                };
+                ->;
+            };
+
             // Names the arguments of a function the way visit_FunctionDef does
             name_args(IRFunc* f, Node* fd, int skip) -> void
             {
@@ -1990,6 +2190,7 @@ namespace flux
                 byte* mn;
                 byte* full;
                 byte* mid;
+                int passes, pass, dd;
                 switch (m.text == (byte*)0)
                 {
                     case (true) { ->; }
@@ -2032,8 +2233,26 @@ namespace flux
                 }
                     default {};
                 };
-                this.mod.name_arg(f, 0, g"this\0");
-                this.name_args(f, m, 1);
+                // Python predeclares a namespaced object's method in the type only pass and
+                // again in visit_ObjectDef, and once more for each repeated definition
+                // (prototype and body), and every assignment of a taken name takes the next suffix
+                passes = 1;
+                dd = 0;
+                while (obj_name[dd] != (byte)0)
+                {
+                    switch (obj_name[dd] == (byte)'_' & obj_name[dd + 1] == (byte)'_')
+                    {
+                        case (true) { passes = 2; }
+                        default {};
+                    };
+                    dd++;
+                };
+                while (pass < passes)
+                {
+                    this.mod.rename_arg(f, 0, g"this\0");
+                    this.rename_args(f, m, 1);
+                    pass++;
+                };
                 switch (m.text2 != (byte*)0)
                 {
                     case (true) { f.cconv = this.cc_name(m.text2); }
@@ -2042,6 +2261,46 @@ namespace flux
                 ffree(mn);
                 ffree(full);
                 this.cur_obj = prev;
+                ->;
+            };
+
+            // Index of the first '.' of a function name, -1 when it has none
+            dot_index(byte* s) -> int
+            {
+                int i;
+                switch (s == (byte*)0) { case (true) { -> -1; } default {}; };
+                while (s[i] != 0)
+                {
+                    switch (s[i] == '.') { case (true) { -> i; } default {}; };
+                    i++;
+                };
+                -> -1;
+            };
+
+            // Object part of a dotted function name (Type.method) as a mangled object name
+            dotted_object(Node* fd, byte* ns) -> byte*
+            {
+                int d = this.dot_index(fd.text);
+                byte* raw = (byte*)fmalloc((u64)(d + 1));
+                byte* r;
+                int i;
+                while (i < d) { raw[i] = fd.text[i]; i++; };
+                raw[d] = 0;
+                r = mangle_namespace_name(ns, raw);
+                ffree(raw);
+                -> r;
+            };
+
+            // A function named Type.method is a method of that object (an instantiated
+            // template method): declared with the object pointer first
+            declare_dotted(Node* fd, byte* ns) -> void
+            {
+                byte* full = fd.text;
+                byte* oname = this.dotted_object(fd, ns);
+                fd.text = full + this.dot_index(full) + 1;
+                this.declare_method((Node*)0, fd, oname);
+                fd.text = full;
+                ffree(oname);
                 ->;
             };
 
@@ -2139,6 +2398,11 @@ namespace flux
                 int k = n.kind;
                 int s, c, e;
                 byte* full;
+                switch (this.retry_mode & k != NodeKind.STRUCT_DEF & k != NodeKind.OBJECT_DEF & k != NodeKind.NAMESPACE_DEF)
+                {
+                    case (true) { ->; }
+                    default {};
+                };
                 switch (k)
                 {
                     case (NodeKind.STRUCT_DEF) { this.reg_struct(n, ns); }
@@ -2176,15 +2440,85 @@ namespace flux
             };
 
             // Declares every function, method and extern in n
+            // visit_TypeFuncDef: the synthetic FunctionDef __typefunc__<type>__<name>(_ receiver, params...).
+            // Returns false for an unsized array receiver, whose generic function Python never emits
+            tf_convert(Node* d) -> bool
+            {
+                PtrVec* tmp;
+                Node* p0;
+                int i;
+                int n;
+                switch (d.ts2 == (TypeSpec*)0 | d.text == (byte*)0 | d.text2 == (byte*)0)
+                {
+                    case (true) { -> false; }
+                    default {};
+                };
+                switch (ts_is_array(d.ts2) & d.ts2.array_size == (Node*)0)
+                {
+                    case (true) {
+                    // Kept for the size specialized variants that call sites create
+                    nm_put(this.tf_ast, join3(join3(g"__typefunc__\0", d.text, g"__\0"), d.text2, g"\0"), (void*)d);
+                    -> false;
+                }
+                    default {};
+                };
+                tmp = pv_new();
+                p0 = node_new(NodeKind.PARAMETER, d.line, d.col);
+                p0.text = g"_\0";
+                p0.ts = d.ts2;
+                d.ts2 = (TypeSpec*)0;
+                n = node_count(d, 0);
+                while (i < n)
+                {
+                    pv_push(tmp, (void*)node_child(d, 0, i));
+                    i++;
+                };
+                switch (n > 0)
+                {
+                    case (true) { d.l0.len = 0; }
+                    default {};
+                };
+                node_push(d, 0, p0);
+                i = 0;
+                while (i < n)
+                {
+                    node_push(d, 0, (Node*)tmp.items[i]);
+                    i++;
+                };
+                pv_free(tmp);
+                d.text = this.mod.own(join3(join3(g"__typefunc__\0", d.text, g"__\0"), d.text2, g"\0"));
+                d.text2 = (byte*)0;
+                d.kind = NodeKind.FUNCTION_DEF;
+                -> true;
+            };
+
             decls_pass(Node* n0, byte* ns) -> void
             {
                 Node* n = this.unwrap(n0);
                 int k = n.kind;
                 int s, c, e;
                 byte* full;
+                switch (k == NodeKind.TYPE_FUNC_DEF)
+                {
+                    case (true) {
+                    switch (this.tf_convert(n)) { case (true) { k = n.kind; } default {}; };
+                }
+                    default {};
+                };
+                switch (k == NodeKind.EXPRESSION_STATEMENT)
+                {
+                    case (true) { this.global_assign(n); ->; }
+                    default {};
+                };
                 switch (k == NodeKind.FUNCTION_DEF)
                 {
-                    case (true) { this.declare_function(n, ns); }
+                    case (true) {
+                    switch (this.dot_index(n.text) > 0)
+                    {
+                        case (true) { this.declare_dotted(n, ns); }
+                        default { this.declare_function(n, ns); };
+                    };
+                }
                     default {
                         switch (k == NodeKind.VARIABLE_DECLARATION | k == NodeKind.FUNCTION_POINTER_DECLARATION)
                         {
@@ -2200,6 +2534,8 @@ namespace flux
                     c = node_count(n, 0);
                     while (e < c)
                     {
+                        pv_push(this.ext_fns, (void*)node_child(n, 0, e));
+                        pv_push(this.ext_fns, (void*)this.unwrap(node_child(n, 0, e)));
                         this.declare_extern(node_child(n, 0, e), ns);
                         e++;
                     };
@@ -2325,6 +2661,7 @@ namespace flux
                 v.ptr = ptr;
                 v.ts = ts;
                 v.vol = false;
+                v.is_heap = false;
                 this.keep((void*)v);
                 nm_put((NameMap*)this.scopes.items[this.scopes.len - 1], name, (void*)v);
                 -> v;
@@ -2358,6 +2695,51 @@ namespace flux
                 -> this.find_global_var(name);
             };
 
+            // Global variable found through the using namespaces
+            using_global_var(byte* name) -> LVar*
+            {
+                int i;
+                byte* m;
+                FXC_SYMENTRY* e;
+                IRGlobal* gl;
+                LVar* v;
+                void* p;
+                while (i < this.st.using_ns.len)
+                {
+                    m = mangle_namespace_name((byte*)this.st.using_ns.items[i], name);
+                    gl = this.mod.find_global(m);
+                    switch (gl != (IRGlobal*)0)
+                    {
+                        case (true) {
+                        p = nm_get(this.gvars, m);
+                        switch (p != (void*)0)
+                        {
+                            case (true) {
+                            ffree(m);
+                            -> (LVar*)p;
+                        }
+                            default {};
+                        };
+                        e = st_lookup_any(this.st, name, (byte*)this.st.using_ns.items[i]);
+                        v = (LVar*)fmalloc((u64)((sizeof(LVar) + 7) / 8));
+                        v.ptr = gl.self;
+                        v.ts = (TypeSpec*)0;
+                        switch (e != (FXC_SYMENTRY*)0) { case (true) { v.ts = (TypeSpec*)e.ts; } default {}; };
+                        v.vol = false;
+                        v.is_heap = false;
+                        this.keep((void*)v);
+                        nm_put(this.gvars, m, (void*)v);
+                        ffree(m);
+                        -> v;
+                    }
+                        default {};
+                    };
+                    ffree(m);
+                    i++;
+                };
+                -> (LVar*)0;
+            };
+
             // Global variable visible as name (module.globals, then the namespace resolution)
             find_global_var(byte* name) -> LVar*
             {
@@ -2381,8 +2763,10 @@ namespace flux
                 switch (gl == (IRGlobal*)0)
                 {
                     case (true) {
+                    // The duplicate check skipped this declaration, so the symbol table resolves
+                    // the name through the using namespaces to the global that was kept
                     ffree(m);
-                    -> (LVar*)0;
+                    -> this.using_global_var(name);
                 }
                     default {};
                 };
@@ -2399,6 +2783,7 @@ namespace flux
                 v.ptr = gl.self;
                 v.ts = (TypeSpec*)e.ts;
                 v.vol = false;
+                v.is_heap = false;
                 this.keep((void*)v);
                 nm_put(this.gvars, m, (void*)v);
                 ffree(m);
@@ -2483,6 +2868,615 @@ namespace flux
 
             // Initializer text of a global (create_global_initializer for literals),
             // null when the initializer is not handled yet
+            // ----------------------------------------------------------
+            // dict{K:V}
+            // ----------------------------------------------------------
+
+            is_dict_struct(IRType* t) -> bool
+            {
+                switch (t.kind != LK.STRUCT)
+                {
+                    case (true) { -> false; }
+                    default {};
+                };
+                switch (t.nitems != 3)
+                {
+                    case (true) { -> false; }
+                    default {};
+                };
+                -> t.items[0].kind == LK.ARRAY & t.items[1].kind == LK.ARRAY & t.items[2].kind == LK.INT & t.items[2].width == 32;
+            };
+
+            dict_struct(IRType* kl, IRType* vl, int cap) -> IRType*
+            {
+                IRType** ps = (IRType**)fmalloc((u64)4 * (u64)((sizeof(IRType*) + 7) / 8));
+                this.keep((void*)ps);
+                ps[0] = this.mod.t_array(kl, cap);
+                ps[1] = this.mod.t_array(vl, cap);
+                ps[2] = this.t_i32;
+                -> this.mod.t_struct(ps, 3);
+            };
+
+            // Registers the key/value/capacity layout of a dict variable (module._dict_types[name])
+            dict_make(byte* name, TypeSpec* ts, int line) -> DictInfo*
+            {
+                DictInfo* di = (DictInfo*)fmalloc((u64)((sizeof(DictInfo) + 7) / 8));
+                this.keep((void*)di);
+                di.kts = ts.dict_key;
+                di.vts = ts.dict_value;
+                di.kl = this.t_i8;
+                di.vl = this.t_i8;
+                switch (ts.dict_key != (TypeSpec*)0)
+                {
+                    case (true) { di.kl = this.lower(ts.dict_key, false, line); }
+                    default {};
+                };
+                switch (ts.dict_value != (TypeSpec*)0)
+                {
+                    case (true) { di.vl = this.lower(ts.dict_value, false, line); }
+                    default {};
+                };
+                di.cap = 0;
+                switch (ts.dict_capacity > 0)
+                {
+                    case (true) { di.cap = ts.dict_capacity; }
+                    default {};
+                };
+                di.st = this.dict_struct(di.kl, di.vl, di.cap);
+                di.kc = (byte**)0;
+                di.vc = (byte**)0;
+                nm_put(this.dicts, name, (void*)di);
+                -> di;
+            };
+
+            // create_global_string_initializer for a byte* target: the bytes plus a NUL live in
+            // .str.gsi.<first 8 hex digits of their md5>; returns a gep to it
+            gsi_ref(byte* src, int len, Buf* ob, bool with_ty) -> void
+            {
+                int n = len + 1;
+                byte* buf = (byte*)this.zbuf(n / 8 + 1);
+                byte[16] hx;
+                Buf gn;
+                IRType* aty;
+                IRValue* cv;
+                IRGlobal* gl;
+                memcpy((void*)buf, (void*)src, (u64)len);
+                buf[len] = (byte)0;
+                md5_hex8(buf, n, @hx[0]);
+                gn.__init();
+                defer gn.__exit();
+                gn.put_str(g".str.gsi.\0");
+                gn.put_str(@hx[0]);
+                aty = this.mod.t_array(this.t_i8, n);
+                gl = this.mod.find_global(gn.mem);
+                switch (gl == (IRGlobal*)0)
+                {
+                    case (true) {
+                    cv = this.mod.c_bytes(aty, buf, n);
+                    gl = this.mod.add_global(aty, gn.mem, cv.text);
+                    gl.linkage = this.mod.own(g"internal\0");
+                    gl.constant = true;
+                    this.mark_arr_ptr(gl.self.ty);
+                }
+                    default {};
+                };
+                switch (with_ty)
+                {
+                    case (true) { ob.put_str(g"i8* \0"); }
+                    default {};
+                };
+                ob.put_str(g"getelementptr (\0");
+                lt_text(ob, aty);
+                ob.put_str(g", \0");
+                lt_text(ob, aty);
+                ob.put_str(g"* \0");
+                ob.put_str(gl.self.text);
+                ob.put_str(g", i32 0, i32 0)\0");
+            };
+
+            str_len_of(Node* e) -> int
+            {
+                int len = (int)e.ival;
+                byte* src = e.text;
+                switch (src == (byte*)0)
+                {
+                    case (true) { -> 0; }
+                    default {};
+                };
+                switch (len <= 0)
+                {
+                    case (true) {
+                    len = 0;
+                    while (src[len] != 0) { len++; };
+                }
+                    default {};
+                };
+                -> len;
+            };
+
+            // create_global_initializer for one dict slot: "<ty> <value>", null when not constant
+            dict_elem_text(Node* e, IRType* et) -> byte*
+            {
+                Buf b;
+                byte* src;
+                int dt;
+                i64 v;
+                i64 lim;
+                b.__init();
+                defer b.__exit();
+                switch (e.kind == NodeKind.STRING_LITERAL)
+                {
+                    case (true) {
+                    switch (et.kind != LK.PTR)
+                    {
+                        case (true) { -> (byte*)0; }
+                        default {};
+                    };
+                    switch (et.elem.kind != LK.INT)
+                    {
+                        case (true) { -> (byte*)0; }
+                        default {};
+                    };
+                    switch (et.elem.width != 8)
+                    {
+                        case (true) { -> (byte*)0; }
+                        default {};
+                    };
+                    src = e.text;
+                    switch (src == (byte*)0) { case (true) { src = g"\0"; } default {}; };
+                    this.gsi_ref(src, this.str_len_of(e), @b, true);
+                    -> this.mod.own(b.mem);
+                }
+                    default {};
+                };
+                switch (e.kind == NodeKind.LITERAL & et.kind == LK.INT)
+                {
+                    case (true) {
+                    dt = e.op;
+                    v = e.ival;
+                    switch (dt == DataType.BOOL)
+                    {
+                        case (true) {
+                        switch (v != (i64)0) { case (true) { v = (i64)1; } default {}; };
+                    }
+                        default {
+                        switch (dt == DataType.UINT | dt == DataType.ULONG | dt == DataType.DATA)
+                        {
+                            case (true) {
+                            // converted to signed two's complement
+                            switch (et.width < 64)
+                            {
+                                case (true) {
+                                lim = ((i64)1 << (et.width - 1)) - (i64)1;
+                                switch (v > lim) { case (true) { v = v - ((i64)1 << et.width); } default {}; };
+                            }
+                                default {};
+                            };
+                        }
+                            default {
+                            switch (dt != DataType.SINT) { case (true) { -> (byte*)0; } default {}; };
+                        };
+                        };
+                    };
+                    };
+                    lt_text(@b, et);
+                    b.put(32);
+                    put_i64(@b, v);
+                    -> this.mod.own(b.mem);
+                }
+                    default {};
+                };
+                -> (byte*)0;
+            };
+
+            dict_zero_text(IRType* et) -> byte*
+            {
+                Buf b;
+                b.__init();
+                defer b.__exit();
+                switch (et.kind == LK.PTR)
+                {
+                    case (true) {
+                    lt_text(@b, et);
+                    b.put_str(g" null\0");
+                    -> this.mod.own(b.mem);
+                }
+                    default {};
+                };
+                switch (et.kind == LK.INT)
+                {
+                    case (true) {
+                    lt_text(@b, et);
+                    b.put_str(g" 0\0");
+                    -> this.mod.own(b.mem);
+                }
+                    default {};
+                };
+                -> (byte*)0;
+            };
+
+            // "{[N x K] [...], [N x V] [...], i32 count}" from the slot texts of di
+            dict_text(DictInfo* di, int count) -> byte*
+            {
+                Buf b;
+                int i;
+                b.__init();
+                defer b.__exit();
+                b.put(123);
+                lt_text(@b, di.st.items[0]);
+                b.put_str(g" [\0");
+                while (i < di.cap)
+                {
+                    switch (i > 0) { case (true) { b.put_str(g", \0"); } default {}; };
+                    b.put_str(di.kc[i]);
+                    i++;
+                };
+                b.put_str(g"], \0");
+                lt_text(@b, di.st.items[1]);
+                b.put_str(g" [\0");
+                i = 0;
+                while (i < di.cap)
+                {
+                    switch (i > 0) { case (true) { b.put_str(g", \0"); } default {}; };
+                    b.put_str(di.vc[i]);
+                    i++;
+                };
+                b.put_str(g"], i32 \0");
+                b.put_int(count);
+                b.put(125);
+                -> this.mod.own(b.mem);
+            };
+
+            // VariableTypeHandler._dict_literal_to_constant
+            dict_lit_text(Node* ini, DictInfo* di) -> byte*
+            {
+                int np = node_count(ini, 0) / 2;
+                int i;
+                byte* t;
+                switch (np > di.cap)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                di.kc = (byte**)this.zbuf(di.cap + 1);
+                di.vc = (byte**)this.zbuf(di.cap + 1);
+                while (i < di.cap)
+                {
+                    switch (i < np)
+                    {
+                        case (true) {
+                        t = this.dict_elem_text(node_child(ini, 0, i * 2), di.kl);
+                        switch (t == (byte*)0) { case (true) { -> (byte*)0; } default {}; };
+                        di.kc[i] = t;
+                        t = this.dict_elem_text(node_child(ini, 0, i * 2 + 1), di.vl);
+                        switch (t == (byte*)0) { case (true) { -> (byte*)0; } default {}; };
+                        di.vc[i] = t;
+                    }
+                        default {
+                        t = this.dict_zero_text(di.kl);
+                        switch (t == (byte*)0) { case (true) { -> (byte*)0; } default {}; };
+                        di.kc[i] = t;
+                        t = this.dict_zero_text(di.vl);
+                        switch (t == (byte*)0) { case (true) { -> (byte*)0; } default {}; };
+                        di.vc[i] = t;
+                    };
+                    };
+                    i++;
+                };
+                -> this.dict_text(di, np);
+            };
+
+            // create_global_initializer, dict merge: BinaryOp(+) on two global dicts
+            dict_merge_text(Node* ini, DictInfo* di) -> byte*
+            {
+                DictInfo* li;
+                DictInfo* ri;
+                int nc;
+                int i;
+                switch (ini.op != Operator.ADD)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                switch (ini.a.kind != NodeKind.IDENTIFIER | ini.b.kind != NodeKind.IDENTIFIER)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                li = (DictInfo*)nm_get(this.dicts, ini.a.text);
+                ri = (DictInfo*)nm_get(this.dicts, ini.b.text);
+                switch (li == (DictInfo*)0 | ri == (DictInfo*)0)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                switch (li.kc == (byte**)0 | ri.kc == (byte**)0)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                nc = li.cap + ri.cap;
+                di.cap = nc;
+                di.st = this.dict_struct(li.kl, li.vl, nc);
+                di.kc = (byte**)this.zbuf(nc + 1);
+                di.vc = (byte**)this.zbuf(nc + 1);
+                while (i < li.cap)
+                {
+                    di.kc[i] = li.kc[i];
+                    di.vc[i] = li.vc[i];
+                    i++;
+                };
+                i = 0;
+                while (i < ri.cap)
+                {
+                    di.kc[li.cap + i] = ri.kc[i];
+                    di.vc[li.cap + i] = ri.vc[i];
+                    i++;
+                };
+                -> this.dict_text(di, nc);
+            };
+
+            // dict{K:V} at global scope (_vardecl_dict -> _vardecl_global)
+            declare_global_dict(Node* n, byte* ns) -> void
+            {
+                TypeSpec* ts = n.ts;
+                Node* ini = n.a;
+                DictInfo* di = this.dict_make(n.text, ts, n.line);
+                IRGlobal* gl;
+                byte* m;
+                byte* it;
+                switch (ini == (Node*)0)
+                {
+                    case (true) { it = this.mod.c_null(di.st).text; }
+                    default {
+                    switch (ini.kind == NodeKind.DICT_LITERAL)
+                    {
+                        case (true) { it = this.dict_lit_text(ini, di); }
+                        default {
+                        switch (ini.kind == NodeKind.BINARY_OP)
+                        {
+                            case (true) { it = this.dict_merge_text(ini, di); }
+                            default { it = (byte*)0; };
+                        };
+                    };
+                    };
+                };
+                };
+                switch (it == (byte*)0)
+                {
+                    case (true) {
+                    this.note_unsup(g"global dict initializer\0");
+                    ->;
+                }
+                    default {};
+                };
+                m = mangle_namespace_name(ns, n.text);
+                switch (this.global_dup(m))
+                {
+                    case (true) {
+                    ffree(m);
+                    ->;
+                }
+                    default {};
+                };
+                gl = this.mod.add_global(di.st, m, it);
+                gl.linkage = this.mod.own(g"internal\0");
+                gl.self.spec = ts;
+                switch (nm_get(this.gvars, m) == (void*)0)
+                {
+                    case (true) {
+                    LVar* gv = (LVar*)fmalloc((u64)((sizeof(LVar) + 7) / 8));
+                    gv.ptr = gl.self;
+                    gv.ts = ts;
+                    gv.vol = false;
+                    gv.is_heap = false;
+                    this.keep((void*)gv);
+                    nm_put(this.gvars, m, (void*)gv);
+                }
+                    default {};
+                };
+                ffree(m);
+            };
+
+            // VariableTypeHandler._eval_const_expr for integers: value and bit width
+            const_eval(Node* e, i64* ov, int* ow) -> bool
+            {
+                i64 lv;
+                i64 rv;
+                int lw;
+                int rw;
+                int k = e.kind;
+                int op;
+                IRGlobal* gg;
+                SInfo* si;
+                int fi;
+                switch (k == NodeKind.LITERAL)
+                {
+                    case (true) {
+                    switch (e.op == DataType.SINT)
+                    {
+                        case (true) { *ov = e.ival; *ow = 32; -> true; }
+                        default {};
+                    };
+                    switch (e.op == DataType.BOOL)
+                    {
+                        case (true) {
+                        *ov = (i64)0;
+                        switch (e.ival != (i64)0) { case (true) { *ov = (i64)1; } default {}; };
+                        *ow = 1;
+                        -> true;
+                    }
+                        default {};
+                    };
+                    -> false;
+                }
+                    default {};
+                };
+                switch (k == NodeKind.MEMBER_ACCESS)
+                {
+                    case (true) {
+                    switch (e.a.kind != NodeKind.IDENTIFIER)
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
+                    gg = this.global_ident_find(e.a.text);
+                    switch (gg == (IRGlobal*)0)
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
+                    switch (gg.init == (byte*)0)
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
+                    si = this.sinfo_of(gg.ty);
+                    switch (si == (SInfo*)0)
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
+                    fi = this.sidx(si, e.text);
+                    switch (fi < 0)
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
+                    // only a zeroinitializer global has a constant member here
+                    switch (!cstr_eq(gg.init, this.mod.c_null(gg.ty).text))
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
+                    switch (si.ftys[fi].kind != LK.INT)
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
+                    *ov = (i64)0;
+                    *ow = si.ftys[fi].width;
+                    -> true;
+                }
+                    default {};
+                };
+                switch (k == NodeKind.UNARY_OP)
+                {
+                    case (true) {
+                    switch (!this.const_eval(e.a, @lv, @lw))
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
+                    switch (e.op == Operator.NOT)
+                    {
+                        case (true) { *ov = `!lv; *ow = lw; -> true; }
+                        default {};
+                    };
+                    switch (e.op == Operator.SUB)
+                    {
+                        case (true) { *ov = (i64)0 - lv; *ow = lw; -> true; }
+                        default {};
+                    };
+                    -> false;
+                }
+                    default {};
+                };
+                switch (k == NodeKind.BINARY_OP)
+                {
+                    case (true) {
+                    op = e.op;
+                    switch (!this.const_eval(e.a, @lv, @lw))
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
+                    switch (!this.const_eval(e.b, @rv, @rw))
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
+                    *ow = lw;
+                    switch (op == Operator.ADD) { case (true) { *ov = lv + rv; -> true; } default {}; };
+                    switch (op == Operator.SUB) { case (true) { *ov = lv - rv; -> true; } default {}; };
+                    switch (op == Operator.MUL) { case (true) { *ov = lv * rv; -> true; } default {}; };
+                    switch (op == Operator.AND | op == Operator.BITAND) { case (true) { *ov = lv `& rv; -> true; } default {}; };
+                    switch (op == Operator.OR | op == Operator.BITOR) { case (true) { *ov = lv `| rv; -> true; } default {}; };
+                    switch (op == Operator.XOR | op == Operator.BITXOR) { case (true) { *ov = lv `^| rv; -> true; } default {}; };
+                    switch (op == Operator.BITSHIFT_LEFT) { case (true) { *ov = lv << (int)rv; -> true; } default {}; };
+                    switch (op == Operator.BITSHIFT_RIGHT) { case (true) { *ov = lv >> (int)rv; -> true; } default {}; };
+                    -> false;
+                }
+                    default {};
+                };
+                -> false;
+            };
+
+            dict_mask(int w) -> i64
+            {
+                switch (w >= 64)
+                {
+                    case (true) { -> (i64)0 - (i64)1; }
+                    default {};
+                };
+                -> ((i64)1 << w) - (i64)1;
+            };
+
+            // _eval_array_access_const for d{k:v, ...}[key]: the text of the matching value
+            global_dict_index(Node* ini, IRType* lt) -> byte*
+            {
+                Node* dn = ini.a;
+                int cnt = node_count(dn, 0);
+                int i;
+                i64 lv;
+                i64 kv;
+                int lw;
+                int kw;
+                i64 mm;
+                Node* ve;
+                Buf b;
+                b.__init();
+                defer b.__exit();
+                switch (!this.const_eval(ini.b, @lv, @lw))
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                while (i < cnt)
+                {
+                    switch (!this.const_eval(node_child(dn, 0, i), @kv, @kw))
+                    {
+                        case (true) { -> (byte*)0; }
+                        default {};
+                    };
+                    mm = this.dict_mask(kw);
+                    switch (lw < kw) { case (true) { mm = this.dict_mask(lw); } default {}; };
+                    switch ((kv `& mm) == (lv `& mm))
+                    {
+                        case (true) {
+                        ve = node_child(dn, 1, i);
+                        switch (ve.kind == NodeKind.STRING_LITERAL)
+                        {
+                            case (true) {
+                            switch (lt.kind != LK.PTR) { case (true) { -> (byte*)0; } default {}; };
+                            switch (ve.text == (byte*)0) { case (true) { -> (byte*)0; } default {}; };
+                            this.gsi_ref(ve.text, this.str_len_of(ve), @b, false);
+                            -> this.mod.own(b.mem);
+                        }
+                            default {};
+                        };
+                        switch (lt.kind != LK.INT) { case (true) { -> (byte*)0; } default {}; };
+                        switch (!this.const_eval(ve, @kv, @kw)) { case (true) { -> (byte*)0; } default {}; };
+                        put_i64(@b, kv);
+                        -> this.mod.own(b.mem);
+                    }
+                        default {};
+                    };
+                    i++;
+                };
+                -> (byte*)0;
+            };
+
             global_init(Node* n, IRType* lt) -> byte*
             {
                 Node* ini = n.a;
@@ -2500,6 +3494,17 @@ namespace flux
                 switch (ini.kind == NodeKind.NO_INIT)
                 {
                     case (true) { -> g"undef\0"; }
+                    default {};
+                };
+                switch (ini.kind == NodeKind.ARRAY_ACCESS)
+                {
+                    case (true) {
+                    switch (ini.a.kind == NodeKind.DICT_LITERAL_EXPR)
+                    {
+                        case (true) { -> this.global_dict_index(ini, lt); }
+                        default {};
+                    };
+                }
                     default {};
                 };
                 switch (ini.kind == NodeKind.IDENTIFIER)
@@ -2520,6 +3525,11 @@ namespace flux
                     case (true) { -> this.global_string_init(ini, lt); }
                     default {};
                 };
+                switch (ini.kind == NodeKind.ARRAY_LITERAL & lt.kind == LK.INT)
+                {
+                    case (true) { -> this.global_pack_int(ini, lt); }
+                    default {};
+                };
                 switch (ini.kind == NodeKind.ARRAY_LITERAL)
                 {
                     case (true) { -> this.global_array_init(ini, lt); }
@@ -2531,6 +3541,16 @@ namespace flux
                     // The base has no constant for these and falls back to the default initializer
                     -> this.mod.c_null(lt).text;
                 }
+                    default {};
+                };
+                // create_global_initializer answers None for any other kind, and the caller
+                // then takes the type's default initializer
+                switch (ini.kind != NodeKind.LITERAL & ini.kind != NodeKind.IDENTIFIER & ini.kind != NodeKind.BINARY_OP &
+                    ini.kind != NodeKind.UNARY_OP & ini.kind != NodeKind.STRING_LITERAL & ini.kind != NodeKind.ARRAY_LITERAL &
+                    ini.kind != NodeKind.ARRAY_ACCESS & ini.kind != NodeKind.STRUCT_LITERAL & ini.kind != NodeKind.DICT_LITERAL &
+                    ini.kind != NodeKind.DICT_LITERAL_EXPR)
+                {
+                    case (true) { -> this.mod.c_null(lt).text; }
                     default {};
                 };
                 switch (ini.kind == NodeKind.CAST_EXPRESSION & lt.kind == LK.PTR)
@@ -2705,7 +3725,7 @@ namespace flux
             };
 
             // Initializer text of the global an identifier names, or null when it has none
-            global_ident_init(byte* name) -> byte*
+            global_ident_find(byte* name) -> IRGlobal*
             {
                 FXC_SYMENTRY* se = st_lookup_any(this.st, name, this.cur_ns);
                 IRGlobal* sg;
@@ -2718,19 +3738,106 @@ namespace flux
                     ffree(sm);
                     switch (sg != (IRGlobal*)0)
                     {
-                        case (true) { -> sg.init; }
+                        case (true) { -> sg; }
                         default {};
                     };
                 }
                     default {};
                 };
-                sg = this.mod.find_global(name);
+                -> this.mod.find_global(name);
+            };
+
+            global_ident_init(byte* name) -> byte*
+            {
+                IRGlobal* sg = this.global_ident_find(name);
                 switch (sg != (IRGlobal*)0)
                 {
                     case (true) { -> sg.init; }
                     default {};
                 };
                 -> (byte*)0;
+            };
+
+            // VariableTypeHandler._pack_array_literal_to_int_constant: first element at the high bits
+            global_pack_int(Node* ini, IRType* lt) -> byte*
+            {
+                int n = node_count(ini, 0);
+                int i = n - 1;
+                int off;
+                int w;
+                int dt;
+                i64 v;
+                i64 packed;
+                Node* e;
+                IRGlobal* g;
+                Buf ab;
+                byte* r;
+                while (i >= 0)
+                {
+                    e = node_child(ini, 0, i);
+                    switch (e.kind == NodeKind.LITERAL)
+                    {
+                        case (true) {
+                        dt = e.op;
+                        v = e.ival;
+                        w = 0;
+                        switch (dt == DataType.SINT | dt == DataType.UINT) { case (true) { w = 32; } default {}; };
+                        switch (dt == DataType.SLONG | dt == DataType.ULONG) { case (true) { w = 64; } default {}; };
+                        switch (dt == DataType.BOOL)
+                        {
+                            case (true) {
+                            w = 1;
+                            switch (v != (i64)0) { case (true) { v = (i64)1; } default {}; };
+                        }
+                            default {};
+                        };
+                        switch (dt == DataType.CHAR) { case (true) { w = 8; } default {}; };
+                        switch (w == 0) { case (true) { -> (byte*)0; } default {}; };
+                    }
+                        default {
+                            switch (e.kind != NodeKind.IDENTIFIER)
+                            {
+                                case (true) { -> (byte*)0; }
+                                default {};
+                            };
+                            g = this.global_ident_find(e.text);
+                            switch (g == (IRGlobal*)0)
+                            {
+                                case (true) { -> (byte*)0; }
+                                default {};
+                            };
+                            switch (g.init == (byte*)0 | g.ty.kind != LK.INT)
+                            {
+                                case (true) { -> (byte*)0; }
+                                default {};
+                            };
+                            switch (!this.parse_int_text(g.init, @v))
+                            {
+                                case (true) { -> (byte*)0; }
+                                default {};
+                            };
+                            w = g.ty.width;
+                        };
+                    };
+                    switch (v < (i64)0 | off + w > 63)
+                    {
+                        case (true) { -> (byte*)0; }
+                        default {};
+                    };
+                    packed = packed `| (v << (i64)off);
+                    off = off + w;
+                    i--;
+                };
+                switch (off != lt.width)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                ab.__init();
+                defer ab.__exit();
+                put_i64(@ab, packed);
+                r = this.mod.own(ab.mem);
+                -> r;
             };
 
             // Decimal text to integer. False when the text is not a plain integer.
@@ -2895,6 +4002,770 @@ namespace flux
                 -> r;
             };
 
+            // create_global_array_initializer for string elements of a pointer array
+            global_ptr_array_init(Node* ini, IRType* lt) -> byte*
+            {
+                int n = node_count(ini, 0);
+                int i;
+                Buf ab;
+                byte* r;
+                switch (lt.elem.elem.kind != LK.INT | n > lt.count)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                switch (lt.elem.elem.width != 8)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                while (i < n)
+                {
+                    switch (node_child(ini, 0, i).kind != NodeKind.STRING_LITERAL)
+                    {
+                        case (true) { -> (byte*)0; }
+                        default {};
+                    };
+                    i++;
+                };
+                ab.__init();
+                defer ab.__exit();
+                ab.put(91);
+                i = 0;
+                while (i < lt.count)
+                {
+                    switch (i > 0)
+                    {
+                        case (true) { ab.put_str(g", \0"); }
+                        default {};
+                    };
+                    switch (i < n)
+                    {
+                        case (true) { this.str_global_text(node_child(ini, 0, i), @ab); }
+                        default { ab.put_str(g"i8* null\0"); };
+                    };
+                    i++;
+                };
+                ab.put(93);
+                r = this.mod.own(ab.mem);
+                -> r;
+            };
+
+            // create_global_array_initializer for float literal elements of a float or double array.
+            // A literal of the other floating type is a type mismatch there, so it is not handled
+            global_fp_array_init(Node* ini, IRType* lt) -> byte*
+            {
+                int n = node_count(ini, 0);
+                int i;
+                int want;
+                Node* e;
+                Buf ab;
+                byte* r;
+                switch (n > lt.count)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                switch (lt.elem.kind == LK.FLOAT)
+                {
+                    case (true) { want = DataType.FLOAT; }
+                    default { want = DataType.DOUBLE; };
+                };
+                while (i < n)
+                {
+                    e = node_child(ini, 0, i);
+                    switch (e.kind != NodeKind.LITERAL)
+                    {
+                        case (true) { -> (byte*)0; }
+                        default {};
+                    };
+                    switch (e.op != want)
+                    {
+                        case (true) { -> (byte*)0; }
+                        default {};
+                    };
+                    i++;
+                };
+                ab.__init();
+                defer ab.__exit();
+                ab.put(91);
+                i = 0;
+                while (i < lt.count)
+                {
+                    switch (i > 0)
+                    {
+                        case (true) { ab.put_str(g", \0"); }
+                        default {};
+                    };
+                    lt_text(@ab, lt.elem);
+                    ab.put(32);
+                    switch (i < n)
+                    {
+                        case (true) { ab.put_str(this.mod.c_fp(lt.elem, node_child(ini, 0, i).fval).text); }
+                        default { ab.put_str(this.mod.c_fp(lt.elem, 0.0).text); };
+                    };
+                    i++;
+                };
+                ab.put(93);
+                r = this.mod.own(ab.mem);
+                -> r;
+            };
+
+            // "[ty v, ...]" for a global array of structs given as global identifiers (identifier_to_constant)
+            global_struct_array_init(Node* ini, IRType* lt) -> byte*
+            {
+                int n = node_count(ini, 0);
+                int i;
+                int k;
+                int f;
+                int nf;
+                int np;
+                int nn;
+                Node* e;
+                Node* fe;
+                byte* it;
+                byte* fv;
+                SInfo* si = this.sinfo_of(lt.elem);
+                Buf ab;
+                byte* r;
+                Node** ex;
+                switch (n > lt.count | si == (SInfo*)0)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                ab.__init();
+                defer ab.__exit();
+                ab.put(91);
+                while (i < lt.count)
+                {
+                    switch (i > 0)
+                    {
+                        case (true) { ab.put_str(g", \0"); }
+                        default {};
+                    };
+                    lt_text(@ab, lt.elem);
+                    ab.put(32);
+                    switch (i >= n)
+                    {
+                        case (true) { ab.put_str(this.mod.c_null(lt.elem).text); }
+                        default {
+                            e = node_child(ini, 0, i);
+                            switch (e.kind == NodeKind.IDENTIFIER)
+                            {
+                                case (true) {
+                                it = this.global_ident_init(e.text);
+                                switch (it == (byte*)0)
+                                {
+                                    case (true) { -> (byte*)0; }
+                                    default {};
+                                };
+                                ab.put_str(it);
+                            }
+                                default {
+                                    switch (e.kind != NodeKind.STRUCT_LITERAL)
+                                    {
+                                        case (true) { -> (byte*)0; }
+                                        default {};
+                                    };
+                                    nf = si.n;
+                                    np = node_count(e, 2);
+                                    nn = node_count(e, 0);
+                                    switch (np > nf)
+                                    {
+                                        case (true) { -> (byte*)0; }
+                                        default {};
+                                    };
+                                    ex = (Node**)this.zbuf(nf + 1);
+                                    k = 0;
+                                    while (k < nn)
+                                    {
+                                        f = this.sidx(si, node_child(e, 0, k).text);
+                                        switch (f < 0)
+                                        {
+                                            case (true) { -> (byte*)0; }
+                                            default {};
+                                        };
+                                        ex[f] = node_child(e, 1, k);
+                                        k++;
+                                    };
+                                    k = 0;
+                                    while (k < np)
+                                    {
+                                        ex[k] = node_child(e, 2, k);
+                                        k++;
+                                    };
+                                    ab.put(123);
+                                    k = 0;
+                                    while (k < nf)
+                                    {
+                                        switch (k > 0)
+                                        {
+                                            case (true) { ab.put_str(g", \0"); }
+                                            default {};
+                                        };
+                                        lt_text(@ab, si.ftys[k]);
+                                        ab.put(32);
+                                        switch (ex[k] != (Node*)0)
+                                        {
+                                            case (true) {
+                                            fv = this.global_member_value(ex[k], si.ftys[k]);
+                                            switch (fv == (byte*)0)
+                                            {
+                                                case (true) { -> (byte*)0; }
+                                                default {};
+                                            };
+                                            ab.put_str(fv);
+                                        }
+                                            default { ab.put_str(this.mod.c_null(si.ftys[k]).text); };
+                                        };
+                                        k++;
+                                    };
+                                    ab.put(125);
+                                };
+                            };
+                        };
+                    };
+                    i++;
+                };
+                ab.put(93);
+                r = this.mod.own(ab.mem);
+                -> r;
+            };
+
+            // Splits the aggregate constant text t (from its opening bracket) into top level
+            // items. Returns the item count, starts and ends index into t.
+            split_agg(byte* t, int open, int* st, int* en, int max) -> int
+            {
+                int i = open + 1;
+                int depth;
+                int cnt;
+                int b = i;
+                bool q;
+                byte c;
+                while (t[i] != 0)
+                {
+                    c = t[i];
+                    switch (q)
+                    {
+                        case (true) {
+                        switch (c == '"') { case (true) { q = false; } default {}; };
+                    }
+                        default {
+                            switch (c == '"')
+                            {
+                                case (true) { q = true; }
+                                default {
+                                    switch (c == '{' | c == '[' | c == '(')
+                                    {
+                                        case (true) { depth++; }
+                                        default {
+                                            switch (c == '}' | c == ']' | c == ')')
+                                            {
+                                                case (true) {
+                                                switch (depth == 0)
+                                                {
+                                                    case (true) {
+                                                    switch (i > b & cnt < max)
+                                                    {
+                                                        case (true) { st[cnt] = b; en[cnt] = i; cnt++; }
+                                                        default {};
+                                                    };
+                                                    -> cnt;
+                                                }
+                                                    default {};
+                                                };
+                                                depth--;
+                                            }
+                                                default {
+                                                    switch (c == ',' & depth == 0)
+                                                    {
+                                                        case (true) {
+                                                        switch (cnt < max)
+                                                        {
+                                                            case (true) { st[cnt] = b; en[cnt] = i; cnt++; }
+                                                            default {};
+                                                        };
+                                                        b = i + 1;
+                                                        switch (t[b] == ' ') { case (true) { b++; } default {}; };
+                                                    }
+                                                        default {};
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                    i++;
+                };
+                -> cnt;
+            };
+
+            // Struct body text ("{...}" or "zeroinitializer") with field idx replaced by "ty v"
+            patch_struct_text(byte* body, SInfo* si, int idx, byte* fv) -> byte*
+            {
+                int* sts = (int*)this.zbuf(64);
+                int* ens = (int*)this.zbuf(64);
+                int cnt;
+                int i;
+                int o;
+                Buf ab;
+                byte* r;
+                byte* zt;
+                switch (si.n > 64)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                ab.__init();
+                defer ab.__exit();
+                ab.put(123);
+                switch (body[0] == '{')
+                {
+                    case (true) { cnt = this.split_agg(body, 0, sts, ens, 64); }
+                    default {};
+                };
+                while (i < si.n)
+                {
+                    switch (i > 0)
+                    {
+                        case (true) { ab.put_str(g", \0"); }
+                        default {};
+                    };
+                    switch (i == idx)
+                    {
+                        case (true) {
+                        switch (!this.gmv_full)
+                        {
+                            case (true) {
+                                lt_text(@ab, si.ftys[i]);
+                                ab.put(32);
+                            }
+                            default {};
+                        };
+                        ab.put_str(fv);
+                    }
+                        default {
+                            switch (body[0] == '{' & i < cnt)
+                            {
+                                case (true) {
+                                o = sts[i];
+                                while (o < ens[i])
+                                {
+                                    ab.put(body[o]);
+                                    o++;
+                                };
+                            }
+                                default {
+                                    lt_text(@ab, si.ftys[i]);
+                                    ab.put(32);
+                                    ab.put_str(this.mod.c_null(si.ftys[i]).text);
+                                };
+                            };
+                        };
+                    };
+                    i++;
+                };
+                ab.put(125);
+                r = this.mod.own(ab.mem);
+                -> r;
+            };
+
+            // Constant text of an integer member value, or null when it is not a plain integer
+            global_member_value(Node* v, IRType* ft) -> byte*
+            {
+                Buf ab;
+                i64 x;
+                byte* r;
+                this.gmv_full = false;
+                switch (v.kind == NodeKind.STRING_LITERAL & ft.kind == LK.PTR)
+                {
+                    case (true) {
+                    // Python leaves the string global undecayed in a struct member slot
+                    ab.__init();
+                    defer ab.__exit();
+                    this.str_global_ref(v, @ab, false);
+                    this.gmv_full = true;
+                    r = this.mod.own(ab.mem);
+                    -> r;
+                }
+                    default {};
+                };
+                switch (ft.kind != LK.INT)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                switch (v.kind == NodeKind.LITERAL)
+                {
+                    case (true) {
+                    switch (v.op != DataType.SINT & v.op != DataType.UINT & v.op != DataType.SLONG & v.op != DataType.ULONG &
+                            v.op != DataType.BOOL & v.op != DataType.CHAR)
+                    {
+                        case (true) { -> (byte*)0; }
+                        default {};
+                    };
+                    x = v.ival;
+                }
+                    default {
+                        switch (v.kind != NodeKind.IDENTIFIER)
+                        {
+                            case (true) { -> (byte*)0; }
+                            default {};
+                        };
+                        switch (!this.parse_int_text(this.global_ident_init(v.text), @x))
+                        {
+                            case (true) { -> (byte*)0; }
+                            default {};
+                        };
+                    };
+                };
+                ab.__init();
+                defer ab.__exit();
+                put_i64(@ab, x);
+                r = this.mod.own(ab.mem);
+                -> r;
+            };
+
+            // visit_Assignment at global scope: the constant initializer of the global is patched
+            global_assign(Node* es) -> void
+            {
+                Node* asn = es.a;
+                Node* t;
+                Node* v;
+                Node* o;
+                IRGlobal* gl;
+                SInfo* si;
+                int idx;
+                int ai;
+                int* sts = (int*)this.zbuf(512);
+                int* ens = (int*)this.zbuf(512);
+                int cnt;
+                int i;
+                int j;
+                byte* fv;
+                byte* body;
+                byte* nb;
+                IRType* et;
+                Buf ab;
+                Buf pb;
+                switch (asn == (Node*)0)
+                {
+                    case (true) { ->; }
+                    default {};
+                };
+                switch (asn.kind != NodeKind.ASSIGNMENT)
+                {
+                    case (true) { ->; }
+                    default {};
+                };
+                t = asn.a;
+                v = asn.b;
+                switch (t.kind == NodeKind.MEMBER_ACCESS)
+                {
+                    case (true) {
+                    o = t.a;
+                    switch (o.kind == NodeKind.IDENTIFIER)
+                    {
+                        case (true) {
+                        gl = this.global_ident_find(o.text);
+                        switch (gl == (IRGlobal*)0 | gl.init == (byte*)0)
+                        {
+                            case (true) { this.note_unsup(g"global member assignment\0"); ->; }
+                            default {};
+                        };
+                        si = this.sinfo_of(gl.ty);
+                        switch (si == (SInfo*)0)
+                        {
+                            case (true) { this.note_unsup(g"global member assignment\0"); ->; }
+                            default {};
+                        };
+                        idx = this.sidx(si, t.text);
+                        switch (idx < 0)
+                        {
+                            case (true) { this.note_unsup(g"global member assignment\0"); ->; }
+                            default {};
+                        };
+                        fv = this.global_member_value(v, si.ftys[idx]);
+                        switch (fv == (byte*)0)
+                        {
+                            case (true) { this.note_unsup(g"global member assignment\0"); ->; }
+                            default {};
+                        };
+                        nb = this.patch_struct_text(gl.init, si, idx, fv);
+                        switch (nb == (byte*)0)
+                        {
+                            case (true) { this.note_unsup(g"global member assignment\0"); ->; }
+                            default {};
+                        };
+                        gl.init = nb;
+                        ->;
+                    }
+                        default {};
+                    };
+                    switch (o.kind == NodeKind.ARRAY_ACCESS)
+                    {
+                        case (true) {
+                        switch (o.a.kind != NodeKind.IDENTIFIER | o.b.kind != NodeKind.LITERAL)
+                        {
+                            case (true) { this.note_unsup(g"global member assignment\0"); ->; }
+                            default {};
+                        };
+                        gl = this.global_ident_find(o.a.text);
+                        switch (gl == (IRGlobal*)0 | gl.init == (byte*)0)
+                        {
+                            case (true) { this.note_unsup(g"global member assignment\0"); ->; }
+                            default {};
+                        };
+                        switch (gl.ty.kind != LK.ARRAY)
+                        {
+                            case (true) { this.note_unsup(g"global member assignment\0"); ->; }
+                            default {};
+                        };
+                        et = gl.ty.elem;
+                        si = this.sinfo_of(et);
+                        ai = (int)o.b.ival;
+                        switch (si == (SInfo*)0 | ai < 0 | ai >= gl.ty.count | gl.ty.count > 512)
+                        {
+                            case (true) { this.note_unsup(g"global member assignment\0"); ->; }
+                            default {};
+                        };
+                        idx = this.sidx(si, t.text);
+                        switch (idx < 0)
+                        {
+                            case (true) { this.note_unsup(g"global member assignment\0"); ->; }
+                            default {};
+                        };
+                        fv = this.global_member_value(v, si.ftys[idx]);
+                        switch (fv == (byte*)0)
+                        {
+                            case (true) { this.note_unsup(g"global member assignment\0"); ->; }
+                            default {};
+                        };
+                        switch (gl.init[0] == '[')
+                        {
+                            case (true) { cnt = this.split_agg(gl.init, 0, sts, ens, 512); }
+                            default {};
+                        };
+                        ab.__init();
+                        defer ab.__exit();
+                        ab.put(91);
+                        i = 0;
+                        while (i < gl.ty.count)
+                        {
+                            switch (i > 0)
+                            {
+                                case (true) { ab.put_str(g", \0"); }
+                                default {};
+                            };
+                            lt_text(@ab, et);
+                            ab.put(32);
+                            body = this.mod.c_null(et).text;
+                            switch (gl.init[0] == '[' & i < cnt)
+                            {
+                                case (true) {
+                                // Element text is "ty body": keep the body part
+                                j = sts[i];
+                                while (j < ens[i] & gl.init[j] != '{' & !(gl.init[j] == 'z' & gl.init[j + 1] == 'e'))
+                                {
+                                    j++;
+                                };
+                                pb.__init();
+                                while (j < ens[i])
+                                {
+                                    pb.put(gl.init[j]);
+                                    j++;
+                                };
+                                body = this.mod.own(pb.mem);
+                                pb.__exit();
+                            }
+                                default {};
+                            };
+                            switch (i == ai)
+                            {
+                                case (true) {
+                                nb = this.patch_struct_text(body, si, idx, fv);
+                                switch (nb == (byte*)0)
+                                {
+                                    case (true) { this.note_unsup(g"global member assignment\0"); ->; }
+                                    default {};
+                                };
+                                ab.put_str(nb);
+                            }
+                                default { ab.put_str(body); };
+                            };
+                            i++;
+                        };
+                        ab.put(93);
+                        gl.init = this.mod.own(ab.mem);
+                        ->;
+                    }
+                        default {};
+                    };
+                    this.note_unsup(g"global member assignment\0");
+                    ->;
+                }
+                    default {};
+                };
+                switch (t.kind == NodeKind.ARRAY_ACCESS)
+                {
+                    case (true) {
+                    // Only a named global array with a constant index is patched
+                    switch (t.a.kind != NodeKind.IDENTIFIER | t.b.kind != NodeKind.LITERAL)
+                    {
+                        case (true) { this.note_unsup(g"global element assignment\0"); ->; }
+                        default {};
+                    };
+                    gl = this.global_ident_find(t.a.text);
+                    switch (gl == (IRGlobal*)0)
+                    {
+                        case (true) { this.note_unsup(g"global element assignment\0"); ->; }
+                        default {};
+                    };
+                    switch (gl.init == (byte*)0 | gl.ty.kind != LK.ARRAY)
+                    {
+                        case (true) { this.note_unsup(g"global element assignment\0"); ->; }
+                        default {};
+                    };
+                    switch (gl.init[0] != '[' | gl.ty.count > 512)
+                    {
+                        case (true) { this.note_unsup(g"global element assignment\0"); ->; }
+                        default {};
+                    };
+                    et = gl.ty.elem;
+                    ai = (int)t.b.ival;
+                    cnt = this.split_agg(gl.init, 0, sts, ens, 512);
+                    switch (ai < 0 | ai >= cnt)
+                    {
+                        case (true) { this.note_unsup(g"global element assignment\0"); ->; }
+                        default {};
+                    };
+                    ab.__init();
+                    defer ab.__exit();
+                    switch (v.kind == NodeKind.STRING_LITERAL & et.kind == LK.PTR)
+                    {
+                        case (true) {
+                        switch (et.elem.kind != LK.INT)
+                        {
+                            case (true) { this.note_unsup(g"global element assignment\0"); ->; }
+                            default {};
+                        };
+                        this.str_global_text(v, @ab);
+                    }
+                        default {
+                            fv = this.global_member_value(v, et);
+                            switch (fv == (byte*)0)
+                            {
+                                case (true) { this.note_unsup(g"global element assignment\0"); ->; }
+                                default {};
+                            };
+                            lt_text(@ab, et);
+                            ab.put(32);
+                            ab.put_str(fv);
+                        };
+                    };
+                    fv = this.mod.own(ab.mem);
+                    pb.__init();
+                    defer pb.__exit();
+                    j = 0;
+                    while (j < sts[ai])
+                    {
+                        pb.put(gl.init[j]);
+                        j++;
+                    };
+                    pb.put_str(fv);
+                    j = ens[ai];
+                    while (gl.init[j] != 0)
+                    {
+                        pb.put(gl.init[j]);
+                        j++;
+                    };
+                    gl.init = this.mod.own(pb.mem);
+                    ->;
+                }
+                    default {};
+                };
+                ->;
+            };
+
+            // Internal constant .str.N global for a string element of a global pointer array
+            str_global_text(Node* e, Buf* ob) -> bool
+            {
+                -> this.str_global_ref(e, ob, true);
+            };
+
+            str_global_ref(Node* e, Buf* ob, bool decay) -> bool
+            {
+                byte* src = this.str_bytes(e);
+                int len = this.q_len;
+                byte* buf;
+                IRType* aty;
+                IRValue* cv;
+                IRGlobal* gl;
+                void* hit;
+                IRValue* gv;
+                buf = (byte*)fmalloc((u64)(len + 2));
+                this.keep((void*)buf);
+                memcpy((void*)buf, (void*)src, (u64)len);
+                switch (this.null_term)
+                {
+                    case (true) {
+                    switch (len == 0)
+                    {
+                        case (true) { buf[0] = (byte)0; len = 1; }
+                        default {
+                            switch (buf[len - 1] != (byte)0)
+                            {
+                                case (true) { buf[len] = (byte)0; len++; }
+                                default {};
+                            };
+                        };
+                    };
+                }
+                    default {};
+                };
+                aty = this.mod.t_array(this.t_i8, len);
+                cv = this.mod.c_bytes(aty, buf, len);
+                hit = nm_get(this.gcache, cv.text);
+                switch (hit != (void*)0)
+                {
+                    case (true) { gv = (IRValue*)hit; }
+                    default {
+                        this.sc.clear();
+                        this.sc.put_str(g".str.\0");
+                        this.sc.put_int(this.nstr);
+                        this.nstr++;
+                        gl = this.mod.add_global(aty, this.sc.mem, cv.text);
+                        gl.linkage = this.mod.own(g"internal\0");
+                        gl.constant = true;
+                        this.mark_arr_ptr(gl.self.ty);
+                        nm_put(this.gcache, this.mod.own(cv.text), (void*)gl.self);
+                        gv = gl.self;
+                    };
+                };
+                switch (!decay)
+                {
+                    case (true) {
+                    lt_text(ob, aty);
+                    ob.put_str(g"* \0");
+                    ob.put_str(gv.text);
+                    -> true;
+                }
+                    default {};
+                };
+                ob.put_str(g"i8* getelementptr (\0");
+                lt_text(ob, aty);
+                ob.put_str(g", \0");
+                lt_text(ob, aty);
+                ob.put_str(g"* \0");
+                ob.put_str(gv.text);
+                ob.put_str(g", i32 0, i32 0)\0");
+                -> true;
+            };
+
             global_array_init(Node* ini, IRType* lt) -> byte*
             {
                 int n = node_count(ini, 0);
@@ -2905,6 +4776,21 @@ namespace flux
                 switch (lt.kind != LK.ARRAY)
                 {
                     case (true) { -> (byte*)0; }
+                    default {};
+                };
+                switch (lt.elem.kind == LK.ISTRUCT)
+                {
+                    case (true) { -> this.global_struct_array_init(ini, lt); }
+                    default {};
+                };
+                switch (lt.elem.kind == LK.PTR)
+                {
+                    case (true) { -> this.global_ptr_array_init(ini, lt); }
+                    default {};
+                };
+                switch (lt.elem.kind == LK.FLOAT | lt.elem.kind == LK.DOUBLE)
+                {
+                    case (true) { -> this.global_fp_array_init(ini, lt); }
                     default {};
                 };
                 switch (lt.elem.kind != LK.INT)
@@ -2939,7 +4825,21 @@ namespace flux
                 int i;
                 i64* vals;
                 byte* r;
-                byte* src = this.str_bytes(ini);
+                byte* src;
+                Buf pb;
+                switch (lt.kind == LK.PTR & lt.elem.kind == LK.INT & lt.elem.width == 8)
+                {
+                    case (true) {
+                    // byte* target: a gep to a .str.gsi.<md5> constant
+                    pb.__init();
+                    this.gsi_ref(ini.text, this.str_len_of(ini), @pb, false);
+                    r = this.mod.own(pb.mem);
+                    pb.__exit();
+                    -> r;
+                }
+                    default {};
+                };
+                src = this.str_bytes(ini);
                 len = this.q_len;
                 switch (lt.kind != LK.ARRAY)
                 {
@@ -2969,6 +4869,46 @@ namespace flux
                 };
                 r = this.global_array_text(lt, vals, len);
                 ffree((void*)vals);
+                -> r;
+            };
+
+            // TypeSystem.infer_array_size for an ArrayLiteral initializer: a bare [] keeps every
+            // element, without brackets a trailing zero literal is the terminator and is not counted
+            sized_to(TypeSpec* ts, int cnt, Node* n) -> TypeSpec*
+            {
+                TypeSpec* r = typespec_clone(ts);
+                Node* zn;
+                r.array_dims = (NodeVec*)0;
+                zn = node_new(NodeKind.LITERAL, n.line, n.col);
+                zn.op = DataType.SINT;
+                zn.ival = (i64)cnt;
+                r.array_size = zn;
+                -> r;
+            };
+
+            sized_by_literal(TypeSpec* ts, Node* ini, Node* n) -> TypeSpec*
+            {
+                int asz = node_count(ini, 0);
+                Node* zn;
+                TypeSpec* r;
+                switch (ts.array_dims == (NodeVec*)0 & asz > 0)
+                {
+                    case (true) {
+                    zn = node_child(ini, 0, asz - 1);
+                    switch (zn.kind == NodeKind.LITERAL & zn.ival == (i64)0)
+                    {
+                        case (true) { asz--; }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+                r = typespec_clone(ts);
+                r.array_dims = (NodeVec*)0;
+                zn = node_new(NodeKind.LITERAL, n.line, n.col);
+                zn.op = DataType.SINT;
+                zn.ival = (i64)asz;
+                r.array_size = zn;
                 -> r;
             };
 
@@ -3008,7 +4948,7 @@ namespace flux
                 };
                 switch (ts.base_type == DataType.DICT)
                 {
-                    case (true) { ->; }
+                    case (true) { this.declare_global_dict(n, ns); ->; }
                     default {};
                 };
                 switch (ts.storage_class == StorageClass.AUTO)
@@ -3029,22 +4969,28 @@ namespace flux
                     }
                         default {};
                     };
-                    switch (n.a.kind != NodeKind.STRING_LITERAL)
+                    switch (n.a.kind == NodeKind.ARRAY_LITERAL & (n.a.flags `& NF_IS_STRING) == 0)
                     {
-                        case (true) {
-                        this.note_unsup(g"global array without size\0");
-                        ->;
-                    }
-                        default {};
+                        case (true) { ts = this.sized_by_literal(ts, n.a, n); }
+                        default {
+                            switch (n.a.kind != NodeKind.STRING_LITERAL)
+                            {
+                                case (true) {
+                                this.note_unsup(g"global array without size\0");
+                                ->;
+                            }
+                                default {};
+                            };
+                            lt = this.lower(ts, true, n.line);
+                            switch (lt == (IRType*)0)
+                            {
+                                case (true) { ->; }
+                                default {};
+                            };
+                            this.str_bytes(n.a);
+                            lt = this.mod.t_array(lt.elem, this.q_len);
+                        };
                     };
-                    lt = this.lower(ts, true, n.line);
-                    switch (lt == (IRType*)0)
-                    {
-                        case (true) { ->; }
-                        default {};
-                    };
-                    this.str_bytes(n.a);
-                    lt = this.mod.t_array(lt.elem, this.q_len);
                 }
                     default {};
                 };
@@ -3079,6 +5025,7 @@ namespace flux
                 };
                 gl = this.mod.add_global(lt, m, it);
                 gl.linkage = this.mod.own(g"internal\0");
+                gl.self.spec = ts;
                 switch (nm_get(this.gvars, m) == (void*)0)
                 {
                     case (true) {
@@ -3086,6 +5033,7 @@ namespace flux
                     gv.ptr = gl.self;
                     gv.ts = ts;
                     gv.vol = false;
+                    gv.is_heap = false;
                     this.keep((void*)gv);
                     nm_put(this.gvars, m, (void*)gv);
                 }
@@ -3164,6 +5112,88 @@ namespace flux
 
             ci32(int v) -> IRValue* -> this.mod.c_int(this.t_i32, (i64)v);
 
+            // Zero fill of a whole object through llvm.memset sized by the GEP from null trick
+            // Array widening assignment (assign_field_value): zero the destination array, then
+            // memcpy the source bytes in
+            array_widen(IRValue* mp, IRValue* val, IRType* mt) -> void
+            {
+                IRType** ps = (IRType**)fmalloc((u64)4 * (u64)((sizeof(IRType*) + 7) / 8));
+                IRType* i8p = this.mod.t_ptr(this.t_i8);
+                IRFunc* f;
+                IRValue* dp;
+                IRValue* sp;
+                i64 eb = (i64)8;
+                i64 dst_bytes;
+                i64 src_bytes;
+                this.keep((void*)ps);
+                switch (mt.elem.kind == LK.INT)
+                {
+                    case (true) {
+                    eb = (i64)(mt.elem.width / 8);
+                    switch (eb < (i64)1)
+                    {
+                        case (true) { eb = (i64)1; }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+                dst_bytes = (i64)mt.count * eb;
+                src_bytes = (i64)val.ty.elem.count * eb;
+                ps[0] = i8p;
+                ps[1] = this.t_i8;
+                ps[2] = this.t_i64;
+                ps[3] = this.t_i1;
+                f = this.intrinsic(g"llvm.memset.p0i8.i64\0", this.mod.t_func(this.t_void, ps, 4, false));
+                dp = this.mod.cast(g"bitcast\0", mp, i8p, (byte*)0);
+                this.mod.ia[0] = dp;
+                this.mod.ia[1] = this.mod.c_int(this.t_i8, (i64)0);
+                this.mod.ia[2] = this.mod.c_int(this.t_i64, dst_bytes);
+                this.mod.ia[3] = this.mod.c_null(this.t_i1);
+                this.mod.call(f.self, this.mod.ia, 4, (byte*)0);
+                ps = (IRType**)fmalloc((u64)4 * (u64)((sizeof(IRType*) + 7) / 8));
+                this.keep((void*)ps);
+                ps[0] = i8p;
+                ps[1] = i8p;
+                ps[2] = this.t_i64;
+                ps[3] = this.t_i1;
+                f = this.intrinsic(g"llvm.memcpy.p0i8.p0i8.i64\0", this.mod.t_func(this.t_void, ps, 4, false));
+                dp = this.mod.cast(g"bitcast\0", mp, i8p, (byte*)0);
+                sp = this.mod.cast(g"bitcast\0", val, i8p, (byte*)0);
+                this.mod.ia[0] = dp;
+                this.mod.ia[1] = sp;
+                this.mod.ia[2] = this.mod.c_int(this.t_i64, src_bytes);
+                this.mod.ia[3] = this.mod.c_null(this.t_i1);
+                this.mod.call(f.self, this.mod.ia, 4, (byte*)0);
+                ->;
+            };
+
+            memset_object(IRValue* alloca, IRType* lt) -> void
+            {
+                IRType** ps = (IRType**)fmalloc((u64)4 * (u64)((sizeof(IRType*) + 7) / 8));
+                IRType* i8p = this.mod.t_ptr(this.t_i8);
+                IRFunc* f;
+                IRValue* szp;
+                IRValue* sz;
+                IRValue* cp;
+                this.keep((void*)ps);
+                ps[0] = i8p;
+                ps[1] = this.t_i8;
+                ps[2] = this.t_i64;
+                ps[3] = this.t_i1;
+                f = this.intrinsic(g"llvm.memset.p0i8.i64\0", this.mod.t_func(this.t_void, ps, 4, false));
+                this.mod.ia[0] = this.ci32(1);
+                szp = this.mod.gep(this.mod.c_null(this.mod.t_ptr(lt)), this.mod.ia, 1, false, g"obj_sizeof_gep\0");
+                sz = this.mod.cast(g"ptrtoint\0", szp, this.t_i64, g"obj_sizeof\0");
+                cp = this.mod.cast(g"bitcast\0", alloca, i8p, g"obj_memset_ptr\0");
+                this.mod.ia[0] = cp;
+                this.mod.ia[1] = this.mod.c_int(this.t_i8, (i64)0);
+                this.mod.ia[2] = sz;
+                this.mod.ia[3] = this.mod.c_null(this.t_i1);
+                this.mod.call(f.self, this.mod.ia, 4, (byte*)0);
+                ->;
+            };
+
             // Object declaration with a constructor call (_vardecl_call_constructor)
             init_ctor(IRValue* alloca, IRType* lt, Node* ini, Node* site) -> void
             {
@@ -3175,6 +5205,8 @@ namespace flux
                 IRFunc* f;
                 IRType* ft;
                 int j;
+                bool large;
+                bool isstr;
                 switch (argc == 1 & lt.kind == LK.ISTRUCT)
                 {
                     case (true) {
@@ -3215,6 +5247,7 @@ namespace flux
                 switch (lt.kind == LK.ISTRUCT)
                 {
                     case (true) {
+                    large = false;
                     j = 0;
                     while (j < lt.nitems)
                     {
@@ -3223,10 +5256,7 @@ namespace flux
                             case (true) {
                             switch (lt.items[j].count > 64)
                             {
-                                case (true) {
-                                this.unsup(site, g"constructor on large object\0");
-                                ->;
-                            }
+                                case (true) { large = true; }
                                 default {};
                             };
                         }
@@ -3234,7 +5264,11 @@ namespace flux
                         };
                         j++;
                     };
-                    this.mod.store(this.zero_of(lt), alloca);
+                    switch (large)
+                    {
+                        case (true) { this.memset_object(alloca, lt); }
+                        default { this.mod.store(this.zero_of(lt), alloca); };
+                    };
                 }
                     default {};
                 };
@@ -3254,7 +5288,12 @@ namespace flux
                 i = 0;
                 while (i < argc)
                 {
-                    switch (node_child(ini, 0, i).kind == NodeKind.STRING_LITERAL & i + 1 < ft.nitems & this.is_i8_ptr(ft.items[i + 1]))
+                    switch (node_child(ini, 0, i).kind == NodeKind.STRING_LITERAL & i + 1 < ft.nitems)
+                    {
+                        case (true) { isstr = this.is_i8_ptr(ft.items[i + 1]); }
+                        default { isstr = false; };
+                    };
+                    switch (isstr)
                     {
                         case (true) {
                         this.sc.clear();
@@ -3460,6 +5499,40 @@ namespace flux
                     case (true) { -> false; }
                     default {};
                 };
+                switch (lt.elem.kind == LK.ARRAY)
+                {
+                    case (true) {
+                    // Rows given as strings, each a stack array that is loaded and stored whole
+                    while (i < c)
+                    {
+                        switch (node_child(ini, 0, i).kind != NodeKind.STRING_LITERAL)
+                        {
+                            case (true) { -> false; }
+                            default {};
+                        };
+                        i++;
+                    };
+                    -> c > 0;
+                }
+                    default {};
+                };
+                switch (lt.elem.kind == LK.ISTRUCT)
+                {
+                    case (true) {
+                    // Struct literals, each stored whole into its element
+                    while (i < c)
+                    {
+                        switch (node_child(ini, 0, i).kind != NodeKind.STRUCT_LITERAL)
+                        {
+                            case (true) { -> false; }
+                            default {};
+                        };
+                        i++;
+                    };
+                    -> c > 0;
+                }
+                    default {};
+                };
                 switch (lt.elem.kind != LK.INT & lt.elem.kind != LK.PTR & lt.elem.kind != LK.FLOAT & lt.elem.kind != LK.DOUBLE)
                 {
                     case (true) { -> false; }
@@ -3478,6 +5551,47 @@ namespace flux
                 -> true;
             };
 
+            // StructTypeHandler._array_bits
+            array_bits(IRType* at) -> int
+            {
+                IRType* e = at.elem;
+                int w = 64;
+                switch (e.kind)
+                {
+                    case (LK.INT) { w = e.width; }
+                    case (LK.FLOAT) { w = 32; }
+                    case (LK.DOUBLE) { w = 64; }
+                    case (LK.STRUCT) { w = this.struct_bits(e); }
+                    case (LK.ISTRUCT) { w = this.struct_bits(e); }
+                    default {};
+                };
+                -> w * at.count;
+            };
+
+            // StructTypeHandler._struct_bits: total bit width of the members of a struct type
+            struct_bits(IRType* st) -> int
+            {
+                int i;
+                int total;
+                IRType* e;
+                while (i < st.nitems)
+                {
+                    e = st.items[i];
+                    switch (e.kind)
+                    {
+                        case (LK.INT) { total += e.width; }
+                        case (LK.FLOAT) { total += 32; }
+                        case (LK.DOUBLE) { total += 64; }
+                        case (LK.STRUCT) { total += this.struct_bits(e); }
+                        case (LK.ISTRUCT) { total += this.struct_bits(e); }
+                        case (LK.ARRAY) { total += this.array_bits(e); }
+                        default { total += 64; };
+                    };
+                    i++;
+                };
+                -> total;
+            };
+
             // ArrayTypeHandler.initialize_local_array for integer element arrays
             init_local_array(IRValue* alloca, IRType* lt, Node* ini) -> void
             {
@@ -3487,7 +5601,27 @@ namespace flux
                 IRValue* ep;
                 while (i < c & i < lt.count)
                 {
-                    ev = this.visit(node_child(ini, 0, i));
+                    switch (lt.elem.kind == LK.ARRAY & node_child(ini, 0, i).kind == NodeKind.ARRAY_LITERAL)
+                    {
+                        case (true) {
+                        this.mod.ia[0] = this.ci32(0);
+                        this.mod.ia[1] = this.ci32(i);
+                        this.sc.clear();
+                        this.sc.put_str(g"elem_\0");
+                        this.sc.put_int(i);
+                        ep = this.mod.gep(alloca, this.mod.ia, 2, false, this.sc.mem);
+                        this.init_local_array(ep, lt.elem, node_child(ini, 0, i));
+                        switch (this.bad) { case (true) { ->; } default {}; };
+                        i++;
+                        continue;
+                    }
+                        default {};
+                    };
+                    switch (lt.elem.kind == LK.ISTRUCT & node_child(ini, 0, i).kind == NodeKind.STRUCT_LITERAL)
+                    {
+                        case (true) { ev = this.x_struct_lit(node_child(ini, 0, i), lt.elem); }
+                        default { ev = this.visit(node_child(ini, 0, i)); };
+                    };
                     switch (this.bad)
                     {
                         case (true) { ->; }
@@ -3503,6 +5637,17 @@ namespace flux
                     };
                     switch (lt.elem.kind)
                     {
+                        case (LK.ISTRUCT)
+                        {
+                            switch (!lt_eq(ev.ty, lt.elem))
+                            {
+                                case (true) {
+                                this.unsup(ini, g"array element type\0");
+                                ->;
+                            }
+                                default {};
+                            };
+                        }
                         case (LK.PTR)
                         {
                             // Pointer elements keep the pointer, an array pointer decays to its first element
@@ -3540,6 +5685,17 @@ namespace flux
                             switch (lt.elem.kind == LK.INT)
                             {
                                 case (true) {
+                                // A struct whose total bit width equals the element is reinterpreted through memory
+                                switch ((ev.ty.kind == LK.STRUCT | ev.ty.kind == LK.ISTRUCT) & this.struct_bits(ev.ty) == lt.elem.width)
+                                {
+                                    case (true) {
+                                    IRValue* stmp = this.mod.alloca(ev.ty, g"struct_tmp\0");
+                                    this.mod.store(ev, stmp);
+                                    IRValue* sip = this.mod.cast(g"bitcast\0", stmp, this.mod.t_ptr(lt.elem), g"struct_as_int_ptr\0");
+                                    ev = this.mod.load(sip, g"struct_to_int\0");
+                                }
+                                    default {};
+                                };
                                 switch (ev.ty.kind != LK.INT)
                                 {
                                     case (true) {
@@ -3614,6 +5770,364 @@ namespace flux
             };
 
             // Declares (or finds) an intrinsic or external function by type
+            // llvm.va_start / va_end (n == 1) and llvm.va_copy (n == 2): void (i8*[, i8*])
+            va_intrinsic(byte* name, int n) -> IRFunc*
+            {
+                IRType** ps = (IRType**)this.zbuf(2);
+                ps[0] = this.t_i8p;
+                ps[1] = this.t_i8p;
+                -> this.intrinsic(name, this.mod.t_func(this.t_void, ps, n, false));
+            };
+
+            // Removes the source variable of a recast from its scope
+            recast_invalidate(Node* src) -> void
+            {
+                int k;
+                byte* nm = (byte*)0;
+                switch (src.kind == NodeKind.ARRAY_SLICE)
+                {
+                    case (true) {
+                    switch (src.a.kind == NodeKind.IDENTIFIER) { case (true) { nm = src.a.text; } default {}; };
+                }
+                    default {
+                    switch (src.kind == NodeKind.IDENTIFIER) { case (true) { nm = src.text; } default {}; };
+                };
+                };
+                switch (nm == (byte*)0)
+                {
+                    case (true) { ->; }
+                    default {};
+                };
+                k = this.scopes.len - 1;
+                while (k >= 0)
+                {
+                    switch (nm_get((NameMap*)this.scopes.items[k], nm) != (void*)0)
+                    {
+                        case (true) {
+                        nm_del((NameMap*)this.scopes.items[k], nm);
+                        break;
+                    }
+                        default {};
+                    };
+                    k--;
+                };
+                ->;
+            };
+
+            // visit_StructRecast: a pointer source is reinterpreted in place
+            x_recast(Node* n) -> IRValue*
+            {
+                IRType* st = this.resolve_custom(n.text);
+                IRValue* src;
+                IRValue* sv;
+                IRValue* start;
+                Node* sl;
+                switch (st == (IRType*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"struct recast target\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (n.a.kind == NodeKind.ARRAY_SLICE)
+                {
+                    case (true) {
+                    sl = n.a;
+                    sv = this.visit(sl.a);
+                    switch (this.bad | sv == (IRValue*)0)
+                    {
+                        case (true) { -> (IRValue*)0; }
+                        default {};
+                    };
+                    // An alloca of a pointer to a non array is loaded first
+                    switch (sv.ty.kind == LK.PTR)
+                    {
+                        case (true) {
+                        switch (sv.ty.elem.kind == LK.PTR)
+                        {
+                            case (true) {
+                            switch (sv.ty.elem.elem.kind != LK.ARRAY)
+                            {
+                                case (true) { sv = this.mod.load(sv, g"recast_arr_load\0"); }
+                                default {};
+                            };
+                        }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                    start = this.visit(sl.b);
+                    switch (this.bad | start == (IRValue*)0)
+                    {
+                        case (true) { -> (IRValue*)0; }
+                        default {};
+                    };
+                    switch (start.ty.kind == LK.INT & start.ty.width != 32)
+                    {
+                        case (true) {
+                        switch (start.ty.width > 32)
+                        {
+                            case (true) { start = this.mod.cast(g"trunc\0", start, this.t_i32, g"recast_start_trunc\0"); }
+                            default { start = this.mod.cast(g"sext\0", start, this.t_i32, g"recast_start_ext\0"); };
+                        };
+                    }
+                        default {};
+                    };
+                    switch (sv.ty.kind == LK.PTR)
+                    {
+                        case (true) {
+                        switch (sv.ty.elem.kind == LK.ARRAY)
+                        {
+                            case (true) {
+                            this.mod.ia[0] = this.ci32(0);
+                            this.mod.ia[1] = start;
+                            src = this.mod.gep(sv, this.mod.ia, 2, true, g"recast_src_ptr\0");
+                        }
+                            default {
+                            this.mod.ia[0] = start;
+                            src = this.mod.gep(sv, this.mod.ia, 1, true, g"recast_src_ptr\0");
+                        };
+                        };
+                    }
+                        default {
+                        this.unsup(n, g"struct recast slice source\0");
+                        -> (IRValue*)0;
+                    };
+                    };
+                }
+                    default {
+                    src = this.visit(n.a);
+                    switch (this.bad | src == (IRValue*)0)
+                    {
+                        case (true) { -> (IRValue*)0; }
+                        default {};
+                    };
+                };
+                };
+                switch (src.ty.kind != LK.PTR)
+                {
+                    case (true) {
+                    this.unsup(n, g"struct recast by value\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (lt_eq(src.ty.elem, st))
+                {
+                    case (true) { -> src; }
+                    default {};
+                };
+                -> this.mod.cast(g"bitcast\0", src, this.mod.t_ptr(st), g"recast_ptr\0");
+            };
+
+            // _stringify_emit: internal constant holding text, named with the node identity
+            stringify_emit(byte* text, Node* n) -> IRValue*
+            {
+                int len = pp_cstrlen(text);
+                IRType* aty = this.mod.t_array(this.t_i8, len + 1);
+                IRValue* cv;
+                IRGlobal* gl;
+                byte[24] dig;
+                int nd;
+                u64 id = (u64)n;
+                Buf gn;
+                byte* buf = (byte*)this.zbuf((len + 8) / 8 + 1);
+                int i;
+                while (i < len)
+                {
+                    buf[i] = text[i];
+                    i++;
+                };
+                buf[len] = (byte)0;
+                cv = this.mod.c_bytes(aty, buf, len + 1);
+                gn.__init();
+                defer gn.__exit();
+                gn.put_str(g".stringify.\0");
+                gn.put_str(text);
+                gn.put(46);
+                if (id == (u64)0) { dig[0] = '0'; nd = 1; };
+                while (id > (u64)0)
+                {
+                    dig[nd] = (byte)('0' + (int)(id % (u64)10));
+                    nd++;
+                    id = id / (u64)10;
+                };
+                while (nd > 0)
+                {
+                    nd--;
+                    gn.put(dig[nd]);
+                };
+                gl = this.mod.add_global(aty, gn.mem, cv.text);
+                gl.linkage = this.mod.own(g"internal\0");
+                gl.constant = true;
+                this.mark_arr_ptr(gl.self.ty);
+                this.mod.ia[0] = this.ci32(0);
+                this.mod.ia[1] = this.ci32(0);
+                this.sc.clear();
+                this.sc.put_str(g"str_\0");
+                this.sc.put_str(text);
+                -> this.mod.gep(gl.self, this.mod.ia, 2, true, this.sc.mem);
+            };
+
+            // visit_Stringify: $name and $name.member
+            x_stringify(Node* n) -> IRValue*
+            {
+                byte* text;
+                switch (n.text2 != (byte*)0)
+                {
+                    case (true) {
+                    switch (n.text2[0] == '#')
+                    {
+                        case (true) {
+                        this.unsup(n, g"stringify of a union tag\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    text = join3(n.text, g".\0", n.text2);
+                    this.keep((void*)text);
+                    -> this.stringify_emit(text, n);
+                }
+                    default {};
+                };
+                switch (this.find_var(n.text) == (LVar*)0 & st_lookup_any(this.st, n.text, this.cur_ns) == (FXC_SYMENTRY*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"stringify of an undefined identifier\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                -> this.stringify_emit(n.text, n);
+            };
+
+            // visit_TieExpression: loads the variable, marks it moved and zeroes it
+            x_tie(Node* n) -> IRValue*
+            {
+                LVar* lv;
+                IRValue* tied;
+                IRType* pt;
+                switch (n.a.kind != NodeKind.IDENTIFIER)
+                {
+                    case (true) {
+                    this.unsup(n, g"tie of a non variable\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (nm_get(this.untied, n.a.text) != (void*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"use after untie\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                lv = this.find_var(n.a.text);
+                switch (lv == (LVar*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"tie of an unknown variable\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                this.sc.clear();
+                this.sc.put_str(n.a.text);
+                this.sc.put_str(g"_tied\0");
+                tied = this.mod.load(lv.ptr, this.sc.mem);
+                nm_put(this.untied, n.a.text, (void*)1);
+                pt = lv.ptr.ty.elem;
+                switch (pt.kind == LK.PTR | pt.kind == LK.INT | pt.kind == LK.FLOAT | pt.kind == LK.DOUBLE |
+                        pt.kind == LK.STRUCT | pt.kind == LK.ISTRUCT | pt.kind == LK.ARRAY)
+                {
+                    case (true) { this.mod.store(this.zero_of(pt), lv.ptr); }
+                    default {};
+                };
+                -> tied;
+            };
+
+            // visit_VariadicAccess: ...[N]
+            x_vaaccess(Node* n) -> IRValue*
+            {
+                IRValue* idx;
+                IRValue* cl;
+                IRValue* cp;
+                IRValue* res;
+                IRValue* ctr;
+                IRValue* cv;
+                IRValue* c;
+                IRValue* t;
+                IRFunc* f;
+                IRBlock* binit;
+                IRBlock* bcond;
+                IRBlock* bbody;
+                IRBlock* bend;
+                IRBlock* bmerge;
+                switch (this.va_list_v == (IRValue*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"...[N] used outside of a variadic function\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                idx = this.visit(n.a);
+                switch (this.bad | idx == (IRValue*)0)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                switch (idx.ty.kind == LK.INT & idx.ty.width != 32)
+                {
+                    case (true) {
+                    switch (idx.ty.width > 32)
+                    {
+                        case (true) { idx = this.mod.cast(g"trunc\0", idx, this.t_i32, g"va_idx_trunc\0"); }
+                        default { idx = this.mod.cast(g"sext\0", idx, this.t_i32, g"va_idx_ext\0"); };
+                    };
+                }
+                    default {};
+                };
+                cl = this.mod.alloca_here(this.mod.t_array(this.t_i8p, 1), g"va_copy\0");
+                cp = this.mod.cast(g"bitcast\0", cl, this.t_i8p, g"va_copy_ptr\0");
+                this.mod.ia[0] = cp;
+                this.mod.ia[1] = this.va_list_p;
+                this.mod.call(this.va_intrinsic(g"llvm.va_copy\0", 2).self, this.mod.ia, 2, (byte*)0);
+                f = this.va_intrinsic(g"llvm.va_end\0", 1);
+                res = this.mod.alloca_here(this.t_i64, g"va_result\0");
+                binit = this.mod.append_block(this.fn, g"va_loop_init\0");
+                bcond = this.mod.append_block(this.fn, g"va_loop_cond\0");
+                bbody = this.mod.append_block(this.fn, g"va_loop_body\0");
+                bend = this.mod.append_block(this.fn, g"va_loop_end\0");
+                bmerge = this.mod.append_block(this.fn, g"va_merge\0");
+                this.mod.br(binit);
+                this.mod.position(this.fn, binit);
+                ctr = this.mod.alloca_here(this.t_i32, g"va_counter\0");
+                this.mod.store(this.mod.c_int(this.t_i32, (i64)0), ctr);
+                this.mod.br(bcond);
+                this.mod.position(this.fn, bcond);
+                cv = this.mod.load(ctr, g"va_cnt_load\0");
+                c = this.mod.icmp(g"slt\0", cv, idx, g"va_cond\0");
+                this.mod.cbr(c, bbody, bend);
+                this.mod.position(this.fn, bbody);
+                this.mod.va_arg(cp, this.t_i64, g"va_discard\0");
+                cv = this.mod.load(ctr, g"va_cnt_inc_load\0");
+                t = this.mod.binop(g"add\0", cv, this.mod.c_int(this.t_i32, (i64)1), g"va_cnt_inc\0");
+                this.mod.store(t, ctr);
+                this.mod.br(bcond);
+                this.mod.position(this.fn, bend);
+                t = this.mod.va_arg(cp, this.t_i64, g"va_result_val\0");
+                this.mod.store(t, res);
+                this.mod.ia[0] = cp;
+                this.mod.call(f.self, this.mod.ia, 1, (byte*)0);
+                this.mod.br(bmerge);
+                this.mod.position(this.fn, bmerge);
+                -> this.mod.load(res, g"va_arg_result\0");
+            };
+
             intrinsic(byte* name, IRType* ft) -> IRFunc*
             {
                 IRFunc* f = this.mod.find_function(name);
@@ -3907,7 +6421,9 @@ namespace flux
                 switch (ik == NodeKind.CAST_EXPRESSION & vt.kind == LK.PTR & llvm_type.kind == LK.ARRAY)
                 {
                     case (true) {
-                    this.unsup(site, g"cast to array initializer\0");
+                    v = this.mod.cast(g"bitcast\0", v, this.ptr_of(llvm_type), g"cast_to_array_ptr\0");
+                    v = this.mod.load(v, g"loaded_array\0");
+                    this.mod.store(v, alloca);
                     ->;
                 }
                     default {};
@@ -3918,7 +6434,34 @@ namespace flux
                     switch (vt.kind == LK.PTR & vt.elem.kind == LK.ARRAY & llvm_type.kind == LK.ARRAY)
                     {
                         case (true) {
+                        switch (vt.elem.elem.kind == llvm_type.elem.kind & vt.elem.elem.width == llvm_type.elem.width & vt.elem.count <= llvm_type.count)
+                        {
+                            case (true) {
+                            this.array_widen(alloca, v, llvm_type);
+                            ->;
+                        }
+                            default {};
+                        };
+                        switch (ik == NodeKind.BINARY_OP & (ini.op == Operator.ADD | ini.op == Operator.SUB))
+                        {
+                            case (true) {
+                            this.mod.store(this.mod.load(v, g"concat_array_value\0"), alloca);
+                            ->;
+                        }
+                            default {};
+                        };
                         this.unsup(site, g"array widening initializer\0");
+                        ->;
+                    }
+                        default {};
+                    };
+                    switch (ik == NodeKind.BINARY_OP & (ini.op == Operator.ADD | ini.op == Operator.SUB) & vt.kind == LK.PTR & vt.elem.kind == LK.ARRAY &
+                        llvm_type.kind == LK.PTR & llvm_type.elem.kind == LK.INT)
+                    {
+                        case (true) {
+                        this.mod.ia[0] = this.ci32(0);
+                        this.mod.ia[1] = this.ci32(0);
+                        this.mod.store(this.mod.gep(v, this.mod.ia, 2, false, g"concat_array_to_ptr\0"), alloca);
                         ->;
                     }
                         default {};
@@ -4327,7 +6870,12 @@ namespace flux
                         switch (n.text[0] != '-')
                         {
                             case (true) {
-                            r = this.mod.c_u64(this.t_i64, (u64)v);
+                            // Unsigned values above INT64_MAX are wrapped to the signed form by normalize_int_value
+                            switch (dt == DataType.UINT)
+                            {
+                                case (true) { r = this.mod.c_int(this.t_i64, v); }
+                                default { r = this.mod.c_u64(this.t_i64, (u64)v); };
+                            };
                             r.spec = this.lit_spec(dt);
                             -> r;
                         }
@@ -4382,11 +6930,8 @@ namespace flux
                 switch (dt == DataType.SLONG | dt == DataType.ULONG)
                 {
                     case (true) {
-                    switch (dt == DataType.ULONG & v < (i64)0)
-                    {
-                        case (true) { r = this.mod.c_u64(this.t_i64, (u64)v); }
-                        default { r = this.mod.c_int(this.t_i64, v); };
-                    };
+                    // normalize_int_value wraps unsigned values above INT64_MAX to the signed form
+                    r = this.mod.c_int(this.t_i64, v);
                     r.spec = this.lit_spec(dt);
                     -> r;
                 }
@@ -4556,6 +7101,15 @@ namespace flux
                 };
                 ptr = lv.ptr;
                 ts = lv.ts;
+                // Use after untie, checked for locals only
+                switch (nm_get(this.untied, n.text) != (void*)0 & this.find_local(n.text) != (LVar*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"use after untie\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
                 switch (cstr_eq(n.text, g"this\0"))
                 {
                     case (true) { -> ptr; }
@@ -4704,6 +7258,628 @@ namespace flux
                 -> st_overloads_of(this.st, this.sc.mem) != (PtrVec*)0;
             };
 
+            // emit_memcpy of ArrayTypeHandler: bitcast to i8* when needed, then llvm.memcpy
+            emit_memcpy_bytes(IRValue* dst, IRValue* src, i64 bytes) -> void
+            {
+                this.emit_memcpy_val(dst, src, this.mod.c_int(this.t_i64, bytes));
+                ->;
+            };
+
+            // emit_memcpy_dynamic with an i64 byte count
+            emit_memcpy_val(IRValue* dst, IRValue* src, IRValue* cnt) -> void
+            {
+                IRType** ps = (IRType**)fmalloc((u64)4 * (u64)((sizeof(IRType*) + 7) / 8));
+                IRType* i8p = this.mod.t_ptr(this.t_i8);
+                IRFunc* f;
+                this.keep((void*)ps);
+                ps[0] = i8p;
+                ps[1] = i8p;
+                ps[2] = this.t_i64;
+                ps[3] = this.t_i1;
+                f = this.intrinsic(g"llvm.memcpy.p0i8.p0i8.i64\0", this.mod.t_func(this.t_void, ps, 4, false));
+                switch (dst.ty != i8p)
+                {
+                    case (true) { dst = this.mod.cast(g"bitcast\0", dst, i8p, (byte*)0); }
+                    default {};
+                };
+                switch (src.ty != i8p)
+                {
+                    case (true) { src = this.mod.cast(g"bitcast\0", src, i8p, (byte*)0); }
+                    default {};
+                };
+                this.mod.ia[0] = dst;
+                this.mod.ia[1] = src;
+                this.mod.ia[2] = cnt;
+                this.mod.ia[3] = this.mod.c_null(this.t_i1);
+                this.mod.call(f.self, this.mod.ia, 4, (byte*)0);
+                ->;
+            };
+
+            arr_start(IRValue* p, byte* hint) -> IRValue*
+            {
+                this.mod.ia[0] = this.ci32(0);
+                this.mod.ia[1] = this.ci32(0);
+                -> this.mod.gep(p, this.mod.ia, 2, false, hint);
+            };
+
+            // ArrayTypeHandler.concatenate (runtime path)
+            array_concat(Node* n, IRValue* lhs, IRValue* rhs, int op) -> IRValue*
+            {
+                IRType* le = lhs.ty.elem.elem;
+                IRType* re = rhs.ty.elem.elem;
+                int ll = lhs.ty.elem.count;
+                int rl = rhs.ty.elem.count;
+                int nt = 0;
+                int rlen;
+                int lcopy;
+                int eb;
+                IRType* rt;
+                IRValue* res;
+                IRValue* dst;
+                IRValue* src;
+                switch (le.kind != re.kind | le.width != re.width)
+                {
+                    case (true) {
+                    this.unsup(n, g"array concatenation element types\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (op == Operator.ADD & le.kind == LK.INT & le.width == 8 & ll >= 1 & this.null_term)
+                {
+                    case (true) { nt = 1; }
+                    default {};
+                };
+                switch (nt == 1)
+                {
+                    case (true) { rlen = (ll - 1) + rl; }
+                    default {
+                        switch (op == Operator.ADD)
+                        {
+                            case (true) { rlen = ll + rl; }
+                            default {
+                                rlen = ll - rl;
+                                switch (rlen < 0) { case (true) { rlen = 0; } default {}; };
+                            };
+                        };
+                    };
+                };
+                switch (le.kind != LK.INT)
+                {
+                    case (true) {
+                    this.unsup(n, g"array concatenation element size\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                eb = le.width / 8;
+                lcopy = ll;
+                switch (nt == 1) { case (true) { lcopy = ll - 1; } default {}; };
+                rt = this.mod.t_array(le, rlen);
+                res = this.mod.alloca_here(rt, g"array_concat_result\0");
+                switch (lcopy > 0)
+                {
+                    case (true) {
+                    dst = this.arr_start(res, g"result_start\0");
+                    src = this.arr_start(lhs, g"left_start\0");
+                    this.emit_memcpy_bytes(dst, src, (i64)(lcopy * eb));
+                }
+                    default {};
+                };
+                switch (op == Operator.ADD & rl > 0)
+                {
+                    case (true) {
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(lcopy);
+                    dst = this.mod.gep(res, this.mod.ia, 2, false, g"result_right_start\0");
+                    src = this.arr_start(rhs, g"right_start\0");
+                    this.emit_memcpy_bytes(dst, src, (i64)(rl * eb));
+                }
+                    default {};
+                };
+                -> res;
+            };
+
+            // Appends a decimal i64 to cb
+            put_i64(Buf* cb, i64 v) -> void
+            {
+                byte* tmp = (byte*)fmalloc((u64)24);
+                int n = 0;
+                int j;
+                u64 u;
+                bool neg = v < (i64)0;
+                switch (neg)
+                {
+                    case (true) { u = (u64)0 - (u64)v; }
+                    default { u = (u64)v; };
+                };
+                switch (u == (u64)0)
+                {
+                    case (true) { tmp[0] = '0'; n = 1; }
+                    default {};
+                };
+                while (u != (u64)0)
+                {
+                    tmp[n] = (byte)((int)(u % (u64)10) + 48);
+                    u = u / (u64)10;
+                    n++;
+                };
+                switch (neg) { case (true) { cb.put('-'); } default {}; };
+                j = n - 1;
+                while (j >= 0)
+                {
+                    cb.put((int)tmp[j]);
+                    j--;
+                };
+                ffree(tmp);
+                ->;
+            };
+
+            // _fstring_eval_ct: 0 evaluated into ct_v/ct_k, 1 raises (runtime path), 2 not mirrored
+            ctv(Node* e) -> int
+            {
+                int k = e.kind;
+                int st;
+                int op;
+                i64 lv;
+                i64 rv;
+                int lk;
+                int rk;
+                bool b;
+                int cm;
+                i64 res;
+                IRGlobal* gl;
+                FXC_SYMENTRY* se;
+                byte* sm;
+                byte* sn;
+                int sfx;
+                switch (k == NodeKind.LITERAL)
+                {
+                    case (true) {
+                    op = e.op;
+                    switch (op == DataType.SINT | op == DataType.SLONG)
+                    {
+                        case (true) { this.ct_v = e.ival; this.ct_k = 0; -> 0; }
+                        default {};
+                    };
+                    switch (op == DataType.ULONG)
+                    {
+                        case (true) {
+                        switch (e.ival < (i64)0) { case (true) { -> 2; } default {}; };
+                        this.ct_v = e.ival;
+                        this.ct_k = 0;
+                        -> 0;
+                    }
+                        default {};
+                    };
+                    switch (op == DataType.BOOL)
+                    {
+                        case (true) { this.ct_v = e.ival; this.ct_k = 1; -> 0; }
+                        default {};
+                    };
+                    switch (op == DataType.CHAR)
+                    {
+                        case (true) { this.ct_v = e.ival; this.ct_k = 2; -> 0; }
+                        default {};
+                    };
+                    switch (op == DataType.FLOAT | op == DataType.DOUBLE) { case (true) { -> 2; } default {}; };
+                    -> 1;
+                }
+                    default {};
+                };
+                switch (k == NodeKind.BINARY_OP)
+                {
+                    case (true) {
+                    st = this.ctv(e.a);
+                    switch (st != 0) { case (true) { -> st; } default {}; };
+                    lv = this.ct_v;
+                    lk = this.ct_k;
+                    st = this.ctv(e.b);
+                    switch (st != 0) { case (true) { -> st; } default {}; };
+                    rv = this.ct_v;
+                    rk = this.ct_k;
+                    // Python evaluates every operator eagerly, so a zero divisor raises ZeroDivisionError
+                    switch (rv == (i64)0 | lk != 0 | rk != 0) { case (true) { -> 2; } default {}; };
+                    op = e.op;
+                    this.ct_k = 0;
+                    switch (op == Operator.ADD) { case (true) { this.ct_v = lv + rv; -> 0; } default {}; };
+                    switch (op == Operator.SUB) { case (true) { this.ct_v = lv - rv; -> 0; } default {}; };
+                    switch (op == Operator.MUL) { case (true) { this.ct_v = lv * rv; -> 0; } default {}; };
+                    switch (op == Operator.DIV | op == Operator.MOD) { case (true) { -> 2; } default {}; };
+                    this.ct_k = 1;
+                    cm = 0;
+                    switch (op == Operator.EQUAL) { case (true) { b = lv == rv; cm = 1; } default {}; };
+                    switch (op == Operator.NOT_EQUAL) { case (true) { b = lv != rv; cm = 1; } default {}; };
+                    switch (op == Operator.LESS_THAN) { case (true) { b = lv < rv; cm = 1; } default {}; };
+                    switch (op == Operator.LESS_EQUAL) { case (true) { b = lv <= rv; cm = 1; } default {}; };
+                    switch (op == Operator.GREATER_THAN) { case (true) { b = lv > rv; cm = 1; } default {}; };
+                    switch (op == Operator.GREATER_EQUAL) { case (true) { b = lv >= rv; cm = 1; } default {}; };
+                    switch (cm == 0) { case (true) { -> 1; } default {}; };
+                    res = (i64)0;
+                    switch (b) { case (true) { res = (i64)1; } default {}; };
+                    this.ct_v = res;
+                    -> 0;
+                }
+                    default {};
+                };
+                switch (k == NodeKind.UNARY_OP)
+                {
+                    case (true) {
+                    st = this.ctv(e.a);
+                    switch (st != 0) { case (true) { -> st; } default {}; };
+                    op = e.op;
+                    switch (op == Operator.NOT)
+                    {
+                        case (true) {
+                        res = (i64)0;
+                        switch (this.ct_v == (i64)0) { case (true) { res = (i64)1; } default {}; };
+                        this.ct_v = res;
+                        this.ct_k = 1;
+                        -> 0;
+                    }
+                        default {};
+                    };
+                    switch (op == Operator.SUB & this.ct_k == 0)
+                    {
+                        case (true) { this.ct_v = (i64)0 - this.ct_v; -> 0; }
+                        default {};
+                    };
+                    -> 2;
+                }
+                    default {};
+                };
+                switch (k == NodeKind.IDENTIFIER)
+                {
+                    case (true) {
+                    switch (this.find_local(e.text) != (LVar*)0) { case (true) { -> 1; } default {}; };
+                    // Bare name, then the be/le typed suffixes, then the symbol table entry
+                    gl = this.mod.find_global(e.text);
+                    sfx = 0;
+                    while (gl == (IRGlobal*)0 & sfx < 6)
+                    {
+                        switch (sfx == 0) { case (true) { sn = g"__be32\0"; } default {}; };
+                        switch (sfx == 1) { case (true) { sn = g"__le32\0"; } default {}; };
+                        switch (sfx == 2) { case (true) { sn = g"__be64\0"; } default {}; };
+                        switch (sfx == 3) { case (true) { sn = g"__le64\0"; } default {}; };
+                        switch (sfx == 4) { case (true) { sn = g"__be16\0"; } default {}; };
+                        switch (sfx == 5) { case (true) { sn = g"__le16\0"; } default {}; };
+                        sm = join3(e.text, sn, g"\0");
+                        gl = this.mod.find_global(sm);
+                        ffree(sm);
+                        sfx++;
+                    };
+                    switch (gl == (IRGlobal*)0)
+                    {
+                        case (true) {
+                        se = st_lookup_any(this.st, e.text, this.cur_ns);
+                        switch (se != (FXC_SYMENTRY*)0)
+                        {
+                            case (true) {
+                            switch (se.kind_id == SymbolKind.VARIABLE)
+                            {
+                                case (true) {
+                                sm = sym_mangled(se);
+                                gl = this.mod.find_global(sm);
+                                ffree(sm);
+                            }
+                                default {};
+                            };
+                        }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                    // A global without an initializer, or one that is not marked constant, raises
+                    // into the runtime path. Only the constant initializer fold is not mirrored.
+                    switch (gl != (IRGlobal*)0 & gl.init != (byte*)0 & gl.constant) { case (true) { -> 2; } default {}; };
+                    -> 1;
+                }
+                    default {};
+                };
+                // A sizeof of an expression is not a TypeSystem target, so the base raises into the runtime path
+                switch (k == NodeKind.SIZE_OF) { case (true) { switch (e.ts == (TypeSpec*)0) { case (true) { -> 1; } default {}; }; -> 2; } default {}; };
+                switch (k == NodeKind.CAST_EXPRESSION) { case (true) { -> 2; } default {}; };
+                -> 1;
+            };
+
+            // _array_literal_string on a local: str_stack bytes and an inbounds str_ptr
+            fstr_lit(byte* text, int len) -> IRValue*
+            {
+                int total = len;
+                int i;
+                IRType* aty;
+                IRValue* arr;
+                IRValue* gp;
+                switch (this.null_term & (len == 0 | text[len - 1] != (byte)0)) { case (true) { total = len + 1; } default {}; };
+                aty = this.mod.t_array(this.t_i8, total);
+                arr = this.mod.alloca_here(aty, g"str_stack\0");
+                while (i < total)
+                {
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(i);
+                    this.sc.clear();
+                    this.sc.put_str(g"str_char_\0");
+                    this.sc.put_int(i);
+                    gp = this.mod.gep(arr, this.mod.ia, 2, false, this.sc.mem);
+                    switch (i < len)
+                    {
+                        case (true) { this.mod.store(this.mod.c_int(this.t_i8, (i64)((int)text[i])), gp); }
+                        default { this.mod.store(this.mod.c_int(this.t_i8, (i64)0), gp); };
+                    };
+                    i++;
+                };
+                this.mod.ia[0] = this.ci32(0);
+                this.mod.ia[1] = this.ci32(0);
+                -> this.mod.gep(arr, this.mod.ia, 2, true, g"str_ptr\0");
+            };
+
+            fa_decl(byte* name, IRType* vt) -> IRFunc*
+            {
+                IRType** ps = (IRType**)fmalloc((u64)3 * (u64)((sizeof(IRType*) + 7) / 8));
+                this.keep((void*)ps);
+                ps[0] = vt;
+                ps[1] = this.t_i8p;
+                ps[2] = this.mod.t_ptr(this.t_i32);
+                -> this.intrinsic(name, this.mod.t_func(this.t_i32, ps, 3, false));
+            };
+
+            // Length of an f-string text part (embedded NUL bytes count)
+            fs_len(Node* p) -> int
+            {
+                int l = (int)p.ival;
+                switch (l <= 0)
+                {
+                    case (true) {
+                    l = 0;
+                    while (p.text[l] != (byte)0) { l++; };
+                }
+                    default {};
+                };
+                -> l;
+            };
+
+            // visit_FStringLiteral
+            x_fstring(Node* n) -> IRValue*
+            {
+                int c = node_count(n, 0);
+                int i;
+                int st;
+                int rt = 0;
+                int size = 256;
+                Node* p;
+                Buf* cb;
+                byte* txt;
+                int tl;
+                IRValue* val;
+                IRValue* pos;
+                IRValue* dest;
+                IRValue* sp;
+                IRValue* buffer;
+                IRValue* pos_ptr;
+                IRValue* r;
+                IRValue* bp;
+                IRFunc* cf;
+                IRType* aty;
+                IRType* vt;
+                byte* fname;
+                int j;
+                int w;
+                int wt;
+                int ec;
+                bool uns;
+                bool istext;
+                // Compile time attempt
+                cb = (Buf*)fmalloc((u64)((sizeof(Buf) + 7) / 8));
+                cb.__init();
+                while (i < c)
+                {
+                    p = node_child(n, 0, i);
+                    switch (p.kind == NodeKind.STRING_LITERAL)
+                    {
+                        case (true) {
+                        switch (p.text != (byte*)0) { case (true) { cb.put_n(p.text, this.fs_len(p)); } default {}; };
+                    }
+                        default {
+                        st = this.ctv(p);
+                        switch (st == 2)
+                        {
+                            case (true) {
+                            this.unsup(n, g"f-string compile time value\0");
+                            cb.__exit();
+                            ffree((byte*)cb);
+                            -> (IRValue*)0;
+                        }
+                            default {};
+                        };
+                        switch (st == 1)
+                        {
+                            case (true) { rt = 1; break; }
+                            default {};
+                        };
+                        switch (this.ct_k == 1)
+                        {
+                            case (true) {
+                            switch (this.ct_v != (i64)0) { case (true) { cb.put_str(g"True\0"); } default { cb.put_str(g"False\0"); }; };
+                        }
+                            default {
+                            switch (this.ct_k == 2) { case (true) { cb.put((int)this.ct_v); } default { this.put_i64(cb, this.ct_v); }; };
+                        };
+                    };
+                    };
+                    };
+                    i++;
+                };
+                switch (rt == 0)
+                {
+                    case (true) {
+                    tl = cb.len;
+                    txt = (byte*)fmalloc((u64)(tl + 1));
+                    this.keep((void*)txt);
+                    j = 0;
+                    while (j <= tl) { txt[j] = cb.mem[j]; j++; };
+                    cb.__exit();
+                    ffree((byte*)cb);
+                    -> this.fstr_lit(txt, tl);
+                }
+                    default {};
+                };
+                cb.__exit();
+                ffree((byte*)cb);
+                // Runtime path
+                i = 0;
+                while (i < c)
+                {
+                    p = node_child(n, 0, i);
+                    switch (p.kind != NodeKind.STRING_LITERAL)
+                    {
+                        case (true) {
+                        switch (p.kind == NodeKind.LITERAL & p.op == DataType.CHAR)
+                        {
+                            case (true) {
+                            this.unsup(n, g"f-string char part\0");
+                            -> (IRValue*)0;
+                        }
+                            default {};
+                        };
+                        size = size + 32;
+                    }
+                        default {};
+                    };
+                    i++;
+                };
+                aty = this.mod.t_array(this.t_i8, size);
+                buffer = this.mod.alloca_here(aty, g"fstring_buffer\0");
+                pos_ptr = this.mod.alloca_here(this.t_i32, g"fstring_pos\0");
+                this.mod.store(this.ci32(0), pos_ptr);
+                // The front end always yields a text part first and last, empty when an expression is at the edge
+                i = 0;
+                switch (c > 0)
+                {
+                    case (true) {
+                    ec = c - 1;
+                    switch (n.op == 1)
+                    {
+                        case (true) {
+                        switch (node_child(n, 0, 0).kind != NodeKind.STRING_LITERAL) { case (true) { i = -1; } default {}; };
+                        ec = c;
+                        switch (node_child(n, 0, c - 1).kind == NodeKind.STRING_LITERAL) { case (true) { ec = c - 1; } default {}; };
+                    }
+                        default {};
+                    };
+                }
+                    default { ec = -1; };
+                };
+                while (i <= ec)
+                {
+                    p = (Node*)0;
+                    switch (i >= 0 & i < c) { case (true) { p = node_child(n, 0, i); } default {}; };
+                    pos = this.mod.load(pos_ptr, g"current_pos\0");
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = pos;
+                    dest = this.mod.gep(buffer, this.mod.ia, 2, false, g"dest\0");
+                    switch (p == (Node*)0)
+                    {
+                        case (true) { txt = g"\0"; }
+                        default {
+                        switch (p.kind == NodeKind.STRING_LITERAL) { case (true) { txt = p.text; } default { txt = (byte*)0; }; };
+                    };
+                    };
+                    istext = true;
+                    switch (p != (Node*)0)
+                    {
+                        case (true) { istext = p.kind == NodeKind.STRING_LITERAL; }
+                        default {};
+                    };
+                    switch (istext)
+                    {
+                        case (true) {
+                        switch (txt == (byte*)0) { case (true) { txt = g"\0"; } default {}; };
+                        tl = 0;
+                        switch (p != (Node*)0) { case (true) { tl = this.fs_len(p); } default {}; };
+                        sp = this.fstr_lit(txt, tl);
+                        j = 0;
+                        while (j < tl)
+                        {
+                            this.mod.ia[0] = this.ci32(j);
+                            val = this.mod.gep(sp, this.mod.ia, 1, false, (byte*)0);
+                            val = this.mod.load(val, (byte*)0);
+                            this.mod.ia[0] = this.ci32(j);
+                            r = this.mod.gep(dest, this.mod.ia, 1, false, (byte*)0);
+                            this.mod.store(val, r);
+                            j++;
+                        };
+                        this.mod.store(this.mod.binop(g"add\0", pos, this.ci32(tl), (byte*)0), pos_ptr);
+                    }
+                        default {
+                        val = this.visit(p);
+                        switch (this.bad | val == (IRValue*)0) { case (true) { -> (IRValue*)0; } default {}; };
+                        switch (val.ty.kind == LK.PTR & val.ty.elem.kind == LK.ARRAY & val.ty.elem.elem.kind == LK.INT & val.ty.elem.elem.width == 8)
+                        {
+                            case (true) {
+                            this.mod.ia[0] = this.ci32(0);
+                            this.mod.ia[1] = this.ci32(0);
+                            val = this.mod.gep(val, this.mod.ia, 2, false, g"str_decay\0");
+                        }
+                            default {};
+                        };
+                        fname = (byte*)0;
+                        vt = val.ty;
+                        switch (vt.kind == LK.FLOAT) { case (true) { fname = g"standard__strings__fstr_append__3__floatE1__byteE1_ptr1__intE1_ptr1__ret_intE1\0"; } default {}; };
+                        switch (vt.kind == LK.DOUBLE) { case (true) { fname = g"standard__strings__fstr_append__3__doubleE1__byteE1_ptr1__intE1_ptr1__ret_intE1\0"; } default {}; };
+                        switch (vt.kind == LK.PTR) { case (true) { fname = g"standard__strings__fstr_append__3__byteE1_ptr1__byteE1_ptr1__intE1_ptr1__ret_intE1\0"; } default {}; };
+                        switch (vt.kind == LK.INT)
+                        {
+                            case (true) {
+                            w = vt.width;
+                            uns = this.is_uns(val);
+                            wt = 64;
+                            switch (w <= 32) { case (true) { wt = 32; } default {}; };
+                            switch (w <= 16) { case (true) { wt = 16; } default {}; };
+                            switch (uns)
+                            {
+                                case (true) { val = this.mod.cast(g"zext\0", val, this.mod.t_int(wt), (byte*)0); }
+                                default { val = this.mod.cast(g"sext\0", val, this.mod.t_int(wt), (byte*)0); };
+                            };
+                            switch (uns & wt == 16) { case (true) { fname = g"standard__strings__fstr_append__3__dataE1_ubits16__byteE1_ptr1__intE1_ptr1__ret_intE1\0"; } default {}; };
+                            switch (uns & wt == 32) { case (true) { fname = g"standard__strings__fstr_append__3__dataE1_ubits32__byteE1_ptr1__intE1_ptr1__ret_intE1\0"; } default {}; };
+                            switch (uns & wt == 64) { case (true) { fname = g"standard__strings__fstr_append__3__dataE1_ubits64__byteE1_ptr1__intE1_ptr1__ret_intE1\0"; } default {}; };
+                            switch (!uns & wt == 16) { case (true) { fname = g"standard__strings__fstr_append__3__dataE1_sbits16__byteE1_ptr1__intE1_ptr1__ret_intE1\0"; } default {}; };
+                            switch (!uns & wt == 32) { case (true) { fname = g"standard__strings__fstr_append__3__dataE1_sbits32__byteE1_ptr1__intE1_ptr1__ret_intE1\0"; } default {}; };
+                            switch (!uns & wt == 64) { case (true) { fname = g"standard__strings__fstr_append__3__dataE1_sbits64__byteE1_ptr1__intE1_ptr1__ret_intE1\0"; } default {}; };
+                        }
+                            default {};
+                        };
+                        switch (fname != (byte*)0)
+                        {
+                            case (true) {
+                            cf = this.fa_decl(fname, val.ty);
+                            this.mod.ia[0] = this.ci32(0);
+                            this.mod.ia[1] = this.ci32(0);
+                            bp = this.mod.gep(buffer, this.mod.ia, 2, false, g"fstr_buf_ptr\0");
+                            this.mod.ia[0] = val;
+                            this.mod.ia[1] = bp;
+                            this.mod.ia[2] = pos_ptr;
+                            this.mod.call(cf.self, this.mod.ia, 3, (byte*)0);
+                        }
+                            default {};
+                        };
+                    };
+                    };
+                    i++;
+                };
+                pos = this.mod.load(pos_ptr, (byte*)0);
+                this.mod.ia[0] = this.ci32(0);
+                this.mod.ia[1] = pos;
+                dest = this.mod.gep(buffer, this.mod.ia, 2, false, (byte*)0);
+                this.mod.store(this.mod.c_int(this.t_i8, (i64)0), dest);
+                this.mod.ia[0] = this.ci32(0);
+                this.mod.ia[1] = this.ci32(0);
+                r = this.mod.gep(buffer, this.mod.ia, 2, false, g"fstring_result\0");
+                r.flags = r.flags `| VF_TYPEFUNC_STR;
+                -> r;
+            };
+
             x_binary(Node* n) -> IRValue*
             {
                 int op = n.op;
@@ -4712,6 +7888,7 @@ namespace flux
                 IRValue* r;
                 bool uns, is_cmp, might_ptr, lp, rp, li, ri;
                 bool lzero, rzero;
+                bool dhandled;
                 IRType* pe;
                 int lcat, rcat, bare_cat, other_cat;
                 Node* other_n;
@@ -4805,6 +7982,12 @@ namespace flux
                     this.unsup(n, g"binary void operand\0");
                     -> (IRValue*)0;
                 }
+                    default {};
+                };
+                r = this.dict_binary(n, lhs, rhs, @dhandled);
+                switch (dhandled)
+                {
+                    case (true) { -> r; }
                     default {};
                 };
                 lp = lhs.ty.kind == LK.PTR;
@@ -4976,6 +8159,12 @@ namespace flux
                         (lhs.ty.kind == LK.PTR & lhs.ty.elem.kind == LK.ARRAY & rhs.ty.kind == LK.PTR & rhs.ty.elem.kind == LK.ARRAY))
                     {
                         case (true) {
+                        switch (lhs.ty.kind == LK.PTR & lhs.ty.elem.kind == LK.ARRAY & rhs.ty.kind == LK.PTR & rhs.ty.elem.kind == LK.ARRAY &
+                            ((lhs.flags `| rhs.flags) `& VF_GLOBAL) == 0)
+                        {
+                            case (true) { -> this.array_concat(n, lhs, rhs, op); }
+                            default {};
+                        };
                         this.unsup(n, g"array concatenation\0");
                         -> (IRValue*)0;
                     }
@@ -4990,8 +8179,34 @@ namespace flux
                     switch (((lhs.flags `| rhs.flags) `& (VF_FROM_EXPR `| VF_TYPEFUNC_STR)) != 0)
                     {
                         case (true) {
-                        this.unsup(n, g"string concatenation\0");
-                        -> (IRValue*)0;
+                        IRFunc* cf = this.mod.find_function(g"standard__strings__manip__concat__2__byteE1_ptr1__byteE1_ptr1__ret_byteE1_ptr1\0");
+                        switch (cf != (IRFunc*)0)
+                        {
+                            case (true) {
+                            switch (lhs.ty.kind == LK.PTR & lhs.ty.elem.kind == LK.ARRAY & lhs.ty.elem.elem.kind == LK.INT & lhs.ty.elem.elem.width == 8)
+                            {
+                                case (true) {
+                                this.mod.ia[0] = this.ci32(0);
+                                this.mod.ia[1] = this.ci32(0);
+                                lhs = this.mod.gep(lhs, this.mod.ia, 2, false, g"lhs_str_decay\0");
+                            }
+                                default {};
+                            };
+                            switch (rhs.ty.kind == LK.PTR & rhs.ty.elem.kind == LK.ARRAY & rhs.ty.elem.elem.kind == LK.INT & rhs.ty.elem.elem.width == 8)
+                            {
+                                case (true) {
+                                this.mod.ia[0] = this.ci32(0);
+                                this.mod.ia[1] = this.ci32(0);
+                                rhs = this.mod.gep(rhs, this.mod.ia, 2, false, g"rhs_str_decay\0");
+                            }
+                                default {};
+                            };
+                            this.mod.ia[0] = lhs;
+                            this.mod.ia[1] = rhs;
+                            -> this.mod.call(cf.self, this.mod.ia, 2, g"str_concat\0");
+                        }
+                            default {};
+                        };
                     }
                         default {};
                     };
@@ -5536,6 +8751,7 @@ namespace flux
                 IRType* ft;
                 Node* an;
                 Node* dn;
+                IRValue** pslot;
                 switch (n.text != (byte*)0)
                 {
                     case (true) {
@@ -5616,6 +8832,8 @@ namespace flux
                     args[i] = v;
                     i++;
                 };
+                pslot = (IRValue**)this.zbuf(1);
+                switch (this.ptr_overload_call(n, argc, pslot)) { case (true) { -> *pslot; } default {}; };
                 i = argc;
                 while (i < total)
                 {
@@ -5650,15 +8868,242 @@ namespace flux
                 };
                 // Base compiler's pointer-param overload shortcut names every call
                 // with no arguments op_overload_result, unless the call spells the mangled symbol
-                switch (argc == 0 & !this.spells_mangled(n.text) & nm_get(this.fdefs, f.name) != (void*)0)
+                switch (argc == 0 & !this.spells_mangled(n.text) & this.ptr_ovl_zero(n.text))
                 {
-                    case (true) { r = this.mod.call_ex(f.self, args, total, g"op_overload_result\0", f.cconv, this.fn == f); }
-                    default { r = this.mod.call_ex(f.self, args, total, (byte*)0, f.cconv, this.fn == f); };
+                    case (true) { r = this.mod.call_ex(f.self, args, total, g"op_overload_result\0", f.cconv, false); }
+                    default {
+                        this.mod.must_tail = this.fn == f & this.rec_fn;
+                        r = this.mod.call_ex(f.self, args, total, (byte*)0, f.cconv, this.fn == f);
+                    };
                 };
                 -> r;
             };
 
+            // End of the key part of a registered overload name: the index of the first
+            // __<digits>__ group, -1 when the name has none
+            ov_key_end(byte* s) -> int
+            {
+                int i;
+                int j;
+                while (s[i] != 0)
+                {
+                    switch (s[i] == '_' & s[i + 1] == '_' & s[i + 2] >= '0' & s[i + 2] <= '9')
+                    {
+                        case (true) {
+                        j = i + 2;
+                        while (s[j] >= '0' & s[j] <= '9') { j++; };
+                        switch (s[j] == '_' & s[j + 1] == '_') { case (true) { -> i; } default {}; };
+                    }
+                        default {};
+                    };
+                    i++;
+                };
+                -> -1;
+            };
+
+            // True when the registered overload name f has the key text equal to name or ending in __name
+            ov_key_matches(byte* fname, int e, byte* name) -> bool
+            {
+                int nl;
+                int i;
+                while (name[nl] != 0) { nl++; };
+                switch (e == nl)
+                {
+                    case (true) {
+                    while (i < e)
+                    {
+                        switch (fname[i] != name[i]) { case (true) { -> false; } default {}; };
+                        i++;
+                    };
+                    -> true;
+                }
+                    default {};
+                };
+                switch (e < nl + 2) { case (true) { -> false; } default {}; };
+                switch (fname[e - nl - 2] != '_' | fname[e - nl - 1] != '_') { case (true) { -> false; } default {}; };
+                while (i < nl)
+                {
+                    switch (fname[e - nl + i] != name[i]) { case (true) { -> false; } default {}; };
+                    i++;
+                };
+                -> true;
+            };
+
+            // Base compiler's pointer-param overload shortcut: the first registered overload key
+            // named by the call, whose pointer-only overload matches the local variable
+            // allocas passed as arguments, is called with those allocas
+            ptr_overload_call(Node* n, int argc, IRValue** out) -> bool
+            {
+                byte* name;
+                int nl;
+                int i;
+                int j;
+                int e;
+                int ke = -1;
+                IRFunc* g;
+                IRFunc* key_f = (IRFunc*)0;
+                IRValue** args;
+                IRType* pt;
+                LVar* lv;
+                Node* an;
+                bool ok;
+                switch (n.text == (byte*)0 | argc == 0) { case (true) { -> false; } default {}; };
+                while (n.text[nl] != 0) { nl++; };
+                name = (byte*)fmalloc((u64)(nl + 1));
+                this.keep((void*)name);
+                while (i < nl)
+                {
+                    switch (n.text[i] == ':' & n.text[i + 1] == ':')
+                    {
+                        case (true) {
+                        name[j] = '_';
+                        name[j + 1] = '_';
+                        j = j + 2;
+                        i = i + 2;
+                    }
+                        default {
+                        name[j] = n.text[i];
+                        j++;
+                        i++;
+                    };
+                    };
+                };
+                name[j] = 0;
+                i = 0;
+                while (i < this.mod.funcs.len & key_f == (IRFunc*)0)
+                {
+                    g = (IRFunc*)this.mod.funcs.items[i];
+                    e = this.ov_key_end(g.name);
+                    switch (e >= 0)
+                    {
+                        case (true) {
+                        switch (this.ov_key_matches(g.name, e, name)) { case (true) { key_f = g; ke = e; } default {}; };
+                    }
+                        default {};
+                    };
+                    i++;
+                };
+                switch (key_f == (IRFunc*)0) { case (true) { -> false; } default {}; };
+                i = 0;
+                while (i < this.mod.funcs.len)
+                {
+                    g = (IRFunc*)this.mod.funcs.items[i];
+                    i++;
+                    e = this.ov_key_end(g.name);
+                    switch (e != ke) { case (true) { continue; } default {}; };
+                    j = 0;
+                    ok = true;
+                    while (j < ke & ok)
+                    {
+                        switch (g.name[j] != key_f.name[j]) { case (true) { ok = false; } default {}; };
+                        j++;
+                    };
+                    switch (!ok | g.ftype.nitems != argc) { case (true) { continue; } default {}; };
+                    args = (IRValue**)fmalloc((u64)(argc + 1) * (u64)((sizeof(IRValue*) + 7) / 8));
+                    this.keep((void*)args);
+                    j = 0;
+                    while (j < argc & ok)
+                    {
+                        pt = g.ftype.items[j];
+                        switch (pt.kind != LK.PTR) { case (true) { ok = false; } default {}; };
+                        switch (ok)
+                        {
+                            case (true) {
+                            switch (pt.elem.kind == LK.ARRAY | pt.elem.kind == LK.ISTRUCT) { case (true) { ok = false; } default {}; };
+                        }
+                            default {};
+                        };
+                        an = node_child(n, 0, j);
+                        switch (ok & an.kind != NodeKind.IDENTIFIER) { case (true) { ok = false; } default {}; };
+                        switch (ok)
+                        {
+                            case (true) {
+                            lv = this.find_local(an.text);
+                            switch (lv == (LVar*)0) { case (true) { ok = false; } default {}; };
+                        }
+                            default {};
+                        };
+                        switch (ok)
+                        {
+                            case (true) {
+                            switch (!lt_eq(lv.ptr.ty, pt)) { case (true) { ok = false; } default {}; };
+                        }
+                            default {};
+                        };
+                        switch (ok) { case (true) { args[j] = lv.ptr; } default {}; };
+                        j++;
+                    };
+                    switch (ok)
+                    {
+                        case (true) {
+                        *out = this.mod.call_ex(g.self, args, argc, g"op_overload_result\0", g.cconv, false);
+                        -> true;
+                    }
+                        default {};
+                    };
+                };
+                -> false;
+            };
+
             // True when a call name is already a mangled symbol (contains __ret_)
+            // Base pointer-param overload shortcut: the first overload key equal to name or ending in
+            // "__name" decides, and it applies when that key holds a function with no parameters
+            is_ext_fn(Node* fd) -> bool
+            {
+                int i;
+                while (i < this.ext_fns.len)
+                {
+                    switch (this.ext_fns.items[i] == (void*)fd) { case (true) { -> true; } default {}; };
+                    i++;
+                };
+                -> false;
+            };
+
+            ptr_ovl_zero(byte* name) -> bool
+            {
+                int i, j, kl, nl, pass, d;
+                bool dotted;
+                byte* key;
+                PtrVec* list;
+                Overload* oc;
+                while (name[nl] != 0) { nl++; };
+                // Object method keys are registered by the type pre-pass, before any function key
+                while (pass < 2)
+                {
+                i = 0;
+                while (i < this.st.overloads.count)
+                {
+                    key = this.st.overloads.keys[i];
+                    kl = 0;
+                    dotted = false;
+                    while (key[kl] != 0) { switch (key[kl] == '.') { case (true) { dotted = true; } default {}; }; kl++; };
+                    j = 0;
+                    switch ((pass == 0) != dotted)
+                    {
+                        case (true) { i++; continue; }
+                        default {};
+                    };
+                    switch (cstr_eq(key, name) | (kl > nl + 2 & cstr_eq(key + (kl - nl), name) & key[kl - nl - 1] == '_' & key[kl - nl - 2] == '_'))
+                    {
+                        case (true) {
+                        list = (PtrVec*)this.st.overloads.vals[i];
+                        while (j < list.len)
+                        {
+                            oc = (Overload*)list.items[j];
+                            switch (oc.nparams == 0 & !this.is_ext_fn(oc.func)) { case (true) { -> true; } default {}; };
+                            j++;
+                        };
+                        -> false;
+                    }
+                        default {};
+                    };
+                    i++;
+                };
+                pass++;
+                };
+                -> false;
+            };
+
             spells_mangled(byte* s) -> bool
             {
                 int i;
@@ -5752,6 +9197,14 @@ namespace flux
                     }
                         default {};
                     };
+                }
+                    default {};
+                };
+                switch (nm_get(this.untied, target.text) != (void*)0)
+                {
+                    case (true) {
+                    this.unsup(target, g"assign to an untied variable\0");
+                    -> (IRValue*)0;
                 }
                     default {};
                 };
@@ -6335,6 +9788,322 @@ namespace flux
                 -> res;
             };
 
+            // True when s begins with p
+            has_prefix(byte* s, byte* p) -> bool
+            {
+                int i;
+                while (p[i] != 0)
+                {
+                    switch (s[i] != p[i]) { case (true) { -> false; } default {}; };
+                    i++;
+                };
+                -> true;
+            };
+
+            // _llvm_type_to_flux_type_name; null when the type has no Flux name
+            tf_type_name(IRType* t) -> byte*
+            {
+                byte* en;
+                switch (t.kind)
+                {
+                    case (LK.INT)
+                    {
+                        switch (t.width)
+                        {
+                            case (1) { -> g"bool\0"; }
+                            case (8) { -> g"byte\0"; }
+                            case (16) { -> g"int\0"; }
+                            case (32) { -> g"int\0"; }
+                            case (64) { -> g"long\0"; }
+                            default {};
+                        };
+                        this.sc.clear();
+                        this.sc.put_str(g"data\0");
+                        this.sc.put_int(t.width);
+                        -> this.mod.own(this.sc.mem);
+                    }
+                    case (LK.FLOAT) { -> g"float\0"; }
+                    case (LK.DOUBLE) { -> g"double\0"; }
+                    case (LK.PTR)
+                    {
+                        switch (t.elem.kind == LK.INT & t.elem.width == 8)
+                        {
+                            case (true) { -> g"string\0"; }
+                            default {};
+                        };
+                        switch (t.elem.kind == LK.ISTRUCT)
+                        {
+                            case (true) { -> t.elem.name; }
+                            default {};
+                        };
+                    }
+                    case (LK.ISTRUCT) { -> t.name; }
+                    case (LK.ARRAY)
+                    {
+                        switch (t.elem.kind == LK.ISTRUCT)
+                        {
+                            case (true) { en = t.elem.name; }
+                            default {
+                                switch (t.elem.kind == LK.INT | t.elem.kind == LK.FLOAT | t.elem.kind == LK.DOUBLE)
+                                {
+                                    case (true) { en = this.tf_type_name(t.elem); }
+                                    default {};
+                                };
+                            };
+                        };
+                        switch (en == (byte*)0)
+                        {
+                            case (true) { -> (byte*)0; }
+                            default {};
+                        };
+                        this.sc.clear();
+                        this.sc.put_str(en);
+                        this.sc.put_str(g"_arr\0");
+                        -> this.mod.own(this.sc.mem);
+                    }
+                    default {};
+                };
+                -> (byte*)0;
+            };
+
+            // _dispatch_type_func_call: the size specialized variant __typefunc__<type>_sz<N>__<name> of an
+            // unsized array type function, declared here and given its body once the caller is finished
+            tf_specialize(Node* n, byte* tn, IRType* sp, TypeSpec* cts) -> IRFunc*
+            {
+                Node* orig;
+                Node* fd;
+                Node* p0;
+                Node* pc;
+                IRFunc* f;
+                byte* nm;
+                int i;
+                this.sc.clear();
+                this.sc.put_str(g"__typefunc__\0");
+                this.sc.put_str(tn);
+                this.sc.put_str(g"__\0");
+                this.sc.put_str(n.text);
+                orig = (Node*)nm_get(this.tf_ast, this.sc.mem);
+                switch (orig == (Node*)0 | cts == (TypeSpec*)0)
+                {
+                    case (true) { -> (IRFunc*)0; }
+                    default {};
+                };
+                switch (!ts_is_array(cts) | cts.array_size == (Node*)0 | sp.elem.kind == LK.ARRAY)
+                {
+                    case (true) { -> (IRFunc*)0; }
+                    default {};
+                };
+                this.sc.clear();
+                this.sc.put_str(g"__typefunc__\0");
+                this.sc.put_str(tn);
+                this.sc.put_str(g"_sz\0");
+                this.sc.put_int(sp.count);
+                this.sc.put_str(g"__\0");
+                this.sc.put_str(n.text);
+                nm = this.mod.own(this.sc.mem);
+                f = this.mod.find_function(nm);
+                switch (f != (IRFunc*)0) { case (true) { -> f; } default {}; };
+                fd = node_new(NodeKind.FUNCTION_DEF, orig.line, orig.col);
+                fd.text = nm;
+                fd.ts = orig.ts;
+                fd.a = orig.a;
+                fd.text2 = orig.text3;
+                fd.flags = orig.flags `| NF_NO_MANGLE;
+                p0 = node_new(NodeKind.PARAMETER, orig.line, orig.col);
+                p0.text = g"_\0";
+                p0.ts = orig.ts2;
+                node_push(fd, 0, p0);
+                while (i < node_count(orig, 0))
+                {
+                    pc = node_child(orig, 0, i);
+                    node_push(fd, 0, pc);
+                    i++;
+                };
+                f = this.declare_function(fd, g"\0");
+                switch (f == (IRFunc*)0) { case (true) { -> f; } default {}; };
+                pv_push(this.tf_pend, (void*)fd);
+                pv_push(this.tf_pend, (void*)f);
+                pv_push(this.tf_pend, (void*)cts);
+                -> f;
+            };
+
+            // visit_MethodCall on a receiver that is not an object: type function dispatch
+            x_typefunc(Node* n) -> IRValue*
+            {
+                Node* o = n.a;
+                int argc = node_count(n, 0);
+                int i;
+                LVar* lv;
+                IRValue* objp;
+                IRValue* recv;
+                IRValue* v;
+                IRValue** args;
+                IRFunc* f;
+                IRType* ft;
+                IRType* sp;
+                byte* tn;
+                byte* om;
+                int nm;
+                bool spec_arr;
+                switch (o.kind == NodeKind.IDENTIFIER)
+                {
+                    case (true) {
+                    lv = this.find_local(o.text);
+                    switch (lv == (LVar*)0)
+                    {
+                        case (true) {
+                        this.unsup(n, g"method target not resolved\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    objp = lv.ptr;
+                }
+                    default {
+                    objp = this.visit(o);
+                    switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                };
+                };
+                switch (objp == (IRValue*)0 | objp.ty.kind != LK.PTR)
+                {
+                    case (true) {
+                    this.unsup(n, g"method target not resolved\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                sp = objp.ty.elem;
+                switch (sp.kind == LK.ISTRUCT | (sp.kind == LK.PTR & sp.elem.kind == LK.ISTRUCT))
+                {
+                    case (true) {
+                    this.unsup(n, g"method target not resolved\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                // An array held by a variable decays to a pointer to its first element
+                spec_arr = sp.kind == LK.ARRAY & o.kind == NodeKind.IDENTIFIER;
+                switch (spec_arr)
+                {
+                    case (true) {
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(0);
+                    recv = this.mod.gep(objp, this.mod.ia, 2, false, g"typefunc_arr_decay\0");
+                }
+                    default {
+                        switch (o.kind == NodeKind.IDENTIFIER)
+                        {
+                            case (true) { recv = this.mod.load(objp, g"typefunc_recv_load\0"); }
+                            default { recv = objp; };
+                        };
+                    };
+                };
+                switch (recv.ty.kind == LK.PTR & recv.ty.elem.kind == LK.ARRAY & recv.ty.elem.elem.kind == LK.INT & recv.ty.elem.elem.width == 8)
+                {
+                    case (true) {
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(0);
+                    recv = this.mod.gep(recv, this.mod.ia, 2, false, g"typefunc_str_decay\0");
+                }
+                    default {};
+                };
+                switch (spec_arr)
+                {
+                    case (true) { tn = this.tf_type_name(sp); }
+                    default { tn = this.tf_type_name(recv.ty); };
+                };
+                switch (tn == (byte*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"type function receiver type\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                this.sc.clear();
+                this.sc.put_str(g"__typefunc__\0");
+                this.sc.put_str(tn);
+                this.sc.put_str(g"__\0");
+                this.sc.put_str(n.text);
+                switch (spec_arr)
+                {
+                    case (true) { f = this.tf_specialize(n, tn, sp, lv.ts); }
+                    default { f = this.mod.find_function(this.sc.mem); };
+                };
+                switch (f == (IRFunc*)0)
+                {
+                    case (true) {
+                    // Overloaded type functions carry their mangled signature after the base name
+                    this.sc.put_str(g"__\0");
+                    nm = 0;
+                    i = 0;
+                    while (i < this.fdefs.count)
+                    {
+                        switch (this.has_prefix(this.fdefs.keys[i], this.sc.mem))
+                        {
+                            case (true) {
+                            switch (node_count((Node*)this.fdefs.vals[i], 0) == argc + 1)
+                            {
+                                case (true) {
+                                switch (nm == 0) { case (true) { om = this.fdefs.keys[i]; } default {}; };
+                                nm++;
+                            }
+                                default {};
+                            };
+                        }
+                            default {};
+                        };
+                        i++;
+                    };
+                    switch (nm != 1)
+                    {
+                        case (true) {
+                        this.unsup(n, g"method target not resolved\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    f = this.mod.find_function(om);
+                }
+                    default {};
+                };
+                switch (f == (IRFunc*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"method target not resolved\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                ft = f.ftype;
+                args = (IRValue**)fmalloc((u64)(8 * (argc + 1)));
+                this.keep((void*)args);
+                args[0] = recv;
+                i = 0;
+                while (i < argc)
+                {
+                    v = this.visit(node_child(n, 0, i));
+                    switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                    switch (v == (IRValue*)0)
+                    {
+                        case (true) {
+                        this.unsup(n, g"void method argument\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    switch (i + 1 < ft.nitems)
+                    {
+                        case (true) { v = this.convert_arg(v, ft.items[i + 1], i, n); }
+                        default {};
+                    };
+                    switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                    args[i + 1] = v;
+                    i++;
+                };
+                -> this.mod.call_ex(f.self, args, argc + 1, (byte*)0, f.cconv, false);
+            };
+
             // visit_MethodCall for object receivers
             x_method(Node* n) -> IRValue*
             {
@@ -6352,10 +10121,7 @@ namespace flux
                 byte* vname = (byte*)0;
                 switch (n.text3 == (byte*)0)
                 {
-                    case (true) {
-                    this.unsup(n, g"method target not resolved\0");
-                    -> (IRValue*)0;
-                }
+                    case (true) { -> this.x_typefunc(n); }
                     default {};
                 };
                 switch (o.kind)
@@ -7045,6 +10811,792 @@ namespace flux
                 -> phi;
             };
 
+            // visit_IfExpression
+            // _array_literal_array for a local literal without an element type context
+            x_array_literal(Node* n) -> IRValue*
+            {
+                int c = node_count(n, 0);
+                int i;
+                bool allc = true;
+                IRValue** ev;
+                IRValue* v;
+                IRValue* arr;
+                IRValue* ep;
+                IRType* et;
+                IRType* aty;
+                Node* sn;
+                int sl;
+                int k;
+                i64 pk;
+                int mw;
+                switch (c == 0 | this.fn == (IRFunc*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"array literal\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                ev = (IRValue**)fmalloc((u64)c * (u64)((sizeof(IRValue*) + 7) / 8));
+                this.keep((void*)ev);
+                while (i < c)
+                {
+                    switch (node_child(n, 0, i).kind == NodeKind.STRING_LITERAL)
+                    {
+                        case (true) {
+                        sn = node_child(n, 0, i);
+                        sl = (int)sn.ival;
+                        switch (sl <= 0)
+                        {
+                            case (true) {
+                            sl = 0;
+                            switch (sn.text != (byte*)0)
+                            {
+                                case (true) { while (sn.text[sl] != 0) { sl++; }; }
+                                default {};
+                            };
+                        }
+                            default {};
+                        };
+                        switch (sl > 4) { case (true) { sl = 4; } default {}; };
+                        pk = (i64)0;
+                        k = 0;
+                        while (k < sl)
+                        {
+                            pk = pk + ((i64)(int)sn.text[k] * (i64)(1 << (k * 8)));
+                            k++;
+                        };
+                        v = this.mod.c_int(this.t_i32, pk);
+                    }
+                        default {
+                            v = this.visit(node_child(n, 0, i));
+                            switch (this.bad)
+                            {
+                                case (true) { -> (IRValue*)0; }
+                                default {};
+                            };
+                        };
+                    };
+                    switch (v == (IRValue*)0)
+                    {
+                        case (true) {
+                        this.unsup(n, g"void array element\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    ev[i] = v;
+                    switch (!v.is_const) { case (true) { allc = false; } default {}; };
+                    i++;
+                };
+                et = ev[0].ty;
+                mw = 0;
+                i = 0;
+                while (i < c)
+                {
+                    switch (ev[i].ty.kind != LK.INT)
+                    {
+                        case (true) { mw = -1; }
+                        default {};
+                    };
+                    switch (mw >= 0 & ev[i].ty.width > mw) { case (true) { mw = ev[i].ty.width; } default {}; };
+                    i++;
+                };
+                switch (mw > 0)
+                {
+                    case (true) {
+                    et = this.int_ty(mw);
+                    i = 0;
+                    allc = true;
+                    while (i < c)
+                    {
+                        ev[i] = this.int_resize(ev[i], et, this.is_uns(ev[i]));
+                        switch (!ev[i].is_const) { case (true) { allc = false; } default {}; };
+                        i++;
+                    };
+                }
+                    default {};
+                };
+                i = 0;
+                while (i < c)
+                {
+                    switch (!lt_eq(ev[i].ty, et))
+                    {
+                        case (true) {
+                        this.unsup(n, g"mixed array literal element types\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    i++;
+                };
+                aty = this.mod.t_array(et, c);
+                switch (allc)
+                {
+                    case (true) {
+                    arr = this.mod.alloca_here(aty, g"array_literal_const\0");
+                    this.mod.store(this.mod.c_array(aty, ev, c), arr);
+                    -> arr;
+                }
+                    default {};
+                };
+                arr = this.mod.alloca_here(aty, g"array_literal\0");
+                i = 0;
+                while (i < c)
+                {
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(i);
+                    this.sc.clear();
+                    this.sc.put_str(g"elem_\0");
+                    this.sc.put_int(i);
+                    ep = this.mod.gep(arr, this.mod.ia, 2, true, this.sc.mem);
+                    this.mod.store(ev[i], ep);
+                    i++;
+                };
+                -> arr;
+            };
+
+            x_ifexpr(Node* n) -> IRValue*
+            {
+                IRValue* cv;
+                IRValue* tv;
+                IRValue* fv;
+                IRValue* phi;
+                IRValue** pv;
+                IRBlock** pb;
+                IRBlock* tb;
+                IRBlock* fb;
+                IRBlock* mb;
+                IRBlock* te;
+                IRBlock* fe;
+                cv = this.cond_value(n.b);
+                switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                tb = this.mod.append_block(this.fn, g"ifexpr_value\0");
+                fb = this.mod.append_block(this.fn, g"ifexpr_else\0");
+                mb = this.mod.append_block(this.fn, g"ifexpr_merge\0");
+                this.mod.cbr(cv, tb, fb);
+
+                this.mod.position(this.fn, tb);
+                tv = this.visit(n.a);
+                switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                te = this.mod.cb;
+                switch (!te.terminated) { case (true) { this.mod.br(mb); } default {}; };
+
+                switch (tv == (IRValue*)0 & n.c == (Node*)0)
+                {
+                    case (true) {
+                    this.mod.position(this.fn, fb);
+                    switch (!this.mod.cb.terminated) { case (true) { this.mod.br(mb); } default {}; };
+                    this.mod.position(this.fn, mb);
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (tv == (IRValue*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"void if-expression value\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+
+                this.mod.position(this.fn, fb);
+                switch (n.c == (Node*)0)
+                {
+                    case (true) { fv = this.mod.c_int(tv.ty, (i64)0); }
+                    default {
+                        switch (n.c.kind == NodeKind.NO_INIT)
+                        {
+                            case (true) { fv = this.mod.c_undef(tv.ty); }
+                            default {
+                                fv = this.visit(n.c);
+                                switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                            };
+                        };
+                    };
+                };
+                switch (fv == (IRValue*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"void if-expression else\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                fe = this.mod.cb;
+                switch (!fe.terminated) { case (true) { this.mod.br(mb); } default {}; };
+
+                this.mod.position(this.fn, mb);
+                switch (!lt_eq(tv.ty, fv.ty))
+                {
+                    case (true) {
+                    switch (tv.ty.kind == LK.INT & fv.ty.kind == LK.INT)
+                    {
+                        case (true) {
+                        switch (tv.ty.width < fv.ty.width)
+                        {
+                            case (true) {
+                            this.pop_term(te);
+                            this.mod.position(this.fn, te);
+                            tv = this.mod.cast(g"sext\0", tv, fv.ty, (byte*)0);
+                            this.mod.br(mb);
+                            this.mod.position(this.fn, mb);
+                        }
+                            default {
+                                this.pop_term(fe);
+                                this.mod.position(this.fn, fe);
+                                fv = this.mod.cast(g"sext\0", fv, tv.ty, (byte*)0);
+                                this.mod.br(mb);
+                                this.mod.position(this.fn, mb);
+                            };
+                        };
+                    }
+                        default {
+                        this.unsup(n, g"if-expression incompatible branch types\0");
+                        -> (IRValue*)0;
+                    };
+                    };
+                }
+                    default {};
+                };
+                pv = (IRValue**)this.zbuf(2);
+                pb = (IRBlock**)this.zbuf(2);
+                pv[0] = tv;
+                pv[1] = fv;
+                pb[0] = te;
+                pb[1] = fe;
+                phi = this.mod.phi(tv.ty, pv, pb, 2, g"ifexpr_result\0");
+                -> phi;
+            };
+
+            // visit_NullCoalesce (operands of one type)
+            // visit_TernaryAssign: assign the value when the target is zero
+            x_ternassign(Node* n) -> IRValue*
+            {
+                LVar* lv;
+                IRValue* cur;
+                IRValue* iz;
+                IRValue* nv;
+                IRBlock* tb;
+                IRBlock* mb;
+                switch (n.a.kind != NodeKind.IDENTIFIER)
+                {
+                    case (true) {
+                    this.unsup(n, g"ternary assign target\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                lv = this.find_local(n.a.text);
+                switch (lv == (LVar*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"ternary assign target not local\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                cur = this.mod.load(lv.ptr, g"ternary_assign_cur\0");
+                iz = this.mod.icmp(g"eq\0", cur, this.mod.c_null(cur.ty), g"ternary_assign_cmp\0");
+                tb = this.mod.append_block(this.fn, g"ternary_assign_then\0");
+                mb = this.mod.append_block(this.fn, g"ternary_assign_merge\0");
+                this.mod.cbr(iz, tb, mb);
+                this.mod.position(this.fn, tb);
+                nv = this.visit(n.b);
+                switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                switch (nv == (IRValue*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"ternary assign void value\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (!lt_eq(nv.ty, cur.ty) & nv.ty.kind == LK.INT & cur.ty.kind == LK.INT)
+                {
+                    case (true) {
+                    switch (nv.ty.width > cur.ty.width)
+                    {
+                        case (true) { nv = this.mod.cast(g"trunc\0", nv, cur.ty, g"ternary_assign_trunc\0"); }
+                        default { nv = this.mod.cast(g"sext\0", nv, cur.ty, g"ternary_assign_ext\0"); };
+                    };
+                }
+                    default {};
+                };
+                this.mod.store(nv, lv.ptr);
+                this.mod.br(mb);
+                this.mod.position(this.fn, mb);
+                -> (IRValue*)0;
+            };
+
+            x_coalesce(Node* n) -> IRValue*
+            {
+                IRValue* lv;
+                IRValue* rv;
+                IRValue* isn;
+                IRValue* phi;
+                IRValue** pv;
+                IRBlock** pb;
+                IRBlock* rb;
+                IRBlock* mb;
+                IRBlock* lb;
+                IRBlock* re;
+                lv = this.visit(n.a);
+                switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                switch (lv == (IRValue*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"null coalesce void operand\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (lv.ty.kind == LK.PTR)
+                {
+                    case (true) { isn = this.mod.icmp(g"eq\0", lv, this.mod.c_null(lv.ty), g"is_null\0"); }
+                    default {
+                        switch (lv.ty.kind == LK.INT)
+                        {
+                            case (true) { isn = this.mod.icmp(g"eq\0", lv, this.mod.c_int(lv.ty, (i64)0), g"is_zero\0"); }
+                            default {
+                                this.unsup(n, g"null coalesce operand type\0");
+                                -> (IRValue*)0;
+                            };
+                        };
+                    };
+                };
+                rb = this.mod.append_block(this.fn, g"coalesce_right\0");
+                mb = this.mod.append_block(this.fn, g"coalesce_merge\0");
+                lb = this.mod.cb;
+                this.mod.cbr(isn, rb, mb);
+                this.mod.position(this.fn, rb);
+                rv = this.visit(n.b);
+                switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                re = this.mod.cb;
+                this.mod.br(mb);
+                this.mod.position(this.fn, mb);
+                switch (rv == (IRValue*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"null coalesce void operand\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (!lt_eq(lv.ty, rv.ty))
+                {
+                    case (true) {
+                    this.unsup(n, g"null coalesce operand types differ\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                pv = (IRValue**)this.zbuf(2);
+                pb = (IRBlock**)this.zbuf(2);
+                pv[0] = lv;
+                pv[1] = rv;
+                pb[0] = lb;
+                pb[1] = re;
+                phi = this.mod.phi(lv.ty, pv, pb, 2, g"coalesce_result\0");
+                -> phi;
+            };
+
+            // visit_FunctionPointerDeclaration inside a function body
+            x_fpdecl(Node* n) -> IRValue*
+            {
+                IRType* pt = this.lower(n.ts, false, n.line);
+                IRValue* al;
+                IRValue* iv;
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                al = this.mod.alloca_here(pt, n.text);
+                this.define_var(n.text, al, (TypeSpec*)0);
+                switch (n.a != (Node*)0)
+                {
+                    case (true) {
+                    iv = this.visit(n.a);
+                    switch (this.bad)
+                    {
+                        case (true) { -> (IRValue*)0; }
+                        default {};
+                    };
+                    switch (iv == (IRValue*)0)
+                    {
+                        case (true) {
+                        this.unsup(n, g"void function pointer initializer\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    switch (iv.ty.kind == LK.PTR & iv.ty.elem.kind == LK.FUNC & iv.text[0] == '@')
+                    {
+                        case (true) {
+                        iv = this.mod.cast(g"ptrtoint\0", iv, this.t_i64, (byte*)0);
+                        iv = this.mod.cast(g"inttoptr\0", iv, pt, (byte*)0);
+                    }
+                        default {
+                            switch (iv.ty.kind == LK.INT)
+                            {
+                                case (true) {
+                                switch (iv.ty.width != 64)
+                                {
+                                    case (true) { iv = this.mod.cast(g"zext\0", iv, this.t_i64, g"fp_addr_ext\0"); }
+                                    default {};
+                                };
+                                iv = this.mod.cast(g"inttoptr\0", iv, pt, g"fp_from_int\0");
+                            }
+                                default {
+                                    switch (iv.ty.kind == LK.PTR & !lt_eq(iv.ty, pt))
+                                    {
+                                        case (true) { iv = this.mod.cast(g"bitcast\0", iv, pt, (byte*)0); }
+                                        default {};
+                                    };
+                                };
+                            };
+                        };
+                    };
+                    this.mod.store(iv, al);
+                }
+                    default {};
+                };
+                -> al;
+            };
+
+            // visit_InExpression for an integer needle in an integer haystack: sliding bit window
+            x_in_bits(Node* n, IRValue* nd) -> IRValue*
+            {
+                IRValue* hy = this.visit(n.b);
+                IRValue* nv = nd;
+                IRValue* pos_ptr;
+                IRValue* pos;
+                IRValue* pos2;
+                IRValue* done;
+                IRValue* ph;
+                IRValue* sh;
+                IRValue* win;
+                IRValue* hit;
+                IRValue* res;
+                IRValue** pv;
+                IRBlock** pb;
+                IRBlock* fb;
+                IRBlock* nb;
+                IRBlock* mb;
+                IRBlock* cb;
+                IRBlock* bb;
+                IRType* ht;
+                int hw;
+                int nw;
+                u64 mk;
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                switch (hy == (IRValue*)0 | hy.ty.kind != LK.INT)
+                {
+                    case (true) {
+                    this.unsup(n, g"in: scalar needle haystack\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                ht = hy.ty;
+                hw = ht.width;
+                nw = nd.ty.width;
+                switch (nw > hw | nw > 63)
+                {
+                    case (true) {
+                    this.unsup(n, g"in: needle wider than haystack\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (nw < hw) { case (true) { nv = this.mod.cast(g"zext\0", nd, ht, (byte*)0); } default {}; };
+                mk = ((u64)1 << (u64)nw) - (u64)1;
+                fb = this.mod.append_block(this.fn, g"in.found\0");
+                nb = this.mod.append_block(this.fn, g"in.notfound\0");
+                mb = this.mod.append_block(this.fn, g"in.merge\0");
+                pos_ptr = this.mod.alloca_here(this.t_i32, g"in.pos\0");
+                this.mod.store(this.mod.c_int(this.t_i32, (i64)0), pos_ptr);
+                cb = this.mod.append_block(this.fn, g"in.bit.cond\0");
+                bb = this.mod.append_block(this.fn, g"in.bit.body\0");
+                this.mod.br(cb);
+
+                this.mod.position(this.fn, cb);
+                pos = this.mod.load(pos_ptr, g"in.pos.v\0");
+                done = this.mod.icmp(g"eq\0", pos, this.mod.c_int(this.t_i32, (i64)(hw - nw + 1)), g"in.bit.done\0");
+                this.mod.cbr(done, nb, bb);
+
+                this.mod.position(this.fn, bb);
+                pos2 = this.mod.load(pos_ptr, g"in.pos2\0");
+                ph = pos2;
+                switch (hw < 32) { case (true) { ph = this.mod.cast(g"trunc\0", pos2, ht, g"in.pos.hw\0"); } default {}; };
+                switch (hw > 32) { case (true) { ph = this.mod.cast(g"zext\0", pos2, ht, g"in.pos.hw\0"); } default {}; };
+                sh = this.mod.binop(g"lshr\0", hy, ph, g"in.shifted\0");
+                win = this.mod.binop(g"and\0", sh, this.mod.c_u64(ht, mk), g"in.window\0");
+                hit = this.mod.icmp(g"eq\0", win, nv, g"in.hit\0");
+                this.mod.store(this.mod.binop(g"add\0", pos2, this.mod.c_int(this.t_i32, (i64)1), (byte*)0), pos_ptr);
+                this.mod.cbr(hit, fb, cb);
+
+                this.mod.position(this.fn, fb);
+                this.mod.br(mb);
+                this.mod.position(this.fn, nb);
+                this.mod.br(mb);
+                this.mod.position(this.fn, mb);
+                pv = (IRValue**)this.zbuf(2);
+                pb = (IRBlock**)this.zbuf(2);
+                pv[0] = this.i1_lit(g"1\0");
+                pv[1] = this.i1_lit(g"0\0");
+                pb[0] = fb;
+                pb[1] = nb;
+                res = this.mod.phi(this.t_i1, pv, pb, 2, g"in.result\0");
+                -> res;
+            };
+
+            // _decay of visit_InExpression: sets elem type and count, count -1 when unknown.
+            // Returns the decayed pointer, null when the value is not a supported pointer.
+            in_decay(IRValue* p, void** sl) -> IRValue*
+            {
+                IRValue* d;
+                switch (p.ty.kind != LK.PTR)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                switch (p.ty.elem.kind == LK.ARRAY)
+                {
+                    case (true) {
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(0);
+                    d = this.mod.gep(p, this.mod.ia, 2, false, g"decay.ptr\0");
+                    sl[0] = (void*)p.ty.elem.elem;
+                    sl[1] = (void*)((u64)p.ty.elem.count + (u64)1);
+                    -> d;
+                }
+                    default {};
+                };
+                switch (p.ty.elem.kind == LK.INT)
+                {
+                    case (true) {
+                    sl[0] = (void*)p.ty.elem;
+                    sl[1] = (void*)(u64)0;
+                    -> p;
+                }
+                    default {};
+                };
+                -> (IRValue*)0;
+            };
+
+            // visit_InExpression sequence needle over a typed haystack. hy0 is the haystack
+            // when it was already visited, null otherwise.
+            x_in_seq(Node* n, IRValue* nd, IRValue* hy0) -> IRValue*
+            {
+                IRType* ne_t;
+                IRType* he_t;
+                int ncount = -1;
+                int hcount = -1;
+                IRValue* np;
+                IRValue* hp;
+                IRValue* hy = hy0;
+                IRValue* i0 = this.mod.c_int(this.t_i32, (i64)0);
+                IRValue* i1v = this.mod.c_int(this.t_i32, (i64)1);
+                IRValue* oidx;
+                IRValue* oi;
+                IRValue* oi2;
+                IRValue* oi3;
+                IRValue* nidx;
+                IRValue* hidx;
+                IRValue* ni;
+                IRValue* ni2;
+                IRValue* hi2;
+                IRValue* t1;
+                IRValue* t2;
+                IRValue* hel;
+                IRValue* nel;
+                IRValue* oob;
+                IRValue* nev;
+                IRValue* mm;
+                IRValue* res;
+                IRValue** pv;
+                IRBlock** pb;
+                IRBlock* found_b;
+                IRBlock* nf_b;
+                IRBlock* merge_b;
+                IRBlock* oc_b;
+                IRBlock* ob_b;
+                IRBlock* ic_b;
+                IRBlock* ib_b;
+                IRBlock* if_b;
+                bool nul_h;
+                bool nul_n;
+                void** sl;
+                sl = this.zbuf(2);
+                np = this.in_decay(nd, sl);
+                switch (np == (IRValue*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"in: needle type\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                ne_t = (IRType*)sl[0];
+                ncount = (int)((u64)sl[1]) - 1;
+                switch (hy == (IRValue*)0)
+                {
+                    case (true) {
+                    hy = this.visit(n.b);
+                    switch (this.bad)
+                    {
+                        case (true) { -> (IRValue*)0; }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+                sl = this.zbuf(2);
+                hp = this.in_decay(hy, sl);
+                switch (hp == (IRValue*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"in: haystack type\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                he_t = (IRType*)sl[0];
+                hcount = (int)((u64)sl[1]) - 1;
+                nul_h = hcount < 0 & he_t.width == 8;
+                switch (hcount < 0 & !nul_h)
+                {
+                    case (true) {
+                    this.unsup(n, g"in: haystack size\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (ne_t.width == 8) { case (true) { ncount = -1; } default {}; };
+                nul_n = ncount < 0 & ne_t.width == 8;
+                switch (ncount < 0 & !nul_n)
+                {
+                    case (true) {
+                    this.unsup(n, g"in: needle size\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                found_b = this.mod.append_block(this.fn, g"in.found\0");
+                nf_b = this.mod.append_block(this.fn, g"in.notfound\0");
+                merge_b = this.mod.append_block(this.fn, g"in.merge\0");
+                oc_b = this.mod.append_block(this.fn, g"in.outer.cond\0");
+                ob_b = this.mod.append_block(this.fn, g"in.outer.body\0");
+                ic_b = this.mod.append_block(this.fn, g"in.inner.cond\0");
+                ib_b = this.mod.append_block(this.fn, g"in.inner.body\0");
+                if_b = this.mod.append_block(this.fn, g"in.inner.fail\0");
+                oidx = this.mod.alloca_here(this.t_i32, g"in.outer.idx\0");
+                this.mod.store(i0, oidx);
+                this.mod.br(oc_b);
+                this.mod.position(this.fn, oc_b);
+                oi = this.mod.load(oidx, g"o.idx\0");
+                switch (nul_h)
+                {
+                    case (true) {
+                    t1 = this.mod.gep_ptr(hp, oi, false, g"hay.ep\0");
+                    t2 = this.mod.load(t1, g"hay.ch\0");
+                    t1 = this.mod.icmp(g"eq\0", t2, this.mod.c_int(he_t, (i64)0), g"hay.end\0");
+                    this.mod.cbr(t1, nf_b, ob_b);
+                }
+                    default {
+                    t1 = this.mod.icmp(g"eq\0", oi, this.mod.c_int(this.t_i32, (i64)hcount), g"hay.done\0");
+                    this.mod.cbr(t1, nf_b, ob_b);
+                };
+                };
+                this.mod.position(this.fn, ob_b);
+                nidx = this.mod.alloca_here(this.t_i32, g"in.ndl.idx\0");
+                this.mod.store(i0, nidx);
+                hidx = this.mod.alloca_here(this.t_i32, g"in.hay.idx\0");
+                oi2 = this.mod.load(oidx, g"o.idx2\0");
+                this.mod.store(oi2, hidx);
+                this.mod.br(ic_b);
+                this.mod.position(this.fn, ic_b);
+                ni = this.mod.load(nidx, g"n.idx\0");
+                switch (nul_n)
+                {
+                    case (true) {
+                    t1 = this.mod.gep_ptr(np, ni, false, g"ndl.ep\0");
+                    t2 = this.mod.load(t1, g"ndl.ch\0");
+                    t1 = this.mod.icmp(g"eq\0", t2, this.mod.c_int(ne_t, (i64)0), g"ndl.end\0");
+                    this.mod.cbr(t1, found_b, ib_b);
+                }
+                    default {
+                    t1 = this.mod.icmp(g"eq\0", ni, this.mod.c_int(this.t_i32, (i64)ncount), g"ndl.done\0");
+                    this.mod.cbr(t1, found_b, ib_b);
+                };
+                };
+                this.mod.position(this.fn, ib_b);
+                ni2 = this.mod.load(nidx, g"n.idx2\0");
+                hi2 = this.mod.load(hidx, g"h.idx2\0");
+                t1 = this.mod.gep_ptr(np, ni2, false, g"ndl.ep2\0");
+                nel = this.mod.load(t1, g"ndl.el\0");
+                switch (nul_h)
+                {
+                    case (true) {
+                    t1 = this.mod.gep_ptr(hp, hi2, false, g"hay.ep2\0");
+                    hel = this.mod.load(t1, g"hay.el\0");
+                    oob = this.mod.icmp(g"eq\0", hel, this.mod.c_int(he_t, (i64)0), g"hay.oob\0");
+                }
+                    default {
+                    oob = this.mod.icmp(g"eq\0", hi2, this.mod.c_int(this.t_i32, (i64)hcount), g"hay.oob\0");
+                    t1 = this.mod.gep_ptr(hp, hi2, false, g"hay.ep2\0");
+                    hel = this.mod.load(t1, g"hay.el\0");
+                };
+                };
+                switch (nel.ty.width < hel.ty.width)
+                {
+                    case (true) { nel = this.mod.cast(g"zext\0", nel, hel.ty, (byte*)0); }
+                    default {
+                    switch (nel.ty.width > hel.ty.width)
+                    {
+                        case (true) { nel = this.mod.cast(g"trunc\0", nel, hel.ty, (byte*)0); }
+                        default {};
+                    };
+                };
+                };
+                nev = this.mod.icmp(g"ne\0", hel, nel, g"el.ne\0");
+                mm = this.mod.binop(g"or\0", oob, nev, g"mismatch\0");
+                this.mod.store(this.mod.binop(g"add\0", ni2, i1v, (byte*)0), nidx);
+                this.mod.store(this.mod.binop(g"add\0", hi2, i1v, (byte*)0), hidx);
+                this.mod.cbr(mm, if_b, ic_b);
+                this.mod.position(this.fn, if_b);
+                oi3 = this.mod.load(oidx, g"o.idx3\0");
+                this.mod.store(this.mod.binop(g"add\0", oi3, i1v, (byte*)0), oidx);
+                this.mod.br(oc_b);
+                this.mod.position(this.fn, found_b);
+                this.mod.br(merge_b);
+                this.mod.position(this.fn, nf_b);
+                this.mod.br(merge_b);
+                this.mod.position(this.fn, merge_b);
+                pv = (IRValue**)this.zbuf(2);
+                pb = (IRBlock**)this.zbuf(2);
+                pv[0] = this.i1_lit(g"1\0");
+                pv[1] = this.i1_lit(g"0\0");
+                pb[0] = found_b;
+                pb[1] = nf_b;
+                res = this.mod.phi(this.t_i1, pv, pb, 2, g"in.result\0");
+                switch ((n.flags `& NF_NEGATED) != 0)
+                {
+                    case (true) {
+                    res = this.mod.binop(g"xor\0", res, this.i1_lit(g"-1\0"), g"notin.result\0");
+                }
+                    default {};
+                };
+                -> res;
+            };
+
             x_in(Node* n) -> IRValue*
             {
                 IRValue* nd = this.visit(n.a);
@@ -7089,11 +11641,17 @@ namespace flux
                     case (true) { -> (IRValue*)0; }
                     default {};
                 };
+                switch (nd != (IRValue*)0)
+                {
+                    case (true) {
+                    switch (nd.ty.kind == LK.INT) { case (true) { -> this.x_in_bits(n, nd); } default {}; };
+                }
+                    default {};
+                };
                 switch (!this.is_i8_ptr(nd.ty))
                 {
                     case (true) {
-                    this.unsup(n, g"in: needle type\0");
-                    -> (IRValue*)0;
+                    -> this.x_in_seq(n, nd, (IRValue*)0);
                 }
                     default {};
                 };
@@ -7106,8 +11664,7 @@ namespace flux
                 switch (!this.is_i8_ptr(hy.ty))
                 {
                     case (true) {
-                    this.unsup(n, g"in: haystack type\0");
-                    -> (IRValue*)0;
+                    -> this.x_in_seq(n, nd, hy);
                 }
                     default {};
                 };
@@ -7319,13 +11876,148 @@ namespace flux
                 -> r;
             };
 
+            // visit_Assignment for a bit slice or bit index target of an integer variable
+            assign_bits(Node* t, IRValue* val0) -> IRValue*
+            {
+                Node* o = t.a;
+                LVar* lv;
+                IRValue* ptr;
+                IRValue* val = val0;
+                IRValue* sv;
+                IRValue* ev;
+                IRValue* iv;
+                IRValue* cur;
+                IRValue* cleared;
+                IRValue* rm;
+                IRValue* rs;
+                IRValue* sh;
+                IRValue* one;
+                IRValue* bm;
+                IRType* it;
+                i64 sc;
+                i64 ec;
+                u64 full;
+                u64 mask;
+                u64 inv;
+                int w;
+                int swid;
+                int lsb;
+                switch (o.kind != NodeKind.IDENTIFIER)
+                {
+                    case (true) {
+                    this.unsup(t, g"bit assignment target must be a simple variable\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                lv = this.find_var(o.text);
+                switch (lv == (LVar*)0)
+                {
+                    case (true) {
+                    this.unsup(t, g"bit assignment to unknown variable\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                ptr = lv.ptr;
+                switch (ptr.ty.kind != LK.PTR)
+                {
+                    case (true) {
+                    this.unsup(t, g"bit assignment target\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                it = ptr.ty.elem;
+                switch (it.kind != LK.INT | it.width > 64 | val.ty.kind != LK.INT)
+                {
+                    case (true) {
+                    this.unsup(t, g"bit assignment requires an integer variable\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                w = it.width;
+                full = (u64)0 - (u64)1;
+                switch (w < 64) { case (true) { full = ((u64)1 << (u64)w) - (u64)1; } default {}; };
+                switch (t.kind == NodeKind.BIT_SLICE)
+                {
+                    case (true) {
+                    sv = this.visit(t.b);
+                    switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                    ev = this.visit(t.c);
+                    switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                    switch (sv == (IRValue*)0 | ev == (IRValue*)0) { case (true) { -> (IRValue*)0; } default {}; };
+                    switch (!(sv.is_const & this.parse_int_text(sv.text, @sc)) | !(ev.is_const & this.parse_int_text(ev.text, @ec)))
+                    {
+                        case (true) {
+                        this.unsup(t, g"bit-slice assignment indices must be constants\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    switch (sc < (i64)0 | ec < sc | ec >= (i64)w)
+                    {
+                        case (true) {
+                        this.unsup(t, g"bit-slice assignment range\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    swid = (int)(ec - sc) + 1;
+                    lsb = w - 1 - (int)ec;
+                    mask = ((u64)1 << (u64)swid) - (u64)1;
+                    switch (swid >= 64) { case (true) { mask = (u64)0 - (u64)1; } default {}; };
+                    inv = full - (mask << (u64)lsb);
+                    cur = this.mod.load(ptr, g"bsa_cur\0");
+                    cleared = this.mod.binop(g"and\0", cur, this.mod.c_u64(it, inv), g"bsa_cleared\0");
+                    switch (val.ty.width < w) { case (true) { val = this.mod.cast(g"zext\0", val, it, g"bsa_widen\0"); } default {}; };
+                    switch (val.ty.width > w) { case (true) { val = this.mod.cast(g"trunc\0", val, it, g"bsa_trunc\0"); } default {}; };
+                    rm = this.mod.binop(g"and\0", val, this.mod.c_u64(it, mask), g"bsa_rhs_mask\0");
+                    rs = this.mod.binop(g"shl\0", rm, this.mod.c_int(it, (i64)lsb), g"bsa_rhs_shift\0");
+                    iv = this.mod.binop(g"or\0", cleared, rs, g"bsa_result\0");
+                    this.mod.store(iv, ptr);
+                    -> iv;
+                }
+                    default {};
+                };
+                iv = this.visit(t.b);
+                switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                switch (iv == (IRValue*)0 | iv.ty.kind != LK.INT)
+                {
+                    case (true) {
+                    this.unsup(t, g"bit index must be an integer\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (iv.ty.width < 32) { case (true) { iv = this.mod.cast(g"zext\0", iv, this.t_i32, g"bia_idx_ext\0"); } default {}; };
+                switch (iv.ty.width > 32) { case (true) { iv = this.mod.cast(g"trunc\0", iv, this.t_i32, g"bia_idx_trunc\0"); } default {}; };
+                sh = this.mod.binop(g"sub\0", this.mod.c_int(this.t_i32, (i64)(w - 1)), iv, g"bia_shift\0");
+                switch (w < 32) { case (true) { sh = this.mod.cast(g"trunc\0", sh, it, g"bia_shift_trunc\0"); } default {}; };
+                switch (sh.ty.width < w) { case (true) { sh = this.mod.cast(g"zext\0", sh, it, g"bia_shift_e\0"); } default {}; };
+                one = this.mod.c_int(it, (i64)1);
+                bm = this.mod.binop(g"shl\0", one, sh, g"bia_mask\0");
+                inv = full;
+                cleared = this.mod.binop(g"xor\0", bm, this.mod.c_int(it, (i64)-1), g"bia_inv_mask\0");
+                cur = this.mod.load(ptr, g"bia_cur\0");
+                cleared = this.mod.binop(g"and\0", cur, cleared, g"bia_cleared\0");
+                switch (val.ty.width < w) { case (true) { val = this.mod.cast(g"zext\0", val, it, g"bia_rhs_widen\0"); } default {}; };
+                switch (val.ty.width > w) { case (true) { val = this.mod.cast(g"trunc\0", val, it, g"bia_rhs_trunc\0"); } default {}; };
+                rm = this.mod.binop(g"and\0", val, one, g"bia_rhs_bit\0");
+                rs = this.mod.binop(g"shl\0", rm, sh, g"bia_rhs_shift\0");
+                iv = this.mod.binop(g"or\0", cleared, rs, g"bia_result\0");
+                this.mod.store(iv, ptr);
+                -> iv;
+            };
+
             x_assign(Node* n) -> IRValue*
             {
                 Node* t = n.a;
                 int tk = t.kind;
                 IRValue* val;
                 switch (tk != NodeKind.IDENTIFIER & tk != NodeKind.MEMBER_ACCESS & tk != NodeKind.ARRAY_ACCESS &
-                    tk != NodeKind.POINTER_DEREF)
+                    tk != NodeKind.POINTER_DEREF & tk != NodeKind.BIT_SLICE & tk != NodeKind.BIT_INDEX_ACCESS)
                 {
                     case (true) {
                     this.unsup(n, g"assignment target\0");
@@ -7333,7 +12025,7 @@ namespace flux
                 }
                     default {};
                 };
-                switch (n.b.kind == NodeKind.ARRAY_LITERAL | n.b.kind == NodeKind.STRUCT_LITERAL)
+                switch (n.b.kind == NodeKind.STRUCT_LITERAL | (n.b.kind == NodeKind.ARRAY_LITERAL & tk != NodeKind.MEMBER_ACCESS))
                 {
                     case (true) {
                     this.unsup(n, g"literal assignment\0");
@@ -7370,6 +12062,11 @@ namespace flux
                     case (true) { -> this.assign_deref(t, val); }
                     default {};
                 };
+                switch (tk == NodeKind.BIT_SLICE | tk == NodeKind.BIT_INDEX_ACCESS)
+                {
+                    case (true) { -> this.assign_bits(t, val); }
+                    default {};
+                };
                 -> this.assign_ident(t, val, n.b);
             };
 
@@ -7378,6 +12075,1213 @@ namespace flux
             // ----------------------------------------------------------
 
             zero_of(IRType* t) -> IRValue* -> this.mod.c_null(t);
+
+            // Function declared under canon, or any function whose name ends with suffix
+            find_fn_ending(byte* canon, byte* suffix) -> IRFunc*
+            {
+                IRFunc* f = this.mod.find_function(canon);
+                IRFunc* g;
+                int i;
+                switch (f != (IRFunc*)0)
+                {
+                    case (true) { -> f; }
+                    default {};
+                };
+                while (i < this.mod.funcs.len)
+                {
+                    g = (IRFunc*)this.mod.funcs.items[i];
+                    switch (ends_with(g.name, suffix))
+                    {
+                        case (true) { -> g; }
+                        default {};
+                    };
+                    i++;
+                };
+                -> (IRFunc*)0;
+            };
+
+            // fmalloc as the standard library mangles it, declared when absent
+            heap_alloc_fn() -> IRFunc*
+            {
+                byte* canon = g"standard__memory__allocators__stdheap__fmalloc__1__dataE1_ubits64__ret_dataE1_ubits64\0";
+                IRFunc* f = this.find_fn_ending(canon, g"fmalloc\0");
+                IRType** ps;
+                switch (f == (IRFunc*)0)
+                {
+                    case (true) {
+                    ps = (IRType**)fmalloc((u64)2 * (u64)((sizeof(IRType*) + 7) / 8));
+                    this.keep((void*)ps);
+                    ps[0] = this.t_i64;
+                    f = this.mod.add_function(this.mod.t_func(this.t_i64, ps, 1, false), canon);
+                }
+                    default {};
+                };
+                -> f;
+            };
+
+            // ffree as the standard library mangles it, declared when absent
+            heap_free_fn() -> IRFunc*
+            {
+                byte* canon = g"standard__memory__allocators__stdheap__ffree__1__dataE1_ubits64__ret_voidE1\0";
+                IRFunc* f = this.find_fn_ending(canon, g"ffree\0");
+                IRType** ps;
+                switch (f == (IRFunc*)0)
+                {
+                    case (true) {
+                    ps = (IRType**)fmalloc((u64)2 * (u64)((sizeof(IRType*) + 7) / 8));
+                    this.keep((void*)ps);
+                    ps[0] = this.t_i64;
+                    f = this.mod.add_function(this.mod.t_func(this.t_void, ps, 1, false), canon);
+                }
+                    default {};
+                };
+                -> f;
+            };
+
+            // _cast_ffree: ffree(ptrtoint(p))
+            emit_ffree(IRValue* p, byte* name) -> void
+            {
+                IRFunc* f = this.heap_free_fn();
+                IRValue* addr;
+                this.sc.clear();
+                this.sc.put_str(name);
+                this.sc.put_str(g"_freeaddr\0");
+                addr = this.mod.cast(g"ptrtoint\0", p, this.t_i64, this.sc.mem);
+                this.mod.ia[0] = addr;
+                this.mod.call(f.self, this.mod.ia, 1, (byte*)0);
+                ->;
+            };
+
+            // _vardecl_heap: heap T name = val; becomes T* name = (T*)fmalloc(sizeof(T));
+            vardecl_heap(Node* n, IRType* lt, TypeSpec* ts) -> IRValue*
+            {
+                IRType* pt = this.mod.t_ptr(lt);
+                IRFunc* mf = this.heap_alloc_fn();
+                IRValue* np = this.mod.c_null(pt);
+                IRValue* szp;
+                IRValue* sz;
+                IRValue* raw;
+                IRValue* ip;
+                IRValue* tp;
+                IRValue* slot;
+                TypeSpec* pts;
+                LVar* lv;
+                IRValue* iv;
+                IRValue* tmpa;
+                this.mod.ia[0] = this.ci32(1);
+                szp = this.mod.gep(np, this.mod.ia, 1, false, g"sizeof_gep\0");
+                sz = this.mod.cast(g"ptrtoint\0", szp, this.t_i64, g"sizeof_val\0");
+                this.mod.ia[0] = sz;
+                this.sc.clear();
+                this.sc.put_str(n.text);
+                this.sc.put_str(g"_raw\0");
+                raw = this.mod.call(mf.self, this.mod.ia, 1, this.sc.mem);
+                this.sc.clear();
+                this.sc.put_str(n.text);
+                this.sc.put_str(g"_i8ptr\0");
+                ip = this.mod.cast(g"inttoptr\0", raw, this.t_i8p, this.sc.mem);
+                tp = ip;
+                switch (!lt_eq(pt, this.t_i8p))
+                {
+                    case (true) {
+                    this.sc.clear();
+                    this.sc.put_str(n.text);
+                    this.sc.put_str(g"_ptr\0");
+                    tp = this.mod.cast(g"bitcast\0", ip, pt, this.sc.mem);
+                }
+                    default {};
+                };
+                slot = this.mod.alloca(pt, n.text);
+                this.mod.store(tp, slot);
+                pts = typespec_copy(ts);
+                pts.pointer_depth = pts.pointer_depth + 1;
+                pts.storage_class = -1;
+                pts.flags = (pts.flags `| TS_ARRAY) - TS_ARRAY;
+                pts.array_size = (Node*)0;
+                pts.array_dims = (NodeVec*)0;
+                this.keep((void*)pts);
+                slot.spec = pts;
+                lv = this.define_var(n.text, slot, pts);
+                lv.is_heap = true;
+                switch (n.a != (Node*)0 & lt.kind == LK.ARRAY & (n.a.kind == NodeKind.STRING_LITERAL | n.a.kind == NodeKind.BINARY_OP))
+                {
+                    case (true) {
+                    iv = this.visit(n.a);
+                    switch (this.bad)
+                    {
+                        case (true) { -> (IRValue*)0; }
+                        default {};
+                    };
+                    switch (iv != (IRValue*)0)
+                    {
+                        case (true) {
+                        switch (iv.ty.kind != LK.PTR)
+                        {
+                            case (true) {
+                            this.sc.clear();
+                            this.sc.put_str(n.text);
+                            this.sc.put_str(g"_init_tmp\0");
+                            tmpa = this.mod.alloca_here(lt, this.sc.mem);
+                            this.mod.store(iv, tmpa);
+                            iv = tmpa;
+                        }
+                            default {};
+                        };
+                        this.emit_memcpy_val(tp, iv, sz);
+                    }
+                        default {};
+                    };
+                    -> slot;
+                }
+                    default {};
+                };
+                switch (!this.init_slot(tp, lt, n.a, n))
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                -> slot;
+            };
+
+            // _vardecl_singinit: function scoped variable with program lifetime
+            vardecl_singinit(Node* n, IRType* lt, TypeSpec* ts) -> IRValue*
+            {
+                IRGlobal* gv;
+                IRGlobal* gg;
+                IRBlock* ib;
+                IRBlock* db;
+                IRValue* guard;
+                IRValue* one;
+                byte* gname;
+                byte* uname;
+                this.sc.clear();
+                this.sc.put_str(g"__singinit__\0");
+                this.sc.put_str(this.fn.name);
+                this.sc.put_str(g"__\0");
+                this.sc.put_str(n.text);
+                gname = ts_dup(this.sc.mem);
+                this.keep((void*)gname);
+                this.sc.clear();
+                this.sc.put_str(g"__singinit_guard__\0");
+                this.sc.put_str(this.fn.name);
+                this.sc.put_str(g"__\0");
+                this.sc.put_str(n.text);
+                uname = ts_dup(this.sc.mem);
+                this.keep((void*)uname);
+                gv = this.mod.find_global(gname);
+                switch (gv == (IRGlobal*)0)
+                {
+                    case (true) {
+                    gv = this.mod.add_global(lt, gname, this.mod.c_null(lt).text);
+                    gv.linkage = this.mod.own(g"internal\0");
+                }
+                    default {};
+                };
+                gg = this.mod.find_global(uname);
+                switch (gg == (IRGlobal*)0)
+                {
+                    case (true) {
+                    gg = this.mod.add_global(this.t_i1, uname, g"0\0");
+                    gg.linkage = this.mod.own(g"internal\0");
+                }
+                    default {};
+                };
+                this.sc.clear();
+                this.sc.put_str(g"singinit_\0");
+                this.sc.put_str(n.text);
+                this.sc.put_str(g"_init\0");
+                ib = this.mod.append_block(this.fn, this.sc.mem);
+                this.sc.clear();
+                this.sc.put_str(g"singinit_\0");
+                this.sc.put_str(n.text);
+                this.sc.put_str(g"_done\0");
+                db = this.mod.append_block(this.fn, this.sc.mem);
+                this.sc.clear();
+                this.sc.put_str(n.text);
+                this.sc.put_str(g"_guard\0");
+                guard = this.mod.load(gg.self, this.sc.mem);
+                this.mod.cbr(guard, db, ib);
+                this.mod.position(this.fn, ib);
+                switch (!this.init_slot(gv.self, lt, n.a, n))
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                one = this.mod.new_value(this.t_i1, g"1\0");
+                one.is_const = true;
+                this.mod.store(one, gg.self);
+                this.mod.br(db);
+                this.mod.position(this.fn, db);
+                gv.self.spec = ts;
+                this.define_var(n.text, gv.self, ts);
+                -> gv.self;
+            };
+
+            // "prefix<a>" or "prefix<a>_<b>" in the scratch name buffer (b < 0 omits the second part)
+            nm_ab(byte* pre, int a, int b) -> byte*
+            {
+                this.sc.clear();
+                this.sc.put_str(pre);
+                this.sc.put_int(a);
+                switch (b >= 0)
+                {
+                    case (true) {
+                    this.sc.put(95);
+                    this.sc.put_int(b);
+                }
+                    default {};
+                };
+                -> this.sc.mem;
+            };
+
+            // Byte pointer for the bit slice staging buffer: byte index form [0, i] for arrays, [i] otherwise
+            bs_gep(IRValue* base, IRValue* idx, byte* nm) -> IRValue*
+            {
+                switch (base.ty.kind == LK.PTR)
+                {
+                    case (true) {
+                    switch (base.ty.elem.kind == LK.ARRAY)
+                    {
+                        case (true) {
+                        this.mod.ia[0] = this.ci32(0);
+                        this.mod.ia[1] = idx;
+                        -> this.mod.gep(base, this.mod.ia, 2, true, nm);
+                    }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+                this.mod.ia[0] = idx;
+                -> this.mod.gep(base, this.mod.ia, 1, true, nm);
+            };
+
+            // visit_BitSlice staging buffer for a struct: fields written big-endian in declaration order
+            bs_struct_buf(IRType* st, IRValue* sp) -> IRValue*
+            {
+                SInfo* si = this.sinfo_of(st);
+                int total;
+                int i;
+                int bi;
+                int off;
+                int nb;
+                int bits;
+                IRType* ft;
+                IRType* wty;
+                IRType* at;
+                IRValue* buf;
+                IRValue* i8buf;
+                IRValue* fp;
+                IRValue* fv;
+                IRValue* wv;
+                IRValue* sh;
+                IRValue* bv;
+                IRValue* bp;
+                IRValue* fsrc;
+                IRValue* sb;
+                int* sizes;
+                switch (si == (SInfo*)0)
+                {
+                    case (true) {
+                    this.unsup((Node*)0, g"bit slice of unknown struct\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                sizes = (int*)this.zbuf(si.n + 1);
+                while (i < si.n)
+                {
+                    bits = bits_of(si.ftys[i]);
+                    switch (bits == 0) { case (true) { bits = 8; } default {}; };
+                    sizes[i] = bits / 8;
+                    total = total + sizes[i];
+                    i++;
+                };
+                at = this.mod.t_array(this.t_i8, total);
+                buf = this.mod.alloca_here(at, g"bs_msb_buf\0");
+                i8buf = this.mod.cast(g"bitcast\0", buf, this.mod.t_ptr(this.t_i8), g"bs_msb_i8\0");
+                i = 0;
+                while (i < si.n)
+                {
+                    ft = si.ftys[i];
+                    nb = sizes[i];
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(i);
+                    fp = this.mod.gep(sp, this.mod.ia, 2, true, this.nm_ab(g"bs_fptr_\0", i, -1));
+                    switch (ft.kind == LK.INT & ft.width >= 8)
+                    {
+                        case (true) {
+                        fv = this.mod.load(fp, this.nm_ab(g"bs_fval_\0", i, -1));
+                        wty = fv.ty;
+                        wv = fv;
+                        switch (fv.ty.width < 32)
+                        {
+                            case (true) {
+                            wty = this.t_i32;
+                            wv = this.mod.cast(g"zext\0", fv, wty, (byte*)0);
+                        }
+                            default {};
+                        };
+                        bi = 0;
+                        while (bi < nb)
+                        {
+                            sh = this.mod.binop(g"lshr\0", wv, this.mod.c_int(wty, (i64)((nb - 1 - bi) * 8)), this.nm_ab(g"bs_fsh_\0", i, bi));
+                            bv = this.mod.cast(g"trunc\0", sh, this.t_i8, this.nm_ab(g"bs_fb_\0", i, bi));
+                            bp = this.bs_gep(i8buf, this.ci32(off + bi), this.nm_ab(g"bs_fbptr_\0", i, bi));
+                            this.mod.store(bv, bp);
+                            bi++;
+                        };
+                    }
+                        default {
+                            fsrc = this.mod.cast(g"bitcast\0", fp, this.mod.t_ptr(this.t_i8), (byte*)0);
+                            bi = 0;
+                            while (bi < nb)
+                            {
+                                sb = this.bs_gep(fsrc, this.ci32(bi), (byte*)0);
+                                bv = this.mod.load(sb, (byte*)0);
+                                bp = this.bs_gep(i8buf, this.ci32(off + bi), (byte*)0);
+                                this.mod.store(bv, bp);
+                                bi++;
+                            };
+                        };
+                    };
+                    off = off + nb;
+                    i++;
+                };
+                -> i8buf;
+            };
+
+            // visit_BitSlice
+            x_bitslice(Node* n) -> IRValue*
+            {
+                IRValue* val = this.visit(n.a);
+                IRValue* sv;
+                IRValue* ev;
+                IRValue* base;
+                IRValue* tmp;
+                IRValue* i8p;
+                IRValue* wv;
+                IRValue* sh;
+                IRValue* bv;
+                IRValue* res;
+                IRValue* bval;
+                IRValue* ext;
+                IRValue* plc;
+                IRValue* si32;
+                IRValue* ei32;
+                IRValue* eight;
+                IRValue* bidx;
+                IRValue* bstart;
+                IRValue* bend;
+                IRValue* bp;
+                IRValue* bbyte;
+                IRValue* e8;
+                IRValue* s8;
+                IRValue* shamt;
+                IRValue* shd;
+                IRValue* slen;
+                IRValue* swid;
+                IRValue* mraw;
+                IRValue* mask;
+                IRValue* masked;
+                IRType* vt;
+                IRType* i8t = this.t_i8;
+                IRType* i8ptr = this.mod.t_ptr(this.t_i8);
+                i64 sc;
+                i64 ec;
+                bool has_s;
+                bool has_e;
+                int nbytes;
+                int nbits;
+                int i;
+                int bit_pos;
+                int width;
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                sv = this.visit(n.b);
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                ev = this.visit(n.c);
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                switch (val == (IRValue*)0 | sv == (IRValue*)0 | ev == (IRValue*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"void bit slice operand\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                vt = val.ty;
+                has_s = sv.is_const & this.parse_int_text(sv.text, @sc);
+                has_e = ev.is_const & this.parse_int_text(ev.text, @ec);
+                // Reverse bit slice
+                switch (has_s & has_e & sc > ec)
+                {
+                    case (true) {
+                    switch (vt.kind == LK.PTR & vt.elem.kind == LK.ARRAY)
+                    {
+                        case (true) { base = val; }
+                        default {
+                            switch (vt.kind == LK.PTR & this.is_aggregate_ty(vt.elem))
+                            {
+                                case (true) { base = this.mod.cast(g"bitcast\0", val, i8ptr, g"rev_struct_raw\0"); }
+                                default {
+                                    switch (this.is_aggregate_ty(vt))
+                                    {
+                                        case (true) {
+                                        tmp = this.mod.alloca_here(vt, g"rev_stmp\0");
+                                        this.mod.store(val, tmp);
+                                        base = this.mod.cast(g"bitcast\0", tmp, i8ptr, g"rev_struct_raw\0");
+                                    }
+                                        default {
+                                            switch (vt.kind == LK.INT & vt.width >= 8)
+                                            {
+                                                case (true) {
+                                                nbytes = vt.width / 8;
+                                                tmp = this.mod.alloca_here(this.mod.t_array(i8t, nbytes), g"rev_tmp\0");
+                                                base = this.mod.cast(g"bitcast\0", tmp, i8ptr, g"rev_tmp_i8\0");
+                                                wv = val;
+                                                switch (vt.width < 32) { case (true) { wv = this.mod.cast(g"zext\0", val, this.t_i32, (byte*)0); } default {}; };
+                                                i = 0;
+                                                while (i < nbytes)
+                                                {
+                                                    sh = this.mod.binop(g"lshr\0", wv, this.mod.c_int(wv.ty, (i64)((nbytes - 1 - i) * 8)), (byte*)0);
+                                                    bv = this.mod.cast(g"trunc\0", sh, i8t, (byte*)0);
+                                                    bp = this.bs_gep(base, this.ci32(i), (byte*)0);
+                                                    this.mod.store(bv, bp);
+                                                    i++;
+                                                };
+                                            }
+                                                default {
+                                                    tmp = this.mod.alloca_here(i8t, g"rev_tmp\0");
+                                                    wv = val;
+                                                    switch (vt.kind != LK.INT) { case (true) { this.unsup(n, g"bit slice operand\0"); -> (IRValue*)0; } default {}; };
+                                                    switch (vt.width != 8) { case (true) { wv = this.mod.cast(g"trunc\0", val, i8t, (byte*)0); } default {}; };
+                                                    this.mod.store(wv, tmp);
+                                                    base = tmp;
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                    nbits = (int)(sc - ec + (i64)1);
+                    res = this.mod.c_int(i8t, (i64)0);
+                    i = 0;
+                    bit_pos = (int)sc;
+                    while (bit_pos >= (int)ec)
+                    {
+                        bp = this.bs_gep(base, this.ci32(bit_pos / 8), (byte*)0);
+                        bval = this.mod.load(bp, this.nm_ab(g"rev_byte_\0", i, -1));
+                        sh = this.mod.binop(g"lshr\0", bval, this.mod.c_int(i8t, (i64)(7 - bit_pos % 8)), this.nm_ab(g"rev_ext_\0", i, -1));
+                        ext = this.mod.binop(g"and\0", sh, this.mod.c_int(i8t, (i64)1), this.nm_ab(g"rev_bit_\0", i, -1));
+                        plc = this.mod.binop(g"shl\0", ext, this.mod.c_int(i8t, (i64)(nbits - 1 - i)), this.nm_ab(g"rev_place_\0", i, -1));
+                        res = this.mod.binop(g"or\0", res, plc, this.nm_ab(g"rev_acc_\0", i, -1));
+                        i++;
+                        bit_pos--;
+                    };
+                    switch (nbits >= 1 & nbits < 8)
+                    {
+                        case (true) { -> this.mod.cast(g"trunc\0", res, this.mod.t_int(nbits), g"rev_trunc\0"); }
+                        default {};
+                    };
+                    -> res;
+                }
+                    default {};
+                };
+                // Forward bit slice: MSB-first addressing
+                switch (vt.kind == LK.PTR & vt.elem.kind == LK.ARRAY)
+                {
+                    case (true) { base = val; }
+                    default {
+                        switch (vt.kind == LK.PTR & this.is_aggregate_ty(vt.elem))
+                        {
+                            case (true) {
+                            base = this.bs_struct_buf(vt.elem, val);
+                            switch (this.bad | base == (IRValue*)0) { case (true) { -> (IRValue*)0; } default {}; };
+                        }
+                            default {
+                                switch (vt.kind == LK.PTR)
+                                {
+                                    case (true) { base = val; }
+                                    default {
+                                        switch (this.is_aggregate_ty(vt))
+                                        {
+                                            case (true) {
+                                            tmp = this.mod.alloca_here(vt, g"bs_tmp\0");
+                                            this.mod.store(val, tmp);
+                                            base = this.bs_struct_buf(vt, tmp);
+                                            switch (this.bad | base == (IRValue*)0) { case (true) { -> (IRValue*)0; } default {}; };
+                                        }
+                                            default {
+                                                switch (vt.kind == LK.ARRAY)
+                                                {
+                                                    case (true) {
+                                                    tmp = this.mod.alloca_here(vt, g"bs_tmp\0");
+                                                    this.mod.store(val, tmp);
+                                                    base = tmp;
+                                                }
+                                                    default {
+                                                        switch (vt.kind == LK.INT & vt.width >= 8)
+                                                        {
+                                                            case (true) {
+                                                            nbytes = vt.width / 8;
+                                                            tmp = this.mod.alloca_here(this.mod.t_array(i8t, nbytes), g"bs_tmp\0");
+                                                            base = this.mod.cast(g"bitcast\0", tmp, i8ptr, g"bs_tmp_i8\0");
+                                                            wv = val;
+                                                            switch (vt.width < 32)
+                                                            {
+                                                                case (true) { wv = this.mod.cast(g"zext\0", val, this.t_i32, g"bs_widen\0"); }
+                                                                default {
+                                                                    switch (vt.width > 64)
+                                                                    {
+                                                                        case (true) { wv = this.mod.cast(g"trunc\0", val, this.t_i64, g"bs_widen\0"); }
+                                                                        default {};
+                                                                    };
+                                                                };
+                                                            };
+                                                            i = 0;
+                                                            while (i < nbytes)
+                                                            {
+                                                                sh = this.mod.binop(g"lshr\0", wv, this.mod.c_int(wv.ty, (i64)((nbytes - 1 - i) * 8)), this.nm_ab(g"bs_byteshift_\0", i, -1));
+                                                                bv = this.mod.cast(g"trunc\0", sh, i8t, this.nm_ab(g"bs_byte_\0", i, -1));
+                                                                bp = this.bs_gep(base, this.ci32(i), this.nm_ab(g"bs_bptr_\0", i, -1));
+                                                                this.mod.store(bv, bp);
+                                                                i++;
+                                                            };
+                                                        }
+                                                            default {
+                                                                switch (vt.kind != LK.INT)
+                                                                {
+                                                                    case (true) {
+                                                                    this.unsup(n, g"bit slice operand\0");
+                                                                    -> (IRValue*)0;
+                                                                }
+                                                                    default {};
+                                                                };
+                                                                wv = this.mod.cast(g"zext\0", val, i8t, g"bs_widen\0");
+                                                                sh = this.mod.binop(g"shl\0", wv, this.mod.c_int(i8t, (i64)(8 - vt.width)), g"bs_prealign\0");
+                                                                tmp = this.mod.alloca_here(i8t, g"bs_tmp\0");
+                                                                this.mod.store(sh, tmp);
+                                                                base = tmp;
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                switch (sv.ty.kind != LK.INT | ev.ty.kind != LK.INT)
+                {
+                    case (true) {
+                    this.unsup(n, g"bit slice index\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                si32 = sv;
+                switch (sv.ty.width < 32)
+                {
+                    case (true) { si32 = this.mod.cast(g"zext\0", sv, this.t_i32, g"bs_start\0"); }
+                    default {
+                        switch (sv.ty.width > 32)
+                        {
+                            case (true) { si32 = this.mod.cast(g"trunc\0", sv, this.t_i32, g"bs_start\0"); }
+                            default {};
+                        };
+                    };
+                };
+                ei32 = ev;
+                switch (ev.ty.width < 32)
+                {
+                    case (true) { ei32 = this.mod.cast(g"zext\0", ev, this.t_i32, g"bs_end\0"); }
+                    default {
+                        switch (ev.ty.width > 32)
+                        {
+                            case (true) { ei32 = this.mod.cast(g"trunc\0", ev, this.t_i32, g"bs_end\0"); }
+                            default {};
+                        };
+                    };
+                };
+                eight = this.ci32(8);
+                bidx = this.mod.binop(g"udiv\0", si32, eight, g"bs_byte_idx\0");
+                bstart = this.mod.binop(g"urem\0", si32, eight, g"bs_bit_start\0");
+                bend = this.mod.binop(g"urem\0", ei32, eight, g"bs_bit_end\0");
+                bp = this.bs_gep(base, bidx, g"bs_byte_ptr\0");
+                bbyte = this.mod.load(bp, g"bs_byte\0");
+                e8 = this.mod.cast(g"trunc\0", bend, i8t, g"bs_bit_end_i8\0");
+                s8 = this.mod.cast(g"trunc\0", bstart, i8t, g"bs_bit_start_i8\0");
+                shamt = this.mod.binop(g"sub\0", this.mod.c_int(i8t, (i64)7), e8, g"bs_shift_amt\0");
+                shd = this.mod.binop(g"lshr\0", bbyte, shamt, g"bs_shift\0");
+                slen = this.mod.binop(g"sub\0", e8, s8, g"bs_slen\0");
+                swid = this.mod.binop(g"add\0", slen, this.mod.c_int(i8t, (i64)1), g"bs_swidth\0");
+                mraw = this.mod.binop(g"shl\0", this.mod.c_int(i8t, (i64)1), swid, g"bs_mask_raw\0");
+                mask = this.mod.binop(g"sub\0", mraw, this.mod.c_int(i8t, (i64)1), g"bs_mask\0");
+                masked = this.mod.binop(g"and\0", shd, mask, g"bs_result\0");
+                switch (si32.is_const & ei32.is_const & this.parse_int_text(si32.text, @sc) & this.parse_int_text(ei32.text, @ec))
+                {
+                    case (true) {
+                    width = (int)(ec % (i64)8 - sc % (i64)8 + (i64)1);
+                    switch (width >= 1 & width <= 8)
+                    {
+                        case (true) { -> this.mod.cast(g"trunc\0", masked, this.mod.t_int(width), g"bs_trunc\0"); }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+                -> masked;
+            };
+
+            // visit_BitIndexAccess: single bit, MSB-first, as an i8
+            x_bitindex(Node* n) -> IRValue*
+            {
+                IRValue* val = this.visit(n.a);
+                IRValue* iv;
+                IRValue* ix;
+                IRValue* sh;
+                IRValue* wv;
+                IRValue* shd;
+                IRValue* bit;
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                iv = this.visit(n.b);
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                switch (val == (IRValue*)0 | iv == (IRValue*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"void bit index operand\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (val.ty.kind == LK.PTR)
+                {
+                    case (true) {
+                    switch (val.ty.elem.kind == LK.INT) { case (true) { val = this.mod.load(val, g"bia_load\0"); } default {}; };
+                }
+                    default {};
+                };
+                switch (val.ty.kind != LK.INT | iv.ty.kind != LK.INT)
+                {
+                    case (true) {
+                    this.unsup(n, g"bit index operand\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                ix = iv;
+                switch (iv.ty.width < 32)
+                {
+                    case (true) { ix = this.mod.cast(g"zext\0", iv, this.t_i32, g"bia_idx_ext\0"); }
+                    default {
+                        switch (iv.ty.width > 32)
+                        {
+                            case (true) { ix = this.mod.cast(g"trunc\0", iv, this.t_i32, g"bia_idx_trunc\0"); }
+                            default {};
+                        };
+                    };
+                };
+                sh = this.mod.binop(g"sub\0", this.ci32(val.ty.width - 1), ix, g"bia_shift\0");
+                wv = val;
+                switch (val.ty.width < 32) { case (true) { wv = this.mod.cast(g"zext\0", val, this.t_i32, (byte*)0); } default {}; };
+                shd = this.mod.binop(g"lshr\0", wv, sh, g"bia_shifted\0");
+                bit = this.mod.binop(g"and\0", shd, this.ci32(1), g"bia_bit\0");
+                -> this.mod.cast(g"trunc\0", bit, this.t_i8, g"bia_result\0");
+            };
+
+            // LiteralTypeHandler.cast_to_target_int_type
+            int_to(IRValue* v, IRType* t) -> IRValue*
+            {
+                switch (v.ty.kind != LK.INT | t.kind != LK.INT)
+                {
+                    case (true) { -> v; }
+                    default {};
+                };
+                switch (v.ty.width == t.width)
+                {
+                    case (true) { -> v; }
+                    default {};
+                };
+                switch (v.ty.width > t.width)
+                {
+                    case (true) { -> this.mod.cast(g"trunc\0", v, t, (byte*)0); }
+                    default {};
+                };
+                -> this.mod.cast(g"sext\0", v, t, (byte*)0);
+            };
+
+            // visit_ArrayComprehension. Returns the comprehension array pointer.
+            x_comp(Node* n, int expected) -> IRValue*
+            {
+                IRType* et = this.t_i32;
+                TypeSpec* vts = n.ts;
+                Node* it = n.b;
+                Node* sn;
+                Node* en;
+                IRType* at;
+                IRType* rt;
+                IRType** fl;
+                IRValue* arr;
+                IRValue* itarr;
+                IRValue* rp;
+                IRValue* sp;
+                IRValue* sv;
+                IRValue* ev;
+                IRValue* xv;
+                IRValue* idxp;
+                IRValue* varp;
+                IRValue* cur;
+                IRValue* cidx;
+                IRValue* ep;
+                IRValue* cv;
+                IRBlock* cond_b;
+                IRBlock* body_b;
+                IRBlock* end_b;
+                int cnt;
+                int i;
+                switch (vts != (TypeSpec*)0)
+                {
+                    case (true) {
+                    et = this.lower(vts, true, n.line);
+                    switch (this.nerrors > this.body_errs)
+                    {
+                        case (true) {
+                        this.unsup(n, g"comprehension element type\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                }
+                    default { vts = this.lit_spec(DataType.SINT); };
+                };
+                switch (it.kind == NodeKind.ARRAY_LITERAL)
+                {
+                    case (true) {
+                    cnt = node_count(it, 0);
+                    at = this.mod.t_array(et, cnt);
+                    arr = this.mod.alloca_here(at, g"comprehension_array\0");
+                    itarr = this.mod.alloca_here(at, g"iterable_array\0");
+                    while (i < cnt)
+                    {
+                        xv = this.visit(node_child(it, 0, i));
+                        switch (this.bad)
+                        {
+                            case (true) { -> (IRValue*)0; }
+                            default {};
+                        };
+                        switch (xv == (IRValue*)0)
+                        {
+                            case (true) {
+                            this.unsup(n, g"void comprehension element\0");
+                            -> (IRValue*)0;
+                        }
+                            default {};
+                        };
+                        xv = this.int_to(xv, et);
+                        this.mod.ia[0] = this.ci32(0);
+                        this.mod.ia[1] = this.ci32(i);
+                        ep = this.mod.gep(itarr, this.mod.ia, 2, false, (byte*)0);
+                        this.mod.store(xv, ep);
+                        i++;
+                    };
+                    varp = this.mod.alloca_here(et, n.text);
+                    this.define_var(n.text, varp, vts);
+                    idxp = this.mod.alloca_here(this.t_i32, g"comp_index\0");
+                    this.mod.store(this.ci32(0), idxp);
+                    cond_b = this.mod.append_block(this.fn, g"comp_loop_cond\0");
+                    body_b = this.mod.append_block(this.fn, g"comp_loop_body\0");
+                    end_b = this.mod.append_block(this.fn, g"comp_loop_end\0");
+                    this.mod.br(cond_b);
+                    this.mod.position(this.fn, cond_b);
+                    cidx = this.mod.load(idxp, (byte*)0);
+                    cv = this.mod.icmp(g"slt\0", cidx, this.ci32(cnt), (byte*)0);
+                    this.mod.cbr(cv, body_b, end_b);
+                    this.mod.position(this.fn, body_b);
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = cidx;
+                    ep = this.mod.gep(itarr, this.mod.ia, 2, false, (byte*)0);
+                    this.mod.store(this.mod.load(ep, (byte*)0), varp);
+                    xv = this.visit(n.a);
+                    switch (this.bad)
+                    {
+                        case (true) { -> (IRValue*)0; }
+                        default {};
+                    };
+                    switch (xv == (IRValue*)0)
+                    {
+                        case (true) {
+                        this.unsup(n, g"void comprehension expression\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    xv = this.int_to(xv, et);
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = cidx;
+                    ep = this.mod.gep(arr, this.mod.ia, 2, false, (byte*)0);
+                    this.mod.store(xv, ep);
+                    this.mod.store(this.mod.binop(g"add\0", cidx, this.ci32(1), (byte*)0), idxp);
+                    this.mod.br(cond_b);
+                    this.mod.position(this.fn, end_b);
+                    -> arr;
+                }
+                    default {};
+                };
+                switch (it.kind != NodeKind.RANGE_EXPRESSION)
+                {
+                    case (true) {
+                    this.unsup(n, g"comprehension iterable\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                sn = it.a;
+                en = it.b;
+                // visit_RangeExpression with the element type, its result is not used further
+                sv = this.visit(sn);
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                ev = this.visit(en);
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                switch (sv == (IRValue*)0 | ev == (IRValue*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"void range bound\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                fl = (IRType**)fmalloc((u64)3 * (u64)((sizeof(IRType*) + 7) / 8));
+                this.keep((void*)fl);
+                fl[0] = et;
+                fl[1] = et;
+                rt = this.mod.t_struct(fl, 2);
+                rp = this.mod.alloca_here(rt, g"range\0");
+                sv = this.range_fit(sv, et);
+                ev = this.range_fit(ev, et);
+                this.mod.ia[0] = this.ci32(0);
+                this.mod.ia[1] = this.ci32(0);
+                sp = this.mod.gep(rp, this.mod.ia, 2, true, (byte*)0);
+                this.mod.store(sv, sp);
+                this.mod.ia[0] = this.ci32(0);
+                this.mod.ia[1] = this.ci32(1);
+                sp = this.mod.gep(rp, this.mod.ia, 2, true, (byte*)0);
+                this.mod.store(ev, sp);
+                sv = this.visit(sn);
+                ev = this.visit(en);
+                sv = this.int_to(sv, et);
+                ev = this.int_to(ev, et);
+                switch (sn.kind == NodeKind.LITERAL & en.kind == NodeKind.LITERAL)
+                {
+                    case (true) { cnt = (int)(en.ival - sn.ival + (i64)1); }
+                    default {
+                        switch (expected < 0)
+                        {
+                            case (true) {
+                            this.unsup(n, g"comprehension without size\0");
+                            -> (IRValue*)0;
+                        }
+                            default {};
+                        };
+                        cnt = expected;
+                    };
+                };
+                at = this.mod.t_array(et, cnt);
+                arr = this.mod.alloca_here(at, g"comprehension_array\0");
+                idxp = this.mod.alloca_here(this.t_i32, g"comp_index\0");
+                this.mod.store(this.ci32(0), idxp);
+                varp = this.mod.alloca_here(et, n.text);
+                this.define_var(n.text, varp, vts);
+                sv = this.int_to(sv, et);
+                ev = this.int_to(ev, et);
+                cond_b = this.mod.append_block(this.fn, g"comp_loop_cond\0");
+                body_b = this.mod.append_block(this.fn, g"comp_loop_body\0");
+                end_b = this.mod.append_block(this.fn, g"comp_loop_end\0");
+                this.mod.store(sv, varp);
+                this.mod.br(cond_b);
+                this.mod.position(this.fn, cond_b);
+                cur = this.mod.load(varp, g"current_var\0");
+                cv = this.mod.icmp(g"sle\0", cur, ev, g"loop_cond\0");
+                this.mod.cbr(cv, body_b, end_b);
+                this.mod.position(this.fn, body_b);
+                xv = this.visit(n.a);
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                switch (xv == (IRValue*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"void comprehension expression\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                xv = this.int_to(xv, et);
+                cidx = this.mod.load(idxp, g"current_index\0");
+                this.mod.ia[0] = this.ci32(0);
+                this.mod.ia[1] = cidx;
+                ep = this.mod.gep(arr, this.mod.ia, 2, true, (byte*)0);
+                this.mod.store(xv, ep);
+                this.mod.store(this.mod.binop(g"add\0", cidx, this.ci32(1), g"next_index\0"), idxp);
+                this.mod.store(this.mod.binop(g"add\0", cur, this.mod.c_int(et, (i64)1), g"next_var\0"), varp);
+                this.mod.br(cond_b);
+                this.mod.position(this.fn, end_b);
+                -> arr;
+            };
+
+            // visit_RangeExpression: trunc or sext a bound to the range element type
+            range_fit(IRValue* v, IRType* t) -> IRValue*
+            {
+                switch (v.ty.kind != LK.INT | t.kind != LK.INT)
+                {
+                    case (true) { -> v; }
+                    default {};
+                };
+                switch (v.ty.width == t.width)
+                {
+                    case (true) { -> v; }
+                    default {};
+                };
+                switch (v.ty.width > t.width)
+                {
+                    case (true) { -> this.mod.cast(g"trunc\0", v, t, (byte*)0); }
+                    default {};
+                };
+                -> this.mod.cast(g"sext\0", v, t, (byte*)0);
+            };
+
+            // Initializes the slot at alloca (a pointer to lt) from ini, or zero fills it.
+            // Returns false when the initializer could not be generated.
+            init_slot(IRValue* alloca, IRType* lt, Node* ini, Node* n) -> bool
+            {
+                IRValue* iv;
+                int cexp;
+                switch (ini != (Node*)0)
+                {
+                    case (true) {
+                    switch (ini.kind == NodeKind.NO_INIT)
+                    {
+                        case (true) { -> true; }
+                        default {};
+                    };
+                    switch (ini.kind == NodeKind.ARRAY_COMPREHENSION)
+                    {
+                        case (true) {
+                        cexp = -1;
+                        switch (lt.kind == LK.ARRAY)
+                        {
+                            case (true) { cexp = lt.count; }
+                            default {};
+                        };
+                        iv = this.x_comp(ini, cexp);
+                        switch (this.bad | iv == (IRValue*)0)
+                        {
+                            case (true) { -> false; }
+                            default {};
+                        };
+                        this.mod.store(this.mod.load(iv, g"comp_array_load\0"), alloca);
+                        -> true;
+                    }
+                        default {};
+                    };
+                    switch (ini.kind == NodeKind.ARRAY_LITERAL)
+                    {
+                        case (true) {
+                        this.init_local_array(alloca, lt, ini);
+                        -> true;
+                    }
+                        default {};
+                    };
+                    switch (ini.kind == NodeKind.STRING_LITERAL)
+                    {
+                        case (true) {
+                        this.init_local_string(alloca, lt, ini);
+                        -> true;
+                    }
+                        default {};
+                    };
+                    switch (ini.kind == NodeKind.FUNCTION_CALL & ini.text != (byte*)0)
+                    {
+                        case (true) {
+                        switch (ends_with(ini.text, g".__init\0"))
+                        {
+                            case (true) {
+                            this.init_ctor(alloca, lt, ini, n);
+                            -> true;
+                        }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                    switch (ini.kind == NodeKind.STRUCT_LITERAL & lt.kind == LK.ISTRUCT)
+                    {
+                        case (true) { iv = this.x_struct_lit(ini, lt); }
+                        default { iv = this.visit(ini); };
+                    };
+                    switch (this.bad)
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
+                    switch (iv != (IRValue*)0)
+                    {
+                        case (true) {
+                        this.store_conv(alloca, lt, iv, ini, n);
+                    }
+                        default {};
+                    };
+                    -> true;
+                }
+                    default {};
+                };
+                switch (lt.kind == LK.ARRAY)
+                {
+                    case (true) {
+                    switch (lt.count > 64)
+                    {
+                        case (true) {
+                        this.memset_zero(alloca, lt);
+                        -> true;
+                    }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+                this.mod.store(this.zero_of(lt), alloca);
+                -> true;
+            };
+
+            // _vardecl_auto: the variable takes the type of its initializer value
+            vardecl_auto(Node* n) -> IRValue*
+            {
+                Node* ini = n.a;
+                IRValue* rv;
+                IRValue* alloca;
+                TypeSpec* its;
+                int k;
+                int w;
+                int d;
+                int bt;
+                IRType* et;
+                switch (ini == (Node*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"auto without initializer\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                rv = this.visit(ini);
+                switch (this.bad | rv == (IRValue*)0)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                // Python literals carry no Flux type, so the LLVM type decides
+                its = rv.spec;
+                switch (ini.kind == NodeKind.LITERAL)
+                {
+                    case (true) { its = (TypeSpec*)0; }
+                    default {};
+                };
+                switch (its == (TypeSpec*)0)
+                {
+                    case (true) {
+                    k = rv.ty.kind;
+                    w = rv.ty.width;
+                    switch (k == LK.INT)
+                    {
+                        case (true) {
+                        switch (w == 1) { case (true) { its = this.lit_spec(DataType.BOOL); } default {}; };
+                        switch (w == 8) { case (true) { its = this.lit_spec(DataType.BYTE); } default {}; };
+                        switch (w == 32) { case (true) { its = this.lit_spec(DataType.SINT); } default {}; };
+                        switch (w == 64) { case (true) { its = this.lit_spec(DataType.SLONG); } default {}; };
+                    }
+                        default {};
+                    };
+                    switch (k == LK.PTR)
+                    {
+                        case (true) {
+                        d = 0;
+                        et = rv.ty;
+                        while (et.kind == LK.PTR)
+                        {
+                            d++;
+                            et = et.elem;
+                        };
+                        bt = -1;
+                        switch (et.kind == LK.INT & et.width == 8) { case (true) { bt = DataType.BYTE; } default {}; };
+                        switch (et.kind == LK.INT & et.width == 32) { case (true) { bt = DataType.SINT; } default {}; };
+                        switch (et.kind == LK.INT & et.width == 64) { case (true) { bt = DataType.SLONG; } default {}; };
+                        switch (et.kind == LK.FLOAT) { case (true) { bt = DataType.FLOAT; } default {}; };
+                        switch (et.kind == LK.DOUBLE) { case (true) { bt = DataType.DOUBLE; } default {}; };
+                        switch (bt >= 0)
+                        {
+                            case (true) {
+                            its = typespec_copy(this.lit_spec(bt));
+                            its.pointer_depth = d;
+                            this.keep((void*)its);
+                        }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                    switch (k == LK.FLOAT) { case (true) { its = this.lit_spec(DataType.FLOAT); } default {}; };
+                    switch (k == LK.DOUBLE) { case (true) { its = this.lit_spec(DataType.DOUBLE); } default {}; };
+                }
+                    default {};
+                };
+                switch (its == (TypeSpec*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"auto variable type\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                alloca = this.mod.alloca(rv.ty, n.text);
+                alloca.spec = its;
+                this.mod.store(rv, alloca);
+                this.define_var(n.text, alloca, its);
+                -> alloca;
+            };
 
             x_vardecl(Node* n) -> IRValue*
             {
@@ -7407,25 +13311,33 @@ namespace flux
                 };
                 switch (ts.base_type == DataType.DICT)
                 {
-                    case (true) {
-                    this.unsup(n, g"dict variable\0");
-                    -> (IRValue*)0;
-                }
+                    case (true) { -> this.vardecl_dict(n, ts); }
                     default {};
                 };
                 switch (ts.storage_class == StorageClass.AUTO)
                 {
                     case (true) {
-                    this.unsup(n, g"auto variable\0");
-                    -> (IRValue*)0;
+                    -> this.vardecl_auto(n);
                 }
                     default {};
                 };
-                switch (ts.storage_class == StorageClass.SINGINIT | ts.storage_class == StorageClass.HEAP)
+                switch ((ts.flags `& TS_ARRAY) != 0 & ts.array_size == (Node*)0 & (ts.array_dims == (NodeVec*)0 | this.dims_empty(ts)) & ini != (Node*)0)
                 {
                     case (true) {
-                    this.unsup(n, g"singinit or heap variable\0");
-                    -> (IRValue*)0;
+                    switch (ini.kind == NodeKind.ARRAY_LITERAL & (ini.flags `& NF_IS_STRING) == 0)
+                    {
+                        case (true) { ts = this.sized_by_literal(ts, ini, n); }
+                        default {};
+                    };
+                    // infer_array_size: a string initializer gives the array its length
+                    switch (ini.kind == NodeKind.STRING_LITERAL & (ini.flags `& NF_IS_STRING) == 0 & ini.op != StorageClass.HEAP)
+                    {
+                        case (true) {
+                        this.str_bytes(ini);
+                        ts = this.sized_to(ts, this.q_len, n);
+                    }
+                        default {};
+                    };
                 }
                     default {};
                 };
@@ -7500,8 +13412,30 @@ namespace flux
                     switch (ini.kind == NodeKind.STRUCT_RECAST)
                     {
                         case (true) {
-                        this.unsup(n, g"struct recast initializer\0");
-                        -> (IRValue*)0;
+                        alloca = this.x_recast(ini);
+                        switch (this.bad | alloca == (IRValue*)0)
+                        {
+                            case (true) { -> (IRValue*)0; }
+                            default {};
+                        };
+                        // Only a pointer aliases the source in place
+                        switch (alloca.ty.kind != LK.PTR)
+                        {
+                            case (true) {
+                            this.unsup(n, g"struct recast by value\0");
+                            -> (IRValue*)0;
+                        }
+                            default {};
+                        };
+                        alloca.spec = ts;
+                        this.define_var(n.text, alloca, ts);
+                        // The source is invalidated unless the declaration ended with '!'
+                        switch (ini.ival == (i64)0)
+                        {
+                            case (true) { this.recast_invalidate(ini.a); }
+                            default {};
+                        };
+                        -> alloca;
                     }
                         default {};
                     };
@@ -7543,7 +13477,7 @@ namespace flux
                                     {
                                         case (true) { }
                                         default {
-                                            switch (ini.kind == NodeKind.ARRAY_LITERAL | ini.kind == NodeKind.ARRAY_COMPREHENSION |
+                                            switch (ini.kind == NodeKind.ARRAY_LITERAL |
                         ini.kind == NodeKind.STRING_LITERAL | ini.kind == NodeKind.STRUCT_LITERAL)
                                             {
                                                 case (true) {
@@ -7569,6 +13503,16 @@ namespace flux
                 }
                     default {};
                 };
+                switch (ts.storage_class == StorageClass.SINGINIT)
+                {
+                    case (true) { -> this.vardecl_singinit(n, lt, ts); }
+                    default {};
+                };
+                switch (ts.storage_class == StorageClass.HEAP)
+                {
+                    case (true) { -> this.vardecl_heap(n, lt, ts); }
+                    default {};
+                };
                 alloca = this.mod.alloca(lt, n.text);
                 alloca.spec = ts;
                 lv = this.define_var(n.text, alloca, ts);
@@ -7577,80 +13521,11 @@ namespace flux
                     case (true) { lv.vol = true; }
                     default {};
                 };
-                switch (ini != (Node*)0)
+                switch (!this.init_slot(alloca, lt, ini, n))
                 {
-                    case (true) {
-                    switch (ini.kind == NodeKind.NO_INIT)
-                    {
-                        case (true) { -> alloca; }
-                        default {};
-                    };
-                    switch (ini.kind == NodeKind.ARRAY_LITERAL)
-                    {
-                        case (true) {
-                        this.init_local_array(alloca, lt, ini);
-                        -> alloca;
-                    }
-                        default {};
-                    };
-                    switch (ini.kind == NodeKind.STRING_LITERAL)
-                    {
-                        case (true) {
-                        this.init_local_string(alloca, lt, ini);
-                        -> alloca;
-                    }
-                        default {};
-                    };
-                    switch (ini.kind == NodeKind.FUNCTION_CALL & ini.text != (byte*)0)
-                    {
-                        case (true) {
-                        switch (ends_with(ini.text, g".__init\0"))
-                        {
-                            case (true) {
-                            this.init_ctor(alloca, lt, ini, n);
-                            -> alloca;
-                        }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
-                    switch (ini.kind == NodeKind.STRUCT_LITERAL & lt.kind == LK.ISTRUCT)
-                    {
-                        case (true) { iv = this.x_struct_lit(ini, lt); }
-                        default { iv = this.visit(ini); };
-                    };
-                    switch (this.bad)
-                    {
-                        case (true) { -> (IRValue*)0; }
-                        default {};
-                    };
-                    switch (iv != (IRValue*)0)
-                    {
-                        case (true) {
-                        this.store_conv(alloca, lt, iv, ini, n);
-                    }
-                        default {};
-                    };
-                    -> alloca;
-                }
+                    case (true) { -> (IRValue*)0; }
                     default {};
                 };
-                switch (lt.kind == LK.ARRAY)
-                {
-                    case (true) {
-                    switch (lt.count > 64)
-                    {
-                        case (true) {
-                        this.memset_zero(alloca, lt);
-                        -> alloca;
-                    }
-                        default {};
-                    };
-                }
-                    default {};
-                };
-                this.mod.store(this.zero_of(lt), alloca);
                 -> alloca;
             };
 
@@ -7771,6 +13646,137 @@ namespace flux
                     default {};
                 };
                 -> this.to_bool(v);
+            };
+
+            // visit_AssertStatement: cbranch to assert.pass / assert.fail; the fail
+            // block prints the message, calls ExitProcess(1) and is unreachable
+            s_assert(Node* n) -> void
+            {
+                IRValue* cv = this.cond_value(n.a);
+                IRBlock* pass_b;
+                IRBlock* fail_b;
+                IRFunc* pf;
+                IRFunc* ef;
+                IRType** ps;
+                IRValue* mp;
+                IRValue* cvs;
+                IRGlobal* gl;
+                IRType* aty;
+                byte* src;
+                byte* buf;
+                int len;
+                int i;
+                byte[24] dig;
+                int nd;
+                u64 id = (u64)n;
+                Buf gn;
+                switch (this.bad)
+                {
+                    case (true) { ->; }
+                    default {};
+                };
+                switch (n.b != (Node*)0 & n.b.kind != NodeKind.STRING_LITERAL)
+                {
+                    case (true) {
+                    this.unsup(n, g"assert with non-literal message\0");
+                    ->;
+                }
+                    default {};
+                };
+                pass_b = this.mod.append_block(this.fn, g"assert.pass\0");
+                fail_b = this.mod.append_block(this.fn, g"assert.fail\0");
+                this.mod.cbr(cv, pass_b, fail_b);
+                this.mod.position(this.fn, fail_b);
+                switch (n.b != (Node*)0)
+                {
+                    case (true) {
+                    src = n.b.text;
+                    switch (src == (byte*)0) { case (true) { src = g"\0"; } default {}; };
+                    len = (int)n.b.ival;
+                    switch (len <= 0)
+                    {
+                        case (true) { while (src[len] != 0) { len++; }; }
+                        default {};
+                    };
+                    buf = (byte*)this.zbuf((len + 8) / 8 + 1);
+                    while (i < len)
+                    {
+                        buf[i] = src[i];
+                        i++;
+                    };
+                    switch (this.null_term)
+                    {
+                        case (true) {
+                        switch (len == 0 | buf[len - 1] != (byte)0)
+                        {
+                            case (true) { buf[len] = (byte)0; len++; }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                    aty = this.mod.t_array(this.t_i8, len);
+                    cvs = this.mod.c_bytes(aty, buf, len);
+                    gn.__init();
+                    defer gn.__exit();
+                    gn.put_str(g"assert_msg_\0");
+                    if (id == (u64)0) { dig[0] = '0'; nd = 1; };
+                    while (id > (u64)0)
+                    {
+                        dig[nd] = (byte)('0' + (int)(id % (u64)10));
+                        nd++;
+                        id = id / (u64)10;
+                    };
+                    while (nd > 0)
+                    {
+                        nd--;
+                        gn.put(dig[nd]);
+                    };
+                    gl = this.mod.add_global(aty, gn.mem, cvs.text);
+                    gl.linkage = this.mod.own(g"internal\0");
+                    gl.constant = true;
+                    this.mark_arr_ptr(gl.self.ty);
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(0);
+                    mp = this.mod.gep(gl.self, this.mod.ia, 2, true, (byte*)0);
+                    pf = this.mod.find_function(g"print\0");
+                    switch (pf == (IRFunc*)0)
+                    {
+                        case (true) {
+                        pf = this.mod.find_function(g"puts\0");
+                        switch (pf == (IRFunc*)0)
+                        {
+                            case (true) {
+                            ps = (IRType**)fmalloc((u64)2 * (u64)((sizeof(IRType*) + 7) / 8));
+                            this.keep((void*)ps);
+                            ps[0] = this.t_i8p;
+                            pf = this.mod.add_function(this.mod.t_func(this.t_i32, ps, 1, false), g"puts\0");
+                        }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                    this.mod.ia[0] = mp;
+                    this.mod.call(pf.self, this.mod.ia, 1, (byte*)0);
+                }
+                    default {};
+                };
+                ef = this.mod.find_function(g"ExitProcess\0");
+                switch (ef == (IRFunc*)0)
+                {
+                    case (true) {
+                    ps = (IRType**)fmalloc((u64)2 * (u64)((sizeof(IRType*) + 7) / 8));
+                    this.keep((void*)ps);
+                    ps[0] = this.t_i32;
+                    ef = this.mod.add_function(this.mod.t_func(this.t_void, ps, 1, false), g"ExitProcess\0");
+                }
+                    default {};
+                };
+                this.mod.ia[0] = this.ci32(1);
+                this.mod.call(ef.self, this.mod.ia, 1, (byte*)0);
+                this.mod.unreachable();
+                this.mod.position(this.fn, pass_b);
             };
 
             s_if(Node* n) -> void
@@ -8488,7 +14494,8 @@ namespace flux
                         }
                             default {};
                         };
-                        switch (sv.ty.kind == LK.INT & sv.ty.width == 1)
+                        // A bool constant keeps its true/false spelling, an integer constant prints as a number
+                        switch (sv.ty.kind == LK.INT & sv.ty.width == 1 & cv.ty.width != 1)
                         {
                             case (true) { vals[ncase] = this.mod.c_u64(sv.ty, (u64)(this.const_i64(cv) `& (i64)1)); }
                             default { vals[ncase] = this.mod.c_int(sv.ty, this.const_i64(cv)); };
@@ -8555,28 +14562,19 @@ namespace flux
                 int cc = node_count(n, 0);
                 int i;
                 Node* cl;
-                while (i < cc)
-                {
-                    cl = node_child(n, 0, i);
-                    switch (cl.text != (byte*)0)
-                    {
-                        case (true) {
-                        switch (cl.text[0] != (byte)0)
-                        {
-                            case (true) {
-                            this.unsup(n, g"named catch\0");
-                            pv_free(cbs);
-                            ->;
-                        }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
-                    i++;
-                };
+                IRValue* oflag = this.exc_flag;
+                IRValue* ovalue = this.exc_value;
+                IRValue* evp;
+                IRValue* e64;
+                IRValue* ev;
+                IRValue* xv;
+                IRType* et;
+                LVar* lv;
+                int k;
                 flag = this.mod.alloca_here(this.t_i1, g"exception_flag\0");
-                this.mod.alloca_here(this.t_i64, g"exception_value\0");
+                evp = this.mod.alloca_here(this.t_i64, g"exception_value\0");
+                this.exc_flag = flag;
+                this.exc_value = evp;
                 try_b = this.mod.append_block(this.fn, g"try.body\0");
                 chk_b = this.mod.append_block(this.fn, g"catch.check\0");
                 end_b = this.mod.append_block(this.fn, g"try.end\0");
@@ -8592,6 +14590,7 @@ namespace flux
                 };
                 fz = this.mod.new_value(this.t_i1, g"0\0");
                 fz.is_const = true;
+                this.exc_handler = chk_b;
                 this.mod.store(fz, flag);
                 this.mod.br(try_b);
                 this.mod.position(this.fn, try_b);
@@ -8621,10 +14620,101 @@ namespace flux
                     cl = node_child(n, 0, i);
                     this.mod.position(this.fn, (IRBlock*)cbs.items[i]);
                     this.mod.store(fz, flag);
+                    switch (cl.text != (byte*)0)
+                    {
+                        case (true) {
+                        switch (cl.text[0] != (byte)0)
+                        {
+                            case (true) {
+                            e64 = this.mod.load(evp, g"exc_val\0");
+                            et = this.t_i64;
+                            switch (cl.ts != (TypeSpec*)0)
+                            {
+                                case (true) {
+                                switch (!(cl.ts.storage_class == StorageClass.AUTO & cl.ts.base_type == DataType.VOID))
+                                {
+                                    case (true) {
+                                    et = this.lower(cl.ts, false, cl.line);
+                                    switch (this.nerrors > this.body_errs)
+                                    {
+                                        case (true) {
+                                        this.unsup(cl, g"catch type lowering\0");
+                                        pv_free(cbs);
+                                        ->;
+                                    }
+                                        default {};
+                                    };
+                                }
+                                    default {};
+                                };
+                            }
+                                default {};
+                            };
+                            xv = this.mod.alloca_here(et, cl.text);
+                            switch (et.kind == LK.INT)
+                            {
+                                case (true) {
+                                switch (et.width < 64)
+                                {
+                                    case (true) { ev = this.mod.cast(g"trunc\0", e64, et, g"exc_trunc\0"); }
+                                    default {
+                                        switch (et.width > 64)
+                                        {
+                                            case (true) { ev = this.mod.cast(g"zext\0", e64, et, g"exc_ext\0"); }
+                                            default { ev = e64; };
+                                        };
+                                    };
+                                };
+                            }
+                                default {
+                                    switch (et.kind == LK.PTR)
+                                    {
+                                        case (true) { ev = this.mod.cast(g"inttoptr\0", e64, et, g"exc_int_to_ptr\0"); }
+                                        default {
+                                            this.unsup(cl, g"catch type\0");
+                                            pv_free(cbs);
+                                            ->;
+                                        };
+                                    };
+                                };
+                            };
+                            this.mod.store(ev, xv);
+                            this.define_var(cl.text, xv, (TypeSpec*)0);
+                        }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
                     this.visit(cl.a);
                     switch (this.bad)
                     {
                         case (true) { pv_free(cbs); ->; }
+                        default {};
+                    };
+                    switch (cl.text != (byte*)0)
+                    {
+                        case (true) {
+                        switch (cl.text[0] != (byte)0)
+                        {
+                            case (true) {
+                            k = this.scopes.len - 1;
+                            while (k >= 0)
+                            {
+                                switch (nm_get((NameMap*)this.scopes.items[k], cl.text) != (void*)0)
+                                {
+                                    case (true) {
+                                    nm_del((NameMap*)this.scopes.items[k], cl.text);
+                                    break;
+                                }
+                                    default {};
+                                };
+                                k--;
+                            };
+                        }
+                            default {};
+                        };
+                    }
                         default {};
                     };
                     switch (!this.mod.is_terminated())
@@ -8635,7 +14725,165 @@ namespace flux
                     i++;
                 };
                 pv_free(cbs);
+                this.exc_flag = oflag;
+                this.exc_value = ovalue;
+                this.exc_handler = (IRBlock*)0;
                 this.mod.position(this.fn, end_b);
+                ->;
+            };
+
+            // visit_ThrowStatement
+            s_throw(Node* n) -> void
+            {
+                IRValue* v;
+                IRValue* w;
+                switch (this.exc_flag == (IRValue*)0)
+                {
+                    case (true) { this.unsup(n, g"throw outside try\0"); ->; }
+                    default {};
+                };
+                v = this.visit(n.a);
+                switch (this.bad)
+                {
+                    case (true) { ->; }
+                    default {};
+                };
+                switch (v == (IRValue*)0)
+                {
+                    case (true) { this.unsup(n, g"void throw value\0"); ->; }
+                    default {};
+                };
+                switch (v.ty.kind == LK.INT)
+                {
+                    case (true) {
+                    switch (v.ty.width < 64)
+                    {
+                        case (true) { w = this.mod.cast(g"zext\0", v, this.t_i64, g"exc_zext\0"); }
+                        default {
+                            switch (v.ty.width > 64)
+                            {
+                                case (true) { w = this.mod.cast(g"trunc\0", v, this.t_i64, g"exc_trunc\0"); }
+                                default { w = v; };
+                            };
+                        };
+                    };
+                }
+                    default {
+                        switch (v.ty.kind == LK.PTR)
+                        {
+                            case (true) { w = this.mod.cast(g"ptrtoint\0", v, this.t_i64, g"exc_ptr_to_int\0"); }
+                            default { this.unsup(n, g"throw value type\0"); ->; };
+                        };
+                    };
+                };
+                this.mod.store(w, this.exc_value);
+                w = this.mod.new_value(this.t_i1, g"1\0");
+                w.is_const = true;
+                this.mod.store(w, this.exc_flag);
+                switch (this.exc_handler != (IRBlock*)0)
+                {
+                    case (true) { this.mod.br(this.exc_handler); }
+                    default { this.mod.unreachable(); };
+                };
+                ->;
+            };
+
+            // _collect_label_names: label blocks are appended after the entry block in source order
+            collect_labels(Node* n, IRFunc* f) -> void
+            {
+                int i;
+                int c;
+                int k;
+                Node* ch;
+                switch (n == (Node*)0)
+                {
+                    case (true) { ->; }
+                    default {};
+                };
+                k = n.kind;
+                switch (k == NodeKind.LABEL_STATEMENT)
+                {
+                    case (true) {
+                    switch (n.text != (byte*)0)
+                    {
+                        case (true) {
+                        switch (nm_get(this.labels, n.text) == (void*)0)
+                        {
+                            case (true) { nm_put(this.labels, this.mod.own(n.text), (void*)this.mod.append_block(f, n.text)); }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                    ->;
+                }
+                    default {};
+                };
+                switch (k == NodeKind.BLOCK)
+                {
+                    case (true) {
+                    c = node_count(n, 0);
+                    while (i < c)
+                    {
+                        this.collect_labels(node_child(n, 0, i), f);
+                        i++;
+                    };
+                    ->;
+                }
+                    default {};
+                };
+                switch (k == NodeKind.IF_STATEMENT)
+                {
+                    case (true) {
+                    this.collect_labels(n.b, f);
+                    this.collect_labels(n.c, f);
+                    ->;
+                }
+                    default {};
+                };
+                switch (k == NodeKind.WHILE_LOOP | k == NodeKind.DO_LOOP | k == NodeKind.DO_WHILE_LOOP | k == NodeKind.FOR_IN_LOOP)
+                {
+                    case (true) { this.collect_labels(n.b, f); ->; }
+                    default {};
+                };
+                switch (k == NodeKind.FOR_LOOP)
+                {
+                    case (true) { this.collect_labels(n.d, f); ->; }
+                    default {};
+                };
+                ->;
+            };
+
+            s_label(Node* n) -> void
+            {
+                IRBlock* tb = (IRBlock*)nm_get(this.labels, n.text);
+                switch (tb == (IRBlock*)0)
+                {
+                    case (true) { this.unsup(n, g"label not collected\0"); ->; }
+                    default {};
+                };
+                switch (!this.mod.is_terminated())
+                {
+                    case (true) { this.mod.br(tb); }
+                    default {};
+                };
+                this.mod.position(this.fn, tb);
+                ->;
+            };
+
+            s_goto(Node* n) -> void
+            {
+                IRBlock* tb = (IRBlock*)nm_get(this.labels, n.text);
+                switch (tb == (IRBlock*)0)
+                {
+                    case (true) { this.unsup(n, g"goto to undefined label\0"); ->; }
+                    default {};
+                };
+                switch (!this.mod.is_terminated())
+                {
+                    case (true) { this.mod.br(tb); }
+                    default {};
+                };
                 ->;
             };
 
@@ -8748,6 +14996,320 @@ namespace flux
                     default {};
                 };
                 this.mod.cbr(cv, body_b, end_b);
+                this.brk = ob;
+                this.cont = oc;
+                this.mod.position(this.fn, end_b);
+                ->;
+            };
+
+            // Element TypeSpec of a for-in collection (the base binds the variable without a spec)
+            forin_spec(Node* it, IRType* et) -> TypeSpec*
+            {
+                LVar* lv;
+                TypeSpec* r;
+                // The base binds the variable without a spec
+                switch (et.kind == LK.INT)
+                {
+                    case (true) { -> (TypeSpec*)0; }
+                    default {};
+                };
+                switch (it.kind == NodeKind.IDENTIFIER)
+                {
+                    case (true) {
+                    lv = this.find_var(it.text);
+                    switch (lv != (LVar*)0)
+                    {
+                        case (true) {
+                        switch (lv.ts != (TypeSpec*)0)
+                        {
+                            case (true) {
+                            r = typespec_clone(lv.ts);
+                            switch ((r.flags `& TS_ARRAY) != 0)
+                            {
+                                case (true) {
+                                r.flags = r.flags - (r.flags `& TS_ARRAY);
+                                r.array_size = (Node*)0;
+                                r.array_dims = (NodeVec*)0;
+                            }
+                                default {
+                                    switch (r.pointer_depth > 0)
+                                    {
+                                        case (true) { r.pointer_depth = r.pointer_depth - 1; }
+                                        default {};
+                                    };
+                                };
+                            };
+                            -> r;
+                        }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+                -> (TypeSpec*)0;
+            };
+
+            // visit_ForInLoop
+            s_forin(Node* n) -> void
+            {
+                IRValue* coll = this.visit(n.a);
+                IRType* ct;
+                IRType* et;
+                IRBlock* cond_b;
+                IRBlock* body_b;
+                IRBlock* end_b;
+                IRBlock* ob;
+                IRBlock* oc;
+                IRValue* idxp;
+                IRValue* curp;
+                IRValue* cur;
+                IRValue* ep;
+                IRValue* ev;
+                IRValue* vp;
+                IRValue* cv;
+                IRValue* slot;
+                IRValue* nxt;
+                IRValue* fp;
+                IRValue* fa;
+                SInfo* si;
+                LVar* lv;
+                i64 dv;
+                int size;
+                int k;
+                int nv = node_count(n, 0);
+                bool sized = false;
+                Node* vn;
+                switch (this.bad)
+                {
+                    case (true) { ->; }
+                    default {};
+                };
+                switch (coll == (IRValue*)0)
+                {
+                    case (true) { this.unsup(n, g"void for-in collection\0"); ->; }
+                    default {};
+                };
+                ct = coll.ty;
+                switch (ct.kind != LK.PTR)
+                {
+                    case (true) { this.unsup(n, g"for-in collection type\0"); ->; }
+                    default {};
+                };
+                cond_b = this.mod.append_block(this.fn, g"forin.cond\0");
+                body_b = this.mod.append_block(this.fn, g"forin.body\0");
+                end_b = this.mod.append_block(this.fn, g"forin.end\0");
+                et = ct.elem;
+                switch (et.kind == LK.ARRAY)
+                {
+                    case (true) {
+                    size = et.count;
+                    idxp = this.mod.alloca_here(this.t_i32, g"forin.idx\0");
+                    this.mod.store(this.ci32(0), idxp);
+                    this.mod.br(cond_b);
+                    this.mod.position(this.fn, cond_b);
+                    cur = this.mod.load(idxp, g"idx\0");
+                    cv = this.mod.icmp(g"ult\0", cur, this.ci32(size), g"loop.cond\0");
+                    this.mod.cbr(cv, body_b, end_b);
+                    this.mod.position(this.fn, body_b);
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = cur;
+                    ep = this.mod.gep(coll, this.mod.ia, 2, false, g"elem.ptr\0");
+                    si = this.sinfo_of(et.elem);
+                    switch ((n.flags `& NF_DESTRUCTURE) != 0 & si != (SInfo*)0)
+                    {
+                        case (true) {
+                        k = 0;
+                        while (k < nv)
+                        {
+                            vn = node_child(n, 0, k);
+                            this.mod.ia[0] = this.ci32(0);
+                            this.mod.ia[1] = this.ci32(k);
+                            this.sc.clear();
+                            this.sc.put_str(vn.text);
+                            this.sc.put_str(g".ptr\0");
+                            fp = this.mod.gep(ep, this.mod.ia, 2, false, this.mod.own(this.sc.mem));
+                            fa = this.mod.alloca_here(si.ftys[k], vn.text);
+                            this.sc.clear();
+                            this.sc.put_str(vn.text);
+                            this.sc.put_str(g".val\0");
+                            ev = this.mod.load(fp, this.mod.own(this.sc.mem));
+                            this.mod.store(ev, fa);
+                            this.define_var(vn.text, fa, si.specs[k]);
+                            k++;
+                        };
+                    }
+                        default {
+                            ev = this.mod.load(ep, g"elem\0");
+                            vn = node_child(n, 0, 0);
+                            vp = this.mod.alloca_here(et.elem, vn.text);
+                            this.mod.store(ev, vp);
+                            this.define_var(vn.text, vp, this.forin_spec(n.a, et.elem));
+                        };
+                    };
+                }
+                    default {
+                        switch (et.kind == LK.PTR)
+                        {
+                            case (true) {
+                            curp = this.mod.alloca_here(ct, g"forin.cursor\0");
+                            this.mod.store(coll, curp);
+                            this.mod.br(cond_b);
+                            this.mod.position(this.fn, cond_b);
+                            cur = this.mod.load(curp, g"cursor\0");
+                            slot = this.mod.load(cur, g"slot\0");
+                            ev = this.mod.cast(g"ptrtoint\0", slot, this.t_i64, g"slot.int\0");
+                            cv = this.mod.icmp(g"ne\0", ev, this.mod.c_int(this.t_i64, (i64)0), g"loop.cond\0");
+                            this.mod.cbr(cv, body_b, end_b);
+                            this.mod.position(this.fn, body_b);
+                            vn = node_child(n, 0, 0);
+                            vp = this.mod.alloca_here(et, vn.text);
+                            this.mod.store(slot, vp);
+                            this.define_var(vn.text, vp, this.forin_spec(n.a, et));
+                        }
+                            default {
+                                switch (et.kind == LK.INT & et.width == 8)
+                                {
+                                    case (true) {
+                                    curp = this.mod.alloca_here(ct, g"char.ptr\0");
+                                    this.mod.store(coll, curp);
+                                    this.mod.br(cond_b);
+                                    this.mod.position(this.fn, cond_b);
+                                    cur = this.mod.load(curp, g"ptr\0");
+                                    ev = this.mod.load(cur, g"char\0");
+                                    cv = this.mod.icmp(g"ne\0", ev, this.mod.c_int(this.t_i8, (i64)0), g"loop.cond\0");
+                                    this.mod.cbr(cv, body_b, end_b);
+                                    this.mod.position(this.fn, body_b);
+                                    vn = node_child(n, 0, 0);
+                                    vp = this.mod.alloca_here(this.t_i8, vn.text);
+                                    this.mod.store(ev, vp);
+                                    this.define_var(vn.text, vp, this.forin_spec(n.a, et));
+                                }
+                                    default {
+                                        switch (et.kind != LK.INT)
+                                        {
+                                            case (true) { this.unsup(n, g"for-in collection type\0"); ->; }
+                                            default {};
+                                        };
+                                        // Decayed array pointer: the count comes from the declared type
+                                        size = -1;
+                                        switch (n.a.kind == NodeKind.IDENTIFIER)
+                                        {
+                                            case (true) {
+                                            lv = this.find_var(n.a.text);
+                                            switch (lv != (LVar*)0)
+                                            {
+                                                case (true) {
+                                                switch (lv.ts != (TypeSpec*)0)
+                                                {
+                                                    case (true) {
+                                                    switch (lv.ts.array_size != (Node*)0)
+                                                    {
+                                                        case (true) {
+                                                        switch (this.dim_value(lv.ts.array_size, @dv)) { case (true) { size = (int)dv; } default {}; };
+                                                    }
+                                                        default {
+                                                            switch (lv.ts.array_dims != (NodeVec*)0)
+                                                            {
+                                                                case (true) {
+                                                                switch (lv.ts.array_dims.len > 0)
+                                                                {
+                                                                    case (true) {
+                                                                    switch (lv.ts.array_dims.items[0] != (Node*)0)
+                                                                    {
+                                                                        case (true) {
+                                                                        switch (this.dim_value((Node*)lv.ts.array_dims.items[0], @dv)) { case (true) { size = (int)dv; } default {}; };
+                                                                    }
+                                                                        default {};
+                                                                    };
+                                                                }
+                                                                    default {};
+                                                                };
+                                                            }
+                                                                default {};
+                                                            };
+                                                        };
+                                                    };
+                                                }
+                                                    default {};
+                                                };
+                                            }
+                                                default {};
+                                            };
+                                        }
+                                            default {};
+                                        };
+                                        switch (size < 0)
+                                        {
+                                            case (true) { this.unsup(n, g"for-in size unknown\0"); ->; }
+                                            default {};
+                                        };
+                                        idxp = this.mod.alloca_here(this.t_i32, g"forin.idx\0");
+                                        this.mod.store(this.ci32(0), idxp);
+                                        this.mod.br(cond_b);
+                                        this.mod.position(this.fn, cond_b);
+                                        cur = this.mod.load(idxp, g"idx\0");
+                                        cv = this.mod.icmp(g"ult\0", cur, this.ci32(size), g"loop.cond\0");
+                                        this.mod.cbr(cv, body_b, end_b);
+                                        this.mod.position(this.fn, body_b);
+                                        this.mod.ia[0] = cur;
+                                        ep = this.mod.gep(coll, this.mod.ia, 1, false, g"elem.ptr\0");
+                                        ev = this.mod.load(ep, g"elem\0");
+                                        vn = node_child(n, 0, 0);
+                                        vp = this.mod.alloca_here(et, vn.text);
+                                        this.mod.store(ev, vp);
+                                        this.define_var(vn.text, vp, this.forin_spec(n.a, et));
+                                        sized = true;
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+                ob = this.brk;
+                oc = this.cont;
+                this.brk = end_b;
+                this.cont = cond_b;
+                this.visit(n.b);
+                switch (this.bad)
+                {
+                    case (true) { ->; }
+                    default {};
+                };
+                switch (!this.mod.is_terminated())
+                {
+                    case (true) {
+                    switch (et.kind == LK.ARRAY | sized)
+                    {
+                        case (true) {
+                        cur = this.mod.load(idxp, g"idx\0");
+                        nxt = this.mod.binop(g"add\0", cur, this.ci32(1), g"next.idx\0");
+                        this.mod.store(nxt, idxp);
+                    }
+                        default {
+                            switch (et.kind == LK.PTR)
+                            {
+                                case (true) {
+                                cur = this.mod.load(curp, g"cursor.latch\0");
+                                this.mod.ia[0] = this.ci32(1);
+                                nxt = this.mod.gep(cur, this.mod.ia, 1, false, g"cursor.next\0");
+                                this.mod.store(nxt, curp);
+                            }
+                                default {
+                                cur = this.mod.load(curp, g"ptr.latch\0");
+                                this.mod.ia[0] = this.ci32(1);
+                                nxt = this.mod.gep(cur, this.mod.ia, 1, false, g"ptr.next\0");
+                                this.mod.store(nxt, curp);
+                            };
+                            };
+                        };
+                    };
+                    this.mod.br(cond_b);
+                }
+                    default {};
+                };
                 this.brk = ob;
                 this.cont = oc;
                 this.mod.position(this.fn, end_b);
@@ -8872,6 +15434,7 @@ namespace flux
                 switch (n.a == (Node*)0)
                 {
                     case (true) {
+                    switch (this.rec_fn) { case (true) { this.rec_call(false, (IRValue*)0); } default {}; };
                     this.mod.ret_void();
                     ->;
                 }
@@ -8953,8 +15516,43 @@ namespace flux
                     case (true) { ->; }
                     default {};
                 };
+                switch (this.rec_fn)
+                {
+                    case (true) {
+                    this.mod.ret(this.rec_call(true, rv));
+                    ->;
+                }
+                    default {};
+                };
                 this.mod.ret(rv);
                 ->;
+            };
+
+            // A <~ function returns by calling itself as a musttail call: with its own parameters when
+            // given no value, else with the returned value as the only argument
+            rec_call(bool with_val, IRValue* v) -> IRValue*
+            {
+                IRFunc* f = this.fn;
+                int n = f.ftype.nitems;
+                int i;
+                IRValue** args = (IRValue**)fmalloc((u64)(n + 1) * (u64)((sizeof(IRValue*) + 7) / 8));
+                this.keep((void*)args);
+                switch (with_val)
+                {
+                    case (true) {
+                    args[0] = v;
+                    n = 1;
+                }
+                    default {
+                        while (i < n)
+                        {
+                            args[i] = f.args[i];
+                            i++;
+                        };
+                    };
+                };
+                this.mod.must_tail = true;
+                -> this.mod.call_ex(f.self, args, n, (byte*)0, f.cconv, false);
             };
 
 
@@ -9474,6 +16072,7 @@ namespace flux
             cast_void(Node* n) -> IRValue*
             {
                 Node* e = n.a;
+                IRGlobal* gl;
                 LVar* lv;
                 IRType* pt;
                 IRValue* ev;
@@ -9485,7 +16084,17 @@ namespace flux
                     switch (lv == (LVar*)0)
                     {
                         case (true) {
-                        this.unsup(n, g"void cast of non-local\0");
+                        // Global: nulled in place when module.globals holds it under this plain name
+                        gl = this.mod.find_global(e.text);
+                        switch (gl == (IRGlobal*)0)
+                        {
+                            case (true) {
+                            this.unsup(n, g"void cast of non-local\0");
+                            -> (IRValue*)0;
+                        }
+                            default {};
+                        };
+                        this.mod.store(this.mod.c_null(gl.self.ty.elem), gl.self);
                         -> (IRValue*)0;
                     }
                         default {};
@@ -9499,10 +16108,36 @@ namespace flux
                         default {};
                     };
                     pt = lv.ptr.ty.elem;
-                    switch (pt.kind != LK.PTR & pt.kind != LK.INT & pt.kind != LK.FLOAT & pt.kind != LK.DOUBLE)
+                    switch (lv.is_heap)
                     {
                         case (true) {
-                        this.unsup(n, g"void cast of aggregate\0");
+                        this.sc.clear();
+                        this.sc.put_str(e.text);
+                        this.sc.put_str(g"_heapptr\0");
+                        ev = this.mod.load(lv.ptr, this.sc.mem);
+                        this.emit_ffree(ev, e.text);
+                        this.mod.store(this.mod.c_null(pt), lv.ptr);
+                        i = this.scopes.len - 1;
+                        while (i >= 0)
+                        {
+                            switch (nm_get((NameMap*)this.scopes.items[i], e.text) != (void*)0)
+                            {
+                                case (true) {
+                                nm_del((NameMap*)this.scopes.items[i], e.text);
+                                break;
+                            }
+                                default {};
+                            };
+                            i--;
+                        };
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    switch (pt.kind != LK.PTR & pt.kind != LK.INT & pt.kind != LK.FLOAT & pt.kind != LK.DOUBLE & pt.kind != LK.STRUCT & pt.kind != LK.ISTRUCT & pt.kind != LK.ARRAY)
+                    {
+                        case (true) {
+                        this.unsup(n, g"void cast of type\0");
                         -> (IRValue*)0;
                     }
                         default {};
@@ -9549,6 +16184,179 @@ namespace flux
             };
 
             // visit_CastExpression (scalar, pointer and integer conversions)
+            // Bit width of an element for packing; floats are reinterpreted as integer bits, 0 when unsupported
+            pack_bits(IRType* t) -> int
+            {
+                switch (t.kind)
+                {
+                    case (LK.INT) { -> t.width; }
+                    case (LK.FLOAT) { -> 32; }
+                    case (LK.DOUBLE) { -> 64; }
+                    default {};
+                };
+                -> 0;
+            };
+
+            // ArrayTypeHandler.pack_array_pointer_to_integer
+            pack_array_ptr(Node* n, IRValue* av, IRType* tt) -> IRValue*
+            {
+                IRType* at = av.ty.elem;
+                IRType* et = at.elem;
+                IRValue* res;
+                IRValue* ep;
+                IRValue* ev;
+                int eb = this.pack_bits(et);
+                int i;
+                int off;
+                int ew;
+                switch (eb == 0 | at.count * eb != tt.width)
+                {
+                    case (true) {
+                    this.unsup(n, g"array pointer pack cast\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                res = this.mod.c_int(tt, (i64)0);
+                i = at.count - 1;
+                while (i >= 0)
+                {
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(i);
+                    ep = this.mod.gep(av, this.mod.ia, 2, true, (byte*)0);
+                    ev = this.mod.load(ep, (byte*)0);
+                    switch (ev.ty.kind == LK.FLOAT) { case (true) { ev = this.mod.cast(g"bitcast\0", ev, this.t_i32, g"float_bits\0"); } default {}; };
+                    switch (ev.ty.kind == LK.DOUBLE) { case (true) { ev = this.mod.cast(g"bitcast\0", ev, this.t_i64, g"double_bits\0"); } default {}; };
+                    ew = ev.ty.width;
+                    switch (ev.ty.width < tt.width) { case (true) { ev = this.mod.cast(g"zext\0", ev, tt, (byte*)0); } default {}; };
+                    switch (ev.ty.width > tt.width) { case (true) { ev = this.mod.cast(g"trunc\0", ev, tt, (byte*)0); } default {}; };
+                    switch (off > 0) { case (true) { ev = this.mod.binop(g"shl\0", ev, this.mod.c_int(tt, (i64)off), (byte*)0); } default {}; };
+                    res = this.mod.binop(g"or\0", res, ev, (byte*)0);
+                    off = off + ew;
+                    i--;
+                };
+                -> res;
+            };
+
+            // ArrayTypeHandler.unpack_integer_to_array for an integer or float source
+            // Scalar integer cast to byte[N]: big-endian bytes in a null terminated stack array
+            scalar_to_bytes(IRValue* v, IRType* at) -> IRValue*
+            {
+                int count = at.count;
+                IRValue* al = this.mod.alloca_here(this.mod.t_array(at.elem, count + 1), g"scalar_to_bytes\0");
+                IRValue* wide = v;
+                IRValue* sh;
+                IRValue* bv;
+                IRValue* dp;
+                int i;
+                int shift;
+                switch (v.ty.width < 32) { case (true) { wide = this.mod.cast(g"zext\0", v, this.t_i32, g"scalar_widen\0"); } default {}; };
+                while (i < count)
+                {
+                    shift = (count - 1 - i) * 8;
+                    sh = wide;
+                    this.sc.clear();
+                    this.sc.put_str(g"scalar_shift_\0");
+                    this.sc.put_int(i);
+                    switch (shift > 0)
+                    {
+                        case (true) { sh = this.mod.binop(g"lshr\0", wide, this.mod.c_int(wide.ty, (i64)shift), this.sc.mem); }
+                        default {};
+                    };
+                    this.sc.clear();
+                    this.sc.put_str(g"scalar_byte_\0");
+                    this.sc.put_int(i);
+                    bv = this.mod.cast(g"trunc\0", sh, this.t_i8, this.sc.mem);
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(i);
+                    this.sc.clear();
+                    this.sc.put_str(g"scalar_dst_\0");
+                    this.sc.put_int(i);
+                    dp = this.mod.gep(al, this.mod.ia, 2, true, this.sc.mem);
+                    this.mod.store(bv, dp);
+                    i++;
+                };
+                this.mod.ia[0] = this.ci32(0);
+                this.mod.ia[1] = this.ci32(count);
+                dp = this.mod.gep(al, this.mod.ia, 2, true, g"scalar_null_term\0");
+                this.mod.store(this.mod.c_int(this.t_i8, (i64)0), dp);
+                -> al;
+            };
+
+            unpack_to_array(Node* n, IRValue* v, IRType* at) -> IRValue*
+            {
+                IRType* et = at.elem;
+                IRType* it;
+                IRType* iet;
+                IRValue* packed = v;
+                IRValue* al;
+                IRValue* sh;
+                IRValue* ei;
+                IRValue* ev;
+                IRValue* ep;
+                int eb = this.pack_bits(et);
+                int total = at.count * eb;
+                int i;
+                int pos;
+                u64 mk;
+                bool isf = et.kind == LK.FLOAT | et.kind == LK.DOUBLE;
+                switch (eb == 0 | total > 64)
+                {
+                    case (true) {
+                    this.unsup(n, g"cast between these types\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                it = this.mod.t_int(total);
+                iet = this.mod.t_int(eb);
+                switch (v.ty.kind == LK.INT)
+                {
+                    case (true) {
+                    switch (v.ty.width > total) { case (true) { packed = this.mod.cast(g"trunc\0", v, it, g"unpack_trunc\0"); } default {}; };
+                    switch (v.ty.width < total) { case (true) { packed = this.mod.cast(g"zext\0", v, it, g"unpack_zext\0"); } default {}; };
+                }
+                    default {
+                    switch (v.ty.kind == LK.FLOAT | v.ty.kind == LK.DOUBLE)
+                    {
+                        case (true) { packed = this.mod.cast(g"bitcast\0", v, it, g"float_to_bits\0"); }
+                        default {
+                            this.unsup(n, g"cast between these types\0");
+                            -> (IRValue*)0;
+                        };
+                    };
+                };
+                };
+                al = this.mod.alloca_here(at, g"unpacked_arr\0");
+                mk = ((u64)1 << (u64)eb) - (u64)1;
+                switch (eb >= 64) { case (true) { mk = (u64)0 - (u64)1; } default {}; };
+                while (i < at.count)
+                {
+                    pos = (at.count - 1 - i) * eb;
+                    sh = this.mod.binop(g"lshr\0", packed, this.mod.c_int(it, (i64)pos), this.nm_ab(g"unpack_shift_\0", i, -1));
+                    ei = this.mod.binop(g"and\0", sh, this.mod.c_u64(it, mk), this.nm_ab(g"unpack_elem_\0", i, -1));
+                    switch (total != eb)
+                    {
+                        case (true) {
+                        switch (isf)
+                        {
+                            case (true) { ei = this.mod.cast(g"trunc\0", ei, iet, this.nm_ab(g"unpack_trunc_\0", i, -1)); }
+                            default { ei = this.mod.cast(g"trunc\0", ei, et, this.nm_ab(g"unpack_trunc_\0", i, -1)); };
+                        };
+                    }
+                        default {};
+                    };
+                    ev = ei;
+                    switch (isf) { case (true) { ev = this.mod.cast(g"bitcast\0", ei, et, this.nm_ab(g"unpack_float_\0", i, -1)); } default {}; };
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(i);
+                    ep = this.mod.gep(al, this.mod.ia, 2, true, (byte*)0);
+                    this.mod.store(ev, ep);
+                    i++;
+                };
+                -> al;
+            };
+
             x_cast(Node* n) -> IRValue*
             {
                 IRType* tt;
@@ -9763,14 +16571,21 @@ namespace flux
                     case (true) {
                     switch (st.elem.kind == LK.ARRAY)
                     {
-                        case (true) {
-                        this.unsup(n, g"array pointer pack cast\0");
-                        -> (IRValue*)0;
-                    }
+                        case (true) { -> this.pack_array_ptr(n, v, tt); }
                         default {};
                     };
                     -> this.mod.cast(g"ptrtoint\0", v, tt, g"ptr_to_int\0");
                 }
+                    default {};
+                };
+                switch (tt.kind == LK.ARRAY & st.kind == LK.INT & tt.elem.kind == LK.INT & tt.elem.width == 8)
+                {
+                    case (true) { -> this.scalar_to_bytes(v, tt); }
+                    default {};
+                };
+                switch (tt.kind == LK.ARRAY & ((st.kind == LK.INT & !(tt.elem.kind == LK.INT & tt.elem.width == 8)) | st.kind == LK.FLOAT | st.kind == LK.DOUBLE))
+                {
+                    case (true) { -> this.unpack_to_array(n, v, tt); }
                     default {};
                 };
                 this.unsup(n, g"cast between these types\0");
@@ -9887,6 +16702,72 @@ namespace flux
                 };
                 this.mark_arr_ptr(arr.ty);
                 -> arr;
+            };
+
+            // module.data_layout.preferred_alignment for the scalar types, -1 when not known here
+            pref_align(IRType* t) -> int
+            {
+                int b;
+                switch (t.kind == LK.INT)
+                {
+                    case (true) {
+                    b = (t.width + 7) / 8;
+                    switch (b > 8) { case (true) { -> -1; } default {}; };
+                    switch (b == 3) { case (true) { b = 4; } default {}; };
+                    switch (b > 4 & b < 8) { case (true) { b = 8; } default {}; };
+                    -> b;
+                }
+                    default {};
+                };
+                switch (t.kind == LK.FLOAT) { case (true) { -> 4; } default {}; };
+                switch (t.kind == LK.DOUBLE | t.kind == LK.PTR) { case (true) { -> 8; } default {}; };
+                switch (t.kind == LK.ARRAY) { case (true) { -> this.pref_align(t.elem); } default {}; };
+                -> -1;
+            };
+
+            // visit_AlignOf on a type target, in bytes
+            x_alignof(Node* n) -> IRValue*
+            {
+                TypeSpec* ts = n.ts;
+                IRType* lt;
+                int a;
+                switch (ts == (TypeSpec*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"alignof of expression\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (ts.alignment > 0)
+                {
+                    case (true) { -> this.mod.c_int(this.t_i32, (i64)ts.alignment); }
+                    default {};
+                };
+                switch (ts.base_type == DataType.DATA & ts.bit_width > 0)
+                {
+                    case (true) { -> this.mod.c_int(this.t_i32, (i64)((ts.bit_width + 7) / 8)); }
+                    default {};
+                };
+                lt = this.lower(ts, true, n.line);
+                switch (this.nerrors > this.body_errs)
+                {
+                    case (true) {
+                    this.unsup(n, g"alignof type lowering\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                a = this.pref_align(lt);
+                switch (a < 0)
+                {
+                    case (true) {
+                    this.unsup(n, g"alignof of aggregate\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                -> this.mod.c_int(this.t_i32, (i64)a);
             };
 
             // visit_SizeOf: size in bits as an i32 constant
@@ -10438,7 +17319,7 @@ namespace flux
                 };
                 switch (nm_has(this.unions, name) | nm_has(this.enums, name))
                 {
-                    case (true) { -> 0 - 1; }
+                    case (true) { -> -1; }
                     default {};
                 };
                 lv = this.find_var(name);
@@ -10469,7 +17350,7 @@ namespace flux
                     case (true) { -> DataType.STRUCT; }
                     default {};
                 };
-                -> 0 - 1;
+                -> -1;
             };
 
             // _typeof_arg_category on the argument of a TYPE_OF node
@@ -10488,13 +17369,13 @@ namespace flux
                         case (true) { -> t.ts.base_type; }
                         default {};
                     };
-                    -> 0 - 1;
+                    -> -1;
                 }
                     default {};
                 };
                 switch (t.a == (Node*)0)
                 {
-                    case (true) { -> 0 - 1; }
+                    case (true) { -> -1; }
                     default {};
                 };
                 switch (t.a.kind == NodeKind.IDENTIFIER & t.a.text != (byte*)0)
@@ -10513,7 +17394,7 @@ namespace flux
                 }
                     default {};
                 };
-                -> 0 - 1;
+                -> -1;
             };
 
             // _typeof_bare_category_literal: DataType.STRUCT or DataType.OBJECT when the
@@ -10530,13 +17411,13 @@ namespace flux
                         case (true) { -> s.base_type; }
                         default {};
                     };
-                    -> 0 - 1;
+                    -> -1;
                 }
                     default {};
                 };
                 switch (t.a == (Node*)0)
                 {
-                    case (true) { -> 0 - 1; }
+                    case (true) { -> -1; }
                     default {};
                 };
                 switch (t.a.kind == NodeKind.LITERAL & (t.a.op == DataType.STRUCT | t.a.op == DataType.OBJECT) & t.a.text != (byte*)0)
@@ -10550,7 +17431,7 @@ namespace flux
                 }
                     default {};
                 };
-                -> 0 - 1;
+                -> -1;
             };
 
             // ----------------------------------------------------------
@@ -10567,6 +17448,180 @@ namespace flux
                     default {};
                 };
                 -> this.sty(t.elem);
+            };
+
+            // MemberAccessTypeHandler.get_union_name_from_type: first union with an equal type
+            union_key_of(IRType* t) -> byte*
+            {
+                int i;
+                while (i < this.unions.count)
+                {
+                    switch (lt_eq((IRType*)this.unions.vals[i], t))
+                    {
+                        case (true) { -> this.unions.keys[i]; }
+                        default {};
+                    };
+                    i++;
+                };
+                -> (byte*)0;
+            };
+
+            // Type of a union member, null when the union has no such member
+            union_member(byte* key, byte* name) -> IRType*
+            {
+                Node* ud = (Node*)nm_get(this.union_defs, key);
+                Node* mem;
+                int i;
+                int c;
+                switch (ud == (Node*)0)
+                {
+                    case (true) { -> (IRType*)0; }
+                    default {};
+                };
+                c = node_count(ud, 0);
+                while (i < c)
+                {
+                    mem = node_child(ud, 0, i);
+                    switch (cstr_eq(mem.text, name))
+                    {
+                        case (true) { -> this.lower(mem.ts, false, ud.line); }
+                        default {};
+                    };
+                    i++;
+                };
+                -> (IRType*)0;
+            };
+
+            // _member_access_union
+            union_read(Node* n, IRValue* obj, byte* key) -> IRValue*
+            {
+                Node* ud = (Node*)nm_get(this.union_defs, key);
+                bool tagged = ud.text2 != (byte*)0;
+                IRType* mt;
+                IRValue* dp;
+                IRValue* cp;
+                switch (cstr_eq(n.text, g"#\0"))
+                {
+                    case (true) {
+                    switch (!tagged)
+                    {
+                        case (true) {
+                        this.unsup(n, g"tag access on non-tagged union\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(0);
+                    dp = this.mod.gep(obj, this.mod.ia, 2, true, g"union_tag_ptr\0");
+                    -> this.mod.load(dp, g"union_tag_value\0");
+                }
+                    default {};
+                };
+                mt = this.union_member(key, n.text);
+                switch (mt == (IRType*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"union member not found\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                this.sc.clear();
+                this.sc.put_str(g"union_as_\0");
+                this.sc.put_str(n.text);
+                switch (tagged)
+                {
+                    case (true) {
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(1);
+                    dp = this.mod.gep(obj, this.mod.ia, 2, true, g"union_data_ptr\0");
+                    cp = this.mod.cast(g"bitcast\0", dp, this.mod.t_ptr(mt), this.sc.mem);
+                }
+                    default {
+                    cp = this.mod.cast(g"bitcast\0", obj, this.mod.t_ptr(mt), this.sc.mem);
+                    switch (this.sty(mt))
+                    {
+                        case (true) {
+                        cp.flags = cp.flags `| VF_UNION_STRUCT;
+                        -> cp;
+                    }
+                        default {};
+                    };
+                };
+                };
+                this.sc.clear();
+                this.sc.put_str(g"union_\0");
+                this.sc.put_str(n.text);
+                this.sc.put_str(g"_value\0");
+                -> this.mod.load(cp, this.sc.mem);
+            };
+
+            // AssignmentTypeHandler.handle_union_member_assignment
+            union_store(Node* t, IRValue* obj, byte* key, IRValue* val) -> IRValue*
+            {
+                Node* ud = (Node*)nm_get(this.union_defs, key);
+                bool tagged = ud.text2 != (byte*)0;
+                IRType* mt;
+                IRValue* dp;
+                IRValue* cp;
+                int i;
+                switch (cstr_eq(t.text, g"#\0"))
+                {
+                    case (true) {
+                    switch (!tagged)
+                    {
+                        case (true) {
+                        this.unsup(t, g"tag assignment on non-tagged union\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(0);
+                    dp = this.mod.gep(obj, this.mod.ia, 2, true, g"union_tag_ptr\0");
+                    this.mod.store(val, dp);
+                    -> val;
+                }
+                    default {};
+                };
+                mt = this.union_member(key, t.text);
+                switch (mt == (IRType*)0)
+                {
+                    case (true) {
+                    this.unsup(t, g"union member not found\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                while (i < this.inited_unions.len)
+                {
+                    switch (this.inited_unions.items[i] == (void*)obj)
+                    {
+                        case (true) {
+                        this.unsup(t, g"union variable is immutable after initialization\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    i++;
+                };
+                pv_push(this.inited_unions, (void*)obj);
+                this.sc.clear();
+                this.sc.put_str(g"union_as_\0");
+                this.sc.put_str(t.text);
+                switch (tagged)
+                {
+                    case (true) {
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(1);
+                    dp = this.mod.gep(obj, this.mod.ia, 2, true, g"union_data_ptr\0");
+                    cp = this.mod.cast(g"bitcast\0", dp, this.mod.t_ptr(mt), this.sc.mem);
+                }
+                    default { cp = this.mod.cast(g"bitcast\0", obj, this.mod.t_ptr(mt), this.sc.mem); };
+                };
+                this.mod.store(val, cp);
+                -> val;
             };
 
             sinfo_of(IRType* t) -> SInfo*
@@ -10591,7 +17646,7 @@ namespace flux
                     };
                     i++;
                 };
-                -> 0 - 1;
+                -> -1;
             };
 
             // MemberAccessTypeHandler.is_struct_type
@@ -10885,6 +17940,7 @@ namespace flux
                 IRValue* mp;
                 IRValue* ld;
                 IRType* pe;
+                byte* ukey;
                 SInfo* si;
                 int idx;
                 bool prev;
@@ -11002,6 +18058,12 @@ namespace flux
                 switch (this.is_struct_ptr_ty(obj2.ty))
                 {
                     case (true) {
+                    ukey = this.union_key_of(obj2.ty.elem);
+                    switch (ukey != (byte*)0)
+                    {
+                        case (true) { -> this.union_read(n, obj2, ukey); }
+                        default {};
+                    };
                     si = this.sinfo_of(obj2.ty.elem);
                     switch (si == (SInfo*)0)
                     {
@@ -11020,6 +18082,8 @@ namespace flux
                     }
                         default {};
                     };
+                    // A struct reached through a union overlay is laid out big-endian
+                    switch ((obj2.flags `& VF_UNION_STRUCT) != 0) { case (true) { idx = si.n - 1 - idx; } default {}; };
                     mp = this.mod.gep_field(obj2, idx, true, (byte*)0);
                     pe = mp.ty.elem;
                     switch (pe.kind == LK.ARRAY)
@@ -11057,6 +18121,35 @@ namespace flux
             };
 
             // _member_access_get_ptr: address of a member, without loading it
+            // Enum key for an identifier that names an enum or a variable declared with an enum type
+            enum_key_of_ident(byte* name) -> byte*
+            {
+                byte* key = this.find_enum_key(name);
+                LVar* lv;
+                switch (key != (byte*)0)
+                {
+                    case (true) { -> key; }
+                    default {};
+                };
+                lv = this.find_var(name);
+                switch (lv == (LVar*)0)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                switch (lv.ts == (TypeSpec*)0)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                switch (lv.ts.custom_typename == (byte*)0)
+                {
+                    case (true) { -> (byte*)0; }
+                    default {};
+                };
+                -> this.find_enum_key(lv.ts.custom_typename);
+            };
+
             member_ptr(Node* n) -> IRValue*
             {
                 Node* o = n.a;
@@ -11064,6 +18157,19 @@ namespace flux
                 LVar* lv;
                 SInfo* si;
                 int idx;
+                byte* ekey;
+                switch (o.kind == NodeKind.IDENTIFIER)
+                {
+                    case (true) {
+                    ekey = this.enum_key_of_ident(o.text);
+                    switch (ekey != (byte*)0)
+                    {
+                        case (true) { -> this.enum_member(n, ekey); }
+                        default {};
+                    };
+                }
+                    default {};
+                };
                 switch (o.kind)
                 {
                     case (NodeKind.IDENTIFIER)
@@ -11241,6 +18347,528 @@ namespace flux
                 -> b.items[0].kind == LK.ARRAY & b.items[1].kind == LK.ARRAY & b.items[2].kind == LK.INT;
             };
 
+            // visit_DictLiteralExpr: d{k : v, ...} built on the stack
+            x_dictlit(Node* n) -> IRValue*
+            {
+                int cap = node_count(n, 0);
+                int i;
+                IRValue** kvs = (IRValue**)this.zbuf(cap + 1);
+                IRValue** vvs = (IRValue**)this.zbuf(cap + 1);
+                IRType* kl = this.t_i32;
+                IRType* vl = this.t_i32;
+                IRType* st;
+                IRValue* dp;
+                while (i < cap)
+                {
+                    kvs[i] = this.visit(node_child(n, 0, i));
+                    switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                    switch (kvs[i] == (IRValue*)0)
+                    {
+                        case (true) { this.unsup(n, g"void dict key\0"); -> (IRValue*)0; }
+                        default {};
+                    };
+                    i++;
+                };
+                i = 0;
+                while (i < cap)
+                {
+                    vvs[i] = this.visit(node_child(n, 1, i));
+                    switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                    switch (vvs[i] == (IRValue*)0)
+                    {
+                        case (true) { this.unsup(n, g"void dict value\0"); -> (IRValue*)0; }
+                        default {};
+                    };
+                    i++;
+                };
+                switch (cap > 0)
+                {
+                    case (true) {
+                    kl = kvs[0].ty;
+                    vl = vvs[0].ty;
+                }
+                    default {};
+                };
+                st = this.dict_struct(kl, vl, cap);
+                dp = this.mod.alloca_here(st, g"dictlit\0");
+                this.mod.store(this.mod.c_undef(st), dp);
+                i = 0;
+                while (i < cap)
+                {
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(0);
+                    this.mod.ia[2] = this.ci32(i);
+                    this.mod.store(kvs[i], this.mod.gep(dp, this.mod.ia, 3, true, (byte*)0));
+                    i++;
+                };
+                i = 0;
+                while (i < cap)
+                {
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(1);
+                    this.mod.ia[2] = this.ci32(i);
+                    this.mod.store(vvs[i], this.mod.gep(dp, this.mod.ia, 3, true, (byte*)0));
+                    i++;
+                };
+                this.mod.ia[0] = this.ci32(0);
+                this.mod.ia[1] = this.ci32(2);
+                this.mod.store(this.ci32(cap), this.mod.gep(dp, this.mod.ia, 2, true, (byte*)0));
+                -> dp;
+            };
+
+            dict_name(byte* a, byte* b, int i, bool with_i) -> byte*
+            {
+                this.sc.clear();
+                this.sc.put_str(a);
+                this.sc.put_str(b);
+                switch (with_i)
+                {
+                    case (true) { this.sc.put_int(i); }
+                    default {};
+                };
+                -> this.sc.mem;
+            };
+
+            // prefix + label + "_" + i
+            dict_name2(byte* pre, byte* lbl, int i) -> byte*
+            {
+                this.sc.clear();
+                this.sc.put_str(pre);
+                this.sc.put_str(lbl);
+                this.sc.put(95);
+                this.sc.put_int(i);
+                -> this.sc.mem;
+            };
+
+            // _dict_access / _dict_access_from_ptr: linear scan over the key slots, yielding the
+            // value (or a pointer to it for aggregates). named selects the _dict_access naming.
+            dict_scan(IRValue* dp, IRType* st, Node* index, byte* lbl, bool named) -> IRValue*
+            {
+                int cap = st.items[0].count;
+                IRType* kl = st.items[0].elem;
+                IRType* vl = st.items[1].elem;
+                IRValue* lk0 = this.visit(index);
+                IRValue* lk;
+                IRValue* rp;
+                IRValue* sk;
+                IRValue* cr;
+                IRValue* cmp;
+                IRValue* vp;
+                IRValue* res;
+                IRBlock* mb;
+                IRBlock** cbs;
+                IRBlock** fbs;
+                IRBlock* nx;
+                IRFunc* sf;
+                IRType** ps;
+                IRType* rpt;
+                bool is_str;
+                int i;
+                byte* nm;
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                switch (lk0 == (IRValue*)0)
+                {
+                    case (true) { this.unsup(index, g"void dict key\0"); -> (IRValue*)0; }
+                    default {};
+                };
+                cbs = (IRBlock**)this.zbuf(cap + 1);
+                fbs = (IRBlock**)this.zbuf(cap + 1);
+                mb = this.mod.append_block(this.fn, this.mod.own(this.dict_name(g"dict_merge_\0", lbl, 0, false)));
+                rpt = this.ptr_of(vl);
+                rp = this.mod.alloca_here(rpt, this.dict_name(lbl, g"_result_ptr\0", 0, false));
+                this.mod.store(this.mod.c_null(rpt), rp);
+                switch (named)
+                {
+                    case (true) {
+                    i = 0;
+                    while (i < cap)
+                    {
+                        cbs[i] = this.mod.append_block(this.fn, this.dict_name2(g"dict_check_\0", lbl, i));
+                        fbs[i] = this.mod.append_block(this.fn, this.dict_name2(g"dict_found_\0", lbl, i));
+                        i++;
+                    };
+                }
+                    default {
+                    i = 0;
+                    while (i < cap)
+                    {
+                        cbs[i] = this.mod.append_block(this.fn, this.dict_name2(g"dict_check_\0", lbl, i));
+                        i++;
+                    };
+                    i = 0;
+                    while (i < cap)
+                    {
+                        fbs[i] = this.mod.append_block(this.fn, this.dict_name2(g"dict_found_\0", lbl, i));
+                        i++;
+                    };
+                };
+                };
+                switch (cap > 0)
+                {
+                    case (true) { this.mod.br(cbs[0]); }
+                    default { this.mod.br(mb); };
+                };
+                is_str = false;
+                switch (kl.kind == LK.PTR)
+                {
+                    case (true) {
+                    switch (kl.elem.kind == LK.INT)
+                    {
+                        case (true) { is_str = kl.elem.width == 8; }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+                i = 0;
+                while (i < cap)
+                {
+                    this.mod.position(this.fn, cbs[i]);
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(0);
+                    this.mod.ia[2] = this.ci32(i);
+                    nm = (byte*)0;
+                    switch (named) { case (true) { nm = this.dict_name(g"kptr_\0", g"\0", i, true); } default {}; };
+                    sk = this.mod.load(this.mod.gep(dp, this.mod.ia, 3, true, nm), this.dict_name(g"key_\0", g"\0", i, true));
+                    lk = lk0;
+                    switch (is_str)
+                    {
+                        case (true) {
+                        switch (lk.ty.kind == LK.PTR)
+                        {
+                            case (true) {
+                            switch (lk.ty.elem.kind == LK.ARRAY)
+                            {
+                                case (true) {
+                                this.mod.ia[0] = this.ci32(0);
+                                this.mod.ia[1] = this.ci32(0);
+                                lk = this.mod.gep(lk, this.mod.ia, 2, true, this.dict_name(g"lk_decay_\0", g"\0", i, true));
+                            }
+                                default {};
+                            };
+                        }
+                            default {};
+                        };
+                        sf = this.mod.find_function(g"strcmp\0");
+                        switch (sf == (IRFunc*)0)
+                        {
+                            case (true) {
+                            ps = (IRType**)fmalloc((u64)3 * (u64)((sizeof(IRType*) + 7) / 8));
+                            this.keep((void*)ps);
+                            ps[0] = this.t_i8p;
+                            ps[1] = this.t_i8p;
+                            sf = this.mod.add_function(this.mod.t_func(this.t_i32, ps, 2, false), g"strcmp\0");
+                        }
+                            default {};
+                        };
+                        this.mod.ia[0] = sk;
+                        this.mod.ia[1] = lk;
+                        cr = this.mod.call(sf.self, this.mod.ia, 2, this.dict_name(g"strcmp_\0", g"\0", i, true));
+                        cmp = this.mod.icmp(g"eq\0", cr, this.ci32(0), this.dict_name(g"keycmp_\0", g"\0", i, true));
+                    }
+                        default {
+                        switch (kl.kind == LK.PTR)
+                        {
+                            case (true) {
+                            cmp = this.mod.icmp(g"eq\0", sk, lk, this.dict_name(g"keycmp_\0", g"\0", i, true));
+                        }
+                            default {
+                            switch (!named & lk.ty.kind == LK.INT & sk.ty.kind == LK.INT)
+                            {
+                                case (true) {
+                                switch (lk.ty.width > sk.ty.width)
+                                {
+                                    case (true) {
+                                    lk = this.mod.cast(g"trunc\0", lk, sk.ty, this.dict_name(g"key_trunc_\0", g"\0", i, true));
+                                }
+                                    default {
+                                    switch (lk.ty.width < sk.ty.width)
+                                    {
+                                        case (true) {
+                                        lk = this.mod.cast(g"zext\0", lk, sk.ty, this.dict_name(g"key_ext_\0", g"\0", i, true));
+                                    }
+                                        default {};
+                                    };
+                                };
+                                };
+                            }
+                                default {};
+                            };
+                            cmp = this.mod.icmp(g"eq\0", sk, lk, this.dict_name(g"keycmp_\0", g"\0", i, true));
+                        };
+                        };
+                    };
+                    };
+                    nx = mb;
+                    switch (i + 1 < cap) { case (true) { nx = cbs[i + 1]; } default {}; };
+                    this.mod.cbr(cmp, fbs[i], nx);
+                    this.mod.position(this.fn, fbs[i]);
+                    this.mod.ia[0] = this.ci32(0);
+                    this.mod.ia[1] = this.ci32(1);
+                    this.mod.ia[2] = this.ci32(i);
+                    nm = (byte*)0;
+                    switch (named) { case (true) { nm = this.dict_name(g"vptr_\0", g"\0", i, true); } default {}; };
+                    vp = this.mod.gep(dp, this.mod.ia, 3, true, nm);
+                    this.mod.store(vp, rp);
+                    this.mod.br(mb);
+                    i++;
+                };
+                this.mod.position(this.fn, mb);
+                res = this.mod.load(rp, this.dict_name(lbl, g"_valptr\0", 0, false));
+                switch (vl.kind == LK.STRUCT | vl.kind == LK.ISTRUCT | vl.kind == LK.ARRAY)
+                {
+                    case (true) { -> res; }
+                    default {};
+                };
+                -> this.mod.load(res, this.dict_name(lbl, g"_val\0", 0, false));
+            };
+
+            // _dict_access: dict_name[key] on a named dict variable or parameter
+            dict_access_named(Node* n) -> IRValue*
+            {
+                byte* name = n.a.text;
+                DictInfo* di = (DictInfo*)nm_get(this.dicts, name);
+                LVar* lv = this.find_var(name);
+                IRValue* dp;
+                IRType* st;
+                switch (lv == (LVar*)0)
+                {
+                    case (true) {
+                    this.unsup(n, g"dict variable not found\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                dp = lv.ptr;
+                // a parameter slot holds a pointer to the dict
+                switch (dp.ty.kind == LK.PTR)
+                {
+                    case (true) {
+                    switch (dp.ty.elem.kind == LK.PTR)
+                    {
+                        case (true) {
+                        switch (this.is_dict_struct(dp.ty.elem.elem))
+                        {
+                            case (true) {
+                            dp = this.mod.load(dp, this.dict_name(name, g"_deref\0", 0, false));
+                        }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+                st = di.st;
+                switch (dp.ty.kind == LK.PTR)
+                {
+                    case (true) {
+                    switch (this.is_dict_struct(dp.ty.elem)) { case (true) { st = dp.ty.elem; } default {}; };
+                }
+                    default {};
+                };
+                -> this.dict_scan(dp, st, n.b, name, true);
+            };
+
+            // _dict_merge: dict + dict into a new stack dict
+            dict_merge_ir(IRValue* lp, IRValue* rp, DictInfo* li, DictInfo* ri) -> IRValue*
+            {
+                int nc = li.cap + ri.cap;
+                IRType* st = this.dict_struct(li.kl, li.vl, nc);
+                IRValue* al = this.mod.alloca_here(st, g"dict_merged\0");
+                IRValue* sk;
+                IRValue* sv;
+                IRValue* dk;
+                IRValue* dv;
+                IRValue* src;
+                int pass;
+                int i;
+                int cap;
+                int off;
+                this.mod.store(this.mod.c_null(st), al);
+                pass = 0;
+                while (pass < 2)
+                {
+                    src = lp;
+                    cap = li.cap;
+                    off = 0;
+                    switch (pass == 1)
+                    {
+                        case (true) { src = rp; cap = ri.cap; off = li.cap; }
+                        default {};
+                    };
+                    i = 0;
+                    while (i < cap)
+                    {
+                        this.mod.ia[0] = this.ci32(0);
+                        this.mod.ia[1] = this.ci32(0);
+                        this.mod.ia[2] = this.ci32(i);
+                        sk = this.mod.gep(src, this.mod.ia, 3, true, (byte*)0);
+                        this.mod.ia[0] = this.ci32(0);
+                        this.mod.ia[1] = this.ci32(1);
+                        this.mod.ia[2] = this.ci32(i);
+                        sv = this.mod.gep(src, this.mod.ia, 3, true, (byte*)0);
+                        this.mod.ia[0] = this.ci32(0);
+                        this.mod.ia[1] = this.ci32(0);
+                        this.mod.ia[2] = this.ci32(off + i);
+                        dk = this.mod.gep(al, this.mod.ia, 3, true, (byte*)0);
+                        this.mod.ia[0] = this.ci32(0);
+                        this.mod.ia[1] = this.ci32(1);
+                        this.mod.ia[2] = this.ci32(off + i);
+                        dv = this.mod.gep(al, this.mod.ia, 3, true, (byte*)0);
+                        this.mod.store(this.mod.load(sk, this.dict_name(g"mk\0", g"\0", i, true)), dk);
+                        this.mod.store(this.mod.load(sv, this.dict_name(g"mv\0", g"\0", i, true)), dv);
+                        i++;
+                    };
+                    pass++;
+                };
+                this.mod.ia[0] = this.ci32(0);
+                this.mod.ia[1] = this.ci32(2);
+                this.mod.store(this.ci32(nc), this.mod.gep(al, this.mod.ia, 2, true, (byte*)0));
+                -> al;
+            };
+
+            // dict + dict in a binary expression; returns null when neither operand is a dict
+            dict_binary(Node* n, IRValue* lhs, IRValue* rhs, bool* handled) -> IRValue*
+            {
+                DictInfo* li = (DictInfo*)0;
+                DictInfo* ri = (DictInfo*)0;
+                *handled = false;
+                switch (n.a.kind == NodeKind.IDENTIFIER)
+                {
+                    case (true) { li = (DictInfo*)nm_get(this.dicts, n.a.text); }
+                    default {};
+                };
+                switch (n.b.kind == NodeKind.IDENTIFIER)
+                {
+                    case (true) { ri = (DictInfo*)nm_get(this.dicts, n.b.text); }
+                    default {};
+                };
+                switch (li == (DictInfo*)0 & ri == (DictInfo*)0)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                *handled = true;
+                switch (li == (DictInfo*)0 | ri == (DictInfo*)0)
+                {
+                    case (true) {
+                    this.fail(g"Dict operator '+' requires both operands to be dicts\0", n.line);
+                    this.unsup(n, g"dict operator operand\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (n.op != Operator.ADD)
+                {
+                    case (true) {
+                    this.fail(g"Unsupported operator for dict types\0", n.line);
+                    this.unsup(n, g"dict operator\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (li.kl != ri.kl | li.vl != ri.vl)
+                {
+                    case (true) {
+                    this.fail(g"Dict type mismatch: cannot combine dicts of different key or value types\0", n.line);
+                    this.unsup(n, g"dict type mismatch\0");
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                -> this.dict_merge_ir(lhs, rhs, li, ri);
+            };
+
+            // _vardecl_dict at function scope
+            vardecl_dict(Node* n, TypeSpec* ts) -> IRValue*
+            {
+                DictInfo* di = this.dict_make(n.text, ts, n.line);
+                Node* ini = n.a;
+                IRValue* al;
+                IRValue* src;
+                IRValue* kv;
+                IRValue* vv;
+                IRType* st = di.st;
+                int np;
+                int i;
+                switch (ini != (Node*)0)
+                {
+                    case (true) {
+                    switch (ini.kind == NodeKind.DICT_LITERAL & node_count(ini, 0) > 0)
+                    {
+                        case (true) {
+                        np = node_count(ini, 0) / 2;
+                        al = this.mod.alloca_here(st, n.text);
+                        this.mod.store(this.mod.c_null(st), al);
+                        while (i < np)
+                        {
+                            kv = this.visit(node_child(ini, 0, i * 2));
+                            switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                            vv = this.visit(node_child(ini, 0, i * 2 + 1));
+                            switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                            switch (kv == (IRValue*)0 | vv == (IRValue*)0)
+                            {
+                                case (true) { this.unsup(n, g"void dict entry\0"); -> (IRValue*)0; }
+                                default {};
+                            };
+                            this.mod.ia[0] = this.ci32(0);
+                            this.mod.ia[1] = this.ci32(0);
+                            this.mod.ia[2] = this.ci32(i);
+                            this.mod.store(kv, this.mod.gep(al, this.mod.ia, 3, true, this.dict_name(n.text, g"_k\0", i, true)));
+                            this.mod.ia[0] = this.ci32(0);
+                            this.mod.ia[1] = this.ci32(1);
+                            this.mod.ia[2] = this.ci32(i);
+                            this.mod.store(vv, this.mod.gep(al, this.mod.ia, 3, true, this.dict_name(n.text, g"_v\0", i, true)));
+                            i++;
+                        };
+                        this.mod.ia[0] = this.ci32(0);
+                        this.mod.ia[1] = this.ci32(2);
+                        this.mod.store(this.ci32(np), this.mod.gep(al, this.mod.ia, 2, true, this.dict_name(n.text, g"_count\0", 0, false)));
+                    }
+                        default {
+                        src = this.visit(ini);
+                        switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                        switch (src == (IRValue*)0)
+                        {
+                            case (true) { this.unsup(n, g"void dict initializer\0"); -> (IRValue*)0; }
+                            default {};
+                        };
+                        switch (src.ty.kind == LK.PTR)
+                        {
+                            case (true) {
+                            switch (this.is_dict_struct(src.ty.elem))
+                            {
+                                case (true) {
+                                st = src.ty.elem;
+                                di.cap = st.items[0].count;
+                                di.st = st;
+                            }
+                                default {};
+                            };
+                        }
+                            default {};
+                        };
+                        al = this.mod.alloca_here(st, n.text);
+                        this.mod.store(this.mod.load(src, g"dict_init_load\0"), al);
+                    };
+                    };
+                }
+                    default {
+                    al = this.mod.alloca_here(st, n.text);
+                    this.mod.store(this.mod.c_null(st), al);
+                };
+                };
+                al.spec = ts;
+                this.define_var(n.text, al, ts);
+                -> al;
+            };
+
             // visit_ArrayAccess
             x_index(Node* n) -> IRValue*
             {
@@ -11251,6 +18879,17 @@ namespace flux
                 IRValue* t1;
                 IRValue* t2;
                 IRValue* t3;
+                switch (n.a.kind == NodeKind.IDENTIFIER)
+                {
+                    case (true) {
+                    switch (nm_get(this.dicts, n.a.text) != (void*)0)
+                    {
+                        case (true) { -> this.dict_access_named(n); }
+                        default {};
+                    };
+                }
+                    default {};
+                };
                 switch (n.b.kind == NodeKind.RANGE_EXPRESSION)
                 {
                     case (true) {
@@ -11276,7 +18915,18 @@ namespace flux
                 switch (this.is_dict_ty(arr.ty))
                 {
                     case (true) {
-                    this.unsup(n, g"dict access\0");
+                    switch (arr.ty.kind == LK.PTR)
+                    {
+                        case (true) {
+                        this.sc.clear();
+                        this.sc.put_str(g"dictexpr_\0");
+                        t1 = (IRValue*)0;
+                        put_u64(@this.sc, (u64)arr);
+                        -> this.dict_scan(arr, arr.ty.elem, n.b, this.mod.own(this.sc.mem), false);
+                    }
+                        default {};
+                    };
+                    this.unsup(n, g"dict access by value\0");
                     -> (IRValue*)0;
                 }
                     default {};
@@ -11437,6 +19087,7 @@ namespace flux
                 IRValue* val = val0;
                 IRType* mt;
                 LVar* lv;
+                byte* ukey;
                 SInfo* si;
                 int idx;
                 bool glob = false;
@@ -11556,6 +19207,12 @@ namespace flux
                 }
                     default {};
                 };
+                ukey = this.union_key_of(obj.ty.elem);
+                switch (ukey != (byte*)0)
+                {
+                    case (true) { -> this.union_store(t, obj, ukey, val); }
+                    default {};
+                };
                 si = this.sinfo_of(obj.ty.elem);
                 switch (si == (SInfo*)0)
                 {
@@ -11579,8 +19236,8 @@ namespace flux
                 switch (vexpr.kind == NodeKind.ARRAY_LITERAL & mt.kind == LK.ARRAY)
                 {
                     case (true) {
-                    this.unsup(t, g"array literal to member\0");
-                    -> (IRValue*)0;
+                    this.init_local_array(mp, mt, vexpr);
+                    -> mp;
                 }
                     default {};
                 };
@@ -11590,8 +19247,8 @@ namespace flux
                     switch (lt_eq(val.ty.elem.elem, mt.elem) & val.ty.elem.count <= mt.count)
                     {
                         case (true) {
-                        this.unsup(t, g"array widening member assignment\0");
-                        -> (IRValue*)0;
+                        this.array_widen(mp, val, mt);
+                        -> val;
                     }
                         default {};
                     };
@@ -11981,6 +19638,46 @@ namespace flux
                     case (true) { -> this.x_ternary(n); }
                     default {};
                 };
+                switch (k == NodeKind.TERNARY_ASSIGN)
+                {
+                    case (true) { -> this.x_ternassign(n); }
+                    default {};
+                };
+                switch (k == NodeKind.TIE_EXPRESSION)
+                {
+                    case (true) { -> this.x_tie(n); }
+                    default {};
+                };
+                switch (k == NodeKind.STRINGIFY)
+                {
+                    case (true) { -> this.x_stringify(n); }
+                    default {};
+                };
+                switch (k == NodeKind.STRUCT_RECAST)
+                {
+                    case (true) { -> this.x_recast(n); }
+                    default {};
+                };
+                switch (k == NodeKind.VARIADIC_ACCESS)
+                {
+                    case (true) { -> this.x_vaaccess(n); }
+                    default {};
+                };
+                switch (k == NodeKind.NULL_COALESCE)
+                {
+                    case (true) { -> this.x_coalesce(n); }
+                    default {};
+                };
+                switch (k == NodeKind.IF_EXPRESSION)
+                {
+                    case (true) { -> this.x_ifexpr(n); }
+                    default {};
+                };
+                switch (k == NodeKind.ARRAY_LITERAL & (n.flags `& NF_IS_STRING) == 0)
+                {
+                    case (true) { -> this.x_array_literal(n); }
+                    default {};
+                };
                 switch (k == NodeKind.STRUCT_LITERAL)
                 {
                     case (true) { -> this.x_struct_lit(n, (IRType*)0); }
@@ -12026,6 +19723,11 @@ namespace flux
                     case (true) { -> this.x_sizeof(n); }
                     default {};
                 };
+                switch (k == NodeKind.ALIGN_OF)
+                {
+                    case (true) { -> this.x_alignof(n); }
+                    default {};
+                };
                 switch (k == NodeKind.TYPE_OF)
                 {
                     case (true) { -> this.x_typeof(n); }
@@ -12044,6 +19746,11 @@ namespace flux
                 switch (k == NodeKind.VARIABLE_DECLARATION)
                 {
                     case (true) { -> this.x_vardecl(n); }
+                    default {};
+                };
+                switch (k == NodeKind.FUNCTION_POINTER_DECLARATION)
+                {
+                    case (true) { -> this.x_fpdecl(n); }
                     default {};
                 };
                 switch (k == NodeKind.EXPRESSION_STATEMENT)
@@ -12109,6 +19816,46 @@ namespace flux
                     case (true) { this.s_for(n); -> (IRValue*)0; }
                     default {};
                 };
+                switch (k == NodeKind.THROW_STATEMENT)
+                {
+                    case (true) { this.s_throw(n); -> (IRValue*)0; }
+                    default {};
+                };
+                switch (k == NodeKind.LABEL_STATEMENT)
+                {
+                    case (true) { this.s_label(n); -> (IRValue*)0; }
+                    default {};
+                };
+                switch (k == NodeKind.GOTO_STATEMENT)
+                {
+                    case (true) { this.s_goto(n); -> (IRValue*)0; }
+                    default {};
+                };
+                switch (k == NodeKind.FOR_IN_LOOP)
+                {
+                    case (true) { this.s_forin(n); -> (IRValue*)0; }
+                    default {};
+                };
+                switch (k == NodeKind.BIT_INDEX_ACCESS)
+                {
+                    case (true) { -> this.x_bitindex(n); }
+                    default {};
+                };
+                switch (k == NodeKind.BIT_SLICE)
+                {
+                    case (true) { -> this.x_bitslice(n); }
+                    default {};
+                };
+                switch (k == NodeKind.ASSERT_STATEMENT)
+                {
+                    case (true) { this.s_assert(n); -> (IRValue*)0; }
+                    default {};
+                };
+                switch (k == NodeKind.DICT_LITERAL_EXPR)
+                {
+                    case (true) { -> this.x_dictlit(n); }
+                    default {};
+                };
                 switch (k == NodeKind.RETURN_STATEMENT)
                 {
                     case (true) { this.s_return(n); -> (IRValue*)0; }
@@ -12154,6 +19901,91 @@ namespace flux
                 }
                     default {};
                 };
+                switch (k == NodeKind.TYPE_DECLARATION)
+                {
+                    case (true) {
+                    // visit_TypeDeclaration: the alias is registered, an initializer makes a global constant
+                    switch (n.a != (Node*)0)
+                    {
+                        case (true) {
+                        this.unsup(n, g"type declaration initializer\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    this.reg_alias(n, this.cur_ns);
+                    switch (this.nerrors > this.body_errs)
+                    {
+                        case (true) {
+                        this.unsup(n, g"type declaration lowering\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                switch (k == NodeKind.UNION_DEF_STATEMENT)
+                {
+                    case (true) { this.reg_union(n.a, this.cur_ns); -> (IRValue*)0; }
+                    default {};
+                };
+                switch (k == NodeKind.UNION_DEF)
+                {
+                    case (true) { this.reg_union(n, this.cur_ns); -> (IRValue*)0; }
+                    default {};
+                };
+                switch (k == NodeKind.F_STRING_LITERAL)
+                {
+                    case (true) { -> this.x_fstring(n); }
+                    default {};
+                };
+                switch (k == NodeKind.ESCAPE_STATEMENT)
+                {
+                    case (true) {
+                    // visit_EscapeStatement: the call runs, then the <~ function returns its result
+                    switch (this.mod.is_terminated()) { case (true) { -> (IRValue*)0; } default {}; };
+                    switch (!this.rec_fn)
+                    {
+                        case (true) {
+                        this.unsup(n, g"escape outside a recursive function\0");
+                        -> (IRValue*)0;
+                    }
+                        default {};
+                    };
+                    r = this.visit(n.a);
+                    switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                    switch (this.fret.kind == LK.VOID)
+                    {
+                        case (true) { this.mod.ret_void(); }
+                        default {
+                            switch (r == (IRValue*)0)
+                            {
+                                case (true) { this.mod.ret(this.mod.c_null(this.fret)); }
+                                default {
+                                r = this.coerce_ret(r, this.fret, n);
+                                switch (this.bad) { case (true) { -> (IRValue*)0; } default {}; };
+                                this.mod.ret(r);
+                            };
+                            };
+                        };
+                    };
+                    -> (IRValue*)0;
+                }
+                    default {};
+                };
+                // visit_UsingStatement: the namespace joins the module's using list and stays there
+                switch (k == NodeKind.USING_STATEMENT)
+                {
+                    case (true) { st_add_using_namespace(this.st, n.text); -> (IRValue*)0; }
+                    default {};
+                };
+                switch (k == NodeKind.NOT_USING_STATEMENT)
+                {
+                    case (true) { st_remove_using_namespace(this.st, n.text); -> (IRValue*)0; }
+                    default {};
+                };
                 this.unsup(n, node_kind_name(k));
                 -> (IRValue*)0;
             };
@@ -12172,6 +20004,9 @@ namespace flux
                 Node* p;
                 byte* pname;
                 IRBlock* ebk;
+                int dd;
+                SInfo* osi;
+                bool plain;
                 IRValue* a;
                 IRValue* slot;
                 IRType* ft = f.ftype;
@@ -12181,6 +20016,8 @@ namespace flux
                 this.brk = (IRBlock*)0;
                 this.cont = (IRBlock*)0;
                 this.in_member = false;
+                this.va_list_v = (IRValue*)0;
+                this.va_list_p = (IRValue*)0;
                 this.fn = f;
                                 this.fnd = fd;
                 this.fret = ft.elem;
@@ -12192,25 +20029,17 @@ namespace flux
                 }
                     default {};
                 };
-                switch ((fd.flags `& NF_VARIADIC) != 0)
-                {
-                    case (true) {
-                    this.unsup(fd, g"variadic function\0");
-                    ->;
-                }
-                    default {};
-                };
-                switch ((fd.flags `& NF_RECURSIVE) != 0)
-                {
-                    case (true) {
-                    this.unsup(fd, g"recursive function\0");
-                    ->;
-                }
-                    default {};
-                };
+                this.rec_fn = (fd.flags `& NF_RECURSIVE) != 0;
                 ebk = this.mod.append_block(f, g"entry\0");
                 this.mod.position(f, ebk);
                 this.mod.set_entry(ebk);
+                this.inited_unions.len = 0;
+                nm_free(this.labels);
+                this.labels = nm_new();
+                nm_free(this.untied);
+                this.untied = nm_new();
+                nm_put(this.labels, this.mod.own(g"entry\0"), (void*)ebk);
+                this.collect_labels(fd.a, f);
                 this.push_scope();
                 switch (obj != (byte*)0)
                 {
@@ -12224,22 +20053,40 @@ namespace flux
                     f.args[0].spec = this_ts;
                     // Method parameters were named when declared; naming them again at
                     // emission gives the .1 suffixed names
-                    this.mod.rename_arg(f, 0, g"this\0");
-                    i = 0;
-                    while (i < np)
+                    // An object outside any namespace is declared once, so its names stay plain
+                    plain = true;
+                    dd = 0;
+                    while (obj[dd] != (byte)0)
                     {
-                        p = node_child(fd, 0, i);
-                        switch (p.text != (byte*)0)
+                        switch (obj[dd] == (byte)'_' & obj[dd + 1] == (byte)'_')
                         {
-                            case (true) { this.mod.rename_arg(f, i + 1, p.text); }
-                            default {
-                            this.sc.clear();
-                            this.sc.put_str(g"arg\0");
-                            this.sc.put_int(i);
-                            this.mod.rename_arg(f, i + 1, this.sc.mem);
+                            case (true) { plain = false; }
+                            default {};
                         };
+                        dd++;
+                    };
+                    switch (!plain & !nm_has(f.names, g"this\0"))
+                    {
+                        case (true) {
+                        this.mod.rename_arg(f, 0, g"this\0");
+                        i = 0;
+                        while (i < np)
+                        {
+                            p = node_child(fd, 0, i);
+                            switch (p.text != (byte*)0)
+                            {
+                                case (true) { this.mod.rename_arg(f, i + 1, p.text); }
+                                default {
+                                this.sc.clear();
+                                this.sc.put_str(g"arg\0");
+                                this.sc.put_int(i);
+                                this.mod.rename_arg(f, i + 1, this.sc.mem);
+                            };
+                            };
+                            i++;
                         };
-                        i++;
+                    }
+                        default {};
                     };
                     this.define_var(g"this\0", f.args[0], this_ts);
                 }
@@ -12268,7 +20115,28 @@ namespace flux
                     a.spec = p.ts;
                     this.mod.store(a, slot);
                     this.define_var(pname, slot, p.ts);
+                    switch (p.ts != (TypeSpec*)0)
+                    {
+                        case (true) {
+                        switch (p.ts.base_type == DataType.DICT)
+                        {
+                            case (true) { this.dict_make(pname, p.ts, p.line); }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
                     i++;
+                };
+                switch ((fd.flags `& NF_VARIADIC) != 0)
+                {
+                    case (true) {
+                    this.va_list_v = this.mod.alloca(this.mod.t_array(this.t_i8p, 1), g"va_list\0");
+                    this.va_list_p = this.mod.cast(g"bitcast\0", this.va_list_v, this.t_i8p, g"va_list_ptr\0");
+                    this.mod.ia[0] = this.va_list_p;
+                    this.mod.call(this.va_intrinsic(g"llvm.va_start\0", 1).self, this.mod.ia, 1, (byte*)0);
+                }
+                    default {};
                 };
                 this.visit(fd.a);
                 this.pop_scope();
@@ -12286,7 +20154,10 @@ namespace flux
                         default {
                             switch (this.fret.kind == LK.VOID)
                             {
-                                case (true) { this.mod.ret_void(); }
+                                case (true) {
+                                    switch (this.rec_fn) { case (true) { this.rec_call(false, (IRValue*)0); } default {}; };
+                                    this.mod.ret_void();
+                                }
                                 default {
                                     switch (this.mod.cb.lines.len == 0)
                                     {
@@ -12323,6 +20194,24 @@ namespace flux
                     f.is_decl = true;
                 }
                     default { this.nbodies++; };
+                };
+                // Specialized type functions created while this body was generated
+                switch (!this.tf_drain)
+                {
+                    case (true) {
+                    this.tf_drain = true;
+                    i = 0;
+                    while (i < this.tf_pend.len)
+                    {
+                        Node* sfd = (Node*)this.tf_pend.items[i];
+                        node_child(sfd, 0, 0).ts = (TypeSpec*)this.tf_pend.items[i + 2];
+                        this.run_body(sfd, (IRFunc*)this.tf_pend.items[i + 1], g"\0", (byte*)0);
+                        i = i + 3;
+                    };
+                    this.tf_pend.len = 0;
+                    this.tf_drain = false;
+                }
+                    default {};
                 };
                 ->;
             };
@@ -12389,6 +20278,35 @@ namespace flux
                 ->;
             };
 
+            // Body of a function named Type.method, generated as a method of the object
+            dotted_body(Node* fd, byte* ns) -> void
+            {
+                byte* full = fd.text;
+                byte* oname = this.dotted_object(fd, ns);
+                byte* mn;
+                byte* fn;
+                IRFunc* f;
+                byte* prev = this.cur_obj;
+                fd.text = full + this.dot_index(full) + 1;
+                this.cur_obj = this.mod.own(oname);
+                mn = this.mangled_name(fd.text, fd);
+                this.cur_obj = prev;
+                fn = join3(oname, g".\0", mn);
+                f = this.mod.find_function(fn);
+                ffree(mn);
+                ffree(fn);
+                switch (f != (IRFunc*)0)
+                {
+                    case (true) {
+                    switch (f.is_decl) { case (true) { this.run_body(fd, f, ns, oname); } default {}; };
+                }
+                    default {};
+                };
+                fd.text = full;
+                ffree(oname);
+                ->;
+            };
+
             // Walks the program in declaration order and generates the bodies
             bodies_pass(Node* n0, byte* ns) -> void
             {
@@ -12421,6 +20339,11 @@ namespace flux
                         switch (n.a == (Node*)0)
                         {
                             case (true) { ->; }
+                            default {};
+                        };
+                        switch (this.dot_index(n.text) > 0)
+                        {
+                            case (true) { this.dotted_body(n, ns); ->; }
                             default {};
                         };
                         base = mangle_namespace_name(ns, n.text);
@@ -12489,6 +20412,7 @@ namespace flux
                 int i;
                 int n = node_count(prog, 0);
                 Node* s;
+                bool has_inst;
                 byte* root = ts_dup(g"\0");
                 int nns;
                 while (i < n)
@@ -12534,6 +20458,23 @@ namespace flux
                     this.types_pass(node_child(prog, 0, i), root);
                     i++;
                 };
+                // _namespace_preregister_all_types: retry until forward references resolve
+                int rp = 0;
+                this.retry_mode = true;
+                while (this.fwd_hit & rp <= n)
+                {
+                    this.fwd_hit = false;
+                    i = 0;
+                    while (i < n)
+                    {
+                        this.cur_stmt = i;
+                        this.types_pass(node_child(prog, 0, i), root);
+                        i++;
+                    };
+                    rp++;
+                };
+                this.retry_mode = false;
+                this.fwd_hit = false;
                 // Top level extern blocks are registered first, as the base pre-pass does
                 i = 0;
                 while (i < n)
@@ -12552,6 +20493,20 @@ namespace flux
                     i++;
                 };
                 i = 0;
+                has_inst = false;
+                while (i < n)
+                {
+                    s = node_child(prog, 0, i);
+                    switch (s.kind == NodeKind.FUNCTION_DEF)
+                    {
+                        case (true) {
+                        switch ((s.flags `& NF_INSTANCE) != 0) { case (true) { has_inst = true; } default {}; };
+                    }
+                        default {};
+                    };
+                    i++;
+                };
+                i = 0;
                 standard::io::console::println(g"[AST] Pass 3: Processing all other statements...\0");
                 while (i < n)
                 {
@@ -12562,6 +20517,14 @@ namespace flux
                     switch (!this.si_closed & (s.kind == NodeKind.NAMESPACE_DEF | s.kind == NodeKind.NAMESPACE_DEF_STATEMENT))
                     {
                         case (true) { this.static_init_block(); }
+                        default {};
+                    };
+                    // Template instances are emitted through the global builder before the first
+                    // statement that is neither a namespace nor skipped by pass 3, which leaves it
+                    // positioned in a block
+                    switch (!this.si_closed & has_inst & this.pass3_runs(s))
+                    {
+                        case (true) { this.si_closed = true; }
                         default {};
                     };
                     this.bodies_pass(s, root);
@@ -12586,6 +20549,49 @@ namespace flux
             // Defines whichever of main() and main(int, byte**) the program left undefined,
             // so FRTStartup can call either form
             // visit_NamespaceDef without a builder: __static_init gains a block that returns
+            // False for the statements pass 3 skips (fcodegen.visit_Program._should_skip) and for
+            // namespaces and the instances themselves
+            pass3_runs(Node* s) -> bool
+            {
+                int k = s.kind;
+                switch (k == NodeKind.NAMESPACE_DEF | k == NodeKind.NAMESPACE_DEF_STATEMENT | k == NodeKind.USING_STATEMENT | k == NodeKind.NOT_USING_STATEMENT)
+                {
+                    case (true) { -> false; }
+                    default {};
+                };
+                switch (k == NodeKind.EXTERN_BLOCK | k == NodeKind.STRUCT_DEF | k == NodeKind.STRUCT_DEF_STATEMENT | k == NodeKind.OBJECT_DEF)
+                {
+                    case (true) { -> false; }
+                    default {};
+                };
+                switch (k == NodeKind.OBJECT_DEF_STATEMENT | k == NodeKind.CONTRACT_DEF)
+                {
+                    case (true) { -> false; }
+                    default {};
+                };
+                switch (k == NodeKind.VARIABLE_DECLARATION)
+                {
+                    case (true) {
+                    switch (s.ts != (TypeSpec*)0)
+                    {
+                        case (true) {
+                        switch (s.ts.base_type == DataType.DICT) { case (true) { -> false; } default {}; };
+                    }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+                switch (k == NodeKind.FUNCTION_DEF)
+                {
+                    case (true) {
+                    switch ((s.flags `& NF_INSTANCE) != 0) { case (true) { -> false; } default {}; };
+                }
+                    default {};
+                };
+                -> true;
+            };
+
             static_init_block() -> void
             {
                 IRFunc* f = this.mod.find_function(g"__static_init\0");
@@ -12629,12 +20635,12 @@ namespace flux
                         switch (m2.is_decl & !m0.is_decl)
                         {
                             case (true) {
-                    eb = this.mod.append_block(m2, g"entry\0");
-                    this.mod.position(m2, eb);
-                    this.mod.set_entry(eb);
-                    this.mod.ret(this.mod.call(m0.self, this.mod.ia, 0, (byte*)0));
-                    m2.is_decl = false;
-                }
+                                eb = this.mod.append_block(m2, g"entry\0");
+                                this.mod.position(m2, eb);
+                                this.mod.set_entry(eb);
+                                this.mod.ret(this.mod.call(m0.self, this.mod.ia, 0, (byte*)0));
+                                m2.is_decl = false;
+                            }
                             default {};
                         };
                     };

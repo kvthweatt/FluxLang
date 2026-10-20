@@ -1,4 +1,4 @@
-#import "standard.fx";
+#import <standard.fx>;
 using standard::io::console;
 
 def foo(int x = 5, int y = 2) -> int

@@ -1,6 +1,6 @@
 // As seen in the readme.md!!
 
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 

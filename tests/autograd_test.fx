@@ -13,8 +13,8 @@
 // Finite-difference tolerance used throughout: 1e-3
 // (tape uses float32; FD epsilon h = 0.001)
 
-#import "standard.fx";
-#import "autograd.fx";
+#import <standard.fx>;
+#import <autograd.fx>;
 
 using standard::io::console,
       standard::autograd;

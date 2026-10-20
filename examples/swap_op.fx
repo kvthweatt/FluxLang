@@ -1,4 +1,4 @@
-#import "standard.fx", "operators.fx";
+#import <standard.fx>, <operators.fx>;
 
 using standard::io::console,
       standard::operators;

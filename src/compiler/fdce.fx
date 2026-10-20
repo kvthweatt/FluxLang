@@ -1525,6 +1525,10 @@ namespace flux
                     i++;
                 };
 
+                // memset is emitted by code generation itself (llvm.memset for zero
+                // initialization), so no source reference to it exists for DCE to see
+                this.add_suffixes(seed, g"memset\0");
+
                 // Step 1b: top level code that is not a namespace, using or function
                 i = 0;
                 while (i < c)

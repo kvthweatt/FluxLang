@@ -389,40 +389,37 @@ namespace flux
                 print(operator_text(n.op));
             }
                 default {
-                    switch (k == NodeKind.LITERAL)
+                switch (k)
+                {
+                    case (NodeKind.LITERAL)
                     {
-                        case (true) {
-                print(g" op=\0");
-                print(datatype_text(n.op));
-                switch (n.op != DataType.FLOAT & n.op != DataType.DOUBLE & n.op != DataType.CHAR)
-                {
-                    case (true) {
-                    print(g" val=\0");
-                    print(n.ival);
-                }
-                    default {};
-                };
-                switch (n.op == DataType.CHAR & n.text != (byte*)0)
-                {
-                    case (true) {
-                    print(g" text=\0");
-                    dump_quoted(n.text);
-                }
-                    default {};
-                };
-            }
-                        default {
-                            switch (k == NodeKind.COMPOUND_ASSIGNMENT)
-                            {
-                                case (true) {
-                print(g" op=\0");
-                print(token_name(n.op));
-            }
-                                default {};
-                            };
+                        print(g" op=\0");
+                        print(datatype_text(n.op));
+                        switch (n.op != DataType.FLOAT & n.op != DataType.DOUBLE & n.op != DataType.CHAR)
+                        {
+                            case (true) {
+                            print(g" val=\0");
+                            print(n.ival);
+                        }
+                            default {};
                         };
-                    };
+                        switch (n.op == DataType.CHAR & n.text != (byte*)0)
+                        {
+                            case (true) {
+                            print(g" text=\0");
+                            dump_quoted(n.text);
+                        }
+                            default {};
+                        };
+                    }
+                    case (NodeKind.COMPOUND_ASSIGNMENT)
+                    {
+                        print(g" op=\0");
+                        print(token_name(n.op));
+                    }
+                    default {};
                 };
+            };
             };
             switch (k != NodeKind.LITERAL)
             {
@@ -627,6 +624,7 @@ namespace flux
             PtrVec* tinst_s;        // instantiated template structs (appended after the program)
             PtrVec* tinst_o;        // instantiated template objects
             PtrVec* tinst_f;        // instantiated template functions
+            PtrVec* pend_dict;      // dict argument TypeSpecs by parameter index, for capacity patching (_pending_dict_arg_ts)
             PtrVec* tmp_ts;         // TypeSpecs made while inferring, freed on exit
             Checker* chk; // template constraint checker (created on first use)
             NameMap* macros;        // names of the macros defined so far (the value is only a marker)
@@ -685,6 +683,7 @@ namespace flux
                 this.tinst_s = pv_new();
                 this.tinst_o = pv_new();
                 this.tinst_f = pv_new();
+                this.pend_dict = pv_new();
                 this.tmp_ts = pv_new();
                 this.chk = (Checker*)0;
                 this.feat_hits = (int*)fmalloc((u64)Feat.COUNT * (u64)((sizeof(int) + 7) / 8));
@@ -2934,7 +2933,13 @@ namespace flux
                 Node* tn;
                 NameMap* tm;
                 int i;
-                switch (ex != (TemplateEntry*)0 & ex.kind == kind)
+                bool same;
+                switch (ex != (TemplateEntry*)0)
+                {
+                    case (true) { same = ex.kind == kind; }
+                    default {};
+                };
+                switch (same)
                 {
                     case (true) {
                     tv = ex.params; ex.params = e.params; e.params = tv;
@@ -3642,6 +3647,7 @@ namespace flux
                 }
                     default {};
                 };
+                this.patch_dict_caps(concrete);
 
                 ce = this.tp_constraint_entry(fname, te, true);
                 switch (node_count(ce.rels, 1) > 0)
@@ -4250,6 +4256,79 @@ namespace flux
                 ->;
             };
 
+            // Patch dict parameter capacities: after substitution dict params have capacity 0
+            // because the template declared dict{T:U} with no literal. Fill in the actual
+            // capacity from the call-site argument type specs (fparser._resolve_template_call)
+            patch_dict_caps(Node* concrete) -> void
+            {
+                int p = 0;
+                Node* param;
+                TypeSpec* at;
+                TypeSpec* nt;
+                int j;
+                while (p < node_count(concrete, 0))
+                {
+                    param = node_child(concrete, 0, p);
+                    switch (param.ts != (TypeSpec*)0 & p < this.pend_dict.len)
+                    {
+                        case (true) {
+                        at = (TypeSpec*)this.pend_dict.items[p];
+                        switch (param.ts.base_type == DataType.DICT & param.ts.dict_capacity <= 0 & at != (TypeSpec*)0)
+                        {
+                            case (true) {
+                            switch (at.dict_capacity > 0)
+                            {
+                                case (true) {
+                                nt = typespec_copy(param.ts);
+                                nt.dict_capacity = at.dict_capacity;
+                                param.ts = nt;
+                            }
+                                default {};
+                            };
+                        }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                    p++;
+                };
+                switch (concrete.ts != (TypeSpec*)0)
+                {
+                    case (true) {
+                    switch (concrete.ts.base_type == DataType.DICT & concrete.ts.dict_capacity <= 0)
+                    {
+                        case (true) {
+                        j = 0;
+                        while (j < this.pend_dict.len)
+                        {
+                            at = (TypeSpec*)this.pend_dict.items[j];
+                            switch (at != (TypeSpec*)0)
+                            {
+                                case (true) {
+                                switch (at.dict_capacity > 0)
+                                {
+                                    case (true) {
+                                    nt = typespec_copy(concrete.ts);
+                                    nt.dict_capacity = at.dict_capacity;
+                                    concrete.ts = nt;
+                                    ->;
+                                }
+                                    default {};
+                                };
+                            }
+                                default {};
+                            };
+                            j++;
+                        };
+                    }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+            };
+
             infer_template_params(TemplateEntry* te, Node* holder, bool skip_first, NameMap* out) -> void
             {
                 int i, first, nargs;
@@ -4262,6 +4341,7 @@ namespace flux
                 TypeSpec* at;
                 PtrVec* raw;
                 Node* decl = te.node;
+                this.pend_dict.len = 0;
                 nargs = node_count(holder, 0);
                 first = 0;
                 switch (skip_first)
@@ -4289,6 +4369,7 @@ namespace flux
                     {
                         case (true) {
                         at = (TypeSpec*)0;
+                        while (this.pend_dict.len <= i - 1 - first) { pv_push(this.pend_dict, (void*)0); };
                         switch (arg.kind == NodeKind.IDENTIFIER & this.st != (FXC_SYMTABLE*)0)
                         {
                             case (true) { at = st_get_type_spec(this.st, arg.text); }
@@ -4300,6 +4381,7 @@ namespace flux
                             switch (at.base_type == DataType.DICT)
                             {
                                 case (true) {
+                                this.pend_dict.items[i - 1 - first] = (void*)at;
                                 kp = (byte*)0;
                                 vp = (byte*)0;
                                 switch (dp.ts.dict_key != (TypeSpec*)0)
@@ -4763,43 +4845,40 @@ namespace flux
                     case (true) { -> (byte*)0; }
                     default {};
                 };
-                switch (expr.kind == NodeKind.IDENTIFIER)
+                switch (expr.kind)
                 {
-                    case (true) { id = expr; }
-                    default {
-                        switch (expr.kind == NodeKind.TIE_EXPRESSION)
-                        {
-                            case (true) {
-                    switch (expr.a != (Node*)0)
+                    case (NodeKind.IDENTIFIER) { id = expr; }
+                    case (NodeKind.TIE_EXPRESSION)
                     {
-                        case (true) {
-                        switch (expr.a.kind == NodeKind.IDENTIFIER)
+                        switch (expr.a != (Node*)0)
                         {
                             case (true) {
-                            id = expr.a;
-                            tied = true;
+                            switch (expr.a.kind == NodeKind.IDENTIFIER)
+                            {
+                                case (true) {
+                                id = expr.a;
+                                tied = true;
+                            }
+                                default {};
+                            };
                         }
                             default {};
                         };
                     }
-                        default {};
-                    };
-                }
-                            default {
-                                switch (expr.kind == NodeKind.STRING_LITERAL | expr.kind == NodeKind.F_STRING_LITERAL)
-                                {
-                                    case (true) {
-                    cand = this.cat2(g"__typefunc__string__\0", member);
-                    switch (this.template_lookup(cand) != (TemplateEntry*)0)
+                    default
                     {
-                        case (true) { -> cand; }
-                        default {};
-                    };
-                    -> (byte*)0;
-                }
-                                    default {};
-                                };
+                        switch (expr.kind == NodeKind.STRING_LITERAL | expr.kind == NodeKind.F_STRING_LITERAL)
+                        {
+                            case (true) {
+                            cand = this.cat2(g"__typefunc__string__\0", member);
+                            switch (this.template_lookup(cand) != (TemplateEntry*)0)
+                            {
+                                case (true) { -> cand; }
+                                default {};
                             };
+                            -> (byte*)0;
+                        }
+                            default {};
                         };
                     };
                 };
@@ -4968,6 +5047,7 @@ namespace flux
                 };
                 inferred = nm_new();
                 this.infer_template_params(te, holder, true, inferred);
+                this.pend_dict.len = 0;
                 i = 0;
                 while (i < te.params.len)
                 {
@@ -9032,85 +9112,83 @@ namespace flux
                     }
                         default {};
                     };
-                    switch (c == TokenType.IN)
+                    switch (c)
                     {
-                        case (true) {
-                        this.advance();
-                        r = this.chain_expression();
-                        switch (this.failed)
+                        case (TokenType.IN)
                         {
-                            case (true) { -> expr; }
-                            default {};
-                        };
-                        n = this.mk(NodeKind.IN_EXPRESSION, line, col);
-                        switch (this.failed)
+                            this.advance();
+                            r = this.chain_expression();
+                            switch (this.failed)
+                            {
+                                case (true) { -> expr; }
+                                default {};
+                            };
+                            n = this.mk(NodeKind.IN_EXPRESSION, line, col);
+                            switch (this.failed)
+                            {
+                                case (true) { -> expr; }
+                                default {};
+                            };
+                            n.a = expr;
+                            n.b = r;
+                            expr = n;
+                        }
+                        case (TokenType.HAS)
                         {
-                            case (true) { -> expr; }
-                            default {};
-                        };
-                        n.a = expr;
-                        n.b = r;
-                        expr = n;
-                    }
-                        default {
-                            switch (c == TokenType.HAS)
+                            this.advance();
+                            switch (!this.expect(TokenType.IDENTIFIER))
                             {
                                 case (true) {
-                        this.advance();
-                        switch (!this.expect(TokenType.IDENTIFIER))
-                        {
-                            case (true) {
-                            this.error(g"Expected trait name after 'has'\0");
-                            -> expr;
+                                this.error(g"Expected trait name after 'has'\0");
+                                -> expr;
+                            }
+                                default {};
+                            };
+                            n = this.mk(NodeKind.HAS_EXPRESSION, line, col);
+                            switch (this.failed)
+                            {
+                                case (true) { -> expr; }
+                                default {};
+                            };
+                            n.text = this.cur_value();
+                            this.advance();
+                            n.a = expr;
+                            expr = n;
                         }
-                            default {};
-                        };
-                        n = this.mk(NodeKind.HAS_EXPRESSION, line, col);
-                        switch (this.failed)
+                        default
                         {
-                            case (true) { -> expr; }
-                            default {};
-                        };
-                        n.text = this.cur_value();
-                        this.advance();
-                        n.a = expr;
-                        expr = n;
-                    }
-                                default {
-                                    switch (c == TokenType.IS | c == TokenType.EQUAL | c == TokenType.NOT_EQUAL)
-                                    {
-                                        case (true) {
-                        this.advance();
-                        r = this.chain_expression();
-                        switch (this.failed)
-                        {
-                            case (true) { -> expr; }
-                            default {};
-                        };
-                        n = this.mk(NodeKind.BINARY_OP, line, col);
-                        switch (this.failed)
-                        {
-                            case (true) { -> expr; }
-                            default {};
-                        };
-                        switch (c)
-                        {
-                            case (TokenType.NOT_EQUAL) { n.op = Operator.NOT_EQUAL; }
-                            default { n.op = Operator.EQUAL; };
-                        };
-                        n.a = expr;
-                        n.b = r;
-                        expr = n;
-                        this.try_template_op(n);
-                        switch (this.failed)
-                        {
-                            case (true) { -> expr; }
-                            default {};
-                        };
-                    }
-                                        default { break; };
-                                    };
+                            switch (c == TokenType.IS | c == TokenType.EQUAL | c == TokenType.NOT_EQUAL)
+                            {
+                                case (true) {
+                                this.advance();
+                                r = this.chain_expression();
+                                switch (this.failed)
+                                {
+                                    case (true) { -> expr; }
+                                    default {};
                                 };
+                                n = this.mk(NodeKind.BINARY_OP, line, col);
+                                switch (this.failed)
+                                {
+                                    case (true) { -> expr; }
+                                    default {};
+                                };
+                                switch (c)
+                                {
+                                    case (TokenType.NOT_EQUAL) { n.op = Operator.NOT_EQUAL; }
+                                    default { n.op = Operator.EQUAL; };
+                                };
+                                n.a = expr;
+                                n.b = r;
+                                expr = n;
+                                this.try_template_op(n);
+                                switch (this.failed)
+                                {
+                                    case (true) { -> expr; }
+                                    default {};
+                                };
+                            }
+                                default { break; };
                             };
                         };
                     };
@@ -9722,92 +9800,90 @@ namespace flux
                             case (true) { -> expr; }
                             default {};
                         };
-                        switch (expr.kind == NodeKind.IDENTIFIER)
+                        switch (expr.kind)
                         {
-                            case (true) {
-                            // a defined macro name makes a macro invocation, not a function call
-                            switch (nm_has(this.macros, expr.text))
+                            case (NodeKind.IDENTIFIER)
                             {
-                                case (true) { n = this.mk(NodeKind.MACRO_CALL, line, col); }
-                                default { n = this.mk(NodeKind.FUNCTION_CALL, line, col); };
-                            };
-                            switch (this.failed)
-                            {
-                                case (true) { -> expr; }
-                                default {};
-                            };
-                            n.text = expr.text;
-                            this.take_args(n, holder);
-                        }
-                            default {
-                                switch (expr.kind == NodeKind.STRING_LITERAL)
+                                // a defined macro name makes a macro invocation, not a function call
+                                switch (nm_has(this.macros, expr.text))
                                 {
-                                    case (true) {
-                            n = this.mk(NodeKind.FUNCTION_CALL, line, col);
-                            switch (this.failed)
-                            {
-                                case (true) { -> expr; }
-                                default {};
-                            };
-                            n.text = expr.text;
-                            this.take_args(n, holder);
-                        }
-                                    default {
-                                        switch (expr.kind == NodeKind.F_STRING_LITERAL | expr.kind == NodeKind.STRINGIFY)
-                                        {
-                                            case (true) {
-                            n = this.mk(NodeKind.FUNCTION_CALL, line, col);
-                            switch (this.failed)
-                            {
-                                case (true) { -> expr; }
-                                default {};
-                            };
-                            n.a = expr;
-                            expr = (Node*)0;
-                            this.take_args(n, holder);
-                        }
-                                            default {
-                                                switch (expr.kind == NodeKind.MEMBER_ACCESS)
-                                                {
-                                                    case (true) {
-                            n = (Node*)0;
-                            switch (expr.text2 != (byte*)0)
-                            {
-                                case (true) { n = this.typefunc_call_implicit(expr, holder, line, col); }
-                                default {};
-                            };
-                            switch (this.failed)
-                            {
-                                case (true) { -> expr; }
-                                default {};
-                            };
-                            switch (n != (Node*)0)
-                            {
-                                case (true) {
-                                this.take_args(n, holder);
-                                this.push_front(n, expr.a);
-                                expr.a = (Node*)0;
-                            }
-                                default {
-                                n = this.mk(NodeKind.METHOD_CALL, line, col);
+                                    case (true) { n = this.mk(NodeKind.MACRO_CALL, line, col); }
+                                    default { n = this.mk(NodeKind.FUNCTION_CALL, line, col); };
+                                };
                                 switch (this.failed)
                                 {
                                     case (true) { -> expr; }
                                     default {};
                                 };
-                                n.a = expr.a;
                                 n.text = expr.text;
-                                expr.a = (Node*)0;
                                 this.take_args(n, holder);
-                            };
-                            };
-                        }
-                                                    default {
-                            this.error(g"Cannot call function on complex expression\0");
-                            -> expr;
-                        };
-                                                };
-                                            };
+                            }
+                            case (NodeKind.STRING_LITERAL)
+                            {
+                                n = this.mk(NodeKind.FUNCTION_CALL, line, col);
+                                switch (this.failed)
+                                {
+                                    case (true) { -> expr; }
+                                    default {};
+                                };
+                                n.text = expr.text;
+                                this.take_args(n, holder);
+                            }
+                            default
+                            {
+                                switch (expr.kind == NodeKind.F_STRING_LITERAL | expr.kind == NodeKind.STRINGIFY)
+                                {
+                                    case (true) {
+                                    n = this.mk(NodeKind.FUNCTION_CALL, line, col);
+                                    switch (this.failed)
+                                    {
+                                        case (true) { -> expr; }
+                                        default {};
+                                    };
+                                    n.a = expr;
+                                    expr = (Node*)0;
+                                    this.take_args(n, holder);
+                                }
+                                    default {
+                                        switch (expr.kind == NodeKind.MEMBER_ACCESS)
+                                        {
+                                            case (true) {
+                                    n = (Node*)0;
+                                    switch (expr.text2 != (byte*)0)
+                                    {
+                                        case (true) { n = this.typefunc_call_implicit(expr, holder, line, col); }
+                                        default {};
+                                    };
+                                    switch (this.failed)
+                                    {
+                                        case (true) { -> expr; }
+                                        default {};
+                                    };
+                                    switch (n != (Node*)0)
+                                    {
+                                        case (true) {
+                                        this.take_args(n, holder);
+                                        this.push_front(n, expr.a);
+                                        expr.a = (Node*)0;
+                                    }
+                                        default {
+                                        n = this.mk(NodeKind.METHOD_CALL, line, col);
+                                        switch (this.failed)
+                                        {
+                                            case (true) { -> expr; }
+                                            default {};
+                                        };
+                                        n.a = expr.a;
+                                        n.text = expr.text;
+                                        expr.a = (Node*)0;
+                                        this.take_args(n, holder);
+                                    };
+                                    };
+                                }
+                                            default {
+                                    this.error(g"Cannot call function on complex expression\0");
+                                    -> expr;
+                                };
                                         };
                                     };
                                 };
@@ -9942,6 +10018,12 @@ namespace flux
                                             switch (this.expect(TokenType.INCREMENT) | this.expect(TokenType.DECREMENT))
                                             {
                                                 case (true) {
+                        // not a postfix ++ or -- when it begins a registered custom operator
+                        switch (this.cop_best(0) != (COp*)0)
+                        {
+                            case (true) { -> expr; }
+                            default {};
+                        };
                         pop = Operator.INCREMENT;
                         switch (this.expect(TokenType.DECREMENT))
                         {
@@ -15684,7 +15766,12 @@ namespace flux
                 {
                     case (true) {
                     bool void_form = this.param_count(f) == 0 & f.ts.base_type == DataType.VOID;
-                    bool single_form = this.param_count(f) == 1 & typespec_equal(f.l0.items[0].ts, f.ts);
+                    bool single_form;
+                    switch (this.param_count(f) == 1)
+                    {
+                        case (true) { single_form = typespec_equal(f.l0.items[0].ts, f.ts); }
+                        default {};
+                    };
                     switch (!void_form & !single_form)
                     {
                         case (true) {
@@ -17021,175 +17108,151 @@ namespace flux
                     this.ns_add_all(ns, x);
                 }
                             default {
-                                switch (c == TokenType.STRUCT)
-                                {
-                                    case (true) {
-                    x = this.struct_def();
-                    switch (this.failed)
+                    switch (c)
                     {
-                        case (true) { ->; }
-                        default {};
-                    };
-                    this.ns_tmpl_alias(x);
-                    this.ns_add_all(ns, x);
-                }
-                                    default {
-                                        switch (c == TokenType.OBJECT)
+                        case (TokenType.STRUCT)
+                        {
+                            x = this.struct_def();
+                            switch (this.failed)
+                            {
+                                case (true) { ->; }
+                                default {};
+                            };
+                            this.ns_tmpl_alias(x);
+                            this.ns_add_all(ns, x);
+                        }
+                        case (TokenType.OBJECT)
+                        {
+                            x = this.object_def();
+                            switch (this.failed)
+                            {
+                                case (true) { ->; }
+                                default {};
+                            };
+                            this.ns_tmpl_alias(x);
+                            this.ns_add_all(ns, x);
+                        }
+                        case (TokenType.TRAIT)
+                        {
+                            x = this.trait_def();
+                            switch (this.failed)
+                            {
+                                case (true) { ->; }
+                                default {};
+                            };
+                            this.ns_add_all(ns, x);
+                        }
+                        case (TokenType.INTERFACE)
+                        {
+                            x = this.interface_def();
+                            switch (this.failed)
+                            {
+                                case (true) { ->; }
+                                default {};
+                            };
+                            this.ns_add_all(ns, x);
+                        }
+                        default
+                        {
+                            switch (this.is_trait_prefixed_object())
+                            {
+                                case (true) {
+                                x = this.trait_prefixed_object();
+                                switch (this.failed)
+                                {
+                                    case (true) { ->; }
+                                    default {};
+                                };
+                                this.ns_tmpl_alias(x);
+                                this.ns_add_all(ns, x);
+                            }
+                                default {
+                                    switch (c == TokenType.ENUM | this.type_at(1) == TokenType.ENUM)
+                                    {
+                                        case (true) {
+                                x = this.enum_def();
+                                switch (this.failed)
+                                {
+                                    case (true) { ->; }
+                                    default {};
+                                };
+                                this.ns_add_all(ns, x);
+                            }
+                                        default {
+                                switch (c)
+                                {
+                                    case (TokenType.UNION)
+                                    {
+                                        x = this.union_def();
+                                        switch (this.failed)
+                                        {
+                                            case (true) { ->; }
+                                            default {};
+                                        };
+                                        this.ns_add_all(ns, x);
+                                    }
+                                    case (TokenType.OPERATOR)
+                                    {
+                                        x = this.operator_def();
+                                        switch (this.failed)
+                                        {
+                                            case (true) { ->; }
+                                            default {};
+                                        };
+                                        this.ns_add_all(ns, x);
+                                    }
+                                    case (TokenType.EXTERN)
+                                    {
+                                        x = this.extern_statement();
+                                        switch (this.failed)
+                                        {
+                                            case (true) { ->; }
+                                            default {};
+                                        };
+                                        this.ns_add_all(ns, x);
+                                    }
+                                    case (TokenType.NAMESPACE)
+                                    {
+                                        x = this.namespace_def();
+                                        switch (this.failed)
+                                        {
+                                            case (true) { ->; }
+                                            default {};
+                                        };
+                                        this.ns_nest(ns, x);
+                                    }
+                                    case (TokenType.IF)
+                                    {
+                                        x = this.if_statement();
+                                        node_free(x);
+                                    }
+                                    default
+                                    {
+                                        switch (this.is_variable_declaration())
                                         {
                                             case (true) {
-                    x = this.object_def();
-                    switch (this.failed)
-                    {
-                        case (true) { ->; }
-                        default {};
-                    };
-                    this.ns_tmpl_alias(x);
-                    this.ns_add_all(ns, x);
-                }
-                                            default {
-                                                switch (c == TokenType.TRAIT)
-                                                {
-                                                    case (true) {
-                    x = this.trait_def();
-                    switch (this.failed)
-                    {
-                        case (true) { ->; }
-                        default {};
-                    };
-                    this.ns_add_all(ns, x);
-                }
-                                                    default {
-                                                        switch (c == TokenType.INTERFACE)
-                                                        {
-                                                            case (true) {
-                    x = this.interface_def();
-                    switch (this.failed)
-                    {
-                        case (true) { ->; }
-                        default {};
-                    };
-                    this.ns_add_all(ns, x);
-                }
-                                                            default {
-                                                                switch (this.is_trait_prefixed_object())
-                                                                {
-                                                                    case (true) {
-                    x = this.trait_prefixed_object();
-                    switch (this.failed)
-                    {
-                        case (true) { ->; }
-                        default {};
-                    };
-                    this.ns_tmpl_alias(x);
-                    this.ns_add_all(ns, x);
-                }
-                                                                    default {
-                                                                        switch (c == TokenType.ENUM | this.type_at(1) == TokenType.ENUM)
-                                                                        {
-                                                                            case (true) {
-                    x = this.enum_def();
-                    switch (this.failed)
-                    {
-                        case (true) { ->; }
-                        default {};
-                    };
-                    this.ns_add_all(ns, x);
-                }
-                                                                            default {
-                                                                                switch (c == TokenType.UNION)
-                                                                                {
-                                                                                    case (true) {
-                    x = this.union_def();
-                    switch (this.failed)
-                    {
-                        case (true) { ->; }
-                        default {};
-                    };
-                    this.ns_add_all(ns, x);
-                }
-                                                                                    default {
-                                                                                        switch (c == TokenType.OPERATOR)
-                                                                                        {
-                                                                                            case (true) {
-                    x = this.operator_def();
-                    switch (this.failed)
-                    {
-                        case (true) { ->; }
-                        default {};
-                    };
-                    this.ns_add_all(ns, x);
-                }
-                                                                                            default {
-                                                                                                switch (c == TokenType.EXTERN)
-                                                                                                {
-                                                                                                    case (true) {
-                    x = this.extern_statement();
-                    switch (this.failed)
-                    {
-                        case (true) { ->; }
-                        default {};
-                    };
-                    this.ns_add_all(ns, x);
-                }
-                                                                                                    default {
-                                                                                                        switch (c == TokenType.NAMESPACE)
-                                                                                                        {
-                                                                                                            case (true) {
-                    x = this.namespace_def();
-                    switch (this.failed)
-                    {
-                        case (true) { ->; }
-                        default {};
-                    };
-                    this.ns_nest(ns, x);
-                }
-                                                                                                            default {
-                                                                                                                switch (c == TokenType.IF)
-                                                                                                                {
-                                                                                                                    case (true) {
-                    x = this.if_statement();
-                    node_free(x);
-                }
-                                                                                                                    default {
-                                                                                                                        switch (this.is_variable_declaration())
-                                                                                                                        {
-                                                                                                                            case (true) {
-                    x = this.variable_declaration();
-                    switch (this.failed)
-                    {
-                        case (true) { ->; }
-                        default {};
-                    };
-                    this.ns_add_all(ns, x);
-                    this.consume(TokenType.SEMICOLON);
-                }
-                                                                                                                            default {
-                    this.error(g"Expected function, struct, object, namespace, enum, union, or variable declaration\0");
-                };
-                                                                                                                        };
-                                                                                                                    };
-                                                                                                                };
-                                                                                                            };
-                                                                                                        };
-                                                                                                    };
-                                                                                                };
-                                                                                            };
-                                                                                        };
-                                                                                    };
-                                                                                };
-                                                                            };
-                                                                        };
-                                                                    };
-                                                                };
-                                                            };
-                                                        };
-                                                    };
-                                                };
+                                            x = this.variable_declaration();
+                                            switch (this.failed)
+                                            {
+                                                case (true) { ->; }
+                                                default {};
                                             };
+                                            this.ns_add_all(ns, x);
+                                            this.consume(TokenType.SEMICOLON);
+                                        }
+                                            default {
+                                            this.error(g"Expected function, struct, object, namespace, enum, union, or variable declaration\0");
+                                        };
                                         };
                                     };
                                 };
                             };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
                         };
                     };
                 };
@@ -20329,12 +20392,12 @@ namespace flux
                 int np = this.param_count(f);
                 switch (bind == 1)
                 {
-                    case (true) { this.cop_register(2, l, (OpSym*)0, f.text); this.define_op_symbol(l); ->; }
+                    case (true) { this.define_op_symbol(l); this.cop_register(2, l, (OpSym*)0, f.text); ->; }
                     default {};
                 };
                 switch (bind == 2)
                 {
-                    case (true) { this.cop_register(3, l, (OpSym*)0, f.text); this.define_op_symbol(l); ->; }
+                    case (true) { this.define_op_symbol(l); this.cop_register(3, l, (OpSym*)0, f.text); ->; }
                     default {};
                 };
                 switch (r != (OpSym*)0)
@@ -20348,13 +20411,13 @@ namespace flux
                     }
                         default {};
                     };
+                    this.define_op_symbol(r);
+                    this.define_op_symbol(l);
                     switch (np)
                     {
                         case (1) { this.cop_register(5, l, r, f.text); }
                         default { this.cop_register(4, l, r, f.text); };
                     };
-                    this.define_op_symbol(r);
-                    this.define_op_symbol(l);
                     ->;
                 }
                     default {};
@@ -20362,8 +20425,8 @@ namespace flux
                 switch (variadic)
                 {
                     case (true) {
-                    this.cop_register(1, l, (OpSym*)0, f.text);
                     this.define_op_symbol(l);
+                    this.cop_register(1, l, (OpSym*)0, f.text);
                     ->;
                 }
                     default {};
@@ -20384,8 +20447,8 @@ namespace flux
                 }
                     default {};
                 };
-                this.cop_register(0, l, (OpSym*)0, f.text);
                 this.define_op_symbol(l);
+                this.cop_register(0, l, (OpSym*)0, f.text);
                 ->;
             };
 
@@ -21340,64 +21403,53 @@ namespace flux
                     }
                         default {};
                     };
-                    switch (s.kind == NodeKind.BLOCK)
+                    switch (s.kind)
                     {
-                        case (true) { this.rewrite_returns(s, rt, post, void_mode); }
-                        default {
-                            switch (s.kind == NodeKind.IF_STATEMENT)
+                        case (NodeKind.BLOCK) { this.rewrite_returns(s, rt, post, void_mode); }
+                        case (NodeKind.IF_STATEMENT)
+                        {
+                            this.rewrite_returns(s.b, rt, post, void_mode);
+                            this.rewrite_returns(s.c, rt, post, void_mode);
+                            k = 0;
+                            while (k < node_count(s, 1))
+                            {
+                                this.rewrite_returns(s.l1.items[k], rt, post, void_mode);
+                                k++;
+                            };
+                        }
+                        default
+                        {
+                            switch (s.kind == NodeKind.WHILE_LOOP | s.kind == NodeKind.DO_LOOP | s.kind == NodeKind.DO_WHILE_LOOP | s.kind == NodeKind.FOR_IN_LOOP)
                             {
                                 case (true) {
-                        this.rewrite_returns(s.b, rt, post, void_mode);
-                        this.rewrite_returns(s.c, rt, post, void_mode);
-                        k = 0;
-                        while (k < node_count(s, 1))
-                        {
-                            this.rewrite_returns(s.l1.items[k], rt, post, void_mode);
-                            k++;
-                        };
-                    }
+                                this.rewrite_returns(s.b, rt, post, void_mode);
+                            }
                                 default {
-                                    switch (s.kind == NodeKind.WHILE_LOOP | s.kind == NodeKind.DO_LOOP | s.kind == NodeKind.DO_WHILE_LOOP | s.kind == NodeKind.FOR_IN_LOOP)
+                                switch (s.kind)
+                                {
+                                    case (NodeKind.FOR_LOOP) { this.rewrite_returns(s.d, rt, post, void_mode); }
+                                    case (NodeKind.SWITCH_STATEMENT)
                                     {
-                                        case (true) {
-                        this.rewrite_returns(s.b, rt, post, void_mode);
-                    }
-                                        default {
-                                            switch (s.kind == NodeKind.FOR_LOOP)
-                                            {
-                                                case (true) { this.rewrite_returns(s.d, rt, post, void_mode); }
-                                                default {
-                                                    switch (s.kind == NodeKind.SWITCH_STATEMENT)
-                                                    {
-                                                        case (true) {
-                        k = 0;
-                        while (k < node_count(s, 0))
-                        {
-                            this.rewrite_returns(s.l0.items[k].b, rt, post, void_mode);
-                            k++;
-                        };
-                    }
-                                                        default {
-                                                            switch (s.kind == NodeKind.TRY_BLOCK)
-                                                            {
-                                                                case (true) {
-                        this.rewrite_returns(s.a, rt, post, void_mode);
-                        k = 0;
-                        while (k < node_count(s, 0))
-                        {
-                            this.rewrite_returns(s.l0.items[k].a, rt, post, void_mode);
-                            k++;
-                        };
-                    }
-                                                                default {};
-                                                            };
-                                                        };
-                                                    };
-                                                };
-                                            };
+                                        k = 0;
+                                        while (k < node_count(s, 0))
+                                        {
+                                            this.rewrite_returns(s.l0.items[k].b, rt, post, void_mode);
+                                            k++;
                                         };
-                                    };
+                                    }
+                                    case (NodeKind.TRY_BLOCK)
+                                    {
+                                        this.rewrite_returns(s.a, rt, post, void_mode);
+                                        k = 0;
+                                        while (k < node_count(s, 0))
+                                        {
+                                            this.rewrite_returns(s.l0.items[k].a, rt, post, void_mode);
+                                            k++;
+                                        };
+                                    }
+                                    default {};
                                 };
+                            };
                             };
                         };
                     };
@@ -21539,6 +21591,7 @@ namespace flux
                     default {};
                 };
                 t.text = this.own_n(this.sb.mem, this.sb.len);
+                t.ival = (i64)this.sb.len;
                 t.op = -1;
                 node_push(holder, 0, t);
                 this.sb.len = 0;
@@ -21554,6 +21607,7 @@ namespace flux
                 int line = this.cur_line();
                 int col = this.cur_col();
                 Node* n = this.mk(NodeKind.F_STRING_LITERAL, line, col);
+                n.op = 1;
                 switch (this.failed)
                 {
                     case (true) { -> n; }
@@ -22394,425 +22448,232 @@ namespace flux
                 };
 
                 c = this.cur();
-                switch (c == TokenType.MACRO)
+                switch (c)
                 {
-                    case (true) { -> this.macro_def(); }
-                    default {
-                        switch (c == TokenType.USING)
-                        {
-                            case (true) { -> this.using_statement(); }
-                            default {
-                                switch (c == TokenType.NOT)
-                                {
-                                    case (true){
-                    this.advance();
-                    switch (this.expect(TokenType.USING))
+                    case (TokenType.MACRO) { -> this.macro_def(); }
+                    case (TokenType.USING) { -> this.using_statement(); }
+                    case (TokenType.NOT)
                     {
-                        case (true) {
                         this.advance();
-                        -> this.not_using_statement();
+                        switch (this.expect(TokenType.USING))
+                        {
+                            case (true) {
+                            this.advance();
+                            -> this.not_using_statement();
+                        }
+                            default {};
+                        };
                     }
-                        default {};
-                    };
-                }
+                    case (TokenType.OPERATOR) { -> this.operator_def(); }
+                    case (TokenType.EXTERN) { -> this.extern_statement(); }
+                    case (TokenType.EXPORT) { -> this.export_statement(); }
+                    case (TokenType.CONTRACT) { -> this.contract_def(); }
+                    case (TokenType.CONSTRAINT) { -> this.constra_def(); }
+                    case (TokenType.EFFECT) { -> this.effect_def(); }
+                    case (TokenType.INLINE) { -> this.function_def(); }
+                    case (TokenType.DEF) { -> this.function_def(); }
+                    case (TokenType.NO_MANGLE) { -> this.function_def(); }
+                    default
+                    {
+                        switch (this.is_calling_conv(c))
+                        {
+                            case (true) { -> this.function_def(); }
+                            default {
+                                switch (this.is_bare_function_def())
+                                {
+                                    case (true) { -> this.function_def(); }
                                     default {
-                                        switch (c == TokenType.OPERATOR)
+                                        switch (c == TokenType.ENUM)
                                         {
-                                            case (true) { -> this.operator_def(); }
+                                            case (true) { -> this.enum_def(); }
                                             default {
-                                                switch (c == TokenType.EXTERN)
+                                                switch (this.type_at(1) == TokenType.ENUM)
                                                 {
-                                                    case (true) { -> this.extern_statement(); }
+                                                    case (true) { -> this.enum_def(); }
                                                     default {
-                                                        switch (c == TokenType.EXPORT)
+                            switch (c)
+                            {
+                                case (TokenType.UNION) { -> this.union_def(); }
+                                case (TokenType.STRUCT)
+                                {
+                                    switch (this.type_at(1) == TokenType.MULTIPLY)
+                                    {
+                                        case (true) {
+                                        -> this.variable_declaration_statement();
+                                    }
+                                        default {};
+                                    };
+                                    -> this.struct_def();
+                                }
+                                case (TokenType.OBJECT)
+                                {
+                                    switch (this.type_at(1) == TokenType.MULTIPLY)
+                                    {
+                                        case (true) {
+                                        -> this.variable_declaration_statement();
+                                    }
+                                        default {};
+                                    };
+                                    -> this.object_def();
+                                }
+                                case (TokenType.TRAIT) { -> this.trait_def(); }
+                                case (TokenType.INTERFACE) { -> this.interface_def(); }
+                                default
+                                {
+                                    switch (this.is_trait_prefixed_object())
+                                    {
+                                        case (true) { -> this.trait_prefixed_object(); }
+                                        default {
+                                        switch (c)
+                                        {
+                                            case (TokenType.NAMESPACE) { -> this.namespace_def(); }
+                                            case (TokenType.IF) { -> this.if_statement(); }
+                                            case (TokenType.DO) { -> this.do_while_statement(); }
+                                            case (TokenType.WHILE) { -> this.while_statement(); }
+                                            case (TokenType.FOR) { -> this.for_statement(); }
+                                            case (TokenType.SWITCH) { -> this.switch_statement(); }
+                                            case (TokenType.TRY) { -> this.try_statement(); }
+                                            case (TokenType.RETURN) { -> this.return_statement(); }
+                                            case (TokenType.RETURN_ARROW) { -> this.return_arrow_ret(); }
+                                            case (TokenType.BREAK) { -> this.break_statement(); }
+                                            case (TokenType.CONTINUE) { -> this.continue_statement(); }
+                                            case (TokenType.LABEL) { -> this.label_statement(); }
+                                            case (TokenType.GOTO) { -> this.goto_statement(); }
+                                            case (TokenType.JUMP) { -> this.jump_statement(); }
+                                            case (TokenType.THROW) { -> this.throw_statement(); }
+                                            case (TokenType.ASSERT) { -> this.assert_statement(); }
+                                            case (TokenType.DEFER) { -> this.defer_statement(); }
+                                            case (TokenType.ESCAPE_KW) { -> this.escape_statement(); }
+                                            case (TokenType.DEPRECATE) { -> this.deprecate_statement(); }
+                                            case (TokenType.NORET) { -> this.noreturn_statement(); }
+                                            case (TokenType.LEFT_BRACE) { -> this.block_statement(); }
+                                            default
+                                            {
+                                                switch (this.is_type_func_def())
+                                                {
+                                                    case (true) { -> this.type_func_def(); }
+                                                    default {
+                                                        switch (this.is_dual_assign_declaration())
                                                         {
-                                                            case (true) { -> this.export_statement(); }
+                                                            case (true) { -> this.dual_assign_declaration(); }
                                                             default {
-                                                                switch (c == TokenType.CONTRACT)
+                                                                switch (this.is_variable_declaration())
                                                                 {
-                                                                    case (true) { -> this.contract_def(); }
+                                                                    case (true) { -> this.variable_declaration_statement(); }
                                                                     default {
-                                                                        switch (c == TokenType.CONSTRAINT)
+                                                    switch (c)
+                                                    {
+                                                        case (TokenType.UNSIGNED) { -> this.variable_declaration_statement(); }
+                                                        case (TokenType.SIGNED) { -> this.variable_declaration_statement(); }
+                                                        default
+                                                        {
+                                                            switch (this.expect4(TokenType.SINT, TokenType.UINT, TokenType.DATA, TokenType.CHAR)
+                                                                | this.expect4(TokenType.BYTE, TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.BOOL_KW)
+                                                                | this.expect4(TokenType.VOID, TokenType.SLONG, TokenType.ULONG, TokenType.DICT))
+                                                            {
+                                                                case (true) {
+                                                                -> this.variable_declaration_statement();
+                                                            }
+                                                                default {
+                                                                switch (c)
+                                                                {
+                                                                    case (TokenType.DITTO) { -> this.ditto_statement(); }
+                                                                    case (TokenType.SEMICOLON)
+                                                                    {
+                                                                        this.advance();
+                                                                        -> (Node*)0;
+                                                                    }
+                                                                    default
+                                                                    {
+                                                                        switch (c == TokenType.AUTO & this.type_at(1) == TokenType.LEFT_BRACE)
                                                                         {
-                                                                            case (true) { -> this.constra_def(); }
+                                                                            case (true) {
+                                                                            Node* dn = this.destructuring_assignment();
+                                                                            switch (!this.failed)
+                                                                            {
+                                                                                case (true) { this.consume(TokenType.SEMICOLON); }
+                                                                                default {};
+                                                                            };
+                                                                            -> dn;
+                                                                        }
                                                                             default {
-                                                                                switch (c == TokenType.EFFECT)
+                                                                                switch (c == TokenType.AUTO & this.type_at(1) == TokenType.IDENTIFIER)
                                                                                 {
-                                                                                    case (true) { -> this.effect_def(); }
+                                                                                    case (true) {
+                                                                            Node* av = this.auto_variable_declaration();
+                                                                            switch (!this.failed)
+                                                                            {
+                                                                                case (true) { this.consume(TokenType.SEMICOLON); }
+                                                                                default {};
+                                                                            };
+                                                                            -> av;
+                                                                        }
                                                                                     default {
-                                                                                        switch (c == TokenType.INLINE)
-                                                                                        {
-                                                                                            case (true) { -> this.function_def(); }
-                                                                                            default {
-                                                                                                switch (c == TokenType.DEF)
-                                                                                                {
-                                                                                                    case (true) { -> this.function_def(); }
-                                                                                                    default {
-                                                                                                        switch (c == TokenType.NO_MANGLE)
-                                                                                                        {
-                                                                                                            case (true) { -> this.function_def(); }
-                                                                                                            default {
-                                                                                                                switch (this.is_calling_conv(c))
-                                                                                                                {
-                                                                                                                    case (true) { -> this.function_def(); }
-                                                                                                                    default {
-                                                                                                                        switch (this.is_bare_function_def())
-                                                                                                                        {
-                                                                                                                            case (true) { -> this.function_def(); }
-                                                                                                                            default {
-                                                                                                                                switch (c == TokenType.ENUM)
-                                                                                                                                {
-                                                                                                                                    case (true) { -> this.enum_def(); }
-                                                                                                                                    default {
-                                                                                                                                        switch (this.type_at(1) == TokenType.ENUM)
-                                                                                                                                        {
-                                                                                                                                            case (true) { -> this.enum_def(); }
-                                                                                                                                            default {
-                                                                                                                                                switch (c == TokenType.UNION)
-                                                                                                                                                {
-                                                                                                                                                    case (true) { -> this.union_def(); }
-                                                                                                                                                    default {
-                                                                                                                                                        switch (c == TokenType.STRUCT)
-                                                                                                                                                        {
-                                                                                                                                                            case (true) {
-                    switch (this.type_at(1) == TokenType.MULTIPLY)
-                    {
-                        case (true) {
-                        -> this.variable_declaration_statement();
-                    }
-                        default {};
-                    };
-                    -> this.struct_def();
-                }
-                                                                                                                                                            default {
-                                                                                                                                                                switch (c == TokenType.OBJECT)
-                                                                                                                                                                {
-                                                                                                                                                                    case (true) {
-                    switch (this.type_at(1) == TokenType.MULTIPLY)
-                    {
-                        case (true) {
-                        -> this.variable_declaration_statement();
-                    }
-                        default {};
-                    };
-                    -> this.object_def();
-                }
-                                                                                                                                                                    default {
-                                                                                                                                                                        switch (c == TokenType.TRAIT)
-                                                                                                                                                                        {
-                                                                                                                                                                            case (true) { -> this.trait_def(); }
-                                                                                                                                                                            default {
-                                                                                                                                                                                switch (c == TokenType.INTERFACE)
-                                                                                                                                                                                {
-                                                                                                                                                                                    case (true) { -> this.interface_def(); }
-                                                                                                                                                                                    default {
-                                                                                                                                                                                        switch (this.is_trait_prefixed_object())
-                                                                                                                                                                                        {
-                                                                                                                                                                                            case (true) { -> this.trait_prefixed_object(); }
-                                                                                                                                                                                            default {
-                                                                                                                                                                                                switch (c == TokenType.NAMESPACE)
-                                                                                                                                                                                                {
-                                                                                                                                                                                                    case (true) { -> this.namespace_def(); }
-                                                                                                                                                                                                    default {
-                                                                                                                                                                                                        switch (c == TokenType.IF)
-                                                                                                                                                                                                        {
-                                                                                                                                                                                                            case (true) { -> this.if_statement(); }
-                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                switch (c == TokenType.DO)
-                                                                                                                                                                                                                {
-                                                                                                                                                                                                                    case (true) { -> this.do_while_statement(); }
-                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                        switch (c == TokenType.WHILE)
-                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                            case (true) { -> this.while_statement(); }
-                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                switch (c == TokenType.FOR)
-                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                    case (true) { -> this.for_statement(); }
-                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                        switch (c == TokenType.SWITCH)
-                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                            case (true) { -> this.switch_statement(); }
-                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                switch (c == TokenType.TRY)
-                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                    case (true) { -> this.try_statement(); }
-                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                        switch (c == TokenType.RETURN)
-                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                            case (true) { -> this.return_statement(); }
-                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                switch (c == TokenType.RETURN_ARROW)
-                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                    case (true) { -> this.return_arrow_ret(); }
-                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                        switch (c == TokenType.BREAK)
-                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                            case (true) { -> this.break_statement(); }
-                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                switch (c == TokenType.CONTINUE)
-                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                    case (true) { -> this.continue_statement(); }
-                                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                                        switch (c == TokenType.LABEL)
-                                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                                            case (true) { -> this.label_statement(); }
-                                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                                switch (c == TokenType.GOTO)
-                                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                                    case (true) { -> this.goto_statement(); }
-                                                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                                                        switch (c == TokenType.JUMP)
-                                                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                                                            case (true) { -> this.jump_statement(); }
-                                                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                                                switch (c == TokenType.THROW)
-                                                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                                                    case (true) { -> this.throw_statement(); }
-                                                                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                                                                        switch (c == TokenType.ASSERT)
-                                                                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                                                                            case (true) { -> this.assert_statement(); }
-                                                                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                                                                switch (c == TokenType.DEFER)
-                                                                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                                                                    case (true) { -> this.defer_statement(); }
-                                                                                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                                                                                        switch (c == TokenType.ESCAPE_KW)
-                                                                                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                                                                                            case (true) { -> this.escape_statement(); }
-                                                                                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                                                                                switch (c == TokenType.DEPRECATE)
-                                                                                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                                                                                    case (true) { -> this.deprecate_statement(); }
-                                                                                                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                                                                                                        switch (c == TokenType.NORET)
-                                                                                                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                                                                                                            case (true) { -> this.noreturn_statement(); }
-                                                                                                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                                                                                                switch (c == TokenType.LEFT_BRACE)
-                                                                                                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                                                                                                    case (true) { -> this.block_statement(); }
-                                                                                                                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                                                                                                                        switch (this.is_type_func_def())
-                                                                                                                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                                                                                                                            case (true) { -> this.type_func_def(); }
-                                                                                                                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                                                                                                                switch (this.is_dual_assign_declaration())
-                                                                                                                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                                                                                                                    case (true) { -> this.dual_assign_declaration(); }
-                                                                                                                                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                                                                                                                                        switch (this.is_variable_declaration())
-                                                                                                                                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                                                                                                                                            case (true) { -> this.variable_declaration_statement(); }
-                                                                                                                                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                                                                                                                                switch (c == TokenType.UNSIGNED)
-                                                                                                                                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                                                                                                                                    case (true) { -> this.variable_declaration_statement(); }
-                                                                                                                                                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                                                                                                                                                        switch (c == TokenType.SIGNED)
-                                                                                                                                                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                                                                                                                                                            case (true) { -> this.variable_declaration_statement(); }
-                                                                                                                                                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                                                                                                                                                switch (this.expect4(TokenType.SINT, TokenType.UINT, TokenType.DATA, TokenType.CHAR)
-                    | this.expect4(TokenType.BYTE, TokenType.FLOAT_KW, TokenType.DOUBLE_KW, TokenType.BOOL_KW)
-                    | this.expect4(TokenType.VOID, TokenType.SLONG, TokenType.ULONG, TokenType.DICT))
-                                                                                                                                                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                                                                                                                                                    case (true) {
-                    -> this.variable_declaration_statement();
-                }
-                                                                                                                                                                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                                                                                                                                                                        switch (c == TokenType.DITTO)
-                                                                                                                                                                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                                                                                                                                                                            case (true) { -> this.ditto_statement(); }
-                                                                                                                                                                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                                                                                                                                                                switch (c == TokenType.SEMICOLON)
-                                                                                                                                                                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                                                                                                                                                                    case (true) {
-                    this.advance();
-                    -> (Node*)0;
-                }
-                                                                                                                                                                                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                                                                                                                                                                                        switch (c == TokenType.AUTO & this.type_at(1) == TokenType.LEFT_BRACE)
-                                                                                                                                                                                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                                                                                                                                                                                            case (true) {
-                    Node* dn = this.destructuring_assignment();
-                    switch (!this.failed)
-                    {
-                        case (true) { this.consume(TokenType.SEMICOLON); }
-                        default {};
-                    };
-                    -> dn;
-                }
-                                                                                                                                                                                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                switch (c == TokenType.AUTO & this.type_at(1) == TokenType.IDENTIFIER)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                    case (true) {
-                    Node* av = this.auto_variable_declaration();
-                    switch (!this.failed)
-                    {
-                        case (true) { this.consume(TokenType.SEMICOLON); }
-                        default {};
-                    };
-                    -> av;
-                }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        switch (c == TokenType.CODIFY)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                            case (true) { -> this.codify_statement(); }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                switch (c == TokenType.COMPTIME)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                    case (true) { -> this.comptime_block(); }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                        switch (c == TokenType.EMITFLUX)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                            case (true) {
-                    switch (this.in_comptime == 0)
-                    {
-                        case (true) {
-                        this.error(g"'emitflux' is only valid inside a 'comptime' block\0");
-                        -> (Node*)0;
-                    }
-                        default {};
-                    };
-                    -> this.emitflux_statement();
-                }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                switch (c == TokenType.ASM)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    case (true) { -> this.asm_statement(false); }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    default {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        switch (c == TokenType.FLUXVM)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            case (true) {
-                    switch (this.in_comptime == 0)
-                    {
-                        case (true) {
-                        this.error(g"'fluxvm' is only valid inside a 'comptime' block\0");
-                        -> (Node*)0;
-                    }
-                        default {};
-                    };
-                    -> this.fluxvm_statement();
-                }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            default {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                switch (c == TokenType.IDENTIFIER & this.val_is(g"error\0", 5) & this.type_at(1) >= 0 & this.type_at(1) != TokenType.ASSIGN)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    case (true) {
-                    -> this.error_return_statement();
-                }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    default {
-                    -> this.expression_statement();
-                };
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                                };
-                                                                                                                                                                                                                            };
-                                                                                                                                                                                                                        };
-                                                                                                                                                                                                                    };
-                                                                                                                                                                                                                };
-                                                                                                                                                                                                            };
-                                                                                                                                                                                                        };
-                                                                                                                                                                                                    };
-                                                                                                                                                                                                };
-                                                                                                                                                                                            };
-                                                                                                                                                                                        };
-                                                                                                                                                                                    };
-                                                                                                                                                                                };
-                                                                                                                                                                            };
-                                                                                                                                                                        };
-                                                                                                                                                                    };
-                                                                                                                                                                };
-                                                                                                                                                            };
-                                                                                                                                                        };
-                                                                                                                                                    };
-                                                                                                                                                };
-                                                                                                                                            };
-                                                                                                                                        };
-                                                                                                                                    };
-                                                                                                                                };
-                                                                                                                            };
-                                                                                                                        };
-                                                                                                                    };
-                                                                                                                };
-                                                                                                            };
-                                                                                                        };
-                                                                                                    };
-                                                                                                };
-                                                                                            };
-                                                                                        };
+                                                                            switch (c)
+                                                                            {
+                                                                                case (TokenType.CODIFY) { -> this.codify_statement(); }
+                                                                                case (TokenType.COMPTIME) { -> this.comptime_block(); }
+                                                                                case (TokenType.EMITFLUX)
+                                                                                {
+                                                                                    switch (this.in_comptime == 0)
+                                                                                    {
+                                                                                        case (true) {
+                                                                                        this.error(g"'emitflux' is only valid inside a 'comptime' block\0");
+                                                                                        -> (Node*)0;
+                                                                                    }
+                                                                                        default {};
                                                                                     };
+                                                                                    -> this.emitflux_statement();
+                                                                                }
+                                                                                case (TokenType.ASM) { -> this.asm_statement(false); }
+                                                                                case (TokenType.FLUXVM)
+                                                                                {
+                                                                                    switch (this.in_comptime == 0)
+                                                                                    {
+                                                                                        case (true) {
+                                                                                        this.error(g"'fluxvm' is only valid inside a 'comptime' block\0");
+                                                                                        -> (Node*)0;
+                                                                                    }
+                                                                                        default {};
+                                                                                    };
+                                                                                    -> this.fluxvm_statement();
+                                                                                }
+                                                                                default
+                                                                                {
+                                                                                    switch (c == TokenType.IDENTIFIER & this.val_is(g"error\0", 5) & this.type_at(1) >= 0 & this.type_at(1) != TokenType.ASSIGN)
+                                                                                    {
+                                                                                        case (true) {
+                                                                                        -> this.error_return_statement();
+                                                                                    }
+                                                                                        default {
+                                                                                        -> this.expression_statement();
+                                                                                    };
+                                                                                    };
+                                                                                };
+                                                                            };
+                                                                        };
                                                                                 };
                                                                             };
                                                                         };
                                                                     };
                                                                 };
                                                             };
+                                                            };
                                                         };
                                                     };
+                                                };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                    };
+                                };
+                            };
+                        };
                                                 };
                                             };
                                         };
@@ -22911,6 +22772,7 @@ namespace flux
                 k = 0;
                 while (k < this.tinst_f.len)
                 {
+                    ((Node*)this.tinst_f.items[k]).flags = ((Node*)this.tinst_f.items[k]).flags `| NF_INSTANCE;
                     node_push(prog, 0, (Node*)this.tinst_f.items[k]);
                     k++;
                 };

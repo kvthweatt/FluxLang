@@ -1,4 +1,4 @@
-#import "standard.fx";
+#import <standard.fx>;
 
 def foo(byte x) -> byte
 {

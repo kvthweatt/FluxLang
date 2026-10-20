@@ -2,7 +2,7 @@
 // A lexer-style state machine that classifies ASCII input into token kinds.
 // Demonstrates: enum, switch, singinit, and Flux operator idioms (`is`, `?=`).
 
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console,
       standard::strings;

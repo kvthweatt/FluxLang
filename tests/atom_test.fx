@@ -12,8 +12,8 @@
 //   - Reference counter
 //   - Atomic flag
 
-#import "standard.fx";
-#import "atomics.fx";
+#import <standard.fx>;
+#import <atomics.fx>;
 
 using standard::io::console;
 

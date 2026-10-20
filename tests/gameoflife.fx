@@ -1,4 +1,4 @@
-#import "standard.fx", "math.fx", "windows.fx", "opengl.fx", "timing.fx", "threading.fx", "random.fx";
+#import <standard.fx>, <math.fx>, <windows.fx>, <opengl.fx>, <timing.fx>, <threading.fx>, <random.fx>;
 
 using standard::io::console,
       standard::math,

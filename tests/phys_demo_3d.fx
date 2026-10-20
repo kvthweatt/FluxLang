@@ -12,11 +12,11 @@
 // Controls: close window to quit.
 //
 
-#import "standard.fx";
-#import "timing.fx";
-#import "windows.fx";
-#import "opengl.fx";
-#import "physics.fx";
+#import <standard.fx>;
+#import <timing.fx>;
+#import <windows.fx>;
+#import <opengl.fx>;
+#import <physics.fx>;
 
 using standard::io::console;
 using standard::system::windows;

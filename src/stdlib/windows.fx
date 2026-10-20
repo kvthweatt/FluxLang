@@ -160,7 +160,7 @@ namespace standard
             global UINT CS_VREDRAW  = 0x0001,
                         CS_HREDRAW  = 0x0002,
                         CS_DBLCLKS  = 0x0008,
-                        CS_OWNDC   = 0x0020;
+                        CS_OWNDC    = 0x0020;
 
             // ShowWindow Commands (SW_*)
             global int SW_HIDE            = 0,
@@ -177,26 +177,26 @@ namespace standard
                        SW_RESTORE         = 9;
 
             // Window Messages (WM_*)
-            global UINT WM_NULL        = 0x0000,
-                        WM_CREATE      = 0x0001,
-                        WM_DESTROY     = 0x0002,
-                        WM_MOVE        = 0x0003,
-                        WM_SIZE        = 0x0005,
+            global UINT WM_NULL          = 0x0000,
+                        WM_CREATE        = 0x0001,
+                        WM_DESTROY       = 0x0002,
+                        WM_MOVE          = 0x0003,
+                        WM_SIZE          = 0x0005,
                         WM_GETMINMAXINFO = 0x0024,
-                        WM_ACTIVATE    = 0x0006,
-                        WM_PAINT       = 0x000F,
-                        WM_ERASEBKGND  = 0x0014,
-                        WM_CLOSE       = 0x0010,
-                        WM_QUIT        = 0x0012,
-                        WM_KEYDOWN     = 0x0100,
-                        WM_KEYUP       = 0x0101,
-                        WM_CHAR        = 0x0102,
-                        WM_MOUSEMOVE   = 0x0200,
-                        WM_LBUTTONDOWN    = 0x0201,
-                        WM_LBUTTONUP      = 0x0202,
-                        WM_LBUTTONDBLCLK  = 0x0203,
-                        WM_RBUTTONDOWN    = 0x0204,
-                        WM_RBUTTONUP   = 0x0205;
+                        WM_ACTIVATE      = 0x0006,
+                        WM_PAINT         = 0x000F,
+                        WM_ERASEBKGND    = 0x0014,
+                        WM_CLOSE         = 0x0010,
+                        WM_QUIT          = 0x0012,
+                        WM_KEYDOWN       = 0x0100,
+                        WM_KEYUP         = 0x0101,
+                        WM_CHAR          = 0x0102,
+                        WM_MOUSEMOVE     = 0x0200,
+                        WM_LBUTTONDOWN   = 0x0201,
+                        WM_LBUTTONUP     = 0x0202,
+                        WM_LBUTTONDBLCLK = 0x0203,
+                        WM_RBUTTONDOWN   = 0x0204,
+                        WM_RBUTTONUP     = 0x0205;
 
             // PeekMessage flags (PM_*)
             global UINT PM_NOREMOVE = 0x0000,
@@ -214,23 +214,23 @@ namespace standard
             global int CW_USEDEFAULT = 0x80000000;
 
             // Virtual Key Codes
-            global int VK_ESCAPE   = 0x1B,
-                       VK_SPACE   = 0x20,
-                       VK_BACK    = 0x08,
-                       VK_TAB     = 0x09,
-                       VK_DELETE  = 0x2E,
-                       VK_LEFT    = 0x25,
-                       VK_RIGHT   = 0x27,
-                       VK_UP      = 0x26,
-                       VK_DOWN    = 0x28,
-                       VK_LBUTTON = 0x01,
-                       VK_HOME    = 0x24,
-                       VK_END     = 0x23,
-                       VK_PRIOR   = 0x21,
-                       VK_NEXT    = 0x22,
-                       VK_RETURN  = 0x0D,
-                       VK_SHIFT   = 0x10,
-                       VK_CONTROL = 0x11,
+            global int VK_ESCAPE    = 0x1B,
+                       VK_SPACE     = 0x20,
+                       VK_BACK      = 0x08,
+                       VK_TAB       = 0x09,
+                       VK_DELETE    = 0x2E,
+                       VK_LEFT      = 0x25,
+                       VK_RIGHT     = 0x27,
+                       VK_UP        = 0x26,
+                       VK_DOWN      = 0x28,
+                       VK_LBUTTON   = 0x01,
+                       VK_HOME      = 0x24,
+                       VK_END       = 0x23,
+                       VK_PRIOR     = 0x21,
+                       VK_NEXT      = 0x22,
+                       VK_RETURN    = 0x0D,
+                       VK_SHIFT     = 0x10,
+                       VK_CONTROL   = 0x11,
                        VK_OEM_PLUS  = 0x0BB,
                        VK_OEM_MINUS = 0xBD;
 

@@ -1,4 +1,4 @@
-#import "standard.fx", "redmath.fx", "redwindows.fx", "redopengl.fx", "bigint.fx", "decimal.fx";
+#import <standard.fx>, "redmath.fx", "redwindows.fx", "redopengl.fx", <bigint.fx>, <decimal.fx>;
 
 using standard::system::windows;
 using standard::math;
