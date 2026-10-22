@@ -7,8 +7,7 @@
 //   - Console animation
 //   - Timing with Sleep
 
-#import <standard.fx>;
-#import "redconsole.fx";
+#import <standard.fx>, <console.fx>;
 
 using standard::io::console;
 
@@ -20,10 +19,10 @@ def sin(float x) -> float
     while (x < 0.0) { x = x + 6.283185; };
     
     // Taylor series for sin
-    float x2 = x * x;
-    float x3 = x2 * x;
-    float x5 = x3 * x2;
-    float x7 = x5 * x2;
+    float x2 = x * x,
+          x3 = x2 * x,
+          x5 = x3 * x2,
+          x7 = x5 * x2;
     
     return x - (x3 / 6.0) + (x5 / 120.0) - (x7 / 5040.0);
 };

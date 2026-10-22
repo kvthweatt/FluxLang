@@ -20,6 +20,10 @@
 #import "src/compiler/f_llvmir.fx";
 #import "src/compiler/fcodegen.fx";
 #import "src/compiler/fdce.fx";
+#import "src/compiler/fborrow.fx";
+#import "src/compiler/fasync.fx";
+#import "src/compiler/feffects.fx";
+#import "src/compiler/fmodules.fx";
 
 using standard::io::console;
 using standard::io::file;
@@ -33,46 +37,35 @@ using flux::typer;
 using flux::ir;
 using flux::codegen;
 using flux::dce;
+using flux::borrow;
+using flux::asyncl;
+using flux::effects;
+using flux::modules;
 
-// ---------------------------------------------------------------------------
-// Configuration (config/flux_config.cfg, parsed the way fconfig.py does)
-// ---------------------------------------------------------------------------
-global byte* CFG_TEXT;
-global bool CFG_LOADED;
-
-// ---------------------------------------------------------------------------
-// Logger (mirrors flogger.py: the whole line is wrapped in the level color)
-//     [INFO] blue 94, [WARN] yellow 93, [ERROR] red 91, success green 92
-// ---------------------------------------------------------------------------
-global bool LOG_ON;
-global bool LOG_COLOR;
-
-#ifdef __WINDOWS__
-// Console code page, so the UTF-8 bytes of the log symbols display correctly
-extern
-{
-    def !!
-        SetConsoleOutputCP(u32) -> int,
-        GetConsoleOutputCP() -> u32;
-};
-#endif;
+print_version()->void;
 
 usage() -> void
 {
-    println("Flux Compiler (bootstrap)\0");
+    print_version();
     println("Usage: fxc <input.fx> [options]\0");
     println("\0");
+    println("  (no stage)        Full chain: write build/<name>/<name>.ll, LLVM IR to .o, then link\n\0");
     println("Options:\0");
-    println("  -o <output>     Output binary name (second positional argument also works)\0");
+    println("  -o <output>       Output binary name (second positional argument also works)\0");
     println("  -E, --preprocess  Run the preprocessor and print the result\0");
-    println("  --lex           Preprocess, then run the lexer and report tokens\0");
-    println("  --parse         Preprocess, lex, then run the bootstrap parser\0");
-    println("  --dump          Parse, then print the syntax tree\0");
-    println("  --check         Parse, then declare symbols and run the type check pass\0");
-    println("  --emit-ll       Parse, declare symbols, then print LLVM IR (types and declarations)\0");
-    println("  (no stage)      Full chain: write build/<name>/<name>.ll, llc to .o, then link\0");
-    println("  -v, --verbose   Show detailed token information\0");
-    println("  -c, --count     Show token count summary\0");
+    println("  --lex             Preprocess, then run the lexer and report tokens\0");
+    println("  --parse           Preprocess, lex, then run the bootstrap parser\0");
+    println("  --dump            Parse, then print the syntax tree\0");
+    println("  --check           Parse, then declare symbols and run the type check pass\0");
+    println("  --emit-ll         Parse, declare symbols, then print LLVM IR (types and declarations)\0");
+    println("  -v, --verbose     Show detailed token information\0");
+    println("  -c, --count       Show token count summary\0");
+    print();
+    println("Additional:\0");
+    println("  --effects           Check the program's effects");
+    println("  --effects-warn      Emit errors as warnings, permits compilation\0");
+    println("  --borrowcheck       Borrow check the program\0");
+    println("  --borrowcheck-warn  Emit errors as warnings, permits compilation\0");
     ->;
 };
 
@@ -82,9 +75,11 @@ arg_eq(byte* a, byte* lit, int n) -> bool
     switch (!bytes_eq(a, lit, n))
     {
         case (true) { -> false; }
-        default {};
+        default
+        {
+            -> a[n] == 0;
+        };
     };
-    -> a[n] == 0;
 };
 
 // Reads the whole file into a heap buffer. Returns null on failure.
@@ -95,44 +90,49 @@ read_source(byte* path, int* out_len) -> byte*
     switch (f == (void*)0)
     {
         case (true) { -> (byte*)0; }
-        default {};
+        default
+        {
+            fseek(f, 0, SEEK_END);
+            int size = ftell(f);
+            fseek(f, 0, SEEK_SET);
+            switch (size < 0)
+            {
+                case (true) {
+                fclose(f);
+                -> (byte*)0;
+            }
+                default
+                {
+                    byte* buf = (byte*)fmalloc((u64)size + (u64)1);
+                    switch (buf == (byte*)0)
+                    {
+                        case (true) {
+                        fclose(f);
+                        -> (byte*)0;
+                    }
+                        default
+                        {
+                            int n = fread(buf, 1, size, f);
+                            fclose(f);
+                            switch (n < 0)
+                            {
+                                case (true) {
+                                ffree(buf);
+                                -> (byte*)0;
+                            }
+                                default
+                                {
+                                    buf[n] = (byte)0;
+                                    *out_len = n;
+                                    -> buf;
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
     };
-
-    fseek(f, 0, SEEK_END);
-    int size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    switch (size < 0)
-    {
-        case (true) {
-        fclose(f);
-        -> (byte*)0;
-    }
-        default {};
-    };
-
-    byte* buf = (byte*)fmalloc((u64)size + (u64)1);
-    switch (buf == (byte*)0)
-    {
-        case (true) {
-        fclose(f);
-        -> (byte*)0;
-    }
-        default {};
-    };
-
-    int n = fread(buf, 1, size, f);
-    fclose(f);
-    switch (n < 0)
-    {
-        case (true) {
-        ffree(buf);
-        -> (byte*)0;
-    }
-        default {};
-    };
-    buf[n] = (byte)0;
-    *out_len = n;
-    -> buf;
 };
 
 // Text mode newline translation: \r\n and lone \r both become \n.
@@ -144,28 +144,50 @@ normalize_newlines(byte* b, int n) -> int
     {
         switch (b[r] == 13)
         {
-            case (true)
+            case (true) {
+            b[w] = (byte)10;
+            w++;
+            switch (r + 1 < n & b[r + 1] == 10)
             {
-                b[w] = (byte)10;
-                w++;
-                switch (r + 1 < n & b[r + 1] == 10)
-                {
-                    case (true) { r++; }
-                    default {};
-                };
-        	}
-            default
-            {
-                b[w] = b[r];
-                w++;
+                case (true) { r++; }
+                default {};
             };
+        }
+            default {
+            b[w] = b[r];
+            w++;
+        };
         };
         r++;
     };
-    b[w] = 0;
+    b[w] = (byte)0;
     -> w;
 };
 
+#ifndef __WINDOWS__
+extern
+{
+    def !!
+        system(byte*) -> int;
+};
+#endif;
+
+#ifdef __WINDOWS__
+// Console code page, so the UTF-8 bytes of the log symbols display correctly
+extern
+{
+    def !!
+        SetConsoleOutputCP(u32) -> int,
+        GetConsoleOutputCP() -> u32;
+};
+#endif;
+
+// ---------------------------------------------------------------------------
+// Logger (mirrors flogger.py: the whole line is wrapped in the level color)
+//     [INFO] blue 94, [WARN] yellow 93, [ERROR] red 91, success green 92
+// ---------------------------------------------------------------------------
+global bool LOG_ON;
+global bool LOG_COLOR;
 
 // UTF-8 log symbols are built from bytes: the base compiler encodes string literals as ASCII.
 // 1 = arrow (U+25BA), 2 = check mark (U+2713), 3 = cross mark (U+2717)
@@ -195,8 +217,7 @@ print_sym(int which) -> void
     };
     sb.put(32);
     sb.put(0);
-    print(sb.mem);
-    ->;
+    -> print(sb.mem);
 };
 
 log_begin(byte* code) -> void
@@ -216,8 +237,7 @@ log_end() -> void
         case (true) { print("\x1b[0m\0"); }
         default {};
     };
-    println("\0");
-    ->;
+    -> println("\0");
 };
 
 // [TAG] [component] sym msg, component may be null, sym is 0 or a print_sym symbol
@@ -226,28 +246,29 @@ log_line(byte* color, byte* tag, byte* comp, int sym, byte* msg) -> void
     switch (!LOG_ON)
     {
         case (true) { ->; }
-        default {};
+        default
+        {
+            log_begin(color);
+            print(tag);
+            print(" \0");
+            switch (comp != (byte*)0)
+            {
+                case (true) {
+                print("[\0");
+                print(comp);
+                print("] \0");
+            }
+                default {};
+            };
+            switch (sym != 0)
+            {
+                case (true) { print_sym(sym); }
+                default {};
+            };
+            print(msg);
+            -> log_end();
+        };
     };
-    log_begin(color);
-    print(tag);
-    print(" \0");
-    switch (comp != (byte*)0)
-    {
-        case (true) {
-        print("[\0");
-        print(comp);
-        print("] \0");
-    }
-        default {};
-    };
-    switch (sym!?)
-    {
-        case (true) { print_sym(sym); }
-        default {};
-    };
-    print(msg);
-    log_end();
-    ->;
 };
 
 log_info(byte* comp, byte* msg) -> void -> log_line("\x1b[94m\0", "[INFO]\0", comp, 0, msg);
@@ -267,37 +288,38 @@ log_section(byte* title) -> void
     switch (!LOG_ON)
     {
         case (true) { ->; }
-        default {};
+        default
+        {
+            b.__init();
+            defer b.__exit();
+            switch (bn > 50)
+            {
+                case (true) { bn = 50; }
+                default {};
+            };
+            while (k < bn)
+            {
+                b.put(61);
+                k++;
+            };
+            b.put(0);
+            log_info((byte*)0, b.mem);
+            b.clear();
+            b.put_str("  \0");
+            b.put_str(title);
+            b.put(0);
+            log_info((byte*)0, b.mem);
+            b.clear();
+            k = 0;
+            while (k < bn)
+            {
+                b.put(61);
+                k++;
+            };
+            b.put(0);
+            -> log_info((byte*)0, b.mem);
+        };
     };
-    b.__init();
-    defer b.__exit();
-    switch (bn > 50)
-    {
-        case (true) { bn = 50; }
-        default {};
-    };
-    while (k < bn)
-    {
-        b.put(61);
-        k++;
-    };
-    b.put(0);
-    log_info((byte*)0, b.mem);
-    b.clear();
-    b.put_str("  \0");
-    b.put_str(title);
-    b.put(0);
-    log_info((byte*)0, b.mem);
-    b.clear();
-    k = 0;
-    while (k < bn)
-    {
-        b.put(61);
-        k++;
-    };
-    b.put(0);
-    log_info((byte*)0, b.mem);
-    ->;
 };
 
 log_success(byte* msg) -> void
@@ -305,13 +327,14 @@ log_success(byte* msg) -> void
     switch (!LOG_ON)
     {
         case (true) { ->; }
-        default {};
+        default
+        {
+            log_begin("\x1b[92m\0");
+            print_sym(2);
+            print(msg);
+            -> log_end();
+        };
     };
-    log_begin("\x1b[92m\0");
-    print_sym(2);
-    print(msg);
-    log_end();
-    ->;
 };
 
 log_failure(byte* msg) -> void
@@ -319,15 +342,21 @@ log_failure(byte* msg) -> void
     switch (!LOG_ON)
     {
         case (true) { ->; }
-        default {};
+        default
+        {
+            log_begin("\x1b[91m\0");
+            print_sym(3);
+            print(msg);
+            -> log_end();
+        };
     };
-    log_begin("\x1b[91m\0");
-    print_sym(3);
-    print(msg);
-    log_end();
-    ->;
 };
 
+// ---------------------------------------------------------------------------
+// Configuration (config/flux_config.cfg, parsed the way fconfig.py does)
+// ---------------------------------------------------------------------------
+global byte* CFG_TEXT;
+global bool CFG_LOADED;
 
 cfg_load() -> void
 {
@@ -337,114 +366,118 @@ cfg_load() -> void
     switch (CFG_LOADED)
     {
         case (true) { ->; }
-        default {};
+        default
+        {
+            CFG_LOADED = true;
+            pth.__init();
+            defer pth.__exit();
+            srcdir = getenv(g"FLUXC_SRCDIR\0");
+            switch (srcdir != (byte*)0)
+            {
+                case (true) {
+                pth.put_str(srcdir);
+                pth.put_str("/\0");
+            }
+                default {};
+            };
+            pth.put_str("config/flux_config.cfg\0");
+            CFG_TEXT = read_source(pth.mem, @len);
+            switch (CFG_TEXT != (byte*)0)
+            {
+                case (true) { len = normalize_newlines(CFG_TEXT, len); }
+                default {};
+            };
+            ->;
+        };
     };
-    CFG_LOADED = true;
-    pth.__init();
-    defer pth.__exit();
-    srcdir = getenv(g"FLUXC_SRCDIR\0");
-    switch (srcdir != (byte*)0)
-    {
-        case (true) {
-        pth.put_str(srcdir);
-        pth.put_str("/\0");
-    }
-        default {};
-    };
-    pth.put_str("config/flux_config.cfg\0");
-    CFG_TEXT = read_source(pth.mem, @len);
-    switch (CFG_TEXT != (byte*)0)
-    {
-        case (true) { len = normalize_newlines(CFG_TEXT, len); }
-        default {};
-    };
-    ->;
 };
 
 // Returns a heap copy of the value for key, or null when the key is not set
 cfg_get(byte* key) -> byte*
 {
-    int p,
-        ls,
-        eq,
-        ke,
-        vs,
-        ve,
-        kn,
-        i;
+    int p = 0;
+    int ls;
+    int eq;
+    int ke;
+    int vs;
+    int ve;
+    int kn = 0;
+    int i;
     bool same;
     byte* r;
     cfg_load();
     switch (CFG_TEXT == (byte*)0)
     {
         case (true) { -> (byte*)0; }
-        default {};
-    };
-    while (key[kn]!?) { kn++; };
-    while (CFG_TEXT[p]!?)
-    {
-        ls = p;
-        while (CFG_TEXT[p]!? & CFG_TEXT[p] != 10) { p++; };
-        // [ls, p) is one line
-        i = ls;
-        while (i < p & (CFG_TEXT[i] == ' ' | CFG_TEXT[i] == 9)) { i++; };
-        switch (i < p)
+        default
         {
-            case (true) {
-            switch (CFG_TEXT[i] != ';')
+            while (key[kn] != 0) { kn++; };
+            while (CFG_TEXT[p] != 0)
             {
-                case (true) {
-                eq = i;
-                while (eq < p & CFG_TEXT[eq] != '=') { eq++; };
-                switch (eq < p)
+                ls = p;
+                while (CFG_TEXT[p] != 0 & CFG_TEXT[p] != 10) { p++; };
+                // [ls, p) is one line
+                i = ls;
+                while (i < p & (CFG_TEXT[i] == ' ' | CFG_TEXT[i] == 9)) { i++; };
+                switch (i < p)
                 {
                     case (true) {
-                    ke = eq;
-                    while (ke > i & (CFG_TEXT[ke - 1] == ' ' | CFG_TEXT[ke - 1] == 9)) { ke--; };
-                    same = (ke - i) == kn;
-                    switch (same)
+                    switch (CFG_TEXT[i] != ';')
                     {
                         case (true) {
-                        same = bytes_eq(@CFG_TEXT[i], key, kn);
-                    }
-                        default {};
-                    };
-                    switch (same)
-                    {
-                        case (true) {
-                        vs = eq + 1;
-                        ve = vs;
-                        while (ve < p & CFG_TEXT[ve] != ';') { ve++; };
-                        while (vs < ve & (CFG_TEXT[vs] == ' ' | CFG_TEXT[vs] == 9)) { vs++; };
-                        while (ve > vs & (CFG_TEXT[ve - 1] == ' ' | CFG_TEXT[ve - 1] == 9 | CFG_TEXT[ve - 1] == 13)) { ve--; };
-                        r = (byte*)fmalloc((u64)(ve - vs + 1));
-                        i = 0;
-                        while (vs + i < ve)
+                        eq = i;
+                        while (eq < p & CFG_TEXT[eq] != '=') { eq++; };
+                        switch (eq < p)
                         {
-                            r[i] = CFG_TEXT[vs + i];
-                            i++;
+                            case (true) {
+                            ke = eq;
+                            while (ke > i & (CFG_TEXT[ke - 1] == ' ' | CFG_TEXT[ke - 1] == 9)) { ke--; };
+                            same = (ke - i) == kn;
+                            switch (same)
+                            {
+                                case (true) {
+                                same = bytes_eq(@CFG_TEXT[i], key, kn);
+                            }
+                                default {};
+                            };
+                            switch (same)
+                            {
+                                case (true) {
+                                vs = eq + 1;
+                                ve = vs;
+                                while (ve < p & CFG_TEXT[ve] != ';') { ve++; };
+                                while (vs < ve & (CFG_TEXT[vs] == ' ' | CFG_TEXT[vs] == 9)) { vs++; };
+                                while (ve > vs & (CFG_TEXT[ve - 1] == ' ' | CFG_TEXT[ve - 1] == 9 | CFG_TEXT[ve - 1] == 13)) { ve--; };
+                                r = (byte*)fmalloc((u64)(ve - vs + 1));
+                                i = 0;
+                                while (vs + i < ve)
+                                {
+                                    r[i] = CFG_TEXT[vs + i];
+                                    i++;
+                                };
+                                r[i] = (byte)0;
+                                -> r;
+                            }
+                                default {};
+                            };
+                        }
+                            default {};
                         };
-                        r[i] = (byte)0;
-                        -> r;
                     }
                         default {};
                     };
                 }
                     default {};
                 };
-            }
-                default {};
+                switch (CFG_TEXT[p] == 10)
+                {
+                    case (true) { p++; }
+                    default {};
+                };
             };
-        }
-            default {};
-        };
-        switch (CFG_TEXT[p] == 10)
-        {
-            case (true) { p++; }
-            default {};
+            -> (byte*)0;
         };
     };
-    -> (byte*)0;
 };
 
 cfg_str(byte* key, byte* dflt) -> byte*
@@ -453,41 +486,46 @@ cfg_str(byte* key, byte* dflt) -> byte*
     switch (v == (byte*)0)
     {
         case (true) { -> dflt; }
-        default {};
+        default
+        {
+            -> v;
+        };
     };
-    -> v;
 };
 
 // Integer value of a config key (decimal, optional leading minus)
 cfg_int(byte* key, int dflt) -> int
 {
     byte* v = cfg_get(key);
-    int i,r;
+    int i = 0;
+    int r = 0;
     bool neg = false;
     switch (v == (byte*)0)
     {
         case (true) { -> dflt; }
-        default {};
+        default
+        {
+            switch (v[0] == '-')
+            {
+                case (true) {
+                neg = true;
+                i = 1;
+            }
+                default {};
+            };
+            while (v[i] >= '0' & v[i] <= '9')
+            {
+                r = r * 10 + (int)(v[i] - '0');
+                i++;
+            };
+            switch (neg)
+            {
+                case (true) { r = 0 - r; }
+                default {};
+            };
+            -> r;
+        };
     };
-    switch (v[0] == '-')
-    {
-        case (true) {
-        neg = true;
-        i = 1;
-    }
-        default {};
-    };
-    while (v[i] >= '0' & v[i] <= '9')
-    {
-        r = r * 10 + (int)(v[i] - '0');
-        i++;
-    };
-    switch (neg)
-    {
-        case (true) { r = 0 - r; }
-        default {};
-    };
-    -> r;
 };
 
 is_none(byte* v) -> bool
@@ -495,14 +533,18 @@ is_none(byte* v) -> bool
     switch (v == (byte*)0)
     {
         case (true) { -> true; }
-        default {};
+        default
+        {
+            switch (v[0] == 0)
+            {
+                case (true) { -> true; }
+                default
+                {
+                    -> bytes_eq(v, "none\0", 4) & v[4] == 0;
+                };
+            };
+        };
     };
-    switch (v[0] == 0)
-    {
-        case (true) { -> true; }
-        default {};
-    };
-    -> bytes_eq(v, "none\0", 4) & v[4] == 0;
 };
 
 // True when a file can be opened for reading
@@ -512,59 +554,20 @@ can_open(byte* path) -> bool
     switch (f == (void*)0)
     {
         case (true) { -> false; }
-        default {};
+        default
+        {
+            fclose(f);
+            -> true;
+        };
     };
-    fclose(f);
-    -> true;
 };
 
 #import "version.fx";
-
-print_version() -> void -> println(f"Flux Compiler \"{FLUX_VERSION_NAME}\" v{FLUX_COMPILER_VERSION}
-Compiler release date: {FLUX_COMPILER_RELEASE_DATE} // YYYYMMDD");
-
-///
-// Prints version.txt (found next to config/ under FLUXC_SRCDIR), as fxc.py does first
 print_version() -> void
 {
-    byte* srcdir, txt;
-    Buf pth;
-    int len;
-    pth.__init();
-    defer pth.__exit();
-    srcdir = getenv(g"FLUXC_SRCDIR\0");
-    switch (srcdir != (byte*)0)
-    {
-        case (true) {
-        pth.put_str(srcdir);
-        pth.put_str("/\0");
-    }
-        default {};
-    };
-    pth.put_str("version.txt\0");
-    txt = read_source(pth.mem, @len);
-    switch (txt == (byte*)0)
-    {
-        case (true) { ->; }
-        default {};
-    };
-    len = normalize_newlines(txt, len);
-    print(txt);
-    switch (len > 0)
-    {
-        case (true) {
-        switch (txt[len - 1] != 10)
-        {
-            case (true) { println("\0"); }
-            default {};
-        };
-    }
-        default {};
-    };
-    ffree(txt);
-    ->;
+    ->println(f"Flux Compiler {FLUX_VERSION_NAME} v{FLUX_COMPILER_VERSION}\nRelease date: {FLUX_COMPILER_RELEASE_DATE} // YYYYMMDD\n");
 };
-///
+
 
 // The debug block fxc.py prints before compiling
 print_debug_block(int argc, byte** argv) -> void
@@ -588,8 +591,7 @@ print_debug_block(int argc, byte** argv) -> void
     println("Target platform: Linux\0");
     println("Module triple: x86_64-unknown-linux-gnu\0");
     #endif;
-    println("END DEBUG\0");
-    ->;
+    -> println("END DEBUG\0");
 };
 
 // Runs a shell command. The runtime entry leaves the stack 8 bytes off the ABI alignment,
@@ -624,9 +626,12 @@ run_cmd(byte* c) -> int
 // File name without directory and extension, as a new heap string
 path_stem(byte* path) -> byte*
 {
-    int n, start, end, i;
+    int n = 0;
+    int start = 0;
+    int end;
+    int i;
     byte* r;
-    while (path[n]!?) { n++; };
+    while (path[n] != 0) { n++; };
     end = n;
     i = 0;
     while (i < n)
@@ -644,9 +649,11 @@ path_stem(byte* path) -> byte*
         switch (path[i] == '.')
         {
             case (true) { end = i; break; }
-            default {};
+            default
+            {
+                i--;
+            };
         };
-        i--;
     };
     r = (byte*)fmalloc((u64)(end - start + 1));
     i = 0;
@@ -753,57 +760,68 @@ report_link(byte* errpath, int rc) -> void
     switch (txt == (byte*)0)
     {
         case (true) { ->; }
-        default {};
-    };
-    len = normalize_newlines(txt, len);
-    switch (rc!? | len > 0)
-    {
-        case (true)
+        default
         {
-            m.__init();
-            defer m.__exit();
-            switch (rc!?)
+            len = normalize_newlines(txt, len);
+            switch (rc != 0 | len > 0)
             {
-                case (true) { m.put_str("Linking failed: \0"); }
-                default { m.put_str("Linker stderr: \0"); };
+                case (true) {
+                m.__init();
+                defer m.__exit();
+                switch (rc != 0)
+                {
+                    case (true) { m.put_str("Linking failed: \0"); }
+                    default { m.put_str("Linker stderr: \0"); };
+                };
+                m.put_str(txt);
+                m.put(0);
+                switch (rc != 0)
+                {
+                    case (true) { log_error("linker\0", m.mem); }
+                    default { log_warn("linker\0", m.mem); };
+                };
+            }
+                default {};
             };
-            m.put_str(txt);
-            m.put(0);
-            switch (rc!?)
-            {
-                case (true) { log_error("linker\0", m.mem); }
-                default { log_warn("linker\0", m.mem); };
-            };
-        }
-        default {};
+            -> ffree(txt);
+        };
     };
-    ffree(txt);
-    ->;
 };
 
 // Source -> build/<stem>/<stem>.ll -> (opt) -> llc -> object -> linked executable, as fc.py does
-build_output(byte* path, byte* ir_text, byte* outname) -> bool
+build_output(byte* path, byte* ir_text, byte* outname, byte* layout) -> bool
 {
-    byte* stem = path_stem(path),
-          ostem = stem,
-          tmp,
-          march,
-          mcpu;
-    Buf cmd,
-        ll,
-        optll,
-        obj,
-        exe,
-        tool,
-        errp,
-        msg;
+    byte* stem = path_stem(path);
+    byte* ostem = stem;
+    byte* tmp;
+    byte* march;
+    byte* mcpu;
+    Buf cmd;
+    Buf ll;
+    Buf optll;
+    Buf obj;
+    Buf exe;
+    Buf tool;
+    Buf errp;
+    Buf msg;
     void* f;
-    int len, rc, k;
+    int len = 0;
+    int rc;
+    int k;
     bool opt_ok;
     switch (outname != (byte*)0)
     {
         case (true) { ostem = path_stem(outname); }
         default {};
+    };
+    // A module build keeps every file in build/<name>/<Platform>/<Release|Debug>, named after the module
+    byte* bd_s = stem;
+    byte* ed_s = ostem;
+    if (layout != (byte*)0)
+    {
+        bd_s = layout;
+        ed_s = layout;
+        stem = ostem;
     };
     cmd.__init();
     ll.__init();
@@ -824,61 +842,61 @@ build_output(byte* path, byte* ir_text, byte* outname) -> bool
 
     #ifdef __WINDOWS__
     ll.put_str("build\\\0");
-    ll.put_str(stem);
+    ll.put_str(bd_s);
     ll.put_str("\\\0");
     ll.put_str(stem);
     ll.put_str(".ll\0");
     optll.put_str("build\\\0");
-    optll.put_str(stem);
+    optll.put_str(bd_s);
     optll.put_str("\\\0");
     optll.put_str(stem);
     optll.put_str(".opt.ll\0");
     obj.put_str("build\\\0");
-    obj.put_str(stem);
+    obj.put_str(bd_s);
     obj.put_str("\\\0");
     obj.put_str(stem);
     obj.put_str(".obj\0");
     exe.put_str("build\\\0");
-    exe.put_str(ostem);
+    exe.put_str(ed_s);
     exe.put_str("\\\0");
     exe.put_str(ostem);
     exe.put_str(".exe\0");
     errp.put_str("build\\\0");
-    errp.put_str(ostem);
+    errp.put_str(ed_s);
     errp.put_str("\\\0");
     errp.put_str(ostem);
     errp.put_str(".link.err\0");
     cmd.put_str("if not exist build\\\0");
-    cmd.put_str(stem);
+    cmd.put_str(bd_s);
     cmd.put_str(" mkdir build\\\0");
-    cmd.put_str(stem);
+    cmd.put_str(bd_s);
     #else
     ll.put_str("build/\0");
-    ll.put_str(stem);
+    ll.put_str(bd_s);
     ll.put_str("/\0");
     ll.put_str(stem);
     ll.put_str(".ll\0");
     optll.put_str("build/\0");
-    optll.put_str(stem);
+    optll.put_str(bd_s);
     optll.put_str("/\0");
     optll.put_str(stem);
     optll.put_str(".opt.ll\0");
     obj.put_str("build/\0");
-    obj.put_str(stem);
+    obj.put_str(bd_s);
     obj.put_str("/\0");
     obj.put_str(stem);
     obj.put_str(".o\0");
     exe.put_str("build/\0");
-    exe.put_str(ostem);
+    exe.put_str(ed_s);
     exe.put_str("/\0");
     exe.put_str(ostem);
     errp.put_str("build/\0");
-    errp.put_str(ostem);
+    errp.put_str(ed_s);
     errp.put_str("/\0");
     errp.put_str(ostem);
     errp.put_str(".link.err\0");
     cmd.put_str("mkdir -p build/\0");
-    cmd.put_str(stem);
+    cmd.put_str(bd_s);
     #endif;
     run_cmd(cmd.mem);
     switch (ostem != stem)
@@ -887,12 +905,12 @@ build_output(byte* path, byte* ir_text, byte* outname) -> bool
         cmd.clear();
         #ifdef __WINDOWS__
         cmd.put_str("if not exist build\\\0");
-        cmd.put_str(ostem);
+        cmd.put_str(ed_s);
         cmd.put_str(" mkdir build\\\0");
-        cmd.put_str(ostem);
+        cmd.put_str(ed_s);
         #else
         cmd.put_str("mkdir -p build/\0");
-        cmd.put_str(ostem);
+        cmd.put_str(ed_s);
         #endif;
         run_cmd(cmd.mem);
     }
@@ -910,7 +928,7 @@ build_output(byte* path, byte* ir_text, byte* outname) -> bool
     }
         default {};
     };
-    while (ir_text[len]!?) { len++; };
+    while (ir_text[len] != 0) { len++; };
     fwrite(ir_text, 1, len, f);
     fclose(f);
 
@@ -922,64 +940,10 @@ build_output(byte* path, byte* ir_text, byte* outname) -> bool
 
     // opt cleans the IR before llc: first available of opt-21, opt-20, opt-19, opt-18, opt
     tmp = (byte*)ll.mem;
-
-    ///
-    // THIS DOES NOT WORK FOR SOME REASON?
+    k = 0;
     while (k < 5 & !opt_ok)
     {
         tool.clear();
-        switch(k)
-        {
-            case (0)
-            {
-                opt_ok = resolve_tool(@tool, "opt-21\0");
-            }
-            case (1)
-            {
-                opt_ok = resolve_tool(@tool, "opt-20\0");
-            }
-            case (2)
-            {
-                opt_ok = resolve_tool(@tool, "opt-19\0");
-            }
-            case (3)
-            {
-                opt_ok = resolve_tool(@tool, "opt-18\0");
-            }
-            case (4)
-            {
-                opt_ok = resolve_tool(@tool, "opt\0");
-            }
-            default
-            {
-                #ifdef __WINDOWS__
-                switch(opt_ok)
-                {
-                    case (true)
-                    {
-                        // PATH probe, as `which` does in fc.py
-                        println("--- DEBUG --- GOT HERE");
-                        cmd.clear();
-                        cmd.put_str("which \0");
-                        cmd.put_str(tool.mem);
-                        cmd.put_str(" >/dev/null 2>&1\0");
-                        opt_ok = run_cmd(cmd.mem) == 0;
-                    }
-                    default
-                    {
-                        k++;
-                    };
-                };
-                #endif;
-            };
-        };
-    };
-
-    ///
-    while (k < 5 & !opt_ok)
-    {
-        tool.clear();
-
         switch (k == 0)
         {
             case (true) { opt_ok = resolve_tool(@tool, "opt-21\0"); }
@@ -1025,27 +989,24 @@ build_output(byte* path, byte* ir_text, byte* outname) -> bool
             default {};
         };
     };
-
     switch (opt_ok)
     {
-        case (true)
+        case (true) {
+        cmd.clear();
+        cmd.put_str(tool.mem);
+        cmd.put_str(" -passes=mem2reg,sroa,dce,simplifycfg -S \0");
+        cmd.put_str(ll.mem);
+        cmd.put_str(" -o \0");
+        cmd.put_str(optll.mem);
+        switch (run_cmd(cmd.mem) == 0)
         {
-            cmd.clear();
-            cmd.put_str(tool.mem);
-            cmd.put_str(" -passes=mem2reg,sroa,dce,simplifycfg -S \0");
-            cmd.put_str(ll.mem);
-            cmd.put_str(" -o \0");
-            cmd.put_str(optll.mem);
-            switch (run_cmd(cmd.mem) == 0)
-            {
-                case (true)
-                {
-                    tmp = (byte*)optll.mem;
-                    log_info("llc\0", "opt IR optimization pass complete\0");
-                }
-                default { log_warn("llc\0", "opt pass failed, continuing with the unoptimized IR\0"); };
-            };
+            case (true) {
+            tmp = (byte*)optll.mem;
+            log_info("llc\0", "opt IR optimization pass complete\0");
         }
+            default { log_warn("llc\0", "opt pass failed, continuing with the unoptimized IR\0"); };
+        };
+    }
         default { log_warn("llc\0", "opt pass skipped (not available)\0"); };
     };
 
@@ -1053,12 +1014,11 @@ build_output(byte* path, byte* ir_text, byte* outname) -> bool
     tool.clear();
     switch (!resolve_tool(@tool, "llc\0"))
     {
-        case (true)
-        {
-            println("Cannot find llc. Set llvm_path in config/flux_config.cfg or add LLVM to PATH.\0");
-            ffree(stem);
-            -> false;
-        }
+        case (true) {
+        println("Cannot find llc. Set llvm_path in config/flux_config.cfg or add LLVM to PATH.\0");
+        ffree(stem);
+        -> false;
+    }
         default {};
     };
     cmd.clear();
@@ -1072,37 +1032,29 @@ build_output(byte* path, byte* ir_text, byte* outname) -> bool
     #ifndef __WINDOWS__
     switch (is_none(march))
     {
-        case (true)
-        {
-            march = "x86-64\0";
-        }
+        case (true) { march = "x86-64\0"; }
         default {};
     };
     switch (is_none(mcpu))
     {
-        case (true)
-        {
-            mcpu = "native\0";
-        }
+        case (true) { mcpu = "native\0"; }
         default {};
     };
     #endif;
     switch (!is_none(march))
     {
-        case (true)
-        {
-            cmd.put_str(" -march=\0");
-            cmd.put_str(march);
-        }
+        case (true) {
+        cmd.put_str(" -march=\0");
+        cmd.put_str(march);
+    }
         default {};
     };
     switch (!is_none(mcpu))
     {
-        case (true)
-        {
-            cmd.put_str(" -mcpu=\0");
-            cmd.put_str(mcpu);
-        }
+        case (true) {
+        cmd.put_str(" -mcpu=\0");
+        cmd.put_str(mcpu);
+    }
         default {};
     };
     cmd.put_str(" -enable-misched -enable-tail-merge -optimize-regalloc -relocation-model=pic -tail-dup-size=3 -tailcallopt -no-x86-call-frame-opt -x86-use-base-pointer -disable-verify \0");
@@ -1113,17 +1065,16 @@ build_output(byte* path, byte* ir_text, byte* outname) -> bool
     cmd.put_str(" -o \0");
     cmd.put_str(obj.mem);
     rc = run_cmd(cmd.mem);
-    switch (rc!?)
+    switch (rc != 0)
     {
-        case (true)
-        {
-            msg.put_str("llc failed with code \0");
-            msg.put_int(rc);
-            msg.put(0);
-            log_error("llc\0", msg.mem);
-            ffree(stem);
-            -> false;
-        }
+        case (true) {
+        msg.put_str("llc failed with code \0");
+        msg.put_int(rc);
+        msg.put(0);
+        log_error("llc\0", msg.mem);
+        ffree(stem);
+        -> false;
+    }
         default {};
     };
 
@@ -1138,12 +1089,11 @@ build_output(byte* path, byte* ir_text, byte* outname) -> bool
     tool.clear();
     switch (!resolve_tool(@tool, cfg_str("linker\0", "lld-link\0")))
     {
-        case (true)
-        {
-            println("Cannot find the linker. Set llvm_path in config/flux_config.cfg or add LLVM to PATH.\0");
-            ffree(stem);
-            -> false;
-        }
+        case (true) {
+        println("Cannot find the linker. Set llvm_path in config/flux_config.cfg or add LLVM to PATH.\0");
+        ffree(stem);
+        -> false;
+    }
         default {};
     };
     cmd.put_str(tool.mem);
@@ -1161,22 +1111,20 @@ build_output(byte* path, byte* ir_text, byte* outname) -> bool
     flag_if(@cmd, "comdat_folding\0", "/opt:icf\0");
     cmd.put_str(" /section:.text,ERW\0");
     flag_if(@cmd, "marge_data_and_code\0", "/merge:.data=.text\0");
-    switch (cfg_int("memory_alignment\0", 0)!?)
+    switch (cfg_int("memory_alignment\0", 0) != 0)
     {
-        case (true)
-        {
-            cmd.put_str(" /align:\0");
-            cmd.put_int(cfg_int("memory_alignment\0", 0));
-        }
+        case (true) {
+        cmd.put_str(" /align:\0");
+        cmd.put_int(cfg_int("memory_alignment\0", 0));
+    }
         default {};
     };
-    switch (cfg_int("bin_disk_alignment\0", 0)!?)
+    switch (cfg_int("bin_disk_alignment\0", 0) != 0)
     {
-        case (true)
-        {
-            cmd.put_str(" /filealign:\0");
-            cmd.put_int(cfg_int("bin_disk_alignment\0", 0));
-        }
+        case (true) {
+        cmd.put_str(" /filealign:\0");
+        cmd.put_int(cfg_int("bin_disk_alignment\0", 0));
+    }
         default {};
     };
     flag_if(@cmd, "driver_mode\0", "/driver\0");
@@ -1200,30 +1148,28 @@ build_output(byte* path, byte* ir_text, byte* outname) -> bool
     cmd.put_str(errp.mem);
     rc = run_cmd(cmd.mem);
     report_link(errp.mem, rc);
-    switch (rc!?)
+    switch (rc != 0)
     {
-        case (true)
+        case (true) {
+        log_step("linker\0", "Falling back to clang...\0");
+        tool.clear();
+        switch (resolve_tool(@tool, "clang\0"))
         {
-            log_step("linker\0", "Falling back to clang...\0");
-            tool.clear();
-            switch (resolve_tool(@tool, "clang\0"))
-            {
-                case (true)
-                {
-                    cmd.clear();
-                    cmd.put_str(tool.mem);
-                    cmd.put_str(" \0");
-                    cmd.put_str(obj.mem);
-                    cmd.put_str(" -o \0");
-                    cmd.put_str(exe.mem);
-                    cmd.put_str(" -fuse-ld=lld-link -Os -flto -fvisibility=hidden -fmerge-all-constants -fno-unwind-tables -fno-asynchronous-unwind-tables -nodefaultlibs -Wl,/OPT:REF -Wl,/OPT:ICF -Wl,/DEBUG:NONE -Wl,/INCREMENTAL:NO -Wl,/LTCG -Wl,/MERGE:.rdata=.text -Wl,/ENTRY:\0");
-                    cmd.put_str(cfg_str("entrypoint\0", "FRTStartup\0"));
-                    cmd.put_str(" -Wl,/SUBSYSTEM:CONSOLE -lkernel32 -lntdll -ldwmapi -lucrt -lWs2_32 -luser32 -lgdi32 -lopengl32 -lcomdlg32 -lole32 -lmmdevapi -ld2d1 -ldwrite -lmsvcrt -lsecur32 -lcrypt32 -lbcrypt -lncrypt -llegacy_stdio_definitions\0");
-                    rc = run_cmd(cmd.mem);
-                }
-                default {};
-            };
+            case (true) {
+            cmd.clear();
+            cmd.put_str(tool.mem);
+            cmd.put_str(" \0");
+            cmd.put_str(obj.mem);
+            cmd.put_str(" -o \0");
+            cmd.put_str(exe.mem);
+            cmd.put_str(" -fuse-ld=lld-link -Os -flto -fvisibility=hidden -fmerge-all-constants -fno-unwind-tables -fno-asynchronous-unwind-tables -nodefaultlibs -Wl,/OPT:REF -Wl,/OPT:ICF -Wl,/DEBUG:NONE -Wl,/INCREMENTAL:NO -Wl,/LTCG -Wl,/MERGE:.rdata=.text -Wl,/ENTRY:\0");
+            cmd.put_str(cfg_str("entrypoint\0", "FRTStartup\0"));
+            cmd.put_str(" -Wl,/SUBSYSTEM:CONSOLE -lkernel32 -lntdll -ldwmapi -lucrt -lWs2_32 -luser32 -lgdi32 -lopengl32 -lcomdlg32 -lole32 -lmmdevapi -ld2d1 -ldwrite -lmsvcrt -lsecur32 -lcrypt32 -lbcrypt -lncrypt -llegacy_stdio_definitions\0");
+            rc = run_cmd(cmd.mem);
         }
+            default {};
+        };
+    }
         default {};
     };
     #else
@@ -1238,26 +1184,32 @@ build_output(byte* path, byte* ir_text, byte* outname) -> bool
     rc = run_cmd(cmd.mem);
     report_link(errp.mem, rc);
     #endif;
-    switch (rc!?)
+    switch (rc != 0)
     {
         case (true) {
         msg.clear();
-        msg.put_str(f"Compilation failed: Linking failed with code {rc}\0");
+        msg.put_str("Compilation failed: Linking failed with code \0");
+        msg.put_int(rc);
         msg.put(0);
         log_failure(msg.mem);
         ffree(stem);
         -> false;
     }
-        default {};
+        default
+        {
+            msg.clear();
+            msg.put_str("Compilation completed: \0");
+            msg.put_str(exe.mem);
+            msg.put(0);
+            log_success(msg.mem);
+            print_sym(2);
+            print("Compilation successful: \0");
+            print(exe.mem);
+            println(" (executable)\0");
+            ffree(stem);
+            -> true;
+        };
     };
-    msg.clear();
-    msg.put_str(f"Compilation completed: {exe.mem}\0");
-    msg.put(0);
-    log_success(msg.mem);
-    print_sym(2);
-    print(f"Compilation successful: {exe.mem} (executable)\0");
-    ffree(stem);
-    -> true;
 };
 
 fxc_main(int argc, byte** argv) -> int
@@ -1265,129 +1217,170 @@ fxc_main(int argc, byte** argv) -> int
     // argc is 2 for a single argument. With no arguments argv must not be indexed.
     switch (argc < 2)
     {
-        case (true)
-        {
-            usage();
-            -> 1;
-        }
+        case (true) {
+        usage();
+        -> 1;
+    }
         default {};
     };
 
     bool lex_mode, pp_mode, parse_mode, check_mode, dump_mode, verbose, show_count, emit_mode, full_mode;
-    byte* path,
-          outname,
-          a;
+    bool borrow_mode, borrow_warn;
+    bool effects_mode, effects_warn;
+    byte* entry_name = (byte*)0;
+    byte* module_sel;
+    byte* path = (byte*)0;
+    byte* outname = (byte*)0;
+    byte* a;
     int i = 1;
     while (i < argc)
     {
         a = argv[i];
-
-        switch (arg_eq(a, "--lex", 5))
+        switch (arg_eq(a, "--effects-warn", 14))
         {
-            case (true)
-            {
-                lex_mode = true;
-            }
+            case (true) { effects_mode = true; effects_warn = true; i++; continue; }
             default
             {
-                switch (arg_eq(a, "--parse", 7))
+                switch (arg_eq(a, "--effects", 9))
                 {
-                    case (true)
-                    {
-                        parse_mode = true;
-                    }
+                    case (true) { effects_mode = true; i++; continue; }
                     default
                     {
-                        switch (arg_eq(a, "--dump", 6))
+                        switch (arg_eq(a, "--borrowcheck-warn", 18))
                         {
-                            case (true)
+                            case (true) { borrow_mode = true; borrow_warn = true; i++; continue; }
+                            default
                             {
-                                dump_mode = true;
-                                parse_mode = true;
-                            }
-                            default {
-                                switch (arg_eq(a, "--check", 7))
+                                switch (arg_eq(a, "--borrowcheck", 13))
                                 {
-                                    case (true)
-                                    {
-                                        check_mode = true;
-                                        parse_mode = true;
-                                    }
+                                    case (true) { borrow_mode = true; i++; continue; }
                                     default
                                     {
-                                        switch (arg_eq(a, "--emit-ll", 9))
+                                        switch (arg_eq(a, "--module", 8))
                                         {
-                                            case (true)
+                                            case (true) {
+                                            i++;
+                                            switch (i < argc)
                                             {
-                                                emit_mode = true;
-                                                parse_mode = true;
-                                            }
+                                                case (true) { module_sel = argv[i]; }
+                                                default {};
+                                            };
+                                            i++;
+                                            continue;
+                                        }
                                             default
                                             {
-                                                switch (arg_eq(a, "-E", 2) | arg_eq(a, "--preprocess", 12))
+                                                switch (arg_eq(a, "--entrypoint", 12))
                                                 {
-                                                    case (true)
+                                                    case (true) {
+                                                    i++;
+                                                    switch (i < argc)
                                                     {
-                                                        pp_mode = true;
-                                                    }
+                                                        case (true) { entry_name = argv[i]; }
+                                                        default {};
+                                                    };
+                                                    i++;
+                                                    continue;
+                                                }
                                                     default
                                                     {
-                                                        switch (arg_eq(a, "-v", 2) | arg_eq(a, "--verbose", 9))
+                                                        switch (arg_eq(a, "--lex", 5))
                                                         {
-                                                            case (true)
-                                                            {
-                                                                verbose = true;
-                                                            }
-                                                            default
-                                                            {
-                                                                switch (arg_eq(a, "-c", 2) | arg_eq(a, "--count", 7))
+                                                            case (true) {
+                                                            lex_mode = true;
+                                                        }
+                                                            default {
+                                                                switch (arg_eq(a, "--parse", 7))
                                                                 {
-                                                                    case (true)
-                                                                    {
-                                                                        show_count = true;
-                                                                    }
-                                                                    default
-                                                                    {
-                                                                        switch (arg_eq(a, "-o", 2) | arg_eq(a, "--output", 8))
+                                                                    case (true) {
+                                                            parse_mode = true;
+                                                        }
+                                                                    default {
+                                                                        switch (arg_eq(a, "--dump", 6))
                                                                         {
-                                                                            case (true)
-                                                                            {
-                                                                                i++;
-                                                                                switch (i < argc)
+                                                                            case (true) {
+                                                            dump_mode = true;
+                                                            parse_mode = true;
+                                                        }
+                                                                            default {
+                                                                                switch (arg_eq(a, "--check", 7))
                                                                                 {
-                                                                                    case (true) { outname = argv[i]; }
-                                                                                    default {};
-                                                                                };
-                                                                            }
-                                                                            default
-                                                                            {
-                                                                                switch (a[0] == '-')
-                                                                                {
-                                                                                    case (true)
-                                                                                    {
-                                                                                        print(f"Unknown option: {a}\0");;
-                                                                                        usage();
-                                                                                        -> 1;
-                                                                                    }
-                                                                                    default
-                                                                                    {
-                                                                                        switch (path == (byte*)0)
+                                                                                    case (true) {
+                                                            check_mode = true;
+                                                            parse_mode = true;
+                                                        }
+                                                                                    default {
+                                                                                        switch (arg_eq(a, "--emit-ll", 9))
                                                                                         {
-                                                                                            case (true)
-                                                                                            {
-                                                                                                path = a;
-                                                                                            }
-                                                                                            default
-                                                                                            {
-                                                                                                switch (outname == (byte*)0)
+                                                                                            case (true) {
+                                                            emit_mode = true;
+                                                            parse_mode = true;
+                                                        }
+                                                                                            default {
+                                                                                                switch (arg_eq(a, "-E", 2) | arg_eq(a, "--preprocess", 12))
                                                                                                 {
-                                                                                                    case (true)
-                                                                                                    {
-                                                                                                        outname = a;
-                                                                                                    }
-                                                                                                    default
-                                                                                                    {
-                                                                                                        print(f"Warning: Unexpected argument {a}\0");
+                                                                                                    case (true) {
+                                                            pp_mode = true;
+                                                        }
+                                                                                                    default {
+                                                                                                        switch (arg_eq(a, "-v", 2) | arg_eq(a, "--verbose", 9))
+                                                                                                        {
+                                                                                                            case (true) {
+                                                            verbose = true;
+                                                        }
+                                                                                                            default {
+                                                                                                                switch (arg_eq(a, "-c", 2) | arg_eq(a, "--count", 7))
+                                                                                                                {
+                                                                                                                    case (true) {
+                                                            show_count = true;
+                                                        }
+                                                                                                                    default {
+                                                                                                                        switch (arg_eq(a, "-o", 2) | arg_eq(a, "--output", 8))
+                                                                                                                        {
+                                                                                                                            case (true) {
+                                                            i++;
+                                                            switch (i < argc)
+                                                            {
+                                                                case (true) { outname = argv[i]; }
+                                                                default {};
+                                                            };
+                                                        }
+                                                                                                                            default {
+                                                                                                                                switch (a[0] == '-')
+                                                                                                                                {
+                                                                                                                                    case (true) {
+                                                            print("Unknown option: \0");
+                                                            println(a);
+                                                            usage();
+                                                            -> 1;
+                                                        }
+                                                                                                                                    default {
+                                                                                                                                        switch (path == (byte*)0)
+                                                                                                                                        {
+                                                                                                                                            case (true) {
+                                                            path = a;
+                                                        }
+                                                                                                                                            default {
+                                                                                                                                                switch (outname == (byte*)0)
+                                                                                                                                                {
+                                                                                                                                                    case (true) {
+                                                            outname = a;
+                                                        }
+                                                                                                                                                    default {
+                                                            print("Warning: Unexpected argument \0");
+                                                            println(a);
+                                                        };
+                                                                                                                                                };
+                                                                                                                                            };
+                                                                                                                                        };
+                                                                                                                                    };
+                                                                                                                                };
+                                                                                                                            };
+                                                                                                                        };
+                                                                                                                    };
+                                                                                                                };
+                                                                                                            };
+                                                                                                        };
                                                                                                     };
                                                                                                 };
                                                                                             };
@@ -1400,6 +1393,7 @@ fxc_main(int argc, byte** argv) -> int
                                                                 };
                                                             };
                                                         };
+                                                        i++;
                                                     };
                                                 };
                                             };
@@ -1412,7 +1406,6 @@ fxc_main(int argc, byte** argv) -> int
                 };
             };
         };
-        i++;
     };
 
     switch (path == (byte*)0)
@@ -1549,8 +1542,120 @@ fxc_main(int argc, byte** argv) -> int
             default {};
         };
         log_step("parser\0", "AST generated.\0");
+        // Modules: pull every module reachable through 'from' into this compilation unit,
+        // resolve each module's build settings and flatten the bodies into the program.
+        ModUnit* munit;
+        ModMap* mmap;
+        byte* layout, merr;
+        byte* build_name = outname;
+        if (mu_has_modules(prog))
+        {
+            munit = mu_load(prog, path, module_sel, "main\0", srcdir);
+            if (munit.err != (byte*)0)
+            {
+                log_error("modules\0", join3("Module error: \0", munit.err, "\0"));
+                -> 1;
+            };
+            #ifdef __WINDOWS__
+            byte* plat_name = "Windows\0";
+            #else
+            byte* plat_name = "Linux\0";
+            #endif;
+            merr = mu_resolve_settings(munit, borrow_mode, effects_mode, plat_name);
+            if (merr != (byte*)0)
+            {
+                log_error("modules\0", join3("Module error: \0", merr, "\0"));
+                -> 1;
+            };
+            if (module_sel == (byte*)0 & munit.programs.len > 1)
+            {
+                // A file with several programs: build each one in its own process
+                int pk, prc, ai, ci;
+                Buf pc;
+                bool qt;
+                while (pk < munit.programs.len)
+                {
+                    log_step("modules\0", join3("Building module program '\0", (byte*)munit.programs.items[pk], "'\0"));
+                    pc.__init();
+                    ai = 0;
+                    while (ai < argc)
+                    {
+                        qt = false;
+                        ci = 0;
+                        while (argv[ai][ci] != 0)
+                        {
+                            if (argv[ai][ci] == ' ') { qt = true; };
+                            ci++;
+                        };
+                        if (ai > 0) { pc.put_str(" \0"); };
+                        if (qt) { pc.put_str("\"\0"); };
+                        pc.put_str(argv[ai]);
+                        if (qt) { pc.put_str("\"\0"); };
+                        ai++;
+                    };
+                    pc.put_str(" --module \0");
+                    pc.put_str((byte*)munit.programs.items[pk]);
+                    prc = run_cmd(pc.mem);
+                    pc.__exit();
+                    if (prc != 0) { -> prc; };
+                    pk++;
+                };
+                print_sym(2);
+                print("Compilation successful: build/{\0");
+                pk = 0;
+                while (pk < munit.programs.len)
+                {
+                    if (pk > 0) { print(", \0"); };
+                    print((byte*)munit.programs.items[pk]);
+                    pk++;
+                };
+                println("} (executable)\0");
+                -> 0;
+            };
+            int wi;
+            while (wi < munit.warnings.len)
+            {
+                log_warn("modules\0", (byte*)munit.warnings.items[wi]);
+                wi++;
+            };
+            mu_flatten(prog, munit, "main\0");
+            mmap = mu_func_map(munit);
+            build_name = munit.entry.oname;
+            byte* cfg_dir = "Release\0";
+            if (munit.entry.debug) { cfg_dir = "Debug\0"; };
+            #ifdef __WINDOWS__
+            layout = join3(join3(build_name, "\\\0", plat_name), "\\\0", cfg_dir);
+            #else
+            layout = join3(join3(build_name, "/\0", plat_name), "/\0", cfg_dir);
+            #endif;
+        };
         log_step("dce\0", "Dead code elimination\0");
-        int dce_n = eliminate(prog, cfg_str("entrypoint\0", "FRTStartup\0"));
+        switch (entry_name == (byte*)0)
+        {
+            case (true) { entry_name = cfg_str("entrypoint\0", "FRTStartup\0"); }
+            default {};
+        };
+        // One DCE pass. A program that uses async keeps the runtime declarations the
+        // lowering will reference.
+        bool has_async = program_has_async(prog);
+        int dce_n;
+        PtrVec* droots;
+        if (has_async) { droots = al_roots(); };
+        if (munit != (ModUnit*)0)
+        {
+            PtrVec* mroots = mu_dce_roots(munit, mmap);
+            if (mroots.len > 0)
+            {
+                if (droots == (PtrVec*)0) { droots = mroots; }
+                else
+                {
+                    int mk;
+                    while (mk < mroots.len) { pv_push(droots, mroots.items[mk]); mk++; };
+                };
+            };
+        };
+        if (droots != (PtrVec*)0) { dce_n = eliminate_roots(prog, entry_name, droots); }
+        else { dce_n = eliminate(prog, entry_name); };
         switch (LOG_ON)
         {
             case (true) {
@@ -1566,6 +1671,93 @@ fxc_main(int argc, byte** argv) -> int
                     print(dce_n);
                     println(" unreferenced namespace declaration(s).\0");
                 };
+            };
+        }
+            default {};
+        };
+        bool eff_on = effects_mode;
+        bool bc_on = borrow_mode;
+        if (munit != (ModUnit*)0)
+        {
+            if (mmap.on_effect.count > 0) { eff_on = true; };
+            if (mmap.on_borrow.count > 0) { bc_on = true; };
+        };
+        switch (eff_on)
+        {
+            case (true) {
+            log_step("effects\0", "Effect analysis\0");
+            int ef_n;
+            if (munit != (ModUnit*)0) { ef_n = effects_check_filtered(prog, !effects_warn, mmap.own, mmap.on_effect); }
+            else { ef_n = effects_check_program(prog, !effects_warn); };
+            switch (ef_n < 0)
+            {
+                case (true) { println("Effect pass error\0"); }
+                default {};
+            };
+            switch (ef_n > 0 & !effects_warn)
+            {
+                case (true) {
+                log_error("effects\0", "Effect check failed -- compilation aborted.\0");
+                -> 1;
+            }
+                default {};
+            };
+        }
+            default {};
+        };
+        // The borrow check analyses a copy of the pruned program as written; the
+        // lowering rewrites the original.
+        Node* check_prog = prog;
+        switch (has_async)
+        {
+            case (true) {
+            switch (bc_on)
+            {
+                case (true) { check_prog = node_clone(prog); }
+                default {};
+            };
+            log_step("async\0", "Async lowering\0");
+            int lw = lower_program(prog, entry_name, @pp, !bc_on);
+            switch (lw < 0)
+            {
+                case (true) { -> 1; }
+                default {};
+            };
+        }
+            default {};
+        };
+        switch (bc_on)
+        {
+            case (true) {
+            int bc_n;
+            if (munit != (ModUnit*)0)
+            {
+                NameMap* live = mu_live_modules(mmap, check_prog);
+                int lm;
+                ModInfo* lmi;
+                while (lm < munit.order.len)
+                {
+                    lmi = (ModInfo*)munit.order.items[lm];
+                    lm++;
+                    if (nm_has(live, lmi.name) & nm_has(mmap.on_borrow, lmi.name))
+                    {
+                        log_step("FBC\0", join3("Borrow checking \0", lmi.name, "\0"));
+                    };
+                };
+                bc_n = borrow_check_filtered(check_prog, @pp, entry_name, borrow_warn, mmap.own, mmap.on_borrow);
+            }
+            else
+            {
+                log_step("FBC\0", "Borrow checking\0");
+                bc_n = borrow_check_program(check_prog, @pp, entry_name, borrow_warn);
+            };
+            switch (bc_n > 0 & !borrow_warn)
+            {
+                case (true) {
+                log_error("FBC\0", "Borrow check failed -- compilation aborted.\0");
+                -> 1;
+            }
+                default {};
             };
         }
             default {};
@@ -1637,6 +1829,7 @@ fxc_main(int argc, byte** argv) -> int
             CodeGen cg(est);
             defer cg.__exit();
             cg.null_term = cfg_int("null_terminate_strings\0", 0) == 1;
+            cg.pst = ps.st;
             cg.gen_program(prog);
             Buf ob;
             ob.__init();
@@ -1658,7 +1851,7 @@ fxc_main(int argc, byte** argv) -> int
                 }
                     default {};
                 };
-                switch (!build_output(path, ob.mem, outname))
+                switch (!build_output(path, ob.mem, build_name, layout))
                 {
                     case (true) { node_free(prog); -> 1; }
                     default {};
@@ -1666,33 +1859,35 @@ fxc_main(int argc, byte** argv) -> int
                 node_free(prog);
                 -> 0;
             }
-                default {};
-            };
-            println(ob.mem);
-            print("; Bodies generated: \0");
-            print(cg.nbodies);
-            print(", left as declarations: \0");
-            println(cg.nskipped);
-            int ui;
-            while (ui < cg.ucounts.count)
-            {
-                print("; not generated yet: \0");
-                print((byte*)cg.ucounts.keys[ui]);
-                print(" x \0");
-                println((int)*(i64*)cg.ucounts.vals[ui]);
-                ui++;
-            };
-            switch (cg.nerrors > 0)
-            {
-                case (true) {
-                print("Codegen errors: \0");
-                print(cg.nerrors);
-                print(", first at line \0");
-                print(cg.err_line);
-                print(": \0");
-                println(cg.err_msg);
-            }
-                default {};
+                default
+                {
+                    println(ob.mem);
+                    print("; Bodies generated: \0");
+                    print(cg.nbodies);
+                    print(", left as declarations: \0");
+                    println(cg.nskipped);
+                    int ui;
+                    while (ui < cg.ucounts.count)
+                    {
+                        print("; not generated yet: \0");
+                        print((byte*)cg.ucounts.keys[ui]);
+                        print(" x \0");
+                        println((int)*(i64*)cg.ucounts.vals[ui]);
+                        ui++;
+                    };
+                    switch (cg.nerrors > 0)
+                    {
+                        case (true) {
+                        print("Codegen errors: \0");
+                        print(cg.nerrors);
+                        print(", first at line \0");
+                        print(cg.err_line);
+                        print(": \0");
+                        println(cg.err_msg);
+                    }
+                        default {};
+                    };
+                };
             };
         }
             default {};
@@ -1726,15 +1921,14 @@ fxc_main(int argc, byte** argv) -> int
         {
             switch (lx.tokens[k].type != TokenType.EOF)
             {
-                case (true)
+                case (true) {
+                switch (counts[lx.tokens[k].type] == 0)
                 {
-                    switch (counts[lx.tokens[k].type] == 0)
-                    {
-                        case (true) { types++; }
-                        default {};
-                    };
-                    counts[lx.tokens[k].type] = counts[lx.tokens[k].type] + 1;
-                }
+                    case (true) { types++; }
+                    default {};
+                };
+                counts[lx.tokens[k].type] = counts[lx.tokens[k].type] + 1;
+            }
                 default {};
             };
             k++;
@@ -1752,7 +1946,7 @@ fxc_main(int argc, byte** argv) -> int
         k = 0;
         while (k < 256)
         {
-            switch (counts[k]!?)
+            switch (counts[k] != 0)
             {
                 case (true) {
                 print("  \0");
@@ -1771,34 +1965,32 @@ fxc_main(int argc, byte** argv) -> int
 
     switch (verbose)
     {
-        case (true)
+        case (true) {
+        print("=== Detailed Tokens for \0");
+        print(path);
+        println(" ===\0");
+        k = 0;
+        while (k < lx.count)
         {
-            print("=== Detailed Tokens for \0");
-            print(path);
-            println(" ===\0");
-            k = 0;
-            while (k < lx.count)
-            {
-                print(k + 1);
-                print(": \0");
-                print(token_name(lx.tokens[k].type));
-                print(" | \0");
-                print(lx.token_value(k));
-                print(" | Line \0");
-                print(lx.tokens[k].line);
-                print(", Col \0");
-                println(lx.tokens[k].column);
-                k++;
-            };
-        }
-        default
-        {
-            print("=== Token Summary for \0");
-            print(path);
-            println(" ===\0");
-            print("Total tokens: \0");
-            println(total);
+            print(k + 1);
+            print(": \0");
+            print(token_name(lx.tokens[k].type));
+            print(" | \0");
+            print(lx.token_value(k));
+            print(" | Line \0");
+            print(lx.tokens[k].line);
+            print(", Col \0");
+            println(lx.tokens[k].column);
+            k++;
         };
+    }
+        default {
+        print("=== Token Summary for \0");
+        print(path);
+        println(" ===\0");
+        print("Total tokens: \0");
+        println(total);
+    };
     };
 
     -> 0;

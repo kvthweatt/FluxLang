@@ -1,83 +1,146 @@
-<?xml version="1.0" encoding="Windows-1252" ?>
+<?xml version="1.0" encoding="UTF-8" ?>
 <NotepadPlus>
-    <AutoComplete>
-        <KeyWord name="def" />
-        <KeyWord name="extern" />
-        <KeyWord name="object" />
-        <KeyWord name="struct" />
-        <KeyWord name="union" />
-        <KeyWord name="namespace" />
-        <KeyWord name="enum" />
-        <KeyWord name="if" />
-        <KeyWord name="elif" />
-        <KeyWord name="else" />
-        <KeyWord name="for" />
-        <KeyWord name="while" />
-        <KeyWord name="do" />
-        <KeyWord name="switch" />
-        <KeyWord name="case" />
-        <KeyWord name="default" />
-        <KeyWord name="try" />
-        <KeyWord name="catch" />
-        <KeyWord name="throw" />
-        <KeyWord name="return" />
-        <KeyWord name="break" />
-        <KeyWord name="continue" />
-        <KeyWord name="import" />
-        <KeyWord name="using" />
-        <KeyWord name="const" />
-        <KeyWord name="volatile" />
-        <KeyWord name="heap" />
-        <KeyWord name="stack" />
-        <KeyWord name="register" />
-        <KeyWord name="signed" />
-        <KeyWord name="unsigned" />
-        <KeyWord name="noinit" />
-        <KeyWord name="sizeof" />
-        <KeyWord name="typeof" />
+    <AutoComplete language="Flux">
+        <Environment ignoreCase="no" startFunc="(" stopFunc=")" paramSeparator="," terminal=";" additionalWordChar="# _" />
+        <KeyWord name="__exit" />
+        <KeyWord name="__expr" />
+        <KeyWord name="__init" />
         <KeyWord name="alignof" />
-        <KeyWord name="true" />
-        <KeyWord name="false" />
-        <KeyWord name="void" />
-        <KeyWord name="int" />
-        <KeyWord name="uint" />
-        <KeyWord name="float" />
-        <KeyWord name="bool" />
-        <KeyWord name="char" />
-        <KeyWord name="data" />
-        <KeyWord name="this" />
-        <KeyWord name="super" />
-        <KeyWord name="auto" />
+        <KeyWord name="and" />
+        <KeyWord name="as" />
         <KeyWord name="asm" />
         <KeyWord name="assert" />
+        <KeyWord name="async" />
+        <KeyWord name="attenuate" />
+        <KeyWord name="auto" />
+        <KeyWord name="binding" />
+        <KeyWord name="bool" />
+        <KeyWord name="break" />
+        <KeyWord name="byte" />
+        <KeyWord name="case" />
+        <KeyWord name="catch" />
+        <KeyWord name="cdecl" />
+        <KeyWord name="char" />
         <KeyWord name="compt" />
-        <KeyWord name="trait" />
+        <KeyWord name="comptime" />
+        <KeyWord name="const" />
+        <KeyWord name="constraint" />
+        <KeyWord name="continue" />
         <KeyWord name="contract" />
-        <KeyWord name="and" />
-        <KeyWord name="or" />
-        <KeyWord name="not" />
-        <KeyWord name="xor" />
-        <KeyWord name="in" />
-        <KeyWord name="is" />
+        <KeyWord name="data" />
+        <KeyWord name="def" />
+        <KeyWord name="default" />
+        <KeyWord name="defer" />
+        <KeyWord name="deprecate" />
+        <KeyWord name="dict" />
+        <KeyWord name="do" />
+        <KeyWord name="double" />
+        <KeyWord name="effect" />
+        <KeyWord name="elif" />
+        <KeyWord name="else" />
+        <KeyWord name="emitflux" />
+        <KeyWord name="endianof" />
+        <KeyWord name="enum" />
+        <KeyWord name="escape" />
+        <KeyWord name="export" />
+        <KeyWord name="extern" />
+        <KeyWord name="false" />
+        <KeyWord name="fastcall" />
+        <KeyWord name="float" />
+        <KeyWord name="fluxvm" />
+        <KeyWord name="for" />
+        <KeyWord name="from" />
         <KeyWord name="global" />
+        <KeyWord name="goto" />
+        <KeyWord name="has" />
+        <KeyWord name="heap" />
+        <KeyWord name="if" />
+        <KeyWord name="in" />
+        <KeyWord name="inline" />
+        <KeyWord name="int" />
+        <KeyWord name="interface" />
+        <KeyWord name="is" />
+        <KeyWord name="jump" />
+        <KeyWord name="label" />
         <KeyWord name="local" />
+        <KeyWord name="long" />
+        <KeyWord name="macro" />
+        <KeyWord name="module" />
+        <KeyWord name="namespace" />
+        <KeyWord name="noinit" />
+        <KeyWord name="not" />
+        <KeyWord name="object" />
+        <KeyWord name="operator" />
+        <KeyWord name="or" />
         <KeyWord name="private" />
         <KeyWord name="public" />
-        <KeyWord name="from" />
-        
+        <KeyWord name="register" />
+        <KeyWord name="return" />
+        <KeyWord name="signed" />
+        <KeyWord name="singinit" />
+        <KeyWord name="sizeof" />
+        <KeyWord name="stack" />
+        <KeyWord name="stdcall" />
+        <KeyWord name="struct" />
+        <KeyWord name="super" />
+        <KeyWord name="switch" />
+        <KeyWord name="this" />
+        <KeyWord name="thiscall" />
+        <KeyWord name="throw" />
+        <KeyWord name="trait" />
+        <KeyWord name="true" />
+        <KeyWord name="try" />
+        <KeyWord name="typeof" />
+        <KeyWord name="uint" />
+        <KeyWord name="ulong" />
+        <KeyWord name="union" />
+        <KeyWord name="unsigned" />
+        <KeyWord name="using" />
+        <KeyWord name="vector" />
+        <KeyWord name="vectorcall" />
+        <KeyWord name="void" />
+        <KeyWord name="volatile" />
+        <KeyWord name="while" />
+        <KeyWord name="xor" />
+        <KeyWord name="#import" />
+        <KeyWord name="#def" />
+        <KeyWord name="#psub" />
+        <KeyWord name="#dir" />
+        <KeyWord name="#package" />
+        <KeyWord name="#ifdef" />
+        <KeyWord name="#ifndef" />
+        <KeyWord name="#ifpsub" />
+        <KeyWord name="#ifnpsub" />
+        <KeyWord name="#elif" />
+        <KeyWord name="#else" />
+        <KeyWord name="#endif" />
+        <KeyWord name="#warn" />
+        <KeyWord name="#stop" />
         <!-- Common patterns -->
-        <KeyWord name="def name(params) -> return_type" />
+        <KeyWord name="def name(params) -&gt; return_type" />
         <KeyWord name="if (condition)" />
-        <KeyWord name="for (initial; condition; side_effect)" />
+        <KeyWord name="for (init; cond; step)" />
         <KeyWord name="while (condition)" />
         <KeyWord name="switch (value)" />
         <KeyWord name="try { } catch (type value)" />
         <KeyWord name="object name { }" />
         <KeyWord name="struct name { }" />
         <KeyWord name="namespace name { }" />
-        <KeyWord name="extern def !!name() -> void;" />
+        <KeyWord name="extern def !!name() -&gt; void;" />
         <KeyWord name="unsigned data{8}[] as string;" />
-        <KeyWord name="i&quot;{}&quot;:{ }" />
+        <KeyWord name="i&quot;{}&quot;:{ };" />
         <KeyWord name="f&quot;{}&quot;" />
+        <KeyWord name="async name() -&gt; type" />
+        <KeyWord name="module Name { from &quot;file.fx&quot;; } # build { };" />
+        <KeyWord name="#[override for {Module}] = { };" />
+        <!-- Standard library -->
+        <KeyWord name="print" func="yes"><Overload retVal="void" descr="Writes a string to the console"><Param name="byte* s" /></Overload></KeyWord>
+        <KeyWord name="println" func="yes"><Overload retVal="void" descr="Writes a string and newline to the console"><Param name="byte* s" /></Overload></KeyWord>
+        <KeyWord name="fmalloc" func="yes"><Overload retVal="void*" descr="Allocates memory"><Param name="u64 size" /></Overload></KeyWord>
+        <KeyWord name="frealloc" func="yes"><Overload retVal="void*" descr="Resizes an allocation"><Param name="void* p" /><Param name="u64 size" /></Overload></KeyWord>
+        <KeyWord name="ffree" func="yes"><Overload retVal="int" descr="Frees an allocation"><Param name="u64 p" /></Overload></KeyWord>
+        <KeyWord name="memcpy" func="yes"><Overload retVal="void*" descr="Copies memory"><Param name="void* dst" /><Param name="void* src" /><Param name="u64 n" /></Overload></KeyWord>
+        <KeyWord name="memmove" func="yes"><Overload retVal="void*" descr="Moves memory"><Param name="void* dst" /><Param name="void* src" /><Param name="u64 n" /></Overload></KeyWord>
+        <KeyWord name="memset" func="yes"><Overload retVal="void*" descr="Fills memory"><Param name="void* dst" /><Param name="int v" /><Param name="u64 n" /></Overload></KeyWord>
     </AutoComplete>
 </NotepadPlus>

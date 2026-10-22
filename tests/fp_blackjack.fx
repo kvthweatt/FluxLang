@@ -1,4 +1,4 @@
-#import <standard.fx>, "redrandom.fx";
+#import <standard.fx>, <random.fx>;
 
 using standard::random;
 

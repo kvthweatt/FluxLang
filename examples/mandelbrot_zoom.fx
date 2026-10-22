@@ -1,8 +1,10 @@
-#import <standard.fx>, "redmath.fx", "redwindows.fx", "redopengl.fx";
+#import <standard.fx>, <windows.fx>, <opengl.fx>, <threading.fx>;
 
 using standard::io::console;
 using standard::system::windows;
 using standard::math;
+using standard::atomic;
+using standard::threading;
 
 // ============================================================================
 // Mandelbrot Set - Auto Zoom Demo

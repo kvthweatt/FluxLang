@@ -1,4 +1,4 @@
-#import <standard.fx>, "redmath.fx", "redwindows.fx", "redgraphing.fx", "redopengl.fx", "redallocators.fx";
+#import <standard.fx>, <windows.fx>, <graphing.fx>, <opengl.fx>;
 
 using standard::system::windows;
 using standard::math;
@@ -6,6 +6,7 @@ using standard::graphing;
 using standard::graphing::graph3d;
 using standard::graphing::graph3d::generators;
 using standard::memory::allocators::stdheap;
+using OpenGL;
 
 // ============================================================================
 // LAYOUT

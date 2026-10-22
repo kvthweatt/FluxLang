@@ -73,11 +73,11 @@ contexts:
       scope: storage.type.flux
 
     # Keywords (but NOT types)
-    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|cdecl|const|constraint|continue|def|defer|default|deprecate|do|elif|else|endianof|export|extern|false|fastcall|for|from|goto|global|has|heap|if|in|inline|interface|is|jump|label|local|namespace|noreturn|not|operator|or|private|public|register|return|signed|sizeof|stack|stdcall|super|switch|this|thiscall|throw|trait|true|try|typeof|union|unsigned|using|vectorcall|volatile|while|xor)\b'
+    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|cdecl|const|constraint|continue|def|defer|default|deprecate|do|elif|else|endianof|error|export|extern|false|fastcall|for|from|goto|global|has|heap|if|in|inline|interface|is|jump|label|local|module|namespace|noreturn|not|operator|or|private|public|register|return|signed|sizeof|stack|stdcall|super|switch|this|thiscall|throw|trait|true|try|typeof|union|unsigned|using|vectorcall|volatile|while|xor)\b'
       scope: keyword.control.flux
 
     # Type modifiers
-    - match: '\b(escape|noinit|singinit|const|volatile|signed|unsigned|heap|stack|register|macro|contract|emitflux|compiler|comptime|fluxvm|effect|attenuate)\b'
+    - match: '\b(async|escape|noinit|singinit|const|volatile|signed|unsigned|heap|stack|register|macro|contract|emitflux|compiler|comptime|fluxvm|effect|attenuate|binding)\b'
       scope: storage.modifier.flux
 
     # Special methods (dunder methods)
@@ -113,8 +113,11 @@ contexts:
     - match: '@'
       scope: keyword.operator.address.flux
 
-    - match: '\${{identifier}}'
+    - match: '\$'
       scope: keyword.operator.stringify.flux
+
+    - match: '#'
+      scope: keyword.operator.tag.flux
 
     # Pointer dereference
     - match: '\*(?=[a-zA-Z_])'

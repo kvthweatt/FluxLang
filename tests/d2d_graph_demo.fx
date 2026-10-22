@@ -1,4 +1,4 @@
-#import <standard.fx>, "redmath.fx", "redwindows.fx", "direct2d.fx";
+#import <standard.fx>, <math.fx>, <windows.fx>, <direct2d.fx>;
 
 using standard::system::windows;
 using standard::math;

@@ -60,20 +60,26 @@ namespace flux
             switch (t == (TypeSpec*)0)
             {
                 case (true) { -> 0; }
-                default {};
+                default
+                {
+                    switch (t.bit_width > 0)
+                    {
+                        case (true) { -> t.bit_width; }
+                        default
+                        {
+                            int w = builtin_bit_width(t.base_type);
+                            switch (w < 0)
+                            {
+                                case (true) { -> 0; }
+                                default
+                                {
+                                    -> w;
+                                };
+                            };
+                        };
+                    };
+                };
             };
-            switch (t.bit_width > 0)
-            {
-                case (true) { -> t.bit_width; }
-                default {};
-            };
-            int w = builtin_bit_width(t.base_type);
-            switch (w < 0)
-            {
-                case (true) { -> 0; }
-                default {};
-            };
-            -> w;
         };
 
         // Relational constraint compatibility (fparser._types_compatible)
@@ -82,30 +88,36 @@ namespace flux
             switch (ts_is_pointer(a) != ts_is_pointer(b))
             {
                 case (true) { -> false; }
-                default {};
+                default
+                {
+                    switch (ts_is_pointer(a) & a.pointer_depth != b.pointer_depth)
+                    {
+                        case (true) { -> false; }
+                        default
+                        {
+                            int aw, bw_;
+                            switch (a.bit_width > 0)
+                            {
+                                case (true) { aw = a.bit_width; }
+                                default {};
+                            };
+                            switch (b.bit_width > 0)
+                            {
+                                case (true) { bw_ = b.bit_width; }
+                                default {};
+                            };
+                            switch (aw!? & bw_!? & aw != bw_)
+                            {
+                                case (true) { -> false; }
+                                default
+                                {
+                                    -> true;
+                                };
+                            };
+                        };
+                    };
+                };
             };
-            switch (ts_is_pointer(a) & a.pointer_depth != b.pointer_depth)
-            {
-                case (true) { -> false; }
-                default {};
-            };
-            int aw, bw_;
-            switch (a.bit_width > 0)
-            {
-                case (true) { aw = a.bit_width; }
-                default {};
-            };
-            switch (b.bit_width > 0)
-            {
-                case (true) { bw_ = b.bit_width; }
-                default {};
-            };
-            switch (aw != 0 & bw_ != 0 & aw != bw_)
-            {
-                case (true) { -> false; }
-                default {};
-            };
-            -> true;
         };
 
         // Allowed list match (fparser._ts_matches)
@@ -115,41 +127,55 @@ namespace flux
                 allowed.custom_typename != (byte*)0)
             {
                 case (true) { -> true; }
-                default {};
+                default
+                {
+                    switch (concrete.base_type != allowed.base_type)
+                    {
+                        case (true) { -> false; }
+                        default
+                        {
+                            switch (ts_is_pointer(concrete) != ts_is_pointer(allowed))
+                            {
+                                case (true) { -> false; }
+                                default
+                                {
+                                    switch (concrete.pointer_depth != allowed.pointer_depth)
+                                    {
+                                        case (true) { -> false; }
+                                        default
+                                        {
+                                            switch (ts_is_array(concrete) != ts_is_array(allowed))
+                                            {
+                                                case (true) { -> false; }
+                                                default
+                                                {
+                                                    switch (!cstr_eq(concrete.custom_typename, allowed.custom_typename))
+                                                    {
+                                                        case (true) { -> false; }
+                                                        default
+                                                        {
+                                                            switch (allowed.bit_width > 0 & concrete.bit_width > 0 & concrete.bit_width != allowed.bit_width)
+                                                            {
+                                                                case (true) {
+                                                                -> false;
+                                                            }
+                                                                default
+                                                                {
+                                                                    -> true;
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
             };
-            switch (concrete.base_type != allowed.base_type)
-            {
-                case (true) { -> false; }
-                default {};
-            };
-            switch (ts_is_pointer(concrete) != ts_is_pointer(allowed))
-            {
-                case (true) { -> false; }
-                default {};
-            };
-            switch (concrete.pointer_depth != allowed.pointer_depth)
-            {
-                case (true) { -> false; }
-                default {};
-            };
-            switch (ts_is_array(concrete) != ts_is_array(allowed))
-            {
-                case (true) { -> false; }
-                default {};
-            };
-            switch (!cstr_eq(concrete.custom_typename, allowed.custom_typename))
-            {
-                case (true) { -> false; }
-                default {};
-            };
-            switch (allowed.bit_width > 0 & concrete.bit_width > 0 & concrete.bit_width != allowed.bit_width)
-            {
-                case (true) {
-                -> false;
-            }
-                default {};
-            };
-            -> true;
         };
 
         // Appends every node of the tree under n (depth first, n first) to out.
@@ -158,27 +184,29 @@ namespace flux
             switch (n == (Node*)0)
             {
                 case (true) { ->; }
-                default {};
-            };
-            pv_push(out, (void*)n);
-            collect_nodes(n.a, out);
-            collect_nodes(n.b, out);
-            collect_nodes(n.c, out);
-            collect_nodes(n.d, out);
-            collect_nodes(n.e, out);
-            int s, i, cnt;
-            while (s < 6)
-            {
-                cnt = node_count(n, s);
-                i = 0;
-                while (i < cnt)
+                default
                 {
-                    collect_nodes(node_child(n, s, i), out);
-                    i++;
+                    pv_push(out, (void*)n);
+                    collect_nodes(n.a, out);
+                    collect_nodes(n.b, out);
+                    collect_nodes(n.c, out);
+                    collect_nodes(n.d, out);
+                    collect_nodes(n.e, out);
+                    int s, i, cnt;
+                    while (s < 6)
+                    {
+                        cnt = node_count(n, s);
+                        i = 0;
+                        while (i < cnt)
+                        {
+                            collect_nodes(node_child(n, s, i), out);
+                            i++;
+                        };
+                        s++;
+                    };
+                    ->;
                 };
-                s++;
             };
-            ->;
         };
 
         // ------------------------------------------------------------------
@@ -228,8 +256,7 @@ namespace flux
                 };
                 pv_free(this.diags);
                 pv_free(this.tmp_ts);
-                this.mb.__exit();
-                ->;
+                -> this.mb.__exit();
             };
 
             clear_msg() -> void
@@ -266,13 +293,13 @@ namespace flux
                 switch (t == (TypeSpec*)0)
                 {
                     case (true) {
-                    this.mb.put_str(g"?\0");
-                    ->;
+                    -> this.mb.put_str(g"?\0");
                 }
-                    default {};
+                    default
+                    {
+                        -> mangle_type(@this.mb, t);
+                    };
                 };
-                mangle_type(@this.mb, t);
-                ->;
             };
 
             // "T" or "T and U" (a unary relation names the type once)
@@ -328,46 +355,54 @@ namespace flux
                 switch (e == (Node*)0)
                 {
                     case (true) { -> (TypeSpec*)0; }
-                    default {};
-                };
-                switch (e.kind == NodeKind.CAST_EXPRESSION | e.kind == NodeKind.TYPE_CONVERT_EXPRESSION)
-                {
-                    case (true) {
-                    -> e.ts;
-                }
-                    default {};
-                };
-                switch (e.kind == NodeKind.IDENTIFIER)
-                {
-                    case (true) {
-                    switch (e.text == (byte*)0)
+                    default
                     {
-                        case (true) { -> (TypeSpec*)0; }
-                        default {};
+                        switch (e.kind == NodeKind.CAST_EXPRESSION | e.kind == NodeKind.TYPE_CONVERT_EXPRESSION)
+                        {
+                            case (true) {
+                            -> e.ts;
+                        }
+                            default
+                            {
+                                switch (e.kind == NodeKind.IDENTIFIER)
+                                {
+                                    case (true) {
+                                    switch (e.text == (byte*)0)
+                                    {
+                                        case (true) { -> (TypeSpec*)0; }
+                                        default {};
+                                    };
+                                    -> (TypeSpec*)nm_get(locals, e.text);
+                                }
+                                    default
+                                    {
+                                        switch (e.kind == NodeKind.LITERAL)
+                                        {
+                                            case (true) {
+                                            TypeSpec* t = typespec_new();
+                                            t.base_type = e.op;
+                                            switch (e.op == DataType.SINT | e.op == DataType.SLONG | e.op == DataType.CHAR |
+                                                e.op == DataType.FLOAT | e.op == DataType.DOUBLE)
+                                            {
+                                                case (true) {
+                                                t.flags = TS_SIGNED;
+                                            }
+                                                default {};
+                                            };
+                                            pv_push(this.tmp_ts, (void*)t);
+                                            -> t;
+                                        }
+                                            default
+                                            {
+                                                -> (TypeSpec*)0;
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
                     };
-                    -> (TypeSpec*)nm_get(locals, e.text);
-                }
-                    default {};
                 };
-                switch (e.kind == NodeKind.LITERAL)
-                {
-                    case (true) {
-                    TypeSpec* t = typespec_new();
-                    t.base_type = e.op;
-                    switch (e.op == DataType.SINT | e.op == DataType.SLONG | e.op == DataType.CHAR |
-                        e.op == DataType.FLOAT | e.op == DataType.DOUBLE)
-                    {
-                        case (true) {
-                        t.flags = TS_SIGNED;
-                    }
-                        default {};
-                    };
-                    pv_push(this.tmp_ts, (void*)t);
-                    -> t;
-                }
-                    default {};
-                };
-                -> (TypeSpec*)0;
             };
 
             // Fills locals from the parameters and declarations of fn (name -> TypeSpec*)
@@ -410,13 +445,7 @@ namespace flux
                              bool is_trunc, bool between) -> void
             {
                 this.clear_msg();
-                this.mb.put_str(g"Type relation \0");
-                this.mb.put_str(lname);
-                this.mb.put_str(g" \0");
-                this.mb.put_str(op);
-                this.mb.put_str(g" \0");
-                this.mb.put_str(rname);
-                this.mb.put_str(g" violated: illegal \0");
+                this.mb.put_str(f"Type relation {lname} {op} {rname} violated: illegal \0");
                 switch (is_trunc)
                 {
                     case (true) { this.mb.put_str(g"truncation \0"); }
@@ -428,8 +457,7 @@ namespace flux
                     default { this.mb.put_str(g"on \0"); };
                 };
                 this.put_type_clause(lname, rname, lts, rts);
-                this.emit(Severity.ERROR, at.line, at.col);
-                ->;
+                -> this.emit(Severity.ERROR, at.line, at.col);
             };
 
             // !`< !`<= !`> !`>= over the instantiated function fn
@@ -462,27 +490,29 @@ namespace flux
                         switch (src_w == 0 | dst_w == 0)
                         {
                             case (true) { continue; }
-                            default {};
-                        };
-                        switch (is_trunc)
-                        {
-                            case (true) { switch (dst_w >= src_w)
- {
-     case (true) { continue; }
-     default {};
- }; }
-                            default { switch (dst_w <= src_w)
- {
-     case (true) { continue; }
-     default {};
- }; };
-                        };
-                        src_match = this.width_constrained(src_w, lts, rts);
-                        dst_match = this.width_constrained(dst_w, lts, rts);
-                        switch (between)
-                        {
-                            case (true) { violated = src_match & dst_match; }
-                            default { violated = src_match | dst_match; };
+                            default
+                            {
+                                                       switch (is_trunc)
+                                                       {
+                                                           case (true) { switch (dst_w >= src_w)
+                                {
+                                    case (true) { continue; }
+                                    default {};
+                                }; }
+                                                           default { switch (dst_w <= src_w)
+                                {
+                                    case (true) { continue; }
+                                    default {};
+                                }; };
+                                                       };
+                                                       src_match = this.width_constrained(src_w, lts, rts);
+                                                       dst_match = this.width_constrained(dst_w, lts, rts);
+                                                       switch (between)
+                                                       {
+                                                           case (true) { violated = src_match & dst_match; }
+                                                           default { violated = src_match | dst_match; };
+                                                       };
+                            };
                         };
                     }
                         default {
@@ -497,36 +527,42 @@ namespace flux
                                 switch (lw == 0 | rw == 0)
                                 {
                                     case (true) { continue; }
-                                    default {};
-                                };
-                                result_w = lw;
-                                max_w = rw;
-                                switch (rw < lw)
-                                {
-                                    case (true) {
-                                    result_w = rw;
-                                    max_w = lw;
-                                }
-                                    default {};
-                                };
-                                switch (result_w == max_w)
-                                {
-                                    case (true) { continue; }
-                                    default {};
-                                };
-                                // The result width is the narrower operand, so a binary operation
-                                // never widens (same as the Python: result_w <= min operand width).
-                                switch (!is_trunc)
-                                {
-                                    case (true) { continue; }
-                                    default {};
-                                };
-                                src_match = this.width_constrained(result_w, lts, rts);
-                                dst_match = this.width_constrained(max_w, lts, rts);
-                                switch (between)
-                                {
-                                    case (true) { violated = src_match & dst_match; }
-                                    default { violated = src_match | dst_match; };
+                                    default
+                                    {
+                                        result_w = lw;
+                                        max_w = rw;
+                                        switch (rw < lw)
+                                        {
+                                            case (true) {
+                                            result_w = rw;
+                                            max_w = lw;
+                                        }
+                                            default {};
+                                        };
+                                        switch (result_w == max_w)
+                                        {
+                                            case (true) { continue; }
+                                            default
+                                            {
+                                                // The result width is the narrower operand, so a binary operation
+                                                // never widens (same as the Python: result_w <= min operand width).
+                                                switch (!is_trunc)
+                                                {
+                                                    case (true) { continue; }
+                                                    default
+                                                    {
+                                                        src_match = this.width_constrained(result_w, lts, rts);
+                                                        dst_match = this.width_constrained(max_w, lts, rts);
+                                                        switch (between)
+                                                        {
+                                                            case (true) { violated = src_match & dst_match; }
+                                                            default { violated = src_match | dst_match; };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
                                 };
                             }
                             case (NodeKind.RETURN_STATEMENT)
@@ -534,55 +570,59 @@ namespace flux
                                 switch (n.a == (Node*)0)
                                 {
                                     case (true) { continue; }
-                                    default {};
-                                };
-                                s = this.type_of(n.a, locals);
-                                switch (s == (TypeSpec*)0 & n.a.kind == NodeKind.BINARY_OP)
-                                {
-                                    case (true) {
-                                    ls = this.type_of(n.a.a, locals);
-                                    rs = this.type_of(n.a.b, locals);
-                                    lw = bw(ls);
-                                    rw = bw(rs);
-                                    expr_w = lw;
-                                    switch (rw > lw)
+                                    default
                                     {
-                                        case (true) { expr_w = rw; }
-                                        default {};
+                                                                       s = this.type_of(n.a, locals);
+                                                                       switch (s == (TypeSpec*)0 & n.a.kind == NodeKind.BINARY_OP)
+                                                                       {
+                                                                           case (true) {
+                                                                           ls = this.type_of(n.a.a, locals);
+                                                                           rs = this.type_of(n.a.b, locals);
+                                                                           lw = bw(ls);
+                                                                           rw = bw(rs);
+                                                                           expr_w = lw;
+                                                                           switch (rw > lw)
+                                                                           {
+                                                                               case (true) { expr_w = rw; }
+                                                                               default {};
+                                                                           };
+                                                                           switch (lw == 0 | rw == 0)
+                                                                           {
+                                                                               case (true) { expr_w = 0; }
+                                                                               default {};
+                                                                           };
+                                                                       }
+                                                                           default { expr_w = bw(s); };
+                                                                       };
+                                                                       ret_w = bw(fn.ts);
+                                                                       switch (ret_w == 0 | expr_w == 0)
+                                                                       {
+                                                                           case (true) { continue; }
+                                                                           default
+                                                                           {
+                                                                                                              switch (is_trunc)
+                                                                                                              {
+                                                                                                                  case (true) { switch (expr_w <= ret_w)
+                                                                               {
+                                                                                   case (true) { continue; }
+                                                                                   default {};
+                                                                               }; }
+                                                                                                                  default { switch (expr_w >= ret_w)
+                                                                               {
+                                                                                   case (true) { continue; }
+                                                                                   default {};
+                                                                               }; };
+                                                                                                              };
+                                                                                                              src_match = this.width_constrained(expr_w, lts, rts);
+                                                                                                              dst_match = this.width_constrained(ret_w, lts, rts);
+                                                                                                              switch (between)
+                                                                                                              {
+                                                                                                                  case (true) { violated = src_match & dst_match; }
+                                                                                                                  default { violated = src_match | dst_match; };
+                                                                                                              };
+                                                                           };
+                                                                       };
                                     };
-                                    switch (lw == 0 | rw == 0)
-                                    {
-                                        case (true) { expr_w = 0; }
-                                        default {};
-                                    };
-                                }
-                                    default { expr_w = bw(s); };
-                                };
-                                ret_w = bw(fn.ts);
-                                switch (ret_w == 0 | expr_w == 0)
-                                {
-                                    case (true) { continue; }
-                                    default {};
-                                };
-                                switch (is_trunc)
-                                {
-                                    case (true) { switch (expr_w <= ret_w)
- {
-     case (true) { continue; }
-     default {};
- }; }
-                                    default { switch (expr_w >= ret_w)
- {
-     case (true) { continue; }
-     default {};
- }; };
-                                };
-                                src_match = this.width_constrained(expr_w, lts, rts);
-                                dst_match = this.width_constrained(ret_w, lts, rts);
-                                switch (between)
-                                {
-                                    case (true) { violated = src_match & dst_match; }
-                                    default { violated = src_match | dst_match; };
                                 };
                             }
                             default {};
@@ -653,39 +693,44 @@ namespace flux
                     switch (n.kind != NodeKind.ADDRESS_OF)
                     {
                         case (true) { continue; }
-                        default {};
+                        default
+                        {
+                            switch (n.a == (Node*)0)
+                            {
+                                case (true) { continue; }
+                                default
+                                {
+                                    switch (n.a.kind != NodeKind.IDENTIFIER)
+                                    {
+                                        case (true) { continue; }
+                                        default
+                                        {
+                                            switch (n.a.text == (byte*)0)
+                                            {
+                                                case (true) { continue; }
+                                                default
+                                                {
+                                                    switch (!nm_has(vars, n.a.text))
+                                                    {
+                                                        case (true) { continue; }
+                                                        default
+                                                        {
+                                                            this.clear_msg();
+                                                            this.mb.put_str(f"Type relation {lname} !@ {rname} violated: cannot take address of \0");
+                                                            this.put_type_clause(lname, rname, lts, rts);
+                                                            this.emit(Severity.ERROR, n.line, n.col);
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
                     };
-                    switch (n.a == (Node*)0)
-                    {
-                        case (true) { continue; }
-                        default {};
-                    };
-                    switch (n.a.kind != NodeKind.IDENTIFIER)
-                    {
-                        case (true) { continue; }
-                        default {};
-                    };
-                    switch (n.a.text == (byte*)0)
-                    {
-                        case (true) { continue; }
-                        default {};
-                    };
-                    switch (!nm_has(vars, n.a.text))
-                    {
-                        case (true) { continue; }
-                        default {};
-                    };
-                    this.clear_msg();
-                    this.mb.put_str(g"Type relation \0");
-                    this.mb.put_str(lname);
-                    this.mb.put_str(g" !@ \0");
-                    this.mb.put_str(rname);
-                    this.mb.put_str(g" violated: cannot take address of \0");
-                    this.put_type_clause(lname, rname, lts, rts);
-                    this.emit(Severity.ERROR, n.line, n.col);
                 };
-                nm_free(vars);
-                ->;
+                -> nm_free(vars);
             };
 
             // One allowed-list constraint on a template parameter. allowed_text is the
@@ -697,29 +742,27 @@ namespace flux
                 switch (concrete == (TypeSpec*)0)
                 {
                     case (true) { -> true; }
-                    default {};
-                };
-                while (i < n)
-                {
-                    switch (ts_matches(concrete, allowed[i]))
+                    default
                     {
-                        case (true) { -> true; }
-                        default {};
+                        while (i < n)
+                        {
+                            switch (ts_matches(concrete, allowed[i]))
+                            {
+                                case (true) { -> true; }
+                                default
+                                {
+                                    i++;
+                                };
+                            };
+                        };
+                        this.clear_msg();
+                        this.mb.put_str(f"Template parameter '{pname}' of '{fname}' was instantiated with type '\0");
+                        this.put_type(concrete);
+                        this.mb.put_str(f"', which does not satisfy the constraint [{allowed_text}]\0");
+                        this.emit(Severity.ERROR, line, col);
+                        -> false;
                     };
-                    i++;
                 };
-                this.clear_msg();
-                this.mb.put_str(g"Template parameter '\0");
-                this.mb.put_str(pname);
-                this.mb.put_str(g"' of '\0");
-                this.mb.put_str(fname);
-                this.mb.put_str(g"' was instantiated with type '\0");
-                this.put_type(concrete);
-                this.mb.put_str(g"', which does not satisfy the constraint [\0");
-                this.mb.put_str(allowed_text);
-                this.mb.put_str(g"]\0");
-                this.emit(Severity.ERROR, line, col);
-                -> false;
             };
 
             // Applies the CONSTRA_RELATION nodes of a template to one instantiation.
@@ -735,148 +778,142 @@ namespace flux
                 switch (relations == (NodeVec*)0)
                 {
                     case (true) { -> 0; }
-                    default {};
-                };
-
-                PtrVec* tnodes = pv_new();
-                PtrVec* cnodes = pv_new();
-                NameMap* locals = nm_new();
-                collect_nodes(tmpl, tnodes);
-                switch (concrete != (Node*)0)
-                {
-                    case (true) {
-                    collect_nodes(concrete, cnodes);
-                    this.collect_locals(concrete, cnodes, locals);
-                }
-                    default {};
-                };
-
-                int r, a, b, k;
-                Node* rel;
-                byte* op;
-                byte* lname;
-                byte* rname;
-                TypeSpec* lts;
-                TypeSpec* rts;
-                int nl, nr;
-                while (r < relations.len)
-                {
-                    rel = relations.items[r];
-                    r++;
-                    op = rel.text;
-                    nl = node_count(rel, 0);
-                    nr = node_count(rel, 1);
-                    a = 0;
-                    while (a < nl)
+                    default
                     {
-                        lname = node_child(rel, 0, a).text;
-                        b = 0;
-                        while (b < nr)
+                        PtrVec* tnodes = pv_new();
+                        PtrVec* cnodes = pv_new();
+                        NameMap* locals = nm_new();
+                        collect_nodes(tmpl, tnodes);
+                        switch (concrete != (Node*)0)
                         {
-                            rname = node_child(rel, 1, b).text;
-                            lts = (TypeSpec*)0;
-                            rts = (TypeSpec*)0;
-                            k = 0;
-                            while (k < n)
-                            {
-                                switch (cstr_eq((byte*)pnames.items[k], lname))
-                                {
-                                    case (true) { lts = args[k]; }
-                                    default {};
-                                };
-                                switch (cstr_eq((byte*)pnames.items[k], rname))
-                                {
-                                    case (true) { rts = args[k]; }
-                                    default {};
-                                };
-                                k++;
-                            };
-                            b++;
-                            switch (lts == (TypeSpec*)0 | rts == (TypeSpec*)0)
-                            {
-                                case (true) { continue; }
-                                default {};
-                            };
+                            case (true) {
+                            collect_nodes(concrete, cnodes);
+                            this.collect_locals(concrete, cnodes, locals);
+                        }
+                            default {};
+                        };
 
-                            switch (cstr_eq(op, g"~=\0"))
+                        int r, a, b, k;
+                        Node* rel;
+                        byte* op;
+                        byte* lname;
+                        byte* rname;
+                        TypeSpec* lts;
+                        TypeSpec* rts;
+                        int nl, nr;
+                        while (r < relations.len)
+                        {
+                            rel = relations.items[r];
+                            r++;
+                            op = rel.text;
+                            nl = node_count(rel, 0);
+                            nr = node_count(rel, 1);
+                            a = 0;
+                            while (a < nl)
                             {
-                                case (true) {
-                                switch (!types_compatible(lts, rts))
+                                lname = node_child(rel, 0, a).text;
+                                b = 0;
+                                while (b < nr)
                                 {
-                                    case (true) {
-                                    this.clear_msg();
-                                    this.mb.put_str(g"Relation constraint '\0");
-                                    this.mb.put_str(lname);
-                                    this.mb.put_str(g" ~= \0");
-                                    this.mb.put_str(rname);
-                                    this.mb.put_str(g"' violated: '\0");
-                                    this.put_type(lts);
-                                    this.mb.put_str(g"' and '\0");
-                                    this.put_type(rts);
-                                    this.mb.put_str(g"' are not compatible (pointer mismatch or width mismatch)\0");
-                                    this.emit(Severity.ERROR, rel.line, rel.col);
-                                }
-                                    default {};
-                                };
-                            }
-                                default {
-                                    switch (cstr_eq(op, g"!~=\0"))
+                                    rname = node_child(rel, 1, b).text;
+                                    lts = (TypeSpec*)0;
+                                    rts = (TypeSpec*)0;
+                                    k = 0;
+                                    while (k < n)
                                     {
-                                        case (true) {
-                                switch (types_compatible(lts, rts))
-                                {
-                                    case (true) {
-                                    this.clear_msg();
-                                    this.mb.put_str(g"Relation constraint '\0");
-                                    this.mb.put_str(lname);
-                                    this.mb.put_str(g" !~= \0");
-                                    this.mb.put_str(rname);
-                                    this.mb.put_str(g"' violated: '\0");
-                                    this.put_type(lts);
-                                    this.mb.put_str(g"' and '\0");
-                                    this.put_type(rts);
-                                    this.mb.put_str(g"' must be incompatible but are compatible\0");
-                                    this.emit(Severity.ERROR, rel.line, rel.col);
-                                }
-                                    default {};
-                                };
-                            }
-                                        default {
-                                            switch (cstr_eq(op, g"!@\0"))
+                                        switch (cstr_eq((byte*)pnames.items[k], lname))
+                                        {
+                                            case (true) { lts = args[k]; }
+                                            default {};
+                                        };
+                                        switch (cstr_eq((byte*)pnames.items[k], rname))
+                                        {
+                                            case (true) { rts = args[k]; }
+                                            default {};
+                                        };
+                                        k++;
+                                    };
+                                    b++;
+                                    switch (lts == (TypeSpec*)0 | rts == (TypeSpec*)0)
+                                    {
+                                        case (true) { continue; }
+                                        default
+                                        {
+                                            switch (cstr_eq(op, g"~=\0"))
                                             {
                                                 case (true) {
-                                this.check_no_address(tmpl, tnodes, lname, rname, lts, rts);
-                            }
+                                                switch (!types_compatible(lts, rts))
+                                                {
+                                                    case (true) {
+                                                    this.clear_msg();
+                                                    this.mb.put_str(f"Relation constraint '{lname} ~= {rname}' violated: '\0");
+                                                    this.put_type(lts);
+                                                    this.mb.put_str(g"' and '\0");
+                                                    this.put_type(rts);
+                                                    this.mb.put_str(g"' are not compatible (pointer mismatch or width mismatch)\0");
+                                                    this.emit(Severity.ERROR, rel.line, rel.col);
+                                                }
+                                                    default {};
+                                                };
+                                            }
                                                 default {
-                                                    switch (cstr_eq(op, g"!`<\0") | cstr_eq(op, g"!`<=\0") |
-                                  cstr_eq(op, g"!`>\0") | cstr_eq(op, g"!`>=\0"))
+                                                    switch (cstr_eq(op, g"!~=\0"))
                                                     {
                                                         case (true) {
-                                switch (concrete != (Node*)0)
-                                {
-                                    case (true) {
-                                    this.check_width_relation(concrete, cnodes, locals, op, lname, rname, lts, rts);
-                                }
-                                    default {};
-                                };
-                            }
-                                                        default {};
+                                                switch (types_compatible(lts, rts))
+                                                {
+                                                    case (true) {
+                                                    this.clear_msg();
+                                                    this.mb.put_str(f"Relation constraint '{lname} !~= {rname}' violated: '\0");
+                                                    this.put_type(lts);
+                                                    this.mb.put_str(g"' and '\0");
+                                                    this.put_type(rts);
+                                                    this.mb.put_str(g"' must be incompatible but are compatible\0");
+                                                    this.emit(Severity.ERROR, rel.line, rel.col);
+                                                }
+                                                    default {};
+                                                };
+                                            }
+                                                        default {
+                                                            switch (cstr_eq(op, g"!@\0"))
+                                                            {
+                                                                case (true) {
+                                                this.check_no_address(tmpl, tnodes, lname, rname, lts, rts);
+                                            }
+                                                                default {
+                                                                    switch (cstr_eq(op, g"!`<\0") | cstr_eq(op, g"!`<=\0") |
+                                                  cstr_eq(op, g"!`>\0") | cstr_eq(op, g"!`>=\0"))
+                                                                    {
+                                                                        case (true) {
+                                                switch (concrete != (Node*)0)
+                                                {
+                                                    case (true) {
+                                                    this.check_width_relation(concrete, cnodes, locals, op, lname, rname, lts, rts);
+                                                }
+                                                    default {};
+                                                };
+                                            }
+                                                                        default {};
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
                                                     };
                                                 };
                                             };
                                         };
                                     };
                                 };
+                                a++;
                             };
                         };
-                        a++;
+
+                        nm_free(locals);
+                        pv_free(tnodes);
+                        pv_free(cnodes);
+                        -> this.errors - before;
                     };
                 };
-
-                nm_free(locals);
-                pv_free(tnodes);
-                pv_free(cnodes);
-                -> this.errors - before;
             };
 
             // ------------------------------------------------------------------
@@ -884,237 +921,280 @@ namespace flux
             // ------------------------------------------------------------------
 
             // Declares n (and anything nested) in the symbol table
+            // Text after the last "__" of a mangled name
+            seg_of(byte* name) -> byte*
+            {
+                int i;
+                int cut;
+                while (name[i]!?)
+                {
+                    switch (name[i] == '_' & name[i + 1] == '_') { case (true) { cut = i + 2; } default {}; };
+                    i++;
+                };
+                -> name + cut;
+            };
+
+            // _vardecl_global duplicate check: a global of the same name or the same last
+            // segment already exists, so the first declaration keeps its symbol
+            global_var_dup(byte* name) -> bool
+            {
+                NameMap* g = this.st.globals;
+                byte* m = mangle_namespace_name(this.st.current_ns, name);
+                byte* seg = this.seg_of(m);
+                FXC_SYMENTRY* e;
+                int i;
+                bool hit;
+                while (i < g.count & !hit)
+                {
+                    e = (FXC_SYMENTRY*)g.vals[i];
+                    switch (e != (FXC_SYMENTRY*)0)
+                    {
+                        case (true) {
+                        switch (e.kind_id == SymbolKind.VARIABLE & cstr_eq(this.seg_of(g.keys[i]), seg)) { case (true) { hit = true; } default {}; };
+                    }
+                        default {};
+                    };
+                    i++;
+                };
+                ffree(m);
+                -> hit;
+            };
+
             declare_node(Node* n, byte* ns) -> void
             {
                 switch (n == (Node*)0)
                 {
                     case (true) { ->; }
-                    default {};
-                };
-                int k = n.kind;
-                switch (k == NodeKind.FUNCTION_DEF_STATEMENT | k == NodeKind.STRUCT_DEF_STATEMENT |
-                    k == NodeKind.OBJECT_DEF_STATEMENT | k == NodeKind.ENUM_DEF_STATEMENT | k == NodeKind.UNION_DEF_STATEMENT |
-                    k == NodeKind.NAMESPACE_DEF_STATEMENT)
-                {
-                    case (true) {
-                    this.declare_node(n.a, ns);
-                    ->;
-                }
-                    default {};
-                };
-
-                switch (k == NodeKind.EXTERN_BLOCK | k == NodeKind.EXPORT_BLOCK)
-                {
-                    case (true) {
-                    int bi;
-                    int bc = node_count(n, 0);
-                    while (bi < bc)
+                    default
                     {
-                        this.declare_node(node_child(n, 0, bi), ns);
-                        bi++;
-                    };
-                    ->;
-                }
-                    default {};
-                };
-
-                // Stubbed constructs from the bootstrap parser carry no name
-                switch (n.text == (byte*)0)
-                {
-                    case (true) { ->; }
-                    default {};
-                };
-
-                switch (k)
-                {
-                    case (NodeKind.FUNCTION_DEF)
-                    {
-                        st_define(this.st, n.text, SymbolKind.FUNCTION, n.ts, n);
-                        switch ((n.flags `& NF_TEMPLATE) == 0)
+                        int k = n.kind;
+                        switch (k == NodeKind.FUNCTION_DEF_STATEMENT | k == NodeKind.STRUCT_DEF_STATEMENT |
+                            k == NodeKind.OBJECT_DEF_STATEMENT | k == NodeKind.ENUM_DEF_STATEMENT | k == NodeKind.UNION_DEF_STATEMENT |
+                            k == NodeKind.NAMESPACE_DEF_STATEMENT)
                         {
                             case (true) {
-                            byte* fkey = mangle_namespace_name(ns, n.text);
-                            this.reg_overload(fkey, n);
-                            ffree(fkey);
+                            -> this.declare_node(n.a, ns);
                         }
-                            default {};
-                        };
-                        this.decls++;
-                    }
-                    case (NodeKind.TYPE_FUNC_DEF)
-                    {
-                        switch (n.text2 != (byte*)0)
-                        {
-                            case (true) {
-                            byte* tmid = join3(g"__typefunc__\0", n.text, g"__\0");
-                            byte* tkey = join3(tmid, n.text2, g"\0");
-                            this.reg_overload(tkey, n);
-                            ffree(tmid);
-                            ffree(tkey);
-                        }
-                            default {};
-                        };
-                    }
-                    case (NodeKind.TYPE_DECLARATION)
-                    {
-                        st_define(this.st, n.text, SymbolKind.TYPE, n.ts, n);
-                        this.decls++;
-                    }
-                    case (NodeKind.UNION_DEF)
-                    {
-                        st_define(this.st, n.text, SymbolKind.UNION, (TypeSpec*)0, n);
-                        this.decls++;
-                    }
-                    case (NodeKind.FUNCTION_POINTER_DECLARATION)
-                    {
-                        st_define(this.st, n.text, SymbolKind.VARIABLE, n.ts, n);
-                        this.decls++;
-                    }
-                    case (NodeKind.STRUCT_DEF)
-                    {
-                        st_define(this.st, n.text, SymbolKind.STRUCT, (TypeSpec*)0, n);
-                        int si;
-                        int sc = node_count(n, 3);
-                        while (si < sc)
-                        {
-                            this.declare_node(node_child(n, 3, si), ns);
-                            si++;
-                        };
-                        this.decls++;
-                    }
-                    case (NodeKind.OBJECT_DEF)
-                    {
-                        st_define(this.st, n.text, SymbolKind.OBJECT, (TypeSpec*)0, n);
-                        switch (n.d == (Node*)0)
-                        {
-                            case (true) {
-                            byte* okey = mangle_namespace_name(ns, n.text);
-                            int mi;
-                            int mc = node_count(n, 1);
-                            Node* meth;
-                            byte* mkey;
-                            while (mi < mc)
+                            default
                             {
-                                meth = node_child(n, 1, mi);
-                                switch (meth.text != (byte*)0 & (meth.flags `& NF_TEMPLATE) == 0)
+                                switch (k == NodeKind.EXTERN_BLOCK | k == NodeKind.EXPORT_BLOCK)
                                 {
                                     case (true) {
-                                    mkey = join3(okey, g".\0", meth.text);
-                                    this.reg_overload(mkey, meth);
-                                    ffree(mkey);
+                                    int bi;
+                                    int bc = node_count(n, 0);
+                                    while (bi < bc)
+                                    {
+                                        this.declare_node(node_child(n, 0, bi), ns);
+                                        bi++;
+                                    };
+                                    ->;
                                 }
-                                    default {};
+                                    default
+                                    {
+                                        // Stubbed constructs from the bootstrap parser carry no name
+                                        switch (n.text == (byte*)0)
+                                        {
+                                            case (true) { ->; }
+                                            default
+                                            {
+                                                switch (k)
+                                                {
+                                                    case (NodeKind.FUNCTION_DEF)
+                                                    {
+                                                        st_define(this.st, n.text, SymbolKind.FUNCTION, n.ts, n);
+                                                        switch ((n.flags `& NF_TEMPLATE) == 0)
+                                                        {
+                                                            case (true) {
+                                                            byte* fkey = mangle_namespace_name(ns, n.text);
+                                                            this.reg_overload(fkey, n);
+                                                            ffree(fkey);
+                                                        }
+                                                            default {};
+                                                        };
+                                                        this.decls++;
+                                                    }
+                                                    case (NodeKind.TYPE_FUNC_DEF)
+                                                    {
+                                                        switch (n.text2 != (byte*)0)
+                                                        {
+                                                            case (true) {
+                                                            byte* tmid = join3(g"__typefunc__\0", n.text, g"__\0");
+                                                            byte* tkey = join3(tmid, n.text2, g"\0");
+                                                            this.reg_overload(tkey, n);
+                                                            ffree(tmid);
+                                                            ffree(tkey);
+                                                        }
+                                                            default {};
+                                                        };
+                                                    }
+                                                    case (NodeKind.TYPE_DECLARATION)
+                                                    {
+                                                        st_define(this.st, n.text, SymbolKind.TYPE, n.ts, n);
+                                                        this.decls++;
+                                                    }
+                                                    case (NodeKind.UNION_DEF)
+                                                    {
+                                                        st_define(this.st, n.text, SymbolKind.UNION, (TypeSpec*)0, n);
+                                                        this.decls++;
+                                                    }
+                                                    case (NodeKind.FUNCTION_POINTER_DECLARATION)
+                                                    {
+                                                        st_define(this.st, n.text, SymbolKind.VARIABLE, n.ts, n);
+                                                        this.decls++;
+                                                    }
+                                                    case (NodeKind.STRUCT_DEF)
+                                                    {
+                                                        st_define(this.st, n.text, SymbolKind.STRUCT, (TypeSpec*)0, n);
+                                                        int si;
+                                                        int sc = node_count(n, 3);
+                                                        while (si < sc)
+                                                        {
+                                                            this.declare_node(node_child(n, 3, si), ns);
+                                                            si++;
+                                                        };
+                                                        this.decls++;
+                                                    }
+                                                    case (NodeKind.OBJECT_DEF)
+                                                    {
+                                                        st_define(this.st, n.text, SymbolKind.OBJECT, (TypeSpec*)0, n);
+                                                        switch (n.d == (Node*)0)
+                                                        {
+                                                            case (true) {
+                                                            byte* okey = mangle_namespace_name(ns, n.text);
+                                                            int mi;
+                                                            int mc = node_count(n, 1);
+                                                            Node* meth;
+                                                            byte* mkey;
+                                                            while (mi < mc)
+                                                            {
+                                                                meth = node_child(n, 1, mi);
+                                                                switch (meth.text != (byte*)0 & (meth.flags `& NF_TEMPLATE) == 0)
+                                                                {
+                                                                    case (true) {
+                                                                    mkey = join3(okey, g".\0", meth.text);
+                                                                    this.reg_overload(mkey, meth);
+                                                                    ffree(mkey);
+                                                                }
+                                                                    default {};
+                                                                };
+                                                                mi++;
+                                                            };
+                                                            ffree(okey);
+                                                            mi = 0;
+                                                            mc = node_count(n, 3);
+                                                            while (mi < mc)
+                                                            {
+                                                                this.declare_node(node_child(n, 3, mi), ns);
+                                                                mi++;
+                                                            };
+                                                            mi = 0;
+                                                            mc = node_count(n, 4);
+                                                            while (mi < mc)
+                                                            {
+                                                                this.declare_node(node_child(n, 4, mi), ns);
+                                                                mi++;
+                                                            };
+                                                        }
+                                                            default {};
+                                                        };
+                                                        this.decls++;
+                                                    }
+                                                    case (NodeKind.ENUM_DEF)
+                                                    {
+                                                        st_define(this.st, n.text, SymbolKind.ENUM, n.ts, n);
+                                                        this.decls++;
+                                                    }
+                                                    case (NodeKind.VARIABLE_DECLARATION)
+                                                    {
+                                                        switch (n.text != (byte*)0 & !(this.st.scopes.len == 1 & this.global_var_dup(n.text)))
+                                                        {
+                                                            case (true) {
+                                                            st_define(this.st, n.text, SymbolKind.VARIABLE, n.ts, n);
+                                                            this.decls++;
+                                                        }
+                                                            default {};
+                                                        };
+                                                    }
+                                                    case (NodeKind.NAMESPACE_DEF)
+                                                    {
+                                                        byte* prev = ts_dup(this.st.current_ns);
+                                                        byte* full;
+                                                        switch (prev[0] == 0)
+                                                        {
+                                                            case (true) { full = ts_dup(n.text); }
+                                                            default {
+                                                            int la = pp_cstrlen(prev);
+                                                            int lb = pp_cstrlen(n.text);
+                                                            full = (byte*)fmalloc((u64)(la + lb + 3));
+                                                            int i, j;
+                                                            while (i < la)
+                                                            {
+                                                                full[i] = prev[i];
+                                                                i++;
+                                                            };
+                                                            full[i] = ':';
+                                                            full[i + 1] = ':';
+                                                            while (j < lb)
+                                                            {
+                                                                full[i + 2 + j] = n.text[j];
+                                                                j++;
+                                                            };
+                                                            full[i + 2 + lb] = (byte)0;
+                                                        };
+                                                        };
+                                                        st_define(this.st, n.text, SymbolKind.NAMESPACE, (TypeSpec*)0, n);
+                                                        st_set_namespace(this.st, full);
+                                                        int s, c, e, w;
+                                                        Node* lst;
+                                                        while (s < 6)
+                                                        {
+                                                            c = node_count(n, s);
+                                                            e = 0;
+                                                            while (e < c)
+                                                            {
+                                                                this.declare_node(node_child(n, s, e), full);
+                                                                e++;
+                                                            };
+                                                            s++;
+                                                        };
+                                                        w = 0;
+                                                        while (w < 2)
+                                                        {
+                                                            switch (w)
+                                                            {
+                                                                case (0) { lst = n.a; }
+                                                                default { lst = n.b; };
+                                                            };
+                                                            switch (lst != (Node*)0)
+                                                            {
+                                                                case (true) {
+                                                                c = node_count(lst, 0);
+                                                                e = 0;
+                                                                while (e < c)
+                                                                {
+                                                                    this.declare_node(node_child(lst, 0, e), full);
+                                                                    e++;
+                                                                };
+                                                            }
+                                                                default {};
+                                                            };
+                                                            w++;
+                                                        };
+                                                        st_set_namespace(this.st, prev);
+                                                        ffree(prev);
+                                                        ffree(full);
+                                                    }
+                                                    default {};
+                                                };
+                                                ->;
+                                            };
+                                        };
+                                    };
                                 };
-                                mi++;
                             };
-                            ffree(okey);
-                            mi = 0;
-                            mc = node_count(n, 3);
-                            while (mi < mc)
-                            {
-                                this.declare_node(node_child(n, 3, mi), ns);
-                                mi++;
-                            };
-                            mi = 0;
-                            mc = node_count(n, 4);
-                            while (mi < mc)
-                            {
-                                this.declare_node(node_child(n, 4, mi), ns);
-                                mi++;
-                            };
-                        }
-                            default {};
                         };
-                        this.decls++;
-                    }
-                    case (NodeKind.ENUM_DEF)
-                    {
-                        st_define(this.st, n.text, SymbolKind.ENUM, n.ts, n);
-                        this.decls++;
-                    }
-                    case (NodeKind.VARIABLE_DECLARATION)
-                    {
-                        switch (n.text != (byte*)0)
-                        {
-                            case (true) {
-                            st_define(this.st, n.text, SymbolKind.VARIABLE, n.ts, n);
-                            this.decls++;
-                        }
-                            default {};
-                        };
-                    }
-                    case (NodeKind.NAMESPACE_DEF)
-                    {
-                        byte* prev = ts_dup(this.st.current_ns);
-                        byte* full;
-                        switch (prev[0] == 0)
-                        {
-                            case (true) { full = ts_dup(n.text); }
-                            default {
-                            int la = pp_cstrlen(prev);
-                            int lb = pp_cstrlen(n.text);
-                            full = (byte*)fmalloc((u64)(la + lb + 3));
-                            int i, j;
-                            while (i < la)
-                            {
-                                full[i] = prev[i];
-                                i++;
-                            };
-                            full[i] = ':';
-                            full[i + 1] = ':';
-                            while (j < lb)
-                            {
-                                full[i + 2 + j] = n.text[j];
-                                j++;
-                            };
-                            full[i + 2 + lb] = (byte)0;
-                        };
-                        };
-                        st_define(this.st, n.text, SymbolKind.NAMESPACE, (TypeSpec*)0, n);
-                        st_set_namespace(this.st, full);
-                        int s, c, e, w;
-                        Node* lst;
-                        while (s < 6)
-                        {
-                            c = node_count(n, s);
-                            e = 0;
-                            while (e < c)
-                            {
-                                this.declare_node(node_child(n, s, e), full);
-                                e++;
-                            };
-                            s++;
-                        };
-                        w = 0;
-                        while (w < 2)
-                        {
-                            switch (w)
-                            {
-                                case (0) { lst = n.a; }
-                                default { lst = n.b; };
-                            };
-                            switch (lst != (Node*)0)
-                            {
-                                case (true) {
-                                c = node_count(lst, 0);
-                                e = 0;
-                                while (e < c)
-                                {
-                                    this.declare_node(node_child(lst, 0, e), full);
-                                    e++;
-                                };
-                            }
-                                default {};
-                            };
-                            w++;
-                        };
-                        st_set_namespace(this.st, prev);
-                        ffree(prev);
-                        ffree(full);
-                    }
-                    default {};
+                    };
                 };
-                ->;
             };
 
             // Registers fn as an overload of key (parameter types from its declaration)
@@ -1130,28 +1210,29 @@ namespace flux
                     switch (p.ts == (TypeSpec*)0)
                     {
                         case (true) {
-                        ffree((byte*)ps);
-                        ->;
+                        -> ffree((byte*)ps);
                     }
-                        default {};
+                        default
+                        {
+                            ps[i] = p.ts;
+                            i++;
+                        };
                     };
-                    ps[i] = p.ts;
-                    i++;
                 };
                 switch (fn.ts == (TypeSpec*)0)
                 {
                     case (true) {
-                    ffree((byte*)ps);
-                    ->;
+                    -> ffree((byte*)ps);
                 }
-                    default {};
+                    default
+                    {
+                        this.clear_msg();
+                        mangle_function(@this.mb, key, ps, cnt, fn.ts);
+                        st_register_function_overload(this.st, key, this.mb.mem, ps, cnt, fn.ts, fn,
+                                                      (fn.flags `& NF_DEPRECATED)!?);
+                        -> ffree((byte*)ps);
+                    };
                 };
-                this.clear_msg();
-                mangle_function(@this.mb, key, ps, cnt, fn.ts);
-                st_register_function_overload(this.st, key, this.mb.mem, ps, cnt, fn.ts, fn,
-                                              (fn.flags `& NF_DEPRECATED) != 0);
-                ffree((byte*)ps);
-                ->;
             };
 
             // Declares every top level symbol of a PROGRAM node

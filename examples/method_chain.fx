@@ -10,6 +10,11 @@ object testobj
         return this;
     };
 
+    def __expr() -> testobj*
+    {
+        return this;
+    };
+
     def __exit() -> void {};
 
     def foo() -> this

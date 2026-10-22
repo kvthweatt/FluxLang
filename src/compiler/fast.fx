@@ -53,6 +53,7 @@
 #def NF_NO_OVERRIDE 262144;
 #def NF_TEMPLATE 524288;
 #def NF_INSTANCE 1048576;    // instantiated template function appended after the program
+#def NF_ASYNC 2097152;       // async function (definition or prototype)
 
 #def TS_SIGNED 1;
 #def TS_CONST 2;
@@ -266,7 +267,7 @@ namespace flux
             FLUXVM_BLOCK,    // FluxVMBlock: text = body
             INLINE_ASM,    // InlineAsm: text = body, text2 = constraints, NF_VOLATILE
             DEPRECATE_STATEMENT,    // DeprecateStatement: text = namespace_path
-            FUNCTION_DEF,    // FunctionDef: text = name, l0 = parameters, ts = return_type, a = body, ts2 = error_type, text2 = calling_conv, b = effect annotation, c = attenuate annotation, text3 = friend_of (object methods), NF_CONST NF_VOLATILE NF_PROTOTYPE NF_NO_MANGLE NF_VARIADIC NF_RECURSIVE NF_INLINE NF_DEPRECATED NF_PRIVATE NF_OVERRIDE NF_NO_OVERRIDE NF_TEMPLATE (template method or trait prototype stub)
+            FUNCTION_DEF,    // FunctionDef: text = name, l0 = parameters, ts = return_type, a = body, ts2 = error_type, text2 = calling_conv, b = effect annotation, c = attenuate annotation, l1 = async tag uses (ASYNC_TAG_USE), text3 = friend_of (object methods), NF_ASYNC NF_CONST NF_VOLATILE NF_PROTOTYPE NF_NO_MANGLE NF_VARIADIC NF_RECURSIVE NF_INLINE NF_DEPRECATED NF_PRIVATE NF_OVERRIDE NF_NO_OVERRIDE NF_TEMPLATE (template method or trait prototype stub)
             FUNCTION_POINTER_DECLARATION,    // FunctionPointerDeclaration: text = name, ts = function pointer type (fp_* fields), a = initializer
             FUNCTION_POINTER_CALL,    // FunctionPointerCall: a = pointer, l0 = arguments
             FUNCTION_POINTER_ASSIGNMENT,    // FunctionPointerAssignment: text = pointer_name, a = function_expr
@@ -316,6 +317,12 @@ namespace flux
             EFFECT_DEF,    // EffectDef: text = name, a = body
             EFFECT_ANNOTATION,    // EffectAnnotation: a = effects
             ATTENUATE_ANNOTATION,    // AttenuateAnnotation: a = effects
+            ASYNC_RELATION,    // AsyncRelation: l0 = operands (IDENTIFIER), l1 = ops (IDENTIFIER, text = "#" ">" "~" or "!", one per adjacent pair)
+            ASYNC_TAG_DEF,    // AsyncTagDef: text = name, l0 = params (IDENTIFIER), l1 = ASYNC_RELATION nodes
+            ASYNC_TARGET,    // AsyncTarget: text = name ("this" or a function), ival = 1 when a signature is given, l0 = PARAMETER nodes (ts = type), ts = return_type (optional)
+            ASYNC_TAG_USE,    // AsyncTagUse: text = tag, l0 = ASYNC_TARGET nodes (a FUNCTION_DEF keeps its uses in l1)
+            MODULE_DEF,    // ModuleDef: text = name, text2 = source file, l0 = body statements, l1 = from paths (STRING_LITERAL, text = path), l2 = BUILD_ENTRY nodes
+            BUILD_ENTRY,    // BuildEntry: text = tag, flags bit 1 = locked, ival = value kind (0 name or string in text2, 1 bool in op, 2 name list in l0, 3 override block in l1), l2 = override targets (IDENTIFIER)
             PROGRAM    // Program: l0 = statements
         };
 
@@ -334,24 +341,23 @@ namespace flux
 
         struct TypeSpec
         {
-            int base_type;          // DataType
-            int flags;              // TS_* bit flags
-            int bit_width;          // -1 when unset
-            int alignment;          // -1 when unset
-            int endianness;         // 1 default
-            int pointer_depth;
-            int storage_class;      // StorageClass, -1 when unset
-            int dict_capacity;      // -1 when unset
-            int fp_nparams;
+            int base_type,          // DataType
+                flags,              // TS_* bit flags
+                bit_width,          // -1 when unset
+                alignment,          // -1 when unset
+                endianness,         // 1 default
+                pointer_depth,
+                storage_class,      // StorageClass, -1 when unset
+                dict_capacity,      // -1 when unset
+                fp_nparams;
             Node* array_size;
             NodeVec* array_dims;    // array dimension expressions
-            TypeSpec* array_elem;
-            TypeSpec* dict_key;
-            TypeSpec* dict_value;
-            TypeSpec* fp_ret;       // function pointer type: return type
+            TypeSpec* array_elem,
+                      dict_key,
+                      dict_value,
+                      fp_ret;       // function pointer type: -> type
             TypeSpec** fp_params;   // function pointer type: parameter types
-            byte* custom_typename;
-            byte* calling_conv;
+            byte* custom_typename, calling_conv;
         };
 
         struct Node
@@ -359,23 +365,12 @@ namespace flux
             int kind, line, col, op, flags;
             i64 ival;
             double fval;
-            byte* text;
-            byte* text2;
-            byte* text3;
-            Node* a;
-            Node* b;
-            Node* c;
-            Node* d;
-            Node* e;
-            NodeVec* l0;
-            NodeVec* l1;
-            NodeVec* l2;
-            NodeVec* l3;
-            NodeVec* l4;
-            NodeVec* l5;
-            TypeSpec* ts;
-            TypeSpec* ts2;
-            TypeSpec* ety;          // expression type set by ExprTyper, borrowed, never freed
+            byte* text, text2, text3;
+            Node* a, b, c, d, e;
+            NodeVec* l0, l1, l2, l3, l4, l5;
+            TypeSpec* ts,
+                      ts2,
+                      ety;          // expression type set by ExprTyper, borrowed, never freed
         };
 
         // ===== NODE VECTORS =====
@@ -383,7 +378,7 @@ namespace flux
         def nv_new() -> NodeVec*
         {
             NodeVec* v = (NodeVec*)fmalloc((u64)(sizeof(NodeVec) / 8));
-            if (v == (NodeVec*)0) { return v; };
+            if (v == (NodeVec*)0) { -> v; };
             v.len = 0;
             v.cap = 4;
             v.items = (Node**)fmalloc((u64)v.cap * (u64)(sizeof(Node*) / 8));
@@ -391,12 +386,12 @@ namespace flux
             {
                 v.cap = 0;
             };
-            return v;
+            -> v;
         };
 
         def nv_push(NodeVec* v, Node* n) -> bool
         {
-            if (v == (NodeVec*)0) { return false; };
+            if (v == (NodeVec*)0) { -> false; };
             if (v.len >= v.cap)
             {
                 int nc = v.cap * 2;
@@ -410,18 +405,18 @@ namespace flux
                 {
                     np = frealloc((u64)v.items, (size_t)((u64)nc * (u64)(sizeof(Node*) / 8)));
                 };
-                if (np == (u64)0) { return false; };
+                if (np == (u64)0) { -> false; };
                 v.items = (Node**)np;
                 v.cap = nc;
             };
             v.items[v.len] = n;
             v.len++;
-            return true;
+            -> true;
         };
 
         def nv_free(NodeVec* v) -> void
         {
-            if (v == (NodeVec*)0) { return; };
+            if (v == (NodeVec*)0) { ->; };
             int i;
             while (i < v.len)
             {
@@ -430,7 +425,7 @@ namespace flux
             };
             if (v.items != (Node**)0) { ffree((byte*)v.items); };
             ffree((byte*)v);
-            return;
+            ->;
         };
 
         // ===== TYPE SPECS =====
@@ -438,33 +433,36 @@ namespace flux
         def typespec_new() -> TypeSpec*
         {
             TypeSpec* t = (TypeSpec*)fmalloc((u64)(sizeof(TypeSpec) / 8));
-            if (t == (TypeSpec*)0) { return t; };
-            t.base_type = DataType.SINT;
-            t.flags = 0;
-            t.bit_width = -1;
-            t.alignment = -1;
-            t.endianness = 1;
-            t.pointer_depth = 0;
-            t.storage_class = -1;
-            t.dict_capacity = -1;
-            t.fp_nparams = 0;
-            t.array_size = (Node*)0;
-            t.array_dims = (NodeVec*)0;
-            t.array_elem = (TypeSpec*)0;
-            t.dict_key = (TypeSpec*)0;
-            t.dict_value = (TypeSpec*)0;
-            t.fp_ret = (TypeSpec*)0;
-            t.fp_params = (TypeSpec**)0;
-            t.custom_typename = (byte*)0;
-            t.calling_conv = (byte*)0;
-            return t;
+            if (t == (TypeSpec*)0) { -> t; };
+            t
+            {
+                .base_type = DataType.SINT;
+                .flags = 0;
+                .bit_width = -1;
+                .alignment = -1;
+                .endianness = 1;
+                .pointer_depth = 0;
+                .storage_class = -1;
+                .dict_capacity = -1;
+                .fp_nparams = 0;
+                .array_size = (Node*)0;
+                .array_dims = (NodeVec*)0;
+                .array_elem = (TypeSpec*)0;
+                .dict_key = (TypeSpec*)0;
+                .dict_value = (TypeSpec*)0;
+                .fp_ret = (TypeSpec*)0;
+                .fp_params = (TypeSpec**)0;
+                .custom_typename = (byte*)0;
+                .calling_conv = (byte*)0;
+            };
+            -> t;
         };
 
         def typespec_free(TypeSpec* t) -> void
         {
-            if (t == (TypeSpec*)0) { return; };
+            if (t == (TypeSpec*)0) { ->; };
             int i;
-            if (t.array_dims == (NodeVec*)0) { node_free(t.array_size); };
+            if (t.array_dims == (NodeVec*)0) node_free(t.array_size);
             nv_free(t.array_dims);
             typespec_free(t.array_elem);
             typespec_free(t.dict_key);
@@ -480,7 +478,7 @@ namespace flux
                 ffree((byte*)t.fp_params);
             };
             ffree((byte*)t);
-            return;
+            ->;
         };
 
         // ===== NODES =====
@@ -488,70 +486,77 @@ namespace flux
         def node_new(int kind, int line, int col) -> Node*
         {
             Node* n = (Node*)fmalloc((u64)(sizeof(Node) / 8));
-            if (n == (Node*)0) { return n; };
-            n.kind = kind;
-            n.line = line;
-            n.col = col;
-            n.op = 0;
-            n.flags = 0;
-            n.ival = 0;
-            n.fval = 0.0;
-            n.text = (byte*)0;
-            n.text2 = (byte*)0;
-            n.text3 = (byte*)0;
-            n.a = (Node*)0;
-            n.b = (Node*)0;
-            n.c = (Node*)0;
-            n.d = (Node*)0;
-            n.e = (Node*)0;
-            n.l0 = (NodeVec*)0;
-            n.l1 = (NodeVec*)0;
-            n.l2 = (NodeVec*)0;
-            n.l3 = (NodeVec*)0;
-            n.l4 = (NodeVec*)0;
-            n.l5 = (NodeVec*)0;
-            n.ts = (TypeSpec*)0;
-            n.ts2 = (TypeSpec*)0;
-            n.ety = (TypeSpec*)0;
-            return n;
+            if (n == (Node*)0) { -> n; };
+            n
+            {
+                .kind = kind;
+                .line = line;
+                .col = col;
+                .op = 0;
+                .flags = 0;
+                .ival = 0;
+                .fval = 0.0;
+                .text = (byte*)0;
+                .text2 = (byte*)0;
+                .text3 = (byte*)0;
+                .a = (Node*)0;
+                .b = (Node*)0;
+                .c = (Node*)0;
+                .d = (Node*)0;
+                .e = (Node*)0;
+                .l0 = (NodeVec*)0;
+                .l1 = (NodeVec*)0;
+                .l2 = (NodeVec*)0;
+                .l3 = (NodeVec*)0;
+                .l4 = (NodeVec*)0;
+                .l5 = (NodeVec*)0;
+                .ts = (TypeSpec*)0;
+                .ts2 = (TypeSpec*)0;
+                .ety = (TypeSpec*)0;
+            };
+            -> n;
         };
 
         // Returns list slot s (0 to 5) of n, creating it when missing
         def node_list(Node* n, int s) -> NodeVec*
         {
-            if (s == 0)
+            switch (s)
             {
-                if (n.l0 == (NodeVec*)0) { n.l0 = nv_new(); };
-                return n.l0;
-            };
-            if (s == 1)
-            {
-                if (n.l1 == (NodeVec*)0) { n.l1 = nv_new(); };
-                return n.l1;
-            };
-            if (s == 2)
-            {
-                if (n.l2 == (NodeVec*)0) { n.l2 = nv_new(); };
-                return n.l2;
-            };
-            if (s == 3)
-            {
-                if (n.l3 == (NodeVec*)0) { n.l3 = nv_new(); };
-                return n.l3;
-            };
-            if (s == 4)
-            {
-                if (n.l4 == (NodeVec*)0) { n.l4 = nv_new(); };
-                return n.l4;
+                case (0)
+                {
+                    if (n.l0 == (NodeVec*)0) { n.l0 = nv_new(); };
+                    -> n.l0;
+                }
+                case (1)
+                {
+                    if (n.l1 == (NodeVec*)0) { n.l1 = nv_new(); };
+                    -> n.l1;
+                }
+                case (2)
+                {
+                    if (n.l2 == (NodeVec*)0) { n.l2 = nv_new(); };
+                    -> n.l2;
+                }
+                case (3)
+                {
+                    if (n.l3 == (NodeVec*)0) { n.l3 = nv_new(); };
+                    -> n.l3;
+                }
+                case (4)
+                {
+                    if (n.l4 == (NodeVec*)0) { n.l4 = nv_new(); };
+                    -> n.l4;
+                }
+                default {};
             };
             if (n.l5 == (NodeVec*)0) { n.l5 = nv_new(); };
-            return n.l5;
+            -> n.l5;
         };
 
         // Appends child to list slot s of n
         def node_push(Node* n, int s, Node* child) -> bool
         {
-            return nv_push(node_list(n, s), child);
+            -> nv_push(node_list(n, s), child);
         };
 
         // Number of elements in list slot s of n
@@ -564,8 +569,8 @@ namespace flux
             elif (s == 3) { v = n.l3; }
             elif (s == 4) { v = n.l4; }
             else { v = n.l5; };
-            if (v == (NodeVec*)0) { return 0; };
-            return v.len;
+            if (v == (NodeVec*)0) { -> 0; };
+            -> v.len;
         };
 
         // Element i of list slot s of n
@@ -578,12 +583,12 @@ namespace flux
             elif (s == 3) { v = n.l3; }
             elif (s == 4) { v = n.l4; }
             else { v = n.l5; };
-            return v.items[i];
+            -> v.items[i];
         };
 
         def node_free(Node* n) -> void
         {
-            if (n == (Node*)0) { return; };
+            if (n == (Node*)0) { ->; };
             node_free(n.a);
             node_free(n.b);
             node_free(n.c);
@@ -598,14 +603,14 @@ namespace flux
             typespec_free(n.ts);
             typespec_free(n.ts2);
             ffree((byte*)n);
-            return;
+            ->;
         };
 
         // ===== DEEP COPIES =====
 
         def nv_clone(NodeVec* v) -> NodeVec*
         {
-            if (v == (NodeVec*)0) { return v; };
+            if (v == (NodeVec*)0) { -> v; };
             NodeVec* r = nv_new();
             int i;
             while (i < v.len)
@@ -613,27 +618,30 @@ namespace flux
                 nv_push(r, node_clone(v.items[i]));
                 i++;
             };
-            return r;
+            -> r;
         };
 
         // Deep copy of a TypeSpec. Strings stay borrowed. When array_size aliases
         // the first array dimension the copy aliases its own first dimension.
         def typespec_copy(TypeSpec* t) -> TypeSpec*
         {
-            if (t == (TypeSpec*)0) { return t; };
+            if (t == (TypeSpec*)0) { -> t; };
             TypeSpec* r = typespec_new();
             int i;
-            r.base_type = t.base_type;
-            r.flags = t.flags;
-            r.bit_width = t.bit_width;
-            r.alignment = t.alignment;
-            r.endianness = t.endianness;
-            r.pointer_depth = t.pointer_depth;
-            r.storage_class = t.storage_class;
-            r.dict_capacity = t.dict_capacity;
-            r.fp_nparams = t.fp_nparams;
-            r.custom_typename = t.custom_typename;
-            r.calling_conv = t.calling_conv;
+            r
+            {
+                .base_type = t.base_type;
+                .flags = t.flags;
+                .bit_width = t.bit_width;
+                .alignment = t.alignment;
+                .endianness = t.endianness;
+                .pointer_depth = t.pointer_depth;
+                .storage_class = t.storage_class;
+                .dict_capacity = t.dict_capacity;
+                .fp_nparams = t.fp_nparams;
+                .custom_typename = t.custom_typename;
+                .calling_conv = t.calling_conv;
+            };
             if (t.array_dims != (NodeVec*)0)
             {
                 r.array_dims = nv_clone(t.array_dims);
@@ -643,10 +651,13 @@ namespace flux
             {
                 r.array_size = node_clone(t.array_size);
             };
-            r.array_elem = typespec_copy(t.array_elem);
-            r.dict_key = typespec_copy(t.dict_key);
-            r.dict_value = typespec_copy(t.dict_value);
-            r.fp_ret = typespec_copy(t.fp_ret);
+            r
+            {
+                .array_elem = typespec_copy(t.array_elem);
+                .dict_key = typespec_copy(t.dict_key);
+                .dict_value = typespec_copy(t.dict_value);
+                .fp_ret = typespec_copy(t.fp_ret);
+            };
             if (t.fp_params != (TypeSpec**)0)
             {
                 r.fp_params = (TypeSpec**)fmalloc((u64)(t.fp_nparams + 1) * (u64)(sizeof(TypeSpec*) / 8));
@@ -656,13 +667,13 @@ namespace flux
                     i++;
                 };
             };
-            return r;
+            -> r;
         };
 
         // Deep copy of a node tree (strings stay borrowed)
         def node_clone(Node* n) -> Node*
         {
-            if (n == (Node*)0) { return n; };
+            if (n == (Node*)0) { -> n; };
             Node* r = node_new(n.kind, n.line, n.col);
             r.op = n.op;
             r.flags = n.flags;
@@ -684,7 +695,7 @@ namespace flux
             r.l5 = nv_clone(n.l5);
             r.ts = typespec_copy(n.ts);
             r.ts2 = typespec_copy(n.ts2);
-            return r;
+            -> r;
         };
 
         // ===== NAMES =====
@@ -693,128 +704,134 @@ namespace flux
         {
             switch (k)
             {
-                case (NodeKind.NODE_LIST) { return g"NODE_LIST\0"; }
-                case (NodeKind.LITERAL) { return g"LITERAL\0"; }
-                case (NodeKind.IDENTIFIER) { return g"IDENTIFIER\0"; }
-                case (NodeKind.ARRAY_LITERAL) { return g"ARRAY_LITERAL\0"; }
-                case (NodeKind.STRING_LITERAL) { return g"STRING_LITERAL\0"; }
-                case (NodeKind.BINARY_OP) { return g"BINARY_OP\0"; }
-                case (NodeKind.IN_EXPRESSION) { return g"IN_EXPRESSION\0"; }
-                case (NodeKind.HAS_EXPRESSION) { return g"HAS_EXPRESSION\0"; }
-                case (NodeKind.UNARY_OP) { return g"UNARY_OP\0"; }
-                case (NodeKind.CAST_EXPRESSION) { return g"CAST_EXPRESSION\0"; }
-                case (NodeKind.TYPE_CONVERT_EXPRESSION) { return g"TYPE_CONVERT_EXPRESSION\0"; }
-                case (NodeKind.RANGE_EXPRESSION) { return g"RANGE_EXPRESSION\0"; }
-                case (NodeKind.ARRAY_COMPREHENSION) { return g"ARRAY_COMPREHENSION\0"; }
-                case (NodeKind.F_STRING_LITERAL) { return g"F_STRING_LITERAL\0"; }
-                case (NodeKind.FUNCTION_CALL) { return g"FUNCTION_CALL\0"; }
-                case (NodeKind.MEMBER_ACCESS) { return g"MEMBER_ACCESS\0"; }
-                case (NodeKind.METHOD_CALL) { return g"METHOD_CALL\0"; }
-                case (NodeKind.VARIADIC_ACCESS) { return g"VARIADIC_ACCESS\0"; }
-                case (NodeKind.ARRAY_ACCESS) { return g"ARRAY_ACCESS\0"; }
-                case (NodeKind.ARRAY_SLICE) { return g"ARRAY_SLICE\0"; }
-                case (NodeKind.BIT_SLICE) { return g"BIT_SLICE\0"; }
-                case (NodeKind.BIT_INDEX_ACCESS) { return g"BIT_INDEX_ACCESS\0"; }
-                case (NodeKind.POINTER_DEREF) { return g"POINTER_DEREF\0"; }
-                case (NodeKind.ADDRESS_OF) { return g"ADDRESS_OF\0"; }
-                case (NodeKind.STRINGIFY) { return g"STRINGIFY\0"; }
-                case (NodeKind.CODIFY) { return g"CODIFY\0"; }
-                case (NodeKind.ALIGN_OF) { return g"ALIGN_OF\0"; }
-                case (NodeKind.TYPE_OF) { return g"TYPE_OF\0"; }
-                case (NodeKind.SIZE_OF) { return g"SIZE_OF\0"; }
-                case (NodeKind.ENDIAN_OF) { return g"ENDIAN_OF\0"; }
-                case (NodeKind.NO_INIT) { return g"NO_INIT\0"; }
-                case (NodeKind.VARIABLE_DECLARATION) { return g"VARIABLE_DECLARATION\0"; }
-                case (NodeKind.TYPE_DECLARATION) { return g"TYPE_DECLARATION\0"; }
-                case (NodeKind.EXPRESSION_STATEMENT) { return g"EXPRESSION_STATEMENT\0"; }
-                case (NodeKind.ASSIGNMENT) { return g"ASSIGNMENT\0"; }
-                case (NodeKind.COMPOUND_ASSIGNMENT) { return g"COMPOUND_ASSIGNMENT\0"; }
-                case (NodeKind.RANGE_ASSIGNMENT) { return g"RANGE_ASSIGNMENT\0"; }
-                case (NodeKind.TERNARY_ASSIGN) { return g"TERNARY_ASSIGN\0"; }
-                case (NodeKind.BLOCK) { return g"BLOCK\0"; }
-                case (NodeKind.IF_STATEMENT) { return g"IF_STATEMENT\0"; }
-                case (NodeKind.IF_EXPRESSION) { return g"IF_EXPRESSION\0"; }
-                case (NodeKind.TERNARY_OP) { return g"TERNARY_OP\0"; }
-                case (NodeKind.NULL_COALESCE) { return g"NULL_COALESCE\0"; }
-                case (NodeKind.NOT_NULL) { return g"NOT_NULL\0"; }
-                case (NodeKind.WHILE_LOOP) { return g"WHILE_LOOP\0"; }
-                case (NodeKind.DO_LOOP) { return g"DO_LOOP\0"; }
-                case (NodeKind.DO_WHILE_LOOP) { return g"DO_WHILE_LOOP\0"; }
-                case (NodeKind.FOR_LOOP) { return g"FOR_LOOP\0"; }
-                case (NodeKind.FOR_IN_LOOP) { return g"FOR_IN_LOOP\0"; }
-                case (NodeKind.RETURN_STATEMENT) { return g"RETURN_STATEMENT\0"; }
-                case (NodeKind.ERROR_RETURN_STATEMENT) { return g"ERROR_RETURN_STATEMENT\0"; }
-                case (NodeKind.BREAK_STATEMENT) { return g"BREAK_STATEMENT\0"; }
-                case (NodeKind.BREAK_SWITCH_STATEMENT) { return g"BREAK_SWITCH_STATEMENT\0"; }
-                case (NodeKind.CONTINUE_STATEMENT) { return g"CONTINUE_STATEMENT\0"; }
-                case (NodeKind.DEFER_STATEMENT) { return g"DEFER_STATEMENT\0"; }
-                case (NodeKind.NORETURN_STATEMENT) { return g"NORETURN_STATEMENT\0"; }
-                case (NodeKind.ESCAPE_STATEMENT) { return g"ESCAPE_STATEMENT\0"; }
-                case (NodeKind.LABEL_STATEMENT) { return g"LABEL_STATEMENT\0"; }
-                case (NodeKind.GOTO_STATEMENT) { return g"GOTO_STATEMENT\0"; }
-                case (NodeKind.JUMP_STATEMENT) { return g"JUMP_STATEMENT\0"; }
-                case (NodeKind.CASE) { return g"CASE\0"; }
-                case (NodeKind.SWITCH_STATEMENT) { return g"SWITCH_STATEMENT\0"; }
-                case (NodeKind.CATCH_CLAUSE) { return g"CATCH_CLAUSE\0"; }
-                case (NodeKind.TRY_BLOCK) { return g"TRY_BLOCK\0"; }
-                case (NodeKind.THROW_STATEMENT) { return g"THROW_STATEMENT\0"; }
-                case (NodeKind.ASSERT_STATEMENT) { return g"ASSERT_STATEMENT\0"; }
-                case (NodeKind.PARAMETER) { return g"PARAMETER\0"; }
-                case (NodeKind.FLUXVM_BLOCK) { return g"FLUXVM_BLOCK\0"; }
-                case (NodeKind.INLINE_ASM) { return g"INLINE_ASM\0"; }
-                case (NodeKind.DEPRECATE_STATEMENT) { return g"DEPRECATE_STATEMENT\0"; }
-                case (NodeKind.FUNCTION_DEF) { return g"FUNCTION_DEF\0"; }
-                case (NodeKind.FUNCTION_POINTER_DECLARATION) { return g"FUNCTION_POINTER_DECLARATION\0"; }
-                case (NodeKind.FUNCTION_POINTER_CALL) { return g"FUNCTION_POINTER_CALL\0"; }
-                case (NodeKind.FUNCTION_POINTER_ASSIGNMENT) { return g"FUNCTION_POINTER_ASSIGNMENT\0"; }
-                case (NodeKind.DESTRUCTURING_ASSIGNMENT) { return g"DESTRUCTURING_ASSIGNMENT\0"; }
-                case (NodeKind.DUAL_ASSIGN_DECLARATION) { return g"DUAL_ASSIGN_DECLARATION\0"; }
-                case (NodeKind.ENUM_DEF) { return g"ENUM_DEF\0"; }
-                case (NodeKind.ENUM_DEF_STATEMENT) { return g"ENUM_DEF_STATEMENT\0"; }
-                case (NodeKind.UNION_MEMBER) { return g"UNION_MEMBER\0"; }
-                case (NodeKind.UNION_DEF) { return g"UNION_DEF\0"; }
-                case (NodeKind.TIE_EXPRESSION) { return g"TIE_EXPRESSION\0"; }
-                case (NodeKind.STRUCT_MEMBER) { return g"STRUCT_MEMBER\0"; }
-                case (NodeKind.STRUCT_INSTANCE) { return g"STRUCT_INSTANCE\0"; }
-                case (NodeKind.STRUCT_LITERAL) { return g"STRUCT_LITERAL\0"; }
-                case (NodeKind.STRUCT_DEF) { return g"STRUCT_DEF\0"; }
-                case (NodeKind.STRUCT_FIELD_ACCESS) { return g"STRUCT_FIELD_ACCESS\0"; }
-                case (NodeKind.STRUCT_FIELD_ASSIGN) { return g"STRUCT_FIELD_ASSIGN\0"; }
-                case (NodeKind.STRUCT_RECAST) { return g"STRUCT_RECAST\0"; }
-                case (NodeKind.TRAIT_DEF) { return g"TRAIT_DEF\0"; }
-                case (NodeKind.INTERFACE_PROTOCOL) { return g"INTERFACE_PROTOCOL\0"; }
-                case (NodeKind.INTERFACE_DEF) { return g"INTERFACE_DEF\0"; }
-                case (NodeKind.OBJECT_METHOD) { return g"OBJECT_METHOD\0"; }
-                case (NodeKind.OBJECT_DEF) { return g"OBJECT_DEF\0"; }
-                case (NodeKind.EXTERN_BLOCK) { return g"EXTERN_BLOCK\0"; }
-                case (NodeKind.EXPORT_BLOCK) { return g"EXPORT_BLOCK\0"; }
-                case (NodeKind.NAMESPACE_DEF) { return g"NAMESPACE_DEF\0"; }
-                case (NodeKind.USING_STATEMENT) { return g"USING_STATEMENT\0"; }
-                case (NodeKind.NOT_USING_STATEMENT) { return g"NOT_USING_STATEMENT\0"; }
-                case (NodeKind.FUNCTION_DEF_STATEMENT) { return g"FUNCTION_DEF_STATEMENT\0"; }
-                case (NodeKind.UNION_DEF_STATEMENT) { return g"UNION_DEF_STATEMENT\0"; }
-                case (NodeKind.STRUCT_DEF_STATEMENT) { return g"STRUCT_DEF_STATEMENT\0"; }
-                case (NodeKind.OBJECT_DEF_STATEMENT) { return g"OBJECT_DEF_STATEMENT\0"; }
-                case (NodeKind.NAMESPACE_DEF_STATEMENT) { return g"NAMESPACE_DEF_STATEMENT\0"; }
-                case (NodeKind.MACRO_DEF) { return g"MACRO_DEF\0"; }
-                case (NodeKind.MACRO_CALL) { return g"MACRO_CALL\0"; }
-                case (NodeKind.MACRO_DEF_STATEMENT) { return g"MACRO_DEF_STATEMENT\0"; }
-                case (NodeKind.CONTRACT_DEF) { return g"CONTRACT_DEF\0"; }
-                case (NodeKind.CONSTRA_RELATION) { return g"CONSTRA_RELATION\0"; }
-                case (NodeKind.CONSTRA_DEF) { return g"CONSTRA_DEF\0"; }
-                case (NodeKind.TYPE_FUNC_DEF) { return g"TYPE_FUNC_DEF\0"; }
-                case (NodeKind.TYPE_FUNC_CALL) { return g"TYPE_FUNC_CALL\0"; }
-                case (NodeKind.EMIT_FLUX) { return g"EMIT_FLUX\0"; }
-                case (NodeKind.COMPTIME_BLOCK) { return g"COMPTIME_BLOCK\0"; }
-                case (NodeKind.DICT_LITERAL_EXPR) { return g"DICT_LITERAL_EXPR\0"; }
-                case (NodeKind.DICT_LITERAL) { return g"DICT_LITERAL\0"; }
-                case (NodeKind.EFFECT_NAME) { return g"EFFECT_NAME\0"; }
-                case (NodeKind.EFFECT_EXPR) { return g"EFFECT_EXPR\0"; }
-                case (NodeKind.EFFECT_DEF) { return g"EFFECT_DEF\0"; }
-                case (NodeKind.EFFECT_ANNOTATION) { return g"EFFECT_ANNOTATION\0"; }
-                case (NodeKind.ATTENUATE_ANNOTATION) { return g"ATTENUATE_ANNOTATION\0"; }
-                case (NodeKind.PROGRAM) { return g"PROGRAM\0"; }
-                default { return g"UNKNOWN\0"; };
+                case (NodeKind.NODE_LIST) { -> g"NODE_LIST\0"; }
+                case (NodeKind.LITERAL) { -> g"LITERAL\0"; }
+                case (NodeKind.IDENTIFIER) { -> g"IDENTIFIER\0"; }
+                case (NodeKind.ARRAY_LITERAL) { -> g"ARRAY_LITERAL\0"; }
+                case (NodeKind.STRING_LITERAL) { -> g"STRING_LITERAL\0"; }
+                case (NodeKind.BINARY_OP) { -> g"BINARY_OP\0"; }
+                case (NodeKind.IN_EXPRESSION) { -> g"IN_EXPRESSION\0"; }
+                case (NodeKind.HAS_EXPRESSION) { -> g"HAS_EXPRESSION\0"; }
+                case (NodeKind.UNARY_OP) { -> g"UNARY_OP\0"; }
+                case (NodeKind.CAST_EXPRESSION) { -> g"CAST_EXPRESSION\0"; }
+                case (NodeKind.TYPE_CONVERT_EXPRESSION) { -> g"TYPE_CONVERT_EXPRESSION\0"; }
+                case (NodeKind.RANGE_EXPRESSION) { -> g"RANGE_EXPRESSION\0"; }
+                case (NodeKind.ARRAY_COMPREHENSION) { -> g"ARRAY_COMPREHENSION\0"; }
+                case (NodeKind.F_STRING_LITERAL) { -> g"F_STRING_LITERAL\0"; }
+                case (NodeKind.FUNCTION_CALL) { -> g"FUNCTION_CALL\0"; }
+                case (NodeKind.MEMBER_ACCESS) { -> g"MEMBER_ACCESS\0"; }
+                case (NodeKind.METHOD_CALL) { -> g"METHOD_CALL\0"; }
+                case (NodeKind.VARIADIC_ACCESS) { -> g"VARIADIC_ACCESS\0"; }
+                case (NodeKind.ARRAY_ACCESS) { -> g"ARRAY_ACCESS\0"; }
+                case (NodeKind.ARRAY_SLICE) { -> g"ARRAY_SLICE\0"; }
+                case (NodeKind.BIT_SLICE) { -> g"BIT_SLICE\0"; }
+                case (NodeKind.BIT_INDEX_ACCESS) { -> g"BIT_INDEX_ACCESS\0"; }
+                case (NodeKind.POINTER_DEREF) { -> g"POINTER_DEREF\0"; }
+                case (NodeKind.ADDRESS_OF) { -> g"ADDRESS_OF\0"; }
+                case (NodeKind.STRINGIFY) { -> g"STRINGIFY\0"; }
+                case (NodeKind.CODIFY) { -> g"CODIFY\0"; }
+                case (NodeKind.ALIGN_OF) { -> g"ALIGN_OF\0"; }
+                case (NodeKind.TYPE_OF) { -> g"TYPE_OF\0"; }
+                case (NodeKind.SIZE_OF) { -> g"SIZE_OF\0"; }
+                case (NodeKind.ENDIAN_OF) { -> g"ENDIAN_OF\0"; }
+                case (NodeKind.NO_INIT) { -> g"NO_INIT\0"; }
+                case (NodeKind.VARIABLE_DECLARATION) { -> g"VARIABLE_DECLARATION\0"; }
+                case (NodeKind.TYPE_DECLARATION) { -> g"TYPE_DECLARATION\0"; }
+                case (NodeKind.EXPRESSION_STATEMENT) { -> g"EXPRESSION_STATEMENT\0"; }
+                case (NodeKind.ASSIGNMENT) { -> g"ASSIGNMENT\0"; }
+                case (NodeKind.COMPOUND_ASSIGNMENT) { -> g"COMPOUND_ASSIGNMENT\0"; }
+                case (NodeKind.RANGE_ASSIGNMENT) { -> g"RANGE_ASSIGNMENT\0"; }
+                case (NodeKind.TERNARY_ASSIGN) { -> g"TERNARY_ASSIGN\0"; }
+                case (NodeKind.BLOCK) { -> g"BLOCK\0"; }
+                case (NodeKind.IF_STATEMENT) { -> g"IF_STATEMENT\0"; }
+                case (NodeKind.IF_EXPRESSION) { -> g"IF_EXPRESSION\0"; }
+                case (NodeKind.TERNARY_OP) { -> g"TERNARY_OP\0"; }
+                case (NodeKind.NULL_COALESCE) { -> g"NULL_COALESCE\0"; }
+                case (NodeKind.NOT_NULL) { -> g"NOT_NULL\0"; }
+                case (NodeKind.WHILE_LOOP) { -> g"WHILE_LOOP\0"; }
+                case (NodeKind.DO_LOOP) { -> g"DO_LOOP\0"; }
+                case (NodeKind.DO_WHILE_LOOP) { -> g"DO_WHILE_LOOP\0"; }
+                case (NodeKind.FOR_LOOP) { -> g"FOR_LOOP\0"; }
+                case (NodeKind.FOR_IN_LOOP) { -> g"FOR_IN_LOOP\0"; }
+                case (NodeKind.RETURN_STATEMENT) { -> g"RETURN_STATEMENT\0"; }
+                case (NodeKind.ERROR_RETURN_STATEMENT) { -> g"ERROR_RETURN_STATEMENT\0"; }
+                case (NodeKind.BREAK_STATEMENT) { -> g"BREAK_STATEMENT\0"; }
+                case (NodeKind.BREAK_SWITCH_STATEMENT) { -> g"BREAK_SWITCH_STATEMENT\0"; }
+                case (NodeKind.CONTINUE_STATEMENT) { -> g"CONTINUE_STATEMENT\0"; }
+                case (NodeKind.DEFER_STATEMENT) { -> g"DEFER_STATEMENT\0"; }
+                case (NodeKind.NORETURN_STATEMENT) { -> g"NORETURN_STATEMENT\0"; }
+                case (NodeKind.ESCAPE_STATEMENT) { -> g"ESCAPE_STATEMENT\0"; }
+                case (NodeKind.LABEL_STATEMENT) { -> g"LABEL_STATEMENT\0"; }
+                case (NodeKind.GOTO_STATEMENT) { -> g"GOTO_STATEMENT\0"; }
+                case (NodeKind.JUMP_STATEMENT) { -> g"JUMP_STATEMENT\0"; }
+                case (NodeKind.CASE) { -> g"CASE\0"; }
+                case (NodeKind.SWITCH_STATEMENT) { -> g"SWITCH_STATEMENT\0"; }
+                case (NodeKind.CATCH_CLAUSE) { -> g"CATCH_CLAUSE\0"; }
+                case (NodeKind.TRY_BLOCK) { -> g"TRY_BLOCK\0"; }
+                case (NodeKind.THROW_STATEMENT) { -> g"THROW_STATEMENT\0"; }
+                case (NodeKind.ASSERT_STATEMENT) { -> g"ASSERT_STATEMENT\0"; }
+                case (NodeKind.PARAMETER) { -> g"PARAMETER\0"; }
+                case (NodeKind.FLUXVM_BLOCK) { -> g"FLUXVM_BLOCK\0"; }
+                case (NodeKind.INLINE_ASM) { -> g"INLINE_ASM\0"; }
+                case (NodeKind.DEPRECATE_STATEMENT) { -> g"DEPRECATE_STATEMENT\0"; }
+                case (NodeKind.FUNCTION_DEF) { -> g"FUNCTION_DEF\0"; }
+                case (NodeKind.FUNCTION_POINTER_DECLARATION) { -> g"FUNCTION_POINTER_DECLARATION\0"; }
+                case (NodeKind.FUNCTION_POINTER_CALL) { -> g"FUNCTION_POINTER_CALL\0"; }
+                case (NodeKind.FUNCTION_POINTER_ASSIGNMENT) { -> g"FUNCTION_POINTER_ASSIGNMENT\0"; }
+                case (NodeKind.DESTRUCTURING_ASSIGNMENT) { -> g"DESTRUCTURING_ASSIGNMENT\0"; }
+                case (NodeKind.DUAL_ASSIGN_DECLARATION) { -> g"DUAL_ASSIGN_DECLARATION\0"; }
+                case (NodeKind.ENUM_DEF) { -> g"ENUM_DEF\0"; }
+                case (NodeKind.ENUM_DEF_STATEMENT) { -> g"ENUM_DEF_STATEMENT\0"; }
+                case (NodeKind.UNION_MEMBER) { -> g"UNION_MEMBER\0"; }
+                case (NodeKind.UNION_DEF) { -> g"UNION_DEF\0"; }
+                case (NodeKind.TIE_EXPRESSION) { -> g"TIE_EXPRESSION\0"; }
+                case (NodeKind.STRUCT_MEMBER) { -> g"STRUCT_MEMBER\0"; }
+                case (NodeKind.STRUCT_INSTANCE) { -> g"STRUCT_INSTANCE\0"; }
+                case (NodeKind.STRUCT_LITERAL) { -> g"STRUCT_LITERAL\0"; }
+                case (NodeKind.STRUCT_DEF) { -> g"STRUCT_DEF\0"; }
+                case (NodeKind.STRUCT_FIELD_ACCESS) { -> g"STRUCT_FIELD_ACCESS\0"; }
+                case (NodeKind.STRUCT_FIELD_ASSIGN) { -> g"STRUCT_FIELD_ASSIGN\0"; }
+                case (NodeKind.STRUCT_RECAST) { -> g"STRUCT_RECAST\0"; }
+                case (NodeKind.TRAIT_DEF) { -> g"TRAIT_DEF\0"; }
+                case (NodeKind.INTERFACE_PROTOCOL) { -> g"INTERFACE_PROTOCOL\0"; }
+                case (NodeKind.INTERFACE_DEF) { -> g"INTERFACE_DEF\0"; }
+                case (NodeKind.OBJECT_METHOD) { -> g"OBJECT_METHOD\0"; }
+                case (NodeKind.OBJECT_DEF) { -> g"OBJECT_DEF\0"; }
+                case (NodeKind.EXTERN_BLOCK) { -> g"EXTERN_BLOCK\0"; }
+                case (NodeKind.EXPORT_BLOCK) { -> g"EXPORT_BLOCK\0"; }
+                case (NodeKind.NAMESPACE_DEF) { -> g"NAMESPACE_DEF\0"; }
+                case (NodeKind.USING_STATEMENT) { -> g"USING_STATEMENT\0"; }
+                case (NodeKind.NOT_USING_STATEMENT) { -> g"NOT_USING_STATEMENT\0"; }
+                case (NodeKind.FUNCTION_DEF_STATEMENT) { -> g"FUNCTION_DEF_STATEMENT\0"; }
+                case (NodeKind.UNION_DEF_STATEMENT) { -> g"UNION_DEF_STATEMENT\0"; }
+                case (NodeKind.STRUCT_DEF_STATEMENT) { -> g"STRUCT_DEF_STATEMENT\0"; }
+                case (NodeKind.OBJECT_DEF_STATEMENT) { -> g"OBJECT_DEF_STATEMENT\0"; }
+                case (NodeKind.NAMESPACE_DEF_STATEMENT) { -> g"NAMESPACE_DEF_STATEMENT\0"; }
+                case (NodeKind.MACRO_DEF) { -> g"MACRO_DEF\0"; }
+                case (NodeKind.MACRO_CALL) { -> g"MACRO_CALL\0"; }
+                case (NodeKind.MACRO_DEF_STATEMENT) { -> g"MACRO_DEF_STATEMENT\0"; }
+                case (NodeKind.CONTRACT_DEF) { -> g"CONTRACT_DEF\0"; }
+                case (NodeKind.CONSTRA_RELATION) { -> g"CONSTRA_RELATION\0"; }
+                case (NodeKind.CONSTRA_DEF) { -> g"CONSTRA_DEF\0"; }
+                case (NodeKind.TYPE_FUNC_DEF) { -> g"TYPE_FUNC_DEF\0"; }
+                case (NodeKind.TYPE_FUNC_CALL) { -> g"TYPE_FUNC_CALL\0"; }
+                case (NodeKind.EMIT_FLUX) { -> g"EMIT_FLUX\0"; }
+                case (NodeKind.COMPTIME_BLOCK) { -> g"COMPTIME_BLOCK\0"; }
+                case (NodeKind.DICT_LITERAL_EXPR) { -> g"DICT_LITERAL_EXPR\0"; }
+                case (NodeKind.DICT_LITERAL) { -> g"DICT_LITERAL\0"; }
+                case (NodeKind.EFFECT_NAME) { -> g"EFFECT_NAME\0"; }
+                case (NodeKind.EFFECT_EXPR) { -> g"EFFECT_EXPR\0"; }
+                case (NodeKind.EFFECT_DEF) { -> g"EFFECT_DEF\0"; }
+                case (NodeKind.EFFECT_ANNOTATION) { -> g"EFFECT_ANNOTATION\0"; }
+                case (NodeKind.ATTENUATE_ANNOTATION) { -> g"ATTENUATE_ANNOTATION\0"; }
+                case (NodeKind.ASYNC_RELATION) { -> g"ASYNC_RELATION\0"; }
+                case (NodeKind.ASYNC_TAG_DEF) { -> g"ASYNC_TAG_DEF\0"; }
+                case (NodeKind.ASYNC_TARGET) { -> g"ASYNC_TARGET\0"; }
+                case (NodeKind.ASYNC_TAG_USE) { -> g"ASYNC_TAG_USE\0"; }
+                case (NodeKind.MODULE_DEF) { -> g"MODULE_DEF\0"; }
+                case (NodeKind.BUILD_ENTRY) { -> g"BUILD_ENTRY\0"; }
+                case (NodeKind.PROGRAM) { -> g"PROGRAM\0"; }
+                default { -> g"UNKNOWN\0"; };
             };
         };
 
@@ -822,72 +839,72 @@ namespace flux
         {
             switch (o)
             {
-                case (Operator.ADD) { return g"+\0"; }
-                case (Operator.SUB) { return g"-\0"; }
-                case (Operator.INCREMENT) { return g"++\0"; }
-                case (Operator.DECREMENT) { return g"--\0"; }
-                case (Operator.MUL) { return g"*\0"; }
-                case (Operator.DIV) { return g"/\0"; }
-                case (Operator.MOD) { return g"%\0"; }
-                case (Operator.NOT) { return g"!\0"; }
-                case (Operator.POWER) { return g"^\0"; }
-                case (Operator.AND) { return g"&\0"; }
-                case (Operator.OR) { return g"|\0"; }
-                case (Operator.NAND) { return g"!&\0"; }
-                case (Operator.NOR) { return g"!|\0"; }
-                case (Operator.XOR) { return g"^|\0"; }
-                case (Operator.EQUAL) { return g"==\0"; }
-                case (Operator.NOT_EQUAL) { return g"!=\0"; }
-                case (Operator.LESS_THAN) { return g"<\0"; }
-                case (Operator.LESS_EQUAL) { return g"<=\0"; }
-                case (Operator.GREATER_THAN) { return g">\0"; }
-                case (Operator.GREATER_EQUAL) { return g">=\0"; }
-                case (Operator.ASSIGN) { return g"=\0"; }
-                case (Operator.PLUS_ASSIGN) { return g"+=\0"; }
-                case (Operator.MINUS_ASSIGN) { return g"-=\0"; }
-                case (Operator.MULTIPLY_ASSIGN) { return g"*=\0"; }
-                case (Operator.DIVIDE_ASSIGN) { return g"/=\0"; }
-                case (Operator.MODULO_ASSIGN) { return g"%=\0"; }
-                case (Operator.EXPONENT_ASSIGN) { return g"^=\0"; }
-                case (Operator.BITNOT) { return g"`!\0"; }
-                case (Operator.BITAND) { return g"`&\0"; }
-                case (Operator.BITOR) { return g"`|\0"; }
-                case (Operator.BITNAND) { return g"`!&\0"; }
-                case (Operator.BITNOR) { return g"`!|\0"; }
-                case (Operator.BITXOR) { return g"`^|\0"; }
-                case (Operator.BITXNOT) { return g"`^|!\0"; }
-                case (Operator.BITXNAND) { return g"`^|!&\0"; }
-                case (Operator.BITXNOR) { return g"`^|!|\0"; }
-                case (Operator.AND_ASSIGN) { return g"&=\0"; }
-                case (Operator.OR_ASSIGN) { return g"|=\0"; }
-                case (Operator.XOR_ASSIGN) { return g"^|=\0"; }
-                case (Operator.BITAND_ASSIGN) { return g"`&=\0"; }
-                case (Operator.BITOR_ASSIGN) { return g"`|=\0"; }
-                case (Operator.BITNAND_ASSIGN) { return g"`!&=\0"; }
-                case (Operator.BITNOR_ASSIGN) { return g"`!|=\0"; }
-                case (Operator.BITXOR_ASSIGN) { return g"`^|=\0"; }
-                case (Operator.BITXNOT_ASSIGN) { return g"`^|!=\0"; }
-                case (Operator.BITXNAND_ASSIGN) { return g"`^|!&=\0"; }
-                case (Operator.BITXNOR_ASSIGN) { return g"`^|!|=\0"; }
-                case (Operator.BITSHIFT_LEFT) { return g"<<\0"; }
-                case (Operator.BITSHIFT_RIGHT) { return g">>\0"; }
-                case (Operator.BITSHIFT_LEFT_ASSIGN) { return g"<<=\0"; }
-                case (Operator.BITSHIFT_RIGHT_ASSIGN) { return g">>=\0"; }
-                case (Operator.ADDRESS_OF) { return g"@\0"; }
-                case (Operator.RANGE) { return g"..\0"; }
-                case (Operator.SCOPE) { return g"::\0"; }
-                case (Operator.QUESTION) { return g"?\0"; }
-                case (Operator.COLON) { return g":\0"; }
-                case (Operator.TIE) { return g"~\0"; }
-                case (Operator.LAMBDA_ARROW) { return g"<:-\0"; }
-                case (Operator.RETURN_ARROW) { return g"->\0"; }
-                case (Operator.CHAIN_ARROW) { return g"<-\0"; }
-                case (Operator.RECURSE_ARROW) { return g"<~\0"; }
-                case (Operator.NULL_COALESCE) { return g"??\0"; }
-                case (Operator.NO_MANGLE) { return g"!!\0"; }
-                case (Operator.FUNCTION_POINTER) { return g"{}*\0"; }
-                case (Operator.ADDRESS_CAST) { return g"(@)\0"; }
-                default { return g"?\0"; };
+                case (Operator.ADD) { -> g"+\0"; }
+                case (Operator.SUB) { -> g"-\0"; }
+                case (Operator.INCREMENT) { -> g"++\0"; }
+                case (Operator.DECREMENT) { -> g"--\0"; }
+                case (Operator.MUL) { -> g"*\0"; }
+                case (Operator.DIV) { -> g"/\0"; }
+                case (Operator.MOD) { -> g"%\0"; }
+                case (Operator.NOT) { -> g"!\0"; }
+                case (Operator.POWER) { -> g"^\0"; }
+                case (Operator.AND) { -> g"&\0"; }
+                case (Operator.OR) { -> g"|\0"; }
+                case (Operator.NAND) { -> g"!&\0"; }
+                case (Operator.NOR) { -> g"!|\0"; }
+                case (Operator.XOR) { -> g"^|\0"; }
+                case (Operator.EQUAL) { -> g"==\0"; }
+                case (Operator.NOT_EQUAL) { -> g"!=\0"; }
+                case (Operator.LESS_THAN) { -> g"<\0"; }
+                case (Operator.LESS_EQUAL) { -> g"<=\0"; }
+                case (Operator.GREATER_THAN) { -> g">\0"; }
+                case (Operator.GREATER_EQUAL) { -> g">=\0"; }
+                case (Operator.ASSIGN) { -> g"=\0"; }
+                case (Operator.PLUS_ASSIGN) { -> g"+=\0"; }
+                case (Operator.MINUS_ASSIGN) { -> g"-=\0"; }
+                case (Operator.MULTIPLY_ASSIGN) { -> g"*=\0"; }
+                case (Operator.DIVIDE_ASSIGN) { -> g"/=\0"; }
+                case (Operator.MODULO_ASSIGN) { -> g"%=\0"; }
+                case (Operator.EXPONENT_ASSIGN) { -> g"^=\0"; }
+                case (Operator.BITNOT) { -> g"`!\0"; }
+                case (Operator.BITAND) { -> g"`&\0"; }
+                case (Operator.BITOR) { -> g"`|\0"; }
+                case (Operator.BITNAND) { -> g"`!&\0"; }
+                case (Operator.BITNOR) { -> g"`!|\0"; }
+                case (Operator.BITXOR) { -> g"`^|\0"; }
+                case (Operator.BITXNOT) { -> g"`^|!\0"; }
+                case (Operator.BITXNAND) { -> g"`^|!&\0"; }
+                case (Operator.BITXNOR) { -> g"`^|!|\0"; }
+                case (Operator.AND_ASSIGN) { -> g"&=\0"; }
+                case (Operator.OR_ASSIGN) { -> g"|=\0"; }
+                case (Operator.XOR_ASSIGN) { -> g"^|=\0"; }
+                case (Operator.BITAND_ASSIGN) { -> g"`&=\0"; }
+                case (Operator.BITOR_ASSIGN) { -> g"`|=\0"; }
+                case (Operator.BITNAND_ASSIGN) { -> g"`!&=\0"; }
+                case (Operator.BITNOR_ASSIGN) { -> g"`!|=\0"; }
+                case (Operator.BITXOR_ASSIGN) { -> g"`^|=\0"; }
+                case (Operator.BITXNOT_ASSIGN) { -> g"`^|!=\0"; }
+                case (Operator.BITXNAND_ASSIGN) { -> g"`^|!&=\0"; }
+                case (Operator.BITXNOR_ASSIGN) { -> g"`^|!|=\0"; }
+                case (Operator.BITSHIFT_LEFT) { -> g"<<\0"; }
+                case (Operator.BITSHIFT_RIGHT) { -> g">>\0"; }
+                case (Operator.BITSHIFT_LEFT_ASSIGN) { -> g"<<=\0"; }
+                case (Operator.BITSHIFT_RIGHT_ASSIGN) { -> g">>=\0"; }
+                case (Operator.ADDRESS_OF) { -> g"@\0"; }
+                case (Operator.RANGE) { -> g"..\0"; }
+                case (Operator.SCOPE) { -> g"::\0"; }
+                case (Operator.QUESTION) { -> g"?\0"; }
+                case (Operator.COLON) { -> g":\0"; }
+                case (Operator.TIE) { -> g"~\0"; }
+                case (Operator.LAMBDA_ARROW) { -> g"<:-\0"; }
+                case (Operator.RETURN_ARROW) { -> g"->\0"; }
+                case (Operator.CHAIN_ARROW) { -> g"<-\0"; }
+                case (Operator.RECURSE_ARROW) { -> g"<~\0"; }
+                case (Operator.NULL_COALESCE) { -> g"??\0"; }
+                case (Operator.NO_MANGLE) { -> g"!!\0"; }
+                case (Operator.FUNCTION_POINTER) { -> g"{}*\0"; }
+                case (Operator.ADDRESS_CAST) { -> g"(@)\0"; }
+                default { -> g"?\0"; };
             };
         };
     };

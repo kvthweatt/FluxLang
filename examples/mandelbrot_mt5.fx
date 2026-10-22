@@ -1,4 +1,4 @@
-#import <standard.fx>, "redmath.fx", "redwindows.fx", "redopengl.fx", <threading.fx>, <decimal.fx>;
+#import <standard.fx>, <windows.fx>, <opengl.fx>, <threading.fx>, <decimal.fx>;
 
 using standard::io::console;
 using standard::system::windows;

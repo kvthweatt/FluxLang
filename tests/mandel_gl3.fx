@@ -1,7 +1,9 @@
-#import <standard.fx>, "redmath.fx", "redwindows.fx", "redopengl.fx", <bigint.fx>, <decimal.fx>;
+#import <standard.fx>, <windows.fx>, <opengl.fx>, <decimal.fx>;
 
+using standard::io::console;
 using standard::system::windows;
 using standard::math;
+using OpenGL;
 using math::bigint;
 using math::decimal;
 

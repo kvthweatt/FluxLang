@@ -58,6 +58,7 @@ namespace flux
             AS,
             ASM,
             ASM_BLOCK,
+            ASYNC,
             AUTO,
             BREAK,
             BOOL_KW,
@@ -282,14 +283,18 @@ namespace flux
             switch (c >= '0' & c <= '9')
             {
                 case (true) { -> c - 48; }
-                default {};
+                default
+                {
+                    switch (c >= 'A' & c <= 'F')
+                    {
+                        case (true) { -> c - 55; }
+                        default
+                        {
+                            -> c - 87;
+                        };
+                    };
+                };
             };
-            switch (c >= 'A' & c <= 'F')
-            {
-                case (true) { -> c - 55; }
-                default {};
-            };
-            -> c - 87;
         };
 
         is_base32_digit(int c) -> bool
@@ -315,9 +320,11 @@ namespace flux
                 switch (a[i] != b[i])
                 {
                     case (true) { -> false; }
-                    default {};
+                    default
+                    {
+                        i++;
+                    };
                 };
-                i++;
             };
             -> true;
         };
@@ -331,32 +338,42 @@ namespace flux
                 switch (bytes_eq(s, g"as", 2))
                 {
                     case (true) { -> TokenType.AS; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"do", 2))
-                {
-                    case (true) { -> TokenType.DO; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"if", 2))
-                {
-                    case (true) { -> TokenType.IF; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"in", 2))
-                {
-                    case (true) { -> TokenType.IN; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"is", 2))
-                {
-                    case (true) { -> TokenType.IS; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"or", 2))
-                {
-                    case (true) { -> TokenType.OR; }
-                    default {};
+                    default
+                    {
+                        switch (bytes_eq(s, g"do", 2))
+                        {
+                            case (true) { -> TokenType.DO; }
+                            default
+                            {
+                                switch (bytes_eq(s, g"if", 2))
+                                {
+                                    case (true) { -> TokenType.IF; }
+                                    default
+                                    {
+                                        switch (bytes_eq(s, g"in", 2))
+                                        {
+                                            case (true) { -> TokenType.IN; }
+                                            default
+                                            {
+                                                switch (bytes_eq(s, g"is", 2))
+                                                {
+                                                    case (true) { -> TokenType.IS; }
+                                                    default
+                                                    {
+                                                        switch (bytes_eq(s, g"or", 2))
+                                                        {
+                                                            case (true) { -> TokenType.OR; }
+                                                            default {};
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
             }
                 default {};
@@ -367,47 +384,63 @@ namespace flux
                 switch (bytes_eq(s, g"and", 3))
                 {
                     case (true) { -> TokenType.AND; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"asm", 3))
-                {
-                    case (true) { -> TokenType.ASM; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"def", 3))
-                {
-                    case (true) { -> TokenType.DEF; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"for", 3))
-                {
-                    case (true) { -> TokenType.FOR; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"has", 3))
-                {
-                    case (true) { -> TokenType.HAS; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"int", 3))
-                {
-                    case (true) { -> TokenType.SINT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"not", 3))
-                {
-                    case (true) { -> TokenType.NOT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"try", 3))
-                {
-                    case (true) { -> TokenType.TRY; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"xor", 3))
-                {
-                    case (true) { -> TokenType.XOR; }
-                    default {};
+                    default
+                    {
+                        switch (bytes_eq(s, g"asm", 3))
+                        {
+                            case (true) { -> TokenType.ASM; }
+                            default
+                            {
+                                switch (bytes_eq(s, g"def", 3))
+                                {
+                                    case (true) { -> TokenType.DEF; }
+                                    default
+                                    {
+                                        switch (bytes_eq(s, g"for", 3))
+                                        {
+                                            case (true) { -> TokenType.FOR; }
+                                            default
+                                            {
+                                                switch (bytes_eq(s, g"has", 3))
+                                                {
+                                                    case (true) { -> TokenType.HAS; }
+                                                    default
+                                                    {
+                                                        switch (bytes_eq(s, g"int", 3))
+                                                        {
+                                                            case (true) { -> TokenType.SINT; }
+                                                            default
+                                                            {
+                                                                switch (bytes_eq(s, g"not", 3))
+                                                                {
+                                                                    case (true) { -> TokenType.NOT; }
+                                                                    default
+                                                                    {
+                                                                        switch (bytes_eq(s, g"try", 3))
+                                                                        {
+                                                                            case (true) { -> TokenType.TRY; }
+                                                                            default
+                                                                            {
+                                                                                switch (bytes_eq(s, g"xor", 3))
+                                                                                {
+                                                                                    case (true) { -> TokenType.XOR; }
+                                                                                    default {};
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
             }
                 default {};
@@ -418,97 +451,133 @@ namespace flux
                 switch (bytes_eq(s, g"auto", 4))
                 {
                     case (true) { -> TokenType.AUTO; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"bool", 4))
-                {
-                    case (true) { -> TokenType.BOOL_KW; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"byte", 4))
-                {
-                    case (true) { -> TokenType.BYTE; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"case", 4))
-                {
-                    case (true) { -> TokenType.CASE; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"char", 4))
-                {
-                    case (true) { -> TokenType.CHAR; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"data", 4))
-                {
-                    case (true) { -> TokenType.DATA; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"dict", 4))
-                {
-                    case (true) { -> TokenType.DICT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"elif", 4))
-                {
-                    case (true) { -> TokenType.ELIF; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"else", 4))
-                {
-                    case (true) { -> TokenType.ELSE; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"enum", 4))
-                {
-                    case (true) { -> TokenType.ENUM; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"from", 4))
-                {
-                    case (true) { -> TokenType.FROM; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"goto", 4))
-                {
-                    case (true) { -> TokenType.GOTO; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"heap", 4))
-                {
-                    case (true) { -> TokenType.HEAP; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"jump", 4))
-                {
-                    case (true) { -> TokenType.JUMP; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"long", 4))
-                {
-                    case (true) { -> TokenType.SLONG; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"this", 4))
-                {
-                    case (true) { -> TokenType.THIS; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"true", 4))
-                {
-                    case (true) { -> TokenType.TRUE; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"uint", 4))
-                {
-                    case (true) { -> TokenType.UINT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"void", 4))
-                {
-                    case (true) { -> TokenType.VOID; }
-                    default {};
+                    default
+                    {
+                        switch (bytes_eq(s, g"bool", 4))
+                        {
+                            case (true) { -> TokenType.BOOL_KW; }
+                            default
+                            {
+                                switch (bytes_eq(s, g"byte", 4))
+                                {
+                                    case (true) { -> TokenType.BYTE; }
+                                    default
+                                    {
+                                        switch (bytes_eq(s, g"case", 4))
+                                        {
+                                            case (true) { -> TokenType.CASE; }
+                                            default
+                                            {
+                                                switch (bytes_eq(s, g"char", 4))
+                                                {
+                                                    case (true) { -> TokenType.CHAR; }
+                                                    default
+                                                    {
+                                                        switch (bytes_eq(s, g"data", 4))
+                                                        {
+                                                            case (true) { -> TokenType.DATA; }
+                                                            default
+                                                            {
+                                                                switch (bytes_eq(s, g"dict", 4))
+                                                                {
+                                                                    case (true) { -> TokenType.DICT; }
+                                                                    default
+                                                                    {
+                                                                        switch (bytes_eq(s, g"elif", 4))
+                                                                        {
+                                                                            case (true) { -> TokenType.ELIF; }
+                                                                            default
+                                                                            {
+                                                                                switch (bytes_eq(s, g"else", 4))
+                                                                                {
+                                                                                    case (true) { -> TokenType.ELSE; }
+                                                                                    default
+                                                                                    {
+                                                                                        switch (bytes_eq(s, g"enum", 4))
+                                                                                        {
+                                                                                            case (true) { -> TokenType.ENUM; }
+                                                                                            default
+                                                                                            {
+                                                                                                switch (bytes_eq(s, g"from", 4))
+                                                                                                {
+                                                                                                    case (true) { -> TokenType.FROM; }
+                                                                                                    default
+                                                                                                    {
+                                                                                                        switch (bytes_eq(s, g"goto", 4))
+                                                                                                        {
+                                                                                                            case (true) { -> TokenType.GOTO; }
+                                                                                                            default
+                                                                                                            {
+                                                                                                                switch (bytes_eq(s, g"heap", 4))
+                                                                                                                {
+                                                                                                                    case (true) { -> TokenType.HEAP; }
+                                                                                                                    default
+                                                                                                                    {
+                                                                                                                        switch (bytes_eq(s, g"jump", 4))
+                                                                                                                        {
+                                                                                                                            case (true) { -> TokenType.JUMP; }
+                                                                                                                            default
+                                                                                                                            {
+                                                                                                                                switch (bytes_eq(s, g"long", 4))
+                                                                                                                                {
+                                                                                                                                    case (true) { -> TokenType.SLONG; }
+                                                                                                                                    default
+                                                                                                                                    {
+                                                                                                                                        switch (bytes_eq(s, g"this", 4))
+                                                                                                                                        {
+                                                                                                                                            case (true) { -> TokenType.THIS; }
+                                                                                                                                            default
+                                                                                                                                            {
+                                                                                                                                                switch (bytes_eq(s, g"true", 4))
+                                                                                                                                                {
+                                                                                                                                                    case (true) { -> TokenType.TRUE; }
+                                                                                                                                                    default
+                                                                                                                                                    {
+                                                                                                                                                        switch (bytes_eq(s, g"uint", 4))
+                                                                                                                                                        {
+                                                                                                                                                            case (true) { -> TokenType.UINT; }
+                                                                                                                                                            default
+                                                                                                                                                            {
+                                                                                                                                                                switch (bytes_eq(s, g"void", 4))
+                                                                                                                                                                {
+                                                                                                                                                                    case (true) { -> TokenType.VOID; }
+                                                                                                                                                                    default {};
+                                                                                                                                                                };
+                                                                                                                                                            };
+                                                                                                                                                        };
+                                                                                                                                                    };
+                                                                                                                                                };
+                                                                                                                                            };
+                                                                                                                                        };
+                                                                                                                                    };
+                                                                                                                                };
+                                                                                                                            };
+                                                                                                                        };
+                                                                                                                    };
+                                                                                                                };
+                                                                                                            };
+                                                                                                        };
+                                                                                                    };
+                                                                                                };
+                                                                                            };
+                                                                                        };
+                                                                                    };
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
             }
                 default {};
@@ -519,92 +588,133 @@ namespace flux
                 switch (bytes_eq(s, g"break", 5))
                 {
                     case (true) { -> TokenType.BREAK; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"catch", 5))
-                {
-                    case (true) { -> TokenType.CATCH; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"compt", 5))
-                {
-                    case (true) { -> TokenType.COMPT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"const", 5))
-                {
-                    case (true) { -> TokenType.CONST; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"defer", 5))
-                {
-                    case (true) { -> TokenType.DEFER; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"macro", 5))
-                {
-                    case (true) { -> TokenType.MACRO; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"false", 5))
-                {
-                    case (true) { -> TokenType.FALSE; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"float", 5))
-                {
-                    case (true) { -> TokenType.FLOAT_KW; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"label", 5))
-                {
-                    case (true) { -> TokenType.LABEL; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"local", 5))
-                {
-                    case (true) { -> TokenType.LOCAL; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"ulong", 5))
-                {
-                    case (true) { -> TokenType.ULONG; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"stack", 5))
-                {
-                    case (true) { -> TokenType.STACK; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"throw", 5))
-                {
-                    case (true) { -> TokenType.THROW; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"trait", 5))
-                {
-                    case (true) { -> TokenType.TRAIT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"union", 5))
-                {
-                    case (true) { -> TokenType.UNION; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"using", 5))
-                {
-                    case (true) { -> TokenType.USING; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"while", 5))
-                {
-                    case (true) { -> TokenType.WHILE; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"cdecl", 5))
-                {
-                    case (true) { -> TokenType.CDECL; }
-                    default {};
+                    default
+                    {
+                        switch (bytes_eq(s, g"catch", 5))
+                        {
+                            case (true) { -> TokenType.CATCH; }
+                            default
+                            {
+                                switch (bytes_eq(s, g"compt", 5))
+                                {
+                                    case (true) { -> TokenType.COMPT; }
+                                    default
+                                    {
+                                        switch (bytes_eq(s, g"const", 5))
+                                        {
+                                            case (true) { -> TokenType.CONST; }
+                                            default
+                                            {
+                                                switch (bytes_eq(s, g"defer", 5))
+                                                {
+                                                    case (true) { -> TokenType.DEFER; }
+                                                    default
+                                                    {
+                                                        switch (bytes_eq(s, g"macro", 5))
+                                                        {
+                                                            case (true) { -> TokenType.MACRO; }
+                                                            default
+                                                            {
+                                                                switch (bytes_eq(s, g"false", 5))
+                                                                {
+                                                                    case (true) { -> TokenType.FALSE; }
+                                                                    default
+                                                                    {
+                                                                        switch (bytes_eq(s, g"float", 5))
+                                                                        {
+                                                                            case (true) { -> TokenType.FLOAT_KW; }
+                                                                            default
+                                                                            {
+                                                                                switch (bytes_eq(s, g"label", 5))
+                                                                                {
+                                                                                    case (true) { -> TokenType.LABEL; }
+                                                                                    default
+                                                                                    {
+                                                                                        switch (bytes_eq(s, g"local", 5))
+                                                                                        {
+                                                                                            case (true) { -> TokenType.LOCAL; }
+                                                                                            default
+                                                                                            {
+                                                                                                switch (bytes_eq(s, g"ulong", 5))
+                                                                                                {
+                                                                                                    case (true) { -> TokenType.ULONG; }
+                                                                                                    default
+                                                                                                    {
+                                                                                                        switch (bytes_eq(s, g"stack", 5))
+                                                                                                        {
+                                                                                                            case (true) { -> TokenType.STACK; }
+                                                                                                            default
+                                                                                                            {
+                                                                                                                switch (bytes_eq(s, g"throw", 5))
+                                                                                                                {
+                                                                                                                    case (true) { -> TokenType.THROW; }
+                                                                                                                    default
+                                                                                                                    {
+                                                                                                                        switch (bytes_eq(s, g"trait", 5))
+                                                                                                                        {
+                                                                                                                            case (true) { -> TokenType.TRAIT; }
+                                                                                                                            default
+                                                                                                                            {
+                                                                                                                                switch (bytes_eq(s, g"union", 5))
+                                                                                                                                {
+                                                                                                                                    case (true) { -> TokenType.UNION; }
+                                                                                                                                    default
+                                                                                                                                    {
+                                                                                                                                        switch (bytes_eq(s, g"using", 5))
+                                                                                                                                        {
+                                                                                                                                            case (true) { -> TokenType.USING; }
+                                                                                                                                            default
+                                                                                                                                            {
+                                                                                                                                                switch (bytes_eq(s, g"while", 5))
+                                                                                                                                                {
+                                                                                                                                                    case (true) { -> TokenType.WHILE; }
+                                                                                                                                                    default
+                                                                                                                                                    {
+                                                                                                                                                        switch (bytes_eq(s, g"cdecl", 5))
+                                                                                                                                                        {
+                                                                                                                                                            case (true) { -> TokenType.CDECL; }
+                                                                                                                                                            default
+                                                                                                                                                            {
+                                                                                                                                                                switch (bytes_eq(s, g"async", 5))
+                                                                                                                                                                {
+                                                                                                                                                                    case (true) { -> TokenType.ASYNC; }
+                                                                                                                                                                    default {};
+                                                                                                                                                                };
+                                                                                                                                                            };
+                                                                                                                                                        };
+                                                                                                                                                    };
+                                                                                                                                                };
+                                                                                                                                            };
+                                                                                                                                        };
+                                                                                                                                    };
+                                                                                                                                };
+                                                                                                                            };
+                                                                                                                        };
+                                                                                                                    };
+                                                                                                                };
+                                                                                                            };
+                                                                                                        };
+                                                                                                    };
+                                                                                                };
+                                                                                            };
+                                                                                        };
+                                                                                    };
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
             }
                 default {};
@@ -615,97 +725,133 @@ namespace flux
                 switch (bytes_eq(s, g"assert", 6))
                 {
                     case (true) { -> TokenType.ASSERT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"double", 6))
-                {
-                    case (true) { -> TokenType.DOUBLE_KW; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"effect", 6))
-                {
-                    case (true) { -> TokenType.EFFECT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"escape", 6))
-                {
-                    case (true) { -> TokenType.ESCAPE_KW; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"export", 6))
-                {
-                    case (true) { -> TokenType.EXPORT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"extern", 6))
-                {
-                    case (true) { -> TokenType.EXTERN; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"global", 6))
-                {
-                    case (true) { -> TokenType.GLOBAL; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"inline", 6))
-                {
-                    case (true) { -> TokenType.INLINE; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"noinit", 6))
-                {
-                    case (true) { -> TokenType.NO_INIT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"object", 6))
-                {
-                    case (true) { -> TokenType.OBJECT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"public", 6))
-                {
-                    case (true) { -> TokenType.PUBLIC; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"return", 6))
-                {
-                    case (true) { -> TokenType.RETURN; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"signed", 6))
-                {
-                    case (true) { -> TokenType.SIGNED; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"sizeof", 6))
-                {
-                    case (true) { -> TokenType.SIZEOF; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"struct", 6))
-                {
-                    case (true) { -> TokenType.STRUCT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"switch", 6))
-                {
-                    case (true) { -> TokenType.SWITCH; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"typeof", 6))
-                {
-                    case (true) { -> TokenType.TYPEOF; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"vector", 6))
-                {
-                    case (true) { -> TokenType.VECTOR; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"fluxvm", 6))
-                {
-                    case (true) { -> TokenType.FLUXVM; }
-                    default {};
+                    default
+                    {
+                        switch (bytes_eq(s, g"double", 6))
+                        {
+                            case (true) { -> TokenType.DOUBLE_KW; }
+                            default
+                            {
+                                switch (bytes_eq(s, g"effect", 6))
+                                {
+                                    case (true) { -> TokenType.EFFECT; }
+                                    default
+                                    {
+                                        switch (bytes_eq(s, g"escape", 6))
+                                        {
+                                            case (true) { -> TokenType.ESCAPE_KW; }
+                                            default
+                                            {
+                                                switch (bytes_eq(s, g"export", 6))
+                                                {
+                                                    case (true) { -> TokenType.EXPORT; }
+                                                    default
+                                                    {
+                                                        switch (bytes_eq(s, g"extern", 6))
+                                                        {
+                                                            case (true) { -> TokenType.EXTERN; }
+                                                            default
+                                                            {
+                                                                switch (bytes_eq(s, g"global", 6))
+                                                                {
+                                                                    case (true) { -> TokenType.GLOBAL; }
+                                                                    default
+                                                                    {
+                                                                        switch (bytes_eq(s, g"inline", 6))
+                                                                        {
+                                                                            case (true) { -> TokenType.INLINE; }
+                                                                            default
+                                                                            {
+                                                                                switch (bytes_eq(s, g"noinit", 6))
+                                                                                {
+                                                                                    case (true) { -> TokenType.NO_INIT; }
+                                                                                    default
+                                                                                    {
+                                                                                        switch (bytes_eq(s, g"object", 6))
+                                                                                        {
+                                                                                            case (true) { -> TokenType.OBJECT; }
+                                                                                            default
+                                                                                            {
+                                                                                                switch (bytes_eq(s, g"public", 6))
+                                                                                                {
+                                                                                                    case (true) { -> TokenType.PUBLIC; }
+                                                                                                    default
+                                                                                                    {
+                                                                                                        switch (bytes_eq(s, g"return", 6))
+                                                                                                        {
+                                                                                                            case (true) { -> TokenType.RETURN; }
+                                                                                                            default
+                                                                                                            {
+                                                                                                                switch (bytes_eq(s, g"signed", 6))
+                                                                                                                {
+                                                                                                                    case (true) { -> TokenType.SIGNED; }
+                                                                                                                    default
+                                                                                                                    {
+                                                                                                                        switch (bytes_eq(s, g"sizeof", 6))
+                                                                                                                        {
+                                                                                                                            case (true) { -> TokenType.SIZEOF; }
+                                                                                                                            default
+                                                                                                                            {
+                                                                                                                                switch (bytes_eq(s, g"struct", 6))
+                                                                                                                                {
+                                                                                                                                    case (true) { -> TokenType.STRUCT; }
+                                                                                                                                    default
+                                                                                                                                    {
+                                                                                                                                        switch (bytes_eq(s, g"switch", 6))
+                                                                                                                                        {
+                                                                                                                                            case (true) { -> TokenType.SWITCH; }
+                                                                                                                                            default
+                                                                                                                                            {
+                                                                                                                                                switch (bytes_eq(s, g"typeof", 6))
+                                                                                                                                                {
+                                                                                                                                                    case (true) { -> TokenType.TYPEOF; }
+                                                                                                                                                    default
+                                                                                                                                                    {
+                                                                                                                                                        switch (bytes_eq(s, g"vector", 6))
+                                                                                                                                                        {
+                                                                                                                                                            case (true) { -> TokenType.VECTOR; }
+                                                                                                                                                            default
+                                                                                                                                                            {
+                                                                                                                                                                switch (bytes_eq(s, g"fluxvm", 6))
+                                                                                                                                                                {
+                                                                                                                                                                    case (true) { -> TokenType.FLUXVM; }
+                                                                                                                                                                    default {};
+                                                                                                                                                                };
+                                                                                                                                                            };
+                                                                                                                                                        };
+                                                                                                                                                    };
+                                                                                                                                                };
+                                                                                                                                            };
+                                                                                                                                        };
+                                                                                                                                    };
+                                                                                                                                };
+                                                                                                                            };
+                                                                                                                        };
+                                                                                                                    };
+                                                                                                                };
+                                                                                                            };
+                                                                                                        };
+                                                                                                    };
+                                                                                                };
+                                                                                            };
+                                                                                        };
+                                                                                    };
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
             }
                 default {};
@@ -716,22 +862,28 @@ namespace flux
                 switch (bytes_eq(s, g"alignof", 7))
                 {
                     case (true) { -> TokenType.ALIGNOF; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"default", 7))
-                {
-                    case (true) { -> TokenType.DEFAULT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"private", 7))
-                {
-                    case (true) { -> TokenType.PRIVATE; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"stdcall", 7))
-                {
-                    case (true) { -> TokenType.STDCALL; }
-                    default {};
+                    default
+                    {
+                        switch (bytes_eq(s, g"default", 7))
+                        {
+                            case (true) { -> TokenType.DEFAULT; }
+                            default
+                            {
+                                switch (bytes_eq(s, g"private", 7))
+                                {
+                                    case (true) { -> TokenType.PRIVATE; }
+                                    default
+                                    {
+                                        switch (bytes_eq(s, g"stdcall", 7))
+                                        {
+                                            case (true) { -> TokenType.STDCALL; }
+                                            default {};
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
             }
                 default {};
@@ -742,72 +894,98 @@ namespace flux
                 switch (bytes_eq(s, g"continue", 8))
                 {
                     case (true) { -> TokenType.CONTINUE; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"contract", 8))
-                {
-                    case (true) { -> TokenType.CONTRACT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"endianof", 8))
-                {
-                    case (true) { -> TokenType.ENDIANOF; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"fastnode", 8))
-                {
-                    case (true) { -> TokenType.FASTNODE; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"noreturn", 8))
-                {
-                    case (true) { -> TokenType.NORET; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"operator", 8))
-                {
-                    case (true) { -> TokenType.OPERATOR; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"register", 8))
-                {
-                    case (true) { -> TokenType.REGISTER; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"singinit", 8))
-                {
-                    case (true) { -> TokenType.SINGINIT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"unsigned", 8))
-                {
-                    case (true) { -> TokenType.UNSIGNED; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"volatile", 8))
-                {
-                    case (true) { -> TokenType.VOLATILE; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"fastcall", 8))
-                {
-                    case (true) { -> TokenType.FASTCALL; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"thiscall", 8))
-                {
-                    case (true) { -> TokenType.THISCALL; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"comptime", 8))
-                {
-                    case (true) { -> TokenType.COMPTIME; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"emitflux", 8))
-                {
-                    case (true) { -> TokenType.EMITFLUX; }
-                    default {};
+                    default
+                    {
+                        switch (bytes_eq(s, g"contract", 8))
+                        {
+                            case (true) { -> TokenType.CONTRACT; }
+                            default
+                            {
+                                switch (bytes_eq(s, g"endianof", 8))
+                                {
+                                    case (true) { -> TokenType.ENDIANOF; }
+                                    default
+                                    {
+                                        switch (bytes_eq(s, g"fastnode", 8))
+                                        {
+                                            case (true) { -> TokenType.FASTNODE; }
+                                            default
+                                            {
+                                                switch (bytes_eq(s, g"noreturn", 8))
+                                                {
+                                                    case (true) { -> TokenType.NORET; }
+                                                    default
+                                                    {
+                                                        switch (bytes_eq(s, g"operator", 8))
+                                                        {
+                                                            case (true) { -> TokenType.OPERATOR; }
+                                                            default
+                                                            {
+                                                                switch (bytes_eq(s, g"register", 8))
+                                                                {
+                                                                    case (true) { -> TokenType.REGISTER; }
+                                                                    default
+                                                                    {
+                                                                        switch (bytes_eq(s, g"singinit", 8))
+                                                                        {
+                                                                            case (true) { -> TokenType.SINGINIT; }
+                                                                            default
+                                                                            {
+                                                                                switch (bytes_eq(s, g"unsigned", 8))
+                                                                                {
+                                                                                    case (true) { -> TokenType.UNSIGNED; }
+                                                                                    default
+                                                                                    {
+                                                                                        switch (bytes_eq(s, g"volatile", 8))
+                                                                                        {
+                                                                                            case (true) { -> TokenType.VOLATILE; }
+                                                                                            default
+                                                                                            {
+                                                                                                switch (bytes_eq(s, g"fastcall", 8))
+                                                                                                {
+                                                                                                    case (true) { -> TokenType.FASTCALL; }
+                                                                                                    default
+                                                                                                    {
+                                                                                                        switch (bytes_eq(s, g"thiscall", 8))
+                                                                                                        {
+                                                                                                            case (true) { -> TokenType.THISCALL; }
+                                                                                                            default
+                                                                                                            {
+                                                                                                                switch (bytes_eq(s, g"comptime", 8))
+                                                                                                                {
+                                                                                                                    case (true) { -> TokenType.COMPTIME; }
+                                                                                                                    default
+                                                                                                                    {
+                                                                                                                        switch (bytes_eq(s, g"emitflux", 8))
+                                                                                                                        {
+                                                                                                                            case (true) { -> TokenType.EMITFLUX; }
+                                                                                                                            default {};
+                                                                                                                        };
+                                                                                                                    };
+                                                                                                                };
+                                                                                                            };
+                                                                                                        };
+                                                                                                    };
+                                                                                                };
+                                                                                            };
+                                                                                        };
+                                                                                    };
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
             }
                 default {};
@@ -818,17 +996,21 @@ namespace flux
                 switch (bytes_eq(s, g"deprecate", 9))
                 {
                     case (true) { -> TokenType.DEPRECATE; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"interface", 9))
-                {
-                    case (true) { -> TokenType.INTERFACE; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"namespace", 9))
-                {
-                    case (true) { -> TokenType.NAMESPACE; }
-                    default {};
+                    default
+                    {
+                        switch (bytes_eq(s, g"interface", 9))
+                        {
+                            case (true) { -> TokenType.INTERFACE; }
+                            default
+                            {
+                                switch (bytes_eq(s, g"namespace", 9))
+                                {
+                                    case (true) { -> TokenType.NAMESPACE; }
+                                    default {};
+                                };
+                            };
+                        };
+                    };
                 };
             }
                 default {};
@@ -839,12 +1021,14 @@ namespace flux
                 switch (bytes_eq(s, g"constraint", 10))
                 {
                     case (true) { -> TokenType.CONSTRAINT; }
-                    default {};
-                };
-                switch (bytes_eq(s, g"vectorcall", 10))
-                {
-                    case (true) { -> TokenType.VECTORCALL; }
-                    default {};
+                    default
+                    {
+                        switch (bytes_eq(s, g"vectorcall", 10))
+                        {
+                            case (true) { -> TokenType.VECTORCALL; }
+                            default {};
+                        };
+                    };
                 };
             }
                 default {};
@@ -890,6 +1074,7 @@ namespace flux
                 case (TokenType.AS) { -> g"AS\0"; }
                 case (TokenType.ASM) { -> g"ASM\0"; }
                 case (TokenType.ASM_BLOCK) { -> g"ASM_BLOCK\0"; }
+                case (TokenType.ASYNC) { -> g"ASYNC\0"; }
                 case (TokenType.AUTO) { -> g"AUTO\0"; }
                 case (TokenType.BREAK) { -> g"BREAK\0"; }
                 case (TokenType.BOOL_KW) { -> g"BOOL_KW\0"; }
@@ -1158,9 +1343,11 @@ namespace flux
                 switch (this.position >= this.length)
                 {
                     case (true) { -> -1; }
-                    default {};
+                    default
+                    {
+                        -> (int)this.src[this.position];
+                    };
                 };
-                -> (int)this.src[this.position];
             };
 
             peek(int offset) -> int
@@ -1169,9 +1356,11 @@ namespace flux
                 switch (p >= this.length)
                 {
                     case (true) { -> -1; }
-                    default {};
+                    default
+                    {
+                        -> (int)this.src[p];
+                    };
                 };
-                -> (int)this.src[p];
             };
 
             // Mirrors FluxLexer.advance. Newline resets the column, a single
@@ -1239,14 +1428,18 @@ namespace flux
                     switch (this.position + i >= this.length)
                     {
                         case (true) { -> false; }
-                        default {};
+                        default
+                        {
+                            switch (this.src[this.position + i] != lit[i])
+                            {
+                                case (true) { -> false; }
+                                default
+                                {
+                                    i++;
+                                };
+                            };
+                        };
                     };
-                    switch (this.src[this.position + i] != lit[i])
-                    {
-                        case (true) { -> false; }
-                        default {};
-                    };
-                    i++;
                 };
                 -> true;
             };
@@ -1276,14 +1469,15 @@ namespace flux
                 switch (np == (u64)0)
                 {
                     case (true) {
-                    this.fail(LexError.ALLOC_FAILED, this.line, this.column);
-                    ->;
+                    -> this.fail(LexError.ALLOC_FAILED, this.line, this.column);
                 }
-                    default {};
+                    default
+                    {
+                        this.arena = (byte*)np;
+                        this.arena_cap = new_cap;
+                        ->;
+                    };
                 };
-                this.arena = (byte*)np;
-                this.arena_cap = new_cap;
-                ->;
             };
 
             vbegin() -> int
@@ -1298,14 +1492,16 @@ namespace flux
                     case (true) { this.grow(); }
                     default {};
                 };
-                switch (this.err_code != 0)
+                switch (this.err_code!?)
                 {
                     case (true) { ->; }
-                    default {};
+                    default
+                    {
+                        this.arena[this.arena_len] = (byte)b;
+                        this.arena_len++;
+                        ->;
+                    };
                 };
-                this.arena[this.arena_len] = (byte)b;
-                this.arena_len++;
-                ->;
             };
 
             // UTF-8 encode a codepoint below 0x800
@@ -1333,27 +1529,30 @@ namespace flux
 
             emit(int tt, int ln, int col, int voff, int vlen, int numeric) -> void
             {
-                switch (this.err_code != 0)
+                switch (this.err_code!?)
                 {
                     case (true) { ->; }
-                    default {};
+                    default
+                    {
+                        switch (this.count >= this.cap)
+                        {
+                            case (true) {
+                            -> this.fail(LexError.ALLOC_FAILED, ln, col);
+                        }
+                            default
+                            {
+                                this.tokens[this.count].type = tt;
+                                this.tokens[this.count].line = ln;
+                                this.tokens[this.count].column = col;
+                                this.tokens[this.count].voff = voff;
+                                this.tokens[this.count].vlen = vlen;
+                                this.tokens[this.count].numeric_char = numeric;
+                                this.count++;
+                                ->;
+                            };
+                        };
+                    };
                 };
-                switch (this.count >= this.cap)
-                {
-                    case (true) {
-                    this.fail(LexError.ALLOC_FAILED, ln, col);
-                    ->;
-                }
-                    default {};
-                };
-                this.tokens[this.count].type = tt;
-                this.tokens[this.count].line = ln;
-                this.tokens[this.count].column = col;
-                this.tokens[this.count].voff = voff;
-                this.tokens[this.count].vlen = vlen;
-                this.tokens[this.count].numeric_char = numeric;
-                this.count++;
-                ->;
             };
 
             emit_text(int tt, int ln, int col, byte* s, int n) -> void
@@ -1366,8 +1565,7 @@ namespace flux
                     i++;
                 };
                 int vl = this.vend(vb);
-                this.emit(tt, ln, col, vb, vl, 0);
-                ->;
+                -> this.emit(tt, ln, col, vb, vl, 0);
             };
 
             token_value(int i) -> byte*
@@ -1395,8 +1593,7 @@ namespace flux
                     default {};
                 };
                 int vl = this.vend(vb);
-                this.emit(TokenType.ASM_BLOCK, ln, col, vb, vl, 0);
-                ->;
+                -> this.emit(TokenType.ASM_BLOCK, ln, col, vb, vl, 0);
             };
 
             // { ... } block after the asm or fluxvm keyword. Content is raw
@@ -1413,44 +1610,45 @@ namespace flux
                 switch (this.cur() != '{')
                 {
                     case (true) { ->; }
-                    default {};
-                };
-                this.adv(1);
-
-                int depth = 1;
-                int vb = this.vbegin();
-                while (this.cur() != -1 & depth > 0)
-                {
-                    c = this.cur();
-                    switch (c)
+                    default
                     {
-                        case ('{') { depth++; }
-                        case ('}') { depth--; }
-                        default {};
-                    };
-                    switch (depth > 0)
-                    {
-                        case (true) { this.vput(c); }
-                        default {};
-                    };
-                    this.adv(1);
-                };
+                        this.adv(1);
 
-                int s = vb;
-                int e = this.arena_len;
-                while (s < e & is_space((int)this.arena[s])) { s++; };
-                while (e > s & is_space((int)this.arena[e - 1])) { e--; };
-                int k;
-                int n = e - s;
-                while (k < n)
-                {
-                    this.arena[vb + k] = this.arena[s + k];
-                    k++;
+                        int depth = 1;
+                        int vb = this.vbegin();
+                        while (this.cur() != -1 & depth > 0)
+                        {
+                            c = this.cur();
+                            switch (c)
+                            {
+                                case ('{') { depth++; }
+                                case ('}') { depth--; }
+                                default {};
+                            };
+                            switch (depth > 0)
+                            {
+                                case (true) { this.vput(c); }
+                                default {};
+                            };
+                            this.adv(1);
+                        };
+
+                        int s = vb;
+                        int e = this.arena_len;
+                        while (s < e & is_space((int)this.arena[s])) { s++; };
+                        while (e > s & is_space((int)this.arena[e - 1])) { e--; };
+                        int k;
+                        int n = e - s;
+                        while (k < n)
+                        {
+                            this.arena[vb + k] = this.arena[s + k];
+                            k++;
+                        };
+                        this.arena_len = vb + n;
+                        int vl = this.vend(vb);
+                        -> this.emit(tt, ln, col, vb, vl, 0);
+                    };
                 };
-                this.arena_len = vb + n;
-                int vl = this.vend(vb);
-                this.emit(tt, ln, col, vb, vl, 0);
-                ->;
             };
 
             // ===== STRINGS =====
@@ -1550,21 +1748,23 @@ namespace flux
                                 this.fail(LexError.FSTRING_UNTERMINATED, this.line, this.column);
                                 -> false;
                             }
-                                default {};
-                            };
-                            switch (this.cur() == '{')
-                            {
-                                case (true) { depth++; }
-                                default {
-                                    switch (this.cur() == '}')
+                                default
+                                {
+                                    switch (this.cur() == '{')
                                     {
-                                        case (true) { depth--; }
-                                        default {};
+                                        case (true) { depth++; }
+                                        default {
+                                            switch (this.cur() == '}')
+                                            {
+                                                case (true) { depth--; }
+                                                default {};
+                                            };
+                                        };
                                     };
+                                    this.vput(this.cur());
+                                    this.adv(1);
                                 };
                             };
-                            this.vput(this.cur());
-                            this.adv(1);
                         };
                     }
                         default {
@@ -1657,8 +1857,7 @@ namespace flux
                     default {};
                 };
                 int vl = this.vend(vb);
-                this.emit(TokenType.I_STRING, ln, col, vb, vl, 0);
-                ->;
+                -> this.emit(TokenType.I_STRING, ln, col, vb, vl, 0);
             };
 
             // ===== NUMBERS =====
@@ -1704,8 +1903,7 @@ namespace flux
                     };
                 };
                 int vl = this.vend(vb);
-                this.emit(tt, ln, col, vb, vl, 0);
-                ->;
+                -> this.emit(tt, ln, col, vb, vl, 0);
             };
 
             digit_at(int vb, int int_len, int n, int i) -> int
@@ -1713,14 +1911,18 @@ namespace flux
                 switch (i >= n)
                 {
                     case (true) { -> '0'; }
-                    default {};
+                    default
+                    {
+                        switch (i < int_len)
+                        {
+                            case (true) { -> (int)this.arena[vb + i]; }
+                            default
+                            {
+                                -> (int)this.arena[vb + i + 1];
+                            };
+                        };
+                    };
                 };
-                switch (i < int_len)
-                {
-                    case (true) { -> (int)this.arena[vb + i]; }
-                    default {};
-                };
-                -> (int)this.arena[vb + i + 1];
             };
 
             // Mantissa digits are already in the arena at vb (integer part,
@@ -1756,160 +1958,164 @@ namespace flux
                 switch (too_big | exponent > 1000000)
                 {
                     case (true) {
-                    this.fail(LexError.EXPONENT_RANGE, ln, col);
-                    ->;
+                    -> this.fail(LexError.EXPONENT_RANGE, ln, col);
                 }
-                    default {};
-                };
-                exponent = exponent * sign;
-
-                int n = this.arena_len - vb;
-                switch (had_dot)
-                {
-                    case (true) { n = n - 1; }
-                    default {};
-                };
-                int point = int_len + exponent;
-                int out_start = this.arena_len;
-
-                // integer part
-                int ipart = 0;
-                switch (point > 0)
-                {
-                    case (true) { ipart = point; }
-                    default {};
-                };
-                int j, j0 = -1;
-                while (j < ipart)
-                {
-                    switch (this.digit_at(vb, int_len, n, j) != '0')
-                    {
-                        case (true) {
-                        j0 = j;
-                        break;
-                    }
-                        default {};
-                    };
-                    j++;
-                };
-                switch (j0)
-                {
-                    case (-1)
-                    {
-                        this.vput('0');
-                    }
                     default
                     {
-                        j = j0;
+                        exponent = exponent * sign;
+
+                        int n = this.arena_len - vb;
+                        switch (had_dot)
+                        {
+                            case (true) { n = n - 1; }
+                            default {};
+                        };
+                        int point = int_len + exponent;
+                        int out_start = this.arena_len;
+
+                        // integer part
+                        int ipart = 0;
+                        switch (point > 0)
+                        {
+                            case (true) { ipart = point; }
+                            default {};
+                        };
+                        int j, j0 = -1;
                         while (j < ipart)
                         {
-                            this.vput(this.digit_at(vb, int_len, n, j));
-                            j++;
+                            switch (this.digit_at(vb, int_len, n, j) != '0')
+                            {
+                                case (true) {
+                                j0 = j;
+                                break;
+                            }
+                                default
+                                {
+                                    j++;
+                                };
+                            };
                         };
-                    };
-                };
-
-                // fractional part
-                int z = 0;
-                switch (point < 0)
-                {
-                    case (true) { z = 0 - point; }
-                    default {};
-                };
-                int fstart = 0;
-                switch (point > 0)
-                {
-                    case (true) { fstart = point; }
-                    default {};
-                };
-                int flen = 0;
-                switch (n > fstart)
-                {
-                    case (true) { flen = z + (n - fstart); }
-                    default {};
-                };
-
-                int lt, m = flen, idx, dch;
-                while (m > 0)
-                {
-                    idx = m - 1;
-                    switch (idx < z)
-                    {
-                        case (true) { dch = '0'; }
-                        default { dch = this.digit_at(vb, int_len, n, fstart + (idx - z)); };
-                    };
-                    switch (dch != '0')
-                    {
-                        case (true) {
-                        lt = m;
-                        break;
-                    }
-                        default {};
-                    };
-                    m--;
-                };
-                switch (lt > 0)
-                {
-                    case (true) {
-                    this.vput('.');
-                    m = 0;
-                    while (m < lt)
-                    {
-                        switch (m < z)
+                        switch (j0)
                         {
-                            case (true) { dch = '0'; }
-                            default { dch = this.digit_at(vb, int_len, n, fstart + (m - z)); };
+                            case (-1)
+                            {
+                                this.vput('0');
+                            }
+                            default
+                            {
+                                j = j0;
+                                while (j < ipart)
+                                {
+                                    this.vput(this.digit_at(vb, int_len, n, j));
+                                    j++;
+                                };
+                            };
                         };
-                        this.vput(dch);
-                        m++;
-                    };
-                }
-                    default {};
-                };
 
-                // move the expanded text down over the mantissa
-                int out_len = this.arena_len - out_start;
-                int k;
-                while (k < out_len)
-                {
-                    this.arena[vb + k] = this.arena[out_start + k];
-                    k++;
-                };
-                this.arena_len = vb + out_len;
-                int vl = this.vend(vb);
+                        // fractional part
+                        int z = 0;
+                        switch (point < 0)
+                        {
+                            case (true) { z = 0 - point; }
+                            default {};
+                        };
+                        int fstart = 0;
+                        switch (point > 0)
+                        {
+                            case (true) { fstart = point; }
+                            default {};
+                        };
+                        int flen = 0;
+                        switch (n > fstart)
+                        {
+                            case (true) { flen = z + (n - fstart); }
+                            default {};
+                        };
 
-                int tt;
-                switch (this.cur() == 'f')
-                {
-                    case (true) {
-                    this.adv(1);
-                    tt = TokenType.FLOAT;
-                }
-                    default {
-                        switch (this.cur() == 'd')
+                        int lt, m = flen, idx, dch;
+                        while (m > 0)
+                        {
+                            idx = m - 1;
+                            switch (idx < z)
+                            {
+                                case (true) { dch = '0'; }
+                                default { dch = this.digit_at(vb, int_len, n, fstart + (idx - z)); };
+                            };
+                            switch (dch != '0')
+                            {
+                                case (true) {
+                                lt = m;
+                                break;
+                            }
+                                default
+                                {
+                                    m--;
+                                };
+                            };
+                        };
+                        switch (lt > 0)
                         {
                             case (true) {
-                    this.adv(1);
-                    tt = TokenType.DOUBLE;
-                }
-                            default {
-                    int abs_exp = exponent;
-                    switch (abs_exp < 0)
-                    {
-                        case (true) { abs_exp = 0 - abs_exp; }
-                        default {};
-                    };
-                    switch (abs_exp <= 5)
-                    {
-                        case (true) { tt = TokenType.FLOAT; }
-                        default { tt = TokenType.DOUBLE; };
-                    };
-                };
+                            this.vput('.');
+                            m = 0;
+                            while (m < lt)
+                            {
+                                switch (m < z)
+                                {
+                                    case (true) { dch = '0'; }
+                                    default { dch = this.digit_at(vb, int_len, n, fstart + (m - z)); };
+                                };
+                                this.vput(dch);
+                                m++;
+                            };
+                        }
+                            default {};
                         };
+
+                        // move the expanded text down over the mantissa
+                        int out_len = this.arena_len - out_start;
+                        int k;
+                        while (k < out_len)
+                        {
+                            this.arena[vb + k] = this.arena[out_start + k];
+                            k++;
+                        };
+                        this.arena_len = vb + out_len;
+                        int vl = this.vend(vb);
+
+                        int tt;
+                        switch (this.cur() == 'f')
+                        {
+                            case (true) {
+                            this.adv(1);
+                            tt = TokenType.FLOAT;
+                        }
+                            default {
+                                switch (this.cur() == 'd')
+                                {
+                                    case (true) {
+                            this.adv(1);
+                            tt = TokenType.DOUBLE;
+                        }
+                                    default {
+                            int abs_exp = exponent;
+                            switch (abs_exp < 0)
+                            {
+                                case (true) { abs_exp = 0 - abs_exp; }
+                                default {};
+                            };
+                            switch (abs_exp <= 5)
+                            {
+                                case (true) { tt = TokenType.FLOAT; }
+                                default { tt = TokenType.DOUBLE; };
+                            };
+                        };
+                                };
+                            };
+                        };
+                        -> this.emit(tt, ln, col, vb, vl, 0);
                     };
                 };
-                this.emit(tt, ln, col, vb, vl, 0);
-                ->;
             };
 
             read_number() -> void
@@ -1937,70 +2143,70 @@ namespace flux
                             this.vput(this.cur());
                             this.adv(1);
                         };
-                        this.finish_prefixed(ln, col, vb, true);
-                        ->;
+                        -> this.finish_prefixed(ln, col, vb, true);
                     }
-                        default {};
-                    };
-
-                    switch (c == 'x' | c == 'X')
-                    {
-                        case (true) {
-                        this.vput(c);
-                        this.adv(1);
-                        while (is_hex_upper(this.cur()))
+                        default
                         {
-                            this.vput(this.cur());
-                            this.adv(1);
+                            switch (c == 'x' | c == 'X')
+                            {
+                                case (true) {
+                                this.vput(c);
+                                this.adv(1);
+                                while (is_hex_upper(this.cur()))
+                                {
+                                    this.vput(this.cur());
+                                    this.adv(1);
+                                };
+                                -> this.finish_prefixed(ln, col, vb, true);
+                            }
+                                default
+                                {
+                                    switch (c == 'o' | c == 'O')
+                                    {
+                                        case (true) {
+                                        this.vput(c);
+                                        this.adv(1);
+                                        while (this.cur() >= '0' & this.cur() <= '7')
+                                        {
+                                            this.vput(this.cur());
+                                            this.adv(1);
+                                        };
+                                        -> this.finish_prefixed(ln, col, vb, true);
+                                    }
+                                        default
+                                        {
+                                            switch (c == 'b' | c == 'B')
+                                            {
+                                                case (true) {
+                                                this.vput(c);
+                                                this.adv(1);
+                                                while (this.cur() == '0' | this.cur() == '1')
+                                                {
+                                                    this.vput(this.cur());
+                                                    this.adv(1);
+                                                };
+                                                // `0b` with no digits is the byte-suffix form of 0
+                                                switch (c == 'b' & this.arena_len - vb == 2)
+                                                {
+                                                    case (true) {
+                                                    this.arena_len = vb;
+                                                    this.vput('0');
+                                                    vl = this.vend(vb);
+                                                    -> this.emit(TokenType.BYTE_LITERAL, ln, col, vb, vl, 0);
+                                                }
+                                                    default
+                                                    {
+                                                        -> this.finish_prefixed(ln, col, vb, false);
+                                                    };
+                                                };
+                                            }
+                                                default {};
+                                            };
+                                        };
+                                    };
+                                };
+                            };
                         };
-                        this.finish_prefixed(ln, col, vb, true);
-                        ->;
-                    }
-                        default {};
-                    };
-
-                    switch (c == 'o' | c == 'O')
-                    {
-                        case (true) {
-                        this.vput(c);
-                        this.adv(1);
-                        while (this.cur() >= '0' & this.cur() <= '7')
-                        {
-                            this.vput(this.cur());
-                            this.adv(1);
-                        };
-                        this.finish_prefixed(ln, col, vb, true);
-                        ->;
-                    }
-                        default {};
-                    };
-
-                    switch (c == 'b' | c == 'B')
-                    {
-                        case (true) {
-                        this.vput(c);
-                        this.adv(1);
-                        while (this.cur() == '0' | this.cur() == '1')
-                        {
-                            this.vput(this.cur());
-                            this.adv(1);
-                        };
-                        // `0b` with no digits is the byte-suffix form of 0
-                        switch (c == 'b' & this.arena_len - vb == 2)
-                        {
-                            case (true) {
-                            this.arena_len = vb;
-                            this.vput('0');
-                            vl = this.vend(vb);
-                            this.emit(TokenType.BYTE_LITERAL, ln, col, vb, vl, 0);
-                            ->;
-                        }
-                            default {};
-                        };
-                        this.finish_prefixed(ln, col, vb, false);
-                        ->;
-                    }
-                        default {};
                     };
                 }
                     default {};
@@ -2055,8 +2261,7 @@ namespace flux
                     switch (exp_valid)
                     {
                         case (true) {
-                        this.read_scientific(ln, col, vb, int_len, had_dot);
-                        ->;
+                        -> this.read_scientific(ln, col, vb, int_len, had_dot);
                     }
                         default {};
                     };
@@ -2129,8 +2334,7 @@ namespace flux
                     };
                     this.arena_len = vb + n;
                     vl = this.vend(vb);
-                    this.emit(TokenType.CHAR, ln, col, vb, vl, 1);
-                    ->;
+                    -> this.emit(TokenType.CHAR, ln, col, vb, vl, 1);
                 }
                                                             default {};
                                                         };
@@ -2157,8 +2361,7 @@ namespace flux
                 };
 
                 vl = this.vend(vb);
-                this.emit(tt, ln, col, vb, vl, 0);
-                ->;
+                -> this.emit(tt, ln, col, vb, vl, 0);
             };
 
             // ===== IDENTIFIERS =====
@@ -2193,12 +2396,14 @@ namespace flux
                 switch (this.match(g"`^|!&=", 6))
                 {
                     case (true) { *ttype = TokenType.BITXNAND_ASSIGN; -> 6; }
-                    default {};
-                };
-                switch (this.match(g"`^|!|=", 6))
-                {
-                    case (true) { *ttype = TokenType.BITXNOR_ASSIGN; -> 6; }
-                    default {};
+                    default
+                    {
+                        switch (this.match(g"`^|!|=", 6))
+                        {
+                            case (true) { *ttype = TokenType.BITXNOR_ASSIGN; -> 6; }
+                            default {};
+                        };
+                    };
                 };
             }
                 default {};
@@ -2209,17 +2414,21 @@ namespace flux
                 switch (this.match(g"`^|!&", 5))
                 {
                     case (true) { *ttype = TokenType.BITXNAND; -> 5; }
-                    default {};
-                };
-                switch (this.match(g"`^|!|", 5))
-                {
-                    case (true) { *ttype = TokenType.BITXNOR; -> 5; }
-                    default {};
-                };
-                switch (this.match(g"`^|!=", 5))
-                {
-                    case (true) { *ttype = TokenType.BITXNOT_ASSIGN; -> 5; }
-                    default {};
+                    default
+                    {
+                        switch (this.match(g"`^|!|", 5))
+                        {
+                            case (true) { *ttype = TokenType.BITXNOR; -> 5; }
+                            default
+                            {
+                                switch (this.match(g"`^|!=", 5))
+                                {
+                                    case (true) { *ttype = TokenType.BITXNOT_ASSIGN; -> 5; }
+                                    default {};
+                                };
+                            };
+                        };
+                    };
                 };
             }
                 default {};
@@ -2230,22 +2439,28 @@ namespace flux
                 switch (this.match(g"`^|!", 4))
                 {
                     case (true) { *ttype = TokenType.BITXNOT; -> 4; }
-                    default {};
-                };
-                switch (this.match(g"`!&=", 4))
-                {
-                    case (true) { *ttype = TokenType.BITNAND_ASSIGN; -> 4; }
-                    default {};
-                };
-                switch (this.match(g"`!|=", 4))
-                {
-                    case (true) { *ttype = TokenType.BITNOR_ASSIGN; -> 4; }
-                    default {};
-                };
-                switch (this.match(g"`^|=", 4))
-                {
-                    case (true) { *ttype = TokenType.BITXOR_ASSIGN; -> 4; }
-                    default {};
+                    default
+                    {
+                        switch (this.match(g"`!&=", 4))
+                        {
+                            case (true) { *ttype = TokenType.BITNAND_ASSIGN; -> 4; }
+                            default
+                            {
+                                switch (this.match(g"`!|=", 4))
+                                {
+                                    case (true) { *ttype = TokenType.BITNOR_ASSIGN; -> 4; }
+                                    default
+                                    {
+                                        switch (this.match(g"`^|=", 4))
+                                        {
+                                            case (true) { *ttype = TokenType.BITXOR_ASSIGN; -> 4; }
+                                            default {};
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
             }
                 default {};
@@ -2256,57 +2471,77 @@ namespace flux
                 switch (this.match(g"<<=", 3))
                 {
                     case (true) { *ttype = TokenType.BITSHIFT_LEFT_ASSIGN; -> 3; }
-                    default {};
-                };
-                switch (this.match(g">>=", 3))
-                {
-                    case (true) { *ttype = TokenType.BITSHIFT_RIGHT_ASSIGN; -> 3; }
-                    default {};
-                };
-                switch (this.match(g"^|=", 3))
-                {
-                    case (true) { *ttype = TokenType.XOR_ASSIGN; -> 3; }
-                    default {};
-                };
-                switch (this.match(g"{}*", 3))
-                {
-                    case (true) { *ttype = TokenType.FUNCTION_POINTER; -> 3; }
-                    default {};
-                };
-                switch (this.match(g"(@)", 3))
-                {
-                    case (true) { *ttype = TokenType.ADDRESS_CAST; -> 3; }
-                    default {};
-                };
-                switch (this.match(g"...", 3))
-                {
-                    case (true) { *ttype = TokenType.ELLIPSIS; -> 3; }
-                    default {};
-                };
-                switch (this.match(g"`!&", 3))
-                {
-                    case (true) { *ttype = TokenType.BITNAND_OP; -> 3; }
-                    default {};
-                };
-                switch (this.match(g"`!|", 3))
-                {
-                    case (true) { *ttype = TokenType.BITNOR_OP; -> 3; }
-                    default {};
-                };
-                switch (this.match(g"`&=", 3))
-                {
-                    case (true) { *ttype = TokenType.BITAND_ASSIGN; -> 3; }
-                    default {};
-                };
-                switch (this.match(g"`|=", 3))
-                {
-                    case (true) { *ttype = TokenType.BITOR_ASSIGN; -> 3; }
-                    default {};
-                };
-                switch (this.match(g"`^|", 3))
-                {
-                    case (true) { *ttype = TokenType.BITXOR_OP; -> 3; }
-                    default {};
+                    default
+                    {
+                        switch (this.match(g">>=", 3))
+                        {
+                            case (true) { *ttype = TokenType.BITSHIFT_RIGHT_ASSIGN; -> 3; }
+                            default
+                            {
+                                switch (this.match(g"^|=", 3))
+                                {
+                                    case (true) { *ttype = TokenType.XOR_ASSIGN; -> 3; }
+                                    default
+                                    {
+                                        switch (this.match(g"{}*", 3))
+                                        {
+                                            case (true) { *ttype = TokenType.FUNCTION_POINTER; -> 3; }
+                                            default
+                                            {
+                                                switch (this.match(g"(@)", 3))
+                                                {
+                                                    case (true) { *ttype = TokenType.ADDRESS_CAST; -> 3; }
+                                                    default
+                                                    {
+                                                        switch (this.match(g"...", 3))
+                                                        {
+                                                            case (true) { *ttype = TokenType.ELLIPSIS; -> 3; }
+                                                            default
+                                                            {
+                                                                switch (this.match(g"`!&", 3))
+                                                                {
+                                                                    case (true) { *ttype = TokenType.BITNAND_OP; -> 3; }
+                                                                    default
+                                                                    {
+                                                                        switch (this.match(g"`!|", 3))
+                                                                        {
+                                                                            case (true) { *ttype = TokenType.BITNOR_OP; -> 3; }
+                                                                            default
+                                                                            {
+                                                                                switch (this.match(g"`&=", 3))
+                                                                                {
+                                                                                    case (true) { *ttype = TokenType.BITAND_ASSIGN; -> 3; }
+                                                                                    default
+                                                                                    {
+                                                                                        switch (this.match(g"`|=", 3))
+                                                                                        {
+                                                                                            case (true) { *ttype = TokenType.BITOR_ASSIGN; -> 3; }
+                                                                                            default
+                                                                                            {
+                                                                                                switch (this.match(g"`^|", 3))
+                                                                                                {
+                                                                                                    case (true) { *ttype = TokenType.BITXOR_OP; -> 3; }
+                                                                                                    default {};
+                                                                                                };
+                                                                                            };
+                                                                                        };
+                                                                                    };
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
             }
                 default {};
@@ -2317,182 +2552,252 @@ namespace flux
                 switch (this.match(g"==", 2))
                 {
                     case (true) { *ttype = TokenType.EQUAL; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"!=", 2))
-                {
-                    case (true) { *ttype = TokenType.NOT_EQUAL; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"<=", 2))
-                {
-                    case (true) { *ttype = TokenType.LESS_EQUAL; -> 2; }
-                    default {};
-                };
-                switch (this.match(g">=", 2))
-                {
-                    case (true) { *ttype = TokenType.GREATER_EQUAL; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"<<", 2))
-                {
-                    case (true) { *ttype = TokenType.BITSHIFT_LEFT; -> 2; }
-                    default {};
-                };
-                switch (this.match(g">>", 2))
-                {
-                    case (true) { *ttype = TokenType.BITSHIFT_RIGHT; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"++", 2))
-                {
-                    case (true) { *ttype = TokenType.INCREMENT; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"--", 2))
-                {
-                    case (true) { *ttype = TokenType.DECREMENT; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"+=", 2))
-                {
-                    case (true) { *ttype = TokenType.PLUS_ASSIGN; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"-=", 2))
-                {
-                    case (true) { *ttype = TokenType.MINUS_ASSIGN; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"*=", 2))
-                {
-                    case (true) { *ttype = TokenType.MULTIPLY_ASSIGN; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"/=", 2))
-                {
-                    case (true) { *ttype = TokenType.DIVIDE_ASSIGN; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"%=", 2))
-                {
-                    case (true) { *ttype = TokenType.MODULO_ASSIGN; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"^=", 2))
-                {
-                    case (true) { *ttype = TokenType.EXPONENT_ASSIGN; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"&=", 2))
-                {
-                    case (true) { *ttype = TokenType.AND_ASSIGN; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"|=", 2))
-                {
-                    case (true) { *ttype = TokenType.OR_ASSIGN; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"!&", 2))
-                {
-                    case (true) { *ttype = TokenType.NAND_OP; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"!|", 2))
-                {
-                    case (true) { *ttype = TokenType.NOR_OP; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"^|", 2))
-                {
-                    case (true) { *ttype = TokenType.XOR_OP; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"!!", 2))
-                {
-                    case (true) { *ttype = TokenType.NO_MANGLE; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"??", 2))
-                {
-                    case (true) { *ttype = TokenType.NULL_COALESCE; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"->", 2))
-                {
-                    case (true) { *ttype = TokenType.RETURN_ARROW; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"<-", 2))
-                {
-                    case (true) { *ttype = TokenType.CHAIN_ARROW; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"<~", 2))
-                {
-                    case (true) { *ttype = TokenType.RECURSE_ARROW; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"..", 2))
-                {
-                    case (true) { *ttype = TokenType.RANGE; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"::", 2))
-                {
-                    case (true) { *ttype = TokenType.SCOPE; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"?=", 2))
-                {
-                    case (true) { *ttype = TokenType.TERNARY_ASSIGN; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"!?", 2))
-                {
-                    case (true) { *ttype = TokenType.NOT_NULL; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"@=", 2))
-                {
-                    case (true) { *ttype = TokenType.ADDRESS_ASSIGN; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"``", 2))
-                {
-                    case (true) { *ttype = TokenType.BITSLICE; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"~$", 2))
-                {
-                    case (true) { *ttype = TokenType.CODIFY; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"#\"", 2))
-                {
-                    case (true) { *ttype = TokenType.DITTO; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"d{", 2))
-                {
-                    case (true) { *ttype = TokenType.DICT_LITERAL; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"`!", 2))
-                {
-                    case (true) { *ttype = TokenType.BITNOT_OP; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"`&", 2))
-                {
-                    case (true) { *ttype = TokenType.BITAND_OP; -> 2; }
-                    default {};
-                };
-                switch (this.match(g"`|", 2))
-                {
-                    case (true) { *ttype = TokenType.BITOR_OP; -> 2; }
-                    default {};
+                    default
+                    {
+                        switch (this.match(g"!=", 2))
+                        {
+                            case (true) { *ttype = TokenType.NOT_EQUAL; -> 2; }
+                            default
+                            {
+                                switch (this.match(g"<=", 2))
+                                {
+                                    case (true) { *ttype = TokenType.LESS_EQUAL; -> 2; }
+                                    default
+                                    {
+                                        switch (this.match(g">=", 2))
+                                        {
+                                            case (true) { *ttype = TokenType.GREATER_EQUAL; -> 2; }
+                                            default
+                                            {
+                                                switch (this.match(g"<<", 2))
+                                                {
+                                                    case (true) { *ttype = TokenType.BITSHIFT_LEFT; -> 2; }
+                                                    default
+                                                    {
+                                                        switch (this.match(g">>", 2))
+                                                        {
+                                                            case (true) { *ttype = TokenType.BITSHIFT_RIGHT; -> 2; }
+                                                            default
+                                                            {
+                                                                switch (this.match(g"++", 2))
+                                                                {
+                                                                    case (true) { *ttype = TokenType.INCREMENT; -> 2; }
+                                                                    default
+                                                                    {
+                                                                        switch (this.match(g"--", 2))
+                                                                        {
+                                                                            case (true) { *ttype = TokenType.DECREMENT; -> 2; }
+                                                                            default
+                                                                            {
+                                                                                switch (this.match(g"+=", 2))
+                                                                                {
+                                                                                    case (true) { *ttype = TokenType.PLUS_ASSIGN; -> 2; }
+                                                                                    default
+                                                                                    {
+                                                                                        switch (this.match(g"-=", 2))
+                                                                                        {
+                                                                                            case (true) { *ttype = TokenType.MINUS_ASSIGN; -> 2; }
+                                                                                            default
+                                                                                            {
+                                                                                                switch (this.match(g"*=", 2))
+                                                                                                {
+                                                                                                    case (true) { *ttype = TokenType.MULTIPLY_ASSIGN; -> 2; }
+                                                                                                    default
+                                                                                                    {
+                                                                                                        switch (this.match(g"/=", 2))
+                                                                                                        {
+                                                                                                            case (true) { *ttype = TokenType.DIVIDE_ASSIGN; -> 2; }
+                                                                                                            default
+                                                                                                            {
+                                                                                                                switch (this.match(g"%=", 2))
+                                                                                                                {
+                                                                                                                    case (true) { *ttype = TokenType.MODULO_ASSIGN; -> 2; }
+                                                                                                                    default
+                                                                                                                    {
+                                                                                                                        switch (this.match(g"^=", 2))
+                                                                                                                        {
+                                                                                                                            case (true) { *ttype = TokenType.EXPONENT_ASSIGN; -> 2; }
+                                                                                                                            default
+                                                                                                                            {
+                                                                                                                                switch (this.match(g"&=", 2))
+                                                                                                                                {
+                                                                                                                                    case (true) { *ttype = TokenType.AND_ASSIGN; -> 2; }
+                                                                                                                                    default
+                                                                                                                                    {
+                                                                                                                                        switch (this.match(g"|=", 2))
+                                                                                                                                        {
+                                                                                                                                            case (true) { *ttype = TokenType.OR_ASSIGN; -> 2; }
+                                                                                                                                            default
+                                                                                                                                            {
+                                                                                                                                                switch (this.match(g"!&", 2))
+                                                                                                                                                {
+                                                                                                                                                    case (true) { *ttype = TokenType.NAND_OP; -> 2; }
+                                                                                                                                                    default
+                                                                                                                                                    {
+                                                                                                                                                        switch (this.match(g"!|", 2))
+                                                                                                                                                        {
+                                                                                                                                                            case (true) { *ttype = TokenType.NOR_OP; -> 2; }
+                                                                                                                                                            default
+                                                                                                                                                            {
+                                                                                                                                                                switch (this.match(g"^|", 2))
+                                                                                                                                                                {
+                                                                                                                                                                    case (true) { *ttype = TokenType.XOR_OP; -> 2; }
+                                                                                                                                                                    default
+                                                                                                                                                                    {
+                                                                                                                                                                        switch (this.match(g"!!", 2))
+                                                                                                                                                                        {
+                                                                                                                                                                            case (true) { *ttype = TokenType.NO_MANGLE; -> 2; }
+                                                                                                                                                                            default
+                                                                                                                                                                            {
+                                                                                                                                                                                switch (this.match(g"??", 2))
+                                                                                                                                                                                {
+                                                                                                                                                                                    case (true) { *ttype = TokenType.NULL_COALESCE; -> 2; }
+                                                                                                                                                                                    default
+                                                                                                                                                                                    {
+                                                                                                                                                                                        switch (this.match(g"->", 2))
+                                                                                                                                                                                        {
+                                                                                                                                                                                            case (true) { *ttype = TokenType.RETURN_ARROW; -> 2; }
+                                                                                                                                                                                            default
+                                                                                                                                                                                            {
+                                                                                                                                                                                                switch (this.match(g"<-", 2))
+                                                                                                                                                                                                {
+                                                                                                                                                                                                    case (true) { *ttype = TokenType.CHAIN_ARROW; -> 2; }
+                                                                                                                                                                                                    default
+                                                                                                                                                                                                    {
+                                                                                                                                                                                                        switch (this.match(g"<~", 2))
+                                                                                                                                                                                                        {
+                                                                                                                                                                                                            case (true) { *ttype = TokenType.RECURSE_ARROW; -> 2; }
+                                                                                                                                                                                                            default
+                                                                                                                                                                                                            {
+                                                                                                                                                                                                                switch (this.match(g"..", 2))
+                                                                                                                                                                                                                {
+                                                                                                                                                                                                                    case (true) { *ttype = TokenType.RANGE; -> 2; }
+                                                                                                                                                                                                                    default
+                                                                                                                                                                                                                    {
+                                                                                                                                                                                                                        switch (this.match(g"::", 2))
+                                                                                                                                                                                                                        {
+                                                                                                                                                                                                                            case (true) { *ttype = TokenType.SCOPE; -> 2; }
+                                                                                                                                                                                                                            default
+                                                                                                                                                                                                                            {
+                                                                                                                                                                                                                                switch (this.match(g"?=", 2))
+                                                                                                                                                                                                                                {
+                                                                                                                                                                                                                                    case (true) { *ttype = TokenType.TERNARY_ASSIGN; -> 2; }
+                                                                                                                                                                                                                                    default
+                                                                                                                                                                                                                                    {
+                                                                                                                                                                                                                                        switch (this.match(g"!?", 2))
+                                                                                                                                                                                                                                        {
+                                                                                                                                                                                                                                            case (true) { *ttype = TokenType.NOT_NULL; -> 2; }
+                                                                                                                                                                                                                                            default
+                                                                                                                                                                                                                                            {
+                                                                                                                                                                                                                                                switch (this.match(g"@=", 2))
+                                                                                                                                                                                                                                                {
+                                                                                                                                                                                                                                                    case (true) { *ttype = TokenType.ADDRESS_ASSIGN; -> 2; }
+                                                                                                                                                                                                                                                    default
+                                                                                                                                                                                                                                                    {
+                                                                                                                                                                                                                                                        switch (this.match(g"``", 2))
+                                                                                                                                                                                                                                                        {
+                                                                                                                                                                                                                                                            case (true) { *ttype = TokenType.BITSLICE; -> 2; }
+                                                                                                                                                                                                                                                            default
+                                                                                                                                                                                                                                                            {
+                                                                                                                                                                                                                                                                switch (this.match(g"~$", 2))
+                                                                                                                                                                                                                                                                {
+                                                                                                                                                                                                                                                                    case (true) { *ttype = TokenType.CODIFY; -> 2; }
+                                                                                                                                                                                                                                                                    default
+                                                                                                                                                                                                                                                                    {
+                                                                                                                                                                                                                                                                        switch (this.match(g"#\"", 2))
+                                                                                                                                                                                                                                                                        {
+                                                                                                                                                                                                                                                                            case (true) { *ttype = TokenType.DITTO; -> 2; }
+                                                                                                                                                                                                                                                                            default
+                                                                                                                                                                                                                                                                            {
+                                                                                                                                                                                                                                                                                switch (this.match(g"d{", 2))
+                                                                                                                                                                                                                                                                                {
+                                                                                                                                                                                                                                                                                    case (true) { *ttype = TokenType.DICT_LITERAL; -> 2; }
+                                                                                                                                                                                                                                                                                    default
+                                                                                                                                                                                                                                                                                    {
+                                                                                                                                                                                                                                                                                        switch (this.match(g"`!", 2))
+                                                                                                                                                                                                                                                                                        {
+                                                                                                                                                                                                                                                                                            case (true) { *ttype = TokenType.BITNOT_OP; -> 2; }
+                                                                                                                                                                                                                                                                                            default
+                                                                                                                                                                                                                                                                                            {
+                                                                                                                                                                                                                                                                                                switch (this.match(g"`&", 2))
+                                                                                                                                                                                                                                                                                                {
+                                                                                                                                                                                                                                                                                                    case (true) { *ttype = TokenType.BITAND_OP; -> 2; }
+                                                                                                                                                                                                                                                                                                    default
+                                                                                                                                                                                                                                                                                                    {
+                                                                                                                                                                                                                                                                                                        switch (this.match(g"`|", 2))
+                                                                                                                                                                                                                                                                                                        {
+                                                                                                                                                                                                                                                                                                            case (true) { *ttype = TokenType.BITOR_OP; -> 2; }
+                                                                                                                                                                                                                                                                                                            default {};
+                                                                                                                                                                                                                                                                                                        };
+                                                                                                                                                                                                                                                                                                    };
+                                                                                                                                                                                                                                                                                                };
+                                                                                                                                                                                                                                                                                            };
+                                                                                                                                                                                                                                                                                        };
+                                                                                                                                                                                                                                                                                    };
+                                                                                                                                                                                                                                                                                };
+                                                                                                                                                                                                                                                                            };
+                                                                                                                                                                                                                                                                        };
+                                                                                                                                                                                                                                                                    };
+                                                                                                                                                                                                                                                                };
+                                                                                                                                                                                                                                                            };
+                                                                                                                                                                                                                                                        };
+                                                                                                                                                                                                                                                    };
+                                                                                                                                                                                                                                                };
+                                                                                                                                                                                                                                            };
+                                                                                                                                                                                                                                        };
+                                                                                                                                                                                                                                    };
+                                                                                                                                                                                                                                };
+                                                                                                                                                                                                                            };
+                                                                                                                                                                                                                        };
+                                                                                                                                                                                                                    };
+                                                                                                                                                                                                                };
+                                                                                                                                                                                                            };
+                                                                                                                                                                                                        };
+                                                                                                                                                                                                    };
+                                                                                                                                                                                                };
+                                                                                                                                                                                            };
+                                                                                                                                                                                        };
+                                                                                                                                                                                    };
+                                                                                                                                                                                };
+                                                                                                                                                                            };
+                                                                                                                                                                        };
+                                                                                                                                                                    };
+                                                                                                                                                                };
+                                                                                                                                                            };
+                                                                                                                                                        };
+                                                                                                                                                    };
+                                                                                                                                                };
+                                                                                                                                            };
+                                                                                                                                        };
+                                                                                                                                    };
+                                                                                                                                };
+                                                                                                                            };
+                                                                                                                        };
+                                                                                                                    };
+                                                                                                                };
+                                                                                                            };
+                                                                                                        };
+                                                                                                    };
+                                                                                                };
+                                                                                            };
+                                                                                        };
+                                                                                    };
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
             }
                 default {};
@@ -2501,155 +2806,272 @@ namespace flux
             switch (this.match(g"+", 1))
             {
                 case (true) { *ttype = TokenType.PLUS; -> 1; }
-                default {};
+                default
+                {
+                    switch (this.match(g"-", 1))
+                    {
+                        case (true) { *ttype = TokenType.MINUS; -> 1; }
+                        default
+                        {
+                            switch (this.match(g"*", 1))
+                            {
+                                case (true) { *ttype = TokenType.MULTIPLY; -> 1; }
+                                default
+                                {
+                                    switch (this.match(g"/", 1))
+                                    {
+                                        case (true) { *ttype = TokenType.DIVIDE; -> 1; }
+                                        default
+                                        {
+                                            switch (this.match(g"%", 1))
+                                            {
+                                                case (true) { *ttype = TokenType.MODULO; -> 1; }
+                                                default
+                                                {
+                                                    switch (this.match(g"^", 1))
+                                                    {
+                                                        case (true) { *ttype = TokenType.EXPONENT; -> 1; }
+                                                        default
+                                                        {
+                                                            switch (this.match(g"<", 1))
+                                                            {
+                                                                case (true) { *ttype = TokenType.LESS_THAN; -> 1; }
+                                                                default
+                                                                {
+                                                                    switch (this.match(g">", 1))
+                                                                    {
+                                                                        case (true) { *ttype = TokenType.GREATER_THAN; -> 1; }
+                                                                        default
+                                                                        {
+                                                                            switch (this.match(g"&", 1))
+                                                                            {
+                                                                                case (true) { *ttype = TokenType.LOGICAL_AND; -> 1; }
+                                                                                default
+                                                                                {
+                                                                                    switch (this.match(g"|", 1))
+                                                                                    {
+                                                                                        case (true) { *ttype = TokenType.LOGICAL_OR; -> 1; }
+                                                                                        default
+                                                                                        {
+                                                                                            switch (this.match(g"!", 1))
+                                                                                            {
+                                                                                                case (true) { *ttype = TokenType.NOT; -> 1; }
+                                                                                                default
+                                                                                                {
+                                                                                                    switch (this.match(g"@", 1))
+                                                                                                    {
+                                                                                                        case (true) { *ttype = TokenType.ADDRESS_OF; -> 1; }
+                                                                                                        default
+                                                                                                        {
+                                                                                                            switch (this.match(g"=", 1))
+                                                                                                            {
+                                                                                                                case (true) { *ttype = TokenType.ASSIGN; -> 1; }
+                                                                                                                default
+                                                                                                                {
+                                                                                                                    switch (this.match(g"?", 1))
+                                                                                                                    {
+                                                                                                                        case (true) { *ttype = TokenType.QUESTION; -> 1; }
+                                                                                                                        default
+                                                                                                                        {
+                                                                                                                            switch (this.match(g":", 1))
+                                                                                                                            {
+                                                                                                                                case (true) { *ttype = TokenType.COLON; -> 1; }
+                                                                                                                                default
+                                                                                                                                {
+                                                                                                                                    switch (this.match(g"(", 1))
+                                                                                                                                    {
+                                                                                                                                        case (true) { *ttype = TokenType.LEFT_PAREN; -> 1; }
+                                                                                                                                        default
+                                                                                                                                        {
+                                                                                                                                            switch (this.match(g")", 1))
+                                                                                                                                            {
+                                                                                                                                                case (true) { *ttype = TokenType.RIGHT_PAREN; -> 1; }
+                                                                                                                                                default
+                                                                                                                                                {
+                                                                                                                                                    switch (this.match(g"[", 1))
+                                                                                                                                                    {
+                                                                                                                                                        case (true) { *ttype = TokenType.LEFT_BRACKET; -> 1; }
+                                                                                                                                                        default
+                                                                                                                                                        {
+                                                                                                                                                            switch (this.match(g"]", 1))
+                                                                                                                                                            {
+                                                                                                                                                                case (true) { *ttype = TokenType.RIGHT_BRACKET; -> 1; }
+                                                                                                                                                                default
+                                                                                                                                                                {
+                                                                                                                                                                    switch (this.match(g"{", 1))
+                                                                                                                                                                    {
+                                                                                                                                                                        case (true) { *ttype = TokenType.LEFT_BRACE; -> 1; }
+                                                                                                                                                                        default
+                                                                                                                                                                        {
+                                                                                                                                                                            switch (this.match(g"}", 1))
+                                                                                                                                                                            {
+                                                                                                                                                                                case (true) { *ttype = TokenType.RIGHT_BRACE; -> 1; }
+                                                                                                                                                                                default
+                                                                                                                                                                                {
+                                                                                                                                                                                    switch (this.match(g";", 1))
+                                                                                                                                                                                    {
+                                                                                                                                                                                        case (true) { *ttype = TokenType.SEMICOLON; -> 1; }
+                                                                                                                                                                                        default
+                                                                                                                                                                                        {
+                                                                                                                                                                                            switch (this.match(g",", 1))
+                                                                                                                                                                                            {
+                                                                                                                                                                                                case (true) { *ttype = TokenType.COMMA; -> 1; }
+                                                                                                                                                                                                default
+                                                                                                                                                                                                {
+                                                                                                                                                                                                    switch (this.match(g".", 1))
+                                                                                                                                                                                                    {
+                                                                                                                                                                                                        case (true) { *ttype = TokenType.DOT; -> 1; }
+                                                                                                                                                                                                        default
+                                                                                                                                                                                                        {
+                                                                                                                                                                                                            switch (this.match(g"~", 1))
+                                                                                                                                                                                                            {
+                                                                                                                                                                                                                case (true) { *ttype = TokenType.TIE; -> 1; }
+                                                                                                                                                                                                                default
+                                                                                                                                                                                                                {
+                                                                                                                                                                                                                    switch (this.match(g"$", 1))
+                                                                                                                                                                                                                    {
+                                                                                                                                                                                                                        case (true) { *ttype = TokenType.STRINGIFY; -> 1; }
+                                                                                                                                                                                                                        default
+                                                                                                                                                                                                                        {
+                                                                                                                                                                                                                            switch (this.match(g"\\", 1))
+                                                                                                                                                                                                                            {
+                                                                                                                                                                                                                                case (true) { *ttype = TokenType.BACKSLASH; -> 1; }
+                                                                                                                                                                                                                                default
+                                                                                                                                                                                                                                {
+                                                                                                                                                                                                                                    switch (this.match(g"`", 1))
+                                                                                                                                                                                                                                    {
+                                                                                                                                                                                                                                        case (true) { *ttype = TokenType.BACKTICK; -> 1; }
+                                                                                                                                                                                                                                        default
+                                                                                                                                                                                                                                        {
+                                                                                                                                                                                                                                            switch (this.match(g"#", 1))
+                                                                                                                                                                                                                                            {
+                                                                                                                                                                                                                                                case (true) { *ttype = TokenType.TAG; -> 1; }
+                                                                                                                                                                                                                                                default
+                                                                                                                                                                                                                                                {
+                                                                                                                                                                                                                                                    -> 0;
+                                                                                                                                                                                                                                                };
+                                                                                                                                                                                                                                            };
+                                                                                                                                                                                                                                        };
+                                                                                                                                                                                                                                    };
+                                                                                                                                                                                                                                };
+                                                                                                                                                                                                                            };
+                                                                                                                                                                                                                        };
+                                                                                                                                                                                                                    };
+                                                                                                                                                                                                                };
+                                                                                                                                                                                                            };
+                                                                                                                                                                                                        };
+                                                                                                                                                                                                    };
+                                                                                                                                                                                                };
+                                                                                                                                                                                            };
+                                                                                                                                                                                        };
+                                                                                                                                                                                    };
+                                                                                                                                                                                };
+                                                                                                                                                                            };
+                                                                                                                                                                        };
+                                                                                                                                                                    };
+                                                                                                                                                                };
+                                                                                                                                                            };
+                                                                                                                                                        };
+                                                                                                                                                    };
+                                                                                                                                                };
+                                                                                                                                            };
+                                                                                                                                        };
+                                                                                                                                    };
+                                                                                                                                };
+                                                                                                                            };
+                                                                                                                        };
+                                                                                                                    };
+                                                                                                                };
+                                                                                                            };
+                                                                                                        };
+                                                                                                    };
+                                                                                                };
+                                                                                            };
+                                                                                        };
+                                                                                    };
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
             };
-            switch (this.match(g"-", 1))
-            {
-                case (true) { *ttype = TokenType.MINUS; -> 1; }
-                default {};
-            };
-            switch (this.match(g"*", 1))
-            {
-                case (true) { *ttype = TokenType.MULTIPLY; -> 1; }
-                default {};
-            };
-            switch (this.match(g"/", 1))
-            {
-                case (true) { *ttype = TokenType.DIVIDE; -> 1; }
-                default {};
-            };
-            switch (this.match(g"%", 1))
-            {
-                case (true) { *ttype = TokenType.MODULO; -> 1; }
-                default {};
-            };
-            switch (this.match(g"^", 1))
-            {
-                case (true) { *ttype = TokenType.EXPONENT; -> 1; }
-                default {};
-            };
-            switch (this.match(g"<", 1))
-            {
-                case (true) { *ttype = TokenType.LESS_THAN; -> 1; }
-                default {};
-            };
-            switch (this.match(g">", 1))
-            {
-                case (true) { *ttype = TokenType.GREATER_THAN; -> 1; }
-                default {};
-            };
-            switch (this.match(g"&", 1))
-            {
-                case (true) { *ttype = TokenType.LOGICAL_AND; -> 1; }
-                default {};
-            };
-            switch (this.match(g"|", 1))
-            {
-                case (true) { *ttype = TokenType.LOGICAL_OR; -> 1; }
-                default {};
-            };
-            switch (this.match(g"!", 1))
-            {
-                case (true) { *ttype = TokenType.NOT; -> 1; }
-                default {};
-            };
-            switch (this.match(g"@", 1))
-            {
-                case (true) { *ttype = TokenType.ADDRESS_OF; -> 1; }
-                default {};
-            };
-            switch (this.match(g"=", 1))
-            {
-                case (true) { *ttype = TokenType.ASSIGN; -> 1; }
-                default {};
-            };
-            switch (this.match(g"?", 1))
-            {
-                case (true) { *ttype = TokenType.QUESTION; -> 1; }
-                default {};
-            };
-            switch (this.match(g":", 1))
-            {
-                case (true) { *ttype = TokenType.COLON; -> 1; }
-                default {};
-            };
-            switch (this.match(g"(", 1))
-            {
-                case (true) { *ttype = TokenType.LEFT_PAREN; -> 1; }
-                default {};
-            };
-            switch (this.match(g")", 1))
-            {
-                case (true) { *ttype = TokenType.RIGHT_PAREN; -> 1; }
-                default {};
-            };
-            switch (this.match(g"[", 1))
-            {
-                case (true) { *ttype = TokenType.LEFT_BRACKET; -> 1; }
-                default {};
-            };
-            switch (this.match(g"]", 1))
-            {
-                case (true) { *ttype = TokenType.RIGHT_BRACKET; -> 1; }
-                default {};
-            };
-            switch (this.match(g"{", 1))
-            {
-                case (true) { *ttype = TokenType.LEFT_BRACE; -> 1; }
-                default {};
-            };
-            switch (this.match(g"}", 1))
-            {
-                case (true) { *ttype = TokenType.RIGHT_BRACE; -> 1; }
-                default {};
-            };
-            switch (this.match(g";", 1))
-            {
-                case (true) { *ttype = TokenType.SEMICOLON; -> 1; }
-                default {};
-            };
-            switch (this.match(g",", 1))
-            {
-                case (true) { *ttype = TokenType.COMMA; -> 1; }
-                default {};
-            };
-            switch (this.match(g".", 1))
-            {
-                case (true) { *ttype = TokenType.DOT; -> 1; }
-                default {};
-            };
-            switch (this.match(g"~", 1))
-            {
-                case (true) { *ttype = TokenType.TIE; -> 1; }
-                default {};
-            };
-            switch (this.match(g"$", 1))
-            {
-                case (true) { *ttype = TokenType.STRINGIFY; -> 1; }
-                default {};
-            };
-            switch (this.match(g"\\", 1))
-            {
-                case (true) { *ttype = TokenType.BACKSLASH; -> 1; }
-                default {};
-            };
-            switch (this.match(g"`", 1))
-            {
-                case (true) { *ttype = TokenType.BACKTICK; -> 1; }
-                default {};
-            };
-            switch (this.match(g"#", 1))
-            {
-                case (true) { *ttype = TokenType.TAG; -> 1; }
-                default {};
-            };
-                -> 0;
             };
 
             // ===== MAIN LOOP =====
 
             // Tokenizes the whole source. Returns false on error, in which case
             // err_code / err_line / err_col describe it.
+            // Splits a '>>' that closes two nested template argument lists into two '>'
+            // tokens (mirrors flexer.py _split_template_closers).
+            split_template_closers() -> void
+            {
+                int i, depth, t, extra, vb, vl, j, n = this.count, prev = -1;
+                while (i < n)
+                {
+                    t = this.tokens[i].type;
+                    if (t == TokenType.LESS_THAN & prev == TokenType.IDENTIFIER) { depth++; };
+                    if (t == TokenType.GREATER_THAN & depth > 0) { depth--; };
+                    prev = t;
+                    if (t == TokenType.BITSHIFT_RIGHT & depth >= 2)
+                    {
+                        this.tokens[i].numeric_char = 2;
+                        depth = depth - 2;
+                        extra++;
+                        prev = TokenType.GREATER_THAN;
+                    };
+                    if (t == TokenType.SEMICOLON | t == TokenType.LEFT_PAREN | t == TokenType.RIGHT_PAREN | (depth == 0 & (t == TokenType.LEFT_BRACE | t == TokenType.RIGHT_BRACE)))
+                    {
+                        depth = 0;
+                    };
+                    i++;
+                };
+                if (extra == 0) { ->; };
+                if (n + extra > this.cap)
+                {
+                    -> this.fail(LexError.ALLOC_FAILED, this.tokens[0].line, this.tokens[0].column);
+                };
+                vb = this.vbegin();
+                this.vput('>');
+                vl = this.vend(vb);
+                j = n - 1 + extra;
+                i = n - 1;
+                while (i >= 0)
+                {
+                    if (this.tokens[i].numeric_char == 2)
+                    {
+                        this.tokens[j] = this.tokens[i];
+                        this.tokens[j].type = TokenType.GREATER_THAN;
+                        this.tokens[j].column = this.tokens[i].column + 1;
+                        this.tokens[j].voff = vb;
+                        this.tokens[j].vlen = vl;
+                        this.tokens[j].numeric_char = 0;
+                        this.tokens[j - 1] = this.tokens[j];
+                        this.tokens[j - 1].column = this.tokens[i].column;
+                        j = j - 2;
+                    }
+                    else
+                    {
+                        this.tokens[j] = this.tokens[i];
+                        j--;
+                    };
+                    i--;
+                };
+                this.count = n + extra;
+                ->;
+            };
+
             tokenize() -> bool
             {
                 int c, ln, col, tt, vb, vl, cnt, i, oplen, optype, cp, extra;
@@ -2657,277 +3079,292 @@ namespace flux
 
                 while (this.position < this.length)
                 {
-                    switch (this.err_code != 0)
+                    switch (this.err_code!?)
                     {
                         case (true) { -> false; }
-                        default {};
-                    };
-
-                    switch (this.skip_whitespace())
-                    {
-                        case (true) { continue; }
-                        default {};
-                    };
-
-                    c = this.cur();
-                    switch (c == -1)
-                    {
-                        case (true) { break; }
-                        default {};
-                    };
-                    ln = this.line;
-                    col = this.column;
-
-                    // i-string. Its token position is taken after the leading i.
-                    switch (c == 'i' & this.peek(1) == '"')
-                    {
-                        case (true) {
-                        this.adv(1);
-                        this.read_i_string();
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    // f-string
-                    switch (c == 'f' & this.peek(1) == '"')
-                    {
-                        case (true) {
-                        this.adv(1);
-                        vb = this.vbegin();
-                        this.vput('f');
-                        this.vput('"');
-                        switch (!this.read_f_string_body())
+                        default
                         {
-                            case (true) { -> false; }
-                            default {};
-                        };
-                        this.vput('"');
-                        vl = this.vend(vb);
-                        this.emit(TokenType.F_STRING, ln, col, vb, vl, 0);
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    // g-string
-                    switch (c == 'g' & this.peek(1) == '"')
-                    {
-                        case (true) {
-                        this.adv(1);
-                        vb = this.vbegin();
-                        this.read_string('"');
-                        vl = this.vend(vb);
-                        this.emit(TokenType.G_STRING, ln, col, vb, vl, 0);
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    // string and char literals
-                    switch (c == '"')
-                    {
-                        case (true) {
-                        vb = this.vbegin();
-                        this.read_string('"');
-                        vl = this.vend(vb);
-                        this.emit(TokenType.STRING_LITERAL, ln, col, vb, vl, 0);
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    switch (c == 39)
-                    {
-                        case (true) {
-                        vb = this.vbegin();
-                        this.read_string(39);
-                        vl = this.vend(vb);
-
-                        // exactly one character (codepoint) is a CHAR literal
-                        cnt = 0;
-                        i = 0;
-                        while (i < vl)
-                        {
-                            switch (!is_continuation((int)this.arena[vb + i]))
+                            switch (this.skip_whitespace())
                             {
-                                case (true) { cnt++; }
-                                default {};
-                            };
-                            i++;
-                        };
-                        switch (cnt)
-                        {
-                            case (1)
-                            {
-                                this.emit(TokenType.CHAR, ln, col, vb, vl, 0);
-                            }
-                            default
-                            {
-                                this.emit(TokenType.STRING_LITERAL, ln, col, vb, vl, 0);
-                            };
-                        };
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    // asm"..." inline assembly
-                    switch (c == 'a' & this.peek(1) == 's' & this.peek(2) == 'm' & this.peek(3) == '"')
-                    {
-                        case (true) {
-                        this.adv(3);
-                        this.emit_text(TokenType.ASM, ln, col, "asm", 3);
-                        this.read_asm_quoted();
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    // dict literal opener d{
-                    switch (c == 'd' & this.peek(1) == '{')
-                    {
-                        case (true) {
-                        this.adv(2);
-                        this.emit_text(TokenType.DICT_LITERAL, ln, col, "d{", 2);
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    // numbers
-                    switch (is_digit(c))
-                    {
-                        case (true) {
-                        this.read_number();
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    // identifiers and keywords
-                    switch (is_alpha(c) | c == '_')
-                    {
-                        case (true) {
-                        tt = this.read_identifier();
-
-                        switch (tt == TokenType.ASM)
-                        {
-                            case (true) {
-                            while (this.cur() == 32 | this.cur() == 9 | this.cur() == 13 | this.cur() == 10)
-                            {
-                                this.adv(1);
-                            };
-                            switch (this.cur() == '{')
-                            {
-                                case (true) {
-                                this.read_brace_block(TokenType.ASM_BLOCK);
-                                continue;
-                            }
-                                default {};
-                            };
-                        }
-                            default {};
-                        };
-
-                        switch (tt == TokenType.FLUXVM)
-                        {
-                            case (true) {
-                            saved_pos = this.position;
-                            saved_line = this.line;
-                            saved_col = this.column;
-                            while (this.cur() == 32 | this.cur() == 9 | this.cur() == 13 | this.cur() == 10)
-                            {
-                                this.adv(1);
-                            };
-                            switch (this.cur() == '{')
-                            {
-                                case (true) {
-                                this.read_brace_block(TokenType.FLUXVM_BLOCK);
-                                continue;
-                            }
-                                default {
-                                this.position = saved_pos;
-                                this.line = saved_line;
-                                this.column = saved_col;
-                            };
-                            };
-                        }
-                            default {};
-                        };
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    // operators and delimiters
-                    oplen = this.match_op(@optype);
-                    switch (oplen > 0)
-                    {
-                        case (true) {
-                        this.emit_text(optype, ln, col, this.src + this.position, oplen);
-                        this.adv(oplen);
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    // unknown character. Non-ASCII outside strings is recorded and skipped.
-                    switch (c >= 128)
-                    {
-                        case (true) {
-                        extra = 0;
-                        cp = c;
-                        switch (c >= 0xF0)
-                        {
-                            case (true) { cp = c & 0x07; extra = 3; }
-                            default {
-                                switch (c >= 0xE0)
+                                case (true) { continue; }
+                                default
                                 {
-                                    case (true) { cp = c & 0x0F; extra = 2; }
-                                    default {
-                                        switch (c >= 0xC0)
+                                    c = this.cur();
+                                    switch (c == -1)
+                                    {
+                                        case (true) { break; }
+                                        default
                                         {
-                                            case (true) { cp = c & 0x1F; extra = 1; }
-                                            default {};
+                                            ln = this.line;
+                                            col = this.column;
+
+                                            // i-string. Its token position is taken after the leading i.
+                                            switch (c == 'i' & this.peek(1) == '"')
+                                            {
+                                                case (true) {
+                                                this.adv(1);
+                                                this.read_i_string();
+                                                continue;
+                                            }
+                                                default
+                                                {
+                                                    // f-string
+                                                    switch (c == 'f' & this.peek(1) == '"')
+                                                    {
+                                                        case (true) {
+                                                        this.adv(1);
+                                                        vb = this.vbegin();
+                                                        this.vput('f');
+                                                        this.vput('"');
+                                                        switch (!this.read_f_string_body())
+                                                        {
+                                                            case (true) { -> false; }
+                                                            default {};
+                                                        };
+                                                        this.vput('"');
+                                                        vl = this.vend(vb);
+                                                        this.emit(TokenType.F_STRING, ln, col, vb, vl, 0);
+                                                        continue;
+                                                    }
+                                                        default
+                                                        {
+                                                            // g-string
+                                                            switch (c == 'g' & this.peek(1) == '"')
+                                                            {
+                                                                case (true) {
+                                                                this.adv(1);
+                                                                vb = this.vbegin();
+                                                                this.read_string('"');
+                                                                vl = this.vend(vb);
+                                                                this.emit(TokenType.G_STRING, ln, col, vb, vl, 0);
+                                                                continue;
+                                                            }
+                                                                default
+                                                                {
+                                                                    // string and char literals
+                                                                    switch (c == '"')
+                                                                    {
+                                                                        case (true) {
+                                                                        vb = this.vbegin();
+                                                                        this.read_string('"');
+                                                                        vl = this.vend(vb);
+                                                                        this.emit(TokenType.STRING_LITERAL, ln, col, vb, vl, 0);
+                                                                        continue;
+                                                                    }
+                                                                        default
+                                                                        {
+                                                                            switch (c == 39)
+                                                                            {
+                                                                                case (true) {
+                                                                                vb = this.vbegin();
+                                                                                this.read_string(39);
+                                                                                vl = this.vend(vb);
+
+                                                                                // exactly one character (codepoint) is a CHAR literal
+                                                                                cnt = 0;
+                                                                                i = 0;
+                                                                                while (i < vl)
+                                                                                {
+                                                                                    switch (!is_continuation((int)this.arena[vb + i]))
+                                                                                    {
+                                                                                        case (true) { cnt++; }
+                                                                                        default {};
+                                                                                    };
+                                                                                    i++;
+                                                                                };
+                                                                                switch (cnt)
+                                                                                {
+                                                                                    case (1)
+                                                                                    {
+                                                                                        this.emit(TokenType.CHAR, ln, col, vb, vl, 0);
+                                                                                    }
+                                                                                    default
+                                                                                    {
+                                                                                        this.emit(TokenType.STRING_LITERAL, ln, col, vb, vl, 0);
+                                                                                    };
+                                                                                };
+                                                                                continue;
+                                                                            }
+                                                                                default
+                                                                                {
+                                                                                    // asm"..." inline assembly
+                                                                                    switch (c == 'a' & this.peek(1) == 's' & this.peek(2) == 'm' & this.peek(3) == '"')
+                                                                                    {
+                                                                                        case (true) {
+                                                                                        this.adv(3);
+                                                                                        this.emit_text(TokenType.ASM, ln, col, "asm", 3);
+                                                                                        this.read_asm_quoted();
+                                                                                        continue;
+                                                                                    }
+                                                                                        default
+                                                                                        {
+                                                                                            // dict literal opener d{
+                                                                                            switch (c == 'd' & this.peek(1) == '{')
+                                                                                            {
+                                                                                                case (true) {
+                                                                                                this.adv(2);
+                                                                                                this.emit_text(TokenType.DICT_LITERAL, ln, col, "d{", 2);
+                                                                                                continue;
+                                                                                            }
+                                                                                                default
+                                                                                                {
+                                                                                                    // numbers
+                                                                                                    switch (is_digit(c))
+                                                                                                    {
+                                                                                                        case (true) {
+                                                                                                        this.read_number();
+                                                                                                        continue;
+                                                                                                    }
+                                                                                                        default
+                                                                                                        {
+                                                                                                            // identifiers and keywords
+                                                                                                            switch (is_alpha(c) | c == '_')
+                                                                                                            {
+                                                                                                                case (true) {
+                                                                                                                tt = this.read_identifier();
+
+                                                                                                                switch (tt == TokenType.ASM)
+                                                                                                                {
+                                                                                                                    case (true) {
+                                                                                                                    while (this.cur() == 32 | this.cur() == 9 | this.cur() == 13 | this.cur() == 10)
+                                                                                                                    {
+                                                                                                                        this.adv(1);
+                                                                                                                    };
+                                                                                                                    switch (this.cur() == '{')
+                                                                                                                    {
+                                                                                                                        case (true) {
+                                                                                                                        this.read_brace_block(TokenType.ASM_BLOCK);
+                                                                                                                        continue;
+                                                                                                                    }
+                                                                                                                        default {};
+                                                                                                                    };
+                                                                                                                }
+                                                                                                                    default {};
+                                                                                                                };
+
+                                                                                                                switch (tt == TokenType.FLUXVM)
+                                                                                                                {
+                                                                                                                    case (true) {
+                                                                                                                    saved_pos = this.position;
+                                                                                                                    saved_line = this.line;
+                                                                                                                    saved_col = this.column;
+                                                                                                                    while (this.cur() == 32 | this.cur() == 9 | this.cur() == 13 | this.cur() == 10)
+                                                                                                                    {
+                                                                                                                        this.adv(1);
+                                                                                                                    };
+                                                                                                                    switch (this.cur() == '{')
+                                                                                                                    {
+                                                                                                                        case (true) {
+                                                                                                                        this.read_brace_block(TokenType.FLUXVM_BLOCK);
+                                                                                                                        continue;
+                                                                                                                    }
+                                                                                                                        default {
+                                                                                                                        this.position = saved_pos;
+                                                                                                                        this.line = saved_line;
+                                                                                                                        this.column = saved_col;
+                                                                                                                    };
+                                                                                                                    };
+                                                                                                                }
+                                                                                                                    default {};
+                                                                                                                };
+                                                                                                                continue;
+                                                                                                            }
+                                                                                                                default
+                                                                                                                {
+                                                                                                                    // operators and delimiters
+                                                                                                                    oplen = this.match_op(@optype);
+                                                                                                                    switch (oplen > 0)
+                                                                                                                    {
+                                                                                                                        case (true) {
+                                                                                                                        this.emit_text(optype, ln, col, this.src + this.position, oplen);
+                                                                                                                        this.adv(oplen);
+                                                                                                                        continue;
+                                                                                                                    }
+                                                                                                                        default
+                                                                                                                        {
+                                                                                                                            // unknown character. Non-ASCII outside strings is recorded and skipped.
+                                                                                                                            switch (c >= 128)
+                                                                                                                            {
+                                                                                                                                case (true) {
+                                                                                                                                extra = 0;
+                                                                                                                                cp = c;
+                                                                                                                                switch (c >= 0xF0)
+                                                                                                                                {
+                                                                                                                                    case (true) { cp = c & 0x07; extra = 3; }
+                                                                                                                                    default {
+                                                                                                                                        switch (c >= 0xE0)
+                                                                                                                                        {
+                                                                                                                                            case (true) { cp = c & 0x0F; extra = 2; }
+                                                                                                                                            default {
+                                                                                                                                                switch (c >= 0xC0)
+                                                                                                                                                {
+                                                                                                                                                    case (true) { cp = c & 0x1F; extra = 1; }
+                                                                                                                                                    default {};
+                                                                                                                                                };
+                                                                                                                                            };
+                                                                                                                                        };
+                                                                                                                                    };
+                                                                                                                                };
+
+                                                                                                                                this.warn_count++;
+                                                                                                                                switch (this.warn_count == 1)
+                                                                                                                                {
+                                                                                                                                    case (true) {
+                                                                                                                                    this.warn_line = ln;
+                                                                                                                                    this.warn_col = col;
+                                                                                                                                }
+                                                                                                                                    default {};
+                                                                                                                                };
+
+                                                                                                                                this.adv(1);
+                                                                                                                                while (extra > 0 & is_continuation(this.cur()))
+                                                                                                                                {
+                                                                                                                                    cp = (cp << 6) | (this.cur() & 0x3F);
+                                                                                                                                    this.adv(1);
+                                                                                                                                    extra--;
+                                                                                                                                };
+                                                                                                                                switch (this.warn_count == 1)
+                                                                                                                                {
+                                                                                                                                    case (true) { this.warn_cp = cp; }
+                                                                                                                                    default {};
+                                                                                                                                };
+                                                                                                                            }
+                                                                                                                                default {
+                                                                                                                                this.adv(1);
+                                                                                                                            };
+                                                                                                                            };
+                                                                                                                        };
+                                                                                                                    };
+                                                                                                                };
+                                                                                                            };
+                                                                                                        };
+                                                                                                    };
+                                                                                                };
+                                                                                            };
+                                                                                        };
+                                                                                    };
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
                                         };
                                     };
                                 };
                             };
                         };
-
-                        this.warn_count++;
-                        switch (this.warn_count == 1)
-                        {
-                            case (true) {
-                            this.warn_line = ln;
-                            this.warn_col = col;
-                        }
-                            default {};
-                        };
-
-                        this.adv(1);
-                        while (extra > 0 & is_continuation(this.cur()))
-                        {
-                            cp = (cp << 6) | (this.cur() & 0x3F);
-                            this.adv(1);
-                            extra--;
-                        };
-                        switch (this.warn_count == 1)
-                        {
-                            case (true) { this.warn_cp = cp; }
-                            default {};
-                        };
-                    }
-                        default {
-                        this.adv(1);
-                    };
                     };
                 };
 
                 vb = this.vbegin();
                 vl = this.vend(vb);
                 this.emit(TokenType.EOF, this.line, this.column, vb, vl, 0);
+                this.split_template_closers();
                 -> this.err_code == 0;
             };
         };

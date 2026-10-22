@@ -96,7 +96,7 @@ namespace flux
         pp_cstrlen(byte* s) -> int
         {
             int n;
-            while (s[n] != 0) { n++; };
+            while (s[n]!?) { n++; };
             -> n;
         };
 
@@ -108,9 +108,11 @@ namespace flux
                 switch (a[i] != b[i])
                 {
                     case (true) { -> false; }
-                    default {};
+                    default
+                    {
+                        i++;
+                    };
                 };
-                i++;
             };
             -> true;
         };
@@ -121,14 +123,18 @@ namespace flux
             switch (i < 0)
             {
                 case (true) { -> -1; }
-                default {};
+                default
+                {
+                    switch (i >= n)
+                    {
+                        case (true) { -> -1; }
+                        default
+                        {
+                            -> (int)s[i];
+                        };
+                    };
+                };
             };
-            switch (i >= n)
-            {
-                case (true) { -> -1; }
-                default {};
-            };
-            -> (int)s[i];
         };
 
         pp_find(byte* t, int lo, int hi, int ch) -> int
@@ -139,9 +145,11 @@ namespace flux
                 switch ((int)t[i] == ch)
                 {
                     case (true) { -> i; }
-                    default {};
+                    default
+                    {
+                        i++;
+                    };
                 };
-                i++;
             };
             -> -1;
         };
@@ -151,9 +159,11 @@ namespace flux
             switch (hi - lo < ln)
             {
                 case (true) { -> false; }
-                default {};
+                default
+                {
+                    -> pp_eq(t + lo, lit, ln);
+                };
             };
-            -> pp_eq(t + lo, lit, ln);
         };
 
         pp_is_alpha_us(int c) -> bool -> (c >= 'a' & c <= 'z') | (c >= 'A' & c <= 'Z') | c == '_';
@@ -170,82 +180,96 @@ namespace flux
             switch (i >= n)
             {
                 case (true) { -> 0; }
-                default {};
-            };
-            int c = (int)s[i];
-            switch (c == 32 | (c >= 9 & c <= 13) | (c >= 28 & c <= 31))
-            {
-                case (true) { -> 1; }
-                default {};
-            };
-            switch (c < 128)
-            {
-                case (true) { -> 0; }
-                default {};
-            };
-            int c1 = pp_at(s, n, i + 1);
-            int c2 = pp_at(s, n, i + 2);
-            switch (c == 0xC2)
-            {
-                case (true) {
-                switch (c1 == 0x85 | c1 == 0xA0)
+                default
                 {
-                    case (true) { -> 2; }
-                    default {};
-                };
-                -> 0;
-            }
-                default {};
-            };
-            switch (c == 0xE1)
-            {
-                case (true) {
-                switch (c1 == 0x9A & c2 == 0x80)
-                {
-                    case (true) { -> 3; }
-                    default {};
-                };
-                -> 0;
-            }
-                default {};
-            };
-            switch (c == 0xE2)
-            {
-                case (true) {
-                switch (c1 == 0x80)
-                {
-                    case (true) {
-                    switch ((c2 >= 0x80 & c2 <= 0x8A) | c2 == 0xA8 | c2 == 0xA9 | c2 == 0xAF)
+                    int c = (int)s[i];
+                    switch (c == 32 | (c >= 9 & c <= 13) | (c >= 28 & c <= 31))
                     {
-                        case (true) { -> 3; }
-                        default {};
+                        case (true) { -> 1; }
+                        default
+                        {
+                            switch (c < 128)
+                            {
+                                case (true) { -> 0; }
+                                default
+                                {
+                                    int c1 = pp_at(s, n, i + 1);
+                                    int c2 = pp_at(s, n, i + 2);
+                                    switch (c == 0xC2)
+                                    {
+                                        case (true) {
+                                        switch (c1 == 0x85 | c1 == 0xA0)
+                                        {
+                                            case (true) { -> 2; }
+                                            default {};
+                                        };
+                                        -> 0;
+                                    }
+                                        default
+                                        {
+                                            switch (c == 0xE1)
+                                            {
+                                                case (true) {
+                                                switch (c1 == 0x9A & c2 == 0x80)
+                                                {
+                                                    case (true) { -> 3; }
+                                                    default {};
+                                                };
+                                                -> 0;
+                                            }
+                                                default
+                                                {
+                                                    switch (c == 0xE2)
+                                                    {
+                                                        case (true) {
+                                                        switch (c1 == 0x80)
+                                                        {
+                                                            case (true) {
+                                                            switch ((c2 >= 0x80 & c2 <= 0x8A) | c2 == 0xA8 | c2 == 0xA9 | c2 == 0xAF)
+                                                            {
+                                                                case (true) { -> 3; }
+                                                                default {};
+                                                            };
+                                                            -> 0;
+                                                        }
+                                                            default {};
+                                                        };
+                                                        switch (c1 == 0x81 & c2 == 0x9F)
+                                                        {
+                                                            case (true) { -> 3; }
+                                                            default {};
+                                                        };
+                                                        -> 0;
+                                                    }
+                                                        default
+                                                        {
+                                                            switch (c == 0xE3)
+                                                            {
+                                                                case (true) {
+                                                                switch (c1 == 0x80 & c2 == 0x80)
+                                                                {
+                                                                    case (true) { -> 3; }
+                                                                    default {};
+                                                                };
+                                                                -> 0;
+                                                            }
+                                                                default
+                                                                {
+                                                                    -> 0;
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
                     };
-                    -> 0;
-                }
-                    default {};
                 };
-                switch (c1 == 0x81 & c2 == 0x9F)
-                {
-                    case (true) { -> 3; }
-                    default {};
-                };
-                -> 0;
-            }
-                default {};
             };
-            switch (c == 0xE3)
-            {
-                case (true) {
-                switch (c1 == 0x80 & c2 == 0x80)
-                {
-                    case (true) { -> 3; }
-                    default {};
-                };
-                -> 0;
-            }
-                default {};
-            };
-            -> 0;
         };
 
         // Length of the whitespace character that ends at s[j - 1], never reading below lo
@@ -254,67 +278,77 @@ namespace flux
             switch (j <= lo)
             {
                 case (true) { -> 0; }
-                default {};
-            };
-            int c = (int)s[j - 1];
-            switch (c == 32 | (c >= 9 & c <= 13) | (c >= 28 & c <= 31))
-            {
-                case (true) { -> 1; }
-                default {};
-            };
-            switch (c < 128)
-            {
-                case (true) { -> 0; }
-                default {};
-            };
-            int b1, b2;
-            switch (j - 2 >= lo)
-            {
-                case (true) {
-                b1 = (int)s[j - 2];
-                switch (b1 == 0xC2 & (c == 0x85 | c == 0xA0))
+                default
                 {
-                    case (true) { -> 2; }
-                    default {};
-                };
-            }
-                default {};
-            };
-            switch (j - 3 >= lo)
-            {
-                case (true) {
-                b2 = (int)s[j - 3];
-                b1 = (int)s[j - 2];
-                switch (b2 == 0xE1 & b1 == 0x9A & c == 0x80)
-                {
-                    case (true) { -> 3; }
-                    default {};
-                };
-                switch (b2 == 0xE2 & b1 == 0x80)
-                {
-                    case (true) {
-                    switch ((c >= 0x80 & c <= 0x8A) | c == 0xA8 | c == 0xA9 | c == 0xAF)
+                    int c = (int)s[j - 1];
+                    switch (c == 32 | (c >= 9 & c <= 13) | (c >= 28 & c <= 31))
                     {
-                        case (true) { -> 3; }
-                        default {};
+                        case (true) { -> 1; }
+                        default
+                        {
+                            switch (c < 128)
+                            {
+                                case (true) { -> 0; }
+                                default
+                                {
+                                    int b1, b2;
+                                    switch (j - 2 >= lo)
+                                    {
+                                        case (true) {
+                                        b1 = (int)s[j - 2];
+                                        switch (b1 == 0xC2 & (c == 0x85 | c == 0xA0))
+                                        {
+                                            case (true) { -> 2; }
+                                            default {};
+                                        };
+                                    }
+                                        default {};
+                                    };
+                                    switch (j - 3 >= lo)
+                                    {
+                                        case (true) {
+                                        b2 = (int)s[j - 3];
+                                        b1 = (int)s[j - 2];
+                                        switch (b2 == 0xE1 & b1 == 0x9A & c == 0x80)
+                                        {
+                                            case (true) { -> 3; }
+                                            default
+                                            {
+                                                switch (b2 == 0xE2 & b1 == 0x80)
+                                                {
+                                                    case (true) {
+                                                    switch ((c >= 0x80 & c <= 0x8A) | c == 0xA8 | c == 0xA9 | c == 0xAF)
+                                                    {
+                                                        case (true) { -> 3; }
+                                                        default {};
+                                                    };
+                                                }
+                                                    default {};
+                                                };
+                                                switch (b2 == 0xE2 & b1 == 0x81 & c == 0x9F)
+                                                {
+                                                    case (true) { -> 3; }
+                                                    default
+                                                    {
+                                                        switch (b2 == 0xE3 & b1 == 0x80 & c == 0x80)
+                                                        {
+                                                            case (true) { -> 3; }
+                                                            default {};
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    }
+                                        default {};
+                                    };
+                                    -> 0;
+                                };
+                            };
+                        };
                     };
-                }
-                    default {};
                 };
-                switch (b2 == 0xE2 & b1 == 0x81 & c == 0x9F)
-                {
-                    case (true) { -> 3; }
-                    default {};
-                };
-                switch (b2 == 0xE3 & b1 == 0x80 & c == 0x80)
-                {
-                    case (true) { -> 3; }
-                    default {};
-                };
-            }
-                default {};
             };
-            -> 0;
         };
 
         // str.strip() on t[*lo, *hi)
@@ -329,9 +363,11 @@ namespace flux
                 switch (w == 0)
                 {
                     case (true) { break; }
-                    default {};
+                    default
+                    {
+                        a = a + w;
+                    };
                 };
-                a = a + w;
             };
             while (b > a)
             {
@@ -339,9 +375,11 @@ namespace flux
                 switch (w == 0)
                 {
                     case (true) { break; }
-                    default {};
+                    default
+                    {
+                        b = b - w;
+                    };
                 };
-                b = b - w;
             };
             *lo = a;
             *hi = b;
@@ -360,28 +398,34 @@ namespace flux
                 switch (w == 0)
                 {
                     case (true) { break; }
-                    default {};
+                    default
+                    {
+                        p = p + w;
+                    };
                 };
-                p = p + w;
             };
             switch (p >= hi)
             {
                 case (true) { -> -1; }
-                default {};
-            };
-            *ts = p;
-            while (p < hi)
-            {
-                w = pp_ws_fwd(t, hi, p);
-                switch (w != 0)
+                default
                 {
-                    case (true) { break; }
-                    default {};
+                    *ts = p;
+                    while (p < hi)
+                    {
+                        w = pp_ws_fwd(t, hi, p);
+                        switch (w!?)
+                        {
+                            case (true) { break; }
+                            default
+                            {
+                                p++;
+                            };
+                        };
+                    };
+                    *te = p;
+                    -> p;
                 };
-                p++;
             };
-            *te = p;
-            -> p;
         };
 
         // End of the line that starts at p, following str.splitlines().
@@ -399,52 +443,56 @@ namespace flux
                     *tl = 1;
                     -> j;
                 }
-                    default {};
-                };
-                switch (c == 13)
-                {
-                    case (true) {
-                    *tl = 1;
-                    switch (pp_at(t, n, j + 1) == 10)
+                    default
                     {
-                        case (true) { *tl = 2; }
-                        default {};
+                        switch (c == 13)
+                        {
+                            case (true) {
+                            *tl = 1;
+                            switch (pp_at(t, n, j + 1) == 10)
+                            {
+                                case (true) { *tl = 2; }
+                                default {};
+                            };
+                            -> j;
+                        }
+                            default
+                            {
+                                switch (c == 0xC2)
+                                {
+                                    case (true) {
+                                    switch (pp_at(t, n, j + 1) == 0x85)
+                                    {
+                                        case (true) {
+                                        *tl = 2;
+                                        -> j;
+                                    }
+                                        default {};
+                                    };
+                                }
+                                    default {};
+                                };
+                                switch (c == 0xE2)
+                                {
+                                    case (true) {
+                                    c1 = pp_at(t, n, j + 1);
+                                    c2 = pp_at(t, n, j + 2);
+                                    switch (c1 == 0x80 & (c2 == 0xA8 | c2 == 0xA9))
+                                    {
+                                        case (true) {
+                                        *tl = 3;
+                                        -> j;
+                                    }
+                                        default {};
+                                    };
+                                }
+                                    default {};
+                                };
+                                j++;
+                            };
+                        };
                     };
-                    -> j;
-                }
-                    default {};
                 };
-                switch (c == 0xC2)
-                {
-                    case (true) {
-                    switch (pp_at(t, n, j + 1) == 0x85)
-                    {
-                        case (true) {
-                        *tl = 2;
-                        -> j;
-                    }
-                        default {};
-                    };
-                }
-                    default {};
-                };
-                switch (c == 0xE2)
-                {
-                    case (true) {
-                    c1 = pp_at(t, n, j + 1);
-                    c2 = pp_at(t, n, j + 2);
-                    switch (c1 == 0x80 & (c2 == 0xA8 | c2 == 0xA9))
-                    {
-                        case (true) {
-                        *tl = 3;
-                        -> j;
-                    }
-                        default {};
-                    };
-                }
-                    default {};
-                };
-                j++;
             };
             *tl = 0;
             -> n;
@@ -505,9 +553,11 @@ namespace flux
                 switch ((int)p[i] == FLUX_PP_SEP)
                 {
                     case (true) { break; }
-                    default {};
+                    default
+                    {
+                        i--;
+                    };
                 };
-                i--;
             };
             switch (i < 0)
             {
@@ -605,42 +655,48 @@ namespace flux
                 switch (!this.ok)
                 {
                     case (true) { -> false; }
-                    default {};
+                    default
+                    {
+                        int need = this.len + extra + 1;
+                        switch (need <= this.cap)
+                        {
+                            case (true) { -> true; }
+                            default
+                            {
+                                int nc = this.cap;
+                                switch (nc < 256)
+                                {
+                                    case (true) { nc = 256; }
+                                    default {};
+                                };
+                                while (nc < need) { nc = nc * 2; };
+                                u64 np;
+                                switch (this.mem == (byte*)0)
+                                {
+                                    case (true) {
+                                    np = (u64)fmalloc((u64)nc);
+                                }
+                                    default {
+                                    np = frealloc((u64)this.mem, (size_t)nc);
+                                };
+                                };
+                                switch (np == (u64)0)
+                                {
+                                    case (true) {
+                                    this.ok = false;
+                                    -> false;
+                                }
+                                    default
+                                    {
+                                        this.mem = (byte*)np;
+                                        this.cap = nc;
+                                        -> true;
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
-                int need = this.len + extra + 1;
-                switch (need <= this.cap)
-                {
-                    case (true) { -> true; }
-                    default {};
-                };
-                int nc = this.cap;
-                switch (nc < 256)
-                {
-                    case (true) { nc = 256; }
-                    default {};
-                };
-                while (nc < need) { nc = nc * 2; };
-                u64 np;
-                switch (this.mem == (byte*)0)
-                {
-                    case (true) {
-                    np = (u64)fmalloc((u64)nc);
-                }
-                    default {
-                    np = frealloc((u64)this.mem, (size_t)nc);
-                };
-                };
-                switch (np == (u64)0)
-                {
-                    case (true) {
-                    this.ok = false;
-                    -> false;
-                }
-                    default {};
-                };
-                this.mem = (byte*)np;
-                this.cap = nc;
-                -> true;
             };
 
             put(int b) -> void
@@ -648,12 +704,14 @@ namespace flux
                 switch (!this.reserve(1))
                 {
                     case (true) { ->; }
-                    default {};
+                    default
+                    {
+                        this.mem[this.len] = (byte)b;
+                        this.len++;
+                        this.mem[this.len] = (byte)0;
+                        ->;
+                    };
                 };
-                this.mem[this.len] = (byte)b;
-                this.len++;
-                this.mem[this.len] = (byte)0;
-                ->;
             };
 
             // s must not point into this buffer
@@ -662,22 +720,26 @@ namespace flux
                 switch (n <= 0)
                 {
                     case (true) { ->; }
-                    default {};
+                    default
+                    {
+                        switch (!this.reserve(n))
+                        {
+                            case (true) { ->; }
+                            default
+                            {
+                                int i;
+                                while (i < n)
+                                {
+                                    this.mem[this.len + i] = s[i];
+                                    i++;
+                                };
+                                this.len = this.len + n;
+                                this.mem[this.len] = (byte)0;
+                                ->;
+                            };
+                        };
+                    };
                 };
-                switch (!this.reserve(n))
-                {
-                    case (true) { ->; }
-                    default {};
-                };
-                int i;
-                while (i < n)
-                {
-                    this.mem[this.len + i] = s[i];
-                    i++;
-                };
-                this.len = this.len + n;
-                this.mem[this.len] = (byte)0;
-                ->;
             };
 
             put_str(byte* s) -> void -> this.put_n(s, pp_cstrlen(s));
@@ -697,24 +759,25 @@ namespace flux
                 switch (v == 0)
                 {
                     case (true) {
-                    this.put(48);
-                    ->;
+                    -> this.put(48);
                 }
-                    default {};
+                    default
+                    {
+                        while (v > 0)
+                        {
+                            tmp[n] = (byte)(48 + v % 10);
+                            v = v / 10;
+                            n++;
+                        };
+                        k = n;
+                        while (k > 0)
+                        {
+                            k--;
+                            this.put((int)tmp[k]);
+                        };
+                        ->;
+                    };
                 };
-                while (v > 0)
-                {
-                    tmp[n] = (byte)(48 + v % 10);
-                    v = v / 10;
-                    n++;
-                };
-                k = n;
-                while (k > 0)
-                {
-                    k--;
-                    this.put((int)tmp[k]);
-                };
-                ->;
             };
 
             clear() -> void
@@ -747,21 +810,25 @@ namespace flux
                 switch (this.mem == (byte*)0)
                 {
                     case (true) { ->; }
-                    default {};
-                };
-                int w;
-                while (this.len > 0)
-                {
-                    w = pp_ws_back(this.mem, 0, this.len);
-                    switch (w == 0)
+                    default
                     {
-                        case (true) { break; }
-                        default {};
+                        int w;
+                        while (this.len > 0)
+                        {
+                            w = pp_ws_back(this.mem, 0, this.len);
+                            switch (w == 0)
+                            {
+                                case (true) { break; }
+                                default
+                                {
+                                    this.len = this.len - w;
+                                };
+                            };
+                        };
+                        this.mem[this.len] = (byte)0;
+                        ->;
                     };
-                    this.len = this.len - w;
                 };
-                this.mem[this.len] = (byte)0;
-                ->;
             };
 
             // FXPreprocessor._strip_comments. Appends the stripped text of c[0, n).
@@ -795,84 +862,88 @@ namespace flux
                         i++;
                         continue;
                     }
-                        default {};
-                    };
-
-                    switch (ch == 34 | ch == 39)
-                    {
-                        case (true) {
-                        in_string = true;
-                        string_char = ch;
-                        this.put(ch);
-                        i++;
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    switch (i + 2 < n)
-                    {
-                        case (true) {
-                        switch (ch == 47 & c[i + 1] == 47 & c[i + 2] == 47)
+                        default
                         {
-                            case (true) {
-                            i = i + 3;
-                            while (i < n)
+                            switch (ch == 34 | ch == 39)
                             {
-                                switch (i + 2 < n)
+                                case (true) {
+                                in_string = true;
+                                string_char = ch;
+                                this.put(ch);
+                                i++;
+                                continue;
+                            }
+                                default
                                 {
-                                    case (true) {
-                                    switch (c[i] == 47 & c[i + 1] == 47 & c[i + 2] == 47)
+                                    switch (i + 2 < n)
                                     {
                                         case (true) {
-                                        i = i + 3;
-                                        break;
+                                        switch (ch == 47 & c[i + 1] == 47 & c[i + 2] == 47)
+                                        {
+                                            case (true) {
+                                            i = i + 3;
+                                            while (i < n)
+                                            {
+                                                switch (i + 2 < n)
+                                                {
+                                                    case (true) {
+                                                    switch (c[i] == 47 & c[i + 1] == 47 & c[i + 2] == 47)
+                                                    {
+                                                        case (true) {
+                                                        i = i + 3;
+                                                        break;
+                                                    }
+                                                        default {};
+                                                    };
+                                                }
+                                                    default {};
+                                                };
+                                                switch (c[i] == 10)
+                                                {
+                                                    case (true) { this.put(10); }
+                                                    default {};
+                                                };
+                                                i++;
+                                            };
+                                            continue;
+                                        }
+                                            default {};
+                                        };
                                     }
                                         default {};
                                     };
-                                }
-                                    default {};
-                                };
-                                switch (c[i] == 10)
-                                {
-                                    case (true) { this.put(10); }
-                                    default {};
-                                };
-                                i++;
-                            };
-                            continue;
-                        }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
 
-                    switch (i + 1 < n)
-                    {
-                        case (true) {
-                        switch (ch == 47 & c[i + 1] == 47)
-                        {
-                            case (true) {
-                            while (i < n)
-                            {
-                                switch (c[i] == 10)
-                                {
-                                    case (true) { break; }
-                                    default {};
-                                };
-                                i++;
-                            };
-                            continue;
-                        }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
+                                    switch (i + 1 < n)
+                                    {
+                                        case (true) {
+                                        switch (ch == 47 & c[i + 1] == 47)
+                                        {
+                                            case (true) {
+                                            while (i < n)
+                                            {
+                                                switch (c[i] == 10)
+                                                {
+                                                    case (true) { break; }
+                                                    default
+                                                    {
+                                                        i++;
+                                                    };
+                                                };
+                                            };
+                                            continue;
+                                        }
+                                            default {};
+                                        };
+                                    }
+                                        default {};
+                                    };
 
-                    this.put(ch);
-                    i++;
+                                    this.put(ch);
+                                    i++;
+                                };
+                            };
+                        };
+                    };
                 };
                 ->;
             };
@@ -934,126 +1005,180 @@ namespace flux
                 switch (f == (void*)0)
                 {
                     case (true) { -> -1; }
-                    default {};
-                };
-
-                fseek(f, 0, SEEK_END);
-                int size = ftell(f);
-                fseek(f, 0, SEEK_SET);
-                switch (size < 0)
-                {
-                    case (true) {
-                    fclose(f);
-                    -> -1;
-                }
-                    default {};
-                };
-
-                byte* raw = (byte*)fmalloc((u64)size + (u64)1);
-                switch (raw == (byte*)0)
-                {
-                    case (true) {
-                    fclose(f);
-                    -> -1;
-                }
-                    default {};
-                };
-                int got = fread(raw, 1, size, f);
-                fclose(f);
-                switch (got < 0)
-                {
-                    case (true) {
-                    ffree(raw);
-                    -> -1;
-                }
-                    default {};
-                };
-
-                this.clear();
-                int i, bad, c, need, lo, hi, k, b1;
-                switch (got >= 3)
-                {
-                    case (true) {
-                    switch (raw[0] == 0xEF & raw[1] == 0xBB & raw[2] == 0xBF)
+                    default
                     {
-                        case (true) { i = 3; }
-                        default {};
-                    };
-                }
-                    default {};
-                };
-
-                while (i < got)
-                {
-                    c = (int)raw[i];
-                    switch (c < 0x80)
-                    {
-                        case (true) {
-                        switch (c)
+                        fseek(f, 0, SEEK_END);
+                        int size = ftell(f);
+                        fseek(f, 0, SEEK_SET);
+                        switch (size < 0)
                         {
-                            case (13)
-                            {
-                                this.put(10);
-                                switch (pp_at(raw, got, i + 1) == 10)
-                                {
-                                    case (true) { i++; }
-                                    default {};
-                                };
-                            }
+                            case (true) {
+                            fclose(f);
+                            -> -1;
+                        }
                             default
                             {
-                                this.put(c);
-                            };
-                        };
-                        i++;
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    need = 0;
-                    lo = 0x80;
-                    hi = 0xBF;
-                    switch (c >= 0xC2 & c <= 0xDF)
-                    {
-                        case (true) { need = 1; }
-                        default {
-                            switch (c == 0xE0)
-                            {
-                                case (true) { need = 2; lo = 0xA0; }
-                                default {
-                                    switch (c >= 0xE1 & c <= 0xEC)
+                                byte* raw = (byte*)fmalloc((u64)size + (u64)1);
+                                switch (raw == (byte*)0)
+                                {
+                                    case (true) {
+                                    fclose(f);
+                                    -> -1;
+                                }
+                                    default
                                     {
-                                        case (true) { need = 2; }
-                                        default {
-                                            switch (c == 0xED)
+                                        int got = fread(raw, 1, size, f);
+                                        fclose(f);
+                                        switch (got < 0)
+                                        {
+                                            case (true) {
+                                            ffree(raw);
+                                            -> -1;
+                                        }
+                                            default
                                             {
-                                                case (true) { need = 2; hi = 0x9F; }
-                                                default {
-                                                    switch (c >= 0xEE & c <= 0xEF)
+                                                this.clear();
+                                                int i, bad, c, need, lo, hi, k, b1;
+                                                switch (got >= 3)
+                                                {
+                                                    case (true) {
+                                                    switch (raw[0] == 0xEF & raw[1] == 0xBB & raw[2] == 0xBF)
                                                     {
-                                                        case (true) { need = 2; }
-                                                        default {
-                                                            switch (c == 0xF0)
+                                                        case (true) { i = 3; }
+                                                        default {};
+                                                    };
+                                                }
+                                                    default {};
+                                                };
+
+                                                while (i < got)
+                                                {
+                                                    c = (int)raw[i];
+                                                    switch (c < 0x80)
+                                                    {
+                                                        case (true) {
+                                                        switch (c)
+                                                        {
+                                                            case (13)
                                                             {
-                                                                case (true) { need = 3; lo = 0x90; }
+                                                                this.put(10);
+                                                                switch (pp_at(raw, got, i + 1) == 10)
+                                                                {
+                                                                    case (true) { i++; }
+                                                                    default {};
+                                                                };
+                                                            }
+                                                            default
+                                                            {
+                                                                this.put(c);
+                                                            };
+                                                        };
+                                                        i++;
+                                                        continue;
+                                                    }
+                                                        default
+                                                        {
+                                                            need = 0;
+                                                            lo = 0x80;
+                                                            hi = 0xBF;
+                                                            switch (c >= 0xC2 & c <= 0xDF)
+                                                            {
+                                                                case (true) { need = 1; }
                                                                 default {
-                                                                    switch (c >= 0xF1 & c <= 0xF3)
+                                                                    switch (c == 0xE0)
                                                                     {
-                                                                        case (true) { need = 3; }
+                                                                        case (true) { need = 2; lo = 0xA0; }
                                                                         default {
-                                                                            switch (c == 0xF4)
+                                                                            switch (c >= 0xE1 & c <= 0xEC)
                                                                             {
-                                                                                case (true) { need = 3; hi = 0x8F; }
-                                                                                default {};
+                                                                                case (true) { need = 2; }
+                                                                                default {
+                                                                                    switch (c == 0xED)
+                                                                                    {
+                                                                                        case (true) { need = 2; hi = 0x9F; }
+                                                                                        default {
+                                                                                            switch (c >= 0xEE & c <= 0xEF)
+                                                                                            {
+                                                                                                case (true) { need = 2; }
+                                                                                                default {
+                                                                                                    switch (c == 0xF0)
+                                                                                                    {
+                                                                                                        case (true) { need = 3; lo = 0x90; }
+                                                                                                        default {
+                                                                                                            switch (c >= 0xF1 & c <= 0xF3)
+                                                                                                            {
+                                                                                                                case (true) { need = 3; }
+                                                                                                                default {
+                                                                                                                    switch (c == 0xF4)
+                                                                                                                    {
+                                                                                                                        case (true) { need = 3; hi = 0x8F; }
+                                                                                                                        default {};
+                                                                                                                    };
+                                                                                                                };
+                                                                                                            };
+                                                                                                        };
+                                                                                                    };
+                                                                                                };
+                                                                                            };
+                                                                                        };
+                                                                                    };
+                                                                                };
                                                                             };
                                                                         };
+                                                                    };
+                                                                };
+                                                            };
+
+                                                            switch (need == 0)
+                                                            {
+                                                                case (true) {
+                                                                this.put(0xEF);
+                                                                this.put(0xBF);
+                                                                this.put(0xBD);
+                                                                bad = 1;
+                                                                i++;
+                                                                continue;
+                                                            }
+                                                                default
+                                                                {
+                                                                    k = 1;
+                                                                    while (k <= need)
+                                                                    {
+                                                                        b1 = pp_at(raw, got, i + k);
+                                                                        switch (b1 < lo | b1 > hi)
+                                                                        {
+                                                                            case (true) { break; }
+                                                                            default
+                                                                            {
+                                                                                lo = 0x80;
+                                                                                hi = 0xBF;
+                                                                                k++;
+                                                                            };
+                                                                        };
+                                                                    };
+
+                                                                    switch (k > need)
+                                                                    {
+                                                                        case (true) {
+                                                                        this.put_n(raw + i, need + 1);
+                                                                        i = i + need + 1;
+                                                                    }
+                                                                        default {
+                                                                        this.put(0xEF);
+                                                                        this.put(0xBF);
+                                                                        this.put(0xBD);
+                                                                        bad = 1;
+                                                                        i = i + k;
+                                                                    };
                                                                     };
                                                                 };
                                                             };
                                                         };
                                                     };
                                                 };
+
+                                                ffree(raw);
+                                                -> bad;
                                             };
                                         };
                                     };
@@ -1061,52 +1186,7 @@ namespace flux
                             };
                         };
                     };
-
-                    switch (need == 0)
-                    {
-                        case (true) {
-                        this.put(0xEF);
-                        this.put(0xBF);
-                        this.put(0xBD);
-                        bad = 1;
-                        i++;
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    k = 1;
-                    while (k <= need)
-                    {
-                        b1 = pp_at(raw, got, i + k);
-                        switch (b1 < lo | b1 > hi)
-                        {
-                            case (true) { break; }
-                            default {};
-                        };
-                        lo = 0x80;
-                        hi = 0xBF;
-                        k++;
-                    };
-
-                    switch (k > need)
-                    {
-                        case (true) {
-                        this.put_n(raw + i, need + 1);
-                        i = i + need + 1;
-                    }
-                        default {
-                        this.put(0xEF);
-                        this.put(0xBF);
-                        this.put(0xBD);
-                        bad = 1;
-                        i = i + k;
-                    };
-                    };
                 };
-
-                ffree(raw);
-                -> bad;
             };
         };
 
@@ -1155,43 +1235,47 @@ namespace flux
                 switch (!this.ok)
                 {
                     case (true) { ->; }
-                    default {};
-                };
-                switch (this.len >= this.cap)
-                {
-                    case (true) {
-                    int nc = this.cap * 2;
-                    switch (nc < 64)
+                    default
                     {
-                        case (true) { nc = 64; }
-                        default {};
-                    };
-                    u64 np;
-                    switch (this.arr == (int*)0)
-                    {
-                        case (true) {
-                        np = (u64)fmalloc((u64)nc * (u64)(sizeof(int) / 8));
-                    }
-                        default {
-                        np = frealloc((u64)this.arr, (size_t)((u64)nc * (u64)(sizeof(int) / 8)));
-                    };
-                    };
-                    switch (np == (u64)0)
-                    {
-                        case (true) {
-                        this.ok = false;
+                        switch (this.len >= this.cap)
+                        {
+                            case (true) {
+                            int nc = this.cap * 2;
+                            switch (nc < 64)
+                            {
+                                case (true) { nc = 64; }
+                                default {};
+                            };
+                            u64 np;
+                            switch (this.arr == (int*)0)
+                            {
+                                case (true) {
+                                np = (u64)fmalloc((u64)nc * (u64)(sizeof(int) / 8));
+                            }
+                                default {
+                                np = frealloc((u64)this.arr, (size_t)((u64)nc * (u64)(sizeof(int) / 8)));
+                            };
+                            };
+                            switch (np == (u64)0)
+                            {
+                                case (true) {
+                                this.ok = false;
+                                ->;
+                            }
+                                default
+                                {
+                                    this.arr = (int*)np;
+                                    this.cap = nc;
+                                };
+                            };
+                        }
+                            default {};
+                        };
+                        this.arr[this.len] = v;
+                        this.len++;
                         ->;
-                    }
-                        default {};
                     };
-                    this.arr = (int*)np;
-                    this.cap = nc;
-                }
-                    default {};
                 };
-                this.arr[this.len] = v;
-                this.len++;
-                ->;
             };
 
             pop() -> void
@@ -1243,15 +1327,17 @@ namespace flux
                     this.ok = false;
                     -> this;
                 }
-                    default {};
+                    default
+                    {
+                        int z;
+                        while (z < this.slot_cap)
+                        {
+                            this.slots[z] = 0;
+                            z++;
+                        };
+                        -> this;
+                    };
                 };
-                int z;
-                while (z < this.slot_cap)
-                {
-                    this.slots[z] = 0;
-                    z++;
-                };
-                -> this;
             };
 
             __expr() -> SymTab* -> this;
@@ -1271,8 +1357,7 @@ namespace flux
                 this.slots = (int*)0;
                 this.ents = (int*)0;
                 this.keys.__exit();
-                this.vals.__exit();
-                ->;
+                -> this.vals.__exit();
             };
 
             // Entry index of s[0, n), or -1
@@ -1281,55 +1366,61 @@ namespace flux
                 switch (!this.ok)
                 {
                     case (true) { -> -1; }
-                    default {};
-                };
-                u64 h = pp_hash(s, n);
-                int idx = (int)(h % (u64)this.slot_cap);
-                int e, base, j;
-                bool same;
-                while (true)
-                {
-                    e = this.slots[idx];
-                    switch (e == 0)
+                    default
                     {
-                        case (true) { -> -1; }
-                        default {};
-                    };
-                    e = e - 1;
-                    base = e * FLUX_PP_STRIDE;
-                    switch (this.ents[base + 1] == n)
-                    {
-                        case (true) {
-                        same = true;
-                        j = 0;
-                        while (j < n)
+                        u64 h = pp_hash(s, n);
+                        int idx = (int)(h % (u64)this.slot_cap);
+                        int e, base, j;
+                        bool same;
+                        while (true)
                         {
-                            switch (this.keys.mem[this.ents[base] + j] != s[j])
+                            e = this.slots[idx];
+                            switch (e == 0)
                             {
-                                case (true) {
-                                same = false;
-                                break;
-                            }
-                                default {};
+                                case (true) { -> -1; }
+                                default
+                                {
+                                    e = e - 1;
+                                    base = e * FLUX_PP_STRIDE;
+                                    switch (this.ents[base + 1] == n)
+                                    {
+                                        case (true) {
+                                        same = true;
+                                        j = 0;
+                                        while (j < n)
+                                        {
+                                            switch (this.keys.mem[this.ents[base] + j] != s[j])
+                                            {
+                                                case (true) {
+                                                same = false;
+                                                break;
+                                            }
+                                                default
+                                                {
+                                                    j++;
+                                                };
+                                            };
+                                        };
+                                        switch (same)
+                                        {
+                                            case (true) { -> e; }
+                                            default {};
+                                        };
+                                    }
+                                        default {};
+                                    };
+                                    idx++;
+                                    switch (idx >= this.slot_cap)
+                                    {
+                                        case (true) { idx = 0; }
+                                        default {};
+                                    };
+                                };
                             };
-                            j++;
                         };
-                        switch (same)
-                        {
-                            case (true) { -> e; }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
-                    idx++;
-                    switch (idx >= this.slot_cap)
-                    {
-                        case (true) { idx = 0; }
-                        default {};
+                        -> -1;
                     };
                 };
-                -> -1;
             };
 
             // Links entry e into slots
@@ -1338,7 +1429,7 @@ namespace flux
                 int base = e * FLUX_PP_STRIDE;
                 u64 h = pp_hash(this.keys.mem + this.ents[base], this.ents[base + 1]);
                 int idx = (int)(h % (u64)this.slot_cap);
-                while (this.slots[idx] != 0)
+                while (this.slots[idx]!?)
                 {
                     idx++;
                     switch (idx >= this.slot_cap)
@@ -1361,23 +1452,25 @@ namespace flux
                     this.ok = false;
                     -> false;
                 }
-                    default {};
+                    default
+                    {
+                        int z, e;
+                        while (z < nc)
+                        {
+                            ns[z] = 0;
+                            z++;
+                        };
+                        ffree((byte*)this.slots);
+                        this.slots = ns;
+                        this.slot_cap = nc;
+                        while (e < this.count)
+                        {
+                            this.place(e);
+                            e++;
+                        };
+                        -> true;
+                    };
                 };
-                int z, e;
-                while (z < nc)
-                {
-                    ns[z] = 0;
-                    z++;
-                };
-                ffree((byte*)this.slots);
-                this.slots = ns;
-                this.slot_cap = nc;
-                while (e < this.count)
-                {
-                    this.place(e);
-                    e++;
-                };
-                -> true;
             };
 
             grow_ents() -> bool
@@ -1390,11 +1483,13 @@ namespace flux
                     this.ok = false;
                     -> false;
                 }
-                    default {};
+                    default
+                    {
+                        this.ents = (int*)np;
+                        this.ent_cap = nc;
+                        -> true;
+                    };
                 };
-                this.ents = (int*)np;
-                this.ent_cap = nc;
-                -> true;
             };
 
             // Entry index of s[0, n), created when missing. -1 on allocation failure.
@@ -1405,50 +1500,54 @@ namespace flux
                 switch (e >= 0)
                 {
                     case (true) { -> e; }
-                    default {};
-                };
-                switch (!this.ok)
-                {
-                    case (true) { -> -1; }
-                    default {};
-                };
-                switch (this.count + 1 > this.ent_cap)
-                {
-                    case (true) {
-                    switch (!this.grow_ents())
+                    default
                     {
-                        case (true) { -> -1; }
-                        default {};
+                        switch (!this.ok)
+                        {
+                            case (true) { -> -1; }
+                            default
+                            {
+                                switch (this.count + 1 > this.ent_cap)
+                                {
+                                    case (true) {
+                                    switch (!this.grow_ents())
+                                    {
+                                        case (true) { -> -1; }
+                                        default {};
+                                    };
+                                }
+                                    default {};
+                                };
+                                switch ((this.count + 1) * 2 > this.slot_cap)
+                                {
+                                    case (true) {
+                                    switch (!this.grow_slots())
+                                    {
+                                        case (true) { -> -1; }
+                                        default {};
+                                    };
+                                }
+                                    default {};
+                                };
+                                e = this.count;
+                                int base = e * FLUX_PP_STRIDE;
+                                this.ents[base] = this.keys.len;
+                                this.ents[base + 1] = n;
+                                this.ents[base + 2] = 0;
+                                this.ents[base + 3] = 0;
+                                this.ents[base + 4] = 0;
+                                this.ents[base + 5] = 0;
+                                this.ents[base + 6] = 0;
+                                this.ents[base + 7] = 0;
+                                this.keys.put_n(s, n);
+                                this.keys.put(0);
+                                this.count++;
+                                this.place(e);
+                                -> e;
+                            };
+                        };
                     };
-                }
-                    default {};
                 };
-                switch ((this.count + 1) * 2 > this.slot_cap)
-                {
-                    case (true) {
-                    switch (!this.grow_slots())
-                    {
-                        case (true) { -> -1; }
-                        default {};
-                    };
-                }
-                    default {};
-                };
-                e = this.count;
-                int base = e * FLUX_PP_STRIDE;
-                this.ents[base] = this.keys.len;
-                this.ents[base + 1] = n;
-                this.ents[base + 2] = 0;
-                this.ents[base + 3] = 0;
-                this.ents[base + 4] = 0;
-                this.ents[base + 5] = 0;
-                this.ents[base + 6] = 0;
-                this.ents[base + 7] = 0;
-                this.keys.put_n(s, n);
-                this.keys.put(0);
-                this.count++;
-                this.place(e);
-                -> e;
             };
 
             set_val(int e, byte* v, int n) -> void
@@ -1457,8 +1556,7 @@ namespace flux
                 this.ents[base + 2] = this.vals.len;
                 this.ents[base + 3] = n;
                 this.vals.put_n(v, n);
-                this.vals.put(0);
-                ->;
+                -> this.vals.put(0);
             };
 
             // pcount parameter names stored as consecutive null terminated strings,
@@ -1469,8 +1567,7 @@ namespace flux
                 this.ents[base + 4] = this.vals.len;
                 this.ents[base + 5] = plen;
                 this.ents[base + 6] = pcount;
-                this.vals.put_n(p, plen);
-                ->;
+                -> this.vals.put_n(p, plen);
             };
 
             val_ptr(int e) -> byte* -> this.vals.mem + this.ents[e * FLUX_PP_STRIDE + 2];
@@ -1580,20 +1677,21 @@ namespace flux
                     this.err_kind = PPError.ALLOC;
                     -> this;
                 }
-                    default {};
+                    default
+                    {
+                        switch (this.realpath_into(g".\0"))
+                        {
+                            case (true) {
+                            this.cwd_off = this.pool_add(this.rbuf.mem, this.rbuf.len);
+                        }
+                            default {
+                            this.cwd_off = this.pool_add(g".\0", 1);
+                        };
+                        };
+                        this.srcdir_off = this.cwd_off;
+                        -> this;
+                    };
                 };
-
-                switch (this.realpath_into(g".\0"))
-                {
-                    case (true) {
-                    this.cwd_off = this.pool_add(this.rbuf.mem, this.rbuf.len);
-                }
-                    default {
-                    this.cwd_off = this.pool_add(g".\0", 1);
-                };
-                };
-                this.srcdir_off = this.cwd_off;
-                -> this;
             };
 
             __expr() -> Preprocessor* -> this;
@@ -1633,8 +1731,7 @@ namespace flux
                 this.alen.__exit();
                 this.processed.__exit();
                 this.consts.__exit();
-                this.psubs.__exit();
-                ->;
+                -> this.psubs.__exit();
             };
 
             // ===== ACCESSORS =====
@@ -1669,10 +1766,11 @@ namespace flux
                 switch (e < 0)
                 {
                     case (true) { ->; }
-                    default {};
+                    default
+                    {
+                        -> this.consts.set_val(e, value, pp_cstrlen(value));
+                    };
                 };
-                this.consts.set_val(e, value, pp_cstrlen(value));
-                ->;
             };
 
             // fmacros.build_compiler_macros with the host as target and the
@@ -1797,34 +1895,46 @@ namespace flux
                 switch (!this.pool.ok | !this.outb.ok | !this.errb.ok | !this.fbuf.ok | !this.sc.ok)
                 {
                     case (true) { -> false; }
-                    default {};
+                    default
+                    {
+                        switch (!this.ma.ok | !this.mc.ok | !this.x1.ok | !this.x2.ok | !this.psb.ok)
+                        {
+                            case (true) { -> false; }
+                            default
+                            {
+                                switch (!this.pb.ok | !this.tmp.ok | !this.passb.ok | !this.rbuf.ok | !this.jb.ok)
+                                {
+                                    case (true) { -> false; }
+                                    default
+                                    {
+                                        switch (!this.js.ok | !this.jv.ok | !this.files.ok | !this.lib_dirs.ok | !this.dir_stack.ok)
+                                        {
+                                            case (true) { -> false; }
+                                            default
+                                            {
+                                                switch (!this.map_file.ok | !this.map_line.ok | !this.aoff.ok | !this.alen.ok)
+                                                {
+                                                    case (true) { -> false; }
+                                                    default
+                                                    {
+                                                        switch (!this.processed.ok | !this.consts.ok | !this.psubs.ok)
+                                                        {
+                                                            case (true) { -> false; }
+                                                            default
+                                                            {
+                                                                -> true;
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
-                switch (!this.ma.ok | !this.mc.ok | !this.x1.ok | !this.x2.ok | !this.psb.ok)
-                {
-                    case (true) { -> false; }
-                    default {};
-                };
-                switch (!this.pb.ok | !this.tmp.ok | !this.passb.ok | !this.rbuf.ok | !this.jb.ok)
-                {
-                    case (true) { -> false; }
-                    default {};
-                };
-                switch (!this.js.ok | !this.jv.ok | !this.files.ok | !this.lib_dirs.ok | !this.dir_stack.ok)
-                {
-                    case (true) { -> false; }
-                    default {};
-                };
-                switch (!this.map_file.ok | !this.map_line.ok | !this.aoff.ok | !this.alen.ok)
-                {
-                    case (true) { -> false; }
-                    default {};
-                };
-                switch (!this.processed.ok | !this.consts.ok | !this.psubs.ok)
-                {
-                    case (true) { -> false; }
-                    default {};
-                };
-                -> true;
             };
 
             // ===== PATHS =====
@@ -1837,11 +1947,13 @@ namespace flux
                 switch (r == (byte*)0)
                 {
                     case (true) { -> false; }
-                    default {};
+                    default
+                    {
+                        this.rbuf.clear();
+                        this.rbuf.put_str(this.pathbuf);
+                        -> true;
+                    };
                 };
-                this.rbuf.clear();
-                this.rbuf.put_str(this.pathbuf);
-                -> true;
             };
             #else
             realpath_into(byte* p) -> bool
@@ -1850,11 +1962,13 @@ namespace flux
                 switch (r == (byte*)0)
                 {
                     case (true) { -> false; }
-                    default {};
+                    default
+                    {
+                        this.rbuf.clear();
+                        this.rbuf.put_str(this.pathbuf);
+                        -> true;
+                    };
                 };
-                this.rbuf.clear();
-                this.rbuf.put_str(this.pathbuf);
-                -> true;
             };
             #endif;
 
@@ -1865,25 +1979,25 @@ namespace flux
                 switch (pp_is_abs(rel, rn))
                 {
                     case (true) {
-                    this.jb.put_n(rel, rn);
-                    ->;
+                    -> this.jb.put_n(rel, rn);
                 }
-                    default {};
-                };
-                this.jb.put_n(base, bn);
-                switch (bn > 0)
-                {
-                    case (true) {
-                    switch ((int)base[bn - 1] != FLUX_PP_SEP)
+                    default
                     {
-                        case (true) { this.jb.put(FLUX_PP_SEP); }
-                        default {};
+                        this.jb.put_n(base, bn);
+                        switch (bn > 0)
+                        {
+                            case (true) {
+                            switch ((int)base[bn - 1] != FLUX_PP_SEP)
+                            {
+                                case (true) { this.jb.put(FLUX_PP_SEP); }
+                                default {};
+                            };
+                        }
+                            default {};
+                        };
+                        -> this.jb.put_n(rel, rn);
                     };
-                }
-                    default {};
                 };
-                this.jb.put_n(rel, rn);
-                ->;
             };
 
             // (base / rel).exists() then resolve into rbuf
@@ -1893,9 +2007,11 @@ namespace flux
                 switch (!pp_exists(this.jb.mem))
                 {
                     case (true) { -> false; }
-                    default {};
+                    default
+                    {
+                        -> this.realpath_into(this.jb.mem);
+                    };
                 };
-                -> this.realpath_into(this.jb.mem);
             };
 
             // FXPreprocessor._resolve_path_local
@@ -1920,27 +2036,31 @@ namespace flux
                 switch (this.try_candidate(d, pp_cstrlen(d), fp, n))
                 {
                     case (true) { -> true; }
-                    default {};
-                };
-
-                d = this.pool.mem + this.cwd_off;
-                switch (this.try_candidate(d, pp_cstrlen(d), fp, n))
-                {
-                    case (true) { -> true; }
-                    default {};
-                };
-
-                while (k < this.lib_dirs.len)
-                {
-                    d = this.pool.mem + this.lib_dirs.arr[k];
-                    switch (this.try_candidate(d, pp_cstrlen(d), fp, n))
+                    default
                     {
-                        case (true) { -> true; }
-                        default {};
+                        d = this.pool.mem + this.cwd_off;
+                        switch (this.try_candidate(d, pp_cstrlen(d), fp, n))
+                        {
+                            case (true) { -> true; }
+                            default
+                            {
+                                while (k < this.lib_dirs.len)
+                                {
+                                    d = this.pool.mem + this.lib_dirs.arr[k];
+                                    switch (this.try_candidate(d, pp_cstrlen(d), fp, n))
+                                    {
+                                        case (true) { -> true; }
+                                        default
+                                        {
+                                            k++;
+                                        };
+                                    };
+                                };
+                                -> false;
+                            };
+                        };
                     };
-                    k++;
                 };
-                -> false;
             };
 
             // FXPreprocessor._resolve_path_stdlib: srcdir/src/stdlib and its
@@ -1974,9 +2094,11 @@ namespace flux
                     switch (this.try_candidate(this.x1.mem, this.x1.len, fp, n))
                     {
                         case (true) { -> true; }
-                        default {};
+                        default
+                        {
+                            w++;
+                        };
                     };
-                    w++;
                 };
                 -> false;
             };
@@ -1998,9 +2120,11 @@ namespace flux
                 switch (this.resolve_local(fp, n))
                 {
                     case (true) { -> true; }
-                    default {};
+                    default
+                    {
+                        -> this.resolve_stdlib(fp, n);
+                    };
                 };
-                -> this.resolve_stdlib(fp, n);
             };
 
             // ===== #package =====
@@ -2053,108 +2177,114 @@ namespace flux
                 switch (pp_at(t, n, p) != 34)
                 {
                     case (true) { -> -1; }
-                    default {};
-                };
-                p++;
-                int c, h, lo;
-                while (p < n)
-                {
-                    c = (int)t[p];
-                    switch (c == 34)
+                    default
                     {
-                        case (true) { -> p + 1; }
-                        default {};
-                    };
-                    switch (c == 92)
-                    {
-                        case (true) {
                         p++;
-                        c = pp_at(t, n, p);
-                        switch (c)
+                        int c, h, lo;
+                        while (p < n)
                         {
-                            case ('n') { this.js.put(10); }
-                            case ('t') { this.js.put(9); }
-                            case ('r') { this.js.put(13); }
-                            case ('b') { this.js.put(8); }
-                            case ('f') { this.js.put(12); }
-                            case ('u')
+                            c = (int)t[p];
+                            switch (c == 34)
                             {
-                                h = this.json_hex4(t, n, p + 1);
-                                switch (h < 0)
+                                case (true) { -> p + 1; }
+                                default
                                 {
-                                    case (true) { -> -1; }
-                                    default {};
-                                };
-                                p = p + 4;
-                                switch (h >= 0xD800 & h <= 0xDBFF)
-                                {
-                                    case (true) {
-                                    switch (pp_at(t, n, p + 1) == 92 & pp_at(t, n, p + 2) == 'u')
+                                    switch (c == 92)
                                     {
                                         case (true) {
-                                        lo = this.json_hex4(t, n, p + 3);
-                                        switch (lo >= 0xDC00 & lo <= 0xDFFF)
+                                        p++;
+                                        c = pp_at(t, n, p);
+                                        switch (c)
                                         {
-                                            case (true) {
-                                            h = 0x10000 + (h - 0xD800) * 0x400 + (lo - 0xDC00);
-                                            p = p + 6;
-                                        }
-                                            default {};
-                                        };
-                                    }
-                                        default {};
-                                    };
-                                }
-                                    default {};
-                                };
-                                switch (h < 0x80)
-                                {
-                                    case (true) { this.js.put(h); }
-                                    default {
-                                        switch (h < 0x800)
-                                        {
-                                            case (true) {
-                                    this.js.put(0xC0 + h / 64);
-                                    this.js.put(0x80 + h % 64);
-                                }
-                                            default {
-                                                switch (h < 0x10000)
+                                            case ('n') { this.js.put(10); }
+                                            case ('t') { this.js.put(9); }
+                                            case ('r') { this.js.put(13); }
+                                            case ('b') { this.js.put(8); }
+                                            case ('f') { this.js.put(12); }
+                                            case ('u')
+                                            {
+                                                h = this.json_hex4(t, n, p + 1);
+                                                switch (h < 0)
+                                                {
+                                                    case (true) { -> -1; }
+                                                    default {};
+                                                };
+                                                p = p + 4;
+                                                switch (h >= 0xD800 & h <= 0xDBFF)
                                                 {
                                                     case (true) {
-                                    this.js.put(0xE0 + h / 4096);
-                                    this.js.put(0x80 + (h / 64) % 64);
-                                    this.js.put(0x80 + h % 64);
-                                }
+                                                    switch (pp_at(t, n, p + 1) == 92 & pp_at(t, n, p + 2) == 'u')
+                                                    {
+                                                        case (true) {
+                                                        lo = this.json_hex4(t, n, p + 3);
+                                                        switch (lo >= 0xDC00 & lo <= 0xDFFF)
+                                                        {
+                                                            case (true) {
+                                                            h = 0x10000 + (h - 0xD800) * 0x400 + (lo - 0xDC00);
+                                                            p = p + 6;
+                                                        }
+                                                            default {};
+                                                        };
+                                                    }
+                                                        default {};
+                                                    };
+                                                }
+                                                    default {};
+                                                };
+                                                switch (h < 0x80)
+                                                {
+                                                    case (true) { this.js.put(h); }
                                                     default {
-                                    this.js.put(0xF0 + h / 262144);
-                                    this.js.put(0x80 + (h / 4096) % 64);
-                                    this.js.put(0x80 + (h / 64) % 64);
-                                    this.js.put(0x80 + h % 64);
-                                };
+                                                        switch (h < 0x800)
+                                                        {
+                                                            case (true) {
+                                                    this.js.put(0xC0 + h / 64);
+                                                    this.js.put(0x80 + h % 64);
+                                                }
+                                                            default {
+                                                                switch (h < 0x10000)
+                                                                {
+                                                                    case (true) {
+                                                    this.js.put(0xE0 + h / 4096);
+                                                    this.js.put(0x80 + (h / 64) % 64);
+                                                    this.js.put(0x80 + h % 64);
+                                                }
+                                                                    default {
+                                                    this.js.put(0xF0 + h / 262144);
+                                                    this.js.put(0x80 + (h / 4096) % 64);
+                                                    this.js.put(0x80 + (h / 64) % 64);
+                                                    this.js.put(0x80 + h % 64);
+                                                };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            }
+                                            default
+                                            {
+                                                switch (c < 0)
+                                                {
+                                                    case (true) { -> -1; }
+                                                    default { this.js.put(c); };
                                                 };
                                             };
                                         };
+                                        p++;
+                                        continue;
+                                    }
+                                        default
+                                        {
+                                            this.js.put(c);
+                                            p++;
+                                        };
                                     };
-                                };
-                            }
-                            default
-                            {
-                                switch (c < 0)
-                                {
-                                    case (true) { -> -1; }
-                                    default { this.js.put(c); };
                                 };
                             };
                         };
-                        p++;
-                        continue;
-                    }
-                        default {};
+                        -> -1;
                     };
-                    this.js.put(c);
-                    p++;
                 };
-                -> -1;
             };
 
             // Position after the JSON value starting at t[p], or -1
@@ -2166,62 +2296,68 @@ namespace flux
                 switch (c == 34)
                 {
                     case (true) { -> this.json_string(t, n, p); }
-                    default {};
-                };
-                switch (c == '{' | c == '[')
-                {
-                    case (true) {
-                    depth = 0;
-                    while (p < n)
+                    default
                     {
-                        c = (int)t[p];
-                        switch (c == 34)
-                        {
-                            case (true) {
-                            p = this.json_string(t, n, p);
-                            switch (p < 0)
-                            {
-                                case (true) { -> -1; }
-                                default {};
-                            };
-                            continue;
-                        }
-                            default {};
-                        };
                         switch (c == '{' | c == '[')
                         {
-                            case (true) { depth++; }
-                            default {};
-                        };
-                        switch (c == '}' | c == ']')
-                        {
                             case (true) {
-                            depth--;
-                            switch (depth == 0)
+                            depth = 0;
+                            while (p < n)
                             {
-                                case (true) { -> p + 1; }
-                                default {};
+                                c = (int)t[p];
+                                switch (c == 34)
+                                {
+                                    case (true) {
+                                    p = this.json_string(t, n, p);
+                                    switch (p < 0)
+                                    {
+                                        case (true) { -> -1; }
+                                        default {};
+                                    };
+                                    continue;
+                                }
+                                    default {};
+                                };
+                                switch (c == '{' | c == '[')
+                                {
+                                    case (true) { depth++; }
+                                    default {};
+                                };
+                                switch (c == '}' | c == ']')
+                                {
+                                    case (true) {
+                                    depth--;
+                                    switch (depth == 0)
+                                    {
+                                        case (true) { -> p + 1; }
+                                        default {};
+                                    };
+                                }
+                                    default {};
+                                };
+                                p++;
                             };
+                            -> -1;
                         }
-                            default {};
+                            default
+                            {
+                                while (p < n)
+                                {
+                                    c = (int)t[p];
+                                    switch (c == ',' | c == '}' | c == ']' | c == 32 | c == 9 | c == 10 | c == 13)
+                                    {
+                                        case (true) { break; }
+                                        default
+                                        {
+                                            p++;
+                                        };
+                                    };
+                                };
+                                -> p;
+                            };
                         };
-                        p++;
                     };
-                    -> -1;
-                }
-                    default {};
                 };
-                while (p < n)
-                {
-                    c = (int)t[p];
-                    switch (c == ',' | c == '}' | c == ']' | c == 32 | c == 9 | c == 10 | c == 13)
-                    {
-                        case (true) { break; }
-                        default {};
-                    };
-                    p++;
-                };
-                -> p;
             };
 
             // Scans the JSON object at t[p] for the keys "entries" and "entrypoint".
@@ -2238,78 +2374,90 @@ namespace flux
                 switch (pp_at(t, n, p) != '{')
                 {
                     case (true) { -> 0; }
-                    default {};
-                };
-                p++;
-                while (true)
-                {
-                    p = this.json_ws(t, n, p);
-                    switch (pp_at(t, n, p) == '}')
+                    default
                     {
-                        case (true) { -> 1; }
-                        default {};
-                    };
-                    switch (pp_at(t, n, p) == ',')
-                    {
-                        case (true) {
                         p++;
-                        continue;
-                    }
-                        default {};
-                    };
-                    p = this.json_string(t, n, p);
-                    switch (p < 0)
-                    {
-                        case (true) { -> 0; }
-                        default {};
-                    };
-                    is_ep = this.js.len == 10 & pp_eq(this.js.mem, g"entrypoint\0", 10);
-                    is_en = this.js.len == 7 & pp_eq(this.js.mem, g"entries\0", 7);
-                    p = this.json_ws(t, n, p);
-                    switch (pp_at(t, n, p) != ':')
-                    {
-                        case (true) { -> 0; }
-                        default {};
-                    };
-                    p = this.json_ws(t, n, p + 1);
-                    vs = p;
-                    switch (is_ep)
-                    {
-                        case (true) {
-                        this.jv.clear();
-                        switch (pp_at(t, n, p) == 34)
+                        while (true)
                         {
-                            case (true) {
-                            nx = this.json_string(t, n, p);
-                            switch (nx < 0)
+                            p = this.json_ws(t, n, p);
+                            switch (pp_at(t, n, p) == '}')
                             {
-                                case (true) { -> 0; }
-                                default {};
+                                case (true) { -> 1; }
+                                default
+                                {
+                                    switch (pp_at(t, n, p) == ',')
+                                    {
+                                        case (true) {
+                                        p++;
+                                        continue;
+                                    }
+                                        default
+                                        {
+                                            p = this.json_string(t, n, p);
+                                            switch (p < 0)
+                                            {
+                                                case (true) { -> 0; }
+                                                default
+                                                {
+                                                    is_ep = this.js.len == 10 & pp_eq(this.js.mem, g"entrypoint\0", 10);
+                                                    is_en = this.js.len == 7 & pp_eq(this.js.mem, g"entries\0", 7);
+                                                    p = this.json_ws(t, n, p);
+                                                    switch (pp_at(t, n, p) != ':')
+                                                    {
+                                                        case (true) { -> 0; }
+                                                        default
+                                                        {
+                                                            p = this.json_ws(t, n, p + 1);
+                                                            vs = p;
+                                                            switch (is_ep)
+                                                            {
+                                                                case (true) {
+                                                                this.jv.clear();
+                                                                switch (pp_at(t, n, p) == 34)
+                                                                {
+                                                                    case (true) {
+                                                                    nx = this.json_string(t, n, p);
+                                                                    switch (nx < 0)
+                                                                    {
+                                                                        case (true) { -> 0; }
+                                                                        default
+                                                                        {
+                                                                            this.jv.put_n(this.js.mem, this.js.len);
+                                                                            p = nx;
+                                                                            continue;
+                                                                        };
+                                                                    };
+                                                                }
+                                                                    default {};
+                                                                };
+                                                            }
+                                                                default {};
+                                                            };
+                                                            switch (is_en)
+                                                            {
+                                                                case (true) {
+                                                                this.pc_off = vs;
+                                                            }
+                                                                default {};
+                                                            };
+                                                            p = this.json_skip(t, n, p);
+                                                            switch (p < 0)
+                                                            {
+                                                                case (true) { -> 0; }
+                                                                default {};
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
                             };
-                            this.jv.put_n(this.js.mem, this.js.len);
-                            p = nx;
-                            continue;
-                        }
-                            default {};
                         };
-                    }
-                        default {};
-                    };
-                    switch (is_en)
-                    {
-                        case (true) {
-                        this.pc_off = vs;
-                    }
-                        default {};
-                    };
-                    p = this.json_skip(t, n, p);
-                    switch (p < 0)
-                    {
-                        case (true) { -> 0; }
-                        default {};
+                        -> 0;
                     };
                 };
-                -> 0;
             };
 
             // FXPreprocessor._process_package. name is name_len bytes at text + name_off.
@@ -2345,136 +2493,148 @@ namespace flux
                     this.errb.put_n(this.x1.mem, w);
                     -> false;
                 }
-                    default {};
-                };
-
-                this.x2.clear();
-                this.x2.put_n(this.x1.mem, this.x1.len);
-                this.x2.put(FLUX_PP_SEP);
-                this.x2.put_str(g"package.json\0");
-                switch (!pp_exists(this.x2.mem))
-                {
-                    case (true) {
-                    this.e_begin(PPError.NOT_FOUND);
-                    this.errb.put_str(g"[PREPROCESSOR] Package '\0");
-                    this.errb.put_n(text + name_off, name_len);
-                    this.errb.put_str(g"' is missing package.json\0");
-                    -> false;
-                }
-                    default {};
-                };
-
-                ok2 = man.load_file(this.x2.mem);
-                switch (ok2 < 0)
-                {
-                    case (true) {
-                    this.e_begin(PPError.IO);
-                    this.errb.put_str(g"[PREPROCESSOR] Could not read \0");
-                    this.errb.put_n(this.x2.mem, this.x2.len);
-                    -> false;
-                }
-                    default {};
-                };
-
-                // entries = manifest.get("entries", manifest)
-                switch (this.json_object(man.mem, man.len, 0, 1) == 0)
-                {
-                    case (true) {
-                    this.e_begin(PPError.KEY);
-                    this.errb.put_str(g"[PREPROCESSOR] Package '\0");
-                    this.errb.put_n(text + name_off, name_len);
-                    this.errb.put_str(g"' package.json is not a valid JSON object\0");
-                    -> false;
-                }
-                    default {};
-                };
-                en_off = this.pc_off;
-                switch (en_off >= 0)
-                {
-                    case (true) {
-                    switch (this.json_object(man.mem, man.len, en_off, 0) == 0)
+                    default
                     {
-                        case (true) {
-                        this.jv.clear();
-                    }
-                        default {};
+                        this.x2.clear();
+                        this.x2.put_n(this.x1.mem, this.x1.len);
+                        this.x2.put(FLUX_PP_SEP);
+                        this.x2.put_str(g"package.json\0");
+                        switch (!pp_exists(this.x2.mem))
+                        {
+                            case (true) {
+                            this.e_begin(PPError.NOT_FOUND);
+                            this.errb.put_str(g"[PREPROCESSOR] Package '\0");
+                            this.errb.put_n(text + name_off, name_len);
+                            this.errb.put_str(g"' is missing package.json\0");
+                            -> false;
+                        }
+                            default
+                            {
+                                ok2 = man.load_file(this.x2.mem);
+                                switch (ok2 < 0)
+                                {
+                                    case (true) {
+                                    this.e_begin(PPError.IO);
+                                    this.errb.put_str(g"[PREPROCESSOR] Could not read \0");
+                                    this.errb.put_n(this.x2.mem, this.x2.len);
+                                    -> false;
+                                }
+                                    default
+                                    {
+                                        // entries = manifest.get("entries", manifest)
+                                        switch (this.json_object(man.mem, man.len, 0, 1) == 0)
+                                        {
+                                            case (true) {
+                                            this.e_begin(PPError.KEY);
+                                            this.errb.put_str(g"[PREPROCESSOR] Package '\0");
+                                            this.errb.put_n(text + name_off, name_len);
+                                            this.errb.put_str(g"' package.json is not a valid JSON object\0");
+                                            -> false;
+                                        }
+                                            default
+                                            {
+                                                en_off = this.pc_off;
+                                                switch (en_off >= 0)
+                                                {
+                                                    case (true) {
+                                                    switch (this.json_object(man.mem, man.len, en_off, 0) == 0)
+                                                    {
+                                                        case (true) {
+                                                        this.jv.clear();
+                                                    }
+                                                        default {};
+                                                    };
+                                                }
+                                                    default {};
+                                                };
+
+                                                switch (this.jv.len == 0)
+                                                {
+                                                    case (true) {
+                                                    this.e_begin(PPError.KEY);
+                                                    this.errb.put_str(g"[PREPROCESSOR] Package '\0");
+                                                    this.errb.put_n(text + name_off, name_len);
+                                                    this.errb.put_str(g"' package.json has no 'entrypoint' field\0");
+                                                    -> false;
+                                                }
+                                                    default
+                                                    {
+                                                        // (package_dir / entrypoint)
+                                                        this.join_to(this.x1.mem, this.x1.len, this.jv.mem, this.jv.len);
+                                                        switch (!pp_exists(this.jb.mem))
+                                                        {
+                                                            case (true) {
+                                                            this.e_begin(PPError.NOT_FOUND);
+                                                            this.errb.put_str(g"[PREPROCESSOR] Package '\0");
+                                                            this.errb.put_n(text + name_off, name_len);
+                                                            this.errb.put_str(g"' entrypoint '\0");
+                                                            this.errb.put_n(this.jv.mem, this.jv.len);
+                                                            this.errb.put_str(g"' not found\0");
+                                                            -> false;
+                                                        }
+                                                            default
+                                                            {
+                                                                switch (!this.realpath_into(this.jb.mem))
+                                                                {
+                                                                    case (true) {
+                                                                    this.e_begin(PPError.NOT_FOUND);
+                                                                    this.errb.put_str(g"[PREPROCESSOR] Package '\0");
+                                                                    this.errb.put_n(text + name_off, name_len);
+                                                                    this.errb.put_str(g"' entrypoint '\0");
+                                                                    this.errb.put_n(this.jv.mem, this.jv.len);
+                                                                    this.errb.put_str(g"' not found\0");
+                                                                    -> false;
+                                                                }
+                                                                    default
+                                                                    {
+                                                                        switch (this.processed.find(this.rbuf.mem, this.rbuf.len) >= 0)
+                                                                        {
+                                                                            case (true) { -> true; }
+                                                                            default
+                                                                            {
+                                                                                switch (this.verbose)
+                                                                                {
+                                                                                    case (true) {
+                                                                                    this.tmp.clear();
+                                                                                    this.tmp.put_str(g"[PREPROCESSOR] Package import: \0");
+                                                                                    this.tmp.put_n(text + name_off, name_len);
+                                                                                    this.tmp.put_str(g" -> \0");
+                                                                                    this.tmp.put_n(this.jv.mem, this.jv.len);
+                                                                                    standard::io::console::println(this.tmp.mem);
+                                                                                }
+                                                                                    default {};
+                                                                                };
+
+                                                                                // The package directory is pushed so relative imports inside it resolve
+                                                                                pk = this.pool_add(this.x1.mem, this.x1.len);
+                                                                                this.dir_stack.push(pk);
+                                                                                this.x2.clear();
+                                                                                this.x2.put_n(this.rbuf.mem, this.rbuf.len);
+                                                                                switch (!this.process_file(this.x2.mem, this.x2.len, 1))
+                                                                                {
+                                                                                    case (true) { -> false; }
+                                                                                    default
+                                                                                    {
+                                                                                        this.dir_stack.pop();
+                                                                                        -> true;
+                                                                                    };
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
                     };
-                }
-                    default {};
                 };
-
-                switch (this.jv.len == 0)
-                {
-                    case (true) {
-                    this.e_begin(PPError.KEY);
-                    this.errb.put_str(g"[PREPROCESSOR] Package '\0");
-                    this.errb.put_n(text + name_off, name_len);
-                    this.errb.put_str(g"' package.json has no 'entrypoint' field\0");
-                    -> false;
-                }
-                    default {};
-                };
-
-                // (package_dir / entrypoint)
-                this.join_to(this.x1.mem, this.x1.len, this.jv.mem, this.jv.len);
-                switch (!pp_exists(this.jb.mem))
-                {
-                    case (true) {
-                    this.e_begin(PPError.NOT_FOUND);
-                    this.errb.put_str(g"[PREPROCESSOR] Package '\0");
-                    this.errb.put_n(text + name_off, name_len);
-                    this.errb.put_str(g"' entrypoint '\0");
-                    this.errb.put_n(this.jv.mem, this.jv.len);
-                    this.errb.put_str(g"' not found\0");
-                    -> false;
-                }
-                    default {};
-                };
-                switch (!this.realpath_into(this.jb.mem))
-                {
-                    case (true) {
-                    this.e_begin(PPError.NOT_FOUND);
-                    this.errb.put_str(g"[PREPROCESSOR] Package '\0");
-                    this.errb.put_n(text + name_off, name_len);
-                    this.errb.put_str(g"' entrypoint '\0");
-                    this.errb.put_n(this.jv.mem, this.jv.len);
-                    this.errb.put_str(g"' not found\0");
-                    -> false;
-                }
-                    default {};
-                };
-
-                switch (this.processed.find(this.rbuf.mem, this.rbuf.len) >= 0)
-                {
-                    case (true) { -> true; }
-                    default {};
-                };
-
-                switch (this.verbose)
-                {
-                    case (true) {
-                    this.tmp.clear();
-                    this.tmp.put_str(g"[PREPROCESSOR] Package import: \0");
-                    this.tmp.put_n(text + name_off, name_len);
-                    this.tmp.put_str(g" -> \0");
-                    this.tmp.put_n(this.jv.mem, this.jv.len);
-                    standard::io::console::println(this.tmp.mem);
-                }
-                    default {};
-                };
-
-                // The package directory is pushed so relative imports inside it resolve
-                pk = this.pool_add(this.x1.mem, this.x1.len);
-                this.dir_stack.push(pk);
-                this.x2.clear();
-                this.x2.put_n(this.rbuf.mem, this.rbuf.len);
-                switch (!this.process_file(this.x2.mem, this.x2.len, 1))
-                {
-                    case (true) { -> false; }
-                    default {};
-                };
-                this.dir_stack.pop();
-                -> true;
             };
 
             // ===== FILES =====
@@ -2541,127 +2701,133 @@ namespace flux
                     this.errb.put_n(this.pool.mem + fp_off, fp_n);
                     -> false;
                 }
-                    default {};
-                };
-
-                switch (this.processed.find(this.rbuf.mem, this.rbuf.len) >= 0)
-                {
-                    case (true) { -> true; }
-                    default {};
-                };
-                this.processed.intern(this.rbuf.mem, this.rbuf.len);
-                fid = this.files.len;
-                path_off = this.pool_add(this.rbuf.mem, this.rbuf.len);
-                this.files.push(path_off);
-                pl = pp_parent_len(this.rbuf.mem, this.rbuf.len);
-                dir_off = this.pool_add(this.rbuf.mem, pl);
-
-                switch (this.verbose)
-                {
-                    case (true) {
-                    this.vline(g"[PREPROCESSOR] Processing: \0", this.pool.mem + fp_off, fp_n, g"\0");
-                }
-                    default {};
-                };
-
-                rc = raw.load_file(this.pool.mem + path_off);
-                switch (rc < 0)
-                {
-                    case (true) {
-                    this.e_begin(PPError.IO);
-                    this.errb.put_str(g"[PREPROCESSOR] Could not read file: \0");
-                    this.errb.put_str(this.pool.mem + path_off);
-                    -> false;
-                }
-                    default {};
-                };
-                switch (rc == 1)
-                {
-                    case (true) {
-                    this.vline(g"[PREPROCESSOR] WARNING: '\0", this.pool.mem + path_off, pp_cstrlen(this.pool.mem + path_off),
-                               g"' contains invalid UTF-8 sequences. Replacement characters (U+FFFD) have been substituted. Save the file as UTF-8 to silence this warning.\0");
-                }
-                    default {};
-                };
-
-                content.put_stripped(raw.mem, raw.len);
-                switch (!raw.ok | !content.ok | !this.alloc_ok())
-                {
-                    case (true) {
-                    this.e_begin(PPError.ALLOC);
-                    this.errb.put_str(g"[PREPROCESSOR] allocation failed\0");
-                    -> false;
-                }
-                    default {};
-                };
-
-                while (pos < content.len)
-                {
-                    e0 = pp_eol(content.mem, content.len, pos, @tl);
-                    loff.push(pos);
-                    llen.push(e0 - pos);
-                    pos = e0 + tl;
-                };
-                ll.text = content.mem;
-                ll.off = loff.arr;
-                ll.len = llen.arr;
-                ll.n = loff.len;
-
-                // Directives must end with a semicolon
-                while (q < ll.n)
-                {
-                    lo = ll.off[q];
-                    hi = lo + ll.len[q];
-                    pp_trim(content.mem, @lo, @hi);
-                    switch (hi > lo)
+                    default
                     {
-                        case (true) {
-                        switch (pp_starts(content.mem, lo, hi, g"#import\0", 7) | pp_starts(content.mem, lo, hi, g"#package\0", 8)
-                            | pp_starts(content.mem, lo, hi, g"#warn\0", 5) | pp_starts(content.mem, lo, hi, g"#stop\0", 5)
-                            | pp_starts(content.mem, lo, hi, g"#def\0", 4) | pp_starts(content.mem, lo, hi, g"#dir\0", 4))
+                        switch (this.processed.find(this.rbuf.mem, this.rbuf.len) >= 0)
                         {
-                            case (true) {
-                            switch (content.mem[hi - 1] != 59)
+                            case (true) { -> true; }
+                            default
                             {
-                                case (true) {
-                                pp_next_tok(content.mem, hi, lo, @ts, @te);
-                                this.e_begin(PPError.SYNTAX);
-                                this.errb.put_str(g"[PREPROCESSOR] \0");
-                                this.errb.put_n(content.mem + ts, te - ts);
-                                this.errb.put_str(g" directive missing semicolon in \0");
-                                this.errb.put_n(this.pool.mem + fp_off, fp_n);
-                                this.errb.put_str(g" at line \0");
-                                this.errb.put_int(q + 1);
-                                -> false;
-                            }
-                                default {};
-                            };
-                        }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
-                    q++;
-                };
+                                this.processed.intern(this.rbuf.mem, this.rbuf.len);
+                                fid = this.files.len;
+                                path_off = this.pool_add(this.rbuf.mem, this.rbuf.len);
+                                this.files.push(path_off);
+                                pl = pp_parent_len(this.rbuf.mem, this.rbuf.len);
+                                dir_off = this.pool_add(this.rbuf.mem, pl);
 
-                prev_file = this.cur_file;
-                this.cur_file = fid;
-                this.dir_stack.push(dir_off);
-                i = 0;
-                while (i < ll.n)
-                {
-                    this.cur_lineno = i + 1;
-                    i = this.process_line(@ll, i);
-                    switch (i < 0)
-                    {
-                        case (true) { -> false; }
-                        default {};
+                                switch (this.verbose)
+                                {
+                                    case (true) {
+                                    this.vline(g"[PREPROCESSOR] Processing: \0", this.pool.mem + fp_off, fp_n, g"\0");
+                                }
+                                    default {};
+                                };
+
+                                rc = raw.load_file(this.pool.mem + path_off);
+                                switch (rc < 0)
+                                {
+                                    case (true) {
+                                    this.e_begin(PPError.IO);
+                                    this.errb.put_str(g"[PREPROCESSOR] Could not read file: \0");
+                                    this.errb.put_str(this.pool.mem + path_off);
+                                    -> false;
+                                }
+                                    default
+                                    {
+                                        switch (rc == 1)
+                                        {
+                                            case (true) {
+                                            this.vline(g"[PREPROCESSOR] WARNING: '\0", this.pool.mem + path_off, pp_cstrlen(this.pool.mem + path_off),
+                                                       g"' contains invalid UTF-8 sequences. Replacement characters (U+FFFD) have been substituted. Save the file as UTF-8 to silence this warning.\0");
+                                        }
+                                            default {};
+                                        };
+
+                                        content.put_stripped(raw.mem, raw.len);
+                                        switch (!raw.ok | !content.ok | !this.alloc_ok())
+                                        {
+                                            case (true) {
+                                            this.e_begin(PPError.ALLOC);
+                                            this.errb.put_str(g"[PREPROCESSOR] allocation failed\0");
+                                            -> false;
+                                        }
+                                            default
+                                            {
+                                                while (pos < content.len)
+                                                {
+                                                    e0 = pp_eol(content.mem, content.len, pos, @tl);
+                                                    loff.push(pos);
+                                                    llen.push(e0 - pos);
+                                                    pos = e0 + tl;
+                                                };
+                                                ll.text = content.mem;
+                                                ll.off = loff.arr;
+                                                ll.len = llen.arr;
+                                                ll.n = loff.len;
+
+                                                // Directives must end with a semicolon
+                                                while (q < ll.n)
+                                                {
+                                                    lo = ll.off[q];
+                                                    hi = lo + ll.len[q];
+                                                    pp_trim(content.mem, @lo, @hi);
+                                                    switch (hi > lo)
+                                                    {
+                                                        case (true) {
+                                                        switch (pp_starts(content.mem, lo, hi, g"#import\0", 7) | pp_starts(content.mem, lo, hi, g"#package\0", 8)
+                                                            | pp_starts(content.mem, lo, hi, g"#warn\0", 5) | pp_starts(content.mem, lo, hi, g"#stop\0", 5)
+                                                            | pp_starts(content.mem, lo, hi, g"#def\0", 4) | pp_starts(content.mem, lo, hi, g"#dir\0", 4))
+                                                        {
+                                                            case (true) {
+                                                            switch (content.mem[hi - 1] != 59)
+                                                            {
+                                                                case (true) {
+                                                                pp_next_tok(content.mem, hi, lo, @ts, @te);
+                                                                this.e_begin(PPError.SYNTAX);
+                                                                this.errb.put_str(g"[PREPROCESSOR] \0");
+                                                                this.errb.put_n(content.mem + ts, te - ts);
+                                                                this.errb.put_str(g" directive missing semicolon in \0");
+                                                                this.errb.put_n(this.pool.mem + fp_off, fp_n);
+                                                                this.errb.put_str(g" at line \0");
+                                                                this.errb.put_int(q + 1);
+                                                                -> false;
+                                                            }
+                                                                default {};
+                                                            };
+                                                        }
+                                                            default {};
+                                                        };
+                                                    }
+                                                        default {};
+                                                    };
+                                                    q++;
+                                                };
+
+                                                prev_file = this.cur_file;
+                                                this.cur_file = fid;
+                                                this.dir_stack.push(dir_off);
+                                                i = 0;
+                                                while (i < ll.n)
+                                                {
+                                                    this.cur_lineno = i + 1;
+                                                    i = this.process_line(@ll, i);
+                                                    switch (i < 0)
+                                                    {
+                                                        case (true) { -> false; }
+                                                        default {};
+                                                    };
+                                                };
+                                                this.dir_stack.pop();
+                                                this.cur_file = prev_file;
+                                                -> true;
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
                     };
                 };
-                this.dir_stack.pop();
-                this.cur_file = prev_file;
-                -> true;
             };
 
             // ===== LINES =====
@@ -2687,662 +2853,675 @@ namespace flux
                     this.emit_blank(this.cur_lineno);
                     -> i + 1;
                 }
-                    default {};
-                };
-
-                // #dir
-                switch (pp_starts(text, s, e, g"#dir\0", 4))
-                {
-                    case (true) {
-                    switch (text[e - 1] != 59)
+                    default
                     {
-                        case (true) {
-                        this.e_begin(PPError.SYNTAX);
-                        this.errb.put_str(g"[PREPROCESSOR] #dir directive missing semicolon at line \0");
-                        this.errb.put_int(i + 1);
-                        -> -1;
-                    }
-                        default {};
-                    };
-                    q1 = pp_find(text, lo, hi, 34);
-                    switch (q1 != -1)
-                    {
-                        case (true) {
-                        q2 = pp_find(text, q1 + 1, hi, 34);
-                        switch (q2 != -1)
+                        // #dir
+                        switch (pp_starts(text, s, e, g"#dir\0", 4))
                         {
                             case (true) {
-                            this.tmp.clear();
-                            j = q1 + 1;
-                            while (j < q2)
+                            switch (text[e - 1] != 59)
                             {
-                                k = (int)text[j];
-                                switch (k == 92)
-                                {
-                                    case (true) { k = 47; }
-                                    default {};
-                                };
-                                this.tmp.put(k);
-                                j++;
+                                case (true) {
+                                this.e_begin(PPError.SYNTAX);
+                                this.errb.put_str(g"[PREPROCESSOR] #dir directive missing semicolon at line \0");
+                                this.errb.put_int(i + 1);
+                                -> -1;
+                            }
+                                default {};
                             };
-                            have = false;
-                            k = 0;
-                            while (k < this.lib_dirs.len)
+                            q1 = pp_find(text, lo, hi, 34);
+                            switch (q1 != -1)
                             {
-                                switch (pp_cstrlen(this.pool.mem + this.lib_dirs.arr[k]) == this.tmp.len)
+                                case (true) {
+                                q2 = pp_find(text, q1 + 1, hi, 34);
+                                switch (q2 != -1)
                                 {
                                     case (true) {
-                                    switch (pp_eq(this.pool.mem + this.lib_dirs.arr[k], this.tmp.mem, this.tmp.len))
+                                    this.tmp.clear();
+                                    j = q1 + 1;
+                                    while (j < q2)
                                     {
-                                        case (true) { have = true; }
+                                        k = (int)text[j];
+                                        switch (k == 92)
+                                        {
+                                            case (true) { k = 47; }
+                                            default {};
+                                        };
+                                        this.tmp.put(k);
+                                        j++;
+                                    };
+                                    have = false;
+                                    k = 0;
+                                    while (k < this.lib_dirs.len)
+                                    {
+                                        switch (pp_cstrlen(this.pool.mem + this.lib_dirs.arr[k]) == this.tmp.len)
+                                        {
+                                            case (true) {
+                                            switch (pp_eq(this.pool.mem + this.lib_dirs.arr[k], this.tmp.mem, this.tmp.len))
+                                            {
+                                                case (true) { have = true; }
+                                                default {};
+                                            };
+                                        }
+                                            default {};
+                                        };
+                                        k++;
+                                    };
+                                    switch (!have)
+                                    {
+                                        case (true) {
+                                        this.lib_dirs.push(this.pool_add(this.tmp.mem, this.tmp.len));
+                                        switch (this.verbose)
+                                        {
+                                            case (true) {
+                                            this.x1.clear();
+                                            this.x1.put_n(this.tmp.mem, this.tmp.len);
+                                            this.vline(g"[PREPROCESSOR] Added library directory: \0", this.x1.mem, this.x1.len, g"\0");
+                                        }
+                                            default {};
+                                        };
+                                    }
                                         default {};
                                     };
                                 }
                                     default {};
                                 };
-                                k++;
-                            };
-                            switch (!have)
-                            {
-                                case (true) {
-                                this.lib_dirs.push(this.pool_add(this.tmp.mem, this.tmp.len));
-                                switch (this.verbose)
-                                {
-                                    case (true) {
-                                    this.x1.clear();
-                                    this.x1.put_n(this.tmp.mem, this.tmp.len);
-                                    this.vline(g"[PREPROCESSOR] Added library directory: \0", this.x1.mem, this.x1.len, g"\0");
-                                }
-                                    default {};
-                                };
                             }
                                 default {};
                             };
+                            this.emit_blank(this.cur_lineno);
+                            -> i + 1;
                         }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
-                    this.emit_blank(this.cur_lineno);
-                    -> i + 1;
-                }
-                    default {};
-                };
-
-                // #psub
-                switch (pp_starts(text, s, e, g"#psub\0", 5))
-                {
-                    case (true) {
-                    a = s + 5;
-                    b = e;
-                    pp_trim(text, @a, @b);
-                    this.psb.clear();
-                    this.psb.put_n(text + a, b - a);
-                    more = true;
-                    while (more)
-                    {
-                        more = false;
-                        switch (this.psb.len > 0)
-                        {
-                            case (true) {
-                            switch (this.psb.mem[this.psb.len - 1] == '#')
-                            {
-                                case (true) { more = true; }
-                                default {};
-                            };
-                        }
-                            default {};
-                        };
-                        switch (!more)
-                        {
-                            case (true) { break; }
-                            default {};
-                        };
-                        this.psb.pop();
-                        i++;
-                        switch (i >= ll.n)
-                        {
-                            case (true) { break; }
-                            default {};
-                        };
-                        this.emit_blank(this.cur_lineno);
-                        this.cur_lineno = i + 1;
-                        this.psb.rstrip_ws();
-                        this.psb.put(32);
-                        a = ll.off[i];
-                        b = a + ll.len[i];
-                        pp_trim(text, @a, @b);
-                        this.psb.put_n(text + a, b - a);
-                    };
-
-                    // rest = collected.strip()
-                    a = 0;
-                    b = this.psb.len;
-                    pp_trim(this.psb.mem, @a, @b);
-                    paren_open = pp_find(this.psb.mem, a, b, 40);
-                    switch (paren_open == -1)
-                    {
-                        case (true) {
-                        this.e_begin(PPError.SYNTAX);
-                        this.errb.put_str(g"[PREPROCESSOR] #psub missing parameter list at line \0");
-                        this.errb.put_int(i + 1);
-                        -> -1;
-                    }
-                        default {};
-                    };
-                    name_off = a;
-                    name_len = paren_open;
-                    pp_trim(this.psb.mem, @name_off, @name_len);
-                    paren_close = pp_find(this.psb.mem, paren_open, b, 41);
-                    switch (paren_close == -1)
-                    {
-                        case (true) {
-                        this.e_begin(PPError.SYNTAX);
-                        this.errb.put_str(g"[PREPROCESSOR] #psub unclosed parameter list at line \0");
-                        this.errb.put_int(i + 1);
-                        -> -1;
-                    }
-                        default {};
-                    };
-
-                    // params = [p.strip() for p in raw_params.split(',') if p.strip()]
-                    this.pb.clear();
-                    np = 0;
-                    j = paren_open + 1;
-                    while (j <= paren_close)
-                    {
-                        k = j;
-                        while (k < paren_close)
-                        {
-                            switch (this.psb.mem[k] == ',')
-                            {
-                                case (true) { break; }
-                                default {};
-                            };
-                            k++;
-                        };
-                        ts = j;
-                        te = k;
-                        pp_trim(this.psb.mem, @ts, @te);
-                        switch (te > ts)
-                        {
-                            case (true) {
-                            this.pb.put_n(this.psb.mem + ts, te - ts);
-                            this.pb.put(0);
-                            np++;
-                        }
-                            default {};
-                        };
-                        j = k + 1;
-                    };
-
-                    body_off = paren_close + 1;
-                    body_len = b;
-                    pp_trim(this.psb.mem, @body_off, @body_len);
-
-                    ent = this.psubs.intern(this.psb.mem + name_off, name_len - name_off);
-                    switch (ent < 0)
-                    {
-                        case (true) {
-                        this.e_begin(PPError.ALLOC);
-                        this.errb.put_str(g"[PREPROCESSOR] allocation failed\0");
-                        -> -1;
-                    }
-                        default {};
-                    };
-                    this.psubs.set_val(ent, this.psb.mem + body_off, body_len - body_off);
-                    this.psubs.set_params(ent, this.pb.mem, this.pb.len, np);
-
-                    switch (this.verbose)
-                    {
-                        case (true) {
-                        this.x1.clear();
-                        this.x1.put_n(this.psb.mem + name_off, name_len - name_off);
-                        this.x1.put(40);
-                        k = 0;
-                        j = 0;
-                        while (j < np)
-                        {
-                            switch (j > 0)
-                            {
-                                case (true) { this.x1.put_str(g", \0"); }
-                                default {};
-                            };
-                            this.x1.put_str(this.pb.mem + k);
-                            k = k + pp_cstrlen(this.pb.mem + k) + 1;
-                            j++;
-                        };
-                        this.x1.put_str(g") = \0");
-                        this.x1.put_n(this.psb.mem + body_off, body_len - body_off);
-                        this.vline(g"[PREPROCESSOR] Defined PSUB: \0", this.x1.mem, this.x1.len, g"\0");
-                    }
-                        default {};
-                    };
-
-                    this.emit_blank(this.cur_lineno);
-                    -> i + 1;
-                }
-                    default {};
-                };
-
-                // #def
-                switch (pp_starts(text, s, e, g"#def\0", 4))
-                {
-                    case (true) {
-                    semi = pp_find(text, lo, hi, 59);
-                    switch (semi == -1)
-                    {
-                        case (true) { semi = hi; }
-                        default {};
-                    };
-                    a = lo;
-                    b = semi;
-                    pp_trim(text, @a, @b);
-                    tcount = 0;
-                    this.tmp.clear();
-                    name_off = 0;
-                    name_len = 0;
-                    nx = a;
-                    while (true)
-                    {
-                        nx = pp_next_tok(text, b, nx, @ts, @te);
-                        switch (nx < 0)
-                        {
-                            case (true) { break; }
-                            default {};
-                        };
-                        switch (tcount == 1)
-                        {
-                            case (true) {
-                            name_off = ts;
-                            name_len = te;
-                        }
-                            default {};
-                        };
-                        switch (tcount >= 2)
-                        {
-                            case (true) {
-                            switch (tcount > 2)
-                            {
-                                case (true) { this.tmp.put(32); }
-                                default {};
-                            };
-                            this.tmp.put_n(text + ts, te - ts);
-                        }
-                            default {};
-                        };
-                        tcount++;
-                    };
-                    switch (tcount >= 3)
-                    {
-                        case (true) {
-                        ent = this.consts.intern(text + name_off, name_len - name_off);
-                        switch (ent < 0)
-                        {
-                            case (true) {
-                            this.e_begin(PPError.ALLOC);
-                            this.errb.put_str(g"[PREPROCESSOR] allocation failed\0");
-                            -> -1;
-                        }
-                            default {};
-                        };
-                        w = this.tmp.len;
-                        switch (w > 0)
-                        {
-                            case (true) {
-                            switch (this.tmp.mem[w - 1] == 59)
-                            {
-                                case (true) {
-                                while (w > 0)
-                                {
-                                    switch (this.tmp.mem[w - 1] != 59)
-                                    {
-                                        case (true) { break; }
-                                        default {};
-                                    };
-                                    w--;
-                                };
-                                a = 0;
-                                b = w;
-                                pp_trim(this.tmp.mem, @a, @b);
-                                this.consts.set_val(ent, this.tmp.mem + a, b - a);
-                            }
-                                default {
-                                this.consts.set_val(ent, this.tmp.mem, w);
-                            };
-                            };
-                        }
-                            default {
-                            this.consts.set_val(ent, this.tmp.mem, 0);
-                        };
-                        };
-                        switch (this.verbose)
-                        {
-                            case (true) {
-                            this.x1.clear();
-                            this.x1.put_n(text + name_off, name_len - name_off);
-                            this.x1.put_str(g" = \0");
-                            this.x1.put_n(this.consts.val_ptr(ent), this.consts.val_len(ent));
-                            this.vline(g"[PREPROCESSOR] Defined constant: \0", this.x1.mem, this.x1.len, g"\0");
-                        }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
-                    this.emit_blank(this.cur_lineno);
-                    -> i + 1;
-                }
-                    default {};
-                };
-
-                // #ifnpsub, #ifpsub, #ifdef, #ifndef. Each needs a second token.
-                switch (pp_starts(text, s, e, g"#ifnpsub\0", 8) | pp_starts(text, s, e, g"#ifpsub\0", 7)
-                    | pp_starts(text, s, e, g"#ifdef\0", 6) | pp_starts(text, s, e, g"#ifndef\0", 7))
-                {
-                    case (true) {
-                    nx = pp_next_tok(text, hi, lo, @ts, @te);
-                    switch (nx >= 0)
-                    {
-                        case (true) { nx = pp_next_tok(text, hi, nx, @ts, @te); }
-                        default {};
-                    };
-                    switch (nx >= 0)
-                    {
-                        case (true) {
-                        switch (pp_starts(text, s, e, g"#ifnpsub\0", 8) | pp_starts(text, s, e, g"#ifpsub\0", 7))
-                        {
-                            case (true) {
-                            k = pp_find(text, ts, te, 40);
-                            switch (k != -1)
-                            {
-                                case (true) { te = k; }
-                                default {};
-                            };
-                            a = ts;
-                            b = te;
-                            pp_trim(text, @a, @b);
-                            -> this.process_conditional(ll, i, a, b - a, pp_starts(text, s, e, g"#ifnpsub\0", 8), true);
-                        }
-                            default {};
-                        };
-                        -> this.process_conditional(ll, i, ts, te - ts, pp_starts(text, s, e, g"#ifndef\0", 7), false);
-                    }
-                        default {};
-                    };
-                }
-                    default {};
-                };
-
-                // #package
-                switch (pp_starts(text, s, e, g"#package\0", 8))
-                {
-                    case (true) {
-                    switch (text[e - 1] != 59)
-                    {
-                        case (true) {
-                        this.e_begin(PPError.SYNTAX);
-                        this.errb.put_str(g"[PREPROCESSOR] #package directive missing semicolon at line \0");
-                        this.errb.put_int(i + 1);
-                        -> -1;
-                    }
-                        default {};
-                    };
-                    a = s + 8;
-                    b = e;
-                    while (b > a)
-                    {
-                        switch (text[b - 1] != 59)
-                        {
-                            case (true) { break; }
-                            default {};
-                        };
-                        b--;
-                    };
-                    pp_trim(text, @a, @b);
-                    j = a;
-                    while (j <= b)
-                    {
-                        k = j;
-                        while (k < b)
-                        {
-                            switch (text[k] == ',')
-                            {
-                                case (true) { break; }
-                                default {};
-                            };
-                            k++;
-                        };
-                        ts = j;
-                        te = k;
-                        pp_trim(text, @ts, @te);
-                        switch (te > ts)
-                        {
-                            case (true) {
-                            switch (!this.process_package(text, ts, te - ts))
-                            {
-                                case (true) { -> -1; }
-                                default {};
-                            };
-                        }
-                            default {};
-                        };
-                        j = k + 1;
-                    };
-                    this.emit_blank(this.cur_lineno);
-                    -> i + 1;
-                }
-                    default {};
-                };
-
-                // #import
-                switch (pp_starts(text, s, e, g"#import\0", 7))
-                {
-                    case (true) {
-                    switch (text[e - 1] != 59)
-                    {
-                        case (true) {
-                        this.e_begin(PPError.SYNTAX);
-                        this.errb.put_str(g"[PREPROCESSOR] #import directive missing semicolon at line \0");
-                        this.errb.put_int(i + 1);
-                        -> -1;
-                    }
-                        default {};
-                    };
-                    a = s + 7;
-                    b = e;
-                    while (b > a)
-                    {
-                        switch (text[b - 1] != 59)
-                        {
-                            case (true) { break; }
-                            default {};
-                        };
-                        b--;
-                    };
-                    pp_trim(text, @a, @b);
-                    j = a;
-                    while (j < b)
-                    {
-                        k = (int)text[j];
-                        switch (k)
-                        {
-                            case ('<')
-                            {
-                                j++;
-                                q2 = pp_find(text, j, b, '>');
-                                switch (q2 == -1)
-                                {
-                                    case (true) {
-                                    this.e_begin(PPError.SYNTAX);
-                                    this.errb.put_str(g"[PREPROCESSOR] Unterminated <> in #import at line \0");
-                                    this.errb.put_int(i + 1);
-                                    -> -1;
-                                }
-                                    default {};
-                                };
-                                ts = j;
-                                te = q2;
-                                pp_trim(text, @ts, @te);
-                                switch (this.verbose)
-                                {
-                                    case (true) { this.vline(g"[PREPROCESSOR] Stdlib import: \0", text + ts, te - ts, g"\0"); }
-                                    default {};
-                                };
-                                switch (!this.process_file(text + ts, te - ts, 2))
-                                {
-                                    case (true) { -> -1; }
-                                    default {};
-                                };
-                                j = q2 + 1;
-                            }
-                            case (34)
-                            {
-                                j++;
-                                q2 = pp_find(text, j, b, 34);
-                                switch (q2 == -1)
-                                {
-                                    case (true) {
-                                    this.e_begin(PPError.SYNTAX);
-                                    this.errb.put_str(g"[PREPROCESSOR] Unterminated \"\" in #import at line \0");
-                                    this.errb.put_int(i + 1);
-                                    -> -1;
-                                }
-                                    default {};
-                                };
-                                ts = j;
-                                te = q2;
-                                pp_trim(text, @ts, @te);
-                                switch (this.verbose)
-                                {
-                                    case (true) { this.vline(g"[PREPROCESSOR] Local import: \0", text + ts, te - ts, g"\0"); }
-                                    default {};
-                                };
-                                switch (!this.process_file(text + ts, te - ts, 1))
-                                {
-                                    case (true) { -> -1; }
-                                    default {};
-                                };
-                                j = q2 + 1;
-                            }
                             default
                             {
-                                j++;
+                                // #psub
+                                switch (pp_starts(text, s, e, g"#psub\0", 5))
+                                {
+                                    case (true) {
+                                    a = s + 5;
+                                    b = e;
+                                    pp_trim(text, @a, @b);
+                                    this.psb.clear();
+                                    this.psb.put_n(text + a, b - a);
+                                    more = true;
+                                    while (more)
+                                    {
+                                        more = false;
+                                        switch (this.psb.len > 0)
+                                        {
+                                            case (true) {
+                                            switch (this.psb.mem[this.psb.len - 1] == '#')
+                                            {
+                                                case (true) { more = true; }
+                                                default {};
+                                            };
+                                        }
+                                            default {};
+                                        };
+                                        switch (!more)
+                                        {
+                                            case (true) { break; }
+                                            default {};
+                                        };
+                                        this.psb.pop();
+                                        i++;
+                                        switch (i >= ll.n)
+                                        {
+                                            case (true) { break; }
+                                            default {};
+                                        };
+                                        this.emit_blank(this.cur_lineno);
+                                        this.cur_lineno = i + 1;
+                                        this.psb.rstrip_ws();
+                                        this.psb.put(32);
+                                        a = ll.off[i];
+                                        b = a + ll.len[i];
+                                        pp_trim(text, @a, @b);
+                                        this.psb.put_n(text + a, b - a);
+                                    };
+
+                                    // rest = collected.strip()
+                                    a = 0;
+                                    b = this.psb.len;
+                                    pp_trim(this.psb.mem, @a, @b);
+                                    paren_open = pp_find(this.psb.mem, a, b, 40);
+                                    switch (paren_open == -1)
+                                    {
+                                        case (true) {
+                                        this.e_begin(PPError.SYNTAX);
+                                        this.errb.put_str(g"[PREPROCESSOR] #psub missing parameter list at line \0");
+                                        this.errb.put_int(i + 1);
+                                        -> -1;
+                                    }
+                                        default {};
+                                    };
+                                    name_off = a;
+                                    name_len = paren_open;
+                                    pp_trim(this.psb.mem, @name_off, @name_len);
+                                    paren_close = pp_find(this.psb.mem, paren_open, b, 41);
+                                    switch (paren_close == -1)
+                                    {
+                                        case (true) {
+                                        this.e_begin(PPError.SYNTAX);
+                                        this.errb.put_str(g"[PREPROCESSOR] #psub unclosed parameter list at line \0");
+                                        this.errb.put_int(i + 1);
+                                        -> -1;
+                                    }
+                                        default {};
+                                    };
+
+                                    // params = [p.strip() for p in raw_params.split(',') if p.strip()]
+                                    this.pb.clear();
+                                    np = 0;
+                                    j = paren_open + 1;
+                                    while (j <= paren_close)
+                                    {
+                                        k = j;
+                                        while (k < paren_close)
+                                        {
+                                            switch (this.psb.mem[k] == ',')
+                                            {
+                                                case (true) { break; }
+                                                default {};
+                                            };
+                                            k++;
+                                        };
+                                        ts = j;
+                                        te = k;
+                                        pp_trim(this.psb.mem, @ts, @te);
+                                        switch (te > ts)
+                                        {
+                                            case (true) {
+                                            this.pb.put_n(this.psb.mem + ts, te - ts);
+                                            this.pb.put(0);
+                                            np++;
+                                        }
+                                            default {};
+                                        };
+                                        j = k + 1;
+                                    };
+
+                                    body_off = paren_close + 1;
+                                    body_len = b;
+                                    pp_trim(this.psb.mem, @body_off, @body_len);
+
+                                    ent = this.psubs.intern(this.psb.mem + name_off, name_len - name_off);
+                                    switch (ent < 0)
+                                    {
+                                        case (true) {
+                                        this.e_begin(PPError.ALLOC);
+                                        this.errb.put_str(g"[PREPROCESSOR] allocation failed\0");
+                                        -> -1;
+                                    }
+                                        default {};
+                                    };
+                                    this.psubs.set_val(ent, this.psb.mem + body_off, body_len - body_off);
+                                    this.psubs.set_params(ent, this.pb.mem, this.pb.len, np);
+
+                                    switch (this.verbose)
+                                    {
+                                        case (true) {
+                                        this.x1.clear();
+                                        this.x1.put_n(this.psb.mem + name_off, name_len - name_off);
+                                        this.x1.put(40);
+                                        k = 0;
+                                        j = 0;
+                                        while (j < np)
+                                        {
+                                            switch (j > 0)
+                                            {
+                                                case (true) { this.x1.put_str(g", \0"); }
+                                                default {};
+                                            };
+                                            this.x1.put_str(this.pb.mem + k);
+                                            k = k + pp_cstrlen(this.pb.mem + k) + 1;
+                                            j++;
+                                        };
+                                        this.x1.put_str(g") = \0");
+                                        this.x1.put_n(this.psb.mem + body_off, body_len - body_off);
+                                        this.vline(g"[PREPROCESSOR] Defined PSUB: \0", this.x1.mem, this.x1.len, g"\0");
+                                    }
+                                        default {};
+                                    };
+
+                                    this.emit_blank(this.cur_lineno);
+                                    -> i + 1;
+                                }
+                                    default
+                                    {
+                                        // #def
+                                        switch (pp_starts(text, s, e, g"#def\0", 4))
+                                        {
+                                            case (true) {
+                                            semi = pp_find(text, lo, hi, 59);
+                                            switch (semi == -1)
+                                            {
+                                                case (true) { semi = hi; }
+                                                default {};
+                                            };
+                                            a = lo;
+                                            b = semi;
+                                            pp_trim(text, @a, @b);
+                                            tcount = 0;
+                                            this.tmp.clear();
+                                            name_off = 0;
+                                            name_len = 0;
+                                            nx = a;
+                                            while (true)
+                                            {
+                                                nx = pp_next_tok(text, b, nx, @ts, @te);
+                                                switch (nx < 0)
+                                                {
+                                                    case (true) { break; }
+                                                    default {};
+                                                };
+                                                switch (tcount == 1)
+                                                {
+                                                    case (true) {
+                                                    name_off = ts;
+                                                    name_len = te;
+                                                }
+                                                    default {};
+                                                };
+                                                switch (tcount >= 2)
+                                                {
+                                                    case (true) {
+                                                    switch (tcount > 2)
+                                                    {
+                                                        case (true) { this.tmp.put(32); }
+                                                        default {};
+                                                    };
+                                                    this.tmp.put_n(text + ts, te - ts);
+                                                }
+                                                    default {};
+                                                };
+                                                tcount++;
+                                            };
+                                            switch (tcount >= 3)
+                                            {
+                                                case (true) {
+                                                ent = this.consts.intern(text + name_off, name_len - name_off);
+                                                switch (ent < 0)
+                                                {
+                                                    case (true) {
+                                                    this.e_begin(PPError.ALLOC);
+                                                    this.errb.put_str(g"[PREPROCESSOR] allocation failed\0");
+                                                    -> -1;
+                                                }
+                                                    default {};
+                                                };
+                                                w = this.tmp.len;
+                                                switch (w > 0)
+                                                {
+                                                    case (true) {
+                                                    switch (this.tmp.mem[w - 1] == 59)
+                                                    {
+                                                        case (true) {
+                                                        while (w > 0)
+                                                        {
+                                                            switch (this.tmp.mem[w - 1] != 59)
+                                                            {
+                                                                case (true) { break; }
+                                                                default {};
+                                                            };
+                                                            w--;
+                                                        };
+                                                        a = 0;
+                                                        b = w;
+                                                        pp_trim(this.tmp.mem, @a, @b);
+                                                        this.consts.set_val(ent, this.tmp.mem + a, b - a);
+                                                    }
+                                                        default {
+                                                        this.consts.set_val(ent, this.tmp.mem, w);
+                                                    };
+                                                    };
+                                                }
+                                                    default {
+                                                    this.consts.set_val(ent, this.tmp.mem, 0);
+                                                };
+                                                };
+                                                switch (this.verbose)
+                                                {
+                                                    case (true) {
+                                                    this.x1.clear();
+                                                    this.x1.put_n(text + name_off, name_len - name_off);
+                                                    this.x1.put_str(g" = \0");
+                                                    this.x1.put_n(this.consts.val_ptr(ent), this.consts.val_len(ent));
+                                                    this.vline(g"[PREPROCESSOR] Defined constant: \0", this.x1.mem, this.x1.len, g"\0");
+                                                }
+                                                    default {};
+                                                };
+                                            }
+                                                default {};
+                                            };
+                                            this.emit_blank(this.cur_lineno);
+                                            -> i + 1;
+                                        }
+                                            default
+                                            {
+                                                // #ifnpsub, #ifpsub, #ifdef, #ifndef. Each needs a second token.
+                                                switch (pp_starts(text, s, e, g"#ifnpsub\0", 8) | pp_starts(text, s, e, g"#ifpsub\0", 7)
+                                                    | pp_starts(text, s, e, g"#ifdef\0", 6) | pp_starts(text, s, e, g"#ifndef\0", 7))
+                                                {
+                                                    case (true) {
+                                                    nx = pp_next_tok(text, hi, lo, @ts, @te);
+                                                    switch (nx >= 0)
+                                                    {
+                                                        case (true) { nx = pp_next_tok(text, hi, nx, @ts, @te); }
+                                                        default {};
+                                                    };
+                                                    switch (nx >= 0)
+                                                    {
+                                                        case (true) {
+                                                        switch (pp_starts(text, s, e, g"#ifnpsub\0", 8) | pp_starts(text, s, e, g"#ifpsub\0", 7))
+                                                        {
+                                                            case (true) {
+                                                            k = pp_find(text, ts, te, 40);
+                                                            switch (k != -1)
+                                                            {
+                                                                case (true) { te = k; }
+                                                                default {};
+                                                            };
+                                                            a = ts;
+                                                            b = te;
+                                                            pp_trim(text, @a, @b);
+                                                            -> this.process_conditional(ll, i, a, b - a, pp_starts(text, s, e, g"#ifnpsub\0", 8), true);
+                                                        }
+                                                            default
+                                                            {
+                                                                -> this.process_conditional(ll, i, ts, te - ts, pp_starts(text, s, e, g"#ifndef\0", 7), false);
+                                                            };
+                                                        };
+                                                    }
+                                                        default {};
+                                                    };
+                                                }
+                                                    default {};
+                                                };
+
+                                                // #package
+                                                switch (pp_starts(text, s, e, g"#package\0", 8))
+                                                {
+                                                    case (true) {
+                                                    switch (text[e - 1] != 59)
+                                                    {
+                                                        case (true) {
+                                                        this.e_begin(PPError.SYNTAX);
+                                                        this.errb.put_str(g"[PREPROCESSOR] #package directive missing semicolon at line \0");
+                                                        this.errb.put_int(i + 1);
+                                                        -> -1;
+                                                    }
+                                                        default {};
+                                                    };
+                                                    a = s + 8;
+                                                    b = e;
+                                                    while (b > a)
+                                                    {
+                                                        switch (text[b - 1] != 59)
+                                                        {
+                                                            case (true) { break; }
+                                                            default {};
+                                                        };
+                                                        b--;
+                                                    };
+                                                    pp_trim(text, @a, @b);
+                                                    j = a;
+                                                    while (j <= b)
+                                                    {
+                                                        k = j;
+                                                        while (k < b)
+                                                        {
+                                                            switch (text[k] == ',')
+                                                            {
+                                                                case (true) { break; }
+                                                                default {};
+                                                            };
+                                                            k++;
+                                                        };
+                                                        ts = j;
+                                                        te = k;
+                                                        pp_trim(text, @ts, @te);
+                                                        switch (te > ts)
+                                                        {
+                                                            case (true) {
+                                                            switch (!this.process_package(text, ts, te - ts))
+                                                            {
+                                                                case (true) { -> -1; }
+                                                                default {};
+                                                            };
+                                                        }
+                                                            default {};
+                                                        };
+                                                        j = k + 1;
+                                                    };
+                                                    this.emit_blank(this.cur_lineno);
+                                                    -> i + 1;
+                                                }
+                                                    default
+                                                    {
+                                                        // #import
+                                                        switch (pp_starts(text, s, e, g"#import\0", 7))
+                                                        {
+                                                            case (true) {
+                                                            switch (text[e - 1] != 59)
+                                                            {
+                                                                case (true) {
+                                                                this.e_begin(PPError.SYNTAX);
+                                                                this.errb.put_str(g"[PREPROCESSOR] #import directive missing semicolon at line \0");
+                                                                this.errb.put_int(i + 1);
+                                                                -> -1;
+                                                            }
+                                                                default {};
+                                                            };
+                                                            a = s + 7;
+                                                            b = e;
+                                                            while (b > a)
+                                                            {
+                                                                switch (text[b - 1] != 59)
+                                                                {
+                                                                    case (true) { break; }
+                                                                    default {};
+                                                                };
+                                                                b--;
+                                                            };
+                                                            pp_trim(text, @a, @b);
+                                                            j = a;
+                                                            while (j < b)
+                                                            {
+                                                                k = (int)text[j];
+                                                                switch (k)
+                                                                {
+                                                                    case ('<')
+                                                                    {
+                                                                        j++;
+                                                                        q2 = pp_find(text, j, b, '>');
+                                                                        switch (q2 == -1)
+                                                                        {
+                                                                            case (true) {
+                                                                            this.e_begin(PPError.SYNTAX);
+                                                                            this.errb.put_str(g"[PREPROCESSOR] Unterminated <> in #import at line \0");
+                                                                            this.errb.put_int(i + 1);
+                                                                            -> -1;
+                                                                        }
+                                                                            default {};
+                                                                        };
+                                                                        ts = j;
+                                                                        te = q2;
+                                                                        pp_trim(text, @ts, @te);
+                                                                        switch (this.verbose)
+                                                                        {
+                                                                            case (true) { this.vline(g"[PREPROCESSOR] Stdlib import: \0", text + ts, te - ts, g"\0"); }
+                                                                            default {};
+                                                                        };
+                                                                        switch (!this.process_file(text + ts, te - ts, 2))
+                                                                        {
+                                                                            case (true) { -> -1; }
+                                                                            default {};
+                                                                        };
+                                                                        j = q2 + 1;
+                                                                    }
+                                                                    case (34)
+                                                                    {
+                                                                        j++;
+                                                                        q2 = pp_find(text, j, b, 34);
+                                                                        switch (q2 == -1)
+                                                                        {
+                                                                            case (true) {
+                                                                            this.e_begin(PPError.SYNTAX);
+                                                                            this.errb.put_str(g"[PREPROCESSOR] Unterminated \"\" in #import at line \0");
+                                                                            this.errb.put_int(i + 1);
+                                                                            -> -1;
+                                                                        }
+                                                                            default {};
+                                                                        };
+                                                                        ts = j;
+                                                                        te = q2;
+                                                                        pp_trim(text, @ts, @te);
+                                                                        switch (this.verbose)
+                                                                        {
+                                                                            case (true) { this.vline(g"[PREPROCESSOR] Local import: \0", text + ts, te - ts, g"\0"); }
+                                                                            default {};
+                                                                        };
+                                                                        switch (!this.process_file(text + ts, te - ts, 1))
+                                                                        {
+                                                                            case (true) { -> -1; }
+                                                                            default {};
+                                                                        };
+                                                                        j = q2 + 1;
+                                                                    }
+                                                                    default
+                                                                    {
+                                                                        j++;
+                                                                    };
+                                                                };
+                                                            };
+                                                            this.emit_blank(this.cur_lineno);
+                                                            -> i + 1;
+                                                        }
+                                                            default
+                                                            {
+                                                                // #warn
+                                                                switch (pp_starts(text, s, e, g"#warn\0", 5))
+                                                                {
+                                                                    case (true) {
+                                                                    switch (text[e - 1] != 59)
+                                                                    {
+                                                                        case (true) {
+                                                                        this.e_begin(PPError.SYNTAX);
+                                                                        this.errb.put_str(g"[PREPROCESSOR] #warn directive missing semicolon at line \0");
+                                                                        this.errb.put_int(i + 1);
+                                                                        -> -1;
+                                                                    }
+                                                                        default {};
+                                                                    };
+                                                                    q1 = pp_find(text, lo, hi, 34);
+                                                                    switch (q1 != -1)
+                                                                    {
+                                                                        case (true) {
+                                                                        q2 = pp_find(text, q1 + 1, hi, 34);
+                                                                        switch (q2 != -1)
+                                                                        {
+                                                                            case (true) {
+                                                                            this.vline(g"[PREPROCESSOR] \0", text + q1 + 1, q2 - q1 - 1, g"\0");
+                                                                        }
+                                                                            default {};
+                                                                        };
+                                                                    }
+                                                                        default {};
+                                                                    };
+                                                                    this.emit_blank(this.cur_lineno);
+                                                                    -> i + 1;
+                                                                }
+                                                                    default
+                                                                    {
+                                                                        // #stop
+                                                                        switch (pp_starts(text, s, e, g"#stop\0", 5))
+                                                                        {
+                                                                            case (true) {
+                                                                            switch (text[e - 1] != 59)
+                                                                            {
+                                                                                case (true) {
+                                                                                this.e_begin(PPError.SYNTAX);
+                                                                                this.errb.put_str(g"[PREPROCESSOR] #stop directive missing semicolon at line \0");
+                                                                                this.errb.put_int(i + 1);
+                                                                                -> -1;
+                                                                            }
+                                                                                default {};
+                                                                            };
+                                                                            q1 = pp_find(text, lo, hi, 34);
+                                                                            switch (q1 != -1)
+                                                                            {
+                                                                                case (true) {
+                                                                                q2 = pp_find(text, q1 + 1, hi, 34);
+                                                                                switch (q2 != -1)
+                                                                                {
+                                                                                    case (true) {
+                                                                                    this.vline(g"[PREPROCESSOR] \0", text + q1 + 1, q2 - q1 - 1, g"\0");
+                                                                                }
+                                                                                    default {};
+                                                                                };
+                                                                            }
+                                                                                default {};
+                                                                            };
+                                                                            standard::io::console::println(g"Compilation failed, preprocessor stopped by constant.\0");
+                                                                            this.e_begin(PPError.STOP);
+                                                                            -> -1;
+                                                                        }
+                                                                            default
+                                                                            {
+                                                                                // #endif;
+                                                                                switch (pp_starts(text, s, e, g"#endif;\0", 7))
+                                                                                {
+                                                                                    case (true) {
+                                                                                    this.emit_blank(this.cur_lineno);
+                                                                                    -> i + 1;
+                                                                                }
+                                                                                    default
+                                                                                    {
+                                                                                        // #else
+                                                                                        switch (e - s == 5)
+                                                                                        {
+                                                                                            case (true) {
+                                                                                            switch (pp_eq(text + s, g"#else\0", 5))
+                                                                                            {
+                                                                                                case (true) {
+                                                                                                this.emit_blank(this.cur_lineno);
+                                                                                                -> i + 1;
+                                                                                            }
+                                                                                                default {};
+                                                                                            };
+                                                                                        }
+                                                                                            default {};
+                                                                                        };
+
+                                                                                        // Regular line
+                                                                                        switch (!this.substitute_constants(text + lo, hi - lo))
+                                                                                        {
+                                                                                            case (true) { -> -1; }
+                                                                                            default
+                                                                                            {
+                                                                                                this.emit(this.sub_ptr, this.sub_len, this.cur_lineno);
+                                                                                                -> i + 1;
+                                                                                            };
+                                                                                        };
+                                                                                    };
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
                             };
                         };
                     };
-                    this.emit_blank(this.cur_lineno);
-                    -> i + 1;
-                }
-                    default {};
                 };
-
-                // #warn
-                switch (pp_starts(text, s, e, g"#warn\0", 5))
-                {
-                    case (true) {
-                    switch (text[e - 1] != 59)
-                    {
-                        case (true) {
-                        this.e_begin(PPError.SYNTAX);
-                        this.errb.put_str(g"[PREPROCESSOR] #warn directive missing semicolon at line \0");
-                        this.errb.put_int(i + 1);
-                        -> -1;
-                    }
-                        default {};
-                    };
-                    q1 = pp_find(text, lo, hi, 34);
-                    switch (q1 != -1)
-                    {
-                        case (true) {
-                        q2 = pp_find(text, q1 + 1, hi, 34);
-                        switch (q2 != -1)
-                        {
-                            case (true) {
-                            this.vline(g"[PREPROCESSOR] \0", text + q1 + 1, q2 - q1 - 1, g"\0");
-                        }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
-                    this.emit_blank(this.cur_lineno);
-                    -> i + 1;
-                }
-                    default {};
-                };
-
-                // #stop
-                switch (pp_starts(text, s, e, g"#stop\0", 5))
-                {
-                    case (true) {
-                    switch (text[e - 1] != 59)
-                    {
-                        case (true) {
-                        this.e_begin(PPError.SYNTAX);
-                        this.errb.put_str(g"[PREPROCESSOR] #stop directive missing semicolon at line \0");
-                        this.errb.put_int(i + 1);
-                        -> -1;
-                    }
-                        default {};
-                    };
-                    q1 = pp_find(text, lo, hi, 34);
-                    switch (q1 != -1)
-                    {
-                        case (true) {
-                        q2 = pp_find(text, q1 + 1, hi, 34);
-                        switch (q2 != -1)
-                        {
-                            case (true) {
-                            this.vline(g"[PREPROCESSOR] \0", text + q1 + 1, q2 - q1 - 1, g"\0");
-                        }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
-                    standard::io::console::println(g"Compilation failed, preprocessor stopped by constant.\0");
-                    this.e_begin(PPError.STOP);
-                    -> -1;
-                }
-                    default {};
-                };
-
-                // #endif;
-                switch (pp_starts(text, s, e, g"#endif;\0", 7))
-                {
-                    case (true) {
-                    this.emit_blank(this.cur_lineno);
-                    -> i + 1;
-                }
-                    default {};
-                };
-
-                // #else
-                switch (e - s == 5)
-                {
-                    case (true) {
-                    switch (pp_eq(text + s, g"#else\0", 5))
-                    {
-                        case (true) {
-                        this.emit_blank(this.cur_lineno);
-                        -> i + 1;
-                    }
-                        default {};
-                    };
-                }
-                    default {};
-                };
-
-                // Regular line
-                switch (!this.substitute_constants(text + lo, hi - lo))
-                {
-                    case (true) { -> -1; }
-                    default {};
-                };
-                this.emit(this.sub_ptr, this.sub_len, this.cur_lineno);
-                -> i + 1;
             };
 
             // ===== CONDITIONALS =====
@@ -3382,9 +3561,11 @@ namespace flux
                 switch (invert)
                 {
                     case (true) { -> !defined; }
-                    default {};
+                    default
+                    {
+                        -> defined;
+                    };
                 };
-                -> defined;
             };
 
             // FXPreprocessor._parse_ifdef_condition on text[lo, hi). On success the
@@ -3408,9 +3589,11 @@ namespace flux
                         switch (w == 0)
                         {
                             case (true) { break; }
-                            default {};
+                            default
+                            {
+                                p = p + w;
+                            };
                         };
-                        p = p + w;
                     };
                 }
                     default {};
@@ -3425,9 +3608,11 @@ namespace flux
                         switch (w == 0)
                         {
                             case (true) { break; }
-                            default {};
+                            default
+                            {
+                                p = p + w;
+                            };
                         };
-                        p = p + w;
                     };
                     switch (pp_at(text, hi, p) == '(')
                     {
@@ -3439,9 +3624,11 @@ namespace flux
                             switch (w == 0)
                             {
                                 case (true) { break; }
-                                default {};
+                                default
+                                {
+                                    p = p + w;
+                                };
                             };
-                            p = p + w;
                         };
                         q = p;
                         while (q < hi)
@@ -3449,9 +3636,11 @@ namespace flux
                             switch (!pp_is_word((int)text[q]))
                             {
                                 case (true) { break; }
-                                default {};
+                                default
+                                {
+                                    q++;
+                                };
                             };
-                            q++;
                         };
                         switch (q > p)
                         {
@@ -3463,9 +3652,11 @@ namespace flux
                                 switch (w == 0)
                                 {
                                     case (true) { break; }
-                                    default {};
+                                    default
+                                    {
+                                        n = n + w;
+                                    };
                                 };
-                                n = n + w;
                             };
                             switch (pp_at(text, hi, n) == ')')
                             {
@@ -3508,9 +3699,11 @@ namespace flux
                             ok3 = false;
                             break;
                         }
-                            default {};
+                            default
+                            {
+                                p++;
+                            };
                         };
-                        p++;
                     };
                 }
                     default {};
@@ -3523,16 +3716,15 @@ namespace flux
                     this.pc_inv = false;
                     -> true;
                 }
-                    default {};
+                    default
+                    {
+                        this.e_begin(PPError.SYNTAX);
+                        this.errb.put_str(g"[PREPROCESSOR] Unsupported #elif condition '\0");
+                        this.errb.put_n(text + lo, hi - lo);
+                        this.errb.put_str(f"' at line {lineno}. Only 'SYMBOL', 'defined(SYMBOL)', and '!defined(SYMBOL)' are supported.\0");
+                        -> false;
+                    };
                 };
-
-                this.e_begin(PPError.SYNTAX);
-                this.errb.put_str(g"[PREPROCESSOR] Unsupported #elif condition '\0");
-                this.errb.put_n(text + lo, hi - lo);
-                this.errb.put_str(g"' at line \0");
-                this.errb.put_int(lineno);
-                this.errb.put_str(g". Only 'SYMBOL', 'defined(SYMBOL)', and '!defined(SYMBOL)' are supported.\0");
-                -> false;
             };
 
             // FXPreprocessor._process_conditional_block. The condition name is
@@ -3699,92 +3891,96 @@ namespace flux
                         i++;
                         continue;
                     }
-                        default {};
-                    };
-
-                    switch (depth == 1)
-                    {
-                        case (true) {
-                        switch (pp_starts(text, s, e, g"#elif\0", 5))
+                        default
                         {
-                            case (true) {
-                            switch (has_else)
+                            switch (depth == 1)
                             {
                                 case (true) {
-                                this.e_begin(PPError.SYNTAX);
-                                this.errb.put_str(g"[PREPROCESSOR] #elif after #else at line \0");
-                                this.errb.put_int(i + 1);
-                                -> -1;
-                            }
-                                default {};
-                            };
-                            a = s + 5;
-                            b = e;
-                            while (b > a)
-                            {
-                                switch (text[b - 1] != 59)
+                                switch (pp_starts(text, s, e, g"#elif\0", 5))
                                 {
-                                    case (true) { break; }
-                                    default {};
+                                    case (true) {
+                                    switch (has_else)
+                                    {
+                                        case (true) {
+                                        this.e_begin(PPError.SYNTAX);
+                                        this.errb.put_str(g"[PREPROCESSOR] #elif after #else at line \0");
+                                        this.errb.put_int(i + 1);
+                                        -> -1;
+                                    }
+                                        default {};
+                                    };
+                                    a = s + 5;
+                                    b = e;
+                                    while (b > a)
+                                    {
+                                        switch (text[b - 1] != 59)
+                                        {
+                                            case (true) { break; }
+                                            default {};
+                                        };
+                                        b--;
+                                    };
+                                    pp_trim(text, @a, @b);
+                                    switch (!this.parse_condition(text, a, b, i + 1))
+                                    {
+                                        case (true) { -> -1; }
+                                        default {};
+                                    };
+                                    b_start.push(c_off.len);
+                                    b_name.push(this.pc_off);
+                                    b_nlen.push(this.pc_len);
+                                    switch (this.pc_inv)
+                                    {
+                                        case (true) { b_inv.push(1); }
+                                        default { b_inv.push(0); };
+                                    };
+                                    b_always.push(0);
+                                    this.emit_blank(orig);
+                                    i++;
+                                    continue;
+                                }
+                                    default
+                                    {
+                                        w = e - s;
+                                        switch (pp_eq(text + s, g"#else\0", 5) & w == 5 | pp_eq(text + s, g"#else;\0", 6) & w == 6)
+                                        {
+                                            case (true) {
+                                            switch (has_else)
+                                            {
+                                                case (true) {
+                                                this.e_begin(PPError.SYNTAX);
+                                                this.errb.put_str(g"[PREPROCESSOR] Multiple #else in same conditional block at line \0");
+                                                this.errb.put_int(i + 1);
+                                                -> -1;
+                                            }
+                                                default
+                                                {
+                                                    has_else = true;
+                                                    b_start.push(c_off.len);
+                                                    b_name.push(0);
+                                                    b_nlen.push(0);
+                                                    b_inv.push(0);
+                                                    b_always.push(1);
+                                                    this.emit_blank(orig);
+                                                    i++;
+                                                    continue;
+                                                };
+                                            };
+                                        }
+                                            default {};
+                                        };
+                                    };
                                 };
-                                b--;
-                            };
-                            pp_trim(text, @a, @b);
-                            switch (!this.parse_condition(text, a, b, i + 1))
-                            {
-                                case (true) { -> -1; }
-                                default {};
-                            };
-                            b_start.push(c_off.len);
-                            b_name.push(this.pc_off);
-                            b_nlen.push(this.pc_len);
-                            switch (this.pc_inv)
-                            {
-                                case (true) { b_inv.push(1); }
-                                default { b_inv.push(0); };
-                            };
-                            b_always.push(0);
-                            this.emit_blank(orig);
-                            i++;
-                            continue;
-                        }
-                            default {};
-                        };
-
-                        w = e - s;
-                        switch (pp_eq(text + s, g"#else\0", 5) & w == 5 | pp_eq(text + s, g"#else;\0", 6) & w == 6)
-                        {
-                            case (true) {
-                            switch (has_else)
-                            {
-                                case (true) {
-                                this.e_begin(PPError.SYNTAX);
-                                this.errb.put_str(g"[PREPROCESSOR] Multiple #else in same conditional block at line \0");
-                                this.errb.put_int(i + 1);
-                                -> -1;
                             }
                                 default {};
                             };
-                            has_else = true;
-                            b_start.push(c_off.len);
-                            b_name.push(0);
-                            b_nlen.push(0);
-                            b_inv.push(0);
-                            b_always.push(1);
-                            this.emit_blank(orig);
-                            i++;
-                            continue;
-                        }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
 
-                    c_off.push(lo);
-                    c_len.push(hi - lo);
-                    c_orig.push(orig);
-                    i++;
+                            c_off.push(lo);
+                            c_len.push(hi - lo);
+                            c_orig.push(orig);
+                            i++;
+                        };
+                    };
                 };
 
                 this.e_begin(PPError.SYNTAX);
@@ -3815,150 +4011,210 @@ namespace flux
                         i++;
                         continue;
                     }
-                        default {};
-                    };
-
-                    j = i;
-                    while (j < n)
-                    {
-                        switch (!pp_is_word((int)src[j]))
+                        default
                         {
-                            case (true) { break; }
-                            default {};
-                        };
-                        j++;
-                    };
-
-                    ent = this.psubs.find(src + i, j - i);
-                    switch (ent < 0)
-                    {
-                        case (true) {
-                        this.mc.put_n(src + i, j - i);
-                        i = j;
-                        continue;
-                    }
-                        default {};
-                    };
-                    switch (pp_at(src, n, j) != '(')
-                    {
-                        case (true) {
-                        this.mc.put_n(src + i, j - i);
-                        i = j;
-                        continue;
-                    }
-                        default {};
-                    };
-
-                    // matching close paren, respecting nesting and strings
-                    k = j + 1;
-                    depth = 1;
-                    in_str = false;
-                    str_char = 0;
-                    while (k < n & depth > 0)
-                    {
-                        c = (int)src[k];
-                        switch (in_str)
-                        {
-                            case (true) {
-                            switch (c == 92)
+                            j = i;
+                            while (j < n)
                             {
-                                case (true) { k++; }
-                                default {
-                                    switch (c == str_char)
+                                switch (!pp_is_word((int)src[j]))
+                                {
+                                    case (true) { break; }
+                                    default
                                     {
-                                        case (true) { in_str = false; }
-                                        default {};
+                                        j++;
                                     };
                                 };
                             };
-                        }
-                            default {
-                            switch (c == 34 | c == 39)
+
+                            ent = this.psubs.find(src + i, j - i);
+                            switch (ent < 0)
                             {
                                 case (true) {
-                                in_str = true;
-                                str_char = c;
+                                this.mc.put_n(src + i, j - i);
+                                i = j;
+                                continue;
                             }
-                                default {
-                                    switch (c == '(')
-                                    {
-                                        case (true) { depth++; }
-                                        default {
-                                            switch (c == ')')
-                                            {
-                                                case (true) { depth--; }
-                                                default {};
-                                            };
-                                        };
-                                    };
-                                };
-                            };
-                        };
-                        };
-                        k++;
-                    };
-
-                    rs = j + 1;
-                    re = k - 1;
-                    switch (re > n)
-                    {
-                        case (true) { re = n; }
-                        default {};
-                    };
-                    switch (re < rs)
-                    {
-                        case (true) { re = rs; }
-                        default {};
-                    };
-
-                    // _split_macro_args
-                    this.aoff.clear();
-                    this.alen.clear();
-                    depth = 0;
-                    in_str = false;
-                    str_char = 0;
-                    cstart = rs;
-                    na = 0;
-                    p = rs;
-                    while (p < re)
-                    {
-                        c = (int)src[p];
-                        switch (in_str)
-                        {
-                            case (true) {
-                            switch (c == str_char)
-                            {
-                                case (true) { in_str = false; }
-                                default {};
-                            };
-                        }
-                            default {
-                                switch (c == 34 | c == 39)
+                                default
                                 {
-                                    case (true) {
-                            in_str = true;
-                            str_char = c;
-                        }
-                                    default {
-                                        switch (c == '(')
+                                    switch (pp_at(src, n, j) != '(')
+                                    {
+                                        case (true) {
+                                        this.mc.put_n(src + i, j - i);
+                                        i = j;
+                                        continue;
+                                    }
+                                        default
                                         {
-                                            case (true) { depth++; }
-                                            default {
-                                                switch (c == ')')
+                                            // matching close paren, respecting nesting and strings
+                                            k = j + 1;
+                                            depth = 1;
+                                            in_str = false;
+                                            str_char = 0;
+                                            while (k < n & depth > 0)
+                                            {
+                                                c = (int)src[k];
+                                                switch (in_str)
                                                 {
-                                                    case (true) { depth--; }
-                                                    default {
-                                                        switch (c == ',' & depth == 0)
-                                                        {
-                                                            case (true) {
-                            this.aoff.push(cstart);
-                            this.alen.push(p - cstart);
-                            na++;
-                            cstart = p + 1;
-                        }
-                                                            default {};
+                                                    case (true) {
+                                                    switch (c == 92)
+                                                    {
+                                                        case (true) { k++; }
+                                                        default {
+                                                            switch (c == str_char)
+                                                            {
+                                                                case (true) { in_str = false; }
+                                                                default {};
+                                                            };
                                                         };
                                                     };
+                                                }
+                                                    default {
+                                                    switch (c == 34 | c == 39)
+                                                    {
+                                                        case (true) {
+                                                        in_str = true;
+                                                        str_char = c;
+                                                    }
+                                                        default {
+                                                            switch (c == '(')
+                                                            {
+                                                                case (true) { depth++; }
+                                                                default {
+                                                                    switch (c == ')')
+                                                                    {
+                                                                        case (true) { depth--; }
+                                                                        default {};
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                                };
+                                                k++;
+                                            };
+
+                                            rs = j + 1;
+                                            re = k - 1;
+                                            switch (re > n)
+                                            {
+                                                case (true) { re = n; }
+                                                default {};
+                                            };
+                                            switch (re < rs)
+                                            {
+                                                case (true) { re = rs; }
+                                                default {};
+                                            };
+
+                                            // _split_macro_args
+                                            this.aoff.clear();
+                                            this.alen.clear();
+                                            depth = 0;
+                                            in_str = false;
+                                            str_char = 0;
+                                            cstart = rs;
+                                            na = 0;
+                                            p = rs;
+                                            while (p < re)
+                                            {
+                                                c = (int)src[p];
+                                                switch (in_str)
+                                                {
+                                                    case (true) {
+                                                    switch (c == str_char)
+                                                    {
+                                                        case (true) { in_str = false; }
+                                                        default {};
+                                                    };
+                                                }
+                                                    default {
+                                                        switch (c == 34 | c == 39)
+                                                        {
+                                                            case (true) {
+                                                    in_str = true;
+                                                    str_char = c;
+                                                }
+                                                            default {
+                                                                switch (c == '(')
+                                                                {
+                                                                    case (true) { depth++; }
+                                                                    default {
+                                                                        switch (c == ')')
+                                                                        {
+                                                                            case (true) { depth--; }
+                                                                            default {
+                                                                                switch (c == ',' & depth == 0)
+                                                                                {
+                                                                                    case (true) {
+                                                    this.aoff.push(cstart);
+                                                    this.alen.push(p - cstart);
+                                                    na++;
+                                                    cstart = p + 1;
+                                                }
+                                                                                    default {};
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                                p++;
+                                            };
+                                            switch (re - cstart > 0 | na > 0)
+                                            {
+                                                case (true) {
+                                                this.aoff.push(cstart);
+                                                this.alen.push(re - cstart);
+                                                na++;
+                                            }
+                                                default {};
+                                            };
+
+                                            np = this.psubs.par_count(ent);
+                                            switch (na != np)
+                                            {
+                                                case (true) {
+                                                this.e_begin(PPError.SYNTAX);
+                                                this.errb.put_str(g"[PREPROCESSOR] Macro '\0");
+                                                this.errb.put_n(src + i, j - i);
+                                                this.errb.put_str(f"' expects {np} argument(s), got {na}: '\0");
+                                                d = k;
+                                                switch (d > n)
+                                                {
+                                                    case (true) { d = n; }
+                                                    default {};
+                                                };
+                                                this.errb.put_n(src + i, d - i);
+                                                this.errb.put_str(g"'\0");
+                                                -> -1;
+                                            }
+                                                default
+                                                {
+                                                    // Substitute each parameter into the body in order
+                                                    this.x1.clear();
+                                                    this.x1.put_n(this.psubs.val_ptr(ent), this.psubs.val_len(ent));
+                                                    ppar = this.psubs.par_ptr(ent);
+                                                    p = 0;
+                                                    while (p < np)
+                                                    {
+                                                        plen = pp_cstrlen(ppar);
+                                                        ra = this.aoff.arr[p];
+                                                        rb = ra + this.alen.arr[p];
+                                                        pp_trim(src, @ra, @rb);
+                                                        this.x2.clear();
+                                                        this.x2.put_replaced_word(this.x1.mem, this.x1.len, ppar, plen, src + ra, rb - ra);
+                                                        this.x1.clear();
+                                                        this.x1.put_n(this.x2.mem, this.x2.len);
+                                                        ppar = ppar + plen + 1;
+                                                        p++;
+                                                    };
+                                                    this.mc.put_n(this.x1.mem, this.x1.len);
+                                                    changed = true;
+                                                    i = k;
                                                 };
                                             };
                                         };
@@ -3966,72 +4222,17 @@ namespace flux
                                 };
                             };
                         };
-                        p++;
                     };
-                    switch (re - cstart > 0 | na > 0)
-                    {
-                        case (true) {
-                        this.aoff.push(cstart);
-                        this.alen.push(re - cstart);
-                        na++;
-                    }
-                        default {};
-                    };
-
-                    np = this.psubs.par_count(ent);
-                    switch (na != np)
-                    {
-                        case (true) {
-                        this.e_begin(PPError.SYNTAX);
-                        this.errb.put_str(g"[PREPROCESSOR] Macro '\0");
-                        this.errb.put_n(src + i, j - i);
-                        this.errb.put_str(g"' expects \0");
-                        this.errb.put_int(np);
-                        this.errb.put_str(g" argument(s), got \0");
-                        this.errb.put_int(na);
-                        this.errb.put_str(g": '\0");
-                        d = k;
-                        switch (d > n)
-                        {
-                            case (true) { d = n; }
-                            default {};
-                        };
-                        this.errb.put_n(src + i, d - i);
-                        this.errb.put_str(g"'\0");
-                        -> -1;
-                    }
-                        default {};
-                    };
-
-                    // Substitute each parameter into the body in order
-                    this.x1.clear();
-                    this.x1.put_n(this.psubs.val_ptr(ent), this.psubs.val_len(ent));
-                    ppar = this.psubs.par_ptr(ent);
-                    p = 0;
-                    while (p < np)
-                    {
-                        plen = pp_cstrlen(ppar);
-                        ra = this.aoff.arr[p];
-                        rb = ra + this.alen.arr[p];
-                        pp_trim(src, @ra, @rb);
-                        this.x2.clear();
-                        this.x2.put_replaced_word(this.x1.mem, this.x1.len, ppar, plen, src + ra, rb - ra);
-                        this.x1.clear();
-                        this.x1.put_n(this.x2.mem, this.x2.len);
-                        ppar = ppar + plen + 1;
-                        p++;
-                    };
-                    this.mc.put_n(this.x1.mem, this.x1.len);
-                    changed = true;
-                    i = k;
                 };
 
                 switch (changed)
                 {
                     case (true) { -> 1; }
-                    default {};
+                    default
+                    {
+                        -> 0;
+                    };
                 };
-                -> 0;
             };
 
             // FXPreprocessor._expand_macros. The result is ex_ptr/ex_len, valid until
@@ -4044,37 +4245,45 @@ namespace flux
                 switch (this.psubs.count == 0)
                 {
                     case (true) { -> true; }
-                    default {};
+                    default
+                    {
+                        while (true)
+                        {
+                            switch (depth > FLUX_PP_MAX_DEPTH)
+                            {
+                                case (true) {
+                                this.e_begin(PPError.RECURSION);
+                                this.errb.put_str(g"[PREPROCESSOR] Macro expansion exceeded depth limit (64). Possible infinite recursion.\0");
+                                -> false;
+                            }
+                                default
+                                {
+                                    rc = this.macro_pass(this.ex_ptr, this.ex_len);
+                                    switch (rc < 0)
+                                    {
+                                        case (true) { -> false; }
+                                        default
+                                        {
+                                            switch (rc == 0)
+                                            {
+                                                case (true) { -> true; }
+                                                default
+                                                {
+                                                    this.ma.clear();
+                                                    this.ma.put_n(this.mc.mem, this.mc.len);
+                                                    this.ex_ptr = this.ma.mem;
+                                                    this.ex_len = this.ma.len;
+                                                    depth++;
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                        -> true;
+                    };
                 };
-                while (true)
-                {
-                    switch (depth > FLUX_PP_MAX_DEPTH)
-                    {
-                        case (true) {
-                        this.e_begin(PPError.RECURSION);
-                        this.errb.put_str(g"[PREPROCESSOR] Macro expansion exceeded depth limit (64). Possible infinite recursion.\0");
-                        -> false;
-                    }
-                        default {};
-                    };
-                    rc = this.macro_pass(this.ex_ptr, this.ex_len);
-                    switch (rc < 0)
-                    {
-                        case (true) { -> false; }
-                        default {};
-                    };
-                    switch (rc == 0)
-                    {
-                        case (true) { -> true; }
-                        default {};
-                    };
-                    this.ma.clear();
-                    this.ma.put_n(this.mc.mem, this.mc.len);
-                    this.ex_ptr = this.ma.mem;
-                    this.ex_len = this.ma.len;
-                    depth++;
-                };
-                -> true;
             };
 
             // Appends token s[ts, te) to sc, replaced by its constant when it names one
@@ -4091,41 +4300,42 @@ namespace flux
                 switch (e < 0)
                 {
                     case (true) {
-                    this.sc.put_n(s + ts, te - ts);
-                    ->;
+                    -> this.sc.put_n(s + ts, te - ts);
                 }
-                    default {};
-                };
-                v = this.consts.val_ptr(e);
-                w = this.consts.val_len(e);
-                switch (w > 0)
-                {
-                    case (true) {
-                    switch (v[w - 1] == 59)
+                    default
                     {
-                        case (true) {
-                        while (w > 0)
+                        v = this.consts.val_ptr(e);
+                        w = this.consts.val_len(e);
+                        switch (w > 0)
                         {
-                            switch (v[w - 1] != 59)
+                            case (true) {
+                            switch (v[w - 1] == 59)
                             {
-                                case (true) { break; }
+                                case (true) {
+                                while (w > 0)
+                                {
+                                    switch (v[w - 1] != 59)
+                                    {
+                                        case (true) { break; }
+                                        default
+                                        {
+                                            w--;
+                                        };
+                                    };
+                                };
+                                a = 0;
+                                b = w;
+                                pp_trim(v, @a, @b);
+                                -> this.sc.put_n(v + a, b - a);
+                            }
                                 default {};
                             };
-                            w--;
+                        }
+                            default {};
                         };
-                        a = 0;
-                        b = w;
-                        pp_trim(v, @a, @b);
-                        this.sc.put_n(v + a, b - a);
-                        ->;
-                    }
-                        default {};
+                        -> this.sc.put_n(v, w);
                     };
-                }
-                    default {};
                 };
-                this.sc.put_n(v, w);
-                ->;
             };
 
             // FXPreprocessor._substitute_constants. The result is sub_ptr/sub_len,
@@ -4137,98 +4347,103 @@ namespace flux
                 switch (!this.expand_macros(s, n))
                 {
                     case (true) { -> false; }
-                    default {};
-                };
+                    default
+                    {
+                        byte* t = this.ex_ptr;
+                        int tn = this.ex_len;
+                        this.sub_ptr = t;
+                        this.sub_len = tn;
+                        switch (tn == 0)
+                        {
+                            case (true) { -> true; }
+                            default
+                            {
+                                a = 0;
+                                b = tn;
+                                pp_trim(t, @a, @b);
+                                switch (b - a == 1)
+                                {
+                                    case (true) {
+                                    switch (t[a] == 59)
+                                    {
+                                        case (true) { -> true; }
+                                        default {};
+                                    };
+                                }
+                                    default {};
+                                };
 
-                byte* t = this.ex_ptr;
-                int tn = this.ex_len;
-                this.sub_ptr = t;
-                this.sub_len = tn;
-                switch (tn == 0)
-                {
-                    case (true) { -> true; }
-                    default {};
-                };
-                a = 0;
-                b = tn;
-                pp_trim(t, @a, @b);
-                switch (b - a == 1)
-                {
-                    case (true) {
-                    switch (t[a] == 59)
-                    {
-                        case (true) { -> true; }
-                        default {};
-                    };
-                }
-                    default {};
-                };
+                                this.sc.clear();
+                                ts = -1;
+                                in_quotes = false;
+                                while (i < tn)
+                                {
+                                    c = (int)t[i];
+                                    switch (c == 34)
+                                    {
+                                        case (true) {
+                                        in_quotes = !in_quotes;
+                                        switch (ts < 0)
+                                        {
+                                            case (true) { ts = i; }
+                                            default {};
+                                        };
+                                        i++;
+                                        continue;
+                                    }
+                                        default
+                                        {
+                                            w = pp_ws_fwd(t, tn, i);
+                                            switch (w == 0)
+                                            {
+                                                case (true) {
+                                                switch (pp_is_delim(c))
+                                                {
+                                                    case (true) { w = 1; }
+                                                    default {};
+                                                };
+                                            }
+                                                default {};
+                                            };
+                                            switch (w > 0)
+                                            {
+                                                case (true) {
+                                                switch (ts >= 0)
+                                                {
+                                                    case (true) {
+                                                    this.flush_token(t, ts, i, in_quotes);
+                                                    ts = -1;
+                                                }
+                                                    default {};
+                                                };
+                                                this.sc.put_n(t + i, w);
+                                                i = i + w;
+                                            }
+                                                default {
+                                                switch (ts < 0)
+                                                {
+                                                    case (true) { ts = i; }
+                                                    default {};
+                                                };
+                                                i++;
+                                            };
+                                            };
+                                        };
+                                    };
+                                };
+                                switch (ts >= 0)
+                                {
+                                    case (true) { this.flush_token(t, ts, tn, in_quotes); }
+                                    default {};
+                                };
 
-                this.sc.clear();
-                ts = -1;
-                in_quotes = false;
-                while (i < tn)
-                {
-                    c = (int)t[i];
-                    switch (c == 34)
-                    {
-                        case (true) {
-                        in_quotes = !in_quotes;
-                        switch (ts < 0)
-                        {
-                            case (true) { ts = i; }
-                            default {};
+                                this.sub_ptr = this.sc.mem;
+                                this.sub_len = this.sc.len;
+                                -> true;
+                            };
                         };
-                        i++;
-                        continue;
-                    }
-                        default {};
-                    };
-                    w = pp_ws_fwd(t, tn, i);
-                    switch (w == 0)
-                    {
-                        case (true) {
-                        switch (pp_is_delim(c))
-                        {
-                            case (true) { w = 1; }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
-                    switch (w > 0)
-                    {
-                        case (true) {
-                        switch (ts >= 0)
-                        {
-                            case (true) {
-                            this.flush_token(t, ts, i, in_quotes);
-                            ts = -1;
-                        }
-                            default {};
-                        };
-                        this.sc.put_n(t + i, w);
-                        i = i + w;
-                    }
-                        default {
-                        switch (ts < 0)
-                        {
-                            case (true) { ts = i; }
-                            default {};
-                        };
-                        i++;
-                    };
                     };
                 };
-                switch (ts >= 0)
-                {
-                    case (true) { this.flush_token(t, ts, tn, in_quotes); }
-                    default {};
-                };
-
-                this.sub_ptr = this.sc.mem;
-                this.sub_len = this.sc.len;
-                -> true;
             };
 
             // ===== DRIVER =====
@@ -4239,129 +4454,139 @@ namespace flux
                 int pl, iteration, ls, le;
                 bool replaced, first;
 
-                switch (this.err_kind != 0)
+                switch (this.err_kind!?)
                 {
                     case (true) { -> false; }
-                    default {};
-                };
-
-                switch (this.realpath_into(this.srcpath.mem))
-                {
-                    case (true) {
-                    pl = pp_parent_len(this.rbuf.mem, this.rbuf.len);
-                    this.root_dir_off = this.pool_add(this.rbuf.mem, pl);
-                }
-                    default {
-                    pl = pp_parent_len(this.srcpath.mem, this.srcpath.len);
-                    this.root_dir_off = this.pool_add(this.srcpath.mem, pl);
-                };
-                };
-
-                switch (!this.process_file(this.srcpath.mem, this.srcpath.len, 0))
-                {
-                    case (true) { -> false; }
-                    default {};
-                };
-
-                replaced = true;
-                while (replaced)
-                {
-                    iteration++;
-                    switch (this.verbose)
+                    default
                     {
-                        case (true) {
-                        standard::io::console::print(g"[PREPROCESSOR] constant substitution passes: \0");
-                        standard::io::console::println(iteration);
-                    }
-                        default {};
-                    };
-                    replaced = false;
-                    this.passb.clear();
-                    first = true;
-                    ls = 0;
-                    while (true)
-                    {
-                        le = ls;
-                        while (le < this.outb.len)
-                        {
-                            switch (this.outb.mem[le] == 10)
-                            {
-                                case (true) { break; }
-                                default {};
-                            };
-                            le++;
-                        };
-                        switch (!this.substitute_constants(this.outb.mem + ls, le - ls))
-                        {
-                            case (true) { -> false; }
-                            default {};
-                        };
-                        switch (!first)
-                        {
-                            case (true) { this.passb.put(10); }
-                            default {};
-                        };
-                        first = false;
-                        this.passb.put_n(this.sub_ptr, this.sub_len);
-                        switch (this.sub_len != le - ls)
+                        switch (this.realpath_into(this.srcpath.mem))
                         {
                             case (true) {
-                            replaced = true;
+                            pl = pp_parent_len(this.rbuf.mem, this.rbuf.len);
+                            this.root_dir_off = this.pool_add(this.rbuf.mem, pl);
                         }
                             default {
-                                switch (!pp_eq(this.sub_ptr, this.outb.mem + ls, this.sub_len))
+                            pl = pp_parent_len(this.srcpath.mem, this.srcpath.len);
+                            this.root_dir_off = this.pool_add(this.srcpath.mem, pl);
+                        };
+                        };
+
+                        switch (!this.process_file(this.srcpath.mem, this.srcpath.len, 0))
+                        {
+                            case (true) { -> false; }
+                            default
+                            {
+                                replaced = true;
+                                while (replaced)
+                                {
+                                    iteration++;
+                                    switch (this.verbose)
+                                    {
+                                        case (true) {
+                                        standard::io::console::print(g"[PREPROCESSOR] constant substitution passes: \0");
+                                        standard::io::console::println(iteration);
+                                    }
+                                        default {};
+                                    };
+                                    replaced = false;
+                                    this.passb.clear();
+                                    first = true;
+                                    ls = 0;
+                                    while (true)
+                                    {
+                                        le = ls;
+                                        while (le < this.outb.len)
+                                        {
+                                            switch (this.outb.mem[le] == 10)
+                                            {
+                                                case (true) { break; }
+                                                default
+                                                {
+                                                    le++;
+                                                };
+                                            };
+                                        };
+                                        switch (!this.substitute_constants(this.outb.mem + ls, le - ls))
+                                        {
+                                            case (true) { -> false; }
+                                            default
+                                            {
+                                                switch (!first)
+                                                {
+                                                    case (true) { this.passb.put(10); }
+                                                    default {};
+                                                };
+                                                first = false;
+                                                this.passb.put_n(this.sub_ptr, this.sub_len);
+                                                switch (this.sub_len != le - ls)
+                                                {
+                                                    case (true) {
+                                                    replaced = true;
+                                                }
+                                                    default {
+                                                        switch (!pp_eq(this.sub_ptr, this.outb.mem + ls, this.sub_len))
+                                                        {
+                                                            case (true) {
+                                                    replaced = true;
+                                                }
+                                                            default {};
+                                                        };
+                                                    };
+                                                };
+                                                switch (le >= this.outb.len)
+                                                {
+                                                    case (true) { break; }
+                                                    default
+                                                    {
+                                                        ls = le + 1;
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                    this.outb.clear();
+                                    this.outb.put_n(this.passb.mem, this.passb.len);
+                                };
+
+                                switch (this.verbose)
                                 {
                                     case (true) {
-                            replaced = true;
-                        }
+                                    switch (iteration > 1)
+                                    {
+                                        case (true) {
+                                        standard::io::console::print(g"[PREPROCESSOR] Completed after \0");
+                                        standard::io::console::print(iteration);
+                                        standard::io::console::println(g" constant passes.\0");
+                                    }
+                                        default {
+                                        standard::io::console::print(g"[PREPROCESSOR] Completed after \0");
+                                        standard::io::console::print(iteration);
+                                        standard::io::console::println(g" constant pass.\0");
+                                    };
+                                    };
+                                    standard::io::console::print(g"[PREPROCESSOR] Processed \0");
+                                    standard::io::console::print(this.processed.count);
+                                    standard::io::console::println(g" file(s)\0");
+                                }
                                     default {};
+                                };
+
+                                switch (!this.alloc_ok())
+                                {
+                                    case (true) {
+                                    this.e_begin(PPError.ALLOC);
+                                    this.errb.put_str(g"[PREPROCESSOR] allocation failed\0");
+                                    -> false;
+                                }
+                                    default
+                                    {
+                                        -> true;
+                                    };
                                 };
                             };
                         };
-                        switch (le >= this.outb.len)
-                        {
-                            case (true) { break; }
-                            default {};
-                        };
-                        ls = le + 1;
                     };
-                    this.outb.clear();
-                    this.outb.put_n(this.passb.mem, this.passb.len);
                 };
-
-                switch (this.verbose)
-                {
-                    case (true) {
-                    switch (iteration > 1)
-                    {
-                        case (true) {
-                        standard::io::console::print(g"[PREPROCESSOR] Completed after \0");
-                        standard::io::console::print(iteration);
-                        standard::io::console::println(g" constant passes.\0");
-                    }
-                        default {
-                        standard::io::console::print(g"[PREPROCESSOR] Completed after \0");
-                        standard::io::console::print(iteration);
-                        standard::io::console::println(g" constant pass.\0");
-                    };
-                    };
-                    standard::io::console::print(g"[PREPROCESSOR] Processed \0");
-                    standard::io::console::print(this.processed.count);
-                    standard::io::console::println(g" file(s)\0");
-                }
-                    default {};
-                };
-
-                switch (!this.alloc_ok())
-                {
-                    case (true) {
-                    this.e_begin(PPError.ALLOC);
-                    this.errb.put_str(g"[PREPROCESSOR] allocation failed\0");
-                    -> false;
-                }
-                    default {};
-                };
-                -> true;
             };
         };
     };

@@ -324,7 +324,7 @@ def !!_start() -> void
     } : : "r"(slot) : "memory";
     volatile asm
     {
-        subq $$8, %rsp
+        andq $$-16, %rsp
     } : : : "memory", "cc";
 #endif;
     exit(FRTStartup());
@@ -502,6 +502,9 @@ def !!FRTStartup() -> int
             standard::io::console::print("SEGFAULT\n\0");
         };
     };
+    // Returning from the entry point only ends this thread. Terminate the whole
+    // process so live worker threads cannot keep it running.
+    RtlExitUserProcess((u32)return_code);
     -> return_code;
 };
 #endif; // __WINDOWS__

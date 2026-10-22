@@ -131,24 +131,25 @@ namespace flux
             switch (u == (u64)0)
             {
                 case (true) {
-                b.put(48);
-                ->;
+                -> b.put(48);
             }
-                default {};
+                default
+                {
+                    while (u > (u64)0)
+                    {
+                        tmp[n] = (byte)((int)(u % (u64)10) + 48);
+                        u = u / (u64)10;
+                        n++;
+                    };
+                    k = n - 1;
+                    while (k >= 0)
+                    {
+                        b.put((int)tmp[k]);
+                        k--;
+                    };
+                    ->;
+                };
             };
-            while (u > (u64)0)
-            {
-                tmp[n] = (byte)((int)(u % (u64)10) + 48);
-                u = u / (u64)10;
-                n++;
-            };
-            k = n - 1;
-            while (k >= 0)
-            {
-                b.put((int)tmp[k]);
-                k--;
-            };
-            ->;
         };
 
         put_u64(Buf* b, u64 u) -> void
@@ -158,24 +159,25 @@ namespace flux
             switch (u == (u64)0)
             {
                 case (true) {
-                b.put(48);
-                ->;
+                -> b.put(48);
             }
-                default {};
+                default
+                {
+                    while (u > (u64)0)
+                    {
+                        tmp[n] = (byte)((int)(u % (u64)10) + 48);
+                        u = u / (u64)10;
+                        n++;
+                    };
+                    k = n - 1;
+                    while (k >= 0)
+                    {
+                        b.put((int)tmp[k]);
+                        k--;
+                    };
+                    ->;
+                };
             };
-            while (u > (u64)0)
-            {
-                tmp[n] = (byte)((int)(u % (u64)10) + 48);
-                u = u / (u64)10;
-                n++;
-            };
-            k = n - 1;
-            while (k >= 0)
-            {
-                b.put((int)tmp[k]);
-                k--;
-            };
-            ->;
         };
 
         hexdig(int v) -> int
@@ -183,9 +185,11 @@ namespace flux
             switch (v < 10)
             {
                 case (true) { -> 48 + v; }
-                default {};
+                default
+                {
+                    -> 65 + v - 10;
+                };
             };
-            -> 65 + v - 10;
         };
 
         // 0x followed by 16 uppercase hex digits
@@ -202,9 +206,11 @@ namespace flux
                 switch ((u >> (u64)(nd * 4)) == (u64)0)
                 {
                     case (true) { break; }
-                    default {};
+                    default
+                    {
+                        nd++;
+                    };
                 };
-                nd++;
             };
             pad = 16 - (nd + 2);
             while (pad > 0)
@@ -233,7 +239,7 @@ namespace flux
             int i;
             int c;
             b.put(34);
-            while (s[i] != 0)
+            while (s[i]!?)
             {
                 c = (int)s[i];
                 switch (c < 32 | c > 126 | c == 34 | c == 92)
@@ -247,8 +253,7 @@ namespace flux
                 };
                 i++;
             };
-            b.put(34);
-            ->;
+            -> b.put(34);
         };
 
         // Block label line: name followed by a colon
@@ -257,7 +262,7 @@ namespace flux
             int i;
             bool plain = true;
             int c;
-            while (name[i] != 0)
+            while (name[i]!?)
             {
                 c = (int)name[i];
                 switch (!((c >= 48 & c <= 57) | (c >= 65 & c <= 90) | (c >= 97 & c <= 122) | c == 95 | c == 46 | c == 36 | c == 45))
@@ -274,8 +279,7 @@ namespace flux
                 case (true) { out.put_str(name); }
                 default { put_quoted(out, name); };
             };
-            out.put_str(g":\n\0");
-            ->;
+            -> out.put_str(g":\n\0");
         };
 
         // ------------------------------------------------------------------
@@ -288,104 +292,113 @@ namespace flux
             int k = t.kind;
             switch (k == LK.VOID)
             {
-                case (true) { b.put_str(g"void\0"); ->; }
-                default {};
-            };
-            switch (k == LK.INT)
-            {
-                case (true) {
-                b.put(105);
-                b.put_int(t.width);
-                ->;
-            }
-                default {};
-            };
-            switch (k == LK.FLOAT)
-            {
-                case (true) { b.put_str(g"float\0"); ->; }
-                default {};
-            };
-            switch (k == LK.DOUBLE)
-            {
-                case (true) { b.put_str(g"double\0"); ->; }
-                default {};
-            };
-            switch (k == LK.PTR)
-            {
-                case (true) {
-                lt_text(b, t.elem);
-                b.put(42);
-                ->;
-            }
-                default {};
-            };
-            switch (k == LK.ARRAY)
-            {
-                case (true) {
-                b.put(91);
-                b.put_int(t.count);
-                b.put_str(g" x \0");
-                lt_text(b, t.elem);
-                b.put(93);
-                ->;
-            }
-                default {};
-            };
-            switch (k == LK.STRUCT)
-            {
-                case (true) {
-                b.put_str(g"{\0");
-                while (i < t.nitems)
+                case (true) { -> b.put_str(g"void\0"); }
+                default
                 {
-                    switch (i > 0)
+                    switch (k == LK.INT)
                     {
-                        case (true) { b.put_str(g", \0"); }
-                        default {};
+                        case (true) {
+                        b.put(105);
+                        -> b.put_int(t.width);
+                    }
+                        default
+                        {
+                            switch (k == LK.FLOAT)
+                            {
+                                case (true) { -> b.put_str(g"float\0"); }
+                                default
+                                {
+                                    switch (k == LK.DOUBLE)
+                                    {
+                                        case (true) { -> b.put_str(g"double\0"); }
+                                        default
+                                        {
+                                            switch (k == LK.PTR)
+                                            {
+                                                case (true) {
+                                                lt_text(b, t.elem);
+                                                -> b.put(42);
+                                            }
+                                                default
+                                                {
+                                                    switch (k == LK.ARRAY)
+                                                    {
+                                                        case (true) {
+                                                        b.put(91);
+                                                        b.put_str(f"{t.count} x \0");
+                                                        lt_text(b, t.elem);
+                                                        -> b.put(93);
+                                                    }
+                                                        default
+                                                        {
+                                                            switch (k == LK.STRUCT)
+                                                            {
+                                                                case (true) {
+                                                                b.put_str(g"{\0");
+                                                                while (i < t.nitems)
+                                                                {
+                                                                    switch (i > 0)
+                                                                    {
+                                                                        case (true) { b.put_str(g", \0"); }
+                                                                        default {};
+                                                                    };
+                                                                    lt_text(b, t.items[i]);
+                                                                    i++;
+                                                                };
+                                                                -> b.put_str(g"}\0");
+                                                            }
+                                                                default
+                                                                {
+                                                                    switch (k == LK.ISTRUCT)
+                                                                    {
+                                                                        case (true) {
+                                                                        b.put(37);
+                                                                        -> put_quoted(b, t.name);
+                                                                    }
+                                                                        default
+                                                                        {
+                                                                            // FUNC
+                                                                            lt_text(b, t.elem);
+                                                                            b.put_str(g" (\0");
+                                                                            while (i < t.nitems)
+                                                                            {
+                                                                                switch (i > 0)
+                                                                                {
+                                                                                    case (true) { b.put_str(g", \0"); }
+                                                                                    default {};
+                                                                                };
+                                                                                lt_text(b, t.items[i]);
+                                                                                i++;
+                                                                            };
+                                                                            switch (t.vararg)
+                                                                            {
+                                                                                case (true) {
+                                                                                switch (t.nitems > 0)
+                                                                                {
+                                                                                    case (true) { b.put_str(g", \0"); }
+                                                                                    default {};
+                                                                                };
+                                                                                b.put_str(g"...\0");
+                                                                            }
+                                                                                default {};
+                                                                            };
+                                                                            -> b.put(41);
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
                     };
-                    lt_text(b, t.items[i]);
-                    i++;
                 };
-                b.put_str(g"}\0");
-                ->;
-            }
-                default {};
             };
-            switch (k == LK.ISTRUCT)
-            {
-                case (true) {
-                b.put(37);
-                put_quoted(b, t.name);
-                ->;
-            }
-                default {};
-            };
-            // FUNC
-            lt_text(b, t.elem);
-            b.put_str(g" (\0");
-            while (i < t.nitems)
-            {
-                switch (i > 0)
-                {
-                    case (true) { b.put_str(g", \0"); }
-                    default {};
-                };
-                lt_text(b, t.items[i]);
-                i++;
-            };
-            switch (t.vararg)
-            {
-                case (true) {
-                switch (t.nitems > 0)
-                {
-                    case (true) { b.put_str(g", \0"); }
-                    default {};
-                };
-                b.put_str(g"...\0");
-            }
-                default {};
-            };
-            b.put(41);
-            ->;
         };
 
         lt_eq(IRType* a, IRType* b) -> bool
@@ -394,82 +407,104 @@ namespace flux
             switch (a == b)
             {
                 case (true) { -> true; }
-                default {};
-            };
-            switch (a == (IRType*)0 | b == (IRType*)0)
-            {
-                case (true) { -> false; }
-                default {};
-            };
-            switch (a.kind != b.kind)
-            {
-                case (true) { -> false; }
-                default {};
-            };
-            int k = a.kind;
-            switch (k == LK.VOID | k == LK.FLOAT | k == LK.DOUBLE)
-            {
-                case (true) { -> true; }
-                default {};
-            };
-            switch (k == LK.INT)
-            {
-                case (true) { -> a.width == b.width; }
-                default {};
-            };
-            switch (k == LK.PTR)
-            {
-                case (true) { -> lt_eq(a.elem, b.elem); }
-                default {};
-            };
-            switch (k == LK.ARRAY)
-            {
-                case (true) {
-                switch (a.count != b.count)
+                default
                 {
-                    case (true) { -> false; }
-                    default {};
+                    switch (a == (IRType*)0 | b == (IRType*)0)
+                    {
+                        case (true) { -> false; }
+                        default
+                        {
+                            switch (a.kind != b.kind)
+                            {
+                                case (true) { -> false; }
+                                default
+                                {
+                                    int k = a.kind;
+                                    switch (k == LK.VOID | k == LK.FLOAT | k == LK.DOUBLE)
+                                    {
+                                        case (true) { -> true; }
+                                        default
+                                        {
+                                            switch (k == LK.INT)
+                                            {
+                                                case (true) { -> a.width == b.width; }
+                                                default
+                                                {
+                                                    switch (k == LK.PTR)
+                                                    {
+                                                        case (true) { -> lt_eq(a.elem, b.elem); }
+                                                        default
+                                                        {
+                                                            switch (k == LK.ARRAY)
+                                                            {
+                                                                case (true) {
+                                                                switch (a.count != b.count)
+                                                                {
+                                                                    case (true) { -> false; }
+                                                                    default {};
+                                                                };
+                                                                -> lt_eq(a.elem, b.elem);
+                                                            }
+                                                                default
+                                                                {
+                                                                    switch (k == LK.ISTRUCT)
+                                                                    {
+                                                                        case (true) { -> cstr_eq(a.name, b.name); }
+                                                                        default
+                                                                        {
+                                                                            switch (a.nitems != b.nitems)
+                                                                            {
+                                                                                case (true) { -> false; }
+                                                                                default
+                                                                                {
+                                                                                    switch (k == LK.FUNC)
+                                                                                    {
+                                                                                        case (true) {
+                                                                                        switch (a.vararg != b.vararg)
+                                                                                        {
+                                                                                            case (true) { -> false; }
+                                                                                            default
+                                                                                            {
+                                                                                                switch (!lt_eq(a.elem, b.elem))
+                                                                                                {
+                                                                                                    case (true) { -> false; }
+                                                                                                    default {};
+                                                                                                };
+                                                                                            };
+                                                                                        };
+                                                                                    }
+                                                                                        default {};
+                                                                                    };
+                                                                                    while (i < a.nitems)
+                                                                                    {
+                                                                                        switch (!lt_eq(a.items[i], b.items[i]))
+                                                                                        {
+                                                                                            case (true) { -> false; }
+                                                                                            default
+                                                                                            {
+                                                                                                i++;
+                                                                                            };
+                                                                                        };
+                                                                                    };
+                                                                                    -> true;
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                    };
                 };
-                -> lt_eq(a.elem, b.elem);
-            }
-                default {};
             };
-            switch (k == LK.ISTRUCT)
-            {
-                case (true) { -> cstr_eq(a.name, b.name); }
-                default {};
-            };
-            switch (a.nitems != b.nitems)
-            {
-                case (true) { -> false; }
-                default {};
-            };
-            switch (k == LK.FUNC)
-            {
-                case (true) {
-                switch (a.vararg != b.vararg)
-                {
-                    case (true) { -> false; }
-                    default {};
-                };
-                switch (!lt_eq(a.elem, b.elem))
-                {
-                    case (true) { -> false; }
-                    default {};
-                };
-            }
-                default {};
-            };
-            while (i < a.nitems)
-            {
-                switch (!lt_eq(a.items[i], b.items[i]))
-                {
-                    case (true) { -> false; }
-                    default {};
-                };
-                i++;
-            };
-            -> true;
         };
 
         lt_is_int(IRType* t) -> bool -> t.kind == LK.INT;
@@ -614,8 +649,7 @@ namespace flux
                 this.tb.__exit();
                 this.ib.__exit();
                 this.lb.__exit();
-                ffree((byte*)this.ia);
-                ->;
+                -> ffree((byte*)this.ia);
             };
 
             set_target(byte* triple, byte* layout) -> void
@@ -725,9 +759,11 @@ namespace flux
                     switch (cstr_eq(t.name, name))
                     {
                         case (true) { -> t; }
-                        default {};
+                        default
+                        {
+                            i++;
+                        };
                     };
-                    i++;
                 };
                 t = this.new_type(LK.ISTRUCT);
                 t.name = this.own(name);
@@ -926,8 +962,7 @@ namespace flux
             {
                 lt_text(b, v.ty);
                 b.put(32);
-                b.put_str(v.text);
-                ->;
+                -> b.put_str(v.text);
             };
 
             // ----------------------------------------------------------
@@ -941,23 +976,27 @@ namespace flux
                 switch (!nm_has(this.gnames, name))
                 {
                     case (true) { -> this.own(name); }
-                    default {};
-                };
-                while (true)
-                {
-                    this.tb.clear();
-                    this.tb.put_str(name);
-                    this.tb.put(46);
-                    this.tb.put_int(n);
-                    cand = this.tb.mem;
-                    switch (!nm_has(this.gnames, cand))
+                    default
                     {
-                        case (true) { -> this.own(cand); }
-                        default {};
+                        while (true)
+                        {
+                            this.tb.clear();
+                            this.tb.put_str(name);
+                            this.tb.put(46);
+                            this.tb.put_int(n);
+                            cand = this.tb.mem;
+                            switch (!nm_has(this.gnames, cand))
+                            {
+                                case (true) { -> this.own(cand); }
+                                default
+                                {
+                                    n++;
+                                };
+                            };
+                        };
+                        -> this.own(name);
                     };
-                    n++;
                 };
-                -> this.own(name);
             };
 
             // Global variable of type ty. init is the initializer operand text or null.
@@ -1011,8 +1050,7 @@ namespace flux
                     f.counter = f.counter + 1;
                     this.tb.clear();
                     this.tb.put(37);
-                    this.tb.put_str(g"\".\0");
-                    this.tb.put_int(f.counter);
+                    this.tb.put_str(f"\".{f.counter}\0");
                     this.tb.put(34);
                     f.args[i] = this.new_value(ftype.items[i], this.tb.mem);
                     i++;
@@ -1035,8 +1073,7 @@ namespace flux
                 this.tb.put(37);
                 put_quoted(@this.tb, name);
                 f.args[i].text = this.own(this.tb.mem);
-                nm_put(f.names, name, (void*)f);
-                ->;
+                -> nm_put(f.names, name, (void*)f);
             };
 
             // Gives parameter i a new name, kept unique inside f
@@ -1061,45 +1098,53 @@ namespace flux
                     this.tb.put_int(f.counter);
                     -> this.own(this.tb.mem);
                 }
-                    default {};
-                };
-                switch (base[0] == 0)
-                {
-                    case (true) {
-                    f.counter = f.counter + 1;
-                    this.tb.clear();
-                    this.tb.put(46);
-                    this.tb.put_int(f.counter);
-                    -> this.own(this.tb.mem);
-                }
-                    default {};
-                };
-                switch (!nm_has(f.names, base))
-                {
-                    case (true) {
-                    nm_put(f.names, base, (void*)f);
-                    -> this.own(base);
-                }
-                    default {};
-                };
-                while (true)
-                {
-                    this.tb.clear();
-                    this.tb.put_str(base);
-                    this.tb.put(46);
-                    this.tb.put_int(n);
-                    cand = this.tb.mem;
-                    switch (!nm_has(f.names, cand))
+                    default
                     {
-                        case (true) {
-                        nm_put(f.names, cand, (void*)f);
-                        -> this.own(cand);
-                    }
-                        default {};
+                        switch (base[0] == 0)
+                        {
+                            case (true) {
+                            f.counter = f.counter + 1;
+                            this.tb.clear();
+                            this.tb.put(46);
+                            this.tb.put_int(f.counter);
+                            -> this.own(this.tb.mem);
+                        }
+                            default
+                            {
+                                switch (!nm_has(f.names, base))
+                                {
+                                    case (true) {
+                                    nm_put(f.names, base, (void*)f);
+                                    -> this.own(base);
+                                }
+                                    default
+                                    {
+                                        while (true)
+                                        {
+                                            this.tb.clear();
+                                            this.tb.put_str(base);
+                                            this.tb.put(46);
+                                            this.tb.put_int(n);
+                                            cand = this.tb.mem;
+                                            switch (!nm_has(f.names, cand))
+                                            {
+                                                case (true) {
+                                                nm_put(f.names, cand, (void*)f);
+                                                -> this.own(cand);
+                                            }
+                                                default
+                                                {
+                                                    n++;
+                                                };
+                                            };
+                                        };
+                                        -> this.own(base);
+                                    };
+                                };
+                            };
+                        };
                     };
-                    n++;
                 };
-                -> this.own(base);
             };
 
             append_block(IRFunc* f, byte* name) -> IRBlock*
@@ -1135,9 +1180,11 @@ namespace flux
                 switch (this.cb == (IRBlock*)0)
                 {
                     case (true) { -> true; }
-                    default {};
+                    default
+                    {
+                        -> this.cb.terminated;
+                    };
                 };
-                -> this.cb.terminated;
             };
 
             const_val(IRValue* v) -> i64
@@ -1158,9 +1205,11 @@ namespace flux
                 switch (neg)
                 {
                     case (true) { -> (i64)0 - r; }
-                    default {};
+                    default
+                    {
+                        -> r;
+                    };
                 };
-                -> r;
             };
 
             // Operand text "%name" for a fresh result
@@ -1186,7 +1235,7 @@ namespace flux
                     switch (hint != (byte*)0)
                     {
                         case (true) {
-                        switch (hint[0] != 0)
+                        switch (hint[0]!?)
                         {
                             case (true) { this.fresh_name(this.cf, hint); }
                             default { this.cf.counter = this.cf.counter + 1; };
@@ -1197,18 +1246,19 @@ namespace flux
                     pv_push(this.cb.lines, (void*)this.own(this.ib.mem));
                     -> (IRValue*)0;
                 }
-                    default {};
+                    default
+                    {
+                        nm = this.fresh_name(this.cf, hint);
+                        txt = this.result_text(nm);
+                        this.lb.clear();
+                        this.lb.put_str(f"{txt} = \0");
+                        this.lb.put_str(this.ib.mem);
+                        nm = this.own(this.lb.mem);
+                        pv_push(this.cb.lines, (void*)nm);
+                        v = this.new_value(rty, txt);
+                        -> v;
+                    };
                 };
-                nm = this.fresh_name(this.cf, hint);
-                txt = this.result_text(nm);
-                this.lb.clear();
-                this.lb.put_str(txt);
-                this.lb.put_str(g" = \0");
-                this.lb.put_str(this.ib.mem);
-                nm = this.own(this.lb.mem);
-                pv_push(this.cb.lines, (void*)nm);
-                v = this.new_value(rty, txt);
-                -> v;
             };
 
             fin_term() -> void
@@ -1226,9 +1276,7 @@ namespace flux
                 this.ib.put(32);
                 lt_text(@this.ib, a.ty);
                 this.ib.put(32);
-                this.ib.put_str(a.text);
-                this.ib.put_str(g", \0");
-                this.ib.put_str(b.text);
+                this.ib.put_str(f"{a.text}, {b.text}\0");
                 -> this.fin(a.ty, hint);
             };
 
@@ -1241,9 +1289,7 @@ namespace flux
                 this.ib.put(32);
                 lt_text(@this.ib, a.ty);
                 this.ib.put(32);
-                this.ib.put_str(a.text);
-                this.ib.put_str(g", \0");
-                this.ib.put_str(b.text);
+                this.ib.put_str(f"{a.text}, {b.text}\0");
                 -> this.fin(this.t_int(1), hint);
             };
 
@@ -1256,15 +1302,17 @@ namespace flux
                 switch (lt_eq(v.ty, to))
                 {
                     case (true) { -> v; }
-                    default {};
+                    default
+                    {
+                        this.ib.clear();
+                        this.ib.put_str(op);
+                        this.ib.put(32);
+                        this.op_text(@this.ib, v);
+                        this.ib.put_str(g" to \0");
+                        lt_text(@this.ib, to);
+                        -> this.fin(to, hint);
+                    };
                 };
-                this.ib.clear();
-                this.ib.put_str(op);
-                this.ib.put(32);
-                this.op_text(@this.ib, v);
-                this.ib.put_str(g" to \0");
-                lt_text(@this.ib, to);
-                -> this.fin(to, hint);
             };
 
             alloca(IRType* ty, byte* name) -> IRValue*
@@ -1275,8 +1323,7 @@ namespace flux
                 byte* txt = this.result_text(nm);
                 IRBlock* eb = this.entry_b;
                 this.lb.clear();
-                this.lb.put_str(txt);
-                this.lb.put_str(g" = alloca \0");
+                this.lb.put_str(f"{txt} = alloca \0");
                 lt_text(@this.lb, ty);
                 pos = eb.lines.len;
                 switch (eb.terminated)
@@ -1349,14 +1396,18 @@ namespace flux
                 switch (t.kind == LK.ARRAY)
                 {
                     case (true) { -> t.elem; }
-                    default {};
+                    default
+                    {
+                        switch (t.kind == LK.PTR)
+                        {
+                            case (true) { -> t.elem; }
+                            default
+                            {
+                                -> t.items[(int)this.const_val(idx)];
+                            };
+                        };
+                    };
                 };
-                switch (t.kind == LK.PTR)
-                {
-                    case (true) { -> t.elem; }
-                    default {};
-                };
-                -> t.items[(int)this.const_val(idx)];
             };
 
             struct_items(IRType* t) -> IRType** -> t.items;
@@ -1482,9 +1533,11 @@ namespace flux
                 switch (fty.elem.kind == LK.VOID)
                 {
                     case (true) { -> this.fin((IRType*)0, hint); }
-                    default {};
+                    default
+                    {
+                        -> this.fin(fty.elem, hint);
+                    };
                 };
-                -> this.fin(fty.elem, hint);
             };
 
             call(IRValue* callee, IRValue** args, int n, byte* hint) -> IRValue* -> this.call_ex(callee, args, n, hint, (byte*)0, false);
@@ -1503,9 +1556,7 @@ namespace flux
                         case (true) { this.ib.put_str(g", \0"); }
                         default {};
                     };
-                    this.ib.put_str(g"[\0");
-                    this.ib.put_str(vals[i].text);
-                    this.ib.put_str(g", %\0");
+                    this.ib.put_str(f"[{vals[i].text}, %\0");
                     put_quoted(@this.ib, blocks[i].name);
                     this.ib.put(93);
                     i++;
@@ -1542,8 +1593,7 @@ namespace flux
                 this.ib.clear();
                 this.ib.put_str(g"extractvalue \0");
                 this.op_text(@this.ib, agg);
-                this.ib.put_str(g", \0");
-                this.ib.put_int(i);
+                this.ib.put_str(f", {i}\0");
                 -> this.fin(t, hint);
             };
 
@@ -1554,8 +1604,7 @@ namespace flux
                 this.op_text(@this.ib, agg);
                 this.ib.put_str(g", \0");
                 this.op_text(@this.ib, v);
-                this.ib.put_str(g", \0");
-                this.ib.put_int(i);
+                this.ib.put_str(f", {i}\0");
                 -> this.fin(agg.ty, hint);
             };
 
@@ -1564,8 +1613,7 @@ namespace flux
                 this.ib.clear();
                 this.ib.put_str(g"br label %\0");
                 put_quoted(@this.ib, target.name);
-                this.fin_term();
-                ->;
+                -> this.fin_term();
             };
 
             cbr(IRValue* c, IRBlock* t, IRBlock* f) -> void
@@ -1577,8 +1625,7 @@ namespace flux
                 put_quoted(@this.ib, t.name);
                 this.ib.put_str(g", label %\0");
                 put_quoted(@this.ib, f.name);
-                this.fin_term();
-                ->;
+                -> this.fin_term();
             };
 
             ret(IRValue* v) -> void
@@ -1586,24 +1633,21 @@ namespace flux
                 this.ib.clear();
                 this.ib.put_str(g"ret \0");
                 this.op_text(@this.ib, v);
-                this.fin_term();
-                ->;
+                -> this.fin_term();
             };
 
             ret_void() -> void
             {
                 this.ib.clear();
                 this.ib.put_str(g"ret void\0");
-                this.fin_term();
-                ->;
+                -> this.fin_term();
             };
 
             unreachable() -> void
             {
                 this.ib.clear();
                 this.ib.put_str(g"unreachable\0");
-                this.fin_term();
-                ->;
+                -> this.fin_term();
             };
 
             switch_to(IRValue* v, IRBlock* dflt, IRValue** vals, IRBlock** blocks, int n) -> void
@@ -1628,8 +1672,7 @@ namespace flux
                     i++;
                 };
                 this.ib.put(93);
-                this.fin_term();
-                ->;
+                -> this.fin_term();
             };
 
             // ----------------------------------------------------------
@@ -1638,7 +1681,9 @@ namespace flux
 
             put_function(Buf* out, IRFunc* f) -> void
             {
-                int i, j, k;
+                int i;
+                int j;
+                int k;
                 IRBlock* bl;
                 IRType* ft = f.ftype;
                 switch (f.is_decl)
@@ -1701,35 +1746,36 @@ namespace flux
                 switch (f.is_decl)
                 {
                     case (true) {
-                    out.put(10);
-                    ->;
+                    -> out.put(10);
                 }
-                    default {};
-                };
-                out.put_str(g"\n{\n\0");
-                j = 0;
-                while (j < f.blocks.len)
-                {
-                    bl = (IRBlock*)f.blocks.items[j];
-                    put_quoted_label(out, bl.name);
-                    k = 0;
-                    while (k < bl.lines.len)
+                    default
                     {
-                        out.put_str(g"  \0");
-                        out.put_str((byte*)bl.lines.items[k]);
-                        out.put(10);
-                        k++;
+                        out.put_str(g"\n{\n\0");
+                        j = 0;
+                        while (j < f.blocks.len)
+                        {
+                            bl = (IRBlock*)f.blocks.items[j];
+                            put_quoted_label(out, bl.name);
+                            k = 0;
+                            while (k < bl.lines.len)
+                            {
+                                out.put_str(g"  \0");
+                                out.put_str((byte*)bl.lines.items[k]);
+                                out.put(10);
+                                k++;
+                            };
+                            j++;
+                        };
+                        -> out.put_str(g"}\n\0");
                     };
-                    j++;
                 };
-                out.put_str(g"}\n\0");
-                ->;
             };
 
             // Prints the whole module into out
             emit(Buf* out) -> void
             {
-                int i, j;
+                int i;
+                int j;
                 IRType* t;
                 IRGlobal* g;
                 out.put_str(g"; ModuleID = \0");

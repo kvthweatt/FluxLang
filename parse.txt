@@ -1,2 +1,0 @@
-=== Parse Summary for fxc.fx ===
-Top-level statements: 137

@@ -102,6 +102,8 @@ If you like Flux, please consider contributing to the language or joining the [F
 - [The Ditto Operator](#the-ditto-operator)
 - [Compile Time Execution with `comptime`](#compile-time-execution-with-comptime)
 - [Emitting code back into your source file with `emitflux`](#emitflux)
+- [Async Functions](#async-functions)
+- [Modules and Build Blocks](#modules-and-build-blocks)
 - [The Effect System - Algebraic Effect Tracking](#flux-effect-system)
 - [Keyword list](#keyword-list)
 - [Operator list](#operator-list)
@@ -794,7 +796,7 @@ GeomT1 object Square
 
 <a id="interfaces"></a>
 ## **Interfaces**
-Interfaces define how two or more objects interact. Every interface parameter must declare a trait constraint — bare role names without a trait are a compile error.
+Interfaces define how two or more objects interact. Every interface parameter must declare a trait constraint - bare role names without a trait are a compile error.
 
 Attaching an interface to an object implicitly requires both the attached object and any named partner objects to satisfy their respective trait constraints. This is checked at compile time.
 
@@ -810,11 +812,11 @@ Three operators may appear inside an interface body, each expressing a different
 
 All three can coexist in a single interface for the same pair of roles. Each is enforced independently at compile time.
 
-### `A : B` — call permission
+### `A : B` - call permission
 
-The original and most common form. Restricts which methods A may call on B. Once a governed pair exists, calling any unlisted method — even a public one — is a compile-time error.
+The original and most common form. Restricts which methods A may call on B. Once a governed pair exists, calling any unlisted method - even a public one - is a compile-time error.
 
-### `B(A)` — pass-into permission
+### `B(A)` - pass-into permission
 
 Controls data flow at call sites. When a return value of an A method is passed directly as an argument to a B method, the compiler checks that the A method is listed in the `B(A)` block. This enforces that only sanctioned values flow across the boundary.
 
@@ -826,7 +828,7 @@ b.some_func(a.query());
 b.some_func(a.secret());
 ```
 
-### `A -> B` — return-to permission
+### `A -> B` - return-to permission
 
 Controls call context. An A method listed in `A -> B` may be called from inside a B method body. Methods not listed cannot be called from inside B, even if they are otherwise public.
 
@@ -2158,7 +2160,7 @@ int x = ++i,   // 1
     y = #",    // 2
     z = #";    // 3
 ```
-Each `#"` produces an independent evaluation of the repeated expression — it is not a reference to the prior variable's value.
+Each `#"` produces an independent evaluation of the repeated expression - it is not a reference to the prior variable's value.
 
 `#"` must be followed immediately by `,` or `;` in variable declarations. It is not valid as part of a larger expression (for now).
 
@@ -2191,7 +2193,7 @@ foo(x, y, z);
 foo(y, #", z);   // identical to foo(y, y, z)
 ```
 
-Each `#"` is replaced by a copy of the corresponding positional argument from the previous call — independently evaluated, not a reference.
+Each `#"` is replaced by a copy of the corresponding positional argument from the previous call - independently evaluated, not a reference.
 
 ```
 foo(x, y, z);
@@ -3875,9 +3877,9 @@ Yes, you may write an infinite loop at compile time.
 ---
 
 <a id="emitflux"></a>
-# `emitflux` — Compile-Time Code Generation
+# `emitflux` - Compile-Time Code Generation
 
-`emitflux` is used inside a `comptime` block to inject Flux source code into the surrounding scope. The emitted definitions are deferred and finalized during **Pass 4** ("Re-emitting pending bodies"), so they do not need to be written contiguously — you can build up a single logical definition across multiple `emitflux` calls within one or more `comptime` blocks.
+`emitflux` is used inside a `comptime` block to inject Flux source code into the surrounding scope. The emitted definitions are deferred and finalized during **Pass 4** ("Re-emitting pending bodies"), so they do not need to be written contiguously - you can build up a single logical definition across multiple `emitflux` calls within one or more `comptime` blocks.
 
 Basic usage:
 ```
@@ -3904,13 +3906,13 @@ def main() -> int
 
 ## Splice terminators
 
-By default the closing `};` of an `emitflux` block ends emission and returns control to the surrounding `comptime` context. Two special terminators allow you to interleave comptime logic with emitted code — splicing a single logical construct across multiple `emitflux` calls:
+By default the closing `};` of an `emitflux` block ends emission and returns control to the surrounding `comptime` context. Two special terminators allow you to interleave comptime logic with emitted code - splicing a single logical construct across multiple `emitflux` calls:
 
-### `}#;` — exit emitflux, stay in comptime
+### `}#;` - exit emitflux, stay in comptime
 
 `}#;` terminates the current `emitflux` block and returns to the surrounding `comptime` context, leaving the emitted construct open. This lets you run arbitrary comptime code (loops, conditionals, I/O) between emitted chunks.
 
-### `#};` — close a brace inside emitflux without ending it
+### `#};` - close a brace inside emitflux without ending it
 
 `#};` emits a closing brace into the generated Flux source without being interpreted as the closing brace of the `emitflux` block itself. Use this to close `switch`, `if`, function bodies, or any other braced construct inside emitted code when the bare `}` would prematurely end the `emitflux`.
 
@@ -3973,6 +3975,254 @@ Pass 4 collects all of the emitted fragments in order and finalizes `dispatch` a
 | Pass 4 | All collected `emitflux` fragments are finalized into the surrounding scope |
 
 This means emitted definitions are always available to runtime code, but are not visible to other `comptime` blocks that execute before Pass 4.
+
+---
+
+<a id="async-functions"></a>
+# Async Functions
+
+An `async` function is declared with `async` in place of `def`. Async is colorless: the function is called like any other function, and the compiler decides when a call becomes a concurrent task. There is no `await` keyword and no future type in the source. The future is implicit.
+
+```
+async fill(i32* table, i32 lo, i32 hi) -> void
+{
+    i32 i = lo;
+    while (i < hi) { table[i] = i + 1; i++; };
+};
+```
+
+## When a call launches a task
+
+A call to an async function launches a task only in one of these positions:
+
+| Position | Example |
+|----------|---------|
+| Statement expression | `fill(@t[0], 0, 512);` |
+| Variable initializer | `i64 s = sum_range(@t[0], 0, 512);` |
+| Right-hand side of an assignment | `s = sum_range(@t[0], 0, 512);` |
+
+Any other position (an argument, an operand, a condition) is an ordinary synchronous call.
+
+## When a task is joined
+
+A task is joined at the earliest of:
+
+1. The first use of its result variable.
+2. The end of the enclosing block.
+
+Joins at block end are emitted through `defer`, so they run in reverse order of launch (free first, then join). A task that returns `void` has no result variable and is joined at block end.
+
+## Requirements
+
+Async lowering uses the threading library and the heap runtime, so the program must import it:
+
+```
+#import <standard.fx>, <atomics.fx>, <threading.fx>;
+```
+
+Without it the compiler reports: `[ASYNC] error: async lowering needs the threading library; add #import <threading.fx>;`
+
+## Async tags
+
+By default the compiler infers what each async function reads and writes and orders conflicting tasks sequentially. A **tag** states relations between calls so that independent work can overlap.
+
+### Defining a tag
+
+```
+async Tag(a, b)
+{
+    a # b;
+    b > a;
+};
+```
+
+A tag has a name, a list of formal parameters, and a body of relation statements. Each statement is `lhs OP rhs` where `lhs` and `rhs` are formal parameters.
+
+### Relation operators
+
+| Operator | Meaning | Kind |
+|----------|---------|------|
+| `a # b` | Disjoint: `a` and `b` touch disjoint memory | Claim, checked |
+| `a ~ b` | Commute: overlapping accesses are atomic, any order is correct | Claim, checked |
+| `a ! b` | Mutual exclusion: never run at the same time, any order | Enforced with a mutex |
+| `x > y` | `y` waits for `x`: `x` must finish before `y` starts | Ordering |
+
+`#` and `~` are claims about the code. The compiler verifies them and rejects a contradicted claim. `!` is enforced: each `!` group gets a global `Mutex` that the task holds while it runs. `>` is an ordering edge between two calls.
+
+A relation between a parameter and itself (`a # a`) applies between two calls of the same function.
+
+### Attaching a tag
+
+A tag is attached after the function body with `#<Tag>(targets)`:
+
+```
+async sum_range(i32* table, i32 lo, i32 hi) -> i64
+{
+    ...
+} #<After>(this, fill);
+```
+
+The targets bind positionally to the tag's formal parameters. A target is one of:
+
+| Target | Binds to |
+|--------|----------|
+| `this` | The function being defined |
+| `name` | The async function `name` |
+| `name(types)` | The overload of `name` with those parameter types |
+| `name(types)->ret` | The overload with those parameter types and return type |
+
+Several clauses may be attached to one function: `} #<A>(this) #<B>(this, other);`
+
+### Footprints and checking
+
+For each async function the compiler computes a footprint: a set of `(param, const)` terms over half-open ranges with read, write or free modes. Reads never conflict with reads. Operations from `standard::atomic` count as atomic accesses.
+
+| Situation | Result |
+|-----------|--------|
+| A `#` or `~` claim is contradicted by the code | `async_contradiction`, always fatal, printed even in warn mode |
+| Two calls conflict and no relation covers them | `async_conflict`: downgraded to sequential execution in warn mode, an error under `--borrowcheck` |
+
+### Static errors
+
+- A tag attached to a function that is not `async`.
+- An unknown tag name.
+- A target count that does not match the tag's arity.
+- A target that is unknown or not async.
+- A target type list that matches no overload.
+
+## Lowering
+
+For each launched call the compiler generates a frame struct `__af_N` holding the arguments and result, a trampoline `__af_N_run`, and a `thread_create` call. Each `!` group gets a global `Mutex __am_i`. The threading and heap runtime functions are added as DCE roots.
+
+## Example
+
+```
+async Disjoint(a) { a # a; };
+async After(a, b) { b > a; };
+
+async fill(i32* table, i32 lo, i32 hi) -> void { ... } #<Disjoint>(this);
+async sum_range(i32* table, i32 lo, i32 hi) -> i64 { ... } #<After>(this, fill);
+
+def main() -> int
+{
+    i32[1024] table;
+    fill(@table[0], 0, 512);          // runs concurrently with the next call
+    fill(@table[0], 512, 1024);       // disjoint ranges, no conflict
+    i64 lo = sum_range(@table[0], 0, 512);     // waits for fill
+    i64 hi = sum_range(@table[0], 512, 1024);
+    return (int)(lo + hi != (i64)524800);      // joins at first use of lo and hi
+};
+```
+
+---
+
+<a id="modules-and-build-blocks"></a>
+# Modules and Build Blocks
+
+A module is a named unit of a program with its own build settings. Modules let one file hold several programs, let files be pulled in with `from`, and let each module opt in to checks such as borrow checking.
+
+## Syntax
+
+```
+module Name
+{
+    from "other.fx";
+    def main() -> int { ... };
+}
+# build
+{
+    #[entrypoint] = this,
+    #[name] = prog,
+    #[borrow_check] = true,
+};
+```
+
+- The body accepts every top-level statement except another module.
+- The `# build { ... };` block follows the body. Entries are comma-separated `#[tag] = value`.
+- `module Name;` with no body is an error.
+- `module` is contextual: it is a module only in the form `module IDENT { ...` or `module IDENT;` at top level.
+- A module is top-level only. It is an error inside a function, a namespace or another module.
+
+## `from`
+
+`from "file.fx";` inside a module makes all modules of the named file part of the build. Paths are resolved relative to the including file, then relative to the working directory. A missing file or an include cycle is an error.
+
+## Build tags
+
+| Tag | Default | Values |
+|-----|---------|--------|
+| `entrypoint` | `this` | `this` or a module name |
+| `name` | module name | Output name |
+| `target` | `executable` | `executable`, `bootloader`, `compact`, `library`, `driver` (validated only, other targets are not yet routed) |
+| `debug` | `false` | bool |
+| `borrow_check` | `false` | bool |
+| `effect_check` | `false` | bool |
+| `dce` | `true` | bool, `false` makes every function of the module a DCE root |
+| `using` | `{}` | List of namespaces, acts as a global `using` |
+| `platform` | `{}` (any) | List such as `{Windows, Linux, Darwin}`, case-insensitive |
+
+An unknown tag is an error.
+
+## Overrides and locks
+
+A module can set tags on other modules:
+
+```
+#[override for {Logging}] = { #[borrow_check] = true },
+```
+
+Overrides are applied breadth-first from the entry module, so the override closest to the entry wins. The override target must be a known module. `entrypoint` cannot be overridden, and an override block cannot itself be locked.
+
+`!+` before a tag locks it: `!+#[borrow_check] = false`. A locked tag ignores overrides.
+
+The command line flags `--borrowcheck` and `--effects` force the checks on for every module, including locked ones.
+
+## Programs
+
+A module in the root file is a program if it defines `main` or sets `#[entrypoint] = this`. A file with several programs builds each one separately (one subprocess per program, equivalent to `--module NAME`). Only the entry module of a build keeps its `main`. If no program is found, the compiler reports an error. If `platform` does not include the current platform, the build reports a platform mismatch.
+
+Modules in the same file see each other without `from`. A sibling that is not reached through `from` is not in the entry's module graph, so its checks are off for that build.
+
+Flatten order is dependencies first, then siblings, then the entry module last.
+
+## Per-module checks
+
+The borrow checker, the effects checker and dead code elimination are applied per module. Violations are attributed to the function that owns them and filtered to the modules with the check enabled. Violations with an unknown owner are kept. Each live checked module prints one line:
+
+```
+[INFO] [FBC] ► Borrow checking Name
+```
+
+## Output
+
+```
+build/<name>/<Platform>/Release/<name>[.exe]
+build/<name>/<Platform>/Debug/<name>[.exe]
+```
+
+When a file builds several programs the last line is `Compilation successful: build/{A, B} (executable)`.
+
+## Command line
+
+| Flag | Meaning |
+|------|---------|
+| `--module NAME` | Build only the named program |
+| `--borrowcheck` | Force the borrow checker on for every module |
+| `--effects` | Force the effects checker on for every module |
+
+## Errors
+
+| Error | Cause |
+|-------|-------|
+| cycle | `from` includes form a cycle |
+| missing file | `from` names a file that is not found |
+| no program | No module defines `main` or sets `#[entrypoint] = this` |
+| platform mismatch | `platform` excludes the current platform |
+| unknown tag | A `#[tag]` that does not exist |
+| unknown override target | `override for {M}` names an unknown module |
+| cannot override `entrypoint` | Override sets `entrypoint` |
+| cannot lock an override | `!+` on an override entry |
+| nesting | Module inside a function, namespace or module |
 
 ---
 
@@ -4463,11 +4713,11 @@ system proves, which feeds optimizer signals like `Pure` and `!Alloc`.
 <a id="keyword-list"></a>
 # Keyword list:
 ```
-and, as, asm, assert, auto, bool, break, byte, case, catch,
+and, as, asm, assert, async, auto, bool, break, byte, case, catch,
 cdecl, char, comptime, const, constraint, continue, contract, data, def, default, defer,
 deprecate, dict, do, double, effect, elif, else, emitflux, enum, error, escape, export, extern,
 false, fastcall, float, for, from, global, goto, has, heap, if, in, inline, int, interface, is,  
-jump, label, local, long, macro, namespace, noinit, noreturn, not, object,
+jump, label, local, long, macro, module (contextual, top level only), namespace, noinit, noreturn, not, object,
 operator, or, private, public, register, return, signed, singinit,
 stack, stdcall, struct, switch, this, thiscall, throw, trait, true,
 try, uint, ulong, union, unsigned, using, vectorcall, void,
@@ -4561,6 +4811,16 @@ BITXNOR_ASSIGN = "`^|!|="
 TERN_ASSIGN = "?="  // Assign if LHS is null
 NOT_NULL = "!?"     // unary boolean postfix operator, primary use for pointers `if (px!?) {...};`
 NULL_COALESCE = "??"
+
+# Async tag relations (inside `async Tag(...) { }` bodies)
+ASYNC_DISJOINT = "#"   // a # b : disjoint footprints (claim)
+ASYNC_COMMUTE = "~"    // a ~ b : overlapping accesses commute (claim)
+ASYNC_EXCLUDE = "!"    // a ! b : mutual exclusion (mutex)
+ASYNC_BEFORE = ">"     // x > y : y waits for x
+
+# Async tag use and module build locks
+ASYNC_TAG_USE = "#<Tag>(...)"  // after an async function body
+BUILD_LOCK = "!+"              // prefix on a build entry, locks it against overrides
 
 # Shift
 BITSHIFT_LEFT = "<<"

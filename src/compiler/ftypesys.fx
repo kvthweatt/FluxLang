@@ -127,17 +127,17 @@ namespace flux
 
         def ts_is_pointer(TypeSpec* t) -> bool
         {
-            return (t.flags `& TS_POINTER) != 0;
+            return (t.flags `& TS_POINTER)!?;
         };
 
         def ts_is_array(TypeSpec* t) -> bool
         {
-            return (t.flags `& TS_ARRAY) != 0;
+            return (t.flags `& TS_ARRAY)!?;
         };
 
         def ts_is_signed(TypeSpec* t) -> bool
         {
-            return (t.flags `& TS_SIGNED) != 0;
+            return (t.flags `& TS_SIGNED)!?;
         };
 
         // Effective width in bits of a scalar TypeSpec (not counting pointers/arrays).
@@ -199,7 +199,7 @@ namespace flux
             if (t.custom_typename != (byte*)0)
             {
                 i = 0;
-                while (t.custom_typename[i] != 0)
+                while (t.custom_typename[i]!?)
                 {
                     c = t.custom_typename[i];
                     if (c == ':' | c == '.') { c = '_'; };
@@ -229,8 +229,7 @@ namespace flux
 
             if (ts_is_pointer(t))
             {
-                out.put_str(g"_ptr\0");
-                out.put_int(t.pointer_depth);
+                out.put_str(f"_ptr{t.pointer_depth}\0");
             };
 
             if (t.base_type == DataType.DATA & t.bit_width > 0)
@@ -246,9 +245,7 @@ namespace flux
         def mangle_function(Buf* out, byte* base, TypeSpec** params, int n, TypeSpec* ret) -> void
         {
             int i;
-            out.put_str(base);
-            out.put_str(g"__\0");
-            out.put_int(n);
+            out.put_str(f"{base}__{n}\0");
             while (i < n)
             {
                 out.put_str(g"__\0");
@@ -442,7 +439,7 @@ namespace flux
         def nm_place(NameMap* m, int e) -> void
         {
             int idx = (int)(nm_hash(m.keys[e]) % (u64)m.slot_cap);
-            while (m.slots[idx] != 0)
+            while (m.slots[idx]!?)
             {
                 idx++;
                 if (idx >= m.slot_cap) { idx = 0; };
@@ -526,7 +523,7 @@ namespace flux
         def has_scope_sep(byte* s) -> bool
         {
             int i;
-            while (s[i] != 0)
+            while (s[i]!?)
             {
                 if (s[i] == ':' & s[i + 1] == ':') { return true; };
                 i++;
@@ -539,7 +536,7 @@ namespace flux
         {
             byte* r = ts_dup(s);
             int i;
-            while (r[i] != 0)
+            while (r[i]!?)
             {
                 if (r[i] == ':' & r[i + 1] == ':')
                 {
@@ -810,7 +807,7 @@ namespace flux
         {
             ffree(st.current_ns);
             st.current_ns = ts_dup(ns);
-            if (ns[0] != 0) { sv_add(st.registered_ns, ns); };
+            if (ns[0]!?) { sv_add(st.registered_ns, ns); };
             return;
         };
 
@@ -903,7 +900,7 @@ namespace flux
             if (r != (void*)0) { return (FXC_SYMENTRY*)r; };
 
             // 2. current namespace
-            if (cur[0] != 0)
+            if (cur[0]!?)
             {
                 m = mangle_namespace_name(cur, name);
                 r = nm_get(st.globals, m);

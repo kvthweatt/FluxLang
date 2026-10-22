@@ -1,5 +1,4 @@
-#import "redstandard.fx";
-#import "redformat.fx";
+#import <standard.fx>, <format.fx>;
 
 using standard::format;
 using standard::format::colors;

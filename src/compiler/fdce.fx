@@ -36,9 +36,11 @@ namespace flux
             switch (n == (Node*)0)
             {
                 case (true) { -> 0; }
-                default {};
+                default
+                {
+                    -> node_count(n, s);
+                };
             };
-            -> node_count(n, s);
         };
 
         // Substring test
@@ -49,28 +51,34 @@ namespace flux
             switch (needle[0] == 0)
             {
                 case (true) { -> true; }
-                default {};
-            };
-            while (hay[i] != 0)
-            {
-                j = 0;
-                while (needle[j] != 0)
+                default
                 {
-                    switch (hay[i + j] != needle[j])
+                    while (hay[i]!?)
                     {
-                        case (true) { break; }
-                        default {};
+                        j = 0;
+                        while (needle[j]!?)
+                        {
+                            switch (hay[i + j] != needle[j])
+                            {
+                                case (true) { break; }
+                                default
+                                {
+                                    j++;
+                                };
+                            };
+                        };
+                        switch (needle[j] == 0)
+                        {
+                            case (true) { -> true; }
+                            default
+                            {
+                                i++;
+                            };
+                        };
                     };
-                    j++;
+                    -> false;
                 };
-                switch (needle[j] == 0)
-                {
-                    case (true) { -> true; }
-                    default {};
-                };
-                i++;
             };
-            -> false;
         };
 
         // Index of the first occurrence of needle in hay, or -1
@@ -78,24 +86,28 @@ namespace flux
         {
             int i = 0;
             int j;
-            while (hay[i] != 0)
+            while (hay[i]!?)
             {
                 j = 0;
-                while (needle[j] != 0)
+                while (needle[j]!?)
                 {
                     switch (hay[i + j] != needle[j])
                     {
                         case (true) { break; }
-                        default {};
+                        default
+                        {
+                            j++;
+                        };
                     };
-                    j++;
                 };
                 switch (needle[j] == 0)
                 {
                     case (true) { -> i; }
-                    default {};
+                    default
+                    {
+                        i++;
+                    };
                 };
-                i++;
             };
             -> -1;
         };
@@ -113,19 +125,21 @@ namespace flux
                 b.put('0');
                 -> b.mem;
             }
-                default {};
-            };
-            while (i < 16)
-            {
-                d = (int)((v >> (u64)((15 - i) * 4)) `& (u64)15);
-                switch (d < 10)
+                default
                 {
-                    case (true) { b.put('0' + d); }
-                    default { b.put('a' + (d - 10)); };
+                    while (i < 16)
+                    {
+                        d = (int)((v >> (u64)((15 - i) * 4)) `& (u64)15);
+                        switch (d < 10)
+                        {
+                            case (true) { b.put('0' + d); }
+                            default { b.put('a' + (d - 10)); };
+                        };
+                        i++;
+                    };
+                    -> b.mem;
                 };
-                i++;
             };
-            -> b.mem;
         };
 
         // fstr_append overloads that code generation picks from value types
@@ -199,6 +213,7 @@ namespace flux
             Buf kb;
             Buf kb2;
             byte* entry;
+            PtrVec* extra_roots;    // byte* names a later pass references (mangled with __)
             int eliminated;
 
             __init(byte* entry_name) -> this
@@ -217,6 +232,7 @@ namespace flux
                 this.kb.__init();
                 this.kb2.__init();
                 this.entry = entry_name;
+                this.extra_roots = (PtrVec*)0;
                 this.eliminated = 0;
                 p = dce_prim_name(0);
                 while (p != (byte*)0)
@@ -248,8 +264,7 @@ namespace flux
                 pv_free(this.keep);
                 this.sb.__exit();
                 this.kb.__exit();
-                this.kb2.__exit();
-                ->;
+                -> this.kb2.__exit();
             };
 
             own(void* p) -> void*
@@ -268,7 +283,7 @@ namespace flux
             add_suffixes(NameMap* refs, byte* s) -> void
             {
                 int i = 0;
-                switch (s[0] != 0)
+                switch (s[0]!?)
                 {
                     case (true) {
                     switch (!this.is_prim(s))
@@ -279,7 +294,7 @@ namespace flux
                 }
                     default {};
                 };
-                while (s[i] != 0)
+                while (s[i]!?)
                 {
                     switch (s[i] == '_')
                     {
@@ -288,7 +303,7 @@ namespace flux
                         {
                             case (true) {
                             i = i + 2;
-                            switch (s[i] != 0)
+                            switch (s[i]!?)
                             {
                                 case (true) {
                                 switch (!this.is_prim(s + i))
@@ -315,7 +330,7 @@ namespace flux
             any_suffix_live(byte* s) -> bool
             {
                 int i = 0;
-                switch (s[0] != 0)
+                switch (s[0]!?)
                 {
                     case (true) {
                     switch (nm_has(this.live, s))
@@ -326,7 +341,7 @@ namespace flux
                 }
                     default {};
                 };
-                while (s[i] != 0)
+                while (s[i]!?)
                 {
                     switch (s[i] == '_')
                     {
@@ -335,7 +350,7 @@ namespace flux
                         {
                             case (true) {
                             i = i + 2;
-                            switch (s[i] != 0)
+                            switch (s[i]!?)
                             {
                                 case (true) {
                                 switch (nm_has(this.live, s + i))
@@ -370,109 +385,115 @@ namespace flux
                 switch (name == (byte*)0)
                 {
                     case (true) { ->; }
-                    default {};
-                };
-                switch (name[0] == 0)
-                {
-                    case (true) { ->; }
-                    default {};
-                };
-                switch (this.is_prim(name))
-                {
-                    case (true) { ->; }
-                    default {};
-                };
-                nb.__init();
-                db.__init();
-                defer nb.__exit();
-                defer db.__exit();
-                // "::" becomes "__"
-                while (name[i] != 0)
-                {
-                    switch (name[i] == ':')
+                    default
                     {
-                        case (true) {
-                        switch (name[i + 1] == ':')
+                        switch (name[0] == 0)
                         {
-                            case (true) {
-                            nb.put_str(g"__\0");
-                            i = i + 2;
-                            continue;
-                        }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
-                    nb.put(name[i]);
-                    i++;
-                };
-                // TypeName.method is also added in its "__" spelling
-                i = 0;
-                while (nb.mem[i] != 0)
-                {
-                    switch (nb.mem[i] == '.')
-                    {
-                        case (true) {
-                        dot = true;
-                        db.put_str(g"__\0");
-                    }
-                        default { db.put(nb.mem[i]); };
-                    };
-                    i++;
-                };
-                switch (dot)
-                {
-                    case (true) { this.add_suffixes(refs, db.mem); }
-                    default {};
-                };
-                this.add_suffixes(refs, nb.mem);
-                // main__0__ret_intE1 also yields main__0 and the bare base name
-                r = dce_find(nb.mem, g"__ret_\0");
-                switch (r >= 0)
-                {
-                    case (true) {
-                    db.clear();
-                    k = 0;
-                    while (k < r)
-                    {
-                        db.put(nb.mem[k]);
-                        k++;
-                    };
-                    this.add_suffixes(refs, db.mem);
-                    db.clear();
-                    k = 0;
-                    while (k < r)
-                    {
-                        switch (nb.mem[k] == '_')
-                        {
-                            case (true) {
-                            switch (nb.mem[k + 1] == '_')
+                            case (true) { ->; }
+                            default
                             {
-                                case (true) { break; }
-                                default {};
+                                switch (this.is_prim(name))
+                                {
+                                    case (true) { ->; }
+                                    default
+                                    {
+                                        nb.__init();
+                                        db.__init();
+                                        defer nb.__exit();
+                                        defer db.__exit();
+                                        // "::" becomes "__"
+                                        while (name[i]!?)
+                                        {
+                                            switch (name[i] == ':')
+                                            {
+                                                case (true) {
+                                                switch (name[i + 1] == ':')
+                                                {
+                                                    case (true) {
+                                                    nb.put_str(g"__\0");
+                                                    i = i + 2;
+                                                    continue;
+                                                }
+                                                    default {};
+                                                };
+                                            }
+                                                default {};
+                                            };
+                                            nb.put(name[i]);
+                                            i++;
+                                        };
+                                        // TypeName.method is also added in its "__" spelling
+                                        i = 0;
+                                        while (nb.mem[i]!?)
+                                        {
+                                            switch (nb.mem[i] == '.')
+                                            {
+                                                case (true) {
+                                                dot = true;
+                                                db.put_str(g"__\0");
+                                            }
+                                                default { db.put(nb.mem[i]); };
+                                            };
+                                            i++;
+                                        };
+                                        switch (dot)
+                                        {
+                                            case (true) { this.add_suffixes(refs, db.mem); }
+                                            default {};
+                                        };
+                                        this.add_suffixes(refs, nb.mem);
+                                        // main__0__ret_intE1 also yields main__0 and the bare base name
+                                        r = dce_find(nb.mem, g"__ret_\0");
+                                        switch (r >= 0)
+                                        {
+                                            case (true) {
+                                            db.clear();
+                                            k = 0;
+                                            while (k < r)
+                                            {
+                                                db.put(nb.mem[k]);
+                                                k++;
+                                            };
+                                            this.add_suffixes(refs, db.mem);
+                                            db.clear();
+                                            k = 0;
+                                            while (k < r)
+                                            {
+                                                switch (nb.mem[k] == '_')
+                                                {
+                                                    case (true) {
+                                                    switch (nb.mem[k + 1] == '_')
+                                                    {
+                                                        case (true) { break; }
+                                                        default {};
+                                                    };
+                                                }
+                                                    default {};
+                                                };
+                                                db.put(nb.mem[k]);
+                                                k++;
+                                            };
+                                            switch (db.mem[0]!?)
+                                            {
+                                                case (true) {
+                                                switch (!this.is_prim(db.mem))
+                                                {
+                                                    case (true) { nm_put(refs, db.mem, (void*)1); }
+                                                    default {};
+                                                };
+                                            }
+                                                default {};
+                                            };
+                                        }
+                                            default {};
+                                        };
+                                        ->;
+                                    };
+                                };
                             };
-                        }
-                            default {};
                         };
-                        db.put(nb.mem[k]);
-                        k++;
                     };
-                    switch (db.mem[0] != 0)
-                    {
-                        case (true) {
-                        switch (!this.is_prim(db.mem))
-                        {
-                            case (true) { nm_put(refs, db.mem, (void*)1); }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
-                }
-                    default {};
                 };
-                ->;
             };
 
             // Puts the text after the last "__" of name (with "::" read as "__") plus
@@ -484,7 +505,7 @@ namespace flux
                 int last = 0;
                 nb.__init();
                 defer nb.__exit();
-                while (name[i] != 0)
+                while (name[i]!?)
                 {
                     switch (name[i] == ':')
                     {
@@ -530,17 +551,19 @@ namespace flux
                 switch (this.sb.mem[0] == 0)
                 {
                     case (true) { ->; }
-                    default {};
+                    default
+                    {
+                        switch (this.is_prim(this.sb.mem))
+                        {
+                            case (true) { ->; }
+                            default
+                            {
+                                this.sb.put_str(f"__{nargs}\0");
+                                -> nm_put(refs, this.sb.mem, (void*)1);
+                            };
+                        };
+                    };
                 };
-                switch (this.is_prim(this.sb.mem))
-                {
-                    case (true) { ->; }
-                    default {};
-                };
-                this.sb.put_str(g"__\0");
-                this.sb.put_int(nargs);
-                nm_put(refs, this.sb.mem, (void*)1);
-                ->;
             };
 
             // ----------------------------------------------------------
@@ -553,27 +576,28 @@ namespace flux
                 switch (t == (TypeSpec*)0)
                 {
                     case (true) { ->; }
-                    default {};
-                };
-                switch (t.custom_typename != (byte*)0)
-                {
-                    case (true) { this.add_ref(refs, t.custom_typename); }
-                    default {};
-                };
-                this.collect(refs, t.array_size);
-                switch (t.array_dims != (NodeVec*)0)
-                {
-                    case (true) {
-                    while (i < t.array_dims.len)
+                    default
                     {
-                        this.collect(refs, t.array_dims.items[i]);
-                        i++;
+                        switch (t.custom_typename != (byte*)0)
+                        {
+                            case (true) { this.add_ref(refs, t.custom_typename); }
+                            default {};
+                        };
+                        this.collect(refs, t.array_size);
+                        switch (t.array_dims != (NodeVec*)0)
+                        {
+                            case (true) {
+                            while (i < t.array_dims.len)
+                            {
+                                this.collect(refs, t.array_dims.items[i]);
+                                i++;
+                            };
+                        }
+                            default {};
+                        };
+                        -> this.walk_ts(refs, t.array_elem);
                     };
-                }
-                    default {};
                 };
-                this.walk_ts(refs, t.array_elem);
-                ->;
             };
 
             // Function pointer types are plain dataclasses in fdce.py, so every type
@@ -584,23 +608,25 @@ namespace flux
                 switch (t == (TypeSpec*)0)
                 {
                     case (true) { ->; }
-                    default {};
-                };
-                this.walk_ts(refs, t.fp_ret);
-                this.walk_fp(refs, t.fp_ret);
-                switch (t.fp_params != (TypeSpec**)0)
-                {
-                    case (true) {
-                    while (i < t.fp_nparams)
+                    default
                     {
-                        this.walk_ts(refs, t.fp_params[i]);
-                        this.walk_fp(refs, t.fp_params[i]);
-                        i++;
+                        this.walk_ts(refs, t.fp_ret);
+                        this.walk_fp(refs, t.fp_ret);
+                        switch (t.fp_params != (TypeSpec**)0)
+                        {
+                            case (true) {
+                            while (i < t.fp_nparams)
+                            {
+                                this.walk_ts(refs, t.fp_params[i]);
+                                this.walk_fp(refs, t.fp_params[i]);
+                                i++;
+                            };
+                        }
+                            default {};
+                        };
+                        ->;
                     };
-                }
-                    default {};
                 };
-                ->;
             };
 
             walk_list(NameMap* refs, Node* n, int slot) -> void
@@ -624,247 +650,257 @@ namespace flux
                 switch (n == (Node*)0)
                 {
                     case (true) { ->; }
-                    default {};
-                };
-                k = n.kind;
-                switch (k == NodeKind.IDENTIFIER)
-                {
-                    case (true) {
-                    this.add_ref(refs, n.text);
-                    ->;
-                }
-                    default {};
-                };
-                switch (k == NodeKind.FUNCTION_CALL)
-                {
-                    case (true) {
-                    switch (n.text != (byte*)0)
+                    default
                     {
-                        case (true) {
-                        this.add_ref(refs, n.text);
-                        this.add_arity_ref(refs, n.text, dce_count(n, 0));
-                    }
-                        default {};
-                    };
-                    this.walk_list(refs, n, 0);
-                    ->;
-                }
-                    default {};
-                };
-                switch (k == NodeKind.METHOD_CALL)
-                {
-                    case (true) {
-                    o = n.a;
-                    switch (n.text != (byte*)0)
-                    {
-                        case (true) {
-                        switch (n.text[0] != 0)
+                        k = n.kind;
+                        switch (k == NodeKind.IDENTIFIER)
                         {
                             case (true) {
-                            this.add_ref(refs, n.text);
-                            this.sb.clear();
-                            this.sb.put_str(n.text);
-                            this.sb.put_str(g"__\0");
-                            this.sb.put_int(dce_count(n, 0));
-                            nm_put(refs, this.sb.mem, (void*)1);
-                            switch (o != (Node*)0)
+                            -> this.add_ref(refs, n.text);
+                        }
+                            default
                             {
-                                case (true) {
-                                switch (o.kind == NodeKind.IDENTIFIER | o.kind == NodeKind.FUNCTION_CALL | o.kind == NodeKind.MACRO_CALL)
+                                switch (k == NodeKind.FUNCTION_CALL)
                                 {
                                     case (true) {
-                                    switch (o.text != (byte*)0)
+                                    switch (n.text != (byte*)0)
                                     {
                                         case (true) {
-                                        switch (o.text[0] != 0)
-                                        {
-                                            case (true) {
-                                            this.kb.clear();
-                                            this.kb.put_str(o.text);
-                                            this.kb.put_str(g"__\0");
-                                            this.kb.put_str(n.text);
-                                            this.add_ref(refs, this.kb.mem);
-                                        }
-                                            default {};
-                                        };
+                                        this.add_ref(refs, n.text);
+                                        this.add_arity_ref(refs, n.text, dce_count(n, 0));
                                     }
                                         default {};
                                     };
+                                    -> this.walk_list(refs, n, 0);
                                 }
-                                    default {};
-                                };
-                            }
-                                default {};
-                            };
-                        }
-                            default {};
-                        };
-                    }
-                        default {};
-                    };
-                    this.collect(refs, o);
-                    this.walk_list(refs, n, 0);
-                    ->;
-                }
-                    default {};
-                };
-                switch (k == NodeKind.F_STRING_LITERAL)
-                {
-                    case (true) {
-                    i = 0;
-                    while (i < 9)
-                    {
-                        this.add_ref(refs, dce_fstr_name(i));
-                        i++;
-                    };
-                    this.walk_list(refs, n, 0);
-                    ->;
-                }
-                    default {};
-                };
-                switch (k == NodeKind.MEMBER_ACCESS)
-                {
-                    case (true) {
-                    this.collect(refs, n.a);
-                    ->;
-                }
-                    default {};
-                };
-                switch (k == NodeKind.STRUCT_FIELD_ACCESS)
-                {
-                    case (true) { ->; }
-                    default {};
-                };
-                switch (k == NodeKind.ENUM_DEF)
-                {
-                    case (true) {
-                    this.walk_ts(refs, n.ts);
-                    ->;
-                }
-                    default {};
-                };
-                switch (k == NodeKind.NAMESPACE_DEF)
-                {
-                    case (true) {
-                    // Members only, base namespace names are plain strings
-                    this.walk_list(refs, n, 0);
-                    this.walk_list(refs, n, 1);
-                    this.walk_list(refs, n, 2);
-                    this.walk_list(refs, n, 3);
-                    this.walk_list(refs, n, 4);
-                    this.walk_list(refs, n, 5);
-                    this.collect(refs, n.a);
-                    this.collect(refs, n.b);
-                    ->;
-                }
-                    default {};
-                };
-
-                this.walk_ts(refs, n.ts);
-                this.walk_ts(refs, n.ts2);
-                switch (k == NodeKind.FUNCTION_POINTER_DECLARATION)
-                {
-                    case (true) { this.walk_fp(refs, n.ts); }
-                    default {};
-                };
-
-                this.collect(refs, n.a);
-                this.collect(refs, n.b);
-                this.collect(refs, n.c);
-                switch (k != NodeKind.OBJECT_DEF)
-                {
-                    case (true) {
-                    this.collect(refs, n.d);
-                    this.collect(refs, n.e);
-                }
-                    default {};
-                };
-
-                // Lists whose members are plain names are skipped
-                switch (k == NodeKind.FOR_IN_LOOP | k == NodeKind.STRUCT_INSTANCE | k == NodeKind.STRUCT_LITERAL |
-                    k == NodeKind.INTERFACE_DEF | k == NodeKind.MACRO_DEF | k == NodeKind.CONTRACT_DEF |
-                    k == NodeKind.CONSTRA_DEF)
-                {
-                    case (true) {
-                    switch (k == NodeKind.STRUCT_INSTANCE | k == NodeKind.STRUCT_LITERAL)
-                    {
-                        case (true) {
-                        this.walk_list(refs, n, 1);
-                        this.walk_list(refs, n, 2);
-                    }
-                        default {
-                            switch (k == NodeKind.INTERFACE_DEF)
-                            {
-                                case (true) { this.walk_list(refs, n, 1); }
-                                default {
-                                    switch (k == NodeKind.CONTRACT_DEF | k == NodeKind.CONSTRA_DEF | k == NodeKind.MACRO_DEF)
+                                    default
                                     {
-                                        case (true) { }
-                                        default {
-                        this.walk_list(refs, n, 1);
-                        this.walk_list(refs, n, 2);
-                    };
+                                        switch (k == NodeKind.METHOD_CALL)
+                                        {
+                                            case (true) {
+                                            o = n.a;
+                                            switch (n.text != (byte*)0)
+                                            {
+                                                case (true) {
+                                                switch (n.text[0]!?)
+                                                {
+                                                    case (true) {
+                                                    this.add_ref(refs, n.text);
+                                                    this.sb.clear();
+                                                    this.sb.put_str(f"{n.text}__{dce_count(n, 0)}\0");
+                                                    nm_put(refs, this.sb.mem, (void*)1);
+                                                    switch (o != (Node*)0)
+                                                    {
+                                                        case (true) {
+                                                        switch (o.kind == NodeKind.IDENTIFIER | o.kind == NodeKind.FUNCTION_CALL | o.kind == NodeKind.MACRO_CALL)
+                                                        {
+                                                            case (true) {
+                                                            switch (o.text != (byte*)0)
+                                                            {
+                                                                case (true) {
+                                                                switch (o.text[0]!?)
+                                                                {
+                                                                    case (true) {
+                                                                    this.kb.clear();
+                                                                    this.kb.put_str(f"{o.text}__{n.text}\0");
+                                                                    this.add_ref(refs, this.kb.mem);
+                                                                }
+                                                                    default {};
+                                                                };
+                                                            }
+                                                                default {};
+                                                            };
+                                                        }
+                                                            default {};
+                                                        };
+                                                    }
+                                                        default {};
+                                                    };
+                                                }
+                                                    default {};
+                                                };
+                                            }
+                                                default {};
+                                            };
+                                            this.collect(refs, o);
+                                            -> this.walk_list(refs, n, 0);
+                                        }
+                                            default
+                                            {
+                                                switch (k == NodeKind.F_STRING_LITERAL)
+                                                {
+                                                    case (true) {
+                                                    i = 0;
+                                                    while (i < 9)
+                                                    {
+                                                        this.add_ref(refs, dce_fstr_name(i));
+                                                        i++;
+                                                    };
+                                                    -> this.walk_list(refs, n, 0);
+                                                }
+                                                    default
+                                                    {
+                                                        switch (k == NodeKind.MEMBER_ACCESS)
+                                                        {
+                                                            case (true) {
+                                                            -> this.collect(refs, n.a);
+                                                        }
+                                                            default
+                                                            {
+                                                                switch (k == NodeKind.STRUCT_FIELD_ACCESS)
+                                                                {
+                                                                    case (true) { ->; }
+                                                                    default
+                                                                    {
+                                                                        switch (k == NodeKind.ENUM_DEF)
+                                                                        {
+                                                                            case (true) {
+                                                                            -> this.walk_ts(refs, n.ts);
+                                                                        }
+                                                                            default
+                                                                            {
+                                                                                switch (k == NodeKind.NAMESPACE_DEF)
+                                                                                {
+                                                                                    case (true) {
+                                                                                    // Members only, base namespace names are plain strings
+                                                                                    this.walk_list(refs, n, 0);
+                                                                                    this.walk_list(refs, n, 1);
+                                                                                    this.walk_list(refs, n, 2);
+                                                                                    this.walk_list(refs, n, 3);
+                                                                                    this.walk_list(refs, n, 4);
+                                                                                    this.walk_list(refs, n, 5);
+                                                                                    this.collect(refs, n.a);
+                                                                                    -> this.collect(refs, n.b);
+                                                                                }
+                                                                                    default
+                                                                                    {
+                                                                                        this.walk_ts(refs, n.ts);
+                                                                                        this.walk_ts(refs, n.ts2);
+                                                                                        switch (k == NodeKind.FUNCTION_POINTER_DECLARATION)
+                                                                                        {
+                                                                                            case (true) { this.walk_fp(refs, n.ts); }
+                                                                                            default {};
+                                                                                        };
+
+                                                                                        this.collect(refs, n.a);
+                                                                                        this.collect(refs, n.b);
+                                                                                        this.collect(refs, n.c);
+                                                                                        switch (k != NodeKind.OBJECT_DEF)
+                                                                                        {
+                                                                                            case (true) {
+                                                                                            this.collect(refs, n.d);
+                                                                                            this.collect(refs, n.e);
+                                                                                        }
+                                                                                            default {};
+                                                                                        };
+
+                                                                                        // Lists whose members are plain names are skipped
+                                                                                        switch (k == NodeKind.FOR_IN_LOOP | k == NodeKind.STRUCT_INSTANCE | k == NodeKind.STRUCT_LITERAL |
+                                                                                            k == NodeKind.INTERFACE_DEF | k == NodeKind.MACRO_DEF | k == NodeKind.CONTRACT_DEF |
+                                                                                            k == NodeKind.CONSTRA_DEF)
+                                                                                        {
+                                                                                            case (true) {
+                                                                                            switch (k == NodeKind.STRUCT_INSTANCE | k == NodeKind.STRUCT_LITERAL)
+                                                                                            {
+                                                                                                case (true) {
+                                                                                                this.walk_list(refs, n, 1);
+                                                                                                this.walk_list(refs, n, 2);
+                                                                                            }
+                                                                                                default {
+                                                                                                    switch (k == NodeKind.INTERFACE_DEF)
+                                                                                                    {
+                                                                                                        case (true) { this.walk_list(refs, n, 1); }
+                                                                                                        default {
+                                                                                                            switch (k == NodeKind.CONTRACT_DEF | k == NodeKind.CONSTRA_DEF | k == NodeKind.MACRO_DEF)
+                                                                                                            {
+                                                                                                                case (true) { }
+                                                                                                                default {
+                                                                                                this.walk_list(refs, n, 1);
+                                                                                                this.walk_list(refs, n, 2);
+                                                                                            };
+                                                                                                            };
+                                                                                                        };
+                                                                                                    };
+                                                                                                };
+                                                                                            };
+                                                                                            ->;
+                                                                                        }
+                                                                                            default
+                                                                                            {
+                                                                                                switch (k == NodeKind.STRUCT_DEF)
+                                                                                                {
+                                                                                                    case (true) {
+                                                                                                    this.walk_list(refs, n, 0);
+                                                                                                    this.walk_list(refs, n, 3);
+                                                                                                    -> this.walk_list(refs, n, 5);
+                                                                                                }
+                                                                                                    default
+                                                                                                    {
+                                                                                                        switch (k == NodeKind.OBJECT_DEF)
+                                                                                                        {
+                                                                                                            case (true) {
+                                                                                                            this.walk_list(refs, n, 0);
+                                                                                                            this.walk_list(refs, n, 1);
+                                                                                                            this.walk_list(refs, n, 3);
+                                                                                                            -> this.walk_list(refs, n, 4);
+                                                                                                        }
+                                                                                                            default
+                                                                                                            {
+                                                                                                                switch (k == NodeKind.DESTRUCTURING_ASSIGNMENT)
+                                                                                                                {
+                                                                                                                    case (true) {
+                                                                                                                    c = dce_count(n, 0);
+                                                                                                                    i = 0;
+                                                                                                                    while (i < c)
+                                                                                                                    {
+                                                                                                                        o = node_child(n, 0, i);
+                                                                                                                        switch (o.kind != NodeKind.IDENTIFIER)
+                                                                                                                        {
+                                                                                                                            case (true) { this.collect(refs, o); }
+                                                                                                                            default {};
+                                                                                                                        };
+                                                                                                                        i++;
+                                                                                                                    };
+                                                                                                                    this.walk_list(refs, n, 1);
+                                                                                                                    this.walk_list(refs, n, 2);
+                                                                                                                    this.walk_list(refs, n, 3);
+                                                                                                                    this.walk_list(refs, n, 4);
+                                                                                                                    -> this.walk_list(refs, n, 5);
+                                                                                                                }
+                                                                                                                    default
+                                                                                                                    {
+                                                                                                                        this.walk_list(refs, n, 0);
+                                                                                                                        this.walk_list(refs, n, 1);
+                                                                                                                        this.walk_list(refs, n, 2);
+                                                                                                                        this.walk_list(refs, n, 3);
+                                                                                                                        this.walk_list(refs, n, 4);
+                                                                                                                        -> this.walk_list(refs, n, 5);
+                                                                                                                    };
+                                                                                                                };
+                                                                                                            };
+                                                                                                        };
+                                                                                                    };
+                                                                                                };
+                                                                                            };
+                                                                                        };
+                                                                                    };
+                                                                                };
+                                                                            };
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
+                                        };
                                     };
                                 };
                             };
                         };
                     };
-                    ->;
-                }
-                    default {};
                 };
-                switch (k == NodeKind.STRUCT_DEF)
-                {
-                    case (true) {
-                    this.walk_list(refs, n, 0);
-                    this.walk_list(refs, n, 3);
-                    this.walk_list(refs, n, 5);
-                    ->;
-                }
-                    default {};
-                };
-                switch (k == NodeKind.OBJECT_DEF)
-                {
-                    case (true) {
-                    this.walk_list(refs, n, 0);
-                    this.walk_list(refs, n, 1);
-                    this.walk_list(refs, n, 3);
-                    this.walk_list(refs, n, 4);
-                    ->;
-                }
-                    default {};
-                };
-                switch (k == NodeKind.DESTRUCTURING_ASSIGNMENT)
-                {
-                    case (true) {
-                    c = dce_count(n, 0);
-                    i = 0;
-                    while (i < c)
-                    {
-                        o = node_child(n, 0, i);
-                        switch (o.kind != NodeKind.IDENTIFIER)
-                        {
-                            case (true) { this.collect(refs, o); }
-                            default {};
-                        };
-                        i++;
-                    };
-                    this.walk_list(refs, n, 1);
-                    this.walk_list(refs, n, 2);
-                    this.walk_list(refs, n, 3);
-                    this.walk_list(refs, n, 4);
-                    this.walk_list(refs, n, 5);
-                    ->;
-                }
-                    default {};
-                };
-                this.walk_list(refs, n, 0);
-                this.walk_list(refs, n, 1);
-                this.walk_list(refs, n, 2);
-                this.walk_list(refs, n, 3);
-                this.walk_list(refs, n, 4);
-                this.walk_list(refs, n, 5);
-                ->;
             };
 
             // ----------------------------------------------------------
@@ -877,19 +913,20 @@ namespace flux
                 switch (key[0] == 0)
                 {
                     case (true) { ->; }
-                    default {};
+                    default
+                    {
+                        v = (PtrVec*)nm_get(m, key);
+                        switch (v == (PtrVec*)0)
+                        {
+                            case (true) {
+                            v = pv_new();
+                            nm_put(m, key, (void*)v);
+                        }
+                            default {};
+                        };
+                        -> pv_push(v, (void*)f);
+                    };
                 };
-                v = (PtrVec*)nm_get(m, key);
-                switch (v == (PtrVec*)0)
-                {
-                    case (true) {
-                    v = pv_new();
-                    nm_put(m, key, (void*)v);
-                }
-                    default {};
-                };
-                pv_push(v, (void*)f);
-                ->;
             };
 
             // Adds f under every suffix of key
@@ -897,7 +934,7 @@ namespace flux
             {
                 int i = 0;
                 this.idx_add(m, key, f);
-                while (key[i] != 0)
+                while (key[i]!?)
                 {
                     switch (key[i] == '_')
                     {
@@ -924,25 +961,28 @@ namespace flux
                 switch (s.kind == NodeKind.NAMESPACE_DEF)
                 {
                     case (true) { -> s; }
-                    default {};
+                    default
+                    {
+                        switch (s.kind == NodeKind.NAMESPACE_DEF_STATEMENT)
+                        {
+                            case (true) { -> s.a; }
+                            default
+                            {
+                                -> (Node*)0;
+                            };
+                        };
+                    };
                 };
-                switch (s.kind == NodeKind.NAMESPACE_DEF_STATEMENT)
-                {
-                    case (true) { -> s.a; }
-                    default {};
-                };
-                -> (Node*)0;
             };
 
             // Joins prefix and name with "__" into kb2 (name only when prefix is empty)
             join_prefix(byte* prefix, byte* name) -> byte*
             {
                 this.kb2.clear();
-                switch (prefix[0] != 0)
+                switch (prefix[0]!?)
                 {
                     case (true) {
-                    this.kb2.put_str(prefix);
-                    this.kb2.put_str(g"__\0");
+                    this.kb2.put_str(f"{prefix}__\0");
                 }
                     default {};
                 };
@@ -957,14 +997,14 @@ namespace flux
                 byte* r;
                 pb.__init();
                 defer pb.__exit();
-                switch (prefix[0] != 0)
+                switch (prefix[0]!?)
                 {
                     case (true) {
                     pb.put_str(prefix);
                     switch (ns.text != (byte*)0)
                     {
                         case (true) {
-                        switch (ns.text[0] != 0)
+                        switch (ns.text[0]!?)
                         {
                             case (true) { pb.put_str(g"__\0"); }
                             default {};
@@ -1007,20 +1047,22 @@ namespace flux
                     switch (f.kind != NodeKind.FUNCTION_DEF)
                     {
                         case (true) { continue; }
-                        default {};
+                        default
+                        {
+                            switch (f.text == (byte*)0)
+                            {
+                                case (true) { continue; }
+                                default
+                                {
+                                    full = this.join_prefix(cur, f.text);
+                                    this.idx_suffixes(this.nsf, full, f);
+                                    this.sb.clear();
+                                    this.sb.put_str(f"{f.text}__{dce_count(f, 0)}\0");
+                                    this.idx_add(this.nsf, this.sb.mem, f);
+                                };
+                            };
+                        };
                     };
-                    switch (f.text == (byte*)0)
-                    {
-                        case (true) { continue; }
-                        default {};
-                    };
-                    full = this.join_prefix(cur, f.text);
-                    this.idx_suffixes(this.nsf, full, f);
-                    this.sb.clear();
-                    this.sb.put_str(f.text);
-                    this.sb.put_str(g"__\0");
-                    this.sb.put_int(dce_count(f, 0));
-                    this.idx_add(this.nsf, this.sb.mem, f);
                 };
                 // Object methods
                 kq.__init();
@@ -1034,34 +1076,37 @@ namespace flux
                     switch (o.kind != NodeKind.OBJECT_DEF)
                     {
                         case (true) { continue; }
-                        default {};
-                    };
-                    mc = dce_count(o, 1);
-                    j = 0;
-                    while (j < mc)
-                    {
-                        m = node_child(o, 1, j);
-                        j++;
-                        switch (m.text == (byte*)0)
+                        default
                         {
-                            case (true) { continue; }
-                            default {};
+                            mc = dce_count(o, 1);
+                            j = 0;
+                            while (j < mc)
+                            {
+                                m = node_child(o, 1, j);
+                                j++;
+                                switch (m.text == (byte*)0)
+                                {
+                                    case (true) { continue; }
+                                    default
+                                    {
+                                        kq.clear();
+                                        switch (o.text != (byte*)0)
+                                        {
+                                            case (true) { kq.put_str(o.text); }
+                                            default {};
+                                        };
+                                        kq.put_str(f"__{m.text}\0");
+                                        anchor = ts_dup(kq.mem);
+                                        this.own((void*)anchor);
+                                        full = this.join_prefix(cur, anchor);
+                                        key = ts_dup(full);
+                                        this.own((void*)key);
+                                        nm_put(this.owner, dce_ptr_key(@this.sb, (void*)m), (void*)o.text);
+                                        this.index_method(key, anchor, m);
+                                    };
+                                };
+                            };
                         };
-                        kq.clear();
-                        switch (o.text != (byte*)0)
-                        {
-                            case (true) { kq.put_str(o.text); }
-                            default {};
-                        };
-                        kq.put_str(g"__\0");
-                        kq.put_str(m.text);
-                        anchor = ts_dup(kq.mem);
-                        this.own((void*)anchor);
-                        full = this.join_prefix(cur, anchor);
-                        key = ts_dup(full);
-                        this.own((void*)key);
-                        nm_put(this.owner, dce_ptr_key(@this.sb, (void*)m), (void*)o.text);
-                        this.index_method(key, anchor, m);
                     };
                 };
                 c = dce_count(ns.b, 0);
@@ -1081,7 +1126,7 @@ namespace flux
                 int i = 0;
                 this.idx_add(this.objm, full, m);
                 this.idx_add(this.objmq, full, m);
-                while (full[i] != 0)
+                while (full[i]!?)
                 {
                     switch (full[i] == '_')
                     {
@@ -1090,7 +1135,7 @@ namespace flux
                         {
                             case (true) {
                             i = i + 2;
-                            switch (full[i] != 0)
+                            switch (full[i]!?)
                             {
                                 case (true) {
                                 this.idx_add(this.objm, full + i, m);
@@ -1123,14 +1168,18 @@ namespace flux
                 switch (f.text == (byte*)0)
                 {
                     case (true) { -> false; }
-                    default {};
+                    default
+                    {
+                        switch (cstr_eq(f.text, this.entry))
+                        {
+                            case (true) { -> true; }
+                            default
+                            {
+                                -> cstr_eq(f.text, g"_start\0");
+                            };
+                        };
+                    };
                 };
-                switch (cstr_eq(f.text, this.entry))
-                {
-                    case (true) { -> true; }
-                    default {};
-                };
-                -> cstr_eq(f.text, g"_start\0");
             };
 
             // Adds every ref of f that is not live yet to out
@@ -1154,8 +1203,7 @@ namespace flux
                     };
                     e++;
                 };
-                nm_free(r);
-                ->;
+                -> nm_free(r);
             };
 
             walk_funcs(PtrVec* v, NameMap* out) -> void
@@ -1164,23 +1212,23 @@ namespace flux
                 switch (v == (PtrVec*)0)
                 {
                     case (true) { ->; }
-                    default {};
+                    default
+                    {
+                        while (i < v.len)
+                        {
+                            this.refs_into((Node*)v.items[i], out);
+                            i++;
+                        };
+                        ->;
+                    };
                 };
-                while (i < v.len)
-                {
-                    this.refs_into((Node*)v.items[i], out);
-                    i++;
-                };
-                ->;
             };
 
             // Name of f followed by __N, N being its parameter count, in kb
             count_key(Node* f) -> byte*
             {
                 this.kb.clear();
-                this.kb.put_str(f.text);
-                this.kb.put_str(g"__\0");
-                this.kb.put_int(dce_count(f, 0));
+                this.kb.put_str(f"{f.text}__{dce_count(f, 0)}\0");
                 -> this.kb.mem;
             };
 
@@ -1205,61 +1253,65 @@ namespace flux
                         switch (cur.vals[e] == (void*)0)
                         {
                             case (true) { e++; continue; }
-                            default {};
-                        };
-                        name = cur.keys[e];
-                        e++;
-                        switch (nm_has(this.live, name))
-                        {
-                            case (true) { continue; }
-                            default {};
-                        };
-                        nm_put(this.live, name, (void*)1);
-                        funcs = (PtrVec*)nm_get(this.nsf, name);
-                        switch (funcs != (PtrVec*)0)
-                        {
-                            case (true) {
-                            has_count = false;
-                            switch (narrow)
+                            default
                             {
-                                case (true) {
-                                i = 0;
-                                while (i < funcs.len)
+                                name = cur.keys[e];
+                                e++;
+                                switch (nm_has(this.live, name))
                                 {
-                                    f = (Node*)funcs.items[i];
-                                    i++;
-                                    switch (nm_has(this.live, this.count_key(f)))
+                                    case (true) { continue; }
+                                    default
                                     {
-                                        case (true) { has_count = true; }
-                                        default {};
+                                        nm_put(this.live, name, (void*)1);
+                                        funcs = (PtrVec*)nm_get(this.nsf, name);
+                                        switch (funcs != (PtrVec*)0)
+                                        {
+                                            case (true) {
+                                            has_count = false;
+                                            switch (narrow)
+                                            {
+                                                case (true) {
+                                                i = 0;
+                                                while (i < funcs.len)
+                                                {
+                                                    f = (Node*)funcs.items[i];
+                                                    i++;
+                                                    switch (nm_has(this.live, this.count_key(f)))
+                                                    {
+                                                        case (true) { has_count = true; }
+                                                        default {};
+                                                    };
+                                                };
+                                            }
+                                                default {};
+                                            };
+                                            i = 0;
+                                            while (i < funcs.len)
+                                            {
+                                                f = (Node*)funcs.items[i];
+                                                i++;
+                                                switch (has_count)
+                                                {
+                                                    case (true) {
+                                                    switch (!nm_has(this.live, this.count_key(f)))
+                                                    {
+                                                        case (true) { continue; }
+                                                        default {};
+                                                    };
+                                                }
+                                                    default {};
+                                                };
+                                                this.refs_into(f, nxt);
+                                            };
+                                        }
+                                            default {};
+                                        };
+                                        this.walk_funcs((PtrVec*)nm_get(this.tlf, name), nxt);
+                                        this.walk_funcs((PtrVec*)nm_get(this.objmq, name), nxt);
                                     };
                                 };
-                            }
-                                default {};
                             };
-                            i = 0;
-                            while (i < funcs.len)
-                            {
-                                f = (Node*)funcs.items[i];
-                                i++;
-                                switch (has_count)
-                                {
-                                    case (true) {
-                                    switch (!nm_has(this.live, this.count_key(f)))
-                                    {
-                                        case (true) { continue; }
-                                        default {};
-                                    };
-                                }
-                                    default {};
-                                };
-                                this.refs_into(f, nxt);
-                            };
-                        }
-                            default {};
                         };
-                        this.walk_funcs((PtrVec*)nm_get(this.tlf, name), nxt);
-                        this.walk_funcs((PtrVec*)nm_get(this.objmq, name), nxt);
                     };
                     switch (cur != frontier)
                     {
@@ -1303,19 +1355,25 @@ namespace flux
                         switch (d.text == (byte*)0)
                         {
                             case (true) { continue; }
-                            default {};
+                            default
+                            {
+                                switch (d.text[0] == 0)
+                                {
+                                    case (true) { continue; }
+                                    default
+                                    {
+                                        switch (!this.any_suffix_live(this.join_prefix(cur, d.text)))
+                                        {
+                                            case (true) { continue; }
+                                            default
+                                            {
+                                                this.refs_into(d, out);
+                                            };
+                                        };
+                                    };
+                                };
+                            };
                         };
-                        switch (d.text[0] == 0)
-                        {
-                            case (true) { continue; }
-                            default {};
-                        };
-                        switch (!this.any_suffix_live(this.join_prefix(cur, d.text)))
-                        {
-                            case (true) { continue; }
-                            default {};
-                        };
-                        this.refs_into(d, out);
                     };
                     s++;
                 };
@@ -1355,95 +1413,105 @@ namespace flux
                     switch (o.kind != NodeKind.OBJECT_DEF)
                     {
                         case (true) { continue; }
-                        default {};
-                    };
-                    switch (dce_count(o, 5) == 0)
-                    {
-                        case (true) { continue; }
-                        default {};
-                    };
-                    switch (o.text == (byte*)0)
-                    {
-                        case (true) { continue; }
-                        default {};
-                    };
-                    switch (o.text[0] == 0)
-                    {
-                        case (true) { continue; }
-                        default {};
-                    };
-                    refd = false;
-                    e = 0;
-                    while (e < seed.count)
-                    {
-                        switch (seed.vals[e] != (void*)0)
+                        default
                         {
-                            case (true) {
-                            switch (dce_contains(seed.keys[e], o.text))
+                            switch (dce_count(o, 5) == 0)
                             {
-                                case (true) { refd = true; break; }
-                                default {};
-                            };
-                        }
-                            default {};
-                        };
-                        e++;
-                    };
-                    switch (!refd)
-                    {
-                        case (true) { continue; }
-                        default {};
-                    };
-                    mc = dce_count(o, 1);
-                    j = 0;
-                    while (j < mc)
-                    {
-                        m = node_child(o, 1, j);
-                        j++;
-                        switch (m.text == (byte*)0)
-                        {
-                            case (true) { continue; }
-                            default {};
-                        };
-                        kq.clear();
-                        kq.put_str(o.text);
-                        kq.put_str(g"__\0");
-                        kq.put_str(m.text);
-                        anchor = ts_dup(kq.mem);
-                        this.own((void*)anchor);
-                        full = ts_dup(this.join_prefix(cur, anchor));
-                        this.own((void*)full);
-                        nm_put(seed, full, (void*)1);
-                        q = 0;
-                        while (full[q] != 0)
-                        {
-                            switch (full[q] == '_')
-                            {
-                                case (true) {
-                                switch (full[q + 1] == '_')
+                                case (true) { continue; }
+                                default
                                 {
-                                    case (true) {
-                                    q = q + 2;
-                                    v = full + q;
-                                    switch (v[0] != 0)
+                                    switch (o.text == (byte*)0)
                                     {
-                                        case (true) {
-                                        switch (dce_contains(v, anchor))
+                                        case (true) { continue; }
+                                        default
                                         {
-                                            case (true) { nm_put(seed, v, (void*)1); }
-                                            default {};
+                                            switch (o.text[0] == 0)
+                                            {
+                                                case (true) { continue; }
+                                                default
+                                                {
+                                                    refd = false;
+                                                    e = 0;
+                                                    while (e < seed.count)
+                                                    {
+                                                        switch (seed.vals[e] != (void*)0)
+                                                        {
+                                                            case (true) {
+                                                            switch (dce_contains(seed.keys[e], o.text))
+                                                            {
+                                                                case (true) { refd = true; break; }
+                                                                default {};
+                                                            };
+                                                        }
+                                                            default {};
+                                                        };
+                                                        e++;
+                                                    };
+                                                    switch (!refd)
+                                                    {
+                                                        case (true) { continue; }
+                                                        default
+                                                        {
+                                                            mc = dce_count(o, 1);
+                                                            j = 0;
+                                                            while (j < mc)
+                                                            {
+                                                                m = node_child(o, 1, j);
+                                                                j++;
+                                                                switch (m.text == (byte*)0)
+                                                                {
+                                                                    case (true) { continue; }
+                                                                    default
+                                                                    {
+                                                                        kq.clear();
+                                                                        kq.put_str(f"{o.text}__{m.text}\0");
+                                                                        anchor = ts_dup(kq.mem);
+                                                                        this.own((void*)anchor);
+                                                                        full = ts_dup(this.join_prefix(cur, anchor));
+                                                                        this.own((void*)full);
+                                                                        nm_put(seed, full, (void*)1);
+                                                                        q = 0;
+                                                                        while (full[q]!?)
+                                                                        {
+                                                                            switch (full[q] == '_')
+                                                                            {
+                                                                                case (true) {
+                                                                                switch (full[q + 1] == '_')
+                                                                                {
+                                                                                    case (true) {
+                                                                                    q = q + 2;
+                                                                                    v = full + q;
+                                                                                    switch (v[0]!?)
+                                                                                    {
+                                                                                        case (true) {
+                                                                                        switch (dce_contains(v, anchor))
+                                                                                        {
+                                                                                            case (true) { nm_put(seed, v, (void*)1); }
+                                                                                            default {};
+                                                                                        };
+                                                                                    }
+                                                                                        default {};
+                                                                                    };
+                                                                                    continue;
+                                                                                }
+                                                                                    default {};
+                                                                                };
+                                                                            }
+                                                                                default {};
+                                                                            };
+                                                                            q++;
+                                                                        };
+                                                                    };
+                                                                };
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
                                         };
-                                    }
-                                        default {};
                                     };
-                                    continue;
-                                }
-                                    default {};
                                 };
-                            }
-                                default {};
                             };
-                            q++;
                         };
                     };
                 };
@@ -1471,14 +1539,16 @@ namespace flux
                     switch (b.kind != NodeKind.EXTERN_BLOCK)
                     {
                         case (true) { continue; }
-                        default {};
-                    };
-                    dc = dce_count(b, 0);
-                    j = 0;
-                    while (j < dc)
-                    {
-                        this.collect(seed, node_child(b, 0, j));
-                        j++;
+                        default
+                        {
+                            dc = dce_count(b, 0);
+                            j = 0;
+                            while (j < dc)
+                            {
+                                this.collect(seed, node_child(b, 0, j));
+                                j++;
+                            };
+                        };
                     };
                 };
                 c = dce_count(ns.b, 0);
@@ -1529,6 +1599,17 @@ namespace flux
                 // initialization), so no source reference to it exists for DCE to see
                 this.add_suffixes(seed, g"memset\0");
 
+                // declarations a later pass (async lowering) will reference but no source mentions yet
+                if (this.extra_roots != (PtrVec*)0)
+                {
+                    i = 0;
+                    while (i < this.extra_roots.len)
+                    {
+                        this.add_suffixes(seed, (byte*)this.extra_roots.items[i]);
+                        i++;
+                    };
+                };
+
                 // Step 1b: top level code that is not a namespace, using or function
                 i = 0;
                 while (i < c)
@@ -1538,26 +1619,32 @@ namespace flux
                     switch (this.ns_of(s) != (Node*)0)
                     {
                         case (true) { continue; }
-                        default {};
-                    };
-                    switch (s.kind == NodeKind.USING_STATEMENT)
-                    {
-                        case (true) { continue; }
-                        default {};
-                    };
-                    switch (s.kind == NodeKind.FUNCTION_DEF)
-                    {
-                        case (true) {
-                        switch (this.is_entry(s))
+                        default
                         {
-                            case (true) { this.collect(seed, s); }
-                            default {};
+                            switch (s.kind == NodeKind.USING_STATEMENT)
+                            {
+                                case (true) { continue; }
+                                default
+                                {
+                                    switch (s.kind == NodeKind.FUNCTION_DEF)
+                                    {
+                                        case (true) {
+                                        switch (this.is_entry(s))
+                                        {
+                                            case (true) { this.collect(seed, s); }
+                                            default {};
+                                        };
+                                        continue;
+                                    }
+                                        default
+                                        {
+                                            this.collect(seed, s);
+                                        };
+                                    };
+                                };
+                            };
                         };
-                        continue;
-                    }
-                        default {};
                     };
-                    this.collect(seed, s);
                 };
 
                 // Step 2: top level functions
@@ -1569,19 +1656,23 @@ namespace flux
                     switch (s.kind != NodeKind.FUNCTION_DEF)
                     {
                         case (true) { continue; }
-                        default {};
-                    };
-                    switch (s.text == (byte*)0)
-                    {
-                        case (true) { continue; }
-                        default {};
-                    };
-                    this.idx_suffixes(this.tlf, s.text, s);
-                    this.idx_add(this.tlf, this.count_key(s), s);
-                    switch (this.is_entry(s))
-                    {
-                        case (true) { nm_put(seed, s.text, (void*)1); }
-                        default {};
+                        default
+                        {
+                            switch (s.text == (byte*)0)
+                            {
+                                case (true) { continue; }
+                                default
+                                {
+                                    this.idx_suffixes(this.tlf, s.text, s);
+                                    this.idx_add(this.tlf, this.count_key(s), s);
+                                    switch (this.is_entry(s))
+                                    {
+                                        case (true) { nm_put(seed, s.text, (void*)1); }
+                                        default {};
+                                    };
+                                };
+                            };
+                        };
                     };
                 };
 
@@ -1643,49 +1734,57 @@ namespace flux
                             switch (ms == (PtrVec*)0)
                             {
                                 case (true) { continue; }
-                                default {};
-                            };
-                            switch (dce_contains(key, g"__\0"))
-                            {
-                                case (true) { continue; }
-                                default {};
-                            };
-                            switch (!nm_has(this.live, key))
-                            {
-                                case (true) { continue; }
-                                default {};
-                            };
-                            j = 0;
-                            while (j < ms.len)
-                            {
-                                m = (Node*)ms.items[j];
-                                j++;
-                                switch (nm_has(walked, dce_ptr_key(@this.kb2, (void*)m)))
+                                default
                                 {
-                                    case (true) { continue; }
-                                    default {};
-                                };
-                                on = (byte*)nm_get(this.owner, dce_ptr_key(@this.kb2, (void*)m));
-                                switch (on != (byte*)0)
-                                {
-                                    case (true) {
-                                    switch (on[0] != 0)
+                                    switch (dce_contains(key, g"__\0"))
                                     {
-                                        case (true) {
-                                        switch (!nm_has(this.live, on))
+                                        case (true) { continue; }
+                                        default
                                         {
-                                            case (true) { continue; }
-                                            default {};
+                                            switch (!nm_has(this.live, key))
+                                            {
+                                                case (true) { continue; }
+                                                default
+                                                {
+                                                    j = 0;
+                                                    while (j < ms.len)
+                                                    {
+                                                        m = (Node*)ms.items[j];
+                                                        j++;
+                                                        switch (nm_has(walked, dce_ptr_key(@this.kb2, (void*)m)))
+                                                        {
+                                                            case (true) { continue; }
+                                                            default
+                                                            {
+                                                                on = (byte*)nm_get(this.owner, dce_ptr_key(@this.kb2, (void*)m));
+                                                                switch (on != (byte*)0)
+                                                                {
+                                                                    case (true) {
+                                                                    switch (on[0]!?)
+                                                                    {
+                                                                        case (true) {
+                                                                        switch (!nm_has(this.live, on))
+                                                                        {
+                                                                            case (true) { continue; }
+                                                                            default {};
+                                                                        };
+                                                                    }
+                                                                        default {};
+                                                                    };
+                                                                }
+                                                                    default {};
+                                                                };
+                                                                nm_put(walked, dce_ptr_key(@this.kb2, (void*)m), (void*)1);
+                                                                progressed = true;
+                                                                this.refs_into(m, bare);
+                                                            };
+                                                        };
+                                                    };
+                                                };
+                                            };
                                         };
-                                    }
-                                        default {};
                                     };
-                                }
-                                    default {};
                                 };
-                                nm_put(walked, dce_ptr_key(@this.kb2, (void*)m), (void*)1);
-                                progressed = true;
-                                this.refs_into(m, bare);
                             };
                         };
                         this.expand(bare, false);
@@ -1729,10 +1828,12 @@ namespace flux
                 switch (v == (NodeVec*)0)
                 {
                     case (true) { ->; }
-                    default {};
+                    default
+                    {
+                        v.len = n;
+                        ->;
+                    };
                 };
-                v.len = n;
-                ->;
             };
 
             // Removes entries of list v (slot of node n) whose name is not live
@@ -1745,44 +1846,46 @@ namespace flux
                 switch (v == (NodeVec*)0)
                 {
                     case (true) { ->; }
-                    default {};
-                };
-                while (i < v.len)
-                {
-                    d = v.items[i];
-                    i++;
-                    keepd = true;
-                    switch (d.text != (byte*)0)
+                    default
                     {
-                        case (true) {
-                        switch (d.text[0] != 0)
+                        while (i < v.len)
                         {
-                            case (true) {
-                            switch (!this.type_live(prefix, d.text))
+                            d = v.items[i];
+                            i++;
+                            keepd = true;
+                            switch (d.text != (byte*)0)
                             {
                                 case (true) {
-                                keepd = false;
-                                this.eliminated++;
+                                switch (d.text[0]!?)
+                                {
+                                    case (true) {
+                                    switch (!this.type_live(prefix, d.text))
+                                    {
+                                        case (true) {
+                                        keepd = false;
+                                        this.eliminated++;
+                                    }
+                                        default {};
+                                    };
+                                }
+                                    default {};
+                                };
                             }
                                 default {};
                             };
-                        }
-                            default {};
+                            switch (keepd)
+                            {
+                                case (true) {
+                                v.items[k] = d;
+                                k++;
+                            }
+                                default {};
+                            };
                         };
-                    }
-                        default {};
-                    };
-                    switch (keepd)
-                    {
-                        case (true) {
-                        v.items[k] = d;
-                        k++;
-                    }
-                        default {};
+                        v.len = k;
+                        ->;
                     };
                 };
-                v.len = k;
-                ->;
             };
 
             prune_ns(Node* ns, byte* prefix) -> void
@@ -1822,17 +1925,21 @@ namespace flux
                         switch (f.kind != NodeKind.FUNCTION_DEF)
                         {
                             case (true) { continue; }
-                            default {};
-                        };
-                        switch (f.text == (byte*)0)
-                        {
-                            case (true) { continue; }
-                            default {};
-                        };
-                        switch (nm_has(this.live, this.count_key(f)))
-                        {
-                            case (true) { nm_put(counted, f.text, (void*)1); }
-                            default {};
+                            default
+                            {
+                                switch (f.text == (byte*)0)
+                                {
+                                    case (true) { continue; }
+                                    default
+                                    {
+                                        switch (nm_has(this.live, this.count_key(f)))
+                                        {
+                                            case (true) { nm_put(counted, f.text, (void*)1); }
+                                            default {};
+                                        };
+                                    };
+                                };
+                            };
                         };
                     };
                     i = 0;
@@ -1911,7 +2018,7 @@ namespace flux
                             switch (o.text != (byte*)0)
                             {
                                 case (true) {
-                                switch (o.text[0] != 0)
+                                switch (o.text[0]!?)
                                 {
                                     case (true) {
                                     switch (!this.type_live(cur, o.text))
@@ -1953,16 +2060,13 @@ namespace flux
                                     {
                                         case (true) {
                                         kq.clear();
-                                        kq.put_str(o.text);
-                                        kq.put_str(g"__\0");
-                                        kq.put_str(m.text);
+                                        kq.put_str(f"{o.text}__{m.text}\0");
                                         anchor = kq.mem;
                                         fq.clear();
-                                        switch (cur[0] != 0)
+                                        switch (cur[0]!?)
                                         {
                                             case (true) {
-                                            fq.put_str(cur);
-                                            fq.put_str(g"__\0");
+                                            fq.put_str(f"{cur}__\0");
                                         }
                                             default {};
                                         };
@@ -2038,44 +2142,46 @@ namespace flux
                 switch (nm_has(this.live, full))
                 {
                     case (true) { -> true; }
-                    default {};
-                };
-                while (full[i] != 0)
-                {
-                    switch (full[i] == '_')
+                    default
                     {
-                        case (true) {
-                        switch (full[i + 1] == '_')
+                        while (full[i]!?)
                         {
-                            case (true) {
-                            i = i + 2;
-                            switch (full[i] != 0)
+                            switch (full[i] == '_')
                             {
                                 case (true) {
-                                switch (dce_contains(full + i, anchor))
+                                switch (full[i + 1] == '_')
                                 {
                                     case (true) {
-                                    switch (nm_has(this.live, full + i))
+                                    i = i + 2;
+                                    switch (full[i]!?)
                                     {
-                                        case (true) { -> true; }
+                                        case (true) {
+                                        switch (dce_contains(full + i, anchor))
+                                        {
+                                            case (true) {
+                                            switch (nm_has(this.live, full + i))
+                                            {
+                                                case (true) { -> true; }
+                                                default {};
+                                            };
+                                        }
+                                            default {};
+                                        };
+                                    }
                                         default {};
                                     };
+                                    continue;
                                 }
                                     default {};
                                 };
                             }
                                 default {};
                             };
-                            continue;
-                        }
-                            default {};
+                            i++;
                         };
-                    }
-                        default {};
+                        -> false;
                     };
-                    i++;
                 };
-                -> false;
             };
 
             // eliminate(): prunes prog in place and returns the number of removed declarations
@@ -2142,6 +2248,15 @@ namespace flux
         {
             Dce d(entry);
             defer d.__exit();
+            -> d.run(prog);
+        };
+
+        // Same, keeping extra_roots (PtrVec of byte* names) alive as well
+        eliminate_roots(Node* prog, byte* entry, PtrVec* roots) -> int
+        {
+            Dce d(entry);
+            defer d.__exit();
+            d.extra_roots = roots;
             -> d.run(prog);
         };
     };

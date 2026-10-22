@@ -1,202 +1,182 @@
 # Flux on Windows - Setup Guide
 
-This guide helps you understand and configure your Windows development environment for Flux. Rather than providing automated scripts, we believe in helping you understand each component and make informed choices about your setup.
+Flux on Windows needs Python (runs the compiler), LLVM 21+ with `llc` and `opt`, and the MSVC build tools plus Windows SDK (the libraries `lld-link` links against). There are two ways to set up: run `setup.py` for an automated install, or follow the manual steps below.
+
+## Automated Setup
+
+```
+python scripts\setup.py
+```
+
+The wizard detects what is installed, installs the rest (Python, LLVM through winget, llvmlite, and MSYS2 only if `llc` is missing), sets `FLUXC_SRCDIR`, writes `scripts\flux_dev_prompt.bat`, copies in the v1.5.4 Python compiler if you don't have it, bootstraps in two stages (`fxc.exe`, then `fxc2.exe`), and removes the Python files it copied. Visual Studio cannot be installed silently, so the wizard opens the download page; install the **Desktop development with C++** workload. The manual steps below describe the same result.
 
 ## Toolchain
 
-Flux compilation on Windows involves several components working together:
+1. **Python 3.10+** (3.13+ recommended) - runs `fxc.py`
+2. **llvmlite 0.43+** - Python bindings used for code generation
+3. **LLVM 21+** - `llc`, `opt`, `clang`, `lld-link`
+   - If your LLVM package has no `llc`, install it with MSYS2 (see below)
+   - If `lld-link` fails to link, Flux falls back to `clang`
+4. **Visual Studio or Build Tools** - MSVC x64 toolset and the Windows SDK
+5. **Git**
 
-1. **Python 3.13+** - Runs the Flux compiler itself
-2. **LLVM v21** - Full LLVM pipeline
-- if your LLVM does not come with `llc`, you will need **MSYS2 MinGW64** for `llc`
-- Enter MSYS2 MINGw64 and run `pacman -S mingw-w64-x86_64-llvm`, this will give you `llc`
-3. **Clang v21** - Compiles LLVM IR to object files
-- if `lld` or `lld-link` fails to link, Flux falls back to `clang` to link the object file(s)
-4. **Visual Studio/MSVC** - Provides a linker and the Windows SDK
-5. **llvmlite** - Python bindings to LLVM for code generation
+## Manual Installation
 
-## Component Installation
+### Python
 
-### Python 3.13+
-- Download from [python.org](https://www.python.org/downloads/)
-- Ensure it's added to your PATH during installation
-- Verify: `python --version`
+Download from [python.org](https://www.python.org/downloads/) and tick **Add python.exe to PATH**. Verify:
 
-### LLVM/Clang both at least v21
-Choose one of these methods:
+```
+python --version
+```
 
-**Option 1: Official LLVM (Recommended)**
+### llvmlite
+
+```
+python -m pip install "llvmlite>=0.43.0"
+```
+
+### LLVM
+
 ```
 winget install LLVM.LLVM
-winget install clang
 ```
 
-**Option 2: Manual Installation**
-- Download from [LLVM Releases](https://github.com/llvm/llvm-project/releases)
-- Install to a standard location like `C:\Program Files\LLVM`
-- Add `C:\Program Files\LLVM\bin` to your PATH
+Alternatives: `choco install llvm`, `scoop install llvm`, or the installer from [LLVM Releases](https://github.com/llvm/llvm-project/releases). Make sure `C:\Program Files\LLVM\bin` is on your PATH, then open a new terminal and check:
 
-**Option 3: Package Manager**
-```
-# If you use Chocolatey
-choco install llvm
-
-# If you use Scoop
-scoop install llvm
-```
-
-### Visual Studio Insaller
-----
-- If you already have VS installed:
-
-<img width="1259" height="699" alt="image" src="https://github.com/user-attachments/assets/b0d85075-a92e-4e2b-a06f-7b65b6491d87" />
-
-
-- Select **modify**
-
-<img width="1227" height="483" alt="image" src="https://github.com/user-attachments/assets/9516be90-7f7c-4bfb-b2a5-c772cfa49c3c" />
-
-- Select **Individual components**
-
-- Scroll down until you see **Compilers, build tools, and runtimes**
-
-<img width="599" height="158" alt="image" src="https://github.com/user-attachments/assets/a14b5913-707b-415e-92b7-be2bb13a67af" />
-
-- Select **MSVC v143** based on your architecture.
-
-<img width="493" height="187" alt="image" src="https://github.com/user-attachments/assets/c79a512a-b0f6-4ee7-8a89-6676a3442d15" />
-
-- Scroll down to **SDKs, libraries, and frameworks** and select the appropriate **C++ ATL for latest build tools** based on your architecture, matching the MSCV version you selected.
-----
-- If you do not already have VS installed, install it and include the steps for if you did.
-
-**Visual Studio Build Tools (Minimal):**
-If you prefer a lighter installation:
-- Download "Build Tools for Visual Studio"
-- Install the "Visual C++ build tools" package
-
-----
-
-### Python Dependencies
-```powershell
-pip install llvmlite==0.44.0 dataclasses
-```
-
-## Verification Steps
-
-### 1. Check Python
-```
-python --version                    # Should show 3.8+
-python -c "import llvmlite; print('llvmlite OK')"
-```
-
-### 2. Check Clang
 ```
 clang --version
-clang --print-targets | findstr x86_64  # Should show x86_64 targets
-```
-
-### 3. Check LLVM
-```
 llc --version
+opt --version
 ```
-- If this fails, you'll need step 3.5
 
-### 3.5 Install LLVM toolchain for MSYS2
-If you had to install MSYS2, follow these steps:
-- Inside MSYS2 MinGW64, run `pacman -S mingw-w64-x86_64-llvm`
-- Add `C:\mingw64\mingw64\bin` to your system or user `PATH` environment variable.
+**If `llc` is missing**, install it with [MSYS2](https://www.msys2.org/). In the **MSYS2 MINGW64** shell:
 
-### 4. Create `FLUXC_SRCDIR` as an environment variable
-Set it to wherever you installed Flux, where the compiler entrypoint `fxc.py` lives.
+```
+pacman -S mingw-w64-x86_64-llvm
+```
 
-### 4. Test Flux Compilation
-From a command prompt:
+Then add `C:\msys64\mingw64\bin` to your user or system `PATH`.
+
+### Visual Studio
+
+Flux links with `lld-link`, which takes `kernel32.lib`, `ucrt.lib` and the other system libraries from the Windows SDK. In the Visual Studio Installer:
+
+1. If Visual Studio is installed, select **Modify**; otherwise install **Visual Studio Community** or **Build Tools for Visual Studio**.
+2. Select the **Desktop development with C++** workload, or under **Individual components** pick **MSVC v143 x64/x86 build tools** and a **Windows 10/11 SDK**.
+3. Under **SDKs, libraries, and frameworks**, add the **C++ ATL for latest build tools** that matches the MSVC version.
+
+### Git and the repository
+
+```
+winget install Git.Git
+git clone https://github.com/kvthweatt/Flux
+cd Flux
+```
+
+### FLUXC_SRCDIR
+
+Set it to the directory that holds `fxc.py` and `fxc.fx` (the repo root):
+
+```
+setx FLUXC_SRCDIR "C:\path\to\Flux"
+```
+
+Open a new terminal afterwards. `fxc.py` falls back to its own directory when the variable is unset, but the bootstrapped compiler needs it whenever it runs from somewhere else.
+
+## Use a Developer Command Prompt
+
+`lld-link` finds the Windows SDK through the `LIB` environment variable, and only the Visual Studio developer prompts set it. Compile from one of these:
+
+- **x64 Native Tools Command Prompt for VS** (Start Menu), or
+- `scripts\flux_dev_prompt.bat`, generated by `setup.py`, or
+- any prompt after running `"C:\Program Files\Microsoft Visual Studio\<version>\<edition>\VC\Auxiliary\Build\vcvars64.bat"`
+
+Command Prompt is recommended; PowerShell works only if it was started from a developer prompt. Check with `echo %LIB%` (it should not be empty).
+
+## Verification
+
+```
+python --version
+python -c "import llvmlite; print(llvmlite.__version__)"
+clang --version
+llc --version
+opt --version
+echo %LIB%
+echo %FLUXC_SRCDIR%
+python fxc.py tests\test.fx --log-level 3
+```
+
+The last command needs the Python compiler (see the bootstrap section below) and should produce `build\test\test.exe`.
+
+## Bootstrap the Compiler
+
+Flux compiles itself. Version 2.0.8 does not ship the Python compiler, so copy it in from the bundled v1.5.4 sources first (`setup.py` does this for you when you answer No to its Python compiler question):
+
 ```
 cd C:\path\to\Flux
-python fxc.py tests\test.fx
+copy src\compiler\v1.5.4\core\*.* src\compiler\
+copy src\compiler\v1.5.4\entrypoint\*.* .
 ```
 
-## Common Issues and Solutions
+Then bootstrap from the developer prompt. The Python compiler builds the Flux-written compiler (`fxc.fx`) into a native binary:
 
-### "Clang: warning: unable to find a Visual Studio installation"
-**Cause:** Clang can't locate MSVC tools for linking.
+```
+python fxc.py fxc.fx
+```
 
-**Solutions:**
-1. Run Flux from a **Visual Studio Developer Command Prompt**
-2. Ensure Visual Studio includes the "Desktop development with C++" workload
-3. Verify environment variables are set: `echo $env:VCINSTALLDIR`
+This takes a few minutes and produces `build\fxc\fxc.exe`. The same command works on every platform.
 
-### "Module `llvmlite` not found"
-**Cause:** Python dependencies not installed.
+**Use the native compiler from now on.** It is much faster than the Python compiler. It finds the standard library through `FLUXC_SRCDIR`:
 
-**Solutions:**
-1. Install with: `pip install llvmlite==0.41.0`
-2. If using multiple Python versions, ensure you're using the right pip
-3. Try: `python -m pip install llvmlite==0.41.0`
+```
+set FLUXC_SRCDIR=C:\path\to\Flux
+build\fxc\fxc.exe examples\helloworld.fx
+build\helloworld\helloworld.exe
+```
 
-### Permission Errors
-**Cause:** Insufficient permissions for installation or compilation.
+To check the result, recompile the compiler with itself (`setup.py` does this as stage 2):
 
-**Solutions:**
-1. Run terminals as Administrator when installing tools
-2. Ensure you have write permissions to your Flux directory
-3. Check Windows Defender or antivirus isn't blocking operations
+```
+build\fxc\fxc.exe fxc.fx -o fxc2.exe
+```
 
-## Development Workflow
+Once that succeeds, the Python files you copied in can be deleted, and only those files: the ones from `core\` and `entrypoint\`. Other Python files in the repo are still needed. `setup.py` removes them automatically. Rebuild stage 1 with `python fxc.py fxc.fx` whenever the compiler sources need newer compiler features than your native binary has.
 
-### Recommended Terminal Setup
-1. Use **Command Prompt** (Recommended) or **PowerShell** (Not Recommended)
-2. These terminals automatically configure environment variables for MSVC tools
-3. Available through: Start Menu -> Visual Studio -> Developer Command Prompt
+## Common Issues
 
-### Environment Variables
-When properly configured, you should see these environment variables:
-- `VCINSTALLDIR` - Points to Visual Studio installation
-- `WindowsSdkDir` - Points to Windows SDK
-- `PATH` - Includes LLVM, Python, and MSVC tools
-- `FLUXC_SRCDIR` - Your Flux installation where `fxc.py` lives
+**`lld-link: error: could not open 'kernel32.lib'`** (or `ucrt.lib`, `msvcrt.lib`) - `LIB` is empty. Use a developer prompt, and confirm the Windows SDK is installed.
 
-### Compilation Process Understanding
-When you run `python fxc.py program.fx`, Flux:
-1. **Lexes** your Flux source code into tokens
-2. **Parses** tokens into an Abstract Syntax Tree (AST)
-3. **Generates** LLVM Intermediate Representation (IR)
-4. **Compiles** IR to object file using Clang
-5. **Links** object file to executable using MSVC linker
+**`clang: warning: unable to find a Visual Studio installation`** - same cause. Run from a developer prompt and make sure the C++ workload is installed.
 
-## Advanced Configuration
+**`'llc' is not recognized`** - the LLVM package has no `llc`. Install it through MSYS2 as above and add `C:\msys64\mingw64\bin` to PATH.
 
-### Custom LLVM Installation
-If you have LLVM installed in a non-standard location, Flux will automatically search:
-- `C:\Program Files\LLVM\bin\clang.exe`
-- `clang.exe` (if in PATH)
-- `clang` (Unix-style name)
+**LLVM tools older than 21** - `clang --version` and `llc --version` must report 21 or newer. Remove older LLVM installs from PATH or reinstall.
 
-You can also set a custom configuration in `config\flux_config.cfg`
+**`ModuleNotFoundError: llvmlite`** - install it with the same Python you compile with: `python -m pip install "llvmlite>=0.43.0"`. With several Pythons installed, check `where python`.
 
-### Building
-Flux creates temporary files in `build/` directory:
-- `program.ll` - LLVM IR code
-- `program.o` - Object file
-- `program.exe` - Final executable (Windows)
+**Permission errors** - run the installer steps as Administrator, make sure you can write to the repo directory, and check that antivirus is not blocking `build\`.
 
-### Debugging Compilation Issues
-Enable detailed logging to understand what's happening:
+## Build Output
+
+Everything for a program `name` goes in `build\name\`: the IR (`.ll`), the object file (`.o`) and `name.exe`.
+
 ```
 python fxc.py program.fx --log-level 4 --log-timestamp
 ```
 
-This shows exactly which tools are being called and their output.
+This shows each stage and the exact tool commands.
+
+## Compilation Process
+
+1. **Preprocess** - macros and includes
+2. **Lex and parse** - tokens, then the AST
+3. **Generate** - LLVM IR through llvmlite
+4. **Assemble** - `opt` and `llc` produce an object file
+5. **Link** - `lld-link` (or `clang` as a fallback) links it against the Windows SDK
 
 ## Next Steps
 
-Once your environment is working:
-1. Try compiling the examples in `examples\` and tests in `tests\`
-2. Read the language specification in `docs\`
-3. Explore the standard library in `src\stdlib\`
-4. Write your first Flux program!
-
-As Flux matures, we'll eventually provide a self-hosted installer written in Flux itself - demonstrating the language's capabilities while maintaining transparency about what's being installed.
-
-Happy Flux development!
+- `docs\learn_flux_intro.md`, then `docs\learn_flux_adept.md`
+- `docs\Specs\language_specification.md`
+- Examples in `examples\`, tests in `tests\`, standard library in `src\stdlib\`

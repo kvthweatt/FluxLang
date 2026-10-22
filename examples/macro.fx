@@ -14,7 +14,9 @@ macro testMac2(a,b)
 
 def main() -> int
 {
-    int x,y,z = 1,2,3;
+    int x = 1,
+        y = 2,
+        z = 3;
 
     println(f"testMac(x,y,z) = {testMac(x,y,z)}"); // {(1 + 2) ^ 3}
 
