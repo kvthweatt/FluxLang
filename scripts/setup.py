@@ -1,19 +1,31 @@
 """
-Flux Language - Windows Setup Wizard
+Flux Language - Setup Wizard (Windows, macOS, Linux)
 scripts/setup.py
 
 Run this from the repo root or directly from the scripts/ folder.
 Requires Python 3.10+ (3.13+ recommended) and an internet connection.
 
 What it sets up, in the order the Flux compiler needs it:
-  1. Python and the llvmlite package (the compiler runs on Python)
-  2. LLVM 21+ (llc, opt, clang, lld-link)
-  3. MSYS2 only if the LLVM package has no llc
-  4. MSVC (lld-link takes kernel32.lib, ucrt.lib and friends from the Windows SDK)
-  5. FLUXC_SRCDIR and PATH
-  6. A developer prompt launcher (scripts/flux_dev_prompt.bat)
-  7. The Python compiler (v1.5.4), copied from src/compiler/v1.5.4 if missing
-  8. Bootstrap: python fxc.py fxc.fx
+
+  Windows
+    1. Python and the llvmlite package (the compiler runs on Python)
+    2. LLVM 21+ (llc, opt, clang, lld-link); MSYS2 only if the LLVM package has no llc
+    3. MSVC (lld-link takes kernel32.lib, ucrt.lib and friends from the Windows SDK)
+    4. FLUXC_SRCDIR (user environment variable) and PATH
+    5. A developer prompt launcher (scripts/flux_dev_prompt.bat)
+  macOS
+    1. Xcode command line tools (clang is the linker)
+    2. Homebrew LLVM (llc), then FLUXC_SRCDIR and PATH in your shell rc file
+    3. A virtual environment (.venv) with llvmlite
+  Linux
+    1. llc (LLVM), ld (binutils) and the libc development files, through apt, dnf,
+       pacman or zypper (needs root: pkexec or passwordless sudo)
+    2. A virtual environment (.venv) with llvmlite, FLUXC_SRCDIR in your shell rc file
+
+  All platforms, last
+    - The Python compiler (v1.5.4), copied from src/compiler/v1.5.4 if missing
+    - Bootstrap: python fxc.py fxc.fx (stage 1), then the native fxc builds fxc2 (stage 2)
+    - Remove the Python compiler files this script copied (and only those)
 """
 
 import os
@@ -22,18 +34,29 @@ import subprocess
 import threading
 import urllib.request
 import tempfile
-import winreg
 import shutil
-import ctypes
 import re
+import time
 from pathlib import Path
 from typing import Optional
+
+IS_WIN   = sys.platform == "win32"
+IS_MAC   = sys.platform == "darwin"
+IS_LINUX = sys.platform.startswith("linux")
+PLATFORM_NAME = "Windows" if IS_WIN else "macOS" if IS_MAC else "Linux"
+EXE = ".exe" if IS_WIN else ""
+
+if IS_WIN:
+    import winreg
+    import ctypes
 
 try:
     import tkinter as tk
     from tkinter import ttk, messagebox, filedialog
 except ImportError:
-    print("ERROR: tkinter is not available. Please install Python with tkinter support.")
+    hint = {"Linux": " (Debian/Ubuntu: sudo apt install python3-tk, Fedora: sudo dnf install python3-tkinter)",
+            "macOS": " (Homebrew: brew install python-tk)"}.get(PLATFORM_NAME, "")
+    print("ERROR: tkinter is not available. Please install Python with tkinter support." + hint)
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
@@ -234,11 +257,12 @@ FG          = "#e8e8e8"
 FG_DIM      = "#888888"
 FG_ERR      = "#e05c5c"
 FG_OK       = "#6ec87e"
-FONT_BODY   = ("Consolas", 10)
-FONT_TITLE  = ("Consolas", 22, "bold")
-FONT_HEAD   = ("Consolas", 12, "bold")
-FONT_SMALL  = ("Consolas", 9)
-FONT_MONO   = ("Consolas", 9)
+FONT_FAMILY = "Consolas" if IS_WIN else "Menlo" if IS_MAC else "DejaVu Sans Mono"
+FONT_BODY   = (FONT_FAMILY, 10)
+FONT_TITLE  = (FONT_FAMILY, 22, "bold")
+FONT_HEAD   = (FONT_FAMILY, 12, "bold")
+FONT_SMALL  = (FONT_FAMILY, 9)
+FONT_MONO   = (FONT_FAMILY, 9)
 
 PAD = 20
 
@@ -246,6 +270,18 @@ LLVM_BIN       = Path(r"C:\Program Files\LLVM\bin")
 MSYS2_BIN      = Path(r"C:\msys64\mingw64\bin")
 MIN_LLVM_MAJOR = 21
 LLVMLITE_SPEC  = "llvmlite>=0.43.0"
+BREW_LLVM_BINS = ["/opt/homebrew/opt/llvm/bin", "/usr/local/opt/llvm/bin"]
+BREW_BINS      = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
+RC_BEGIN = "# >>> Flux setup >>>"
+RC_END   = "# <<< Flux setup <<<"
+# Linux packages per package manager: tool -> package
+LINUX_PKGS = {
+    "apt-get": {"llc": "llvm", "ld": "binutils", "libc": "libc6-dev", "venv": "python3-venv"},
+    "dnf":     {"llc": "llvm", "ld": "binutils", "libc": "glibc-devel"},
+    "pacman":  {"llc": "llvm", "ld": "binutils", "libc": "glibc"},
+    "zypper":  {"llc": "llvm", "ld": "binutils", "libc": "glibc-devel"},
+}
+
 PY_COMPILER_VERSION = "1.5.4"
 # Python compiler files that live in <FLUXC_SRCDIR>\\src\\compiler
 PY_COMPILER_CORE = [
@@ -292,12 +328,16 @@ def _major(text: str) -> int:
 
 
 def _tool_candidates(name: str) -> list[str]:
-    return [name, str(LLVM_BIN / (name + ".exe")), str(MSYS2_BIN / (name + ".exe"))]
+    if IS_WIN:
+        return [name, str(LLVM_BIN / (name + ".exe")), str(MSYS2_BIN / (name + ".exe"))]
+    if IS_MAC:   # Homebrew's llvm is keg-only, so it is usually not on PATH
+        return [name] + [str(Path(b) / name) for b in BREW_LLVM_BINS]
+    return [name]
 
 
 def detect_python() -> Optional[str]:
     """Python as the compiler will see it: the first `python` on PATH."""
-    exe = shutil.which("python")
+    exe = shutil.which("python") if IS_WIN else sys.executable
     if not exe:
         return None
     ok, out = _run([exe, "--version"])
@@ -334,6 +374,106 @@ def detect_llvmlite() -> Optional[str]:
         return llvmlite.__version__
     except ImportError:
         return None
+
+
+def venv_python(srcdir: str) -> Optional[str]:
+    p = Path(srcdir) / ".venv" / ("Scripts/python.exe" if IS_WIN else "bin/python")
+    return str(p) if p.exists() else None
+
+
+def detect_llvmlite_unix(srcdir: str) -> Optional[str]:
+    """llvmlite in the repo venv first, then in the interpreter running this wizard."""
+    for py in (venv_python(srcdir), sys.executable):
+        if py:
+            ok, out = _run([py, "-c", "import llvmlite; print(llvmlite.__version__)"], timeout=30)
+            if ok and out:
+                return out
+    return None
+
+
+def compiler_python(srcdir: str) -> Optional[str]:
+    """The python that has llvmlite and will run fxc.py (unix)."""
+    for py in (venv_python(srcdir), sys.executable):
+        if py and _run([py, "-c", "import llvmlite"], timeout=30)[0]:
+            return py
+    return None
+
+
+def detect_xcode_clt() -> Optional[str]:
+    ok, out = _run(["xcode-select", "-p"])
+    return out if ok and out else None
+
+
+def find_brew() -> Optional[str]:
+    return shutil.which("brew") or next((b for b in BREW_BINS if Path(b).exists()), None)
+
+
+def detect_ld() -> Optional[str]:
+    ok, out = _run(["ld", "--version"])
+    return out.splitlines()[0] if ok and out else None
+
+
+def detect_libc_dev() -> Optional[str]:
+    """libc.so (the linker script from the libc development package) is what `-lc` needs."""
+    import glob
+    for pat in ("/usr/lib/libc.so", "/usr/lib64/libc.so", "/lib/libc.so", "/lib64/libc.so",
+                "/usr/lib/*-linux-gnu/libc.so", "/usr/lib/*/libc.so"):
+        hits = glob.glob(pat)
+        if hits:
+            return hits[0]
+    return None
+
+
+def detect_pkg_manager() -> Optional[str]:
+    return next((pm for pm in LINUX_PKGS if shutil.which(pm)), None)
+
+
+def pkg_install_cmd(pm: str, pkgs: list[str]) -> list[str]:
+    if pm == "apt-get":
+        return ["sh", "-c", "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y " + " ".join(pkgs)]
+    if pm == "dnf":
+        return ["dnf", "install", "-y"] + pkgs
+    if pm == "pacman":
+        return ["pacman", "-S", "--needed", "--noconfirm"] + pkgs
+    return ["zypper", "--non-interactive", "install"] + pkgs
+
+
+def as_root(cmd: list[str]) -> Optional[list[str]]:
+    """Wrap cmd so it runs as root: direct, pkexec (GUI prompt), or passwordless sudo."""
+    if os.geteuid() == 0:
+        return cmd
+    if shutil.which("pkexec") and os.environ.get("DISPLAY"):
+        return ["pkexec"] + cmd
+    if shutil.which("sudo"):
+        return ["sudo", "-n"] + cmd
+    return None
+
+
+def shell_rc() -> Path:
+    shell = os.path.basename(os.environ.get("SHELL", ""))
+    home = Path.home()
+    if shell == "zsh" or (IS_MAC and shell != "bash"):
+        return home / ".zshrc"
+    return home / (".bash_profile" if IS_MAC else ".bashrc")
+
+
+def write_rc_block(rc: Path, lines: list[str]):
+    """Insert or replace the Flux block in a shell rc file; everything else is left alone."""
+    text = rc.read_text() if rc.exists() else ""
+    if RC_BEGIN in text and RC_END in text:
+        pre = text[:text.index(RC_BEGIN)]
+        post = text[text.index(RC_END) + len(RC_END):].lstrip("\n")
+        text = pre.rstrip("\n") + ("\n\n" if pre.strip() else "") + post
+    block = RC_BEGIN + "\n" + "\n".join(lines) + "\n" + RC_END + "\n"
+    rc.write_text(text.rstrip("\n") + ("\n\n" if text.strip() else "") + block)
+
+
+def unix_env(srcdir: str) -> dict:
+    env = dict(os.environ, FLUXC_SRCDIR=srcdir, PYTHONDONTWRITEBYTECODE="1")
+    if IS_MAC:
+        extra = [b for b in BREW_LLVM_BINS if Path(b).is_dir()]
+        env["PATH"] = os.pathsep.join(extra + [env.get("PATH", "")])
+    return env
 
 
 def find_vswhere() -> Optional[str]:
@@ -396,7 +536,9 @@ def find_vcvars() -> Optional[str]:
 
 
 def refresh_process_path():
-    """Pick up PATH changes made by installers that ran during this session."""
+    """Pick up PATH changes made by installers that ran during this session (Windows)."""
+    if not IS_WIN:
+        return
     parts = []
     for hive, sub in ((winreg.HKEY_LOCAL_MACHINE,
                        r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
@@ -481,10 +623,12 @@ class WizardApp(tk.Tk):
             "install_python": tk.BooleanVar(value=True),
             "install_llvm":   tk.BooleanVar(value=True),
             "install_msys2":  tk.BooleanVar(value=False),
+            "install_xcode":  tk.BooleanVar(value=False),
+            "install_linker": tk.BooleanVar(value=False),
             "install_msvc":   tk.BooleanVar(value=False),
             "install_pip":    tk.BooleanVar(value=True),
             "set_env":        tk.BooleanVar(value=True),
-            "make_launcher":  tk.BooleanVar(value=True),
+            "make_launcher":  tk.BooleanVar(value=IS_WIN),
             "have_pycompiler": tk.BooleanVar(value=False),
             "bootstrap":      tk.BooleanVar(value=True),
             "py_removed":     False,   # True once the copied Python compiler files were removed
@@ -507,14 +651,10 @@ class WizardApp(tk.Tk):
         self._container = tk.Frame(self, bg=BG)
         self._container.pack(fill="both", expand=True, padx=0, pady=0)
 
-        self._pages = [
-            WelcomePage,
-            LicensePage,
-            ComponentsPage,
-            MSVCPage,
-            InstallPage,
-            FinishPage,
-        ]
+        self._pages = [WelcomePage, LicensePage, ComponentsPage]
+        if IS_WIN:
+            self._pages.append(MSVCPage)      # Visual Studio is a Windows-only requirement
+        self._pages += [InstallPage, FinishPage]
         self._show_page(0)
 
     def _center(self):
@@ -646,12 +786,12 @@ class WelcomePage(tk.Frame):
         self.app = app
 
         tk.Label(self, text="Welcome to the Flux\nLanguage Installer",
-                 font=("Consolas", 18, "bold"), bg=BG, fg=FG,
+                 font=(FONT_FAMILY, 18, "bold"), bg=BG, fg=FG,
                  justify="left").pack(anchor="w", padx=PAD, pady=(PAD, 8))
 
         tk.Label(self,
                  text="This wizard will set up everything you need to\n"
-                      "compile and run Flux programs on Windows.",
+                      f"compile and run Flux programs on {PLATFORM_NAME}.",
                  font=FONT_BODY, bg=BG, fg=FG_DIM, justify="left"
                  ).pack(anchor="w", padx=PAD, pady=(0, PAD))
 
@@ -662,11 +802,26 @@ class WelcomePage(tk.Frame):
         inner = tk.Frame(box, bg=BG2)
         inner.pack(fill="both", padx=12, pady=12)
 
-        items = [
-            ("Python 3.10+",        "Runs the Flux compiler"),
-            ("LLVM & Clang v21+",   "llc, opt and lld-link"),
-            ("MSVC / Build Tools",  "Windows SDK libraries for linking"),
-            ("llvmlite",            "Python -> LLVM IR bindings"),
+        if IS_WIN:
+            items = [
+                ("Python 3.10+",        "Runs the Flux compiler"),
+                ("LLVM & Clang v21+",   "llc, opt and lld-link"),
+                ("MSVC / Build Tools",  "Windows SDK libraries for linking"),
+                ("llvmlite",            "Python -> LLVM IR bindings"),
+            ]
+        elif IS_MAC:
+            items = [
+                ("Xcode CLT",           "clang, used as the linker"),
+                ("Homebrew LLVM",       "llc (LLVM 21+)"),
+                ("llvmlite",            "Python -> LLVM IR bindings, in .venv"),
+            ]
+        else:
+            items = [
+                ("LLVM",                "llc"),
+                ("binutils + libc dev", "ld links against libc"),
+                ("llvmlite",            "Python -> LLVM IR bindings, in .venv"),
+            ]
+        items += [
             ("FLUXC_SRCDIR",        "Environment variable pointing to this repo"),
             ("Python compiler",     f"v{PY_COMPILER_VERSION}, copied in if missing, then bootstrapped"),
         ]
@@ -734,34 +889,76 @@ class ComponentsPage(tk.Frame):
 
         # Run detection
         det = app.state["det"]
-        det["python"]    = detect_python()
-        det["clang"]     = detect_clang()
-        det["llc"]       = detect_llc()
-        det["llvmlite"]  = detect_llvmlite()
-        det["msvc"]      = detect_msvc()
-        if llvm_outdated(det["clang"]) or llvm_outdated(det["llc"]):
-            det["clang"] = det["llc"] = None   # too old: reinstall LLVM
+        srcdir = app.state["fluxc_srcdir"].get()
+        det["python"] = detect_python()
+        if IS_WIN:
+            det["clang"]    = detect_clang()
+            det["llc"]      = detect_llc()
+            det["llvmlite"] = detect_llvmlite()
+            det["msvc"]     = detect_msvc()
+            if llvm_outdated(det["clang"]) or llvm_outdated(det["llc"]):
+                det["clang"] = det["llc"] = None   # too old: reinstall LLVM
+        else:
+            det["llc"]      = detect_llc()
+            det["llvmlite"] = detect_llvmlite_unix(srcdir)
+            if IS_MAC:
+                det["xcode"] = detect_xcode_clt()
+                if llvm_outdated(det["llc"]):
+                    det["llc"] = None
+            else:
+                ld, libc = detect_ld(), detect_libc_dev()
+                det["linker"] = (ld + " + libc dev files") if (ld and libc) else None
+                if ld and not libc:
+                    det["linker_note"] = "ld found, libc development files missing"
 
         # Pre-tick install boxes based on what's missing
-        app.state["install_python"].set(det["python"] is None)
-        app.state["install_llvm"].set(det["clang"] is None or det["llc"] is None)
+        app.state["install_python"].set(IS_WIN and det["python"] is None)
+        if IS_WIN:
+            app.state["install_llvm"].set(det["clang"] is None or det["llc"] is None)
+        else:
+            app.state["install_llvm"].set(det["llc"] is None)
         app.state["install_msys2"].set(False)   # decided after the LLVM step, only if llc is still missing
         app.state["install_pip"].set(det["llvmlite"] is None)
+        app.state["install_xcode"].set(IS_MAC and det.get("xcode") is None)
+        app.state["install_linker"].set(IS_LINUX and det.get("linker") is None)
         # MSVC handled on its own page
 
         grid = tk.Frame(self, bg=BG)
         grid.pack(fill="x", padx=PAD)
 
-        components = [
-            ("Python 3.10+",    "install_python", det["python"],
-             "Required to run the compiler"),
-            ("LLVM + Clang v21+","install_llvm",   det["clang"],
-             "Compiles IR; also provides lld-link"),
-            ("MSYS2 (llc)",     "install_msys2",  det["llc"],
-             "Used only if the LLVM package has no llc"),
-            ("llvmlite (pip)", "install_pip", det["llvmlite"],
-             "Python <-> LLVM bindings"),
-        ]
+        if IS_WIN:
+            components = [
+                ("Python 3.10+",    "install_python", det["python"],
+                 "Required to run the compiler"),
+                ("LLVM + Clang v21+","install_llvm",   det["clang"],
+                 "Compiles IR; also provides lld-link"),
+                ("MSYS2 (llc)",     "install_msys2",  det["llc"],
+                 "Used only if the LLVM package has no llc"),
+                ("llvmlite (pip)", "install_pip", det["llvmlite"],
+                 "Python <-> LLVM bindings"),
+            ]
+        elif IS_MAC:
+            components = [
+                ("Python 3.10+",    "install_python", det["python"],
+                 "Runs the compiler (this wizard's own interpreter)"),
+                ("Xcode command line tools", "install_xcode", det.get("xcode"),
+                 "clang links the executable; opens Apple's installer"),
+                ("LLVM (llc)",      "install_llvm",   det["llc"],
+                 "brew install llvm (Homebrew required)"),
+                ("llvmlite (.venv)", "install_pip",   det["llvmlite"],
+                 "Python <-> LLVM bindings, installed in the repo's .venv"),
+            ]
+        else:
+            components = [
+                ("Python 3.10+",    "install_python", det["python"],
+                 "Runs the compiler (this wizard's own interpreter)"),
+                ("LLVM (llc)",      "install_llvm",   det["llc"],
+                 "Installed with your package manager (root needed)"),
+                ("ld + libc dev files", "install_linker", det.get("linker"),
+                 det.get("linker_note", "binutils and the libc development package")),
+                ("llvmlite (.venv)", "install_pip",   det["llvmlite"],
+                 "Python <-> LLVM bindings, installed in the repo's .venv"),
+            ]
 
         for i, (label, key, detected, hint) in enumerate(components):
             row = tk.Frame(grid, bg=BG2)
@@ -815,7 +1012,8 @@ class ComponentsPage(tk.Frame):
                   relief="flat", padx=10, pady=4, cursor="hand2").pack(side="left")
 
         tk.Checkbutton(self,
-                       text="Set FLUXC_SRCDIR as a user environment variable",
+                       text=("Set FLUXC_SRCDIR as a user environment variable" if IS_WIN
+                             else f"Set FLUXC_SRCDIR in your shell rc file ({shell_rc().name})"),
                        variable=app.state["set_env"],
                        bg=BG, fg=FG, selectcolor=BG3,
                        activebackground=BG, activeforeground=ACCENT,
@@ -828,7 +1026,7 @@ class ComponentsPage(tk.Frame):
         rb = tk.Frame(self, bg=BG)
         rb.pack(anchor="w", padx=PAD)
         for text, val in (("Yes", True),
-                          (f"No - copy it from src\\compiler\\v{PY_COMPILER_VERSION}", False)):
+                          (f"No - copy it from src{os.sep}compiler{os.sep}v{PY_COMPILER_VERSION}", False)):
             tk.Radiobutton(rb, text=text, variable=app.state["have_pycompiler"], value=val,
                            bg=BG, fg=FG, selectcolor=BG3, activebackground=BG,
                            activeforeground=ACCENT, font=FONT_SMALL,
@@ -845,12 +1043,13 @@ class ComponentsPage(tk.Frame):
         refresh_py()
         app.state["fluxc_srcdir"].trace_add("write", refresh_py)
 
-        tk.Checkbutton(self,
-                       text="Create scripts\\flux_dev_prompt.bat (a prompt with the MSVC environment loaded)",
-                       variable=app.state["make_launcher"],
-                       bg=BG, fg=FG, selectcolor=BG3,
-                       activebackground=BG, activeforeground=ACCENT,
-                       font=FONT_SMALL, cursor="hand2").pack(anchor="w", padx=PAD)
+        if IS_WIN:
+            tk.Checkbutton(self,
+                           text="Create scripts\\flux_dev_prompt.bat (a prompt with the MSVC environment loaded)",
+                           variable=app.state["make_launcher"],
+                           bg=BG, fg=FG, selectcolor=BG3,
+                           activebackground=BG, activeforeground=ACCENT,
+                           font=FONT_SMALL, cursor="hand2").pack(anchor="w", padx=PAD)
         tk.Checkbutton(self,
                        text="Bootstrap the compiler when done (python fxc.py fxc.fx)",
                        variable=app.state["bootstrap"],
@@ -1048,19 +1247,32 @@ class InstallPage(tk.Frame):
         st = self.app.state
         steps = []
 
-        if st["install_python"].get():
-            steps.append(("Python",           self._install_python))
-        if st["install_llvm"].get():
-            steps.append(("LLVM + Clang",     self._install_llvm))
-        # MSYS2 is a fallback: it runs only if llc is still missing after the LLVM step
-        steps.append(("MSYS2 (llc, if needed)", self._install_msys2))
-        if st["install_msvc"].get():
-            steps.append(("VS Build Tools",   self._install_msvc))
-        if st["install_pip"].get():
-            steps.append(("llvmlite (pip)",   self._install_llvmlite))
+        if IS_WIN:
+            if st["install_python"].get():
+                steps.append(("Python",           self._install_python))
+            if st["install_llvm"].get():
+                steps.append(("LLVM + Clang",     self._install_llvm_win))
+            # MSYS2 is a fallback: it runs only if llc is still missing after the LLVM step
+            steps.append(("MSYS2 (llc, if needed)", self._install_msys2))
+            if st["install_msvc"].get():
+                steps.append(("VS Build Tools",   self._install_msvc))
+            if st["install_pip"].get():
+                steps.append(("llvmlite (pip)",   self._install_llvmlite))
+        elif IS_MAC:
+            if st["install_xcode"].get():
+                steps.append(("Xcode command line tools", self._install_xcode))
+            if st["install_llvm"].get():
+                steps.append(("LLVM (Homebrew)",  self._install_llvm_mac))
+            if st["install_pip"].get():
+                steps.append(("llvmlite (.venv)", self._install_llvmlite_unix))
+        else:
+            if st["install_llvm"].get() or st["install_linker"].get():
+                steps.append(("System packages",  self._install_linux_packages))
+            if st["install_pip"].get():
+                steps.append(("llvmlite (.venv)", self._install_llvmlite_unix))
         if st["set_env"].get():
             steps.append(("Environment vars", self._set_env_vars))
-        if st["make_launcher"].get():
+        if IS_WIN and st["make_launcher"].get():
             steps.append(("Developer prompt", self._make_launcher))
         steps.append(("Python compiler", self._install_py_compiler))
         if st["bootstrap"].get():
@@ -1102,7 +1314,7 @@ class InstallPage(tk.Frame):
                                ["/quiet", "InstallAllUsers=0", "PrependPath=1"])
         refresh_process_path()
 
-    def _install_llvm(self):
+    def _install_llvm_win(self):
         self._log_msg("  Running: winget install LLVM.LLVM")
         self._set_step(0.1, "winget install LLVM.LLVM...")
         rc = _run_long(["winget", "install", "LLVM.LLVM", "--accept-source-agreements",
@@ -1147,6 +1359,95 @@ class InstallPage(tk.Frame):
         webbrowser.open(URLS["vs"])
         self._set_step(1.0, "")
 
+    def _install_xcode(self):
+        if detect_xcode_clt():
+            self._log_msg("  Command line tools already installed.")
+            return
+        self._log_msg("  Running: xcode-select --install")
+        self._log_msg("  Apple's installer opens in a separate window. Click Install and wait.")
+        subprocess.run(["xcode-select", "--install"], capture_output=True)
+        for i in range(240):                       # up to 20 minutes
+            if detect_xcode_clt():
+                self._log_msg("  Command line tools installed.")
+                return
+            self._set_step(min(0.95, i / 240), "Waiting for the Xcode command line tools installer")
+            time.sleep(5)
+        raise RuntimeError("timed out waiting for the Xcode command line tools; finish that installer, then run setup again")
+
+    def _install_llvm_mac(self):
+        banner = detect_llc()
+        if banner and not llvm_outdated(banner):
+            self._log_msg(f"  llc already available ({banner}).")
+            return
+        brew = find_brew()
+        if not brew:
+            raise RuntimeError("Homebrew is not installed. Install it from https://brew.sh "
+                               "(it needs an interactive terminal), then run setup again.")
+        self._log_msg(f"  Running: {brew} install llvm")
+        self._set_step(0.2, "brew install llvm")
+        rc = _run_long([brew, "install", "llvm"], self._log_msg)
+        self._set_step(1.0, "")
+        banner = detect_llc()
+        if not banner:
+            raise RuntimeError(f"llc not found after brew install (exit code {rc})")
+        if llvm_outdated(banner):
+            raise RuntimeError(f"{banner} is older than LLVM {MIN_LLVM_MAJOR}; run: brew upgrade llvm")
+
+    def _install_linux_packages(self):
+        pm = detect_pkg_manager()
+        if not pm:
+            raise RuntimeError("no supported package manager (apt, dnf, pacman, zypper). "
+                               "Install llc (LLVM), ld (binutils) and the libc development files manually.")
+        table = LINUX_PKGS[pm]
+        pkgs = []
+        banner = detect_llc()
+        if banner is None or llvm_outdated(banner):
+            pkgs.append(table["llc"])
+        if detect_ld() is None:
+            pkgs.append(table["ld"])
+        if detect_libc_dev() is None:
+            pkgs.append(table["libc"])
+        if "venv" in table:
+            pkgs.append(table["venv"])      # Debian splits venv/ensurepip out of python3
+        pkgs = list(dict.fromkeys(pkgs))
+        if not pkgs:
+            self._log_msg("  Nothing to install.")
+            return
+        cmd = pkg_install_cmd(pm, pkgs)
+        manual = " ".join(cmd) if pm != "apt-get" else cmd[-1]
+        rooted = as_root(cmd)
+        if rooted is None:
+            raise RuntimeError(f"root access needed. Run as root: {manual}")
+        self._log_msg("  Running: " + " ".join(rooted))
+        self._set_step(0.2, "Installing " + ", ".join(pkgs))
+        rc = _run_long(rooted, self._log_msg)
+        self._set_step(1.0, "")
+        if rc != 0:
+            raise RuntimeError(f"package install failed (exit code {rc}). Run as root: {manual}")
+        banner = detect_llc()
+        if banner is None:
+            raise RuntimeError("llc still not found after install")
+        if llvm_outdated(banner):
+            self._log_msg(f"  Warning: {banner} is older than LLVM {MIN_LLVM_MAJOR}. "
+                          "Install a newer llvm (for example from apt.llvm.org) and put it first on PATH.")
+
+    def _install_llvmlite_unix(self):
+        srcdir = self.app.state["fluxc_srcdir"].get()
+        venv = Path(srcdir) / ".venv"
+        if not venv_python(srcdir):
+            self._log_msg(f"  Creating virtual environment: {venv}")
+            rc = _run_long([sys.executable, "-m", "venv", str(venv)], self._log_msg)
+            if rc != 0 or not venv_python(srcdir):
+                hint = " (Debian/Ubuntu: sudo apt install python3-venv)" if IS_LINUX else ""
+                raise RuntimeError("could not create .venv" + hint)
+        py = venv_python(srcdir)
+        self._log_msg(f"  Running: {py} -m pip install {LLVMLITE_SPEC}")
+        self._set_step(0.3, f"pip install {LLVMLITE_SPEC}")
+        rc = _run_long([py, "-m", "pip", "install", LLVMLITE_SPEC], self._log_msg)
+        self._set_step(1.0, "")
+        if rc != 0:
+            raise RuntimeError("pip install failed - see log above")
+
     def _install_llvmlite(self):
         py = shutil.which("python") or sys.executable
         self._log_msg(f"  Running: {py} -m pip install {LLVMLITE_SPEC}")
@@ -1160,9 +1461,20 @@ class InstallPage(tk.Frame):
         srcdir = self.app.state["fluxc_srcdir"].get()
         if not valid_srcdir(srcdir):
             raise RuntimeError(f"{srcdir} is not a directory - choose the Flux root")
-        self._log_msg(f"  Setting FLUXC_SRCDIR = {srcdir}")
-        self._set_user_env("FLUXC_SRCDIR", srcdir)
         os.environ["FLUXC_SRCDIR"] = srcdir
+        if IS_WIN:
+            self._log_msg(f"  Setting FLUXC_SRCDIR = {srcdir}")
+            self._set_user_env("FLUXC_SRCDIR", srcdir)
+            return
+        rc = shell_rc()
+        lines = [f'export FLUXC_SRCDIR="{srcdir}"']
+        if IS_MAC:
+            brew_llvm = next((b for b in BREW_LLVM_BINS if Path(b).is_dir()), None)
+            if brew_llvm:
+                lines.append(f'export PATH="{brew_llvm}:$PATH"')
+        write_rc_block(rc, lines)
+        self._log_msg(f"  Wrote FLUXC_SRCDIR{' and PATH' if len(lines) > 1 else ''} to {rc}")
+        self._log_msg(f"  Open a new terminal or run: source {rc}")
 
     def _make_launcher(self):
         """Write scripts\\flux_dev_prompt.bat: cmd with vcvars64 loaded, in the repo root."""
@@ -1213,6 +1525,8 @@ class InstallPage(tk.Frame):
         miss = missing_py_compiler(srcdir)
         if miss or not (Path(srcdir) / "fxc.fx").is_file():
             raise RuntimeError("cannot bootstrap: Python compiler or fxc.fx is missing")
+        if not IS_WIN:
+            return self._bootstrap_unix(srcdir)
         refresh_process_path()
         ok, _ = _run(["python", "-c", "import llvmlite"])
         if not ok:
@@ -1240,6 +1554,31 @@ class InstallPage(tk.Frame):
         self._set_step(0.6, "Stage 2: recompiling with build\\fxc\\fxc.exe")
         rc = _run_long(["cmd", "/c", prefix + r"build\fxc\fxc.exe fxc.fx -o fxc2.exe"],
                        self._log_msg, cwd=srcdir, env=env)
+        if rc != 0 or not stage2.exists():
+            raise RuntimeError(f"stage 2 failed (exit code {rc}); Python compiler files were kept")
+        self._log_msg(f"  Built {stage2}")
+        self._set_step(1.0, "")
+        self._bootstrapped = True
+
+    def _bootstrap_unix(self, srcdir: str):
+        """Stage 1: python fxc.py fxc.fx. Stage 2: the native fxc rebuilds itself as fxc2."""
+        py = compiler_python(srcdir)
+        if not py:
+            raise RuntimeError("llvmlite is not installed (neither in .venv nor for this python)")
+        env = unix_env(srcdir)
+        stage1 = Path(srcdir) / "build" / "fxc" / "fxc"
+        stage2 = Path(srcdir) / "build" / "fxc2" / "fxc2"
+
+        self._log_msg(f"  Stage 1: {py} fxc.py fxc.fx")
+        self._set_step(0.1, "Stage 1: python fxc.py fxc.fx (a few minutes)")
+        rc = _run_long([py, "fxc.py", "fxc.fx"], self._log_msg, cwd=srcdir, env=env)
+        if rc != 0 or not stage1.exists():
+            raise RuntimeError(f"stage 1 failed (exit code {rc}); Python compiler files were kept")
+        self._log_msg(f"  Built {stage1}")
+
+        self._log_msg("  Stage 2: build/fxc/fxc fxc.fx -o fxc2")
+        self._set_step(0.6, "Stage 2: recompiling with build/fxc/fxc")
+        rc = _run_long([str(stage1), "fxc.fx", "-o", "fxc2"], self._log_msg, cwd=srcdir, env=env)
         if rc != 0 or not stage2.exists():
             raise RuntimeError(f"stage 2 failed (exit code {rc}); Python compiler files were kept")
         self._log_msg(f"  Built {stage2}")
@@ -1313,14 +1652,16 @@ class FinishPage(tk.Frame):
         self.app = app
 
         tk.Label(self, text="Setup Complete",
-                 font=("Consolas", 18, "bold"), bg=BG, fg=FG_OK
+                 font=(FONT_FAMILY, 18, "bold"), bg=BG, fg=FG_OK
                  ).pack(anchor="w", padx=PAD, pady=(PAD, 8))
 
         tk.Label(self,
-                 text="Flux has been configured on your system.\n"
-                      "Open a new terminal to pick up the updated environment variables.\n"
-                      "Compile from scripts\\flux_dev_prompt.bat or a Developer Command Prompt for VS, "
-                      "which set the LIB path that lld-link needs.",
+                 text=("Flux has been configured on your system.\n"
+                       "Open a new terminal to pick up the updated environment variables.\n"
+                       "Compile from scripts\\flux_dev_prompt.bat or a Developer Command Prompt for VS, "
+                       "which set the LIB path that lld-link needs.") if IS_WIN else
+                      ("Flux has been configured on your system.\n"
+                       f"Open a new terminal (or run: source {shell_rc()}) to pick up FLUXC_SRCDIR."),
                  font=FONT_BODY, bg=BG, fg=FG, wraplength=660, justify="left"
                  ).pack(anchor="w", padx=PAD, pady=(0, PAD))
 
@@ -1333,14 +1674,27 @@ class FinishPage(tk.Frame):
         tk.Label(inner, text="Quick start", font=FONT_HEAD,
                  bg=BG2, fg=ACCENT).pack(anchor="w")
 
-        cmds = [
-            "cd /d " + app.state["fluxc_srcdir"].get(),
-            *(["build\\fxc\\fxc.exe examples\\helloworld.fx"]
-              if app.state["py_removed"] else
-              ["python fxc.py fxc.fx                  (bootstrap, once)",
-               "python fxc.py examples\\helloworld.fx"]),
-            "build\\helloworld\\helloworld.exe",
-        ]
+        srcdir_txt = app.state["fluxc_srcdir"].get()
+        native = app.state["bootstrap"].get()      # the native compiler exists only after the bootstrap
+        if IS_WIN:
+            cmds = ["cd /d " + srcdir_txt]
+            if native:
+                cmds += ["build\\fxc\\fxc.exe examples\\helloworld.fx",
+                         "build\\helloworld\\helloworld.exe"]
+            else:
+                cmds += ["python fxc.py fxc.fx                  (bootstrap, once)",
+                         "python fxc.py examples\\helloworld.fx",
+                         "build\\helloworld\\helloworld.exe"]
+        else:
+            py_txt = ".venv/bin/python"
+            cmds = ["cd " + srcdir_txt]
+            if native:
+                cmds += ["build/fxc/fxc examples/helloworld.fx",
+                         "build/helloworld/helloworld"]
+            else:
+                cmds += [f"{py_txt} fxc.py fxc.fx                  (bootstrap, once)",
+                         f"{py_txt} fxc.py examples/helloworld.fx",
+                         "build/helloworld/helloworld"]
         for cmd in cmds:
             tk.Label(inner, text=f"  > {cmd}", font=FONT_MONO,
                      bg=BG3, fg=FG).pack(anchor="w", fill="x", pady=1, padx=4)
@@ -1364,15 +1718,13 @@ class FinishPage(tk.Frame):
 
 def _is_admin() -> bool:
     try:
+        if not IS_WIN:
+            return os.geteuid() == 0
         return ctypes.windll.shell32.IsUserAnAdmin()
     except Exception:
         return False
 
 
 if __name__ == "__main__":
-    if sys.platform != "win32":
-        print("This setup script is for Windows only.")
-        sys.exit(1)
-
     app = WizardApp()
     app.mainloop()
