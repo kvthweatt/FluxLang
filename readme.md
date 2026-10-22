@@ -1,4 +1,4 @@
-<h1 align="center">Flux v2 "Dangling Ditto"</h1>
+<h1 align="center">Platypus v2 "Dangling Ditto"</h1>
 
 <p align="center">
     <img width="512" height="512" alt="Flux Logo" src="https://github.com/user-attachments/assets/58da57a7-1924-48a2-ba29-c2040d9343eb" />
@@ -13,21 +13,23 @@
 
 ---
 
-Flux is a compiled, statically typed systems programming language. It has the performance of C and a type system that goes further than C in every direction that matters: arbitrary-width integers with alignment and endianness baked into the type, first-class bit manipulation, opt-in ownership and a totally optional borrow checker, compile-time code generation with `emitflux`, contracts, templates with type geometry constraints, and inline FVM assembly in comptime blocks.
+Flux has been renamed to Platypus due to discoverability issues (I'm getting tired of my work not being seen).
+
+Platypus is a compiled, statically typed systems programming language. It has the performance of C and a type system that goes further than C in every direction that matters: arbitrary-width integers with alignment and endianness baked into the type, first-class bit manipulation, opt-in ownership and a totally optional borrow checker, compile-time code generation with `emitflux`, contracts, templates with type geometry constraints, and inline FVM assembly in comptime blocks.
 
 It is not a C derivative. It is not a safe language in the Rust sense. It is a high-trust language that gives you sharp tools and expects you to use them correctly.
 
 It's designed for power, terseness, and readability. It is a dense language with a low learning curve but high skill ceiling. You can write powerful and expressive programs without needing to know the guts of the language.
 
-As of 10/12/2026, **Flux is bootstrapped and can compile itself**. It is recommended you bootstrap your compiler by running `python fxc.py fxc.fx` for faster compile times.
+As of 10/12/2026, **Platypus is bootstrapped and can compile itself**. It is recommended you bootstrap your compiler by running `python fxc.py fxc.fx` for faster compile times.
 
 ---
 
 ## What it looks like
 
-### 16 lines of C becomes 2 lines of Flux
+### 16 lines of C becomes 2 lines of Platypus
 
-This is real cryptography code. The C version is a manual byte-by-byte extraction loop. The Flux version is a direct consequence of how the type system works.
+This is real cryptography code. The C version is a manual byte-by-byte extraction loop. The Platypus version is a direct consequence of how the type system works.
 
 **C:**
 ```c
@@ -43,7 +45,7 @@ len_block[8]  = (byte)((cipher_bits >> 56) & 0xFF);
 // ... 8 more identical lines
 ```
 
-**Flux:**
+**Platypus:**
 ```
 len_block[0..7]  = (byte[8])(u64)aad_bits;
 len_block[8..15] = (byte[8])(u64)cipher_bits;
@@ -66,7 +68,7 @@ for (i = 0; i < 4; i++) {
 }
 ```
 
-**Flux:**
+**Platypus:**
 ```
 hash[0..3]   = (byte[4])(be32)ctx.state[0];
 hash[4..7]   = (byte[4])(be32)ctx.state[1];
@@ -155,7 +157,7 @@ Bit 0 is always the most significant bit. Slices that cross struct field boundar
 
 ### Compile-time code generation with `emitflux`
 
-Flux has a compile-time executor - the FVM - that runs Flux code at compile time. `emitflux` blocks inject real Flux definitions into the compilation unit, in order, from within comptime logic. This is how you generate code programmatically without a macro preprocessor.
+Platypus has a compile-time executor - the FVM - that runs Platypus code at compile time. `emitflux` blocks inject real Platypus definitions into the compilation unit, in order, from within comptime logic. This is how you generate code programmatically without a macro preprocessor.
 
 ```
 comptime
@@ -405,7 +407,7 @@ The syntax and grammar are stable and will not change. The compiler works. Real 
 - [Beginner Tutorial](docs/learn_flux_intro.md) and [Adept Tutorial](docs/learn_flux_adept.md)
 - Style Guide, Keyword Reference
 - Windows, Linux, and macOS setup guides
-- C->Flux translation utility
+- C->Platypus translation utility
 
 **In progress:**
 - Standard library expansion
@@ -416,7 +418,7 @@ The syntax and grammar are stable and will not change. The compiler works. Real 
 
 ## Requirements
 
-- Python 3.12+ (can be removed once you bootstrap Flux)
+- Python 3.12+ (can be removed once you bootstrap Platypus)
 - LLVM 21+
 
 ---

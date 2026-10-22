@@ -92,8 +92,7 @@ namespace flux
             IRValue** args;
             int nargs;
             PtrVec* blocks;
-            byte* cconv;
-            byte* linkage;
+            byte* cconv, linkage;
             PtrVec* attrs;
             NameMap* names;
             int counter;
@@ -105,8 +104,8 @@ namespace flux
         {
             byte* name;
             IRType* ty;
-            byte* init;         // initializer text, null when none
-            byte* linkage;
+            byte* init,         // initializer text, null when none
+                  linkage;
             bool constant;
             IRValue* self;
         };
