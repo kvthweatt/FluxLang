@@ -5337,8 +5337,8 @@ IDEKA's operators bind in the following order, from **loosest** (evaluated last)
 | 1 | `=` `+=` `-=` `*=` `/=` `%=` `^=` `&=` `\|=` `^|=` `` `&= `` `` `\|= `` `` `!&= `` `` `!\|= `` `` `^|!= `` `<<=` `>>=` `@=` `?=` | right |
 | 2 | `?:` (ternary) | right |
 | 3 | `??` (null-coalesce) | right |
-| 4 | `or` / `\|\|` | left |
-| 5 | `and` / `&&` | left |
+| 4 | `or` / `\|` | left |
+| 5 | `and` / `&` | left |
 | 6 | `xor` / `^|` (logical xor) | left |
 | 7 | `` `\| `` `` `!\| `` (bitwise or / nor) | left |
 | 8 | `` `^| `` `` `^|!\| `` (bitwise xor / xnor) | left |
