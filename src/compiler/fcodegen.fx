@@ -16767,10 +16767,21 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                 in1.text = g"__bititer_i\0";
                 in2 = node_new(NodeKind.IDENTIFIER, n.line, n.col);
                 in2.text = g"__bititer_i\0";
-                bn = node_new(NodeKind.BIT_SLICE, n.line, n.col);
-                bn.a = src;
-                bn.b = in1;
-                bn.c = in2;
+                switch (bt.kind == LK.INT)
+                {
+                    case (true) {
+                        // Plain integer: bit-index operator, MSB of the declared width
+                        bn = node_new(NodeKind.BIT_INDEX_ACCESS, n.line, n.col);
+                        bn.a = src;
+                        bn.b = in1;
+                    }
+                    default {
+                        bn = node_new(NodeKind.BIT_SLICE, n.line, n.col);
+                        bn.a = src;
+                        bn.b = in1;
+                        bn.c = in2;
+                    };
+                };
                 bit = this.visit(bn);
                 switch (this.bad | bit == (IRValue*)0)
                 {

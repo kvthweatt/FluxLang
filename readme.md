@@ -240,9 +240,20 @@ def main() -> int
 
     int i = 420691337;
 
+    data{13} as d13;
+
+    d13 d = 0b1010101010101;
+
     for (`x in i)  // "for bit x in i"
     {
         print((int)x);  // x is a data{1} type
+    };
+
+    print();
+
+    for (`x in d)
+    {
+        print((int)x);
     };
 
     -> b[`0];
@@ -252,6 +263,7 @@ def main() -> int
 ```
 Success!
 00011001000100110011110110001001
+1010101010101
 ```
 
 ### Width, alignment, and endianness are part of the type

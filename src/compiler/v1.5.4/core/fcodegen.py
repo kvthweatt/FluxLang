@@ -6166,7 +6166,13 @@ class CodegenVisitor:
         builder.cbranch(cmp, body_block, end_block)
 
         builder.position_at_start(body_block)
-        bit_node = _BitSlice(src_ident, _Ident(idx_name), _Ident(idx_name))
+        if isinstance(bits_ty, ir.IntType):
+            # A plain integer is read with the bit-index operator, which addresses
+            # from the MSB of the declared width (data{13} included).
+            from fast import BitIndexAccess as _BIA
+            bit_node = _BIA(src_ident, _Ident(idx_name))
+        else:
+            bit_node = _BitSlice(src_ident, _Ident(idx_name), _Ident(idx_name))
         bit_node.line = getattr(node, 'line', 0)
         bit_node.column = getattr(node, 'column', 0)
         bit_val = self.visit(bit_node, builder, module)
