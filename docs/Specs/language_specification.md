@@ -4725,19 +4725,15 @@ When a file builds several programs the last line is `Compilation successful: bu
 
 See [IDEKA Effect System](https://github.com/kvthweatt/IDEKALang/blob/main/docs/effects_system.md) for a more thorough explanation of effects.
 
-Effects are compile-time properties of computation. They describe what a function
-does beyond its return value -- whether it allocates, touches IO, modifies memory,
-hooks into running code, or any other observable behavior. The compiler tracks these
-properties statically, enforces constraints across call chains, and erases them
-entirely before codegen. Zero runtime cost.
+Effects are compile-time properties of computation. They describe what a function does beyond its return value - whether it allocates, touches IO, modifies memory, hooks into running code, or any other observable behavior.  
+The compiler tracks these properties statically, enforces constraints across call chains, and erases them entirely before codegen and has zero runtime cost.
 
 ---
 
 ## Overview
 
-An effect is not a label. A label is metadata the compiler carries. An effect is a
-membership in a relationship algebra the compiler reasons from. The algebra is what
-makes it programming the compiler rather than annotating for it.
+An effect is a label. An effect is a set of relationships between other effects.  
+The algebra is what makes it possible for the compiler to reason about functions without inherently knowing what the labels mean.
 
 There are two annotation sites: origin and boundary.
 
