@@ -84,6 +84,8 @@ If you like IDEKA, please consider contributing to the language or joining the [
     - [Bit slices](#bit-slices)
     - [Taking bit slices from structs](#taking-bit-slices-from-structs)
     - [Bit slices of bit slices](#bit-slices-of-bit-slices)
+    - [Bit Indexing](#bit-indexing)
+    - [Bitwise Iteration](#bitwise-iteration)
   - [Advanced Data Type Features](#advanced-data-type-features)
     - [Unusual Bit Widths](#unusual-bit-widths)
   - [Function Pointers](#function-pointers)
@@ -3681,7 +3683,7 @@ main() -> int
 };
 ```
 
-<a id="bit-iteration"></a>
+<a id="bitwise-iteration"></a>
 ### **Bit Iteration**
 To iterate over the bits of a value or struct, use bitwise iteration. Here's what that looks like:
 ```
