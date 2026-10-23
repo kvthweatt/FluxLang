@@ -3,7 +3,48 @@
 Here you can find what you need to learn and understand IDEKA.
 
 The [language specification](https://github.com/kvthweatt/IDEKA/blob/main/docs/Specs/language_specification.md) covers nearly every aspect of the language.  
-IDEKA is a very dense language, and certain features have names that mean something else in other languages such as `interface`.
+
+---
+
+IDEKA is a very dense language, and certain features have names that mean something else in other languages such as `interface`.  
+To help you get started and to make IDEKA easier to understand:
+
+It's very concept-based. This will make more and more sense with each example.  
+It's also designed to be highly readable once you start recognizing the patterns.  
+
+## Example 1 - Operators  
+C uses `&&` for logical AND, `&` for bitwise AND. Unless you know this, you might think they do the same thing.  
+Then you have `= &x` which would be address-of x, this makes you have to memorize an exception to the rule of what `&` means.  
+Then you have `int&` as a reference type. That's another exception you have to learn.  
+
+IDEKA doesn't do this to you. Firstly, all bitwise operators start with a backtick like ` because "b"acktick = "b"itwise (both start with b)
+
+This means bitwise AND is `&, logical AND is just plain &, no doubling up logical operators because that makes no sense, "and and", and and what?
+
+All bitwise operators start with a backtick like this, making them visually distinct. You can immediately know which is which.
+
+## Example 2 - Address of  
+The address of operator is `@` so taking addresses looks like `@x` which immediately reads as "where x is at".
+
+In C you could never write `&=` to mean address-assignment, because that's logical AND assign.
+
+In Flux you can do address assignment like `int* px @= x;`
+
+## Example 3  
+The not-null operator `!?`
+
+`?` is used in null-related operators like null-assign or null-coalesce. Here, you have `!` not and `?` null.
+
+You use it like `if (pointer!?)` and reads like `if pointer not null`
+
+But now think about it - When you're excited and asking a question:
+
+**"Really, buy 1 get 3 free!?"**
+
+You're asking a question specifically hoping its true.  
+Using `!?` is identical to `!= 0`, so you can do `if (pointer != 0)`
+
+---
 
 The [keyword reference](https://github.com/kvthweatt/IDEKA/blob/main/docs/keyword_reference.md) will help you learn and use new keywords.
 
