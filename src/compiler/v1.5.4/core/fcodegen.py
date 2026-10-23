@@ -3275,7 +3275,10 @@ class CodegenVisitor:
                     full_string += clean
                 else:
                     full_string += str(self._fstring_eval_ct(part, node, builder, module))
-            return self.visit(ArrayLiteral.from_string(full_string), builder, module)
+            _fs_val = self.visit(ArrayLiteral.from_string(full_string), builder, module)
+            # A folded f-string is a string value: '+' concatenates it instead of doing pointer arithmetic
+            _fs_val._is_string_value = True
+            return _fs_val
         except (ValueError, NotImplementedError, FluxCodegenError):
             return self._fstring_runtime(node, builder, module)
 

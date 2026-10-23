@@ -1032,7 +1032,7 @@ interface Database(A: Connectable, B: Queryable)
 
     B(A)
     {
-        query(byte* sql) -> byte*
+        result() -> byte*
     };
 
     A -> B
@@ -2699,7 +2699,35 @@ is trailing: the chain ends with the symbol, so there is no operand after the la
 
 The operator count follows from the other three values: operator count = parameter count - 1 + leading + trailing. The count alone cannot tell a ## b apart from ## a ##, because both have one fewer or equal operands than symbols. Leading and trailing are what separate them.
 
-Current compiler state: it only passes the operator count (as the hidden first argument, which is what the operator’s own symbol reads as inside the body). The parser starts a chain from an operand, so it does not track leading or trailing yet. The parameter count is only known implicitly from the number of variadic arguments. Leading and trailing are planned.
+Here's an example of a variadic operator:
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+// varop.fx - Variadic Operator example
+
+operator(...) [##] -> void
+{
+    println(f"Operator count:    {##}");
+    println(f"Operand count:     {...}");
+    println(f"Is {$##} leading:  " + "true" if (##.is_leading) else "false");
+    println(f"Is {$##} trailing: " + "true" if (##.is_trailing) else "false");
+};
+
+main() -> int
+{
+    ## 0 ## 1 ## 2 ## 3 ##;
+    -> 0;
+};
+```
+Output:
+```
+Operator count:    5
+Operand count:     4
+Is ## leading:  true
+Is ## trailing: true
+```
 
 ---
 
@@ -3702,6 +3730,10 @@ def main() -> int
 
     -> 0;
 };
+```
+Output:
+```
+00011001000100110011110110001001
 ```
 
 This iterates through the bits of `i`, where `x` equals the bit at **i[`current_iteration]**.

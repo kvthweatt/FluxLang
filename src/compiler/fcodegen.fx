@@ -8460,7 +8460,10 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                     while (j <= tl) { txt[j] = cb.mem[j]; j++; };
                     cb.__exit();
                     ffree((byte*)cb);
-                    -> this.fstr_lit(txt, tl);
+                    // A folded f-string is a string value: '+' concatenates it
+                    r = this.fstr_lit(txt, tl);
+                    r.flags = r.flags `| VF_STRING_VALUE;
+                    -> r;
                 }
                     default
                     {

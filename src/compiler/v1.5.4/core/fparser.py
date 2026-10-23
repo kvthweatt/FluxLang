@@ -966,9 +966,15 @@ class FluxParser:
             from ftypesys import TypeSystem, DataType as _DT
             _count_ts = TypeSystem(base_type=_DT.SINT)
             _count_param = Parameter('__op_count', _count_ts)
+            _hidden_params = [
+                _count_param,
+                Parameter('__op_argc', TypeSystem(base_type=_DT.SINT)),
+                Parameter('__op_leading', TypeSystem(base_type=_DT.BOOL)),
+                Parameter('__op_trailing', TypeSystem(base_type=_DT.BOOL)),
+            ]
             # __op_count is the one fixed parameter; operands are passed as C variadic args.
             # Keep is_variadic=True so codegen emits a proper vararg function.
-            params = [_count_param] + [p for p in params if not getattr(p, '_is_variadic_sentinel', False)]
+            params = _hidden_params + [p for p in params if not getattr(p, '_is_variadic_sentinel', False)]
 
         if self.expect(TokenType.SEMICOLON):
             self.advance()
@@ -1129,6 +1135,15 @@ class FluxParser:
         left_syms = {lsym: lsym for lsym, _ in self._custom_ternary_ops}
         return self._match_custom_unary_op(left_syms)
 
+    def _variadic_op_call(self, func_name, op_count, operands, is_leading, is_trailing, tok):
+        """Build the call for a variadic operator chain. The hidden leading arguments are
+        the operator count, the operand count and the is_leading / is_trailing flags."""
+        hidden = [Literal(op_count, DataType.SINT),
+                  Literal(len(operands), DataType.SINT),
+                  Literal(bool(is_leading), DataType.BOOL),
+                  Literal(bool(is_trailing), DataType.BOOL)]
+        return FunctionCall(func_name, hidden + operands).set_location(tok.line, tok.column)
+
     def custom_op_expression(self) -> Expression:
         """
         custom_op_expression -> multiplicative_expression
@@ -1137,7 +1152,30 @@ class FluxParser:
                                   | (multiplicative_expression custom_variadic_op)+ -- variadic chain
                                   )*
         """
-        expr = self.multiplicative_expression()
+        expr = None
+        if self._custom_variadic_ops and self._variadic_op_body_symbol is None:
+            # Leading chain: the expression starts with the variadic operator itself.
+            _lsym, _llen = self._match_custom_unary_op(self._custom_variadic_ops)
+            if _lsym is not None:
+                tok = self.current_token
+                func_name = self._custom_variadic_ops[_lsym]
+                operands = []
+                op_count = 0
+                is_trailing = False
+                while True:
+                    _m, _l = self._match_custom_unary_op({_lsym: _lsym})
+                    if _m is None:
+                        break
+                    for _ in range(_l):
+                        self.advance()
+                    op_count += 1
+                    if self.current_token.type not in _EXPRESSION_START_TOKENS:
+                        is_trailing = True
+                        break
+                    operands.append(self.multiplicative_expression())
+                expr = self._variadic_op_call(func_name, op_count, operands, True, is_trailing, tok)
+        if expr is None:
+            expr = self.multiplicative_expression()
 
         while True:
             # Check variadic operators first.
@@ -1148,6 +1186,7 @@ class FluxParser:
                     func_name = self._custom_variadic_ops[matched_vsym]
                     operands = [expr]
                     op_count = 0
+                    is_trailing = False
                     while True:
                         _m, _l = self._match_custom_unary_op({matched_vsym: matched_vsym})
                         if _m is None:
@@ -1158,9 +1197,10 @@ class FluxParser:
                         # Check if an expression follows
                         _expr_start_types = _EXPRESSION_START_TOKENS
                         if self.current_token.type not in _expr_start_types:
+                            is_trailing = True
                             break
                         operands.append(self.multiplicative_expression())
-                    expr = FunctionCall(func_name, [Literal(op_count, DataType.SINT)] + operands).set_location(tok.line, tok.column)
+                    expr = self._variadic_op_call(func_name, op_count, operands, False, is_trailing, tok)
                     continue
 
             # Check ternary operators next (longer patterns take precedence).
@@ -10726,6 +10766,7 @@ class FluxParser:
                 expr_parser._custom_operators = self._custom_operators
                 expr_parser._custom_ternary_ops = self._custom_ternary_ops
                 expr_parser._custom_variadic_ops = self._custom_variadic_ops
+                expr_parser._variadic_op_body_symbol = self._variadic_op_body_symbol
                 expression = expr_parser.expression()
                 
                 parts.append(expression)
@@ -10787,6 +10828,7 @@ class FluxParser:
                 expr_parser._custom_operators = self._custom_operators
                 expr_parser._custom_ternary_ops = self._custom_ternary_ops
                 expr_parser._custom_variadic_ops = self._custom_variadic_ops
+                expr_parser._variadic_op_body_symbol = self._variadic_op_body_symbol
                 expressions.append(expr_parser.expression())
 
         # Build FStringLiteral parts, substituting {} placeholders positionally
@@ -10833,6 +10875,14 @@ class FluxParser:
                 tok = self.current_token
                 for _ in range(_vl):
                     self.advance()
+                # ##.is_leading / ##.is_trailing expose the chain flags
+                if (self.expect(TokenType.DOT) and self.peek() is not None
+                        and self.peek().type == TokenType.IDENTIFIER
+                        and self.peek().value in ('is_leading', 'is_trailing')):
+                    self.advance()
+                    _prop = self.current_token.value
+                    self.advance()
+                    return Identifier('__op_leading' if _prop == 'is_leading' else '__op_trailing').set_location(tok.line, tok.column)
                 return Identifier('__op_count').set_location(tok.line, tok.column)
         if self.expect(TokenType.IDENTIFIER):
             return self.scoped_identifier()
@@ -10954,6 +11004,11 @@ class FluxParser:
             # Variadic access: ...[N]
             tok = self.current_token
             self.advance()
+            if not self.expect(TokenType.LEFT_BRACKET):
+                # Bare '...' exposes the argument count (variadic operator bodies)
+                if self._variadic_op_body_symbol is None:
+                    self.error("Bare '...' (argument count) is only available inside a variadic operator body")
+                return Identifier('__op_argc').set_location(tok.line, tok.column)
             self.consume(TokenType.LEFT_BRACKET)
             index_expr = self.expression()
             self.consume(TokenType.RIGHT_BRACKET)
@@ -11012,6 +11067,17 @@ class FluxParser:
             # stringify expression. If the next token is a symbol character (e.g. '%' in
             # a custom operator '$%'), do not consume '$' -- fall through so the custom
             # operator machinery upstream can match the full operator sequence.
+            # $## inside a variadic operator body stringifies the operator's own symbol.
+            if self._variadic_op_body_symbol is not None:
+                _sv_pos, _sv_tok = self.position, self.current_token
+                _sv_tok0 = self.current_token
+                self.advance()
+                _vm, _vl = self._match_custom_unary_op({self._variadic_op_body_symbol: self._variadic_op_body_symbol})
+                if _vm is not None:
+                    for _ in range(_vl):
+                        self.advance()
+                    return StringLiteral(self._variadic_op_body_symbol).set_location(_sv_tok0.line, _sv_tok0.column)
+                self.position, self.current_token = _sv_pos, _sv_tok
             _next = self.peek()
             _stringify_valid_next = (
                 _next is not None and (

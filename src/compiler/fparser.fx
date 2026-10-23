@@ -11521,6 +11521,44 @@ namespace flux
                 int line = this.cur_line();
                 int col = this.cur_col();
                 int nx = this.type_at(1);
+                int svpos = this.pos;
+                Node* sn;
+                // $## inside a variadic operator body stringifies the operator's own symbol
+                switch (this.vop_sym != (OpSym*)0)
+                {
+                    case (true) {
+                        this.advance();
+                        switch (this.opsym_match(this.vop_sym))
+                        {
+                            case (true) {
+                                sn = this.mk(NodeKind.STRING_LITERAL, line, col);
+                                switch (this.failed)
+                                {
+                                    case (true) { -> sn; }
+                                    default {};
+                                };
+                                // Built without the shared string buffer: an enclosing f-string may be using it
+                                byte* ot = g"\0";
+                                int oi = 0;
+                                while (oi < this.vop_sym.n)
+                                {
+                                    switch (this.vop_sym.t[oi] == TokenType.IDENTIFIER)
+                                    {
+                                        case (true) { ot = this.cat2(ot, this.vop_sym.v[oi]); }
+                                        default { ot = this.cat2(ot, this.tok_symbol(this.vop_sym.t[oi])); };
+                                    };
+                                    oi++;
+                                };
+                                sn.text = ot;
+                                sn.op = -1;
+                                this.skip_tokens(this.vop_sym.n);
+                                -> sn;
+                            }
+                            default { this.pos = svpos; };
+                        };
+                    }
+                    default {};
+                };
                 bool valid = nx == TokenType.IDENTIFIER | nx == TokenType.CODIFY | nx == TokenType.DOT | nx == TokenType.TAG |
                              nx == TokenType.SINT | nx == TokenType.UINT | nx == TokenType.SLONG | nx == TokenType.ULONG |
                              nx == TokenType.FLOAT_KW | nx == TokenType.DOUBLE_KW | nx == TokenType.BOOL_KW | nx == TokenType.BYTE;
@@ -11665,6 +11703,26 @@ namespace flux
                             {
                                 n.text = g"__op_count\0";
                                 this.skip_tokens(this.vop_sym.n);
+                                // ##.is_leading / ##.is_trailing expose the chain flags
+                                switch (this.cur() == TokenType.DOT & this.type_at(1) == TokenType.IDENTIFIER)
+                                {
+                                    case (true) {
+                                        this.advance();
+                                        switch (this.val_is(g"is_leading\0", 10))
+                                        {
+                                            case (true) { n.text = g"__op_leading\0"; this.advance(); }
+                                            default
+                                            {
+                                                switch (this.val_is(g"is_trailing\0", 11))
+                                                {
+                                                    case (true) { n.text = g"__op_trailing\0"; this.advance(); }
+                                                    default { this.pos = this.pos - 1; };
+                                                };
+                                            };
+                                        };
+                                    }
+                                    default {};
+                                };
                                 -> n;
                             };
                         };
@@ -11843,7 +11901,30 @@ namespace flux
                                                                                                                                                                 {
                                                                                                                                                                     case (true) {
                                                                                                                                                                     this.advance();
-                                                                                                                                                                    switch (!this.consume(TokenType.LEFT_BRACKET))
+                                                                                                                                                                    switch (this.cur() != TokenType.LEFT_BRACKET)
+                                                                                                                                                                    {
+                                                                                                                                                                        case (true) {
+                                                                                                                                                                            // Bare '...' exposes the argument count (variadic operator bodies)
+                                                                                                                                                                            switch (this.vop_sym == (OpSym*)0)
+                                                                                                                                                                            {
+                                                                                                                                                                                case (true) {
+                                                                                                                                                                                    this.error(g"Bare '...' (argument count) is only available inside a variadic operator body\0");
+                                                                                                                                                                                    -> (Node*)0;
+                                                                                                                                                                                }
+                                                                                                                                                                                default {};
+                                                                                                                                                                            };
+                                                                                                                                                                            n = this.mk(NodeKind.IDENTIFIER, line, col);
+                                                                                                                                                                            switch (this.failed)
+                                                                                                                                                                            {
+                                                                                                                                                                                case (true) { -> n; }
+                                                                                                                                                                                default {};
+                                                                                                                                                                            };
+                                                                                                                                                                            n.text = g"__op_argc\0";
+                                                                                                                                                                            -> n;
+                                                                                                                                                                        }
+                                                                                                                                                                        default {};
+                                                                                                                                                                    };
+                                                                                                                                                                                                                                                                                                                                        switch (!this.consume(TokenType.LEFT_BRACKET))
                                                                                                                                                                     {
                                                                                                                                                                         case (true) { -> (Node*)0; }
                                                                                                                                                                         default {};
@@ -22491,9 +22572,93 @@ namespace flux
             };
 
             // custom_op_expression -> multiplicative ( variadic chain | ternary | binary )*
+            // One variadic chain: [first] (op operand?)+ . first is null for a leading chain.
+            // Hidden leading call arguments: operator count, operand count, is_leading, is_trailing.
+            variadic_chain(COp* c, Node* first, int line, int col) -> Node*
+            {
+                Node* call = this.op_call(c.func, line, col);
+                Node* cnt;
+                Node* argc;
+                Node* lead;
+                Node* trail;
+                Node* right;
+                int count = 0;
+                int nargs = 0;
+                bool is_trailing = false;
+                switch (this.failed)
+                {
+                    case (true) { -> call; }
+                    default {};
+                };
+                cnt = this.lit(DataType.SINT, (i64)0, line, col);
+                argc = this.lit(DataType.SINT, (i64)0, line, col);
+                lead = this.lit(DataType.BOOL, (i64)(first == (Node*)0), line, col);
+                trail = this.lit(DataType.BOOL, (i64)0, line, col);
+                switch (this.failed)
+                {
+                    case (true) { node_free(call); -> (Node*)0; }
+                    default {};
+                };
+                node_push(call, 0, cnt);
+                node_push(call, 0, argc);
+                node_push(call, 0, lead);
+                node_push(call, 0, trail);
+                switch (first != (Node*)0)
+                {
+                    case (true) { node_push(call, 0, first); nargs++; }
+                    default {};
+                };
+                while (true)
+                {
+                    switch (!this.opsym_match(c.left))
+                    {
+                        case (true) { break; }
+                        default {};
+                    };
+                    this.skip_tokens(c.left.n);
+                    count++;
+                    switch (!this.starts_operand())
+                    {
+                        case (true) { is_trailing = true; break; }
+                        default {};
+                    };
+                    right = this.bin_level(9);
+                    switch (this.failed)
+                    {
+                        case (true) { node_free(call); -> (Node*)0; }
+                        default {};
+                    };
+                    node_push(call, 0, right);
+                    nargs++;
+                };
+                this.set_count_literal(cnt, count);
+                this.set_count_literal(argc, nargs);
+                trail.ival = (i64)is_trailing;
+                -> call;
+            };
+
             custom_op_expression() -> Node*
             {
-                Node* expr = this.bin_level(9);
+                Node* expr = (Node*)0;
+                COp* lc;
+                switch (this.cop_mask != 0 & this.vop_sym == (OpSym*)0)
+                {
+                    case (true) {
+                        // Leading chain: the expression starts with the variadic operator itself
+                        lc = this.cop_best(1);
+                        switch (lc != (COp*)0)
+                        {
+                            case (true) { expr = this.variadic_chain(lc, (Node*)0, this.cur_line(), this.cur_col()); }
+                            default {};
+                        };
+                    }
+                    default {};
+                };
+                switch (expr == (Node*)0 & !this.failed)
+                {
+                    case (true) { expr = this.bin_level(9); }
+                    default {};
+                };
                 switch (this.failed)
                 {
                     case (true) { -> expr; }
@@ -22520,45 +22685,12 @@ namespace flux
                                     switch (c != (COp*)0)
                                     {
                                         case (true) {
-                                        call = this.op_call(c.func, line, col);
-                                        switch (this.failed)
+                                        call = this.variadic_chain(c, expr, line, col);
+                                        switch (this.failed | call == (Node*)0)
                                         {
                                             case (true) { -> expr; }
                                             default {};
                                         };
-                                        cnt = this.lit(DataType.SINT, (i64)0, line, col);
-                                        switch (this.failed)
-                                        {
-                                            case (true) { node_free(call); -> expr; }
-                                            default {};
-                                        };
-                                        node_push(call, 0, cnt);
-                                        node_push(call, 0, expr);
-                                        count = 0;
-                                        more = true;
-                                        while (more)
-                                        {
-                                            switch (!this.opsym_match(c.left))
-                                            {
-                                                case (true) { break; }
-                                                default {};
-                                            };
-                                            this.skip_tokens(c.left.n);
-                                            count++;
-                                            switch (!this.starts_operand())
-                                            {
-                                                case (true) { break; }
-                                                default {};
-                                            };
-                                            right = this.bin_level(9);
-                                            switch (this.failed)
-                                            {
-                                                case (true) { node_free(call); -> (Node*)0; }
-                                                default {};
-                                            };
-                                            node_push(call, 0, right);
-                                        };
-                                        this.set_count_literal(cnt, count);
                                         expr = call;
                                         continue;
                                     }
@@ -23117,17 +23249,28 @@ namespace flux
                                                                         switch (variadic & r == (OpSym*)0)
                                                                         {
                                                                             case (true) {
-                                                                            cp = this.mk(NodeKind.PARAMETER, f.line, f.col);
-                                                                            switch (this.failed)
+                                                                            // Hidden leading parameters: operator count, operand count, is_leading, is_trailing
+                                                                            int hk = 3;
+                                                                            while (hk >= 0)
                                                                             {
-                                                                                case (true) { node_free(pre); -> this.op_abort(f, l, r); }
-                                                                                default
+                                                                                cp = this.mk(NodeKind.PARAMETER, f.line, f.col);
+                                                                                switch (this.failed)
                                                                                 {
-                                                                                    cp.ts = typespec_new();
-                                                                                    cp.ts.base_type = DataType.SINT;
-                                                                                    cp.text = g"__op_count\0";
-                                                                                    this.push_front(f, cp);
+                                                                                    case (true) { node_free(pre); -> this.op_abort(f, l, r); }
+                                                                                    default
+                                                                                    {
+                                                                                        cp.ts = typespec_new();
+                                                                                        switch (hk)
+                                                                                        {
+                                                                                            case (0) { cp.ts.base_type = DataType.SINT; cp.text = g"__op_count\0"; }
+                                                                                            case (1) { cp.ts.base_type = DataType.SINT; cp.text = g"__op_argc\0"; }
+                                                                                            case (2) { cp.ts.base_type = DataType.BOOL; cp.text = g"__op_leading\0"; }
+                                                                                            default { cp.ts.base_type = DataType.BOOL; cp.text = g"__op_trailing\0"; };
+                                                                                        };
+                                                                                        this.push_front(f, cp);
+                                                                                    };
                                                                                 };
+                                                                                hk--;
                                                                             };
                                                                         }
                                                                             default {};
