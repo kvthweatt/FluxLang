@@ -1,22 +1,23 @@
-<a id="flux"></a>
-# Flux
+<a id="IDEKA"></a>
+# IDEKA
 
-Flux is a compiled, general purpose programming language.
+IDEKA is a compiled, general purpose programming language formerly known as Flux.
 
 It provides power with ease of writing.
 
-If you like Flux, please consider contributing to the language or joining the [Flux Discord server](https://discord.gg/RAHjbYuNUc) where you can ask questions, provide feedback, and talk with other Flux enjoyers!
+If you like IDEKA, please consider contributing to the language or joining the [IDEKA Discord server](https://discord.gg/RAHjbYuNUc) where you can ask questions, provide feedback, and talk with other IDEKA enjoyers!
 
-**Creator note** Everything in Flux is **stack allocated** unless specified.  
+**Creator note** Everything in IDEKA is **stack allocated** unless specified.  
 - This means you are likely to introduce stack overflows if you perform stack allocations inside loops such as declaring a new variable each time a loop passes.
 
 ---
 
 ## Table of Contents
 
-- [Flux](#flux)
+- [IDEKA](#IDEKA)
   - [Functions](#functions)
   - [Variadic functions](#variadic-functions)
+  - [Error Returns](#error-returns)
   - [Chaining Functions](#chaining-functions)
   - [External Functions (FFI)](#external-functions-ffi)
   - [Exporting Functions with `export`](#exporting-functions-with-export)
@@ -62,7 +63,8 @@ If you like Flux, please consider contributing to the language or joining the [F
   - [Assertion with `assert()`](#assertion-with-assert)
   - [Heap allocation](#heap-allocation)
   - [Freeing from the heap](#freeing-from-the-heap)
-  - [Custom infix operators and overloading](#custom-infix-operators-and-overloading)
+  - [Custom operators and overloading](#custom-operators-and-overloading)
+  - [Variadic Operators](#variadic-operator)
   - [Functions and `contract`](#functions-and-contract)
   - [Contract `# binding`](#contract-binding)
   - [Contracts on operators](#contracts-on-operators)
@@ -197,7 +199,7 @@ default thing.
 
 <a id="variadic-functions"></a>
 ## **Variadic functions**
-Variadics in Flux are very straightforward, and use the `...` elipse operator.  
+Variadics in IDEKA are very straightforward, and use the `...` elipse operator.  
 You can index the elipse operator to yield the arguments passed, example:
 ```
 #import <standard.fx>;
@@ -231,8 +233,50 @@ Result:
 
 ---
 
+<a id="error-returns"></a>
+## **Error Returns**
+
+IDEKA supports dual return-type functions, the most common use case is in error returns.
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+struct LogError { /// ... /// };
+// LogFile omitted
+
+def Logger(LogFile* lf) -> int ^| LogError // definition, return type is L xor R, either L or R.
+{
+    if (some_bad_thing_happened)
+    {
+        // LogError e;
+        // set values
+        error -> e;
+    };
+
+    -> 0;
+};
+
+def main() -> int
+{
+    LogFile lf("/path/to/file.log");
+    int ^| LogError result,err = Logger(@lf);
+
+    if (err!?)      { println(err.message); }
+    elif (result!?) { println(result); }
+
+    -> 0;
+};
+```
+
+---
+
 <a id="chaining-functions"></a>
 ## **Chaining functions**
+
+The chain operator `<-` is a binary operator, like `A <- B`.
+Chaining with `<-` passes the right operand into the function call's param on the LHS.
+This only works with single-parameter functions.
 ```
 def foo(int x) -> int
 {
@@ -244,8 +288,39 @@ def bar () -> int
     return 0xFF;
 };
 
-int z = foo() <- bar(); // == // int z = foo(bar());
+int z = foo() <- bar(); // identical to writing int z = foo(bar());
 ```
+
+---
+
+<a id="shorthand-functions"></a>
+## **Shorthand Functions**
+
+First, it is good to know that the return arrow itself `->` can take the place of the `return` keyword.
+Example:
+```
+def foo(int x) -> int
+{
+    -> x / 2;
+};
+```
+It should also be known that `def` does not mean define but actually means default, and is located in the [calling convention](#calling-conventions) position.  
+Because of this, `def` can be omitted:
+```
+foo(int x) -> int
+{
+    -> x / 2;
+};
+```
+
+This function if written on one line would look like this (and kind of ugly):  
+`foo(int x) -> int { -> x / 2; };`
+
+If a function is return-only and has no other statements but that one, it can be reduced.
+IDEKA already has a lot of semicolons, and braces. Like an `if` that has one statement, we can eliminate the braces and write:  
+`foo(int x) -> int -> x / 2;`
+
+This creates a very nice, almost mathematical-looking line of code.
 
 ---
 
@@ -348,12 +423,14 @@ Packages are imported from the compiler's local FPM registry located inside `.fp
 
 To import a package, use the package name directly:
 ```
-#import <standard.fx">
+#import <standard.fx>;
 
 #package super-types, flux-boost;  // these don't exist, yet..
 ```
 
 You still need to perform `using` statements unless the package self-uses, meaning it has the `using` statements inside of it near the end of entrypoint file.
+
+Packages and FPM are still in development and should not be used for now.
 
 ---
 
@@ -381,6 +458,8 @@ You still need to perform `using` statements unless the package self-uses, meani
 ### Parameterized Substitution:
 To achieve C macro-like behavior, you can use `#psub`.  
 
+`#psub` is also "dumb" replacement, and is the other half of `#def`.
+
 Example:
 ```
 #import <standard.fx>;
@@ -397,6 +476,33 @@ def main() -> int
     return 0;
 };
 ```
+
+#### How `#psub` works
+
+**Defining**
+- `#psub name(p1, p2, ...) body` defines a parameterized substitution. It takes no terminating semicolon; any semicolons are part of the body.
+- A `#` at the end of a line continues the definition on the next line. The `#` is removed and the lines are joined with a single space, so a body is always one line.
+- The parameter list ends at the first `)`. Parameters are comma separated and each is trimmed; empty entries are skipped. The body is everything after that `)`.
+- A `#psub` with no `(`...`)` parameter list is a preprocessor error.
+- Definitions are global to the whole compilation, including imported files. Defining a name again replaces the previous definition.
+- The lines of a definition become blank lines in the output, so line numbers are preserved.
+
+**Expanding**
+- A call is the `#psub` name immediately followed by `(`, with no whitespace between them. The same name not followed by `(` is left alone, and only whole identifiers match.
+- A call must be written on a single line.
+- Arguments are split at commas that are outside nested parentheses and outside string literals (`"` and `'`). Each argument is trimmed. The argument count must equal the parameter count, otherwise the preprocessor reports `Macro 'name' expects N argument(s), got M`.
+- Each parameter name in the body is replaced, as a whole word, with its argument text. Substitution is purely textual: it does not know about strings, so parameter names inside string literals in the body are replaced too.
+- Parameters are replaced one at a time in declaration order, so an argument that contains the name of a later parameter is replaced as well:
+  ```
+  #psub add(a, b) a + b
+
+  x = add(b, 1);   // a -> b gives "b + b", then b -> 1 gives "1 + 1"
+                   // result: x = 1 + 1;
+  ```
+- The result is scanned again, so a body may call other `#psub`s. Expansion repeats until no call remains. If it does not settle within 64 passes, the preprocessor stops with `Macro expansion exceeded depth limit (64). Possible infinite recursion.`
+
+**Conditionals**
+`#ifpsub NAME` is true when the `#psub` NAME is defined, and `#ifnpsub NAME` is true when it is not. Both are closed with `#endif;`. A parameter list written after the name, as in `test2(a)` below, is ignored.
 
 You can also perform conditional logic with `#ifpsub` and `#ifnpsub`:
 ```
@@ -608,7 +714,7 @@ object SomeOBJ
 {
     int val;
 
-    def __init(int x) -> this { return this; };
+    def __init(int x) -> this { this.val = x; return this; };
 
     def __exit() -> void {};
 
@@ -796,53 +902,123 @@ GeomT1 object Square
 
 <a id="interfaces"></a>
 ## **Interfaces**
-Interfaces define how two or more objects interact. Every interface parameter must declare a trait constraint - bare role names without a trait are a compile error.
+An interface is a compile-time rule set describing which methods two objects may use on each other. Interfaces generate no code: they exist only to make the compiler reject calls that the interface does not sanction.
 
-Attaching an interface to an object implicitly requires both the attached object and any named partner objects to satisfy their respective trait constraints. This is checked at compile time.
+An interface has a name and a list of **roles**. Each role is bound to a trait, and a role stands for "any object that implements that trait". Inside the body, **protocol blocks** list the methods allowed between two roles.
+
+```
+interface Name(RoleA: TraitA, RoleB: TraitB)
+{
+    RoleA : RoleB   { method() -> type, ... };   // call permission
+    RoleB(RoleA)    { method() -> type, ... };   // pass-into permission
+    RoleA -> RoleB  { method() -> type, ... };   // return-to permission
+};
+```
+
+- Every role must declare a trait. A bare role name (`interface X(A, B)`) is a compile error.
+- Each protocol block lists method prototypes in the form `name(Type param, ...) -> ReturnType`, separated by commas, and ends with `;`.
+- A protocol block names two roles. The first is the caller (or provider) side and the second the callee (or consumer) side, as described below.
+
+### Attaching an interface
+
+An interface takes effect when it is attached to an object, after the closing brace of the object definition:
+
+```
+object Client { /// ... /// } : Database(this, Store);
+```
+
+The arguments bind to the interface roles in declaration order: `Database(this, Store)` binds `A` to `Client` (`this`) and `B` to `Store`. Several interfaces may be attached by separating them with commas: `} : Database(this, Store), Audit(this, Log);`.
+
+When an interface is attached, the compiler:
+
+1. Adds each role's trait to the object it is bound to, so an object bound to a role must implement every method of that trait.
+2. Checks that the attaching object and every named partner object implement their role's trait. A partner is checked even if it never attaches the interface itself.
+3. Checks that the number of attachment arguments matches the number of roles, and that the interface is defined.
+4. Builds the method lists for each protocol block, keyed by the concrete pair of objects.
+
+Failing any of these is a compile error. An interface may be attached to either or both participants; one attachment registers the rules for the pair. Interfaces are not applied to templated objects.
 
 ### Protocol relationship operators
 
-Three operators may appear inside an interface body, each expressing a different kind of relationship between the two roles:
-
 | Syntax | Meaning |
 |---|---|
-| `A : B { methods }` | A may call these methods on a B instance |
-| `B(A) { methods }` | Return values of these A methods may be passed as arguments into B |
-| `A -> B { methods }` | These A methods may be called from inside a B method body |
+| `A : B { methods }` | Code inside `A` may call these methods on a `B` instance |
+| `B(A) { methods }` | The return value of these `A` methods may be passed as an argument into `B` |
+| `A -> B { methods }` | These `A` methods may be called from inside a `B` method body |
 
-All three can coexist in a single interface for the same pair of roles. Each is enforced independently at compile time.
+All three may coexist for the same pair of roles. Each is enforced independently.
+
+For every pair of objects that a protocol block governs, the listed methods form a whitelist. Once a pair is governed, **any method not on the list is rejected**, even if it is public. A pair with no protocol block of a given kind is unrestricted in that direction.
 
 ### `A : B` - call permission
 
-The original and most common form. Restricts which methods A may call on B. Once a governed pair exists, calling any unlisted method - even a public one - is a compile-time error.
+Restricts which methods of `B` may be called from inside `A`'s method bodies.
+
+```
+interface Link(A: Sender, B: Receiver)
+{
+    A : B { accept(byte* data) -> bool };
+};
+```
+
+If `Sender` code calls `Receiver.accept(...)` it compiles. If it calls any other method on a `Receiver` (for example `Receiver.flush()`), the compiler reports:
+
+```
+Interface violation: Sender is not permitted to call flush from Receiver
+```
+
+This check applies to calls made inside object method bodies. Calls made from free functions such as `main` are not covered by `A : B`.
 
 ### `B(A)` - pass-into permission
 
-Controls data flow at call sites. When a return value of an A method is passed directly as an argument to a B method, the compiler checks that the A method is listed in the `B(A)` block. This enforces that only sanctioned values flow across the boundary.
+Controls what may be fed into `B`. When a call to a `B` method has an argument that is itself a method call on an `A` instance, the `A` method must be listed in the `B(A)` block.
 
 ```
-// OK -- query is listed in the B(A) block
-b.some_func(a.query());
+interface Pipe(A: Source, B: Sink)
+{
+    B(A) { read() -> byte* };
+};
 
-// Error -- secret is not listed
-b.some_func(a.secret());
+// OK: read is listed
+sink.write(src.read());
+
+// Error: peek is not listed
+sink.write(src.peek());
+// Interface violation: return value of 'Source.peek' is not permitted to be passed as an argument into 'Sink'
 ```
+
+The check looks at arguments that are direct method calls on a named variable (`src.read()`). A value first stored in a variable and then passed is not tracked.
 
 ### `A -> B` - return-to permission
 
-Controls call context. An A method listed in `A -> B` may be called from inside a B method body. Methods not listed cannot be called from inside B, even if they are otherwise public.
+Controls which `A` methods may be called from inside `B`'s method bodies.
 
 ```
-// Inside a B method body:
-int val = a.result();   // OK -- result is listed in A -> B
-int val = a.secret();   // Error -- secret is not listed
+interface Report(A: Meter, B: Logger)
+{
+    A -> B { value() -> int };
+};
+
+object Logger
+{
+    def log(Meter* m) -> void
+    {
+        int v = m.value();    // OK: value is listed in A -> B
+        int r = m.reset();    // Error: reset is not listed
+    };
+};
+// Interface violation: 'Meter.reset' is not permitted to be called from inside 'Logger'
 ```
+
+### Precedence
+
+Inside a method body, `A -> B` is checked before `B : A`. If a call is explicitly allowed by an `A -> B` list, the `B : A` list is not consulted for that call. This lets one interface permit a call in one direction while restricting the reverse direction.
 
 ### Full example
 
 ```
-trait Queryable  { def query(byte* sql) -> byte*; };
-trait Connectable { def connect() -> bool, disconnect() -> bool; };
+trait Queryable   { def query(byte* sql) -> byte*; };
+trait Connectable { def connect() -> bool; };
 
 interface Database(A: Connectable, B: Queryable)
 {
@@ -879,7 +1055,7 @@ object Store
         byte* r = c.result();
         return r;
     };
-} : Database(Client, this);
+};
 
 object Client
 {
@@ -887,8 +1063,7 @@ object Client
     def __exit() -> void {};
     def __expr() -> int { return 0; };
     def connect() -> bool { return true; };
-    def disconnect() -> bool { return true; };
-    def result() -> byte* { return "data\0"; };
+    def result()  -> byte* { return "data"; };
 } : Database(this, Store);
 
 def main() -> int
@@ -896,20 +1071,21 @@ def main() -> int
     Client c();
     Store  s();
 
-    // Allowed: query() is listed in B(A), result() is the A method being passed
+    // Allowed: result() is listed in B(A), so its value may be passed into Store
     byte* out = s.query(c.result());
 
-    // Allowed: connect() is listed in A : B
     c.connect();
 
     return 0;
 };
 ```
 
+Here `Client` is bound to role `A` (it must implement `Connectable`) and `Store` to role `B` (it must implement `Queryable`). Attaching `Database(this, Store)` to `Client` also checks `Store` against `Queryable`.
+
 ### Attachment rules
 
 - An interface may be attached to either or both participants. A single attachment is sufficient to register all protocol rules for the pair.
-- Argument order must match the interface parameter declaration: `Database(Client, this)` binds the first param role to `Client` and the second to `this`.
+- Argument order must match the interface parameter declaration: `Database(Client, this)` binds the first role to `Client` and the second to `this`.
 - Attaching with the wrong argument order is a compile error if the resulting role bindings violate trait constraints.
 - A partner type named in an attachment (e.g. `Store` in `Database(this, Store)`) is checked against its role's required trait even if it never attaches the interface itself.
 
@@ -968,9 +1144,6 @@ object Obj2
 <a id="istrings-and-fstrings"></a>
 ## **i-Strings and f-Strings**
 
-The syntax in Flux would be: `i"{}{}{}":{x;y;z;};` for an i-string, and `f"{var1}{var2}\0";` for an f-string.
-
-This allows you to write clean interpolated strings without strange formatting.  
 **f-string Example**
 ```
 #import <standard.fx>;
@@ -986,10 +1159,12 @@ def main() -> int
     return 0;
 };
 ```
-`Result: Hello World!`
+Result:
+`Hello World!`
 
 **i-string Example**  
 The brackets are replaced with the results of the statements in order respective to the statements' position in the statement array in i-strings.  
+This allows you to write clean interpolated strings without strange formatting. It keeps code out of the string making them easier to read.  
 ```
 #import <standard.fx>; // imports types.fx
 
@@ -1011,36 +1186,60 @@ def main() -> int
     return 0;
 };
 ```
+Result:
+`Hello World!`
 
 ---
 
 <a id="pointers"></a>
 ## **Pointers**
 
+A pointer is a variable that holds the address of another value. IDEKA uses three symbols for pointer work:
+
+| Syntax | Meaning |
+|---|---|
+| `T*` | In a type: pointer to `T` |
+| `@x` | Address-of: yields a pointer to `x` |
+| `*p` | Dereference: reads or writes the value `p` points to |
+
+### Taking an address
+
+`@` produces the address of a variable, array element, object, struct, or function. The result type is a pointer to the operand's type.
+
 ```
-string a = "Test\0";
-string* pa = @a;
-*pa += "ing!\0";
-print(a);
-// Result: "Testing!"
-
-
-// Pointers to variables:
 int idata = 0;
-int* p_idata = @idata;
+int* p_idata = @idata;     // p_idata holds the address of idata
+```
 
-*p_idata += 3;
-print(idata);  // 3
+### Dereferencing
 
-// Function pointer declarations
+`*p` accesses the pointed-to value, on either side of an assignment. Compound assignments work through the pointer.
+
+```
+*p_idata += 3;             // idata is now 3
+print(idata);              // 3
+
+string a = "Test";
+string* pa = @a;
+*pa += "ing!";
+print(a);                  // Testing!
+```
+
+### Function pointers
+
+A function pointer is declared with `def{}*`, followed by a name, the parameter types, and the return type. Assign a function to it with `@`. A function pointer is called directly by name; it is dereferenced automatically.
+
+```
 def{}* p_add(int,int)->int = @add;
 def{}* p_sub(int,int)->int = @sub;
 
-// Must dereference to call
 print(p_add(0,3)); // 3
 print(p_sub(5,2)); // 3
+```
 
-// Pointers to objects, structs, arrays:
+### Pointers to objects, structs, and arrays
+
+```
 object    myObj {};                 // Definition
 object* p_myObj = @myObj;           // Pointer
 
@@ -1048,21 +1247,62 @@ struct    myStruct {};              // Definition
 struct* p_myStruct = @myStruct;     // Pointer
 
 int*[] pi_array = @i_array;         // Array of pointer
+```
 
+### Address cast `(@)`
+
+`(@)` converts an integer into a pointer, so you do not have to write the pointer type of the cast by hand. The compiler parses `(@)expr` as a cast of `expr` to `void*`, and the result converts to the typed pointer it is assigned to.
+
+```
+uint* px = @x;
+u64 kx = (u64)px;       // address stored as an integer
+uint* py = (@)kx;       // integer back to a pointer
+
+long val = 0x4700FF33324EBA60;
+byte* some_byte = (@)val;
+```
+
+The intended width of the resulting pointer is the compiler's configured default pointer width. That is not implemented yet: currently the width is 32 bits on a 32-bit system and 64 bits on a 64-bit system.
+
+### Address-equals `@=`
+
+`@=` assigns the address of the right-hand side. `T* p @= expr;` is shorthand for `T* p = @expr;`, and `p @= expr;` is shorthand for `p = @expr;`.
+
+```
+int x = 10;
+int* px = @x;     // normal
+int* px @= x;     // address-equals, same result
+```
+
+It is cleaner when the right-hand side is itself an address:
+
+```
+int* px @= @x;
+```
+
+This is **not** an identity. `px @= @x;` is equivalent to `px = @@x;`: the right-hand side `@x` is evaluated first and yields a pointer value that lives somewhere on the stack, then the address of that pointer is taken and becomes the value of `px`. `px` therefore holds the address of a pointer, not the address of `x`. IDEKA does not allow writing `@@x` directly.
+
+### `const` and pointers
+
+The position of `const` decides what is constant:
+
+```
 const int*  px; // Pointer to const value
 
 const* int* px; // Constant pointer to int pointer
 ```
 
+See also **Advanced pointer manipulation** and **Function Pointers** below.
+
 ---
 
 <a id="you-can-also-use-inline-assembly-directly"></a>
 ## You can also use in-line assembly directly:
-Assembly in Flux is done AT&T style.  
+Assembly in IDEKA is done AT&T style.  
 The constraints follow the block in the pattern `outputs : inputs : clobbers`
 Here's an example:
 ```
-def _exchange64(i64* ptr, i64 value, i64* out) -> void
+_exchange64(i64* ptr, i64 value, i64* out) -> void
 {
     #ifdef __ARCH_X86_64__
     volatile asm
@@ -1117,8 +1357,6 @@ You can also do `if` expressions:
 int x = 0;
 int y = x if (x > 5) else noinit;
 ```
-Alternatively, you can use a ternary `?:`
-`int y = x ?  (x > 5) :   noinit;`
 
 You can also use `if` expressions in the following manner:
 ```
@@ -1126,18 +1364,18 @@ You can also use `if` expressions in the following manner:
 
 using standard::io::console;
 
-def foo() -> int
+foo() -> int
 {
     return 10;
 };
 
-def main() -> int
+main() -> int
 {
-    int* px @= 5;
+    int* px @= 5;  // Take value of the integer literal 5 on the stack at runtime.
 
-    print(foo()) if (px);
+    print(foo()) if (px); // if (pointer) is a validity check, true if pointer not null
 
-    return 0;
+    -> 0;
 };
 ```
 You may also use groups of statements in a block before an if:
@@ -1146,82 +1384,101 @@ You may also use groups of statements in a block before an if:
 
 using standard::io::console;
 
-def foo() -> int
+foo() -> int
 {
     print("Hello");
 };
-def bar() -> void
+bar() -> void
 {
     print(" World!");
 };
 
-def main() -> int
+main() -> int
 {
-    {
-        foo(); bar();
-    } if (true);
+    { foo(); bar(); } if (true);
 
-    return 0;
+    -> 0;
 };
 ```
 
-Ternary logic:
+Ternary logic with the standard ternary `?:`:
 ```
 #import <standard.fx>;
 
 using standard::io::console;
 
-def main() -> int
+main() -> int
 {
-    int x = 0;
-    int y = 5;
+    int x = 0,
+        y = 5;
 
-    int z = x < y ? y : 0;
+    int z = x < y ? y : 0; // if x < y then y else 0
 
     if (z is 5)
     {
-        print("Success!\0");
+        print("Success!");
     };
-    return 0;
+    -> 0;
 };
 ```
 
-Ternary assignment:
+Ternary assignment `?=` (if LHS is null):
 ```
 #import <standard.fx>;
 
 using standard::io::console;
 
-def main() -> int
+main() -> int
 {
     int x = 10,
         y;
 
-    x ?= 50;
-    y ?= x;
+    x ?= 50; // x = 50 if x == 0
+    y ?= x;  // y =  x if y == 0
 
-    if (x == y) { print("Success!\n\0"); };
+    if (x == y) { println("Success!"); };
 
-    return 0;
+    -> 0;
 };
 ```
 
-Null coalesce operator:
+Null coalesce `??` operator (result is RHS if LHS is null):
 ```
 #import <standard.fx>;
 
-def main() -> int
-{
-    int x = 0;
-    int y = 5;
+using standard::io::console;
 
-    int z = y ?? 0;
+main() -> int
+{
+    int x = 0,
+        y = 5;
+
+    int z = y ?? 20; // result 20 if y is null
 
     if (z is 5)
     {
-        print("Success!\0");
+        print("Success!");
     };
-    return 0;
+    -> 0;
+};
+```
+
+Not null `!?` operator (boolean unary postfix - is LHS not null):
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+main() -> int
+{
+    int* px;
+    int* py @= px;
+
+    if (px!?) { println("px may be live!"); };
+
+    if (py!?) { println("py is definitely live!"); };
+
+    -> 0;
 };
 ```
 
@@ -1232,7 +1489,7 @@ def main() -> int
 
 Data is a variable bit width, primitive binary data-type creation keyword.  
 Anything can cast to it, and it can cast to any primitive like char, int, float.  
-It is intended to allow Flux programmers to build any basic integer type to fit their needs.  
+It is intended to allow IDEKA programmers to build any basic integer type to fit their needs.  
 Data types use big-endian byte order by default. Manipulate bits as needed.  
 Bit-width bust always be specified.
 
@@ -1287,12 +1544,12 @@ u32 result2 = (u32)a + b;    // 4294967286 + 20 (unsigned, wraps)
 // Comparison with mixed signs
 if (a < (i32)b)  // true: -10 < 20
 {
-    print("Signed comparison\0");
+    print("Signed comparison");
 };
 
 if ((u32)a < b)  // false: 4294967286 > 20
 {
-    print("Unsigned comparison\0");
+    print("Unsigned comparison");
 };
 ```
 
@@ -1330,16 +1587,19 @@ be16[2] net = buf; // autopack and convert endianness
 <a id="casting"></a>
 ## **Casting**
 
-Casting in Flux is C-like
+Casting in IDEKA is C-like.
 
 ```
-float x = 3.14;                  // 01000000010010001111010111000010b   binary representation of 3.14
-i32 y = (i32)x;                  // 01000000010010001111010111000010b   but now treated as an integer  1078523330 == 0x4048F5C2
+float x = 3.14;
+i32 y = (i32)x;                  // 3 (numeric conversion, the value is truncated)
+
+// To reinterpret the bits instead, route through a same-size array:
+u32 bits = (u32)(u16[2])x;       // 0x4048F5C3 == 1078523331 (bit pattern of 3.14f)
 ```
 There are only two types. Integers, and floating point decimals. `float` and `double` are floating point types. All other types are integer types.
 
 Casting anything to `void` is the functional equivalent of freeing the memory occupied by that thing.  
-This is dangerous on purpose, it is equivalent to free(ptr) in C. This syntax is considered explicit in Flux once you understand the convention.  
+This is dangerous on purpose, it is equivalent to free(ptr) in C. This syntax is considered explicit in IDEKA once you understand the convention.  
 It calls `ffree()` under the hood, which uses the standard heap allocator. You should not `void` cast free anything unless it was allocated with `fmalloc()`
 
 **Void casting in relation to the stack and heap**
@@ -1356,7 +1616,7 @@ In this case, `stackVar` is zeroed out and the reference invalidated.
 **The general casting rules.** Every cast falls into one of the following cases, determined by
 the source and target type pair:
 
-- **Same underlying representation, different Flux type.** If the source and target type happen
+- **Same underlying representation, different IDEKA type.** If the source and target type happen
   to share the same underlying machine representation (for example, `le32` and `uint` are both
   a plain 32-bit integer), the cast performs no bit-level work. Instead, the compiler re-tags the
   value with the target type's metadata. This is the mechanism behind clearing an endianness tag
@@ -1424,7 +1684,7 @@ signed data{13:16} as strange;
 sizeof(lestr);    // 8
 alignof(lestr);   // 8
 typeof(lestr);    // unsigned data{8:8}*
-endianof(lestr);  // 1
+endianof(lestr);  // 0
 
 sizeof(strange);   // 13
 alignof(strange);  // 16
@@ -1468,6 +1728,8 @@ int[][][] z = [
 ```
 
 **Static array comprehension**
+
+Ranges are inclusive on both ends: `1..10` is the ten values 1 through 10.
 ```
 // Python-style comprehension
 int[10] squares = [x ^ 2 for (int x in 1..10)];
@@ -1553,7 +1815,7 @@ test
 <a id="loops"></a>
 ## **Loops**
 
-Flux supports 2 styles of for loops:
+IDEKA supports 2 styles of for loops:
 ```
 for (x in y)                     // Array iteration
 {
@@ -1693,8 +1955,8 @@ Functions that have the recurse return operator will always return to themselves
 
 using standard::io::console;
 
-noopstr m1 = "[recurse \0",
-        m2 = "]\0";
+noopstr m1 = "[recurse ",
+        m2 = "]";
 
 def recurse1(int x) <~ int
 {
@@ -1736,7 +1998,7 @@ def recurse2() <~ void
 <a id="error-handling-with-trythrowcatch"></a>
 ## **Error handling with `try`/`throw`/`catch`**
 ```
-unsigned data{8}[] as string;  // Basic string implementation with no functionality (non-OOP string)
+unsigned data{8}[] as string;  // Basic string with no functionality (non-OOP string)
 
 object ERR
 {
@@ -1760,12 +2022,12 @@ def myErr(int e) -> void
     {
         case (0)
         {
-            ERR myErrObj("Custom error from object myE\0");
+            ERR myErrObj("Custom error from object myE");
             throw(myErrObj);
         }
         default
         {
-            throw("Default error from function myErr()\0");
+            throw("Default error from function myErr()");
         };                                                  // Semicolons only follow the default case.
     };
 };
@@ -1777,7 +2039,7 @@ def thisFails() -> bool
 
 def main() -> int
 {
-    string error = "\0";
+    string error = "";
     try
     {
         try
@@ -1933,30 +2195,30 @@ def main() -> int
     {
         case (ErrorUnionEnum.INT_ACTIVE)
         {
-            print("Integer active in error union!\n\0");
+            print("Integer active in error union!\n");
         }
         case (ErrorUnionEnum.LONG_ACTIVE)
         {
-            print("Long active in error union!\n\0");
+            print("Long active in error union!\n");
         }
         case (ErrorUnionEnum.BOOL_ACTIVE)
         {
-            print("Bool active in error union!\n\0");
+            print("Bool active in error union!\n");
         }
         case (ErrorUnionEnum.CHAR_ACTIVE)
         {
-            print("Char active in error union!\n\0");
+            print("Char active in error union!\n");
         }
         case (ErrorUnionEnum.FLOAT_ACTIVE)
         {
-            print("Float active in error union!\n\0");
+            print("Float active in error union!\n");
         }
         case (ErrorUnionEnum.DOUBLE_ACTIVE)
         {
-            print("Double active in error union!\n\0");
+            print("Double active in error union!\n");
         }
 
-        default { print("No active tag set!\n\0"); };
+        default { print("No active tag set!\n"); };
     };
 
     return 0;
@@ -1969,6 +2231,9 @@ def main() -> int
 ## **Dictionaries**
 
 Definition: `dict{KeyType:ValueType} myDict`  
+
+Dictionaries keys and values can be any types except objects.
+
 Instance with initializer:
 ```
 dict{"":""} myDict
@@ -1995,10 +2260,7 @@ println(greetings["en"]); // Hello
 
 Dictionaries can be passed to and returned from functions using the templated `dict{T:U}` type:
 ```
-def foo<T,U>(dict{T:U} d) -> dict{T:U}
-{
-   -> d;
-};
+def foo<T,U>(dict{T:U} d) -> dict{T:U} -> d;
 ```
 
 Dictionaries can be merged with `+`:
@@ -2013,14 +2275,13 @@ dict{"":""} c = a + b;
 
 A `d{}` expression creates an anonymous dict inline without declaring a named variable. The result can be immediately accessed with `[key]`:
 
-byte* status = d{(a.logged_in):"Logged In", (!a.logged_in):"Guest"}[true];
-
+`byte* status = d{true:"Logged In", false:"Guest"}[a.logged_in];`
 
 When all keys and values are compile-time constants, the entire expression folds at compile time and is baked directly into the binary with no runtime cost.
-
+```
 // Compile-time constant -- no runtime dict lookup
-byte* msg = d{true:"yes", false:"no"}[true];
-
+byte* msg = d{///some computed dictionary///}[///some computed result index///];
+```
 
 The `[key]` access on a `d{}` expression is handled by the existing array access postfix, so the inline dict participates naturally in any expression context.
 
@@ -2051,8 +2312,12 @@ switch (e)
 
 <a id="namespace-elimination-with-using-or-not-using"></a>
 ## **Namespace elimination with `!using` or `not using`**
+
+This is a very heavy-duty form of DCE. By doing `!using` you are totally removing a namespace, which in most cases will cause a number of compiler errors from any code still relying on that namespace being available.
+Once `!using` is used somewhere, it is permanent. This is not recommended for code elimination unless you know what you're doing and intend this.
 ```
-!using standard::io::file;
+!using standard::io::file; // anything that was written with `standard::io::file` available will now error.
+
 not using some::specific::namespace;
 ```
 
@@ -2091,8 +2356,12 @@ Function call test1__test2__foo()
 <a id="assertion-with-assert"></a>
 ## **Assertion with `assert()`**
 `assert` automatically performs `throw` if the condition is false if it's inside a try/catch block,
-otherwise it automatically writes to standard error output.
+otherwise it writes the message to standard error output and aborts the program.
 ```
+#import <standard.fx>;
+
+using standard::io::console;
+
 def main() -> int
 {
     int x;
@@ -2102,7 +2371,7 @@ def main() -> int
     }
     catch (string e)
     {
-        print(e);
+        println(e);
         return -1;
     };
     return x;
@@ -2126,7 +2395,7 @@ Allocating with `heap` calls `fmalloc(sizeof(T))` under the hood. `x` is a point
 
 <a id="freeing-from-the-heap"></a>
 ## **Freeing from the heap**
-Flux's standard heap allocator is **incompatible** with C's `malloc` and `free`.
+IDEKA's standard heap allocator is **incompatible** with C's `malloc` and `free`.
 
 You **must** use `ffree` for anything allocated with `fmalloc`, including `heap` allocations.  
 Alternatively you may void cast.
@@ -2136,15 +2405,7 @@ Alternatively you may void cast.
 <a id="the-ditto-operator"></a>
 ## **The Ditto Operator `#"`**
 The ditto operator repeats the previous initializer expression in a multi-declarator variable declaration. It is shorthand for writing the same expression again.
-```
-ulong p0 = alloc_stub_page(),
-      p1 = #",
-      p2 = #",
-      p3 = #",
-      p4 = #",
-      p5 = #";
-```
-Is identical to:
+
 ```
 ulong p0 = alloc_stub_page(),
       p1 = alloc_stub_page(),
@@ -2153,6 +2414,16 @@ ulong p0 = alloc_stub_page(),
       p4 = alloc_stub_page(),
       p5 = alloc_stub_page();
 ```
+Is identical to:
+```
+ulong p0 = alloc_stub_page(),
+      p1 = #",
+      p2 = #",
+      p3 = #",
+      p4 = #",
+      p5 = #";
+```
+
 This works for any initializer expression, including those with side effects:
 ```
 int i;
@@ -2180,6 +2451,11 @@ def main() -> int
     #";
     return 0;
 };
+```
+Result:
+```
+Hello!
+Hello!
 ```
 
 ---
@@ -2262,9 +2538,19 @@ Output:
 
 ---
 
-<a id="custom-infix-operators-and-overloading"></a>
-## **Custom infix operators and overloading**
-- Custom:
+<a id="custom-operators-and-overloading"></a>
+## **Custom operators and overloading**
+
+IDEKA allows you to define many types of operators.  
+| Form | Definition | Usage |
+|---|---|---|
+| Binary | `operator (int L, i32 R) [+++] -> int { ... };` | `a +++ b` |
+| Unary, prefix | `operator (i32 a) [!!] -> int { ... } # binding {this:};` | `!!a` |
+| Unary, postfix | `operator (i32 a) [&] -> int { ... } # binding {:this};` | `a&` |
+| Ternary | `operator (int a, i32 b, byte c) [$%][%$] -> int { ... };` | `a $% b %$ c` |
+| Circumfix | `operator (i32 x) [|][|] -> int { ... };` | `|x|` |
+| Variadic | See [Variadic Operators](#variadic-operators) |
+
 ```
 operator (int L, int R) [+++] -> int
 {
@@ -2292,6 +2578,51 @@ operator (int L, BigInt R) [+] -> bool
     // Implementation for adding an int and a BigInt
 };
 ```
+
+Each symbol is either a bare identifier or a run of the language's existing punctuation tokens. Identifier symbols such as `NOPOR` read as word operators.
+
+**Unary.** A one-parameter operator is unary only when it carries `# binding` after the body, written before the closing `;`. `{this:}` makes it prefix (the operand follows the symbol) and `{:this}` makes it postfix (the operand precedes the symbol). `# binding` is only valid on an operator with exactly one parameter. A prefix operator takes a unary expression as its operand, like built-in `-x` or `*p`.
+
+```
+operator (i32 a) [&] -> int
+{
+    return ++a;
+} # binding {:this};
+
+int y = 9&;      // 10
+```
+
+**Ternary.** Two bracket groups and three parameters. The left symbol sits between the first and second operands and the right symbol between the second and third. Both symbols are required at the use site; a missing right symbol is a compile error.
+
+```
+operator (int a, int b, byte c) [$%][%$] -> int
+{
+    return a + b * c;
+};
+
+int x = 1 $% 2 %$ 3;   // 7
+```
+
+**Circumfix.** Two bracket groups and one parameter. The operand sits between the left and right symbols, and the two symbols may be identical. A missing closing symbol is a compile error.
+
+```
+operator (int x) [|][|] -> int -> x < void ? -x : x;
+
+int m = 5 * |a|;
+```
+
+**Binding to an existing function.** A function may be declared as an operator with `as operator[...]`, written after the return type and before the body or `;`. The function is then usable with that symbol. The same forms apply: one bracket group for binary, two for ternary or circumfix, and `# binding {...}` for unary.
+
+```
+add(int a, i32 b) -> int as operator[\]
+{
+    return a + b;
+};
+
+int s = 5\2;   // 7
+```
+
+**Precedence.** Binary, ternary, and variadic custom operators share one tier between `+`/`-` and `*`/`/`/`%`, always left-associative, and their operands are parsed at the `*` tier. Prefix and circumfix operators bind at the unary tier, and postfix operators at the postfix tier, alongside `[]`, `.` and `++`. Parenthesize to get any other grouping.
 
 **How this actually works under the hood:**
 
@@ -2345,6 +2676,31 @@ rewritten-call-site path (new symbols) or the type-matched-dispatch path (built-
 
 ---
 
+<a id="variadic-operators"></a>
+## **Variadic Operators**
+A variadic operator is one symbol used in a chain of operands. Every use of the symbol and every operand is recorded, and the same operator function receives four values describing the chain:
+
+operator count: how many times the symbol appears in the chain.
+parameter count: how many operands appear in the chain.
+is leading: the chain starts with the symbol, so there is no operand before the first one.
+is trailing: the chain ends with the symbol, so there is no operand after the last one.
+
+| Chain | Operator count | Parameter count | Leading | Trailing |  
+|---|---|---|---|---|
+| a ##; | 1 | 1 | no | yes |  
+| ## a; | 1 | 1 | yes | no |  
+| ## a ##; | 2 | 1 | yes | yes |  
+| a ## b; | 1 | 2 | no | no |  
+| ## a ## b; | 2 | 2 | yes | no |  
+| a ## b ##; | 2 | 2 | no | yes |  
+| ## a ## b ##; | 3 | 2 | yes | yes |  
+
+The operator count follows from the other three values: operator count = parameter count - 1 + leading + trailing. The count alone cannot tell a ## b apart from ## a ##, because both have one fewer or equal operands than symbols. Leading and trailing are what separate them.
+
+Current compiler state: it only passes the operator count (as the hidden first argument, which is what the operator’s own symbol reads as inside the body). The parser starts a chain from an operand, so it does not track leading or trailing yet. The parameter count is only known implicitly from the number of variadic arguments. Leading and trailing are planned.
+
+---
+
 <a id="functions-and-contract"></a>
 ## **Functions and `contract`**
 Contracts are compile time function modification.  
@@ -2352,6 +2708,8 @@ They prepend or append the code contained to a function's body.
 
 Pre-contract form puts the contract's statements before the function's code.  
 Post-contract form puts the contract's statements before the function's return.
+
+Currently post-contracts insert before all return points, including error returns. There will be an update soon for post-contract return sites.
 
 Contracts are not specifically `assert`-only, they can contain any statement.
 They are similar to macros and expand before type checking and semantic analysis.
@@ -2367,18 +2725,18 @@ contract NonZero
 
 contract rValGT10
 {
-    assert(x > 10, "r must be greater than 10");
+    assert(x > 10, "x must be greater than 10");
 };
 
 def foo(int x) -> int : NonZero
 {
     x = x / 2;
     return x;
-} : rValGT5;
+} : rValGT10;
 
 def main() -> int
 {
-    int y = foo(18);
+    int y = foo(30);   // 30 / 2 = 15, passes both contracts
 
     return 0;
 };
@@ -2587,7 +2945,7 @@ Result:
 
 <a id="defining-type-functions"></a>
 ## **Defining Type Functions**:
-Flux has the ability to define functions for a given type, allowing `.` call notation on a value or variable of that type.
+IDEKA has the ability to define functions for a given type, allowing `.` call notation on a value or variable of that type.
 Inside of a type function `_` is reserved, and acts as the `this` parameter.
 ```
 // noopstr is alias for byte*
@@ -2673,7 +3031,7 @@ The compiler will error with:
 
 <a id="templates"></a>
 ## <**Templates**>  
-Templates in Flux are extremely simple.
+Templates in IDEKA are extremely simple.
 
 There are no keywords for templates, only syntax, and involve only type substitution.  
 There is no SFINAE, so templates are not subject to the pitfalls SFINAE allows.  
@@ -2699,7 +3057,7 @@ def main() -> int
     println(y);
     println(z);
 
-    system("pause\0");
+    system("pause");
     return 0;
 };
 ```
@@ -2765,7 +3123,7 @@ def main() -> int
     return 0;
 };
 ```
-"new" isn't a keyword in Flux, so this is fine.
+"new" isn't a keyword in IDEKA, so this is fine.
 
 To set a default type constraint, use `+` before the type like so:
 ```
@@ -2778,13 +3136,13 @@ To enforce no default constraint, use `!+` before your parameter like so:
 Using `+` on any constraint type when the parameter has no default set with `!+` will throw a compiler error.
 
 ## Templates and Type Relationships
-Flux allows ways to describe how a type - or pair of types - can behave.
+IDEKA allows ways to describe how a type - or pair of types - can behave.
 
 There is a dedicated type relationships operator set specifically to describe relations between types.  
 Since all operators are binary, to perform a unary operation, you do `A <op> A`, which is type self-referential.  
 All template type relationships operators are distinct and not related to regular operators and cannot be overloaded.
 
-See the [Algebraic Types](https://github.com/kvthweatt/Flux/blob/main/docs/algebraic_types.md) documentation for more details on the operators.
+See the [Algebraic Types](https://github.com/kvthweatt/IDEKA/blob/main/docs/algebraic_types.md) documentation for more details on the operators.
 
 To use type relationships expressions, they must be constrained in a set.
 
@@ -2840,7 +3198,7 @@ This reads as (inner most []):
 - D cannot be used in signed operations with A
 
 There is a similar relationship here, `D !~= A & B !~= C`. This means `D ~= C` by relation, and doesn't need to be explicitly defined.  
-This is the type geometry of Flux.
+This is the type geometry of IDEKA.
 
 This can be hard to see if you do not write your expression with care, because you may intend `D !~= C`. See the following:
 ```
@@ -3013,16 +3371,16 @@ contract ctNonZero(a,b)
     assert(macNZ(b), "b must be nonzero");
 };
 
-contract ctGreaterThanZero
+contract ctGreaterThanZero(a,b)
 {
-    assert(x > 0, "a must be greater than zero");
-    assert(y > 0, "b must be greater than zero");
+    assert(a > 0, "a must be greater than zero");
+    assert(b > 0, "b must be greater than zero");
 };
 
-operator<T, K>(T t, K k)[+] -> int : ctNonZero(a,b)
+operator<T, K>(T t, K k)[+] -> int : ctNonZero(t,k)
 {
     return t + k;
-} : ctGreaterThanZero;
+} : ctGreaterThanZero(t,k);
 
 def main() -> int
 {
@@ -3095,7 +3453,7 @@ def main() -> int
 
     if (x == 10 & y == 0 & *py == x & px == py & px == (@)kx)
     {
-        print("Success, y unchanged, py points to x.\n\0");
+        print("Success, y unchanged, py points to x.\n");
         print((uint)*py);
         return 0;
     };
@@ -3115,8 +3473,8 @@ def main() -> int
 // 13-bit signed value, 16-bit aligned
 signed data{13:16} as strange13;
 
-strange13 value = 0x1FFF;  // Max positive value for 13 bits
-print(value);              // 8191
+strange13 value = 0x0FFF;  // Max positive value for 13 bits
+print(value);              // 4095
 
 value = 0x1000;            // Sign bit set (bit 12)
 print(value);              // -4096 (two's complement)
@@ -3130,8 +3488,8 @@ def extract_bits(uint32 value, int start, int length) -> uint32
     return (value & mask) >> start;
 };
 
-uint32 nibble0 = extract_bits(packed, 0, 4);   // 0x80
-uint32 nibble3 = extract_bits(packed, 12, 4);  // 0x50
+uint32 nibble0 = extract_bits(packed, 0, 4);   // 0x8
+uint32 nibble3 = extract_bits(packed, 12, 4);  // 0x5
 uint32 byte1 = extract_bits(packed, 8, 8);     // 0x56
 ```
 
@@ -3159,7 +3517,7 @@ len_block[14] = (byte)((cipher_bits >>  8) & 0xFF);
 len_block[15] = (byte)( cipher_bits        & 0xFF);
 ```
 
-***Flux equivalent***
+***IDEKA equivalent***
 ```
 len_block[0..7]  = (byte[8])(u64)aad_bits;
 len_block[8..15] = (byte[8])(u64)cipher_bits;
@@ -3168,7 +3526,7 @@ len_block[8..15] = (byte[8])(u64)cipher_bits;
 ```
 uint* pd = @p.digits[0];
 
-// Proper Flux
+// Proper IDEKA
 pd = [0xFFFFFFEDu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
       0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu];
 
@@ -3212,7 +3570,7 @@ hash[28..31] = (byte[4])(be32)ctx.state[7];
 ```
 
 <a id="bit-slices"></a>
-### ***Bit slices***
+### **Bit Slices**
 The bit-slice operator `` x[a``b] `` addresses individual bits of a value using one consistent
 numbering scheme: **bit 0 is the most significant bit of the entire value, and bit numbers
 increase moving toward the least significant bit.** This numbering runs across the whole
@@ -3225,12 +3583,14 @@ immediately followed by member N+1's first bit.
 A slice written with the start index greater than the end index (as in the example below) reads
 the same bit range but reverses the order of the bits in the result. Bit slices may span up to
 the full width of a native integer type (8 through 64 bits).
+
+Bit slices are distinct from array slices: `x[a:b]` selects elements of an array by index, while `` x[a``b] `` selects bits of a value.
 ```
 #import <standard.fx>;
 
 using standard::io::console;
 
-def main() -> int
+main() -> int
 {
     byte x = 55;
 
@@ -3244,7 +3604,9 @@ def main() -> int
 
 <a id="taking-bit-slices-from-structs"></a>
 ### ***Taking bit slices from structs***
-Bit slicing structs can cross member boundaries, because structs members are packed tightly in memory.
+Bit slicing structs can cross member boundaries, because structs members are packed tightly in memory.  
+If a type inside the struct has an alignment greater than its width, there will be padding in the struct.  
+Padding from alignment is filled with zeros.
 ```
 #import <standard.fx>;
 
@@ -3252,7 +3614,7 @@ using standard::io::console;
 
 struct xx { int a, b; };
 
-def main() -> int
+main() -> int
 {
     data{4} as u4;
     xx yy = {5,10};
@@ -3273,7 +3635,7 @@ using standard::io::console;
 
 struct xx { int a, b; };
 
-def main() -> int
+main() -> int
 {
     data{4} as u4;
     data{2} as u2;
@@ -3298,6 +3660,49 @@ packed[24``31] = 0xFF;   // replace just the lowest byte
 ```
 The assignment target must be a plain variable, and the start/end indices must be compile-time
 constants.
+
+<a id="bit-indexing"></a>
+### **Bit Indexing**
+Let's say you want to mess with individual bits without storing it in a new 1 bit type variable.  
+Bit indexing lets you target a specific bit of a value, or even a struct!
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+main() -> int
+{
+        byte b;
+
+        b[`7] = 1;
+
+        print("Success!") if (b == 1);
+        -> b[`0];
+};
+```
+
+<a id="bit-iteration"></a>
+### **Bit Iteration**
+To iterate over the bits of a value or struct, use bitwise iteration. Here's what that looks like:
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+def main() -> int
+{
+    int i = 420691337;
+
+    for (`x in i)  // "for bit x in i"
+    {
+        print((int)x);  // x is a data{1} type
+    };
+
+    -> 0;
+};
+```
+
+This iterates through the bits of `i`, where `x` equals the bit at **i[`current_iteration]**.
 
 ---
 
@@ -3339,7 +3744,7 @@ using standard::io::console;
 
 def foo(int x) -> int
 {
-    print("Inside foo!\n\0");
+    print("Inside foo!\n");
     return 0;   
 };
 
@@ -3347,7 +3752,7 @@ def foo(int x) -> int
 def main() -> int
 {
     def{}* pfoo(int)->int = @foo;
-    print("Function pointer created.\n\0");
+    print("Function pointer created.\n");
     print();
 
     pfoo(0); // Compiler auto dereferences
@@ -3455,25 +3860,25 @@ def classify_value(int x, int y) -> void
             {
                 case (0)
                 {
-                    print("Both zero\0");
+                    print("Both zero");
                 }
                 case (1)
                 {
-                    print("X zero, Y one\0");
+                    print("X zero, Y one");
                 }
                 default
                 {
-                    print("X zero, Y other\0");
+                    print("X zero, Y other");
                 };
             };
         }
         case (1)
         {
-            print("X is one\0");
+            print("X is one");
         }
         default
         {
-            print("X is other\0");
+            print("X is other");
         };
     };
 };
@@ -3504,11 +3909,11 @@ def risky_operation(int mode) -> void
     }
     elif (mode == 2)
     {
-        throw(ErrorB("Something failed\0"));
+        throw(ErrorB("Something failed"));
     }
     else
     {
-        throw("Generic error\0");
+        throw("Generic error");
     };
 };
 
@@ -3520,19 +3925,19 @@ def main() -> int
     }
     catch (ErrorA e)
     {
-        print(f"ErrorA caught: code {e.code}\0");
+        print(f"ErrorA caught: code {e.code}");
     }
     catch (ErrorB e)
     {
-        print(f"ErrorB caught: {e.message}\0");
+        print(f"ErrorB caught: {e.message}");
     }
     catch (string s)
     {
-        print(f"String error: {s}\0");
+        print(f"String error: {s}");
     }
     catch (auto x)
     {
-        print("Unknown error type\0");
+        print("Unknown error type");
     };
     
     return 0;
@@ -3550,7 +3955,7 @@ def find_in_matrix(int[][] matrix, int target) -> bool
         {
             if (matrix[i][j] == target)
             {
-                print(f"Found at [{i}][{j}]\0");
+                print(f"Found at [{i}][{j}]");
                 return true;  // Break out of both loops
             };
             
@@ -3605,7 +4010,7 @@ def parse_ip_header(bytes* packet) -> IPHeader
 def format_ip(be32 addr) -> string
 {
     bytes* bp = (bytes*)@addr;
-    return f"{bp[0]}.{bp[1]}.{bp[2]}.{bp[3]}\0";
+    return f"{bp[0]}.{bp[1]}.{bp[2]}.{bp[3]}";
 };
 
 // Usage
@@ -3618,8 +4023,8 @@ bytes packet_data = [
 ];
 
 IPHeader hdr = parse_ip_header(@packet_data[0]);
-print(f"Source: {format_ip(hdr.src_addr)}\0");
-print(f"Dest: {format_ip(hdr.dst_addr)}\0");
+print(f"Source: {format_ip(hdr.src_addr)}");
+print(f"Dest: {format_ip(hdr.dst_addr)}");
 ```
 
 <a id="fixedpoint-math"></a>
@@ -3672,7 +4077,7 @@ void* px = @0;      // Null void pointer. Allocates a 0 and takes its address
 
 if (px is void)
 {
-    print("px is null\0");
+    print("px is null");
 };
 
 // Conditional void assignment
@@ -3700,7 +4105,7 @@ def get_nullable() -> int*
 
 <a id="calling-conventions"></a>
 # **Calling Conventions**
-Flux allows you to use different calling conventions at the language level.
+IDEKA allows you to use different calling conventions at the language level.
 ```
 stdcall foobar() -> void;
 ```
@@ -3756,12 +4161,12 @@ Result: `5`
 
 <a id="compile-time-execution-with-comptime"></a>
 # Compile-Time Execution with `comptime`
-Flux can execute itself at compile time. It is capable of performing I/O as well.  
-For now Flux will be limited to standard I/O and file I/O. Networking will come in a future update.
+IDEKA can execute itself at compile time. It is capable of performing I/O as well.  
+For now IDEKA will be limited to standard I/O and file I/O. Networking will come in a future update.
 
 A dedicated VM was created to handle compile time execution, and is what powers the REPL (coming soon).
 
-To perform compile time code execution in Flux, wrap code in a `comptime` block.
+To perform compile time code execution in IDEKA, wrap code in a `comptime` block.
 
 Compile-time code has no main function, the start of execution is at the first statement.  
 Here's an example of programming at compile time:
@@ -3809,7 +4214,7 @@ Result:
 [INFO] [parser] ► Parsing
 [INFO] [parser] ► AST generated.
 [INFO] [codegen] ► LLVM IR code generation
-[AST] Begining codegen for Flux program ...
+[AST] Begining codegen for IDEKA program ...
 [AST] Total statements in AST: 45
 [AST] Namespace definitions: 10
 [AST] Pass 1: Processing using statements...
@@ -3859,7 +4264,7 @@ Result:
 [INFO] [parser] ► Parsing
 [INFO] [parser] ► AST generated.
 [INFO] [codegen] ► LLVM IR code generation
-[AST] Begining codegen for Flux program ...
+[AST] Begining codegen for IDEKA program ...
 [AST] Total statements in AST: 47
 [AST] Namespace definitions: 10
 [AST] Pass 1: Processing using statements...
@@ -3879,7 +4284,7 @@ Yes, you may write an infinite loop at compile time.
 <a id="emitflux"></a>
 # `emitflux` - Compile-Time Code Generation
 
-`emitflux` is used inside a `comptime` block to inject Flux source code into the surrounding scope. The emitted definitions are deferred and finalized during **Pass 4** ("Re-emitting pending bodies"), so they do not need to be written contiguously - you can build up a single logical definition across multiple `emitflux` calls within one or more `comptime` blocks.
+`emitflux` is used inside a `comptime` block to inject IDEKA source code into the surrounding scope. The emitted definitions are deferred and finalized during **Pass 4** ("Re-emitting pending bodies"), so they do not need to be written contiguously - you can build up a single logical definition across multiple `emitflux` calls within one or more `comptime` blocks.
 
 Basic usage:
 ```
@@ -3914,7 +4319,18 @@ By default the closing `};` of an `emitflux` block ends emission and returns con
 
 ### `#};` - close a brace inside emitflux without ending it
 
-`#};` emits a closing brace into the generated Flux source without being interpreted as the closing brace of the `emitflux` block itself. Use this to close `switch`, `if`, function bodies, or any other braced construct inside emitted code when the bare `}` would prematurely end the `emitflux`.
+`#};` emits a closing brace into the generated IDEKA source without being interpreted as the closing brace of the `emitflux` block itself. Use this to close `switch`, `if`, function bodies, or any other braced construct inside emitted code when the bare `}` would prematurely end the `emitflux`.
+
+### How to tell them apart
+
+Both terminators are the same two characters in a different order. The position of the `#` says which brace it belongs to:
+
+```
+#};   // # is on the inside: it closes an inner brace of the emitted code (do not end the splice yet)
+}#;   // # is on the outside: it attaches to the `{` of the emitflux block itself, leaving the emitted construct open
+```
+
+Braces opened in one `emitflux` fragment are closed by `#};` in a later fragment, so the spliced construct is balanced across the whole splice even though no single fragment is balanced on its own.
 
 ---
 
@@ -3981,7 +4397,7 @@ This means emitted definitions are always available to runtime code, but are not
 <a id="async-functions"></a>
 # Async Functions
 
-An `async` function is declared with `async` in place of `def`. Async is colorless: the function is called like any other function, and the compiler decides when a call becomes a concurrent task. There is no `await` keyword and no future type in the source. The future is implicit.
+An `async` function is declared with `async` before the calling convention position. Async is colorless: the function is called like any other function, and the compiler decides when a call becomes a concurrent task. There is no `await` keyword and no future type in the source. The future is implicit.
 
 ```
 async fill(i32* table, i32 lo, i32 hi) -> void
@@ -3989,6 +4405,11 @@ async fill(i32* table, i32 lo, i32 hi) -> void
     i32 i = lo;
     while (i < hi) { table[i] = i + 1; i++; };
 };
+```
+
+Example of `async` used with a calling convention:
+```
+async vectorcall some_simd_func(...) -> SIMDResult*;
 ```
 
 ## When a call launches a task
@@ -4002,6 +4423,12 @@ A call to an async function launches a task only in one of these positions:
 | Right-hand side of an assignment | `s = sum_range(@t[0], 0, 512);` |
 
 Any other position (an argument, an operand, a condition) is an ordinary synchronous call.
+
+```
+fill(@t[0], 0, 512);                      // launches a task
+i64 s = sum_range(@t[0], 0, 512);         // launches a task
+print(sum_range(@t[0], 0, 512));          // synchronous: the call is an argument
+```
 
 ## When a task is joined
 
@@ -4119,14 +4546,15 @@ def main() -> int
 <a id="modules-and-build-blocks"></a>
 # Modules and Build Blocks
 
-A module is a named unit of a program with its own build settings. Modules let one file hold several programs, let files be pulled in with `from`, and let each module opt in to checks such as borrow checking.
+A module is a named unit of a program with its own build settings. Modules let one file hold several programs, let modules be pulled in from other files with `from`, and let each module opt in to checks such as borrow checking.
 
-## Syntax
+A module is either **defined** in place or **referenced** from a source file.
+
+## Defining a module
 
 ```
 module Name
 {
-    from "other.fx";
     def main() -> int { ... };
 }
 # build
@@ -4134,18 +4562,49 @@ module Name
     #[entrypoint] = this,
     #[name] = prog,
     #[borrow_check] = true,
+    #[requires] = {Logging, Net},
 };
 ```
 
-- The body accepts every top-level statement except another module.
+- The body accepts every top-level statement except `module`. A module cannot declare a module or a module reference inside itself.
 - The `# build { ... };` block follows the body. Entries are comma-separated `#[tag] = value`.
-- `module Name;` with no body is an error.
-- `module` is contextual: it is a module only in the form `module IDENT { ...` or `module IDENT;` at top level.
-- A module is top-level only. It is an error inside a function, a namespace or another module.
+- `module Name;` with no body and no `from` is an error.
 
-## `from`
+## Referencing a module with `from`
 
-`from "file.fx";` inside a module makes all modules of the named file part of the build. Paths are resolved relative to the including file, then relative to the working directory. A missing file or an include cycle is an error.
+```
+module TargetName from "target_source.fx";   // module from a file
+module TargetName from <target_source.fx>;   // module from the standard library
+```
+
+This declares `TargetName` as the module of that name found in the given source.  
+Quotes give a path resolved relative to the including file, then relative to the working directory; angle brackets name a standard library module.  
+A missing file or an include cycle is an error.
+
+A referenced module is not part of a build until a module lists it in `#[requires]`.
+
+## Using modules with `#[requires]`
+
+`#[requires] = {M1, M2, M3, ...}` lists the modules a module uses. Each name must be a module defined in the same file or declared with `module ... from`.
+
+```
+module Logging from "logging.fx";
+module Net     from <net.fx>;
+
+module App
+{
+    def main() -> int { ... };
+}
+# build
+{
+    #[requires] = {Logging, Net},
+};
+```
+
+## Placement
+
+- `module` is contextual: it is a module only in the form `module IDENT { ...`, `module IDENT from ...;` or `module IDENT;` at top level.
+- Modules are top-level only. It is an error inside a function, a namespace or another module.
 
 ## Build tags
 
@@ -4158,6 +4617,7 @@ module Name
 | `borrow_check` | `false` | bool |
 | `effect_check` | `false` | bool |
 | `dce` | `true` | bool, `false` makes every function of the module a DCE root |
+| `requires` | `{}` | List of module names this module uses |
 | `using` | `{}` | List of namespaces, acts as a global `using` |
 | `platform` | `{}` (any) | List such as `{Windows, Linux, Darwin}`, case-insensitive |
 
@@ -4181,7 +4641,7 @@ The command line flags `--borrowcheck` and `--effects` force the checks on for e
 
 A module in the root file is a program if it defines `main` or sets `#[entrypoint] = this`. A file with several programs builds each one separately (one subprocess per program, equivalent to `--module NAME`). Only the entry module of a build keeps its `main`. If no program is found, the compiler reports an error. If `platform` does not include the current platform, the build reports a platform mismatch.
 
-Modules in the same file see each other without `from`. A sibling that is not reached through `from` is not in the entry's module graph, so its checks are off for that build.
+Modules in the same file see each other without `from`. A sibling that is not reached through `#[requires]` is not in the entry's module graph, so its checks are off for that build.
 
 Flatten order is dependencies first, then siblings, then the entry module last.
 
@@ -4214,7 +4674,7 @@ When a file builds several programs the last line is `Compilation successful: bu
 
 | Error | Cause |
 |-------|-------|
-| cycle | `from` includes form a cycle |
+| cycle | `from` references form a cycle |
 | missing file | `from` names a file that is not found |
 | no program | No module defines `main` or sets `#[entrypoint] = this` |
 | platform mismatch | `platform` excludes the current platform |
@@ -4222,14 +4682,14 @@ When a file builds several programs the last line is `Compilation successful: bu
 | unknown override target | `override for {M}` names an unknown module |
 | cannot override `entrypoint` | Override sets `entrypoint` |
 | cannot lock an override | `!+` on an override entry |
-| nesting | Module inside a function, namespace or module |
+| nesting | Module or module reference inside a function, namespace or module |
 
 ---
 
 <a id="flux-effect-system">
 # The Effect System - Algebraic Effect Tracking
 
-See [Flux Effect System](https://github.com/kvthweatt/FluxLang/blob/main/docs/effects_system.md) for a more thorough explanation of effects.
+See [IDEKA Effect System](https://github.com/kvthweatt/IDEKALang/blob/main/docs/effects_system.md) for a more thorough explanation of effects.
 
 Effects are compile-time properties of computation. They describe what a function
 does beyond its return value -- whether it allocates, touches IO, modifies memory,
@@ -4303,23 +4763,6 @@ def foo() -> void
 {
     ...
 } # effect {*IO.Console};
-```
-
-### Boundary annotation
-
-```
-def foo() -> void # attenuate { expr };
-```
-
-Declares that the effects described by `expr` are contained within `foo` and do not
-propagate to callers. A caller with `!IO` can call a function annotated
-`# attenuate {IO}` without violation -- the effect exists internally but cannot
-cross the boundary.
-
-Interfaces may also carry attenuation:
-
-```
-interface Sandbox { ... } # attenuate {IO & Alloc};
 ```
 
 ---
@@ -4422,15 +4865,15 @@ effect ExclusiveIO { IO.Console ^| IO.File };
 def bad() -> void # effect {ExclusiveIO};
 def bad() -> void
 {
-    write_console("x\0");
-    read_file("y\0");
+    write_console("x");
+    read_file("y");
 };
 
 // OK: introduces only one side.
 def good() -> void # effect {ExclusiveIO};
 def good() -> void
 {
-    write_console("x\0");
+    write_console("x");
 };
 ```
 
@@ -4852,7 +5295,7 @@ DITTO =  #"
 <a id="operator-precedence-and-associativity"></a>
 # Operator Precedence and Associativity
 
-Flux's operators bind in the following order, from **loosest** (evaluated last) to **tightest**
+IDEKA's operators bind in the following order, from **loosest** (evaluated last) to **tightest**
 (evaluated first):
 
 | Level | Operators | Associativity |
@@ -4878,7 +5321,7 @@ Flux's operators bind in the following order, from **loosest** (evaluated last) 
 | 19 | unary `-` `+` `*` (deref) `@` (address-of) `++` `--` `` `! `` `not` `is not` `` `^|! `` `` `^|!& `` `` `^|!\| `` | right (prefix) |
 | 20 | postfix `[i]` `[a:b]` `` [a``b] `` `(...)` `.field` `->field` postfix `++`/`--` | left |
 
-A few rules worth calling out individually, since they differ from the C-family languages Flux
+A few rules worth calling out individually, since they differ from the C-family languages IDEKA
 otherwise resembles:
 
 - **`^` is the power operator, and it binds at the same precedence as `*`, `/`, and `%`,
@@ -4886,7 +5329,7 @@ otherwise resembles:
   exponentiation to bind tighter than multiplication, parenthesize explicitly.
 - **Bitwise `` `& ``, `` `\| ``, and `` `^| `` bind tighter than the comparison operators**
   (`==`, `!=`, `<`, `<=`, `>`, `>=`). `a == b `&` c` means `a == (b `&` c)`. This is the opposite
-  of C, where bitwise operators are notoriously looser than comparisons - in Flux you do not
+  of C, where bitwise operators are notoriously looser than comparisons - in IDEKA you do not
   need extra parentheses to get the intuitive reading.
 - `xor`/`^|` is a **logical** connective, sitting with `and`/`or` above the bitwise tier. It is
   a different operator from the bitwise `` `^| ``, which lives down with the other bitwise

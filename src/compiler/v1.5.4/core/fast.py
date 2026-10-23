@@ -606,8 +606,14 @@ class RangeAssignment(Statement):
     start: Expression
     end: Expression
     fill: Expression
+    # True for the value form: array[start..end] = <expr>; where <expr> is an
+    # array (or a cast that unpacks to one). Element k of the value is stored at
+    # array[start + k]. False for the fill form: array[start..end] = {fill};
+    from_value: bool = False
 
     def __repr__(self) -> str:
+        if self.from_value:
+            return f"{self.array}[{self.start}..{self.end}] = {self.fill};"
         return f"{self.array}[{self.start}..{self.end}] = {{{self.fill}}};"
 
 @dataclass
@@ -763,6 +769,9 @@ class ForInLoop(Statement):
     iterable: Expression
     body: Block
     is_destructure: bool = False
+    # True for bit iteration: for (`x in value) { ... }. x is a data{1} holding
+    # the bit at value[`k] for k = 0 .. bit width - 1 (bit 0 is the MSB).
+    is_bit: bool = False
 
 @dataclass
 class ReturnStatement(Statement):

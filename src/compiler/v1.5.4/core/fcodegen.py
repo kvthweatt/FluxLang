@@ -1730,13 +1730,15 @@ class CodegenVisitor:
                 pointee = lhs.type.pointee
                 if (not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType))
                         and not getattr(lhs, '_from_expr_method', False)
-                        and not getattr(lhs, '_is_typefunc_string', False)):
+                        and not getattr(lhs, '_is_typefunc_string', False)
+                        and not getattr(lhs, '_is_string_value', False)):
                     lhs = builder.load(lhs, name="auto_deref_lhs")
             if isinstance(rhs.type, ir.PointerType):
                 pointee = rhs.type.pointee
                 if (not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType))
                         and not getattr(rhs, '_from_expr_method', False)
-                        and not getattr(rhs, '_is_typefunc_string', False)):
+                        and not getattr(rhs, '_is_typefunc_string', False)
+                        and not getattr(rhs, '_is_string_value', False)):
                     rhs = builder.load(rhs, name="auto_deref_rhs")
         else:
             lhs_is_int_type = isinstance(lhs.type, ir.IntType)
@@ -1769,9 +1771,11 @@ class CodegenVisitor:
         # _is_typefunc_string - the latter is set on the _ parameter of string type funcs).
         if node.operator == Operator.ADD:
             _lhs_str = (getattr(lhs, '_from_expr_method', False) or
-                        getattr(lhs, '_is_typefunc_string', False))
+                        getattr(lhs, '_is_typefunc_string', False) or
+                        getattr(lhs, '_is_string_value', False))
             _rhs_str = (getattr(rhs, '_from_expr_method', False) or
-                        getattr(rhs, '_is_typefunc_string', False))
+                        getattr(rhs, '_is_typefunc_string', False) or
+                        getattr(rhs, '_is_string_value', False))
             if _lhs_str or _rhs_str:
                 concat_name = "standard__strings__manip__concat__2__byteE1_ptr1__byteE1_ptr1__ret_byteE1_ptr1"
                 concat_func = module.globals.get(concat_name)
@@ -2590,6 +2594,21 @@ class CodegenVisitor:
         return builder.zext(cmp, i8, name='not_null_result')
 
     def visit_BitSlice(self, node, builder, module):
+        """A bit slice is a run of raw bits, so its value is always unsigned."""
+        result = self._visit_BitSlice_raw(node, builder, module)
+        if isinstance(getattr(result, 'type', None), ir.IntType):
+            try:
+                result._flux_type_spec = TypeSystem(
+                    base_type=DataType.DATA, is_signed=False,
+                    bit_width=result.type.width, custom_typename=None,
+                    is_const=False, is_volatile=False, storage_class=None,
+                    is_array=False, array_size=None, array_dimensions=None,
+                    is_pointer=False, pointer_depth=0)
+            except AttributeError:
+                pass
+        return result
+
+    def _visit_BitSlice_raw(self, node, builder, module):
         val       = self.visit(node.value, builder, module)
         start_val = self.visit(node.start, builder, module)
         end_val   = self.visit(node.end,   builder, module)
@@ -2722,6 +2741,43 @@ class CodegenVisitor:
             raise FluxCodegenError(
                 f"Bit-slice operator `` requires array/pointer operand, got {val.type} ", node, module)
 
+        # Constant forward slice: read every byte the slice touches, concatenate them
+        # MSB-first, shift the slice down and mask it. Handles slices of any width up to
+        # 64 bits and slices that cross byte boundaries. The result is an integer of
+        # exactly the slice width.
+        if s_const is not None and e_const_rev is not None and e_const_rev >= s_const:
+            sw    = e_const_rev - s_const + 1
+            first = s_const // 8
+            last  = e_const_rev // 8
+            nb    = last - first + 1
+            if nb * 8 > 64:
+                raise FluxCodegenError(
+                    f"Bit-slice [{s_const}``{e_const_rev}] touches {nb} bytes; "
+                    f"a slice may touch at most 8 bytes ", node, module)
+            wty = ir.IntType(nb * 8)
+            acc = ir.Constant(wty, 0)
+            for j in range(nb):
+                if isinstance(base_ptr.type.pointee, ir.ArrayType):
+                    bp = builder.gep(base_ptr, [zero32, ir.Constant(i32, first + j)],
+                                     inbounds=True, name=f"bs_mb_ptr_{j}")
+                else:
+                    bp = builder.gep(base_ptr, [ir.Constant(i32, first + j)],
+                                     inbounds=True, name=f"bs_mb_ptr_{j}")
+                bv = builder.load(bp, name=f"bs_mb_byte_{j}")
+                if wty.width != 8:
+                    bv = builder.zext(bv, wty, name=f"bs_mb_ext_{j}")
+                sh_in = (nb - 1 - j) * 8
+                if sh_in:
+                    bv = builder.shl(bv, ir.Constant(wty, sh_in), name=f"bs_mb_sh_{j}")
+                acc = builder.or_(acc, bv, name=f"bs_mb_acc_{j}")
+            sh_out = 7 - (e_const_rev % 8)
+            if sh_out:
+                acc = builder.lshr(acc, ir.Constant(wty, sh_out), name="bs_mb_down")
+            if sw < wty.width:
+                acc = builder.and_(acc, ir.Constant(wty, (1 << sw) - 1), name="bs_mb_mask")
+                return builder.trunc(acc, ir.IntType(sw), name="bs_mb_trunc")
+            return acc
+
         def to_i32(v, name):
             if isinstance(v.type, ir.IntType):
                 if v.type.width < 32: return builder.zext(v, i32, name=name)
@@ -2752,8 +2808,12 @@ class CodegenVisitor:
         shifted      = builder.lshr(byte_val, shift_amt, name="bs_shift")
         slice_w      = builder.add(builder.sub(bit_end_i8, bit_start_i8, name="bs_slen"),
                                    ir.Constant(i8, 1), name="bs_swidth")
-        mask_raw     = builder.shl(ir.Constant(i8, 1), slice_w, name="bs_mask_raw")
-        mask         = builder.sub(mask_raw, ir.Constant(i8, 1), name="bs_mask")
+        # Build the mask in i32: a full byte slice (width 8) would shift an i8 by its
+        # whole width, which is poison.
+        slice_w32    = builder.zext(slice_w, i32, name="bs_swidth32")
+        mask_raw     = builder.shl(ir.Constant(i32, 1), slice_w32, name="bs_mask_raw")
+        mask32       = builder.sub(mask_raw, ir.Constant(i32, 1), name="bs_mask32")
+        mask         = builder.trunc(mask32, i8, name="bs_mask")
         masked       = builder.and_(shifted, mask, name="bs_result")
         try:
             sc = int(start_i32.constant) if hasattr(start_i32, 'constant') else None
@@ -3726,6 +3786,11 @@ class CodegenVisitor:
                 raise FluxCodegenError(
                     f"Function {node.name} found but no overload accepts {len(node.arguments)} arguments. "
                     f"Available overloads accept: {available_counts} arguments. ", node, module)
+        owner = (getattr(self, '_module_unbuilt', None) or {}).get(node.name)
+        if owner is not None:
+            raise FluxCodegenError(
+                f"Function '{node.name}' belongs to module '{owner}', which is not part of this build. "
+                f"Add '#[requires] = {{{owner}}}' to the build settings of the module that calls it. ", node, module)
         raise FluxCodegenError(
             f"Function '{node.name}' not found in module or any imported namespaces ", node, module)
 
@@ -5500,6 +5565,11 @@ class CodegenVisitor:
         end_val   = self.visit(node.end,   builder, module)
         fill_val  = self.visit(node.fill,  builder, module)
 
+        if getattr(node, 'from_value', False):
+            return self._range_assign_from_value(node, builder, module, arr_ptr,
+                                                 elem_type, use_2d_gep,
+                                                 start_val, end_val, fill_val)
+
         # Normalise to i32
         def _to_i32(v, name):
             if isinstance(v.type, ir.IntType):
@@ -5555,6 +5625,81 @@ class CodegenVisitor:
         builder.store(fill_val, elem_ptr)
         next_idx = builder.add(cur_idx_body, ir.Constant(i32, 1), name="ra.next")
         builder.store(next_idx, idx_ptr)
+        builder.branch(cond_block)
+
+        builder.position_at_start(end_block)
+        return None
+
+    def _range_assign_from_value(self, node, builder, module, arr_ptr, elem_type,
+                                 use_2d_gep, start_val, end_val, src_val):
+        """Value form of range assignment: array[start..end] = <array value>;
+
+        Element k of the source is stored at array[start + k] for
+        k in 0 .. end - start. Only (end - start + 1) elements are copied, so a
+        longer source (for example the null terminated result of a byte[N]
+        unpack) is not read past the requested range.
+        """
+        i32 = ir.IntType(32)
+
+        def _to_i32(v, name):
+            if isinstance(v.type, ir.IntType):
+                if v.type.width < 32:
+                    return builder.zext(v, i32, name=name + "_ext")
+                elif v.type.width > 32:
+                    return builder.trunc(v, i32, name=name + "_trunc")
+            return v
+
+        start_i32 = _to_i32(start_val, "rav_start")
+        end_i32   = _to_i32(end_val,   "rav_end")
+
+        # Normalise the source to a pointer we can index.
+        if isinstance(src_val.type, ir.ArrayType):
+            tmp = builder.alloca(src_val.type, name="rav.tmp")
+            builder.store(src_val, tmp)
+            src_val = tmp
+        if not isinstance(src_val.type, ir.PointerType):
+            raise FluxCodegenError(
+                f"Range assignment value must be an array, got {src_val.type}", node, module)
+        if isinstance(src_val.type.pointee, ir.ArrayType):
+            src_elem = src_val.type.pointee.element
+            src_2d = True
+        else:
+            src_elem = src_val.type.pointee
+            src_2d = False
+        if src_elem != elem_type:
+            raise FluxCodegenError(
+                f"Range assignment element type mismatch: target elements are {elem_type}, "
+                f"value elements are {src_elem}", node, module)
+
+        func       = builder.block.function
+        cond_block = func.append_basic_block("rav.cond")
+        body_block = func.append_basic_block("rav.body")
+        end_block  = func.append_basic_block("rav.end")
+
+        k_ptr = builder.alloca(i32, name="rav.k")
+        builder.store(ir.Constant(i32, 0), k_ptr)
+        count = builder.sub(end_i32, start_i32, name="rav.span")
+        builder.branch(cond_block)
+
+        builder.position_at_start(cond_block)
+        k = builder.load(k_ptr, name="rav.kv")
+        cmp = builder.icmp_signed('<=', k, count, name="rav.cmp")
+        builder.cbranch(cmp, body_block, end_block)
+
+        builder.position_at_start(body_block)
+        k_body = builder.load(k_ptr, name="rav.kb")
+        if src_2d:
+            sp = builder.gep(src_val, [ir.Constant(i32, 0), k_body], inbounds=True, name="rav.src")
+        else:
+            sp = builder.gep(src_val, [k_body], inbounds=True, name="rav.src")
+        v = builder.load(sp, name="rav.val")
+        dst_idx = builder.add(start_i32, k_body, name="rav.dstidx")
+        if use_2d_gep:
+            dp = builder.gep(arr_ptr, [ir.Constant(i32, 0), dst_idx], inbounds=True, name="rav.dst")
+        else:
+            dp = builder.gep(arr_ptr, [dst_idx], inbounds=True, name="rav.dst")
+        builder.store(v, dp)
+        builder.store(builder.add(k_body, ir.Constant(i32, 1), name="rav.next"), k_ptr)
         builder.branch(cond_block)
 
         builder.position_at_start(end_block)
@@ -5769,6 +5914,31 @@ class CodegenVisitor:
                     else_val = builder.sext(else_val, value_val.type)
                     builder.branch(merge_block)
                     builder.position_at_start(merge_block)
+            elif (isinstance(value_val.type, ir.PointerType) and
+                  isinstance(else_val.type, ir.PointerType)):
+                # Both branches are pointers (for example string literals of
+                # different lengths, [5 x i8]* vs [6 x i8]*): decay arrays to
+                # element pointers in their own blocks, as the ternary does.
+                def _decay_ifexpr(val, end_block):
+                    pt = val.type.pointee
+                    if isinstance(pt, ir.ArrayType):
+                        term = end_block.terminator
+                        builder.position_before(term) if term else builder.position_at_end(end_block)
+                        return builder.bitcast(val, ir.PointerType(pt.element), name='ifexpr_decay')
+                    return val
+                def _is_str_arr(v):
+                    pt = v.type.pointee
+                    return (isinstance(pt, ir.ArrayType) and isinstance(pt.element, ir.IntType)
+                            and pt.element.width == 8)
+                _ifexpr_is_string = _is_str_arr(value_val) and _is_str_arr(else_val)
+                value_val = _decay_ifexpr(value_val, value_end_block)
+                else_val  = _decay_ifexpr(else_val,  else_end_block)
+                if value_val.type != else_val.type:
+                    if str(value_val.type.pointee) != str(else_val.type.pointee):
+                        term = else_end_block.terminator
+                        builder.position_before(term) if term else builder.position_at_end(else_end_block)
+                        else_val = builder.bitcast(else_val, value_val.type, name='ifexpr_cast')
+                builder.position_at_start(merge_block)
             else:
                 raise FluxCodegenError(
                     f"If expression branches have incompatible types: "
@@ -5777,6 +5947,10 @@ class CodegenVisitor:
         phi = builder.phi(value_val.type, name='ifexpr_result')
         phi.add_incoming(value_val, value_end_block)
         phi.add_incoming(else_val, else_end_block)
+        if locals().get('_ifexpr_is_string'):
+            # Both branches were string literals: the result is a string value, so
+            # `+` with another string concatenates instead of doing pointer arithmetic.
+            phi._is_string_value = True
         return phi
 
     def visit_WhileLoop(self, node, builder, module):
@@ -5925,7 +6099,113 @@ class CodegenVisitor:
         builder.position_at_start(end_block)
         return None
 
+    def _visit_bit_iteration(self, node, builder, module):
+        """for (`x in value) { ... }
+
+        x is a data{1} (unsigned) holding value[`k] for k = 0 .. width - 1, where
+        bit 0 is the most significant bit. The value may be an integer, a struct
+        (all of its bits, in declaration order) or a byte array. Each bit is read
+        with the bit-slice operator value[k``k], so the addressing is identical.
+        """
+        from fast import Identifier as _Ident, BitSlice as _BitSlice
+        i1  = ir.IntType(1)
+        i32 = ir.IntType(32)
+
+        value = self.visit(node.iterable, builder, module)
+        vt = value.type
+        if isinstance(vt, ir.PointerType) and isinstance(vt.pointee, (ir.IntType, ir.ArrayType)):
+            bits_ty = vt.pointee
+        elif isinstance(vt, ir.PointerType) and hasattr(vt.pointee, 'elements'):
+            bits_ty = vt.pointee
+        else:
+            bits_ty = vt
+        total_bits = SizeOfTypeHandler.bits_from_llvm_type(bits_ty, module)
+        if not total_bits:
+            raise FluxCodegenError(
+                f"Cannot iterate over the bits of type {vt}", node, module)
+        if isinstance(bits_ty, ir.ArrayType) and not (
+                isinstance(bits_ty.element, ir.IntType) and bits_ty.element.width == 8):
+            raise FluxCodegenError(
+                f"Bit iteration over an array requires 8-bit elements, got {bits_ty}", node, module)
+
+        # The loop reads the value through an identifier. A plain variable is used
+        # as is; any other expression is evaluated once into a hidden copy.
+        uid = module.get_unique_name('bititer')
+        if isinstance(node.iterable, _Ident):
+            src_ident = node.iterable
+        else:
+            if isinstance(vt, ir.PointerType) and not isinstance(vt.pointee, ir.ArrayType):
+                copy_val = builder.load(value, name='bititer.copy')
+            else:
+                copy_val = value
+            if isinstance(copy_val.type, ir.PointerType):
+                src_ptr = copy_val
+            else:
+                src_ptr = builder.alloca(copy_val.type, name=uid + '.val')
+                builder.store(copy_val, src_ptr)
+            hidden = uid + '_v'
+            module.symbol_table.define(hidden, SymbolKind.VARIABLE,
+                                       type_spec=getattr(value, '_flux_type_spec', None),
+                                       llvm_value=src_ptr)
+            src_ident = _Ident(hidden)
+
+        idx_ptr = builder.alloca(i32, name=uid + '.idx')
+        builder.store(ir.Constant(i32, 0), idx_ptr)
+        idx_name = uid + '_i'
+        module.symbol_table.define(idx_name, SymbolKind.VARIABLE, llvm_value=idx_ptr)
+
+        func = builder.block.function
+        cond_block = func.append_basic_block('bititer.cond')
+        body_block = func.append_basic_block('bititer.body')
+        end_block  = func.append_basic_block('bititer.end')
+        builder.branch(cond_block)
+
+        builder.position_at_start(cond_block)
+        cur = builder.load(idx_ptr, name='bititer.k')
+        cmp = builder.icmp_unsigned('<', cur, ir.Constant(i32, total_bits), name='loop.cond')
+        builder.cbranch(cmp, body_block, end_block)
+
+        builder.position_at_start(body_block)
+        bit_node = _BitSlice(src_ident, _Ident(idx_name), _Ident(idx_name))
+        bit_node.line = getattr(node, 'line', 0)
+        bit_node.column = getattr(node, 'column', 0)
+        bit_val = self.visit(bit_node, builder, module)
+        if isinstance(bit_val.type, ir.IntType) and bit_val.type.width > 1:
+            bit_val = builder.trunc(bit_val, i1, name='bititer.bit')
+        var_ptr = builder.alloca(i1, name=node.variables[0])
+        builder.store(bit_val, var_ptr)
+        from ftypesys import TypeSystem as _TS, DataType as _DT
+        bit_spec = _TS(base_type=_DT.DATA, is_signed=False, bit_width=1,
+                       custom_typename=None, is_const=False, is_volatile=False,
+                       storage_class=None, is_array=False, array_size=None,
+                       array_dimensions=None, is_pointer=False, pointer_depth=0)
+        module.symbol_table.define(node.variables[0], SymbolKind.VARIABLE,
+                                   type_spec=bit_spec, llvm_value=var_ptr)
+
+        old_break    = getattr(builder, 'break_block', None)
+        old_continue = getattr(builder, 'continue_block', None)
+        latch_block  = func.append_basic_block('bititer.latch')
+        builder.break_block    = end_block
+        builder.continue_block = latch_block
+
+        self.visit(node.body, builder, module)
+
+        if not builder.block.is_terminated:
+            builder.branch(latch_block)
+        builder.position_at_start(latch_block)
+        nxt = builder.add(builder.load(idx_ptr, name='bititer.k.latch'),
+                          ir.Constant(i32, 1), name='bititer.next')
+        builder.store(nxt, idx_ptr)
+        builder.branch(cond_block)
+
+        builder.break_block    = old_break
+        builder.continue_block = old_continue
+        builder.position_at_start(end_block)
+        return None
+
     def visit_ForInLoop(self, node, builder, module):
+        if getattr(node, 'is_bit', False):
+            return self._visit_bit_iteration(node, builder, module)
         collection = self.visit(node.iterable, builder, module)
         coll_type = collection.type
 
@@ -9665,6 +9945,7 @@ class CodegenVisitor:
         from fast import (UsingStatement, NotUsingStatement, NamespaceDef,
                           StructDef, StructDefStatement, ObjectDef, ObjectDefStatement,
                           ExternBlock, ExportBlock, NamespaceDefStatement, VariableDeclaration)
+        self._module_unbuilt = getattr(node, '_module_unbuilt', None)
         print("[AST] Begining codegen for Flux program ...")
         print(f"[AST] Total statements in AST: {len(node.statements)}", file=sys.stdout)
         namespace_count = sum(1 for s in node.statements if isinstance(s, NamespaceDef))

@@ -76,7 +76,7 @@ namespace flux
         match_at(byte* s, int i, byte* lit) -> bool
         {
             int j;
-            while (lit[j]!?)
+            while (lit[j] != 0)
             {
                 switch (s[i + j] != lit[j])
                 {
@@ -337,7 +337,7 @@ namespace flux
             byte* w;
             bool first_part = true;
             int c;
-            while (sym[i]!?)
+            while (sym[i] != 0)
             {
                 plen = op_part_len(sym, i);
                 switch (!first_part)
@@ -558,6 +558,7 @@ namespace flux
             int mac_depth;      // macro expansions in progress
             bool null_term;     // config null_terminate_strings
             Checker* ck;        // receives diagnostics, null when none are wanted
+            NameMap* unbuilt;   // function name to the module declaring it, for modules outside this build, or null
             int* convs;         // count per Conv value
             PtrVec* bad;        // ConvRec* of invalid conversions
 
@@ -582,6 +583,7 @@ namespace flux
                 this.mac_fail = false;
                 this.mac_depth = 0;
                 this.null_term = false;
+                this.unbuilt = (NameMap*)0;
                 this.ck = (Checker*)0;
                 this.convs = (int*)fmalloc((u64)32 * (u64)(sizeof(int) / 8));
                 int ci;
@@ -1786,7 +1788,7 @@ namespace flux
                     case (true) { -> r; }
                     default
                     {
-                        switch (cur[0]!?)
+                        switch (cur[0] != 0)
                         {
                             case (true) {
                             m = mangle_namespace_name(cur, name);
@@ -2141,7 +2143,7 @@ namespace flux
                             switch (o.func != (Node*)0)
                             {
                                 case (true) {
-                                switch ((o.func.flags `& NF_VARIADIC)!?)
+                                switch ((o.func.flags `& NF_VARIADIC) != 0)
                                 {
                                     case (true) { vari = true; }
                                     default {};
@@ -2584,7 +2586,7 @@ namespace flux
                     {
                         case (true) { len = 1; }
                         default {
-                            switch (text[len - 1]!?)
+                            switch (text[len - 1] != 0)
                             {
                                 case (true) { len = len + 1; }
                                 default {};
@@ -3084,7 +3086,7 @@ namespace flux
                 byte* base;
                 PtrVec* list;
                 Overload* o;
-                while (name[n]!?)
+                while (name[n] != 0)
                 {
                     switch (name[n] == '_' & name[n + 1] == '_')
                     {
@@ -3199,7 +3201,7 @@ namespace flux
                                     switch (e.kind_id == SymbolKind.VARIABLE & (TypeSpec*)e.ts != (TypeSpec*)0)
                                     {
                                         case (true) {
-                                        switch ((((TypeSpec*)e.ts).flags `& TS_LOCAL)!?)
+                                        switch ((((TypeSpec*)e.ts).flags `& TS_LOCAL) != 0)
                                         {
                                             case (true) {
                                             this.ck.clear_msg();
@@ -3242,7 +3244,7 @@ namespace flux
                                     switch (pt != (TypeSpec*)0)
                                     {
                                         case (true) {
-                                        switch (((pt.flags `& TS_TIED)!?) & !tied_arg)
+                                        switch (((pt.flags `& TS_TIED) != 0) & !tied_arg)
                                         {
                                             case (true) {
                                             this.ck.clear_msg();
@@ -3333,7 +3335,29 @@ namespace flux
                             this.ck.mb.put_str(g"]\0");
                         }
                             default {
-                            this.ck.mb.put_str(f"function '{n.text}' not found in module or any imported namespaces\0");
+                            byte* owner = (byte*)0;
+                            switch (this.unbuilt != (NameMap*)0)
+                            {
+                                case (true) { owner = (byte*)nm_get(this.unbuilt, n.text); }
+                                default {};
+                            };
+                            switch (owner != (byte*)0)
+                            {
+                                case (true)
+                                {
+                                    this.ck.mb.put_str(g"function '\0");
+                                    this.ck.mb.put_str(n.text);
+                                    this.ck.mb.put_str(g"' belongs to module '\0");
+                                    this.ck.mb.put_str(owner);
+                                    this.ck.mb.put_str(g"', which is not part of this build. Add '#[requires] = {\0");
+                                    this.ck.mb.put_str(owner);
+                                    this.ck.mb.put_str(g"}' to the build settings of the module that calls it\0");
+                                }
+                                default
+                                {
+                                    this.ck.mb.put_str(f"function '{n.text}' not found in module or any imported namespaces\0");
+                                };
+                            };
                         };
                         };
                         -> this.report(Severity.ERROR, n);
@@ -3797,7 +3821,7 @@ namespace flux
                 TypeSpec* c;
                 int cnt = node_count(n, 0);
                 this.type_list(n, 0);
-                switch ((n.flags `& NF_IS_STRING)!?)
+                switch ((n.flags `& NF_IS_STRING) != 0)
                 {
                     case (true) { -> this.string_type(n.text); }
                     default
@@ -4318,10 +4342,10 @@ namespace flux
                             default
                             {
                                 m = this.mac_mask(k, false);
-                                switch ((m & 1)!?) { case (true) { switch (this.mac_selfref(b.a, name)) { case (true) { -> true; } default {}; }; } default {}; };
-                                switch ((m & 2)!?) { case (true) { switch (this.mac_selfref(b.b, name)) { case (true) { -> true; } default {}; }; } default {}; };
-                                switch ((m & 4)!?) { case (true) { switch (this.mac_selfref(b.c, name)) { case (true) { -> true; } default {}; }; } default {}; };
-                                switch ((m & 8)!?)
+                                switch ((m & 1) != 0) { case (true) { switch (this.mac_selfref(b.a, name)) { case (true) { -> true; } default {}; }; } default {}; };
+                                switch ((m & 2) != 0) { case (true) { switch (this.mac_selfref(b.b, name)) { case (true) { -> true; } default {}; }; } default {}; };
+                                switch ((m & 4) != 0) { case (true) { switch (this.mac_selfref(b.c, name)) { case (true) { -> true; } default {}; }; } default {}; };
+                                switch ((m & 8) != 0)
                                 {
                                     case (true) {
                                     cnt = node_count(b, 0);
@@ -4390,10 +4414,10 @@ namespace flux
                                             default
                                             {
                                                 m = this.mac_mask(k, true);
-                                                switch ((m & 1)!?) { case (true) { b.a = this.mac_subst(b.a, sm); } default {}; };
-                                                switch ((m & 2)!?) { case (true) { b.b = this.mac_subst(b.b, sm); } default {}; };
-                                                switch ((m & 4)!?) { case (true) { b.c = this.mac_subst(b.c, sm); } default {}; };
-                                                switch ((m & 8)!?)
+                                                switch ((m & 1) != 0) { case (true) { b.a = this.mac_subst(b.a, sm); } default {}; };
+                                                switch ((m & 2) != 0) { case (true) { b.b = this.mac_subst(b.b, sm); } default {}; };
+                                                switch ((m & 4) != 0) { case (true) { b.c = this.mac_subst(b.c, sm); } default {}; };
+                                                switch ((m & 8) != 0)
                                                 {
                                                     case (true) {
                                                     cnt = node_count(b, 0);
@@ -4959,7 +4983,7 @@ namespace flux
                 ConvRec* r;
                 while (c < 17)
                 {
-                    switch (this.convs[c]!?)
+                    switch (this.convs[c] != 0)
                     {
                         case (true) {
                         print(g"  \0");
@@ -5068,7 +5092,7 @@ namespace flux
                                                 {
                                                     case (NodeKind.ARRAY_LITERAL)
                                                     {
-                                                        switch ((init.flags `& NF_IS_STRING)!?)
+                                                        switch ((init.flags `& NF_IS_STRING) != 0)
                                                         {
                                                             case (true) {
                                                             switch (init.ety != (TypeSpec*)0)
@@ -5145,7 +5169,7 @@ namespace flux
                 Node* p;
                 int i;
                 int cnt = node_count(fn, 0);
-                switch ((fn.flags `& NF_TEMPLATE)!?)
+                switch ((fn.flags `& NF_TEMPLATE) != 0)
                 {
                     case (true) { ->; }
                     default
@@ -5462,7 +5486,7 @@ namespace flux
                 it = this.type_of(n.a);
                 et = this.elem_of(it);
                 dn = (Node*)0;
-                switch ((n.flags `& NF_DESTRUCTURE)!?)
+                switch ((n.flags `& NF_DESTRUCTURE) != 0)
                 {
                     case (true) {
                     e = this.type_entry(et);
@@ -5478,7 +5502,7 @@ namespace flux
                 {
                     v = node_child(n, 0, i);
                     vt = et;
-                    switch ((n.flags `& NF_DESTRUCTURE)!?)
+                    switch ((n.flags `& NF_DESTRUCTURE) != 0)
                     {
                         case (true) {
                         vt = (TypeSpec*)0;

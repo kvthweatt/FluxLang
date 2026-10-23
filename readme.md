@@ -1,7 +1,7 @@
 <h1 align="center">IDEKA v2 "Dangling Ditto"</h1>
 
 <p align="center">
-    <img width="512" height="512" alt="Flux Logo" src="https://github.com/user-attachments/assets/58da57a7-1924-48a2-ba29-c2040d9343eb" />
+    <img width="512" height="512" alt="IDEKA Logo" src="https://github.com/user-attachments/assets/58da57a7-1924-48a2-ba29-c2040d9343eb" />
 </p>
 
 <p align="center">
@@ -13,23 +13,267 @@
 
 ---
 
-Flux has been renamed to IDEKA due to discoverability issues (I'm getting tired of my work not being seen). It stands for "I Don't Even Know Anymore" because there are just so many names that I can't seem to pick anything that isn't already taken by an unfinished or un-used software. In a patch coming within the next few weeks, all of the compiler will reflect this new name change.
+IDEKA ("I Don't Even Know Anymore") is a compiled, statically typed systems programming language with the performance of C and a type system that goes further than C in every direction that matters.
 
-IDEKA is a compiled, statically typed systems programming language. It has the performance of C and a type system that goes further than C in every direction that matters: arbitrary-width integers with alignment and endianness baked into the type, first-class bit manipulation, opt-in ownership and a totally optional borrow checker, compile-time code generation with `emitflux`, contracts, templates with type geometry constraints, and inline FVM assembly in comptime blocks.
+- **Operators are part of the grammar.** Every operator you declare, made of punctuation or words, becomes part of the language's grammar, the same as the built-in ones.
+- **Bits are first class.** Bit slices, bit indexing, arbitrary-width integers, and endianness live in the type system.
+- **Compile-time code generation.** A built-in VM runs IDEKA at compile time and `emitflux` writes new definitions into your program.
+- **Interfaces** that govern which objects may call, feed, and be called from which other objects, enforced by the compiler.
+- **A module system** with per-module build settings, declared dependencies, and overrides.
+- **Contracts, templates with type geometry constraints, opt-in ownership, and a completely optional borrow checker.**
 
-It is not a C derivative. It is not a safe language in the Rust sense. It is a high-trust language that gives you sharp tools and expects you to use them correctly.
+It is not a C derivative, and it is not a safe language in the Rust sense. It is a high-trust language that gives you sharp tools and expects you to use them correctly. It is dense, with a low learning curve and a high skill ceiling.
 
-It's designed for power, terseness, and readability. It is a dense language with a low learning curve but high skill ceiling. You can write powerful and expressive programs without needing to know the guts of the language.
+The language was previously called Flux. Some names in the compiler still carry it (`fxc.py`, `emitflux`, `FLUXC_SRCDIR`) and will follow the new name in an upcoming patch.
 
 As of 10/12/2026, **IDEKA is bootstrapped and can compile itself**. It is recommended you bootstrap your compiler by running `python fxc.py fxc.fx` for faster compile times.
 
 ---
 
-## What it looks like
+## A first look
 
-### 16 lines of C becomes 2 lines of IDEKA
+A struct filled in with a block, a byte pulled apart with bit slices, the bits reversed in one assignment, and a three-way comparison operator the language does not ship with:
 
-This is real cryptography code. The C version is a manual byte-by-byte extraction loop. The IDEKA version is a direct consequence of how the type system works.
+```
+struct Pixel { byte r, g, b, a; };
+
+operator (int L, int R) [<=>] -> int
+{
+    if (L < R) { return -1; };
+    if (L > R) { return  1; };
+    return 0;
+};
+
+def main() -> int
+{
+    data{4} as u4;
+
+    Pixel p;
+    p { .r = 0xB4; .g = 3; .b = 7; .a = 255; };       // block assignment
+
+    byte r  = p.r;
+    u4   hi = r[0``3];                                // bit slice: top nibble
+    u4   lo = r[4``7];                                // bottom nibble
+    r[0``7] = r[7``0];                                // reverse all eight bits
+
+    println(f"{int(hi)} {int(lo)} {int(r)} {p.g <=> p.b}");
+    return 0;
+};
+```
+
+```
+11 4 45 -1
+```
+
+Every one of those lines is a feature the rest of this page takes apart.
+
+---
+
+## Define your own operators
+
+Declaring an operator extends the grammar. It can be punctuation or a word, and it can take any types you like.
+
+```
+struct Vec2 { float x, y; };
+
+// A new operator made of punctuation
+operator (int L, int R) [<=>] -> int
+{
+    if (L < R) { return -1; };
+    if (L > R) { return  1; };
+    return 0;
+};
+
+// A new operator made of a word
+operator (int L, int R) [NAND] -> int
+{
+    return !(L & R);
+};
+
+// Operators take any type: here, two Vec2 pointers
+operator (Vec2* L, Vec2* R) [DOT] -> float
+{
+    return L.x * R.x + L.y * R.y;
+};
+
+def main() -> int
+{
+    Vec2 a = {1.0, 2.0};
+    Vec2 b = {3.0, 4.0};
+    Vec2* pa = @a;
+    Vec2* pb = @b;
+
+    println(f"{pa DOT pb}");                       // 11.0
+    println(f"{7 <=> 3} {3 <=> 7} {5 <=> 5}");     // 1 -1 0
+    println(f"{6 NAND 1} {6 NAND 2}");             // -1 -3  (bitwise: ! is complement on integers)
+    return 0;
+};
+```
+
+Custom operators parse at one fixed precedence tier, between `+`/`-` and `*`/`/`, always left-associative. Parenthesize at the call site to bind them tighter or looser. Contracts attach to operators exactly as they do to functions, and built-in operators can be overloaded for your own types.
+
+---
+
+## Block assignment
+
+Stop repeating the name. Any struct variable, or any indexed element of an array of structs, takes a block:
+
+```
+struct Entry { int key, size; byte* name; };
+
+def main() -> int
+{
+    Entry[4] table;
+
+    // Block assignment works on a variable...
+    Entry first;
+    first
+    {
+        .key  = 1;
+        .size = 64;
+        .name = "alpha\0";
+    };
+
+    // ...and on an indexed element
+    table[2]
+    {
+        .key  = first.key + 1;
+        .size = first.size * 2;
+        .name = "beta\0";
+    };
+
+    // Struct literals use the same shape
+    Entry third = {3, 256, "gamma\0"};
+
+    println(f"{table[2].key} {table[2].size} {table[2].name} {third.name}");
+    return 0;
+};
+```
+
+```
+2 128 beta gamma
+```
+
+---
+
+## Bits are first class
+
+### Bit slices and bit indexing
+
+`x[a``b]` reads or writes bits `a` through `b`. `x[`i]` addresses a single bit. Bit 0 is always the most significant bit, and numbering runs straight through struct field boundaries because structs have no hidden padding. A reversed range, like `x[7``0]`, reads the bits in reverse order.
+
+```
+struct Pair { int a, b; };
+def main() -> int
+{
+    data{4} as u4;
+    data{1} as bit;
+    byte x = 0xA5;
+    u4 hi = x[0``3];
+    u4 lo = x[4``7];
+    println(f"{int(hi)} {int(lo)}");
+
+    u32 packed = 0x12345678;
+    packed[24``31] = 0xFF;
+    println(f"{packed}");
+
+    u16 w = 0xABCD;
+    u4 n = w[4``7];
+    println(f"{int(n)}");
+
+    byte r = 0b11010010;
+    r[0``3] = r[3``0];
+    println(f"{int(r)}");
+
+    Pair p = {5, 10};
+    u4 nib = p[60``63];
+    println(f"{int(nib)}");
+    return 0;
+};
+```
+
+```
+10 5
+305420031
+11
+178
+10
+```
+
+```
+def main() -> int
+{
+    byte flags = 0b10100000;
+    int a = flags[`0];
+    int b = flags[`1];
+    int c = flags[`2];
+    println(f"{a} {b} {c}");
+    flags[`7] = 1;
+    flags[`0] = 0;
+    println(f"{int(flags)}");
+    u16 w = 0x8001;
+    int hi = w[`0];
+    int lo = w[`15];
+    println(f"{hi} {lo}");
+    return 0;
+};
+```
+
+```
+1 0 1
+33
+1 1
+```
+
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+def main() -> int
+{
+    byte b;
+
+    b[`7] = 1;
+
+    println("Success!") if (b == 1);
+
+    int i = 420691337;
+
+    for (`x in i)  // "for bit x in i"
+    {
+        print((int)x);  // x is a data{1} type
+    };
+
+    -> b[`0];
+};
+```
+
+```
+Success!
+00011001000100110011110110001001
+```
+
+### Width, alignment, and endianness are part of the type
+
+```
+signed   data{13:16} as strange13;   // 13-bit signed, 16-bit aligned
+unsigned data{3}     as tiny;        // 3-bit unsigned (0-7)
+unsigned data{7:8}   as aligned7;    // 7-bit with 8-bit alignment
+unsigned data{5}[10] as 5b_array;    // Array of ten 5-bit values
+
+data{16}    as be16;   // Big-endian 16-bit  (default)
+data{16::0} as le16;   // Little-endian 16-bit
+
+// Assigning between endian types emits a byte swap automatically
+le16 host   = (be16)network_value;
+```
+
+You are not masking bits out of a `uint32_t`. You are working with the type you actually have.
+
+### 16 lines of C become 2 lines of IDEKA
+
+This is real cryptography code. The C version is a manual byte-by-byte extraction. The IDEKA version is a direct consequence of how the type system works.
 
 **C:**
 ```c
@@ -51,38 +295,14 @@ len_block[0..7]  = (byte[8])(u64)aad_bits;
 len_block[8..15] = (byte[8])(u64)cipher_bits;
 ```
 
-Casting an integer to a fixed-size byte array packs the bytes big-endian into the array. No masking. No shifting. No loop. The type system does the work.
+Casting an integer to a fixed-size byte array packs the bytes big-endian into the array. No masking. No shifting. No loop. And with `be32` as a real type, the SHA-256 finalisation loop becomes eight lines with no `htonl` in sight:
 
----
-
-### SHA-256 finalisation loop
-
-**C:**
-```c
-for (i = 0; i < 4; i++) {
-    hash[i]      = (byte)((ctx.state[0] >> (24 - i * 8)) & 0xFF);
-    hash[i + 4]  = (byte)((ctx.state[1] >> (24 - i * 8)) & 0xFF);
-    hash[i + 8]  = (byte)((ctx.state[2] >> (24 - i * 8)) & 0xFF);
-    hash[i + 12] = (byte)((ctx.state[3] >> (24 - i * 8)) & 0xFF);
-    // ... 4 more identical lines
-}
-```
-
-**IDEKA:**
 ```
 hash[0..3]   = (byte[4])(be32)ctx.state[0];
 hash[4..7]   = (byte[4])(be32)ctx.state[1];
-hash[8..11]  = (byte[4])(be32)ctx.state[2];
-hash[12..15] = (byte[4])(be32)ctx.state[3];
-hash[16..19] = (byte[4])(be32)ctx.state[4];
-hash[20..23] = (byte[4])(be32)ctx.state[5];
-hash[24..27] = (byte[4])(be32)ctx.state[6];
+// ...
 hash[28..31] = (byte[4])(be32)ctx.state[7];
 ```
-
-`be32` is a first-class big-endian 32-bit type. Casting to `byte[4]` unpacks it into four bytes in the correct order. No `htonl`. No manual shift arithmetic.
-
----
 
 ### Zero-copy packet parsing
 
@@ -105,69 +325,124 @@ def parse(byte* buf) -> void
 };
 ```
 
-`from` recasts a byte buffer into a struct without copying. The layout is exact - struct fields are tightly packed with no hidden padding. What you declare is what you get in memory.
+`from` recasts a byte buffer into a struct without copying. What you declare is what you get in memory.
 
 ---
 
-### Arbitrary-width integer types
+## Interfaces
+
+An interface says how objects may interact, and the compiler holds them to it. `A : B` lists the methods an `A` may call on a `B`. Call anything else and the program does not compile. Two more forms control which return values may be passed across the boundary (`B(A)`) and which methods may be called from inside the other object's methods (`A -> B`).
 
 ```
-signed   data{13:16} as strange13;   // 13-bit signed, 16-bit aligned
-unsigned data{3}     as tiny;        // 3-bit unsigned (0-7)
-unsigned data{7:8}   as aligned7;    // 7-bit with 8-bit alignment
-unsigned data{5}[10] as 5b_array;    // Array of ten 5-bit values
+trait Queryable  { def query(byte* sql) -> byte*; };
+trait Connectable { def connect() -> bool, disconnect() -> bool; };
 
-data{16}    as be16;   // Big-endian 16-bit  (default)
-data{16::0} as le16;   // Little-endian 16-bit
+interface Database(A: Connectable, B: Queryable)
+{
+    A : B { connect() -> bool };
+};
 
-// Assigning between endian types emits a byte swap automatically
-le16 host   = (be16)network_value;
+object Client, Store;
+
+object Store
+{
+    def __init() -> this { return this; };
+    def __exit() -> void {};
+    def __expr() -> int { return 0; };
+    def query(byte* sql) -> byte* { return sql; };
+    def connect() -> bool { return true; };
+    def disconnect() -> bool { return true; };
+} : Database(Client, this);
+
+object Client
+{
+    def __init() -> this { return this; };
+    def __exit() -> void {};
+    def __expr() -> int { return 0; };
+    def connect() -> bool { return true; };
+    def disconnect() -> bool { return true; };
+
+    def go(Store* s) -> void
+    {
+        s.connect();      // listed in A : B, allowed
+        s.disconnect();   // not listed, compile error
+    };
+} : Database(this, Store);
+
+def main() -> int
+{
+    Client c();
+    Store  s();
+    return 0;
+};
 ```
 
-Width, alignment, and endianness are part of the type. You are not masking bits out of a `uint32_t`. You are working with the type you actually have.
+```
+Interface violation: Client is not permitted to call disconnect from Store
+```
+
+Attaching an interface also requires both sides to satisfy the traits it names, checked at compile time.
 
 ---
 
-### Bit slices
+## Compile-time execution
 
-```
-u32 packed = 0x12345678;
-
-u32 low_nibble  = packed[28``31];   // bits 28-31: 0x8
-u32 high_byte   = packed[0``7];     // bits 0-7:   0x12
-
-packed[24``31] = 0xFF;              // Replace bits 24-31 in place
-// packed == 0x123456FF
-
-// Reverse the bits of a byte
-byte x = 55;
-x[0``7] = x[7``0];
-println(int(x));   // 236
-
-// Bit slices cross struct field boundaries
-struct Pair { int a, b; };
-data{4} as u4;
-Pair p   = {5, 10};
-u4   val = p[60``63];   // 10, because 0b1010 - spans into the second field
-```
-
-Bit 0 is always the most significant bit. Slices that cross struct field boundaries work naturally because struct fields have no hidden padding. Reversing start and end indices reverses the bit order of the result.
-
----
-
-### Compile-time code generation with `emitflux`
-
-IDEKA has a compile-time executor - the FVM - that runs IDEKA code at compile time. `emitflux` blocks inject real IDEKA definitions into the compilation unit, in order, from within comptime logic. This is how you generate code programmatically without a macro preprocessor.
+IDEKA runs itself at compile time. A `comptime` block executes inside the compiler, in the built-in VM, with file and console I/O available. Its results can become part of your program.
 
 ```
 comptime
 {
-    // .. some declarations omitted
+    // Runs inside the compiler. Nothing here exists in the binary.
+    int a = 0;
+    int b = 1;
+    int t, n;
+    while (n < 30)
+    {
+        t = a + b;
+        a = b;
+        b = t;
+        n++;
+    };
+    compiler.io.console.println(f"[comptime] fib(30) = {a}");
+
+    emitflux
+    {
+        def fib30() -> int { return ~$f"{a}"; };
+    };
+};
+
+def main() -> int
+{
+    println(f"{fib30()}");     // a constant, computed before the program existed
+    return 0;
+};
+```
+
+```
+[comptime] fib(30) = 832040      <- printed by the compiler
+832040                           <- printed by the program
+```
+
+### Generate code with `emitflux`
+
+`emitflux` injects real IDEKA definitions into the program from inside a comptime block. Combine it with comptime loops and you get code generation without a macro preprocessor. Here a loop writes four functions, then builds a `dispatch` function whose `switch` is assembled one case at a time:
+
+```
+#def NUM_OPS 4;
+
+comptime
+{
+    byte*[NUM_OPS] op_names = ["add", "sub", "mul", "div"];
+    byte*[NUM_OPS] op_exprs = ["a + b", "a - b", "a * b", "a / b"];
+
+    // One function per operation: op_add, op_sub, op_mul, op_div
+    int i;
+    byte* nm;
+    byte* expr;
     while (i < NUM_OPS)
     {
         nm   = op_names[i];
         expr = op_exprs[i];
-        compiler.io.console.println(f"[comptime]   op_{nm}");
         emitflux
         {
             def ~$i"op_{}":{nm} (int a, int b) -> int { return ~$expr; };
@@ -175,8 +450,7 @@ comptime
         i++;
     };
 
-    compiler.io.console.println("[comptime] generating dispatch...");
-    emitflux { def dispatch(int id, int a, int b) -> int;  };
+    // Open dispatch() and its switch, then drop back into comptime with }#;
     emitflux
     {
         def dispatch(int id, int a, int b) -> int
@@ -185,6 +459,7 @@ comptime
             {
     }#;
 
+    // One case per operation, emitted from a loop
     int j, jv;
     while (j < NUM_OPS)
     {
@@ -197,6 +472,7 @@ comptime
         j++;
     };
 
+    // Close the switch and the function
     emitflux
     {
                 default { return -1; };
@@ -204,11 +480,23 @@ comptime
        #};
     };
 };
+
+def main() -> int
+{
+    println(f"{dispatch(0, 12, 4)} {dispatch(1, 12, 4)} {dispatch(2, 12, 4)} {dispatch(3, 12, 4)} {dispatch(9, 1, 1)}");
+    return 0;
+};
 ```
 
-This comptime segment builds a function piece by piece. In the end, it constructs a switch statement and emits the cases into it with a loop. This whole function gets emitted back into the global scope of the program, fully parsed and part of the AST.
+```
+16 8 48 3 -1
+```
 
-You can also drop into raw FVM assembly inside a comptime block and modify comptime-scope variables directly:
+`}#;` leaves an `emitflux` block without closing the construct being built, so you can run ordinary comptime code between pieces. `#};` closes a brace inside generated code. The finished function is parsed like any other and is part of the AST.
+
+### Drop into VM assembly
+
+You can write VM assembly inside a comptime block and modify comptime variables directly:
 
 ```
 comptime
@@ -227,7 +515,11 @@ comptime
 };
 ```
 
-Named comptime blocks are goto targets, letting you build arbitrary comptime control flow including loops:
+(`emitflux` and `fluxvm` are becoming `emitideka` and `idekavm`.)
+
+### Comptime control flow
+
+Named comptime blocks are `goto` targets, so you can build loops out of them:
 
 ```
 comptime A
@@ -244,6 +536,87 @@ comptime B
 ```
 
 ---
+
+## Modules
+
+A module is a named group of declarations with its own build settings. Settings are set by the module itself, and a module sees only what it asks for with `#[requires]`.
+
+```
+module Math
+{
+    square(int x) -> int -> x * x;
+    cube(int x)   -> int -> x * x * x;
+}
+# build
+{
+    !+#[borrow_check] = true        // locked: no other module can switch this off
+};
+
+module Logging
+{
+    log(byte* msg) -> void -> println(msg);
+}
+# build
+{
+    #[dce] = true
+};
+
+module App
+{
+    main() -> int
+    {
+        log("starting\0");
+        println(f"{square(7)} {cube(3)}");
+        return 0;
+    };
+}
+# build
+{
+    #[entrypoint] = this,
+    #[name]       = "app",
+    #[requires]   = {Math, Logging},
+    #[override for Logging] = { #[effect_check] = false }
+};
+```
+
+```
+starting
+49 27
+```
+
+Each `# build` block is plain data the compiler reads:
+
+| Tag | What it does |
+|---|---|
+| `#[entrypoint] = this` | Marks the program's entry module. A file with several modules that define `main` builds each as its own program. |
+| `#[name]`, `#[target]`, `#[debug]` | Output name, kind (`executable`, `library`, `bootloader`, `compact`, `driver`), and Debug or Release layout. |
+| `#[requires] = {A, B}` | The modules this one uses. Only these, and what `from "file.fx"` pulls in, are built into it. |
+| `#[borrow_check]`, `#[effect_check]`, `#[dce]` | Per-module checks and dead code elimination. |
+| `#[using]`, `#[platform]` | Namespaces made visible to the module, and the platforms it builds for. |
+| `!+#[tag]` | Locks a setting so no other module can override it. |
+| `#[override for {M}] = { ... }` | Changes `M`'s settings as `M` is built into this program. The module closest to the entry wins. |
+
+Dependencies are enforced. A module cannot call into a module it does not require, and it cannot override one:
+
+```
+module B
+{
+    main() -> int { foo(); return 0; };    // foo() lives in module A
+}
+# build
+{
+    #[entrypoint] = this,
+    #[override for A] = { #[borrow_check] = false }
+};
+```
+```
+Module error: module 'B': cannot override module 'A' because 'B' does not use it.
+Add '#[requires] = {A}' to the build settings of 'B' first
+```
+
+---
+
+## And more
 
 ### Contracts
 
@@ -265,9 +638,7 @@ operator (int L, BigInt R) [+] -> BigInt : NonZero(L, R)
 };
 ```
 
-Contracts are pre- and post-condition blocks attached to functions and operators as part of their specification, not their implementation. They are distinct from the function body and transform into assertions at the call boundary. Contracts can contain any statement that can go inside of a function definition, not just assertions.
-
----
+Contracts are pre- and post-condition blocks attached to functions and operators as part of their specification, not their implementation. They transform into assertions at the call boundary, and can contain any statement that can go inside a function.
 
 ### Templates with type geometry constraints
 
@@ -282,13 +653,8 @@ def serialize<T: int, :{NoNarrowing}>(T x) -> byte
     return 5 + x;   // Compile error: narrowing T to byte violates NoNarrowing
 };
 ```
-The constraint operator:
-```
-!`<
-```
-is not a predicate on a concrete type. The compiler walks the instantiated function body and finds the actual narrowing. Template constraints express relationships between types, not just properties of a single type.
 
----
+`!`<` is not a predicate on a concrete type. The compiler walks the instantiated function body and finds the actual narrowing. Template constraints express relationships between types, not just properties of a single type.
 
 ### Opt-in ownership
 
@@ -306,9 +672,7 @@ def main() -> int
 };
 ```
 
-Ownership in Flux is opt-in per type. Apply it where you need a move semantic. The rest of your program has no borrow checker.
-
----
+Ownership is opt-in per type. Apply it where you need move semantics. The rest of your program has no borrow checker.
 
 ### Inline assembly with architecture guards
 
@@ -339,30 +703,6 @@ def exchange64(i64* ptr, i64 value, i64* out) -> void
 };
 ```
 
----
-
-### Custom infix operators
-
-```
-// Define a new operator
-operator (int L, int R) [+++] -> int
-{
-    return ++L + ++R;
-};
-
-int result = a +++ b;
-
-// Identifier-based operators work too
-operator (int L, int R) [NOPOR] -> bool
-{
-    return !L | !R;
-};
-
-bool check = a NOPOR b;
-```
-
----
-
 ### Raw bytecode functions
 
 ```
@@ -373,12 +713,11 @@ fp();
 
 ---
 
-## What Flux is not
+## What IDEKA is not
 
-- **Not a Rust alternative.** Rust's borrow checker is global and mandatory. Flux ownership is opt-in per type. If you want the compiler to enforce memory safety everywhere, use Rust.
-- **Not a Python-syntax language.** The readme description "C performance with Python readability" means the language is clean, not that it looks like Python. It is a C-family language.
+- **Not a Rust alternative.** Rust's borrow checker is global and mandatory. IDEKA ownership is opt-in per type. If you want the compiler to enforce memory safety everywhere, use Rust.
+- **Not a Python-syntax language.** "C performance with Python readability" means the language is clean, not that it looks like Python. It is a C-family language.
 - **Not garbage collected.** Everything is stack allocated by default. Heap allocation is explicit with `heap`. Cleanup is explicit with `(void)ptr` or `defer`.
-- **Not FluxCD.** Not the FLUX image generation models. Not the Flux application architecture pattern. This is a compiled systems programming language.
 
 ---
 

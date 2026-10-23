@@ -36,6 +36,7 @@
 #ifndef FLUX_CODEGEN
 #def FLUX_CODEGEN 1;
 #def VF_UNION_STRUCT 16;
+#def VF_STRING_VALUE 32;
 
 using flux::ast;
 using flux::preprocessor;
@@ -195,7 +196,7 @@ namespace flux
         {
             int i = start;
             int n;
-            while (s[i]!?)
+            while (s[i] != 0)
             {
                 i++;
             };
@@ -422,6 +423,7 @@ namespace flux
             NameMap* fdefs;     // function name to its FUNCTION_DEF
             int nbodies;
             int nskipped;
+            Node* cur_fd;       // function definition whose body is being generated
             NameMap* gcache;    // g-string bytes (escaped) to its global
             int nstr;           // .str.N counter
             bool null_term;     // config null_terminate_strings
@@ -511,6 +513,7 @@ namespace flux
                 this.fdefs = nm_new();
                 this.nbodies = 0;
                 this.nskipped = 0;
+                this.cur_fd = (Node*)0;
                 this.gcache = nm_new();
                 this.nstr = 0;
                 this.null_term = false;
@@ -661,7 +664,7 @@ namespace flux
                     case (true) { -> true; }
                     default
                     {
-                        switch (this.cur_ns[0]!?)
+                        switch (this.cur_ns[0] != 0)
                         {
                             case (true) {
                             m = mangle_namespace_name(this.cur_ns, name);
@@ -1743,7 +1746,6 @@ namespace flux
                 byte* name = mangle_namespace_name(ns, ed.text);
                 IRType* ty = this.t_i32;
                 int i, n;
-                i64* eb;
                 byte* cn;
                 byte* nmx;
                 IRGlobal* g;
@@ -1772,7 +1774,7 @@ namespace flux
                         g.constant = true;
                     };
                     };
-                    eb = (i64*)fmalloc((u64)8);
+                    i64* eb = (i64*)fmalloc((u64)8);
                     eb[0] = item.ival;
                     this.keep((void*)eb);
                     nm_put(this.enumvals, this.mod.own(cn), (void*)eb);
@@ -2065,7 +2067,7 @@ namespace flux
                     ps[i + skip] = this.lower_sig(node_child(fd, 0, i).ts, fd.line);
                     i++;
                 };
-                -> this.mod.t_func(ret, ps, n + skip, (fd.flags `& NF_VARIADIC)!?);
+                -> this.mod.t_func(ret, ps, n + skip, (fd.flags `& NF_VARIADIC) != 0);
             };
 
             // visit_FunctionDef up to the point a body would be emitted
@@ -2076,7 +2078,7 @@ namespace flux
                     case (true) { -> (IRFunc*)0; }
                     default
                     {
-                        switch ((fd.flags `& NF_TEMPLATE)!?)
+                        switch ((fd.flags `& NF_TEMPLATE) != 0)
                         {
                             case (true) { -> (IRFunc*)0; }
                             default
@@ -2086,8 +2088,8 @@ namespace flux
                                 byte* mn;
                                 IRFunc* f;
                                 IRFunc* ex;
-                                bool proto = (fd.flags `& NF_PROTOTYPE)!?;
-                                switch ((fd.flags `& NF_NO_MANGLE)!?)
+                                bool proto = (fd.flags `& NF_PROTOTYPE) != 0;
+                                switch ((fd.flags `& NF_NO_MANGLE) != 0)
                                 {
                                     case (true) { mn = ts_dup(base); }
                                     default { mn = this.mangled_name(base, fd); };
@@ -2144,7 +2146,7 @@ namespace flux
                                     case (true) {
                                     nm_put(this.defined, mn, (void*)f);
                                     nm_put(this.fdefs, f.name, (void*)fd);
-                                    switch ((fd.flags `& NF_INLINE)!?)
+                                    switch ((fd.flags `& NF_INLINE) != 0)
                                     {
                                         case (true) { pv_push(f.attrs, (void*)this.mod.own(g"alwaysinline\0")); }
                                         default {};
@@ -2203,7 +2205,7 @@ namespace flux
                                         base = ts_dup(fd.text);
                                         int cut = 0;
                                         int k = 0;
-                                        while (base[k]!?)
+                                        while (base[k] != 0)
                                         {
                                             switch (base[k] == ':' & base[k + 1] == ':')
                                             {
@@ -2215,7 +2217,7 @@ namespace flux
                                         byte* b1 = dup_from(base, cut);
                                         k = 0;
                                         cut = 0;
-                                        while (b1[k]!?)
+                                        while (b1[k] != 0)
                                         {
                                             switch (b1[k] == '_' & b1[k + 1] == '_')
                                             {
@@ -2225,7 +2227,7 @@ namespace flux
                                             k++;
                                         };
                                         byte* b2 = dup_from(b1, cut);
-                                        switch ((fd.flags `& NF_NO_MANGLE)!?)
+                                        switch ((fd.flags `& NF_NO_MANGLE) != 0)
                                         {
                                             case (true) { fin = ts_dup(b2); }
                                             default { fin = this.mangled_name(b2, fd); };
@@ -2285,7 +2287,7 @@ namespace flux
                     case (true) { ->; }
                     default
                     {
-                        switch ((m.flags `& NF_TEMPLATE)!?)
+                        switch ((m.flags `& NF_TEMPLATE) != 0)
                         {
                             case (true) { ->; }
                             default
@@ -2363,7 +2365,7 @@ namespace flux
                 int i;
                 switch (s == (byte*)0) { case (true) { -> -1; } default
                     {
-                        while (s[i]!?)
+                        while (s[i] != 0)
                         {
                             switch (s[i] == '.') { case (true) { -> i; } default
                                 {
@@ -2942,7 +2944,7 @@ namespace flux
             {
                 int i;
                 int cut;
-                while (name[i]!?)
+                while (name[i] != 0)
                 {
                     switch (name[i] == '_' & name[i + 1] == '_')
                     {
@@ -3126,7 +3128,7 @@ namespace flux
                         {
                             case (true) {
                             len = 0;
-                            while (src[len]!?) { len++; };
+                            while (src[len] != 0) { len++; };
                         }
                             default {};
                         };
@@ -4095,7 +4097,7 @@ namespace flux
                                     v = v * (i64)10 + (i64)(t[i] - '0');
                                     i++;
                                 };
-                                switch (t[i]!?)
+                                switch (t[i] != 0)
                                 {
                                     case (true) { -> false; }
                                     default
@@ -4505,7 +4507,7 @@ namespace flux
                 int b = i;
                 bool q;
                 byte c;
-                while (t[i]!?)
+                while (t[i] != 0)
                 {
                     c = t[i];
                     switch (q)
@@ -4951,7 +4953,7 @@ namespace flux
                                             };
                                             pb.put_str(fv);
                                             j = ens[ai];
-                                            while (gl.init[j]!?)
+                                            while (gl.init[j] != 0)
                                             {
                                                 pb.put(gl.init[j]);
                                                 j++;
@@ -5262,7 +5264,7 @@ namespace flux
                                             default
                                             {
                                                 lt = (IRType*)0;
-                                                switch ((ts.flags `& TS_ARRAY)!? & ts.array_size == (Node*)0 & (ts.array_dims == (NodeVec*)0 | this.dims_empty(ts)))
+                                                switch ((ts.flags `& TS_ARRAY) != 0 & ts.array_size == (Node*)0 & (ts.array_dims == (NodeVec*)0 | this.dims_empty(ts)))
                                                 {
                                                     case (true) {
                                                     // Unsized array: the size comes from a string initializer
@@ -5696,7 +5698,7 @@ namespace flux
                 switch (len <= 0)
                 {
                     case (true) {
-                    while (src[len]!?) { len++; };
+                    while (src[len] != 0) { len++; };
                 }
                     default {};
                 };
@@ -5948,7 +5950,8 @@ namespace flux
             {
                 int i;
                 int c = node_count(ini, 0);
-                IRValue* ev, ep, stmp, sip;
+                IRValue* ev;
+                IRValue* ep;
                 while (i < c & i < lt.count)
                 {
                     switch (lt.elem.kind == LK.ARRAY & node_child(ini, 0, i).kind == NodeKind.ARRAY_LITERAL)
@@ -6035,9 +6038,9 @@ namespace flux
                                                         switch ((ev.ty.kind == LK.STRUCT | ev.ty.kind == LK.ISTRUCT) & this.struct_bits(ev.ty) == lt.elem.width)
                                                         {
                                                             case (true) {
-                                                            stmp = this.mod.alloca(ev.ty, g"struct_tmp\0");
+                                                            IRValue* stmp = this.mod.alloca(ev.ty, g"struct_tmp\0");
                                                             this.mod.store(ev, stmp);
-                                                            sip = this.mod.cast(g"bitcast\0", stmp, this.mod.t_ptr(lt.elem), g"struct_as_int_ptr\0");
+                                                            IRValue* sip = this.mod.cast(g"bitcast\0", stmp, this.mod.t_ptr(lt.elem), g"struct_as_int_ptr\0");
                                                             ev = this.mod.load(sip, g"struct_to_int\0");
                                                         }
                                                             default {};
@@ -6531,7 +6534,7 @@ namespace flux
                             case (true) { -> v; }
                             default
                             {
-                                switch (w % 16!?)
+                                switch (w % 16 != 0)
                                 {
                                     case (true) { -> v; }
                                     default
@@ -7531,7 +7534,7 @@ namespace flux
             has_ns_sep(byte* s) -> bool
             {
                 int i;
-                while (s[i]!?)
+                while (s[i] != 0)
                 {
                     switch (s[i] == '_' & s[i + 1] == '_')
                     {
@@ -7741,14 +7744,237 @@ namespace flux
             };
 
             // True when a user defined operator__<op> overload is registered
-            has_op_overload(int op) -> bool
+has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
+
+            // Overloads registered for operator__<op>, or null
+            op_overloads(int op) -> PtrVec*
             {
                 byte* sym = operator_text(op);
-                bool r;
                 this.sc.clear();
                 this.sc.put_str(g"operator__\0");
                 mangle_builtin_op(@this.sc, sym);
-                -> st_overloads_of(this.st, this.sc.mem) != (PtrVec*)0;
+                -> st_overloads_of(this.st, this.sc.mem);
+            };
+
+            // visit_BinaryOp pointer-param overload shortcut: when the first two-parameter
+            // overload whose parameters are all pointers takes the very allocas of two local
+            // identifier operands, call it with those pointers. Never re-dispatched from
+            // inside the overload itself.
+            binop_ptr_overload(Node* n, int op) -> IRValue*
+            {
+                PtrVec* list = this.op_overloads(op);
+                Overload* o;
+                IRFunc* f;
+                IRFunc* pf = (IRFunc*)0;
+                LVar* ll;
+                LVar* rl;
+                IRValue** args;
+                int i = 0;
+                switch (list == (PtrVec*)0)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                while (i < list.len & pf == (IRFunc*)0)
+                {
+                    o = (Overload*)list.items[i];
+                    i++;
+                    switch (o.nparams != 2)
+                    {
+                        case (true) { continue; }
+                        default {};
+                    };
+                    f = this.mod.find_function(o.mangled);
+                    switch (f == (IRFunc*)0)
+                    {
+                        case (true) { continue; }
+                        default {};
+                    };
+                    switch (f.ftype.nitems != 2)
+                    {
+                        case (true) { continue; }
+                        default {};
+                    };
+                    switch (!this.ov_visible(o))
+                    {
+                        case (true) { continue; }
+                        default {};
+                    };
+                    switch (f.ftype.items[0].kind == LK.PTR & f.ftype.items[1].kind == LK.PTR)
+                    {
+                        case (true) { pf = f; }
+                        default {};
+                    };
+                };
+                switch (pf == (IRFunc*)0 | pf == this.fn)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                switch (n.a.kind != NodeKind.IDENTIFIER | n.b.kind != NodeKind.IDENTIFIER)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                ll = this.find_local(n.a.text);
+                rl = this.find_local(n.b.text);
+                switch (ll == (LVar*)0 | rl == (LVar*)0)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                switch (!lt_eq(ll.ptr.ty, pf.ftype.items[0]) | !lt_eq(rl.ptr.ty, pf.ftype.items[1]))
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                args = (IRValue**)fmalloc((u64)2 * (u64)((sizeof(IRValue*) + 7) / 8));
+                this.keep((void*)args);
+                args[0] = ll.ptr;
+                args[1] = rl.ptr;
+                -> this.mod.call_ex(pf.self, args, 2, g"op_overload_result\0", pf.cconv, false);
+            };
+
+            // The base compiler registers an operator overload when it reaches the operator,
+            // so only code that comes after the operator in the source can dispatch to it
+            ov_visible(Overload* o) -> bool
+            {
+                switch (this.cur_fd == (Node*)0 | o.func == (Node*)0)
+                {
+                    case (true) { -> true; }
+                    default {};
+                };
+                switch (o.func.line == 0 | this.cur_fd.line == 0)
+                {
+                    case (true) { -> true; }
+                    default {};
+                };
+                -> o.func.line < this.cur_fd.line;
+            };
+
+            // An operand fits an overload parameter: same type, a pointer to the same
+            // pointee, or a pointer to an array whose element is the parameter's pointee
+            ov_arg_ok(IRValue* v, IRType* pt) -> bool
+            {
+                IRType* rt = v.ty;
+                switch (lt_eq(rt, pt))
+                {
+                    case (true) { -> true; }
+                    default {};
+                };
+                switch (rt.kind == LK.PTR & pt.kind == LK.PTR)
+                {
+                    case (true) {
+                        switch (lt_eq(rt.elem, pt.elem))
+                        {
+                            case (true) { -> true; }
+                            default {};
+                        };
+                        switch (rt.elem.kind == LK.ARRAY)
+                        {
+                            case (true) { -> lt_eq(rt.elem.elem, pt.elem); }
+                            default {};
+                        };
+                    }
+                    default {};
+                };
+                -> false;
+            };
+
+            // visit_BinaryOp built-in operator overload check: the first two-parameter
+            // overload (not the function being compiled) whose parameter types fit the
+            // operands is called. Returns null when none fits.
+            binop_overload(Node* n, int op, IRValue* lhs, IRValue* rhs) -> IRValue*
+            {
+                PtrVec* list = this.op_overloads(op);
+                Overload* o;
+                IRFunc* f;
+                IRValue** args;
+                IRValue* av;
+                IRType* pt;
+                int i = 0;
+                int k;
+                switch (list == (PtrVec*)0)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                while (i < list.len)
+                {
+                    o = (Overload*)list.items[i];
+                    i++;
+                    switch (o.nparams != 2)
+                    {
+                        case (true) { continue; }
+                        default {};
+                    };
+                    f = this.mod.find_function(o.mangled);
+                    switch (f == (IRFunc*)0 | f == this.fn)
+                    {
+                        case (true) { continue; }
+                        default {};
+                    };
+                    switch (f.ftype.nitems != 2)
+                    {
+                        case (true) { continue; }
+                        default {};
+                    };
+                    switch (!this.ov_visible(o))
+                    {
+                        case (true) { continue; }
+                        default {};
+                    };
+                    switch (!this.ov_arg_ok(lhs, f.ftype.items[0]) | !this.ov_arg_ok(rhs, f.ftype.items[1]))
+                    {
+                        case (true) { continue; }
+                        default {};
+                    };
+                    args = (IRValue**)fmalloc((u64)2 * (u64)((sizeof(IRValue*) + 7) / 8));
+                    this.keep((void*)args);
+                    k = 0;
+                    while (k < 2)
+                    {
+                        av = lhs;
+                        switch (k == 1)
+                        {
+                            case (true) { av = rhs; }
+                            default {};
+                        };
+                        pt = f.ftype.items[k];
+                        switch (lt_eq(av.ty, pt))
+                        {
+                            case (true) {}
+                            default
+                            {
+                                switch (av.ty.kind == LK.PTR & pt.kind == LK.PTR & lt_eq(av.ty.elem, pt.elem))
+                                {
+                                    case (true) {}
+                                    default
+                                    {
+                                        switch (av.ty.kind == LK.PTR & av.ty.elem.kind != LK.ARRAY & av.ty.elem.kind != LK.STRUCT &
+                                            av.ty.elem.kind != LK.ISTRUCT & lt_eq(av.ty.elem, pt))
+                                        {
+                                            case (true) { av = this.mod.load(av, g"op_deref\0"); }
+                                            default
+                                            {
+                                                av = this.convert_arg(av, pt, k, n);
+                                                switch (this.bad)
+                                                {
+                                                    case (true) { -> (IRValue*)0; }
+                                                    default {};
+                                                };
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                        };
+                        args[k] = av;
+                        k++;
+                    };
+                    -> this.mod.call_ex(f.self, args, 2, g"op_overload_result\0", f.cconv, false);
+                };
+                -> (IRValue*)0;
             };
 
             // emit_memcpy of ArrayTypeHandler: bitcast to i8* when needed, then llvm.memcpy
@@ -7966,15 +8192,15 @@ namespace flux
                         {
                             case (true) {
                             st = this.ctv(e.a);
-                            switch (st!?) { case (true) { -> st; } default {}; };
+                            switch (st != 0) { case (true) { -> st; } default {}; };
                             lv = this.ct_v;
                             lk = this.ct_k;
                             st = this.ctv(e.b);
-                            switch (st!?) { case (true) { -> st; } default {}; };
+                            switch (st != 0) { case (true) { -> st; } default {}; };
                             rv = this.ct_v;
                             rk = this.ct_k;
                             // Python evaluates every operator eagerly, so a zero divisor raises ZeroDivisionError
-                            switch (rv == (i64)0 | lk!? | rk!?) { case (true) { -> 2; } default {}; };
+                            switch (rv == (i64)0 | lk != 0 | rk != 0) { case (true) { -> 2; } default {}; };
                             op = e.op;
                             this.ct_k = 0;
                             switch (op == Operator.ADD) { case (true) { this.ct_v = lv + rv; -> 0; } default {}; };
@@ -8001,7 +8227,7 @@ namespace flux
                                 {
                                     case (true) {
                                     st = this.ctv(e.a);
-                                    switch (st!?) { case (true) { -> st; } default {}; };
+                                    switch (st != 0) { case (true) { -> st; } default {}; };
                                     op = e.op;
                                     switch (op == Operator.NOT)
                                     {
@@ -8406,6 +8632,7 @@ namespace flux
                 IRValue* lhs;
                 IRValue* rhs;
                 IRValue* r;
+                IRValue* ovp;
                 bool uns, is_cmp, might_ptr, lp, rp, li, ri;
                 bool lzero, rzero;
                 bool dhandled;
@@ -8478,12 +8705,10 @@ namespace flux
                 }
                     default
                     {
-                        switch (this.has_op_overload(op))
+                        ovp = this.binop_ptr_overload(n, op);
+                        switch (ovp != (IRValue*)0)
                         {
-                            case (true) {
-                            this.unsup(n, g"operator overload\0");
-                            -> (IRValue*)0;
-                        }
+                            case (true) { -> ovp; }
                             default
                             {
                                 lhs = this.visit(n.a);
@@ -8512,6 +8737,17 @@ namespace flux
                                                             case (true) { -> r; }
                                                             default
                                                             {
+                                                                ovp = this.binop_overload(n, op, lhs, rhs);
+                                                                switch (this.bad)
+                                                                {
+                                                                    case (true) { -> (IRValue*)0; }
+                                                                    default {};
+                                                                };
+                                                                switch (ovp != (IRValue*)0)
+                                                                {
+                                                                    case (true) { -> ovp; }
+                                                                    default {};
+                                                                };
                                                                 lp = lhs.ty.kind == LK.PTR;
                                                                 rp = rhs.ty.kind == LK.PTR;
                                                                 li = lhs.ty.kind == LK.INT;
@@ -8579,7 +8815,7 @@ namespace flux
                                                                         case (true) {
                                                                         pe = lhs.ty.elem;
                                                                         switch (pe.kind != LK.ARRAY & pe.kind != LK.STRUCT & pe.kind != LK.ISTRUCT &
-                                                                            (lhs.flags `& (VF_FROM_EXPR `| VF_TYPEFUNC_STR)) == 0)
+                                                                            (lhs.flags `& (VF_FROM_EXPR `| VF_TYPEFUNC_STR `| VF_STRING_VALUE)) == 0)
                                                                         {
                                                                             case (true) {
                                                                             lhs = this.mod.load(lhs, g"auto_deref_lhs\0");
@@ -8594,7 +8830,7 @@ namespace flux
                                                                         case (true) {
                                                                         pe = rhs.ty.elem;
                                                                         switch (pe.kind != LK.ARRAY & pe.kind != LK.STRUCT & pe.kind != LK.ISTRUCT &
-                                                                            (rhs.flags `& (VF_FROM_EXPR `| VF_TYPEFUNC_STR)) == 0)
+                                                                            (rhs.flags `& (VF_FROM_EXPR `| VF_TYPEFUNC_STR `| VF_STRING_VALUE)) == 0)
                                                                         {
                                                                             case (true) {
                                                                             rhs = this.mod.load(rhs, g"auto_deref_rhs\0");
@@ -8700,7 +8936,7 @@ namespace flux
                                                                 switch (op == Operator.ADD)
                                                                 {
                                                                     case (true) {
-                                                                    switch (((lhs.flags `| rhs.flags) `& (VF_FROM_EXPR `| VF_TYPEFUNC_STR))!?)
+                                                                    switch (((lhs.flags `| rhs.flags) `& (VF_FROM_EXPR `| VF_TYPEFUNC_STR `| VF_STRING_VALUE)) != 0)
                                                                     {
                                                                         case (true) {
                                                                         IRFunc* cf = this.mod.find_function(g"standard__strings__manip__concat__2__byteE1_ptr1__byteE1_ptr1__ret_byteE1_ptr1\0");
@@ -9473,7 +9709,7 @@ namespace flux
             {
                 int i;
                 int j;
-                while (s[i]!?)
+                while (s[i] != 0)
                 {
                     switch (s[i] == '_' & s[i + 1] == '_' & s[i + 2] >= '0' & s[i + 2] <= '9')
                     {
@@ -9494,7 +9730,7 @@ namespace flux
             {
                 int nl;
                 int i;
-                while (name[nl]!?) { nl++; };
+                while (name[nl] != 0) { nl++; };
                 switch (e == nl)
                 {
                     case (true) {
@@ -9545,7 +9781,7 @@ namespace flux
                 bool ok;
                 switch (n.text == (byte*)0 | argc == 0) { case (true) { -> false; } default
                     {
-                        while (n.text[nl]!?) { nl++; };
+                        while (n.text[nl] != 0) { nl++; };
                         name = (byte*)fmalloc((u64)(nl + 1));
                         this.keep((void*)name);
                         while (i < nl)
@@ -9672,7 +9908,7 @@ namespace flux
                 byte* key;
                 PtrVec* list;
                 Overload* oc;
-                while (name[nl]!?) { nl++; };
+                while (name[nl] != 0) { nl++; };
                 // Object method keys are registered by the type pre-pass, before any function key
                 while (pass < 2)
                 {
@@ -9682,7 +9918,7 @@ namespace flux
                     key = this.st.overloads.keys[i];
                     kl = 0;
                     dotted = false;
-                    while (key[kl]!?) { switch (key[kl] == '.') { case (true) { dotted = true; } default {}; }; kl++; };
+                    while (key[kl] != 0) { switch (key[kl] == '.') { case (true) { dotted = true; } default {}; }; kl++; };
                     j = 0;
                     switch ((pass == 0) != dotted)
                     {
@@ -9722,7 +9958,7 @@ namespace flux
                     case (true) { -> false; }
                     default
                     {
-                        while (s[i]!?)
+                        while (s[i] != 0)
                         {
                             switch (s[i] == '_' & s[i + 1] == '_' & s[i + 2] == 'r' & s[i + 3] == 'e' & s[i + 4] == 't' & s[i + 5] == '_')
                             {
@@ -9775,7 +10011,7 @@ namespace flux
                             case (true) { -> false; }
                             default
                             {
-                                -> (lv.ts.flags `& flag)!?;
+                                -> (lv.ts.flags `& flag) != 0;
                             };
                         };
                     };
@@ -9803,7 +10039,7 @@ namespace flux
                         switch (lv.ts != (TypeSpec*)0)
                         {
                             case (true) {
-                            switch ((lv.ts.flags `& TS_CONST)!?)
+                            switch ((lv.ts.flags `& TS_CONST) != 0)
                             {
                                 case (true) {
                                 this.unsup(target, g"assign to const\0");
@@ -9811,7 +10047,7 @@ namespace flux
                             }
                                 default
                                 {
-                                    switch ((lv.ts.flags `& TS_CONST_POINTER)!?)
+                                    switch ((lv.ts.flags `& TS_CONST_POINTER) != 0)
                                     {
                                         case (true) {
                                         this.unsup(target, g"assign to const pointer\0");
@@ -9893,7 +10129,7 @@ namespace flux
             {
                 int a;
                 int b;
-                while (s[p]!? & s[p] != '"') { p++; };
+                while (s[p] != 0 & s[p] != '"') { p++; };
                 switch (s[p] == 0)
                 {
                     case (true) { -> -1; }
@@ -9901,7 +10137,7 @@ namespace flux
                     {
                         a = p + 1;
                         b = a;
-                        while (s[b]!? & s[b] != '"') { b++; };
+                        while (s[b] != 0 & s[b] != '"') { b++; };
                         switch (s[b] == 0)
                         {
                             case (true) { -> -1; }
@@ -9990,26 +10226,46 @@ namespace flux
             // visit_InlineAsm
             x_asm(Node* n) -> IRValue*
             {
-                byte* body = n.text,
-                      cons = n.text2,
-                      c, rn;
-                byte** cs = (byte**)this.zbuf(16),
-                       vs = (byte**)this.zbuf(16),
-                       ocs = (byte**)this.zbuf(16),
-                       ics = (byte**)this.zbuf(16),
-                       fcs = (byte**)this.zbuf(40),
-                       clob = (byte**)this.zbuf(16);
-                bool first = true;
-                int ncs, no, ni, nclob, nfin, nfc, nro, i, j, p0, p1, len, a, ls, le, ts, te, qs;
-                IRValue* v, res, callee;
-                IRValue** oops = (IRValue**)this.zbuf(16),
-                          iops = (IRValue**)this.zbuf(16),
-                          fin_ops = (IRValue**)this.zbuf(40),
-                          ro_ptr = (IRValue**)this.zbuf(16);
-                IRType* rty, ft;
-                IRType** itys = (IRType**)this.zbuf(40),
-                         otys = (IRType**)this.zbuf(16);
+                byte* body = n.text;
+                byte* cons = n.text2;
+                byte** cs = (byte**)this.zbuf(16);
+                byte** vs = (byte**)this.zbuf(16);
+                byte** ocs = (byte**)this.zbuf(16);
+                byte** ics = (byte**)this.zbuf(16);
+                byte** fcs = (byte**)this.zbuf(40);
+                IRValue** oops = (IRValue**)this.zbuf(16);
+                IRValue** iops = (IRValue**)this.zbuf(16);
+                IRValue** fin_ops = (IRValue**)this.zbuf(40);
+                byte** clob = (byte**)this.zbuf(16);
+                IRType** itys = (IRType**)this.zbuf(40);
+                IRType** otys = (IRType**)this.zbuf(16);
+                IRValue** ro_ptr = (IRValue**)this.zbuf(16);
+                int ncs;
+                int no;
+                int ni;
+                int nclob;
+                int nfin;
+                int nfc;
+                int nro;
+                int i;
+                int j;
+                int p0;
+                int p1;
+                int len;
+                int a;
+                int ls;
+                int le;
+                int ts;
+                int te;
+                int qs;
+                IRValue* v;
+                IRValue* res;
+                IRValue* callee;
+                IRType* rty;
+                IRType* ft;
                 LVar* lv;
+                byte* c;
+                bool first = true;
                 switch (body == (byte*)0)
                 {
                     case (true) { body = g"\0"; }
@@ -10017,10 +10273,11 @@ namespace flux
                 };
                 // asm text: non-empty, non-comment lines joined with newlines
                 this.asmb.clear();
-                while (body[i]!? | i == 0)
+                i = 0;
+                while (body[i] != 0 | i == 0)
                 {
                     ls = i;
-                    while (body[i]!? & body[i] != 10) { i++; };
+                    while (body[i] != 0 & body[i] != 10) { i++; };
                     le = i;
                     ts = ls;
                     te = le;
@@ -10066,7 +10323,7 @@ namespace flux
                 switch (cons != (byte*)0)
                 {
                     case (true) {
-                    while (cons[len]!?)
+                    while (cons[len] != 0)
                     {
                         switch (cons[len] == ':')
                         {
@@ -10210,7 +10467,7 @@ namespace flux
                     switch (c[a + 1] == 0)
                     {
                         case (true) {
-                        rn = (byte*)0;
+                        byte* rn = (byte*)0;
                         switch (c[a] == 'a')
                         {
                             case (true) { rn = g"rax\0"; }
@@ -10380,7 +10637,7 @@ namespace flux
                 // llvmlite prints asm, sideeffect flag, body and constraints verbatim
                 this.sc.clear();
                 this.sc.put_str(g"asm \0");
-                switch ((n.flags `& NF_VOLATILE)!?)
+                switch ((n.flags `& NF_VOLATILE) != 0)
                 {
                     case (true) { this.sc.put_str(g"sideeffect\0"); }
                     default {};
@@ -10418,7 +10675,7 @@ namespace flux
             has_prefix(byte* s, byte* p) -> bool
             {
                 int i;
-                while (p[i]!?)
+                while (p[i] != 0)
                 {
                     switch (s[i] != p[i]) { case (true) { -> false; } default
                         {
@@ -11011,7 +11268,7 @@ namespace flux
                     case (true) { i = i + 2; }
                     default {};
                 };
-                while (t[i]!?)
+                while (t[i] != 0)
                 {
                     c = (int)t[i];
                     switch (c >= '0' & c <= '9')
@@ -11538,7 +11795,7 @@ namespace flux
                                     sl = 0;
                                     switch (sn.text != (byte*)0)
                                     {
-                                        case (true) { while (sn.text[sl]!?) { sl++; }; }
+                                        case (true) { while (sn.text[sl] != 0) { sl++; }; }
                                         default {};
                                     };
                                 }
@@ -11662,6 +11919,7 @@ namespace flux
                 IRBlock* mb;
                 IRBlock* te;
                 IRBlock* fe;
+        bool isstr = false;
                 cv = this.cond_value(n.b);
                 switch (this.bad) { case (true) { -> (IRValue*)0; } default
                     {
@@ -11747,8 +12005,63 @@ namespace flux
                                                                 };
                                                             }
                                                                 default {
-                                                                this.unsup(n, g"if-expression incompatible branch types\0");
-                                                                -> (IRValue*)0;
+                                                                switch (tv.ty.kind == LK.PTR & fv.ty.kind == LK.PTR)
+                                                                {
+                                                                    case (true) {
+                                                                        // Both branches are pointers (string literals of different lengths,
+                                                                        // [5 x i8]* vs [6 x i8]*): decay arrays to element pointers in their own blocks
+                                                                        isstr = tv.ty.elem.kind == LK.ARRAY & fv.ty.elem.kind == LK.ARRAY;
+                                                                        switch (isstr)
+                                                                        {
+                                                                            case (true) {
+                                                                                isstr = tv.ty.elem.elem.kind == LK.INT & fv.ty.elem.elem.kind == LK.INT;
+                                                                            }
+                                                                            default {};
+                                                                        };
+                                                                        switch (isstr)
+                                                                        {
+                                                                            case (true) { isstr = tv.ty.elem.elem.width == 8 & fv.ty.elem.elem.width == 8; }
+                                                                            default {};
+                                                                        };
+                                                                        switch (tv.ty.elem.kind == LK.ARRAY)
+                                                                        {
+                                                                            case (true) {
+                                                                                this.pop_term(te);
+                                                                                this.mod.position(this.fn, te);
+                                                                                tv = this.mod.cast(g"bitcast\0", tv, this.mod.t_ptr(tv.ty.elem.elem), g"ifexpr_decay\0");
+                                                                                this.mod.br(mb);
+                                                                                this.mod.position(this.fn, mb);
+                                                                            }
+                                                                            default {};
+                                                                        };
+                                                                        switch (fv.ty.elem.kind == LK.ARRAY)
+                                                                        {
+                                                                            case (true) {
+                                                                                this.pop_term(fe);
+                                                                                this.mod.position(this.fn, fe);
+                                                                                fv = this.mod.cast(g"bitcast\0", fv, this.mod.t_ptr(fv.ty.elem.elem), g"ifexpr_decay\0");
+                                                                                this.mod.br(mb);
+                                                                                this.mod.position(this.fn, mb);
+                                                                            }
+                                                                            default {};
+                                                                        };
+                                                                        switch (!lt_eq(tv.ty, fv.ty))
+                                                                        {
+                                                                            case (true) {
+                                                                                this.pop_term(fe);
+                                                                                this.mod.position(this.fn, fe);
+                                                                                fv = this.mod.cast(g"bitcast\0", fv, tv.ty, g"ifexpr_cast\0");
+                                                                                this.mod.br(mb);
+                                                                                this.mod.position(this.fn, mb);
+                                                                            }
+                                                                            default {};
+                                                                        };
+                                                                    }
+                                                                    default {
+                                                                        this.unsup(n, g"if-expression incompatible branch types\0");
+                                                                        -> (IRValue*)0;
+                                                                    };
+                                                                };
                                                             };
                                                             };
                                                         }
@@ -11761,6 +12074,11 @@ namespace flux
                                                         pb[0] = te;
                                                         pb[1] = fe;
                                                         phi = this.mod.phi(tv.ty, pv, pb, 2, g"ifexpr_result\0");
+                                                        switch (isstr)
+                                                        {
+                                                            case (true) { phi.flags = phi.flags `| VF_STRING_VALUE; }
+                                                            default {};
+                                                        };
                                                         -> phi;
                                                     };
                                                 };
@@ -11774,6 +12092,205 @@ namespace flux
 
             // visit_NullCoalesce (operands of one type)
             // visit_TernaryAssign: assign the value when the target is zero
+            // RangeAssignment
+            //   fill form  (n.ival == 0): arr[a..b] = {fill};   every element in a..b gets fill
+            //   value form (n.ival == 1): arr[a..b] = <array>;  element k of the value goes to arr[a + k]
+            x_rangeassign(Node* n) -> IRValue*
+            {
+                IRValue* arr = this.visit(n.a);
+                IRValue* sv;
+                IRValue* ev;
+                IRValue* fv;
+                IRValue* tmp;
+                IRValue* kp;
+                IRValue* kv;
+                IRValue* cnt;
+                IRValue* cmp;
+                IRValue* sp;
+                IRValue* dp;
+                IRValue* el;
+                IRValue* di;
+                IRType* et;
+                IRBlock* cb;
+                IRBlock* bb;
+                IRBlock* eb;
+                bool arr2d = false;
+                bool src2d = false;
+                bool valform = n.ival == (i64)1;
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                switch (arr == (IRValue*)0)
+                {
+                    case (true) {
+                        this.unsup(n, g"void range assignment target\0");
+                        -> (IRValue*)0;
+                    }
+                    default {};
+                };
+                switch (this.needs_ptr_load(arr))
+                {
+                    case (true) { arr = this.mod.load(arr, g"ra_ptr_loaded\0"); }
+                    default {};
+                };
+                switch (arr.ty.kind != LK.PTR)
+                {
+                    case (true) {
+                        this.unsup(n, g"range assignment target type\0");
+                        -> (IRValue*)0;
+                    }
+                    default {};
+                };
+                arr2d = arr.ty.elem.kind == LK.ARRAY;
+                et = arr.ty.elem;
+                switch (arr2d)
+                {
+                    case (true) { et = arr.ty.elem.elem; }
+                    default {};
+                };
+                sv = this.visit(n.b);
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                ev = this.visit(n.c);
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                fv = this.visit(n.d);
+                switch (this.bad)
+                {
+                    case (true) { -> (IRValue*)0; }
+                    default {};
+                };
+                switch (sv == (IRValue*)0 | ev == (IRValue*)0 | fv == (IRValue*)0)
+                {
+                    case (true) {
+                        this.unsup(n, g"void range assignment operand\0");
+                        -> (IRValue*)0;
+                    }
+                    default {};
+                };
+                sv = this.idx_i32(sv);
+                ev = this.idx_i32(ev);
+
+                switch (valform)
+                {
+                    case (true) {
+                        // Normalise the source to a pointer that can be indexed.
+                        switch (fv.ty.kind == LK.ARRAY)
+                        {
+                            case (true) {
+                                tmp = this.mod.alloca(fv.ty, g"rav_tmp\0");
+                                this.mod.store(fv, tmp);
+                                fv = tmp;
+                            }
+                            default {};
+                        };
+                        switch (fv.ty.kind != LK.PTR)
+                        {
+                            case (true) {
+                                this.unsup(n, g"range assignment value must be an array\0");
+                                -> (IRValue*)0;
+                            }
+                            default {};
+                        };
+                        src2d = fv.ty.elem.kind == LK.ARRAY;
+                        tmp = (IRValue*)0;
+                        switch (src2d)
+                        {
+                            case (true) {
+                                switch (!lt_eq(fv.ty.elem.elem, et))
+                                {
+                                    case (true) {
+                                        this.unsup(n, g"range assignment element type mismatch\0");
+                                        -> (IRValue*)0;
+                                    }
+                                    default {};
+                                };
+                            }
+                            default {
+                                switch (!lt_eq(fv.ty.elem, et))
+                                {
+                                    case (true) {
+                                        this.unsup(n, g"range assignment element type mismatch\0");
+                                        -> (IRValue*)0;
+                                    }
+                                    default {};
+                                };
+                            };
+                        };
+                    }
+                    default {
+                        // Coerce the fill value to the element type.
+                        switch (!lt_eq(fv.ty, et) & fv.ty.kind == LK.INT & et.kind == LK.INT)
+                        {
+                            case (true) {
+                                switch (fv.ty.width > et.width)
+                                {
+                                    case (true) { fv = this.mod.cast(g"trunc\0", fv, et, g"ra_fill_trunc\0"); }
+                                    default { fv = this.mod.cast(g"zext\0", fv, et, g"ra_fill_ext\0"); };
+                                };
+                            }
+                            default {};
+                        };
+                    };
+                };
+
+                cb = this.mod.append_block(this.fn, g"ra.cond\0");
+                bb = this.mod.append_block(this.fn, g"ra.body\0");
+                eb = this.mod.append_block(this.fn, g"ra.end\0");
+                kp = this.mod.alloca(this.t_i32, g"ra.k\0");
+                this.mod.store(this.ci32(0), kp);
+                cnt = this.mod.binop(g"sub\0", ev, sv, g"ra.span\0");
+                this.mod.br(cb);
+
+                this.mod.position(this.fn, cb);
+                kv = this.mod.load(kp, g"ra.kv\0");
+                cmp = this.mod.icmp(g"sle\0", kv, cnt, g"ra.cmp\0");
+                this.mod.cbr(cmp, bb, eb);
+
+                this.mod.position(this.fn, bb);
+                kv = this.mod.load(kp, g"ra.kb\0");
+                di = this.mod.binop(g"add\0", sv, kv, g"ra.dstidx\0");
+                switch (arr2d)
+                {
+                    case (true) {
+                        this.mod.ia[0] = this.ci32(0);
+                        this.mod.ia[1] = di;
+                        dp = this.mod.gep(arr, this.mod.ia, 2, true, g"ra.dst\0");
+                    }
+                    default { dp = this.mod.gep_ptr(arr, di, true, g"ra.dst\0"); };
+                };
+                switch (valform)
+                {
+                    case (true) {
+                        switch (src2d)
+                        {
+                            case (true) {
+                                this.mod.ia[0] = this.ci32(0);
+                                this.mod.ia[1] = kv;
+                                sp = this.mod.gep(fv, this.mod.ia, 2, true, g"ra.src\0");
+                            }
+                            default { sp = this.mod.gep_ptr(fv, kv, true, g"ra.src\0"); };
+                        };
+                        el = this.mod.load(sp, g"ra.val\0");
+                        this.mod.store(el, dp);
+                    }
+                    default { this.mod.store(fv, dp); };
+                };
+                this.mod.store(this.mod.binop(g"add\0", kv, this.ci32(1), g"ra.next\0"), kp);
+                this.mod.br(cb);
+
+                this.mod.position(this.fn, eb);
+                -> (IRValue*)0;
+            };
+
             x_ternassign(Node* n) -> IRValue*
             {
                 LVar* lv;
@@ -12325,7 +12842,7 @@ namespace flux
                                                 pb[0] = found_b;
                                                 pb[1] = nf_b;
                                                 res = this.mod.phi(this.t_i1, pv, pb, 2, g"in.result\0");
-                                                switch ((n.flags `& NF_NEGATED)!?)
+                                                switch ((n.flags `& NF_NEGATED) != 0)
                                                 {
                                                     case (true) {
                                                     res = this.mod.binop(g"xor\0", res, this.i1_lit(g"-1\0"), g"notin.result\0");
@@ -12473,7 +12990,7 @@ namespace flux
                                                 pb[0] = found_b;
                                                 pb[1] = nf_b;
                                                 res = this.mod.phi(this.t_i1, pv, pb, 2, g"in.result\0");
-                                                switch ((n.flags `& NF_NEGATED)!?)
+                                                switch ((n.flags `& NF_NEGATED) != 0)
                                                 {
                                                     case (true) {
                                                     res = this.mod.binop(g"xor\0", res, this.i1_lit(g"-1\0"), g"notin.result\0");
@@ -13251,7 +13768,87 @@ namespace flux
             };
 
             // visit_BitSlice
+            // A bit slice is a run of raw bits, so its value is always unsigned
             x_bitslice(Node* n) -> IRValue*
+            {
+                IRValue* r = this.x_bitslice_raw(n);
+                switch (r != (IRValue*)0)
+                {
+                    case (true) {
+                        switch (r.ty.kind == LK.INT)
+                        {
+                            case (true) { r.spec = this.lit_spec(DataType.UINT); }
+                            default {};
+                        };
+                    }
+                    default {};
+                };
+                -> r;
+            };
+
+            // Forward slice with constant indices: read every byte the slice touches,
+            // concatenate them MSB-first, shift down and mask. Result has exactly the
+            // slice width.
+            bs_const_slice(Node* n, IRValue* base, i64 sc, i64 ec) -> IRValue*
+            {
+                int sw = (int)(ec - sc + (i64)1);
+                int first = (int)(sc / (i64)8);
+                int last = (int)(ec / (i64)8);
+                int nb = last - first + 1;
+                int j;
+                int shin;
+                int shout;
+                IRType* wty;
+                IRValue* acc;
+                IRValue* bp;
+                IRValue* bv;
+                switch (nb * 8 > 64)
+                {
+                    case (true) {
+                        this.unsup(n, g"bit slice touches more than 8 bytes\0");
+                        -> (IRValue*)0;
+                    }
+                    default {};
+                };
+                wty = this.mod.t_int(nb * 8);
+                acc = this.mod.c_int(wty, (i64)0);
+                j = 0;
+                while (j < nb)
+                {
+                    bp = this.bs_gep(base, this.ci32(first + j), g"bs_mb_ptr\0");
+                    bv = this.mod.load(bp, g"bs_mb_byte\0");
+                    switch (wty.width != 8)
+                    {
+                        case (true) { bv = this.mod.cast(g"zext\0", bv, wty, g"bs_mb_ext\0"); }
+                        default {};
+                    };
+                    shin = (nb - 1 - j) * 8;
+                    switch (shin != 0)
+                    {
+                        case (true) { bv = this.mod.binop(g"shl\0", bv, this.mod.c_int(wty, (i64)shin), g"bs_mb_sh\0"); }
+                        default {};
+                    };
+                    acc = this.mod.binop(g"or\0", acc, bv, g"bs_mb_acc\0");
+                    j++;
+                };
+                shout = 7 - (int)(ec % (i64)8);
+                switch (shout != 0)
+                {
+                    case (true) { acc = this.mod.binop(g"lshr\0", acc, this.mod.c_int(wty, (i64)shout), g"bs_mb_down\0"); }
+                    default {};
+                };
+                switch (sw < wty.width)
+                {
+                    case (true) {
+                        acc = this.mod.binop(g"and\0", acc, this.mod.c_int(wty, ((i64)1 << sw) - (i64)1), g"bs_mb_mask\0");
+                        -> this.mod.cast(g"trunc\0", acc, this.mod.t_int(sw), g"bs_mb_trunc\0");
+                    }
+                    default {};
+                };
+                -> acc;
+            };
+
+            x_bitslice_raw(Node* n) -> IRValue*
             {
                 IRValue* val = this.visit(n.a);
                 IRValue* sv;
@@ -13489,6 +14086,11 @@ namespace flux
                                                                 };
                                                             };
                                                         };
+                                                        switch (has_s & has_e & ec >= sc)
+                                                        {
+                                                            case (true) { -> this.bs_const_slice(n, base, sc, ec); }
+                                                            default {};
+                                                        };
                                                         switch (sv.ty.kind != LK.INT | ev.ty.kind != LK.INT)
                                                         {
                                                             case (true) {
@@ -13533,8 +14135,8 @@ namespace flux
                                                                 shd = this.mod.binop(g"lshr\0", bbyte, shamt, g"bs_shift\0");
                                                                 slen = this.mod.binop(g"sub\0", e8, s8, g"bs_slen\0");
                                                                 swid = this.mod.binop(g"add\0", slen, this.mod.c_int(i8t, (i64)1), g"bs_swidth\0");
-                                                                mraw = this.mod.binop(g"shl\0", this.mod.c_int(i8t, (i64)1), swid, g"bs_mask_raw\0");
-                                                                mask = this.mod.binop(g"sub\0", mraw, this.mod.c_int(i8t, (i64)1), g"bs_mask\0");
+                                                                mraw = this.mod.binop(g"shl\0", this.ci32(1), this.mod.cast(g"zext\0", swid, this.t_i32, g"bs_swidth32\0"), g"bs_mask_raw\0");
+                                                                mask = this.mod.cast(g"trunc\0", this.mod.binop(g"sub\0", mraw, this.ci32(1), g"bs_mask32\0"), i8t, g"bs_mask\0");
                                                                 masked = this.mod.binop(g"and\0", shd, mask, g"bs_result\0");
                                                                 switch (si32.is_const & ei32.is_const & this.parse_int_text(si32.text, @sc) & this.parse_int_text(ei32.text, @ec))
                                                                 {
@@ -14150,7 +14752,7 @@ namespace flux
                 Node* dimn;
                 IRValue* cv;
                 Node* ini = n.a;
-                switch (this.fn == (IRFunc*)0 | (n.flags `& NF_GLOBAL)!?)
+                switch (this.fn == (IRFunc*)0 | (n.flags `& NF_GLOBAL) != 0)
                 {
                     case (true) {
                     this.unsup(n, g"global variable\0");
@@ -14178,7 +14780,7 @@ namespace flux
                                         }
                                             default
                                             {
-                                                switch ((ts.flags `& TS_ARRAY)!? & ts.array_size == (Node*)0 & (ts.array_dims == (NodeVec*)0 | this.dims_empty(ts)) & ini != (Node*)0)
+                                                switch ((ts.flags `& TS_ARRAY) != 0 & ts.array_size == (Node*)0 & (ts.array_dims == (NodeVec*)0 | this.dims_empty(ts)) & ini != (Node*)0)
                                                 {
                                                     case (true) {
                                                     switch (ini.kind == NodeKind.ARRAY_LITERAL & (ini.flags `& NF_IS_STRING) == 0)
@@ -14198,7 +14800,7 @@ namespace flux
                                                 }
                                                     default {};
                                                 };
-                                                switch ((ts.flags `& TS_ARRAY)!? & ts.array_size == (Node*)0 & ts.array_dims == (NodeVec*)0)
+                                                switch ((ts.flags `& TS_ARRAY) != 0 & ts.array_size == (Node*)0 & ts.array_dims == (NodeVec*)0)
                                                 {
                                                     case (true) {
                                                     this.unsup(n, g"array without size\0");
@@ -14216,7 +14818,7 @@ namespace flux
                                                             default
                                                             {
                                                                 dimn = (Node*)0;
-                                                                switch (lt.kind == LK.PTR & (ts.flags `& TS_ARRAY)!?)
+                                                                switch (lt.kind == LK.PTR & (ts.flags `& TS_ARRAY) != 0)
                                                                 {
                                                                     case (true) {
                                                                     switch (ts.array_dims != (NodeVec*)0)
@@ -14375,7 +14977,7 @@ namespace flux
                                                                                         alloca = this.mod.alloca(lt, n.text);
                                                                                         alloca.spec = ts;
                                                                                         lv = this.define_var(n.text, alloca, ts);
-                                                                                        switch ((ts.flags `& TS_VOLATILE)!?)
+                                                                                        switch ((ts.flags `& TS_VOLATILE) != 0)
                                                                                         {
                                                                                             case (true) { lv.vol = true; }
                                                                                             default {};
@@ -14466,7 +15068,7 @@ namespace flux
                         while (i >= 0)
                         {
                             d = (Node*)this.defers.items[i];
-                            switch ((d.flags `& NF_HAS_BODY)!?)
+                            switch ((d.flags `& NF_HAS_BODY) != 0)
                             {
                                 case (true) {
                                 j = node_count(d, 0) - 1;
@@ -14592,7 +15194,7 @@ namespace flux
                                     len = (int)n.b.ival;
                                     switch (len <= 0)
                                     {
-                                        case (true) { while (src[len]!?) { len++; }; }
+                                        case (true) { while (src[len] != 0) { len++; }; }
                                         default {};
                                     };
                                     buf = (byte*)this.zbuf((len + 8) / 8 + 1);
@@ -16036,7 +16638,7 @@ namespace flux
                                 {
                                     case (true) {
                                     r = typespec_clone(lv.ts);
-                                    switch ((r.flags `& TS_ARRAY)!?)
+                                    switch ((r.flags `& TS_ARRAY) != 0)
                                     {
                                         case (true) {
                                         r.flags = r.flags - (r.flags `& TS_ARRAY);
@@ -16067,8 +16669,155 @@ namespace flux
             };
 
             // visit_ForInLoop
+            // for (`x in value): x is a data{1} holding value[`k] for k = 0 .. width - 1
+            // (bit 0 is the MSB). Mirrors _visit_bit_iteration: the bit is read with the
+            // bit-slice operator value[k``k] through hidden variables.
+            s_bititer(Node* n) -> void
+            {
+                IRValue* coll = this.visit(n.a);
+                IRType* ct;
+                IRType* bt;
+                IRValue* cv0;
+                IRValue* sp;
+                IRValue* idxp;
+                IRValue* cur;
+                IRValue* cv;
+                IRValue* bit;
+                IRValue* vp;
+                IRValue* nxt;
+                IRBlock* cond_b;
+                IRBlock* body_b;
+                IRBlock* latch_b;
+                IRBlock* end_b;
+                IRBlock* ob;
+                IRBlock* oc;
+                Node* src;
+                Node* bn;
+                Node* in1;
+                Node* in2;
+                Node* vn;
+                TypeSpec* bs;
+                int total;
+                switch (this.bad)
+                {
+                    case (true) { ->; }
+                    default {};
+                };
+                switch (coll == (IRValue*)0)
+                {
+                    case (true) { -> this.unsup(n, g"void bit iteration operand\0"); }
+                    default {};
+                };
+                ct = coll.ty;
+                bt = ct;
+                switch (ct.kind == LK.PTR)
+                {
+                    case (true) { bt = ct.elem; }
+                    default {};
+                };
+                total = bits_of(bt);
+                switch (total <= 0)
+                {
+                    case (true) { -> this.unsup(n, g"bit iteration operand type\0"); }
+                    default {};
+                };
+                switch (bt.kind == LK.ARRAY & !(bt.elem.kind == LK.INT & bt.elem.width == 8))
+                {
+                    case (true) { -> this.unsup(n, g"bit iteration over a non-byte array\0"); }
+                    default {};
+                };
+                switch (n.a.kind == NodeKind.IDENTIFIER)
+                {
+                    case (true) { src = n.a; }
+                    default
+                    {
+                        cv0 = coll;
+                        switch (ct.kind == LK.PTR & bt.kind != LK.ARRAY)
+                        {
+                            case (true) { cv0 = this.mod.load(coll, g"bititer.copy\0"); }
+                            default {};
+                        };
+                        switch (cv0.ty.kind == LK.PTR)
+                        {
+                            case (true) { sp = cv0; }
+                            default
+                            {
+                                sp = this.mod.alloca_here(cv0.ty, g"bititer.val\0");
+                                this.mod.store(cv0, sp);
+                            };
+                        };
+                        this.define_var(g"__bititer_v\0", sp, coll.spec);
+                        src = node_new(NodeKind.IDENTIFIER, n.line, n.col);
+                        src.text = g"__bititer_v\0";
+                    };
+                };
+                idxp = this.mod.alloca_here(this.t_i32, g"bititer.idx\0");
+                this.mod.store(this.ci32(0), idxp);
+                this.define_var(g"__bititer_i\0", idxp, this.lit_spec(DataType.UINT));
+                cond_b = this.mod.append_block(this.fn, g"bititer.cond\0");
+                body_b = this.mod.append_block(this.fn, g"bititer.body\0");
+                end_b = this.mod.append_block(this.fn, g"bititer.end\0");
+                this.mod.br(cond_b);
+                this.mod.position(this.fn, cond_b);
+                cur = this.mod.load(idxp, g"bititer.k\0");
+                cv = this.mod.icmp(g"ult\0", cur, this.ci32(total), g"loop.cond\0");
+                this.mod.cbr(cv, body_b, end_b);
+                this.mod.position(this.fn, body_b);
+                in1 = node_new(NodeKind.IDENTIFIER, n.line, n.col);
+                in1.text = g"__bititer_i\0";
+                in2 = node_new(NodeKind.IDENTIFIER, n.line, n.col);
+                in2.text = g"__bititer_i\0";
+                bn = node_new(NodeKind.BIT_SLICE, n.line, n.col);
+                bn.a = src;
+                bn.b = in1;
+                bn.c = in2;
+                bit = this.visit(bn);
+                switch (this.bad | bit == (IRValue*)0)
+                {
+                    case (true) { ->; }
+                    default {};
+                };
+                switch (bit.ty.kind == LK.INT & bit.ty.width > 1)
+                {
+                    case (true) { bit = this.mod.cast(g"trunc\0", bit, this.mod.t_int(1), g"bititer.bit\0"); }
+                    default {};
+                };
+                vn = node_child(n, 0, 0);
+                vp = this.mod.alloca_here(this.mod.t_int(1), vn.text);
+                this.mod.store(bit, vp);
+                bs = typespec_new();
+                bs.base_type = DataType.DATA;
+                bs.bit_width = 1;
+                this.keep((void*)bs);
+                this.define_var(vn.text, vp, bs);
+                latch_b = this.mod.append_block(this.fn, g"bititer.latch\0");
+                ob = this.brk;
+                oc = this.cont;
+                this.brk = end_b;
+                this.cont = latch_b;
+                this.visit(n.b);
+                switch (!this.mod.is_terminated())
+                {
+                    case (true) { this.mod.br(latch_b); }
+                    default {};
+                };
+                this.mod.position(this.fn, latch_b);
+                cur = this.mod.load(idxp, g"bititer.k.latch\0");
+                nxt = this.mod.binop(g"add\0", cur, this.ci32(1), g"bititer.next\0");
+                this.mod.store(nxt, idxp);
+                this.mod.br(cond_b);
+                this.brk = ob;
+                this.cont = oc;
+                this.mod.position(this.fn, end_b);
+            };
+
             s_forin(Node* n) -> void
             {
+                switch ((n.flags `& NF_BIT_ITER) != 0)
+                {
+                    case (true) { this.s_bititer(n); ->; }
+                    default {};
+                };
                 IRValue* coll = this.visit(n.a);
                 IRType* ct;
                 IRType* et;
@@ -16132,7 +16881,7 @@ namespace flux
                                             this.mod.ia[1] = cur;
                                             ep = this.mod.gep(coll, this.mod.ia, 2, false, g"elem.ptr\0");
                                             si = this.sinfo_of(et.elem);
-                                            switch ((n.flags `& NF_DESTRUCTURE)!? & si != (SInfo*)0)
+                                            switch ((n.flags `& NF_DESTRUCTURE) != 0 & si != (SInfo*)0)
                                             {
                                                 case (true) {
                                                 k = 0;
@@ -16617,7 +17366,7 @@ namespace flux
                 IRValue* off;
                 IRValue* mpv;
                 LVar* lv;
-                bool post = (n.flags `& NF_POSTFIX)!?;
+                bool post = (n.flags `& NF_POSTFIX) != 0;
                 bool incdec = op == Operator.INCREMENT | op == Operator.DECREMENT;
                 switch (incdec & opd.kind == NodeKind.ADDRESS_OF)
                 {
@@ -17755,7 +18504,7 @@ namespace flux
                         switch (len <= 0)
                         {
                             case (true) {
-                            while (src[len]!?)
+                            while (src[len] != 0)
                             {
                                 len++;
                             };
@@ -19386,7 +20135,7 @@ namespace flux
                                                                 default {};
                                                             };
                                                             // A struct reached through a union overlay is laid out big-endian
-                                                            switch ((obj2.flags `& VF_UNION_STRUCT)!?) { case (true) { idx = si.n - 1 - idx; } default {}; };
+                                                            switch ((obj2.flags `& VF_UNION_STRUCT) != 0) { case (true) { idx = si.n - 1 - idx; } default {}; };
                                                             mp = this.mod.gep_field(obj2, idx, true, (byte*)0);
                                                             pe = mp.ty.elem;
                                                             switch (pe.kind == LK.ARRAY)
@@ -19625,7 +20374,7 @@ namespace flux
                 {
                     case (true) {
                     depth = ts.pointer_depth;
-                    is_arr = (ts.flags `& TS_ARRAY)!?;
+                    is_arr = (ts.flags `& TS_ARRAY) != 0;
                 }
                     default {};
                 };
@@ -20328,7 +21077,7 @@ namespace flux
                                                             default
                                                             {
                                                                 idx = this.idx_i32(idx);
-                                                                switch ((arr.flags `& VF_GLOBAL)!? | (arr.ty.kind == LK.PTR & arr.ty.elem.kind == LK.ARRAY))
+                                                                switch ((arr.flags `& VF_GLOBAL) != 0 | (arr.ty.kind == LK.PTR & arr.ty.elem.kind == LK.ARRAY))
                                                                 {
                                                                     case (true) {
                                                                     this.mod.ia[0] = this.ci32(0);
@@ -20437,7 +21186,7 @@ namespace flux
                                             default
                                             {
                                                 idx = this.idx_i32(idx);
-                                                switch ((arr.flags `& VF_GLOBAL)!? | (arr.ty.kind == LK.PTR & arr.ty.elem.kind == LK.ARRAY))
+                                                switch ((arr.flags `& VF_GLOBAL) != 0 | (arr.ty.kind == LK.PTR & arr.ty.elem.kind == LK.ARRAY))
                                                 {
                                                     case (true) {
                                                     this.mod.ia[0] = this.ci32(0);
@@ -21442,8 +22191,15 @@ namespace flux
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             case (true) { st_remove_using_namespace(this.st, n.text); -> (IRValue*)0; }
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             default
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             {
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                this.unsup(n, node_kind_name(k));
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                -> (IRValue*)0;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                switch (k == NodeKind.RANGE_ASSIGNMENT)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                {
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    case (true) { -> this.x_rangeassign(n); }
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    default
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    {
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        this.unsup(n, node_kind_name(k));
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        -> (IRValue*)0;
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    };
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                };
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             };
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         };
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     };
@@ -21612,7 +22368,7 @@ namespace flux
                 }
                     default
                     {
-                        this.rec_fn = (fd.flags `& NF_RECURSIVE)!?;
+                        this.rec_fn = (fd.flags `& NF_RECURSIVE) != 0;
                         ebk = this.mod.append_block(f, g"entry\0");
                         this.mod.position(f, ebk);
                         this.mod.set_entry(ebk);
@@ -21708,7 +22464,7 @@ namespace flux
                             };
                             i++;
                         };
-                        switch ((fd.flags `& NF_VARIADIC)!?)
+                        switch ((fd.flags `& NF_VARIADIC) != 0)
                         {
                             case (true) {
                             this.va_list_v = this.mod.alloca(this.mod.t_array(this.t_i8p, 1), g"va_list\0");
@@ -21762,15 +22518,18 @@ namespace flux
             run_body(Node* fd, IRFunc* f, byte* ns, byte* obj) -> void
             {
                 int i;
+                Node* pfd;
                 byte* prev = this.cur_obj;
-                Node* sfd;
                 this.set_ns(ns);
                 switch (obj != (byte*)0)
                 {
                     case (true) { this.cur_obj = this.mod.own(obj); }
                     default {};
                 };
+                pfd = this.cur_fd;
+                this.cur_fd = fd;
                 this.gen_body(fd, f, obj);
+                this.cur_fd = pfd;
                 this.cur_obj = prev;
                 switch (this.bad)
                 {
@@ -21788,7 +22547,7 @@ namespace flux
                     i = 0;
                     while (i < this.tf_pend.len)
                     {
-                        sfd = (Node*)this.tf_pend.items[i];
+                        Node* sfd = (Node*)this.tf_pend.items[i];
                         node_child(sfd, 0, 0).ts = (TypeSpec*)this.tf_pend.items[i + 2];
                         this.run_body(sfd, (IRFunc*)this.tf_pend.items[i + 1], g"\0", (byte*)0);
                         i = i + 3;
@@ -21825,12 +22584,12 @@ namespace flux
                                 case (true) { continue; }
                                 default
                                 {
-                                    switch ((m.flags `& NF_TEMPLATE)!?)
+                                    switch ((m.flags `& NF_TEMPLATE) != 0)
                                     {
                                         case (true) { continue; }
                                         default
                                         {
-                                            switch ((m.flags `& NF_PROTOTYPE)!?)
+                                            switch ((m.flags `& NF_PROTOTYPE) != 0)
                                             {
                                                 case (true) { continue; }
                                                 default
@@ -21923,12 +22682,12 @@ namespace flux
                             case (true) { ->; }
                             default
                             {
-                                switch ((n.flags `& NF_TEMPLATE)!?)
+                                switch ((n.flags `& NF_TEMPLATE) != 0)
                                 {
                                     case (true) { ->; }
                                     default
                                     {
-                                        switch ((n.flags `& NF_PROTOTYPE)!?)
+                                        switch ((n.flags `& NF_PROTOTYPE) != 0)
                                         {
                                             case (true) { ->; }
                                             default
@@ -21944,7 +22703,7 @@ namespace flux
                                                             default
                                                             {
                                                                 base = mangle_namespace_name(ns, n.text);
-                                                                switch ((n.flags `& NF_NO_MANGLE)!?)
+                                                                switch ((n.flags `& NF_NO_MANGLE) != 0)
                                                                 {
                                                                     case (true) { mn = ts_dup(base); }
                                                                     default { mn = this.mangled_name(base, n); };
@@ -22111,7 +22870,7 @@ namespace flux
                     switch (s.kind == NodeKind.FUNCTION_DEF)
                     {
                         case (true) {
-                        switch ((s.flags `& NF_INSTANCE)!?) { case (true) { has_inst = true; } default {}; };
+                        switch ((s.flags `& NF_INSTANCE) != 0) { case (true) { has_inst = true; } default {}; };
                     }
                         default {};
                     };
@@ -22195,7 +22954,7 @@ namespace flux
                                         switch (k == NodeKind.FUNCTION_DEF)
                                         {
                                             case (true) {
-                                            switch ((s.flags `& NF_INSTANCE)!?) { case (true) { -> false; } default {}; };
+                                            switch ((s.flags `& NF_INSTANCE) != 0) { case (true) { -> false; } default {}; };
                                         }
                                             default {};
                                         };
@@ -22241,11 +23000,8 @@ namespace flux
                             eb = this.mod.append_block(m0, g"entry\0");
                             this.mod.position(m0, eb);
                             this.mod.set_entry(eb);
-                            this.mod.ia
-                            {
-                                [0] = this.mod.c_int(this.t_i32, (i64)0);
-                                [1] = this.mod.c_null(m2.ftype.items[1]);
-                            };
+                            this.mod.ia[0] = this.mod.c_int(this.t_i32, (i64)0);
+                            this.mod.ia[1] = this.mod.c_null(m2.ftype.items[1]);
                             this.mod.ret(this.mod.call(m2.self, this.mod.ia, 2, (byte*)0));
                             m0.is_decl = false;
                         }

@@ -30,9 +30,10 @@ module B
 # build
 {
 	#[entrypoint] = this,
-	#[name] = "prog_b",
+	#[name] = "prog_b"
+	///#[requires] = {A},
 	#[override for A] =
 	{
 		#[borrow_check] = false
-	}
+	}///
 };

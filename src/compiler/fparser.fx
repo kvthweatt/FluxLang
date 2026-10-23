@@ -254,32 +254,32 @@ namespace flux
                 print(datatype_text(t.base_type));
             };
             };
-            switch ((t.flags `& TS_SIGNED)!?)
+            switch ((t.flags `& TS_SIGNED) != 0)
             {
                 case (true) { print(g",signed\0"); }
                 default {};
             };
-            switch ((t.flags `& TS_CONST)!?)
+            switch ((t.flags `& TS_CONST) != 0)
             {
                 case (true) { print(g",const\0"); }
                 default {};
             };
-            switch ((t.flags `& TS_VOLATILE)!?)
+            switch ((t.flags `& TS_VOLATILE) != 0)
             {
                 case (true) { print(g",volatile\0"); }
                 default {};
             };
-            switch ((t.flags `& TS_TIED)!?)
+            switch ((t.flags `& TS_TIED) != 0)
             {
                 case (true) { print(g",tied\0"); }
                 default {};
             };
-            switch ((t.flags `& TS_LOCAL)!?)
+            switch ((t.flags `& TS_LOCAL) != 0)
             {
                 case (true) { print(g",local\0"); }
                 default {};
             };
-            switch ((t.flags `& TS_NO_FUNCTIONS)!?)
+            switch ((t.flags `& TS_NO_FUNCTIONS) != 0)
             {
                 case (true) { print(g",nofunc\0"); }
                 default {};
@@ -304,12 +304,12 @@ namespace flux
                 case (true) { print(g",sc\0"); print(t.storage_class); }
                 default {};
             };
-            switch ((t.flags `& TS_POINTER)!?)
+            switch ((t.flags `& TS_POINTER) != 0)
             {
                 case (true) { print(g",ptr\0"); print(t.pointer_depth); }
                 default {};
             };
-            switch ((t.flags `& TS_ARRAY)!?)
+            switch ((t.flags `& TS_ARRAY) != 0)
             {
                 case (true) {
                 print(g",arr\0");
@@ -445,7 +445,7 @@ namespace flux
                     }
                         default {};
                     };
-                    switch ((n.flags `& (NF_POSTFIX `| NF_NEGATED))!?)
+                    switch ((n.flags `& (NF_POSTFIX `| NF_NEGATED)) != 0)
                     {
                         case (true) {
                         print(g" flags=\0");
@@ -1248,7 +1248,7 @@ namespace flux
                         println(g"[BootstrapParser] Stub summary:\0");
                         while (f < Feat.COUNT)
                         {
-                            switch (this.feat_hits[f]!?)
+                            switch (this.feat_hits[f] != 0)
                             {
                                 case (true) {
                                 print(g"  \0");
@@ -1300,7 +1300,7 @@ namespace flux
                         this.advance();
                         if (tdepth <= 0) { break; };
                     };
-                    if (tdepth!?)
+                    if (tdepth != 0)
                     {
                         this.reset(m);
                         return false;
@@ -3330,12 +3330,12 @@ namespace flux
                                                 }
                                                     default {};
                                                 };
-                                                switch ((t.flags `& TS_CONST)!?)
+                                                switch ((t.flags `& TS_CONST) != 0)
                                                 {
                                                     case (true) { r.flags = r.flags `| TS_CONST; }
                                                     default {};
                                                 };
-                                                switch ((t.flags `& TS_VOLATILE)!?)
+                                                switch ((t.flags `& TS_VOLATILE) != 0)
                                                 {
                                                     case (true) { r.flags = r.flags `| TS_VOLATILE; }
                                                     default {};
@@ -3735,7 +3735,7 @@ namespace flux
                 }
                     default
                     {
-                        switch (te.kind!?)
+                        switch (te.kind != 0)
                         {
                             case (true) {
                             this.error(this.cat2(this.cat2(g"Unknown template function '\0", fname), g"'\0"));
@@ -3829,7 +3829,7 @@ namespace flux
                                                                     default
                                                                     {
                                                                         concrete.text = fname;
-                                                                        switch ((concrete.flags `& NF_NO_MANGLE)!?)
+                                                                        switch ((concrete.flags `& NF_NO_MANGLE) != 0)
                                                                         {
                                                                             case (true) { concrete.flags = concrete.flags - NF_NO_MANGLE; }
                                                                             default {};
@@ -3852,6 +3852,37 @@ namespace flux
                 };
             };
 
+            // Operand type for template operator instantiation (fparser._infer_type_from_expr):
+            // a cast has its target type, @x has the type of x with one more pointer level
+            infer_operand_type(Node* e) -> TypeSpec*
+            {
+                TypeSpec* inner;
+                TypeSpec* r;
+                switch (e.kind == NodeKind.CAST_EXPRESSION)
+                {
+                    case (true) { -> e.ts; }
+                    default {};
+                };
+                switch (e.kind == NodeKind.ADDRESS_OF)
+                {
+                    case (true) {
+                        inner = this.infer_operand_type(e.a);
+                        switch (inner == (TypeSpec*)0)
+                        {
+                            case (true) { -> (TypeSpec*)0; }
+                            default {};
+                        };
+                        r = typespec_copy(inner);
+                        r.flags = r.flags `| TS_POINTER;
+                        r.pointer_depth = inner.pointer_depth + 1;
+                        pv_push(this.tmp_ts, (void*)r);
+                        -> r;
+                    }
+                    default {};
+                };
+                -> this.infer_arg_type(e);
+            };
+
             // Called after every binary expression: instantiates a template operator registered for
             // the operator symbol when both operand types are known (fparser._try_instantiate_template_op)
             try_template_op(Node* n) -> void
@@ -3870,13 +3901,13 @@ namespace flux
                             case (true) { ->; }
                             default
                             {
-                                lts = this.infer_arg_type(n.a);
+                                lts = this.infer_operand_type(n.a);
                                 switch (lts == (TypeSpec*)0)
                                 {
                                     case (true) { ->; }
                                     default
                                     {
-                                        rts = this.infer_arg_type(n.b);
+                                        rts = this.infer_operand_type(n.b);
                                         switch (rts == (TypeSpec*)0)
                                         {
                                             case (true) { ->; }
@@ -3938,7 +3969,7 @@ namespace flux
                                     case (true) { r.pointer_depth = 0; }
                                     default {};
                                 };
-                                switch (r.pointer_depth == 0 & (r.flags `& TS_POINTER)!?)
+                                switch (r.pointer_depth == 0 & (r.flags `& TS_POINTER) != 0)
                                 {
                                     case (true) { r.flags = r.flags - TS_POINTER; }
                                     default {};
@@ -4182,7 +4213,7 @@ namespace flux
                                                 }
                                                     default
                                                     {
-                                                        switch ((concrete.flags `& NF_NO_MANGLE)!?)
+                                                        switch ((concrete.flags `& NF_NO_MANGLE) != 0)
                                                         {
                                                             case (true) { concrete.flags = concrete.flags - NF_NO_MANGLE; }
                                                             default {};
@@ -5240,7 +5271,7 @@ namespace flux
                                                 };
                                             };
                                         };
-                                        switch ((rt.flags `& TS_TIED)!?)
+                                        switch ((rt.flags `& TS_TIED) != 0)
                                         {
                                             case (true) { tied = true; }
                                             default {};
@@ -5438,7 +5469,7 @@ namespace flux
                             case (true) { -> expr; }
                             default
                             {
-                                switch (te.kind!?)
+                                switch (te.kind != 0)
                                 {
                                     case (true) { -> expr; }
                                     default
@@ -6811,7 +6842,7 @@ namespace flux
                         switch (tt == TokenType.CHAR)
                         {
                             case (true) {
-                            switch (this.toks[this.pos].numeric_char!?)
+                            switch (this.toks[this.pos].numeric_char != 0)
                             {
                                 case (true) {
                                 this.sb.put_n(v, n);
@@ -7208,7 +7239,7 @@ namespace flux
                                         // stubs hit while parsing the spliced source count toward this parser
                                         while (f < Feat.COUNT)
                                         {
-                                            switch (sp.feat_hits[f]!?)
+                                            switch (sp.feat_hits[f] != 0)
                                             {
                                                 case (true) {
                                                 switch (this.feat_hits[f] == 0)
@@ -7456,7 +7487,7 @@ namespace flux
                         };
                     };
                 };
-                while (s[i]!?)
+                while (s[i] != 0)
                 {
                     c = (int)s[i];
                     i++;
@@ -7719,7 +7750,7 @@ namespace flux
                 bool rbit;
                 u64 mant = (u64)0;
                 double v;
-                while (s[i]!?)
+                while (s[i] != 0)
                 {
                     c = (int)s[i];
                     switch (c >= '0' & c <= '9')
@@ -8293,7 +8324,7 @@ namespace flux
                     case (true) { -> t.custom_typename; }
                     default
                     {
-                        switch ((t.flags `& TS_POINTER)!?)
+                        switch ((t.flags `& TS_POINTER) != 0)
                         {
                             case (true) { this.sb.put_str(g"ptr_\0"); }
                             default {};
@@ -8302,7 +8333,7 @@ namespace flux
                         {
                             case (true) {
                             this.sb.put_str(g"data_\0");
-                            switch ((t.flags `& TS_POINTER) == 0 & (t.flags `& TS_SIGNED)!?)
+                            switch ((t.flags `& TS_POINTER) == 0 & (t.flags `& TS_SIGNED) != 0)
                             {
                                 case (true) { this.sb.put_str(g"i\0"); }
                                 default { this.sb.put_str(g"u\0"); };
@@ -9012,7 +9043,7 @@ namespace flux
                                                         switch (rs.base_type != DataType.DICT & rs.base_type != DataType.FUNC_PTR)
                                                         {
                                                             case (true) {
-                                                            bool alias_arr = (rs.flags `& TS_ARRAY)!?;
+                                                            bool alias_arr = (rs.flags `& TS_ARRAY) != 0;
                                                             int keep_sc = t.storage_class;
                                                             int keep_flags = t.flags;
                                                             this.copy_scalar_type(t, rs);
@@ -9025,7 +9056,7 @@ namespace flux
                                                                 {
                                                                     case (true) { t.flags = t.flags `| TS_LOCAL; }
                                                                     default {
-                                                                        switch ((t.flags `& TS_LOCAL)!?)
+                                                                        switch ((t.flags `& TS_LOCAL) != 0)
                                                                         {
                                                                             case (true) { t.flags = t.flags - TS_LOCAL; }
                                                                             default {};
@@ -9042,7 +9073,7 @@ namespace flux
                                                                 {
                                                                     case (true) { t.flags = t.flags `| TS_SIGNED; }
                                                                     default {
-                                                                        switch ((t.flags `& TS_SIGNED)!?)
+                                                                        switch ((t.flags `& TS_SIGNED) != 0)
                                                                         {
                                                                             case (true) { t.flags = t.flags - TS_SIGNED; }
                                                                             default {};
@@ -9467,7 +9498,7 @@ namespace flux
             bin_match(int lv) -> int
             {
                 int c = this.cur();
-                switch (lv == 9 & this.cop_mask!?)
+                switch (lv == 9 & this.cop_mask != 0)
                 {
                     case (true) {
                     switch (this.cop_right_here())
@@ -10320,6 +10351,7 @@ namespace flux
                 Node* end;
                 Node* holder;
                 Node* fill;
+                bool rvalform = false;
                 byte* callee;
                 byte* member;
                 int pop;
@@ -10447,10 +10479,11 @@ namespace flux
                                                     {
                                                         case (true) {
                                                         this.advance();
-                                                        switch (!this.consume(TokenType.LEFT_BRACE))
+                                                        rvalform = !this.expect(TokenType.LEFT_BRACE);
+                                                        switch (rvalform)
                                                         {
-                                                            case (true) { -> expr; }
-                                                            default {};
+                                                            case (true) {}
+                                                            default { this.advance(); };
                                                         };
                                                         fill = this.expression();
                                                         switch (this.failed)
@@ -10458,10 +10491,17 @@ namespace flux
                                                             case (true) { -> expr; }
                                                             default {};
                                                         };
-                                                        switch (!this.consume(TokenType.RIGHT_BRACE))
+                                                        switch (rvalform)
                                                         {
-                                                            case (true) { -> expr; }
-                                                            default {};
+                                                            case (true) {}
+                                                            default
+                                                            {
+                                                                switch (!this.consume(TokenType.RIGHT_BRACE))
+                                                                {
+                                                                    case (true) { -> expr; }
+                                                                    default {};
+                                                                };
+                                                            };
                                                         };
                                                         n = this.mk(NodeKind.RANGE_ASSIGNMENT, line, col);
                                                         switch (this.failed)
@@ -10473,6 +10513,11 @@ namespace flux
                                                         n.b = idx.a;
                                                         n.c = idx.b;
                                                         n.d = fill;
+                                                        switch (rvalform)
+                                                        {
+                                                            case (true) { n.ival = (i64)1; }
+                                                            default {};
+                                                        };
                                                         idx.a = (Node*)0;
                                                         idx.b = (Node*)0;
                                                         node_free(idx);
@@ -11691,7 +11736,7 @@ namespace flux
                                                                             };
                                                                             n.op = DataType.CHAR;
                                                                             n.text = this.cur_value();
-                                                                            switch (this.toks[this.pos].numeric_char!?)
+                                                                            switch (this.toks[this.pos].numeric_char != 0)
                                                                             {
                                                                                 case (true) { n.ival = this.parse_int(this.cur_value(), @ok); }
                                                                                 default {
@@ -12452,7 +12497,7 @@ namespace flux
                 {
                     case (true) {
                     st_define(this.st, name, SymbolKind.TYPE, ts, (Node*)0);
-                    switch ((ts.flags `& TS_NO_FUNCTIONS)!?)
+                    switch ((ts.flags `& TS_NO_FUNCTIONS) != 0)
                     {
                         case (true) { st_mark_nofunc(this.st, name); }
                         default {};
@@ -14336,7 +14381,7 @@ namespace flux
 
             // True when the tokens after 'for (' start a for-in header.
             // Sets destructure to 1 for the 'auto' forms.
-            is_for_in(bool* destructure) -> bool
+            is_for_in_plain(bool* destructure) -> bool
             {
                 int m = this.mark();
                 bool r = false;
@@ -14428,6 +14473,36 @@ namespace flux
                 -> r;
             };
 
+            // Recognizes 'for (' followed by '`' identifier 'in' (bit iteration),
+            // otherwise defers to is_for_in_plain.
+            is_for_in(bool* destructure, bool* bit) -> bool
+            {
+                *bit = false;
+                bool r = false;
+                switch (this.expect(TokenType.BACKTICK))
+                {
+                    case (true) {
+                        int m = this.mark();
+                        this.advance();
+                        switch (this.expect(TokenType.IDENTIFIER))
+                        {
+                            case (true) {
+                                this.advance();
+                                switch (this.expect(TokenType.IN))
+                                {
+                                    case (true) { r = true; *bit = true; *destructure = false; }
+                                    default {};
+                                };
+                            }
+                            default {};
+                        };
+                        this.reset(m);
+                    }
+                    default { r = this.is_for_in_plain(destructure); };
+                };
+                -> r;
+            };
+
             // Pushes an IDENTIFIER node for the current identifier token onto n.l0
             loop_variable(Node* n) -> void
             {
@@ -14471,8 +14546,9 @@ namespace flux
                     default
                     {
                         bool destructure;
+                        bool bititer;
                         Node* n;
-                        switch (this.is_for_in(@destructure))
+                        switch (this.is_for_in(@destructure, @bititer))
                         {
                             case (true) {
                             n = this.mk(NodeKind.FOR_IN_LOOP, line, col);
@@ -14481,6 +14557,18 @@ namespace flux
                                 case (true) { -> n; }
                                 default {};
                             };
+                            switch (bititer)
+                            {
+                                case (true) {
+                                n.flags = NF_BIT_ITER;
+                                this.consume(TokenType.BACKTICK);
+                                switch (!this.failed)
+                                {
+                                    case (true) { this.loop_variable(n); }
+                                    default {};
+                                };
+                            }
+                                default {
                             switch (destructure)
                             {
                                 case (true) {
@@ -14520,6 +14608,8 @@ namespace flux
                                     this.advance();
                                     this.loop_variable(n);
                                 };
+                            };
+                            };
                             };
                             };
                             switch (!this.failed)
@@ -15585,15 +15675,15 @@ namespace flux
                                                             default
                                                             {
                                                                 byte* cons = g"\0";
-                                                                switch (outs[0]!? | ins[0]!? | clob[0]!?)
+                                                                switch (outs[0] != 0 | ins[0] != 0 | clob[0] != 0)
                                                                 {
                                                                     case (true) {
                                                                     cons = outs;
-                                                                    switch (ins[0]!? | clob[0]!?)
+                                                                    switch (ins[0] != 0 | clob[0] != 0)
                                                                     {
                                                                         case (true) {
                                                                         cons = this.cat2(this.cat2(cons, g":\0"), ins);
-                                                                        switch (clob[0]!?)
+                                                                        switch (clob[0] != 0)
                                                                         {
                                                                             case (true) { cons = this.cat2(this.cat2(cons, g":\0"), clob); }
                                                                             default {};
@@ -17623,7 +17713,7 @@ namespace flux
 
                                                                         this.strip_variadic(f);
 
-                                                                        switch ((f.flags `& NF_RECURSIVE)!?)
+                                                                        switch ((f.flags `& NF_RECURSIVE) != 0)
                                                                         {
                                                                             case (true) {
                                                                             bool void_form = this.param_count(f) == 0 & f.ts.base_type == DataType.VOID;
@@ -17777,7 +17867,7 @@ namespace flux
                                                                                 }
                                                                                     default
                                                                                     {
-                                                                                        switch (this.in_trait!? & !this.expect(TokenType.LEFT_BRACE))
+                                                                                        switch (this.in_trait != 0 & !this.expect(TokenType.LEFT_BRACE))
                                                                                         {
                                                                                             case (true) {
                                                                                             this.fail_expected(TokenType.SEMICOLON);
@@ -17886,7 +17976,7 @@ namespace flux
                     case (true) { ->; }
                     default
                     {
-                        bool is_proto = (f.flags `& NF_PROTOTYPE)!?;
+                        bool is_proto = (f.flags `& NF_PROTOTYPE) != 0;
                         switch (want_proto & !is_proto)
                         {
                             case (true) {
@@ -18918,7 +19008,7 @@ namespace flux
                     };
                 };
                 };
-                switch ((x.flags `& NF_STUB)!?)
+                switch ((x.flags `& NF_STUB) != 0)
                 {
                     case (true) { ->; }
                     default
@@ -20127,7 +20217,7 @@ namespace flux
                     f = methods.items[i];
                     i++;
                     if (f.kind != NodeKind.FUNCTION_DEF | !cstr_eq(f.text, g"__init\0")) { continue; };
-                    if ((f.flags `& NF_PROTOTYPE)!? | f.a == (Node*)0) { continue; };
+                    if ((f.flags `& NF_PROTOTYPE) != 0 | f.a == (Node*)0) { continue; };
                     body = f.a.l0;
                     if (body == (NodeVec*)0) { continue; };
                     fresh = pv_new();
@@ -20554,7 +20644,7 @@ namespace flux
                         }
                             default
                             {
-                                switch ((o.flags `& NF_PROTOTYPE)!?)
+                                switch ((o.flags `& NF_PROTOTYPE) != 0)
                                 {
                                     case (true) {
                                     te_free(te);
@@ -20904,7 +20994,7 @@ namespace flux
                                         {
                                             m = node_child(ob, 0, i);
                                             i++;
-                                            switch ((m.flags `& NF_PRIVATE)!?)
+                                            switch ((m.flags `& NF_PRIVATE) != 0)
                                             {
                                                 case (true) {
                                                 switch (m.text2 != (byte*)0)
@@ -20980,7 +21070,7 @@ namespace flux
                                                 case (true) { continue; }
                                                 default
                                                 {
-                                                    switch ((m.flags `& NF_PRIVATE)!?)
+                                                    switch ((m.flags `& NF_PRIVATE) != 0)
                                                     {
                                                         case (true) {
                                                         switch (m.text3 != (byte*)0)
@@ -21313,7 +21403,7 @@ namespace flux
                             case (true) { continue; }
                             default
                             {
-                                switch ((m.flags `& NF_OVERRIDE)!? | this.method_has_body(m))
+                                switch ((m.flags `& NF_OVERRIDE) != 0 | this.method_has_body(m))
                                 {
                                     case (true) { pv_push(okeys, (void*)this.sig_key(m, false)); }
                                     default {};
@@ -21336,7 +21426,7 @@ namespace flux
                                 while (j < cand.len)
                                 {
                                     x = (Node*)cand.items[j];
-                                    switch ((x.flags `& NF_NO_OVERRIDE)!?)
+                                    switch ((x.flags `& NF_NO_OVERRIDE) != 0)
                                     {
                                         case (true) {
                                         this.error(this.cat2(this.cat2(this.cat2(this.cat2(this.cat2(g"Override error: method '\0", x.text), g"(\0"), this.sig_key(x, true)), g")' is marked no-override in a parent of '\0"), this.cat2(child, g"'\0")));
@@ -21425,7 +21515,7 @@ namespace flux
                         }
                             default
                             {
-                                switch ((m.flags `& NF_OVERRIDE)!? | this.method_has_body(m) | this.inh_key_has(fkeys, this.sig_key(m, false)) < 0)
+                                switch ((m.flags `& NF_OVERRIDE) != 0 | this.method_has_body(m) | this.inh_key_has(fkeys, this.sig_key(m, false)) < 0)
                                 {
                                     case (true) {
                                     node_push(o, 1, m);
@@ -22118,7 +22208,7 @@ namespace flux
                         default {
                         sym = this.tok_symbol(s.t[i]);
                         j = 0;
-                        while (sym[j]!?)
+                        while (sym[j] != 0)
                         {
                             switch (j > 0)
                             {
@@ -25330,7 +25420,7 @@ namespace flux
                 while (i < funcs.len)
                 {
                     f = (Node*)funcs.items[i];
-                    switch (cstr_eq(f.text, name) & (f.flags `& NF_ASYNC)!?)
+                    switch (cstr_eq(f.text, name) & (f.flags `& NF_ASYNC) != 0)
                     {
                         case (true) { -> true; }
                         default
@@ -25504,7 +25594,7 @@ namespace flux
                                                                         }
                                                                         default
                                                                         {
-                                                                            switch (t.ival!?)
+                                                                            switch (t.ival != 0)
                                                                             {
                                                                                 case (true) {
                                                                                     ok = false;

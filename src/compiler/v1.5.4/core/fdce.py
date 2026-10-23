@@ -490,6 +490,42 @@ def _compute_live_functions(program, ns_func_index: Dict[str, List[Any]],
             continue
         seed |= _collect_refs(stmt)
 
+    # Step 1c: Operator functions. A use of an overloaded built-in operator
+    # (a + b on two structs, a pointer overload, an alias overload) is a BinaryOp
+    # or UnaryOp node, not a call, and codegen picks the overload by operand types
+    # at IR emit time, so DCE cannot see the reference. Keep every operator function
+    # from the program itself and from namespaces that are in use.
+    from fast import NamespaceDef as _OpNs, NamespaceDefStatement as _OpNsStmt
+    for stmt in program.statements:
+        if isinstance(stmt, _FunctionDef) and _is_str_name(stmt) and stmt.name.startswith('operator__'):
+            for _v in _all_suffixes(stmt.name):
+                if _v:
+                    seed.add(_v)
+            seed.add(stmt.name + '__' + str(len(getattr(stmt, 'parameters', []) or [])))
+
+    def _seed_ns_operators(ns: Any, full_prefix: str) -> None:
+        ns_name = getattr(ns, 'name', '') or ''
+        cur_prefix = (full_prefix + '__' + ns_name) if full_prefix else ns_name
+        if _ns_is_used(cur_prefix, used_ns_prefixes):
+            for func in getattr(ns, 'functions', []):
+                if (isinstance(func, _FunctionDef) and _is_str_name(func)
+                        and func.name.startswith('operator__')):
+                    full_mangled = (cur_prefix + '__' + func.name) if cur_prefix else func.name
+                    for _v in _all_suffixes(full_mangled):
+                        if _v:
+                            seed.add(_v)
+                    seed.add(func.name + '__' + str(len(getattr(func, 'parameters', []) or [])))
+        for nested in getattr(ns, 'nested_namespaces', []):
+            _seed_ns_operators(nested, cur_prefix)
+
+    for stmt in program.statements:
+        if isinstance(stmt, _OpNs):
+            _seed_ns_operators(stmt, '')
+        elif isinstance(stmt, _OpNsStmt):
+            _ns = getattr(stmt, 'namespace_def', None)
+            if _ns is not None:
+                _seed_ns_operators(_ns, '')
+
     # Step 2: Seed named entrypoint top-level functions and build an index of
     # all top-level FunctionDefs so they can be walked in the fixed-point when
     # their name is live. Top-level functions (no-mangle wrappers, CRT shims,

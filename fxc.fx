@@ -1791,6 +1791,11 @@ fxc_main(int argc, byte** argv) -> int
             ExprTyper ty(st);
             defer ty.__exit();
             ty.ck = @ck;
+            switch (munit != (ModUnit*)0)
+            {
+                case (true) { ty.unbuilt = munit.unbuilt; }
+                default {};
+            };
             ty.null_term = cfg_int("null_terminate_strings\0", 0) == 1;
             ty.walk_program(prog);
             ck.print_diags(path);

@@ -8,6 +8,14 @@ def main() -> int
 
 	b[`7] = 1;
 
-	print("Success!") if (b == 1);
+	println("Success!") if (b == 1);
+
+    int i = 420691337;
+
+    for (`x in i)  // "for bit x in i"
+    {
+        print((int)x);  // x is a data{1} type
+    };
+
 	-> b[`0];
 };

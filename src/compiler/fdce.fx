@@ -53,10 +53,10 @@ namespace flux
                 case (true) { -> true; }
                 default
                 {
-                    while (hay[i]!?)
+                    while (hay[i] != 0)
                     {
                         j = 0;
-                        while (needle[j]!?)
+                        while (needle[j] != 0)
                         {
                             switch (hay[i + j] != needle[j])
                             {
@@ -86,10 +86,10 @@ namespace flux
         {
             int i = 0;
             int j;
-            while (hay[i]!?)
+            while (hay[i] != 0)
             {
                 j = 0;
-                while (needle[j]!?)
+                while (needle[j] != 0)
                 {
                     switch (hay[i + j] != needle[j])
                     {
@@ -214,6 +214,7 @@ namespace flux
             Buf kb2;
             byte* entry;
             PtrVec* extra_roots;    // byte* names a later pass references (mangled with __)
+            PtrVec* usedns;         // byte* mangled paths of the top level using statements
             int eliminated;
 
             __init(byte* entry_name) -> this
@@ -233,6 +234,7 @@ namespace flux
                 this.kb2.__init();
                 this.entry = entry_name;
                 this.extra_roots = (PtrVec*)0;
+                this.usedns = pv_new();
                 this.eliminated = 0;
                 p = dce_prim_name(0);
                 while (p != (byte*)0)
@@ -283,7 +285,7 @@ namespace flux
             add_suffixes(NameMap* refs, byte* s) -> void
             {
                 int i = 0;
-                switch (s[0]!?)
+                switch (s[0] != 0)
                 {
                     case (true) {
                     switch (!this.is_prim(s))
@@ -294,7 +296,7 @@ namespace flux
                 }
                     default {};
                 };
-                while (s[i]!?)
+                while (s[i] != 0)
                 {
                     switch (s[i] == '_')
                     {
@@ -303,7 +305,7 @@ namespace flux
                         {
                             case (true) {
                             i = i + 2;
-                            switch (s[i]!?)
+                            switch (s[i] != 0)
                             {
                                 case (true) {
                                 switch (!this.is_prim(s + i))
@@ -330,7 +332,7 @@ namespace flux
             any_suffix_live(byte* s) -> bool
             {
                 int i = 0;
-                switch (s[0]!?)
+                switch (s[0] != 0)
                 {
                     case (true) {
                     switch (nm_has(this.live, s))
@@ -341,7 +343,7 @@ namespace flux
                 }
                     default {};
                 };
-                while (s[i]!?)
+                while (s[i] != 0)
                 {
                     switch (s[i] == '_')
                     {
@@ -350,7 +352,7 @@ namespace flux
                         {
                             case (true) {
                             i = i + 2;
-                            switch (s[i]!?)
+                            switch (s[i] != 0)
                             {
                                 case (true) {
                                 switch (nm_has(this.live, s + i))
@@ -402,7 +404,7 @@ namespace flux
                                         defer nb.__exit();
                                         defer db.__exit();
                                         // "::" becomes "__"
-                                        while (name[i]!?)
+                                        while (name[i] != 0)
                                         {
                                             switch (name[i] == ':')
                                             {
@@ -424,7 +426,7 @@ namespace flux
                                         };
                                         // TypeName.method is also added in its "__" spelling
                                         i = 0;
-                                        while (nb.mem[i]!?)
+                                        while (nb.mem[i] != 0)
                                         {
                                             switch (nb.mem[i] == '.')
                                             {
@@ -473,7 +475,7 @@ namespace flux
                                                 db.put(nb.mem[k]);
                                                 k++;
                                             };
-                                            switch (db.mem[0]!?)
+                                            switch (db.mem[0] != 0)
                                             {
                                                 case (true) {
                                                 switch (!this.is_prim(db.mem))
@@ -505,7 +507,7 @@ namespace flux
                 int last = 0;
                 nb.__init();
                 defer nb.__exit();
-                while (name[i]!?)
+                while (name[i] != 0)
                 {
                     switch (name[i] == ':')
                     {
@@ -682,7 +684,7 @@ namespace flux
                                             switch (n.text != (byte*)0)
                                             {
                                                 case (true) {
-                                                switch (n.text[0]!?)
+                                                switch (n.text[0] != 0)
                                                 {
                                                     case (true) {
                                                     this.add_ref(refs, n.text);
@@ -698,7 +700,7 @@ namespace flux
                                                             switch (o.text != (byte*)0)
                                                             {
                                                                 case (true) {
-                                                                switch (o.text[0]!?)
+                                                                switch (o.text[0] != 0)
                                                                 {
                                                                     case (true) {
                                                                     this.kb.clear();
@@ -934,7 +936,7 @@ namespace flux
             {
                 int i = 0;
                 this.idx_add(m, key, f);
-                while (key[i]!?)
+                while (key[i] != 0)
                 {
                     switch (key[i] == '_')
                     {
@@ -979,7 +981,7 @@ namespace flux
             join_prefix(byte* prefix, byte* name) -> byte*
             {
                 this.kb2.clear();
-                switch (prefix[0]!?)
+                switch (prefix[0] != 0)
                 {
                     case (true) {
                     this.kb2.put_str(f"{prefix}__\0");
@@ -997,14 +999,14 @@ namespace flux
                 byte* r;
                 pb.__init();
                 defer pb.__exit();
-                switch (prefix[0]!?)
+                switch (prefix[0] != 0)
                 {
                     case (true) {
                     pb.put_str(prefix);
                     switch (ns.text != (byte*)0)
                     {
                         case (true) {
-                        switch (ns.text[0]!?)
+                        switch (ns.text[0] != 0)
                         {
                             case (true) { pb.put_str(g"__\0"); }
                             default {};
@@ -1126,7 +1128,7 @@ namespace flux
                 int i = 0;
                 this.idx_add(this.objm, full, m);
                 this.idx_add(this.objmq, full, m);
-                while (full[i]!?)
+                while (full[i] != 0)
                 {
                     switch (full[i] == '_')
                     {
@@ -1135,7 +1137,7 @@ namespace flux
                         {
                             case (true) {
                             i = i + 2;
-                            switch (full[i]!?)
+                            switch (full[i] != 0)
                             {
                                 case (true) {
                                 this.idx_add(this.objm, full + i, m);
@@ -1471,7 +1473,7 @@ namespace flux
                                                                         this.own((void*)full);
                                                                         nm_put(seed, full, (void*)1);
                                                                         q = 0;
-                                                                        while (full[q]!?)
+                                                                        while (full[q] != 0)
                                                                         {
                                                                             switch (full[q] == '_')
                                                                             {
@@ -1481,7 +1483,7 @@ namespace flux
                                                                                     case (true) {
                                                                                     q = q + 2;
                                                                                     v = full + q;
-                                                                                    switch (v[0]!?)
+                                                                                    switch (v[0] != 0)
                                                                                     {
                                                                                         case (true) {
                                                                                         switch (dce_contains(v, anchor))
@@ -1557,6 +1559,130 @@ namespace flux
                 {
                     this.seed_externs(node_child(ns.b, 0, i), seed);
                     i++;
+                };
+                ->;
+            };
+
+            // True for the name of an operator function (operator__<mangled symbol>)
+            is_op_name(byte* s) -> bool
+            {
+                byte* p = g"operator__\0";
+                int i = 0;
+                while (p[i] != 0)
+                {
+                    switch (s[i] != p[i])
+                    {
+                        case (true) { -> false; }
+                        default {};
+                    };
+                    i++;
+                };
+                -> true;
+            };
+
+            // fdce._ns_is_used: the namespace equals, or is nested in, a used:: path
+            ns_used(byte* full) -> bool
+            {
+                int k = 0;
+                int n;
+                byte* u;
+                while (k < this.usedns.len)
+                {
+                    u = (byte*)this.usedns.items[k];
+                    k++;
+                    n = 0;
+                    while (u[n] != 0 & full[n] == u[n]) { n++; };
+                    switch (u[n] == 0 & (full[n] == 0 | (full[n] == '_' & full[n + 1] == '_')))
+                    {
+                        case (true) { -> true; }
+                        default {};
+                    };
+                };
+                -> false;
+            };
+
+            // Operator functions of used namespaces. A use of an overloaded built-in
+            // operator is not a call and codegen picks the overload by operand types,
+            // so DCE cannot see the reference.
+            seed_ns_operators(Node* ns, byte* prefix, NameMap* seed) -> void
+            {
+                byte* cur = this.child_prefix(prefix, ns);
+                int c;
+                int i;
+                Node* f;
+                byte* full;
+                switch (this.ns_used(cur))
+                {
+                    case (true) {
+                        c = dce_count(ns, 0);
+                        i = 0;
+                        while (i < c)
+                        {
+                            f = node_child(ns, 0, i);
+                            i++;
+                            switch (f.kind == NodeKind.FUNCTION_DEF & f.text != (byte*)0)
+                            {
+                                case (true) {
+                                    switch (this.is_op_name(f.text))
+                                    {
+                                        case (true) {
+                                            full = this.join_prefix(cur, f.text);
+                                            this.add_suffixes(seed, full);
+                                            nm_put(seed, this.count_key(f), (void*)1);
+                                        }
+                                        default {};
+                                    };
+                                }
+                                default {};
+                            };
+                        };
+                    }
+                    default {};
+                };
+                c = dce_count(ns.b, 0);
+                i = 0;
+                while (i < c)
+                {
+                    this.seed_ns_operators(node_child(ns.b, 0, i), cur, seed);
+                    i++;
+                };
+                ->;
+            };
+
+            // Top level using paths with :: written as __
+            collect_used(Node* prog) -> void
+            {
+                int c = dce_count(prog, 0);
+                int i = 0;
+                int n;
+                Node* s;
+                Buf ub;
+                byte* r;
+                ub.__init();
+                defer ub.__exit();
+                while (i < c)
+                {
+                    s = node_child(prog, 0, i);
+                    i++;
+                    switch (s.kind == NodeKind.USING_STATEMENT & s.text != (byte*)0)
+                    {
+                        case (true) {
+                            ub.clear();
+                            n = 0;
+                            while (s.text[n] != 0)
+                            {
+                                switch (s.text[n] == ':' & s.text[n + 1] == ':')
+                                {
+                                    case (true) { ub.put_str(g"__\0"); n = n + 2; }
+                                    default { ub.put(s.text[n]); n++; };
+                                };
+                            };
+                            r = ts_dup(ub.mem);
+                            this.own((void*)r);
+                            pv_push(this.usedns, (void*)r);
+                        }
+                        default {};
+                    };
                 };
                 ->;
             };
@@ -1670,6 +1796,14 @@ namespace flux
                                         case (true) { nm_put(seed, s.text, (void*)1); }
                                         default {};
                                     };
+                                    switch (this.is_op_name(s.text))
+                                    {
+                                        case (true) {
+                                            this.add_suffixes(seed, s.text);
+                                            nm_put(seed, this.count_key(s), (void*)1);
+                                        }
+                                        default {};
+                                    };
                                 };
                             };
                         };
@@ -1707,6 +1841,18 @@ namespace flux
                     switch (ns != (Node*)0)
                     {
                         case (true) { this.seed_externs(ns, seed); }
+                        default {};
+                    };
+                };
+                this.collect_used(prog);
+                i = 0;
+                while (i < c)
+                {
+                    ns = this.ns_of(node_child(prog, 0, i));
+                    i++;
+                    switch (ns != (Node*)0)
+                    {
+                        case (true) { this.seed_ns_operators(ns, g"\0", seed); }
                         default {};
                     };
                 };
@@ -1760,7 +1906,7 @@ namespace flux
                                                                 switch (on != (byte*)0)
                                                                 {
                                                                     case (true) {
-                                                                    switch (on[0]!?)
+                                                                    switch (on[0] != 0)
                                                                     {
                                                                         case (true) {
                                                                         switch (!nm_has(this.live, on))
@@ -1856,7 +2002,7 @@ namespace flux
                             switch (d.text != (byte*)0)
                             {
                                 case (true) {
-                                switch (d.text[0]!?)
+                                switch (d.text[0] != 0)
                                 {
                                     case (true) {
                                     switch (!this.type_live(prefix, d.text))
@@ -2018,7 +2164,7 @@ namespace flux
                             switch (o.text != (byte*)0)
                             {
                                 case (true) {
-                                switch (o.text[0]!?)
+                                switch (o.text[0] != 0)
                                 {
                                     case (true) {
                                     switch (!this.type_live(cur, o.text))
@@ -2063,7 +2209,7 @@ namespace flux
                                         kq.put_str(f"{o.text}__{m.text}\0");
                                         anchor = kq.mem;
                                         fq.clear();
-                                        switch (cur[0]!?)
+                                        switch (cur[0] != 0)
                                         {
                                             case (true) {
                                             fq.put_str(f"{cur}__\0");
@@ -2144,7 +2290,7 @@ namespace flux
                     case (true) { -> true; }
                     default
                     {
-                        while (full[i]!?)
+                        while (full[i] != 0)
                         {
                             switch (full[i] == '_')
                             {
@@ -2153,7 +2299,7 @@ namespace flux
                                 {
                                     case (true) {
                                     i = i + 2;
-                                    switch (full[i]!?)
+                                    switch (full[i] != 0)
                                     {
                                         case (true) {
                                         switch (dce_contains(full + i, anchor))

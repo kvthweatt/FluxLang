@@ -90,6 +90,7 @@ namespace flux
             PtrVec* locked;       // byte* tags locked with '!+'
             PtrVec* using_ns;     // byte*
             PtrVec* platform;     // byte*
+            PtrVec* requires;     // byte* module names named by '#[requires]'
             bool borrow_check, effect_check, dce, debug, entry;
             bool imported;        // declared in a file reached through 'from'
         };
@@ -103,6 +104,7 @@ namespace flux
             ModInfo* entry;
             byte* err;            // set when a pass failed
             PtrVec* warnings;     // byte* non-fatal notes for the driver to print
+            NameMap* unbuilt;     // function name to the module declaring it, for modules not in this build
             byte* root_file, srcdir;
         };
 
@@ -170,7 +172,7 @@ namespace flux
             int i, k;
             int last = -1;
             byte* d;
-            while (file[i]!?)
+            while (file[i] != 0)
             {
                 if (file[i] == '/' | file[i] == '\\') { last = i; };
                 i++;
@@ -197,7 +199,7 @@ namespace flux
         mu_is_abs(byte* p) -> bool
         {
             if (p[0] == '/' | p[0] == '\\') { -> true; };
-            if (p[0]!? & p[1] == ':') { -> true; };
+            if (p[0] != 0 & p[1] == ':') { -> true; };
             -> false;
         };
 
@@ -301,6 +303,7 @@ namespace flux
                 .locked = pv_new();
                 .using_ns = pv_new();
                 .platform = pv_new();
+                .requires = pv_new();
                 .borrow_check = false;
                 .effect_check = false;
                 .dce = true;
@@ -393,6 +396,35 @@ namespace flux
                     j++;
                 };
             };
+            // '#[requires] = {A, B}': the other modules this one uses
+            Node* rq = mu_tag_entry(info.node, g"requires\0");
+            if (rq != (Node*)0)
+            {
+                if (rq.ival != 2)
+                {
+                    -> join3(g"module '\0", info.name, g"': '#[requires]' takes a list: {A, B}\0");
+                };
+                i = 0;
+                byte* rname;
+                while (i < node_count(rq, 0))
+                {
+                    rname = node_child(rq, 0, i).text;
+                    i++;
+                    if (cstr_eq(rname, info.name))
+                    {
+                        -> join3(g"module '\0", info.name, g"' cannot require itself\0");
+                    };
+                    dep = mu_find(u, rname);
+                    if (dep == (ModInfo*)0)
+                    {
+                        -> join3(join3(g"module '\0", info.name, g"': '#[requires]' names module '\0"),
+                                 rname, g"', which is not declared in this file or pulled in with 'from'\0");
+                    };
+                    if (!mu_has(info.deps, rname)) { pv_push(info.deps, (void*)rname); };
+                    err = mu_visit(u, dep, loading);
+                    if (err != (byte*)0) { -> err; };
+                };
+            };
             loading.len = loading.len - 1;
             pv_push(u.order, (void*)info);
             -> (byte*)0;
@@ -419,6 +451,7 @@ namespace flux
                 .entry = (ModInfo*)0;
                 .err = (byte*)0;
                 .warnings = pv_new();
+                .unbuilt = nm_new();
                 .root_file = root_file;
                 .srcdir = srcdir;
             };
@@ -477,18 +510,7 @@ namespace flux
             };
             ei.entry = true;
             u.entry = ei;
-            // modules of the same file are visible to each other
-            i = 0;
-            while (i < root.len)
-            {
-                m = (Node*)root.items[i];
-                i++;
-                if (!cstr_eq(m.text, ei.name))
-                {
-                    err = mu_visit(u, mu_find(u, m.text), loading);
-                    if (err != (byte*)0) { mu_fail(u, err); -> u; };
-                };
-            };
+            // only what the entry requires or pulls in is built
             err = mu_visit(u, ei, loading);
             if (err != (byte*)0) { mu_fail(u, err); -> u; };
             -> u;
@@ -502,7 +524,8 @@ namespace flux
         {
             -> cstr_eq(t, g"entrypoint\0") | cstr_eq(t, g"name\0") | cstr_eq(t, g"target\0")
                  | cstr_eq(t, g"debug\0") | cstr_eq(t, g"borrow_check\0") | cstr_eq(t, g"effect_check\0")
-                 | cstr_eq(t, g"dce\0") | cstr_eq(t, g"using\0") | cstr_eq(t, g"platform\0");
+                 | cstr_eq(t, g"dce\0") | cstr_eq(t, g"using\0") | cstr_eq(t, g"platform\0")
+                 | cstr_eq(t, g"requires\0");
         };
 
         mu_is_bool_tag(byte* t) -> bool
@@ -536,21 +559,22 @@ namespace flux
             if (mu_is_bool_tag(tag))
             {
                 if (e.ival != 1) { -> join3(join3(g"module '\0", mi.name, g"': '#[\0"), tag, g"]' takes true or false\0"); };
-                bool v = e.op!?;
+                bool v = e.op != 0;
                 if (cstr_eq(tag, g"borrow_check\0")) { mi.borrow_check = v; }
                 elif (cstr_eq(tag, g"effect_check\0")) { mi.effect_check = v; }
                 elif (cstr_eq(tag, g"dce\0")) { mi.dce = v; }
                 else { mi.debug = v; };
                 -> (byte*)0;
             };
-            if (cstr_eq(tag, g"using\0") | cstr_eq(tag, g"platform\0"))
+            if (cstr_eq(tag, g"using\0") | cstr_eq(tag, g"platform\0") | cstr_eq(tag, g"requires\0"))
             {
                 if (e.ival != 2) { -> join3(join3(g"module '\0", mi.name, g"': '#[\0"), tag, g"]' takes a list: {A, B}\0"); };
                 if (cstr_eq(tag, g"using\0")) { mi.using_ns = mu_list_of(e); }
+                elif (cstr_eq(tag, g"requires\0")) { mi.requires = mu_list_of(e); }
                 else { mi.platform = mu_list_of(e); };
                 -> (byte*)0;
             };
-            if (e.ival!? | e.text2 == (byte*)0)
+            if (e.ival != 0 | e.text2 == (byte*)0)
             {
                 -> join3(join3(g"module '\0", mi.name, g"': '#[\0"), tag, g"]' takes a single name\0");
             };
@@ -563,7 +587,7 @@ namespace flux
         {
             int i;
             byte x, y;
-            while (a[i]!? & b[i]!?)
+            while (a[i] != 0 & b[i] != 0)
             {
                 x = a[i];
                 y = b[i];
@@ -581,16 +605,16 @@ namespace flux
             int i, j, k, q;
             Node* e, oe, t;
             ModInfo* mi, ti, cur;
-            byte* err, key, plist;
+            byte* err, key;
             NameMap* applied = nm_new();
-            PtrVec* queue = pv_new(),
-                    seen = pv_new();
+            PtrVec* queue = pv_new();
+            PtrVec* seen = pv_new();
             bool found;
 
             i = 0;
-            while (i < u.mods.len)
+            while (i < u.order.len)
             {
-                mi = (ModInfo*)u.mods.items[i];
+                mi = (ModInfo*)u.order.items[i];
                 i++;
                 j = 0;
                 while (j < node_count(mi.node, 2))
@@ -605,7 +629,7 @@ namespace flux
                     if (cstr_eq(e.text, g"entrypoint\0")) { continue; };
                     err = mu_apply(mi, e);
                     if (err != (byte*)0) { -> err; };
-                    if ((e.flags `& 1)!?) { pv_push(mi.locked, (void*)e.text); };
+                    if ((e.flags `& 1) != 0) { pv_push(mi.locked, (void*)e.text); };
                 };
                 if (!mu_is_target(mi.target))
                 {
@@ -638,6 +662,12 @@ namespace flux
                         {
                             -> join3(join3(g"module '\0", cur.name, g"': '#[override for {\0"), t.text,
                                          g"}]' names a module that is not part of this build\0");
+                        };
+                        if (!mu_has(cur.deps, t.text))
+                        {
+                            -> join3(join3(g"module '\0", cur.name, g"': cannot override module '\0"), t.text,
+                                     join3(join3(g"' because '\0", cur.name, g"' does not use it. Add '#[requires] = {\0"),
+                                           t.text, join3(g"}' to the build settings of '\0", cur.name, g"' first\0")));
                         };
                         i = 0;
                         while (i < node_count(e, 1))
@@ -684,9 +714,9 @@ namespace flux
             };
 
             i = 0;
-            while (i < u.mods.len)
+            while (i < u.order.len)
             {
-                mi = (ModInfo*)u.mods.items[i];
+                mi = (ModInfo*)u.order.items[i];
                 i++;
                 if (cli_borrow) { mi.borrow_check = true; };
                 if (cli_effects) { mi.effect_check = true; };
@@ -701,7 +731,7 @@ namespace flux
                     };
                     if (!found)
                     {
-                        plist = ts_dup(g"\0");
+                        byte* plist = ts_dup(g"\0");
                         k = 0;
                         while (k < mi.platform.len)
                         {
@@ -781,9 +811,9 @@ namespace flux
         {
             int i, n, k;
             byte* r;
-            while (ns[n]!?) { n++; };
+            while (ns[n] != 0) { n++; };
             r = (byte*)fmalloc((u64)(n * 2 + 2));
-            while (ns[i]!?)
+            while (ns[i] != 0)
             {
                 if (ns[i] == '.')
                 {
@@ -810,6 +840,18 @@ namespace flux
             -> r;
         };
 
+        // True when a module of this build declares a function called name
+        mu_built_defines(ModUnit* u, byte* name) -> bool
+        {
+            int i;
+            while (i < u.order.len)
+            {
+                if (mu_defines(((ModInfo*)u.order.items[i]).node, name)) { -> true; };
+                i++;
+            };
+            -> false;
+        };
+
         // Replaces the module declarations of the program by their contents, dependencies
         // first. Statements that are not modules (the root file's imports and globals) stay in
         // front. Each module's 'using' list becomes using statements in front of its body.
@@ -817,8 +859,7 @@ namespace flux
         // lines do not follow the statements before it is moved down to follow them.
         mu_flatten(Node* prog, ModUnit* u, byte* entry_fn) -> void
         {
-            NodeVec* nv = nv_new(),
-                     kept;
+            NodeVec* nv = nv_new();
             ModInfo* mi;
             Node* s, f, us;
             int i, j, c, mn, mx, top, mtop;
@@ -845,7 +886,7 @@ namespace flux
                 // only the entry module contributes the program's main
                 if (!mi.entry)
                 {
-                    kept = nv_new();
+                    NodeVec* kept = nv_new();
                     j = 0;
                     c = node_count(mi.node, 0);
                     while (j < c)
@@ -886,6 +927,27 @@ namespace flux
                 if (mtop > top) { top = mtop; };
             };
             prog.l0 = nv;
+
+            // Functions of modules that are declared but not part of this build. A call to one of
+            // them that finds nothing is reported with the module to require.
+            i = 0;
+            while (i < u.mods.len)
+            {
+                mi = (ModInfo*)u.mods.items[i];
+                i++;
+                if (mu_in_order(u, mi)) { continue; };
+                c = node_count(mi.node, 0);
+                j = 0;
+                while (j < c)
+                {
+                    f = bc_unwrap_fn(node_child(mi.node, 0, j));
+                    j++;
+                    if (f.kind != NodeKind.FUNCTION_DEF) { continue; };
+                    if (nm_has(u.unbuilt, f.text)) { continue; };
+                    if (mu_built_defines(u, f.text)) { continue; };
+                    nm_put(u.unbuilt, f.text, (void*)mi.name);
+                };
+            };
             ->;
         };
 
@@ -910,7 +972,6 @@ namespace flux
             Node* tmp;
             int i, j;
             byte* bare;
-            CallGraph cg;
             mm.own = (BcOwners*)fmalloc((u64)((sizeof(BcOwners) + 7) / 8));
             mm.own.full = nm_new();
             mm.own.bare = nm_new();
@@ -932,6 +993,7 @@ namespace flux
                     node_push(tmp, 0, node_child(mi.node, 0, j));
                     j++;
                 };
+                CallGraph cg;
                 cg.__init();
                 cg.collect(tmp);
                 j = 0;

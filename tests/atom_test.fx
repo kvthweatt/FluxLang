@@ -21,42 +21,24 @@ using standard::io::console;
 //  Helpers – print a labelled integer result
 // ─────────────────────────────────────────────
 
-def print_result(byte* label, i32 value) -> void
-{
-    print(label);
-    print(value);
-    print("\n\0");
-};
+def print_result(byte* xl, i32 value) -> void
+    ->println(f"{xl}{value}");
 
-def print_bool(byte* label, bool value) -> void
-{
-    print(label);
-    if (value)
-    {
-        print("true\n\0");
-    }
-    else
-    {
-        print("false\n\0");
-    };
-};
+def print_bool(byte* xl, bool value) -> void
+    -> println(f"{xl}" + "true" if (value) else "false");
 
 def print_sep(byte* title) -> void
-{
-    print("\n-- \0");
-    print(title);
-    print(" --\n\0");
-};
+    -> println(f"\n-- {title} --");
 
 // ─────────────────────────────────────────────
 //  Shared state (globals act as "shared memory")
 // ─────────────────────────────────────────────
 
-i32 g_counter  = 0,   // Protected by g_lock in the spinlock demo
-    g_lock     = 0,   // Spinlock
-    g_once     = 0,   // Once flag
-    g_refcount = 0,   // Reference counter
-    g_flag     = 0,   // Atomic flag
+i32 g_counter,    // Protected by g_lock in the spinlock demo
+    g_lock,       // Spinlock
+    g_once,       // Once flag
+    g_refcount,   // Reference counter
+    g_flag,       // Atomic flag
     g_cas_val  = 100; // Value exercised by the CAS demo
 
 // ─────────────────────────────────────────────
@@ -67,9 +49,9 @@ def demo_load_store() -> void
 {
     print_sep("Atomic Load / Store\0");
 
-    i32 x = 0;
+    i32 x, loaded;
     store32(@x, 42);
-    i32 loaded = load32(@x);
+    loaded = load32(@x);
     print_result("store32(42) -> load32: \0", loaded);   // 42
 
     store64((i64*)@x, (i64)0);
@@ -81,8 +63,8 @@ def demo_exchange() -> void
 {
     print_sep("Atomic Exchange\0");
 
-    i32 val = 10;
-    i32 old = exchange32(@val, 99);
+    i32 val = 10,
+        old = exchange32(@val, 99);
     print_result("exchange32(10->99) old: \0", old);      // 10
     print_result("exchange32(10->99) new: \0", load32(@val)); // 99
 };
@@ -92,12 +74,13 @@ def demo_cas() -> void
     print_sep("Compare-and-Swap\0");
 
     // Successful CAS: expected matches
-    bool ok = cas32(@g_cas_val, 100, 200);
+    bool ok = cas32(@g_cas_val, 100, 200),
+         fail;
     print_bool("cas32(100->200) success: \0", ok);          // true
     print_result("g_cas_val after:        \0", load32(@g_cas_val)); // 200
 
     // Failing CAS: expected does not match current value
-    bool fail = cas32(@g_cas_val, 100, 999);
+    fail = cas32(@g_cas_val, 100, 999);
     print_bool("cas32(100->999) fail:   \0", fail);          // false
     print_result("g_cas_val unchanged:   \0", load32(@g_cas_val)); // 200
 
@@ -116,9 +99,8 @@ def demo_fetch_modify() -> void
 {
     print_sep("Fetch-and-Modify\0");
 
-    i32 n = 50;
-
-    i32 prev = fetch_add32(@n, 10);
+    i32 n = 50,
+        prev = fetch_add32(@n, 10);
     print_result("fetch_add32(50, 10) old: \0", prev);          // 50
     print_result("fetch_add32(50, 10) new: \0", load32(@n));    // 60
 
@@ -143,7 +125,7 @@ def demo_inc_dec() -> void
 {
     print_sep("Increment / Decrement\0");
 
-    i32 c = 0;
+    i32 c;
     print_result("inc32 (0->1):  \0", inc32(@c));  // 1
     print_result("inc32 (1->2):  \0", inc32(@c));  // 2
     print_result("inc32 (2->3):  \0", inc32(@c));  // 3
@@ -158,8 +140,8 @@ def demo_spinlock() -> void
 
     // Simulate N "threads" each adding to g_counter under the lock.
     // (Single-threaded simulation – the point is the correct API usage.)
-    int iterations = 10;
-    int i = 0;
+    int iterations = 10,
+        i;
     while (i < iterations)
     {
         spin_lock(@g_lock);
@@ -170,9 +152,10 @@ def demo_spinlock() -> void
     print_result("counter after 10 locked increments: \0", g_counter); // 10
 
     // trylock demo
-    bool got = spin_trylock(@g_lock);
+    bool got = spin_trylock(@g_lock),
+         again;
     print_bool("spin_trylock (unlocked): \0", got);   // true  – lock was free
-    bool again = spin_trylock(@g_lock);
+    again = spin_trylock(@g_lock);
     print_bool("spin_trylock (locked):   \0", again); // false – already held
     spin_unlock(@g_lock);
 };

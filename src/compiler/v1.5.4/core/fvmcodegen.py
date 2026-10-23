@@ -1337,6 +1337,11 @@ class FVMCodegen:
         Emits a counted loop using the FVM's ARRAY_STORE opcode.
         Only plain identifier array targets are supported in comptime.
         """
+        if getattr(node, 'from_value', False):
+            raise FVMCodegenError(
+                'fvmcodegen: range assignment from an array value is not supported in comptime',
+                node
+            )
         if not isinstance(node.array, Identifier):
             raise FVMCodegenError(
                 'fvmcodegen: range assignment target must be a simple identifier in comptime',
@@ -3231,6 +3236,9 @@ class FVMCodegen:
         for var in iterable { body } -- iterate over an array.
         Mirrors fcodegen.visit_ForInLoop for the array case.
         """
+        if getattr(node, 'is_bit', False):
+            raise FVMCodegenError(
+                'fvmcodegen: bit iteration is not supported in comptime', node)
         self._visit_expr(node.iterable)
         iter_slot = self._alloc_local('__forin_iter__')
         self._emit(_instr(Op.LOCAL_SET, iter_slot))

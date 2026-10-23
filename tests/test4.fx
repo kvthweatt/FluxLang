@@ -11,18 +11,18 @@ interface Database(A: Connectable, B: Queryable)
 {
     A : B
     {
-        connect()    -> bool,
+        query()    -> byte*,
         disconnect() -> void
     };
 
     B(A)
     {
-        query(byte* sql) -> byte*
+        query(byte* sql) -> byte*       // can do B.query(A.result());
     };
 
     A -> B
     {
-        result() -> byte*
+        result() -> byte*               // can 
     };
 };
 

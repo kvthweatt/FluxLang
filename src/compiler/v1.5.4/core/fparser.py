@@ -7460,9 +7460,18 @@ class FluxParser:
         is_for_in = False
         
         is_destructure_for_in = False
+        is_bit_for_in = False
         with self._lookahead():
+            # Look for pattern: '`' identifier 'in' expression  (bit iteration)
+            if self.expect(TokenType.BACKTICK):
+                self.advance()
+                if self.expect(TokenType.IDENTIFIER):
+                    self.advance()
+                    if self.expect(TokenType.IN):
+                        is_for_in = True
+                        is_bit_for_in = True
             # Look for pattern: identifier (',' identifier)* 'in' expression
-            if self.expect(TokenType.IDENTIFIER):
+            elif self.expect(TokenType.IDENTIFIER):
                 self.advance()
                 while self.expect(TokenType.COMMA):
                     self.advance()
@@ -7500,7 +7509,10 @@ class FluxParser:
         if is_for_in:
             # for-in loop
             variables = []
-            if is_destructure_for_in:
+            if is_bit_for_in:
+                self.consume(TokenType.BACKTICK)
+                variables.append(self.consume(TokenType.IDENTIFIER).value)
+            elif is_destructure_for_in:
                 # consume 'auto'
                 self.consume(TokenType.AUTO)
                 if self.expect(TokenType.LEFT_BRACE):
@@ -7528,7 +7540,7 @@ class FluxParser:
             self._loop_depth -= 1
             self.consume(TokenType.SEMICOLON)
 
-            return ForInLoop(variables, iterable, body, is_destructure=is_destructure_for_in).set_location(tok.line, tok.column)
+            return ForInLoop(variables, iterable, body, is_destructure=is_destructure_for_in, is_bit=is_bit_for_in).set_location(tok.line, tok.column)
         else:
             # C-style for loop
             init = None
@@ -10142,6 +10154,19 @@ class FluxParser:
             return self.symbol_table.get_type_spec(expr.name)
         if isinstance(expr, Literal):
             return self._literal_dt_map().get(expr.type)
+        from fast import AddressOf as _AddressOf, CastExpression as _CastExpression
+        if isinstance(expr, _CastExpression):
+            return expr.target_type
+        if isinstance(expr, _AddressOf):
+            # @x has the type of x with one more level of pointer indirection.
+            inner = self._infer_type_from_expr(expr.expression)
+            if inner is None:
+                return None
+            import copy as _cp
+            ptr = _cp.copy(inner)
+            ptr.is_pointer = True
+            ptr.pointer_depth = (inner.pointer_depth or 0) + 1
+            return ptr
         return None
 
     def postfix_expression(self) -> Expression:
@@ -10348,10 +10373,15 @@ class FluxParser:
                     # start_index will be a RangeExpression if the subscript was `start..end`
                     if isinstance(start_index, RangeExpression) and self.expect(TokenType.ASSIGN):
                         self.advance()  # consume '='
-                        self.consume(TokenType.LEFT_BRACE, "Expected '{' after '=' in range assignment")
-                        fill = self.expression()
-                        self.consume(TokenType.RIGHT_BRACE, "Expected '}' after fill value in range assignment")
-                        expr = RangeAssignment(expr, start_index.start, start_index.end, fill).set_location(tok.line, tok.column)
+                        if self.expect(TokenType.LEFT_BRACE):
+                            self.advance()  # consume '{'
+                            fill = self.expression()
+                            self.consume(TokenType.RIGHT_BRACE, "Expected '}' after fill value in range assignment")
+                            expr = RangeAssignment(expr, start_index.start, start_index.end, fill).set_location(tok.line, tok.column)
+                        else:
+                            # Value form: array[start..end] = (byte[N])value;
+                            value = self.expression()
+                            expr = RangeAssignment(expr, start_index.start, start_index.end, value, True).set_location(tok.line, tok.column)
                         # RangeAssignment is a statement; break out of postfix loop
                         break
                     # Dict key validation: if expr is a known dict and key is a string literal,
