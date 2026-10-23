@@ -28,7 +28,7 @@ The address of operator is `@` so taking addresses looks like `@x` which immedia
 
 In C you could never write `&=` to mean address-assignment, because that's logical AND assign.
 
-In Flux you can do address assignment like `int* px @= x;`
+In IDEKA you can do address assignment like `int* px @= x;`
 
 ## Example 3  
 The not-null operator `!?`
