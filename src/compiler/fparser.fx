@@ -36,6 +36,10 @@
 #import "flexer.fx";
 #endif;
 
+#ifndef FLUX_ERRORS
+#import "ferrors.fx";
+#endif;
+
 #ifndef FLUX_AST
 #import "fast.fx";
 #endif;
@@ -52,6 +56,7 @@ using standard::io::console;
 using flux::lexer;
 using flux::ast;
 using flux::preprocessor;
+using flux::errors;
 using flux::types;
 using flux::check;
 
@@ -205,7 +210,8 @@ namespace flux
             NONE,
             MESSAGE,
             EXPECTED,
-            ALLOC
+            ALLOC,
+            SILENT      // already printed; the driver only exits
         };
 
         ps_bytes_eq(byte* a, byte* b, int n) -> bool
@@ -594,8 +600,14 @@ namespace flux
             int* feat_hits;
             int stub_total, stub_features;
             int err_kind, err_expected, err_got, err_line, err_col;
+            int err_prev_line, err_got_len;
+            int* lmap;              // merged line to file local line map, for diagnostics
+            byte** lfiles;          // merged line to file path, for diagnostics
+            int lmapn;
+            bool diag_color;
             byte* err_msg;
-            int function_depth, loop_depth, in_comptime, in_trait;
+            byte* eof_msg;          // text for EOF inside a statement list, null for the generic error
+            int function_depth, loop_depth, in_comptime, in_trait, in_fn_stringify, async_errs;
             bool in_for_init;       // parsing the init clause of a for loop
             bool failed, verbose;
             Node* last_stmt;
@@ -650,12 +662,21 @@ namespace flux
                 this.err_got = 0;
                 this.err_line = 0;
                 this.err_col = 0;
+                this.err_prev_line = 0;
+                this.err_got_len = 0;
+                this.lmap = (int*)0;
+                this.lfiles = (byte**)0;
+                this.lmapn = 0;
+                this.diag_color = flux::errors::DIAG_COLOR_ON;
                 this.err_msg = (byte*)0;
                 this.function_depth = 0;
                 this.loop_depth = 0;
                 this.in_for_init = false;
                 this.in_comptime = 0;
                 this.in_trait = 0;
+                this.in_fn_stringify = 0;
+                this.eof_msg = (byte*)0;
+                this.async_errs = 0;
                 this.failed = false;
                 this.verbose = false;
                 this.last_stmt = (Node*)0;
@@ -934,12 +955,16 @@ namespace flux
                         this.err_msg = msg;
                         this.err_line = this.cur_line();
                         this.err_col = this.cur_col();
+                        this.err_prev_line = 0;
+                        this.err_got_len = 0;
                         ->;
                     };
                 };
             };
 
-            fail_expected(int t) -> void
+            // parser.error(message, expected_type, prev_token): a message with a missing-token caret.
+            // use_prev is false where Python passes no prev_token, so a missing ; or , stays on the current line.
+            fail_expected_msg2(byte* msg, int t, bool use_prev) -> void
             {
                 switch (this.failed)
                 {
@@ -952,7 +977,49 @@ namespace flux
                         this.err_got = this.cur();
                         this.err_line = this.cur_line();
                         this.err_col = this.cur_col();
+                        this.err_got_len = this.toks[this.pos].vlen;
+                        this.err_prev_line = 0;
+                        switch (use_prev & this.pos > 0)
+                        {
+                            case (true) { this.err_prev_line = this.toks[this.pos - 1].line; }
+                            default {};
+                        };
+                        this.err_msg = msg;
                         ->;
+                    };
+                };
+            };
+
+            fail_expected_msg(byte* msg, int t) -> void -> this.fail_expected_msg2(msg, t, true);
+
+            // parser.error(message, expected_type) with no prev_token
+            error_exp(byte* msg, int t) -> void -> this.fail_expected_msg2(msg, t, false);
+
+            // consume(): "Unexpected <token text>, expected <symbol>"
+            fail_expected(int t) -> void
+            {
+                byte* es = flux::errors::sym_of(t);
+                byte* gs = flux::errors::sym_of(this.cur());
+                byte* gv = this.cur_value();
+                switch (es == (byte*)0) { case (true) { es = token_name(t); } default {}; };
+                switch (gs == (byte*)0) { case (true) { gs = token_name(this.cur()); } default {}; };
+                switch (gv[0] != 0 & !cstr_eq(gv, gs)) { case (true) { gs = gv; } default {}; };
+                -> this.fail_expected_msg(this.cat2(this.cat2(this.cat2(g"Unexpected \0", gs), g", expected \0"), es), t);
+            };
+
+                        // consume(type, message): like consume but with a custom error text
+            consume_msg(int t, byte* msg) -> bool
+            {
+                switch (!this.expect(t))
+                {
+                    case (true) {
+                    this.fail_expected_msg(msg, t);
+                    -> false;
+                }
+                    default
+                    {
+                        this.advance();
+                        -> true;
                     };
                 };
             };
@@ -976,7 +1043,7 @@ namespace flux
 
             error_text() -> byte*
             {
-                switch (this.err_kind == ParseErr.MESSAGE)
+                switch (this.err_kind == ParseErr.MESSAGE | this.err_kind == ParseErr.EXPECTED)
                 {
                     case (true) { -> this.err_msg; }
                     default
@@ -993,28 +1060,16 @@ namespace flux
                 };
             };
 
-            // Prints the recorded error
-            print_error() -> void
+            // Formats the recorded error like ferrors._render_diagnostic into out
+            render_error(Buf* out) -> void
             {
-                print(g"Parser error: \0");
-                switch (this.err_kind)
+                int exp = -1;
+                switch (this.err_kind == ParseErr.EXPECTED)
                 {
-                    case (ParseErr.EXPECTED)
-                    {
-                        print(g"Unexpected \0");
-                        print(flux::lexer::token_name(this.err_got));
-                        print(g", expected \0");
-                        print(flux::lexer::token_name(this.err_expected));
-                    }
-                    default
-                    {
-                        print(this.error_text());
-                    };
+                    case (true) { exp = this.err_expected; }
+                    default {};
                 };
-                print(g" at \0");
-                print(this.err_line);
-                print(g":\0");
-                -> println(this.err_col);
+                -> flux::errors::render(out, this.diag_color, flux::errors::SEV_ERROR, this.error_text(), this.err_line, this.err_col, this.lx.src, this.lx.length, this.lmap, this.lmapn, this.lfiles, exp, this.err_got, this.err_got_len, this.err_prev_line, (byte*)0);
             };
 
             // Skips to just after the next statement boundary
@@ -1277,6 +1332,14 @@ namespace flux
                 int m = this.mark();
                 int depth, tdepth;
                 bool r;
+                // Function pointer declaration without 'def': {}* name(types) -> type
+                if (this.expect(TokenType.FUNCTION_POINTER))
+                {
+                    this.advance();
+                    r = this.expect(TokenType.IDENTIFIER);
+                    this.reset(m);
+                    return r;
+                };
                 if (this.expect(TokenType.NO_MANGLE)) { this.advance(); };
                 if (!this.expect(TokenType.IDENTIFIER))
                 {
@@ -3057,7 +3120,6 @@ namespace flux
                 PtrVec* tv;
                 Node* tn;
                 NameMap* tm;
-                int i;
                 bool same;
                 switch (ex != (TemplateEntry*)0)
                 {
@@ -3612,13 +3674,73 @@ namespace flux
                 };
             };
 
+            // Templates may not be instantiated over object types (pointers to objects are fine)
+            // (fparser._reject_object_template_args)
+            reject_object_args(byte* owner, PtrVec* names, PtrVec* specs) -> void
+            {
+                int i;
+                byte* cn;
+                TypeSpec* ts;
+                while (i < names.len & !this.failed)
+                {
+                    cn = (byte*)names.items[i];
+                    ts = (TypeSpec*)0;
+                    switch (specs != (PtrVec*)0)
+                    {
+                        case (true) {
+                        switch (i < specs.len)
+                        {
+                            case (true) { ts = (TypeSpec*)specs.items[i]; }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                    switch (ts != (TypeSpec*)0)
+                    {
+                        case (true) {
+                        switch (ts_is_pointer(ts))
+                        {
+                            case (true) { cn = (byte*)0; }
+                            default
+                            {
+                                switch (ts.custom_typename != (byte*)0)
+                                {
+                                    case (true) { cn = ts.custom_typename; }
+                                    default {};
+                                };
+                            };
+                        };
+                    }
+                        default {};
+                    };
+                    switch (cn != (byte*)0)
+                    {
+                        case (true) {
+                        switch (nm_has(this.pobjs, cn))
+                        {
+                            case (true) {
+                            this.sb.len = 0;
+                            this.sb.mem[0] = (byte)0;
+                            this.sb.put_str(f"Template '{owner}' cannot be instantiated with object type '{cn}'; templates do not accept objects\0");
+                            this.error(this.own_n(this.sb.mem, this.sb.len));
+                        }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                    i++;
+                };
+                return;
+            };
+
             // Allowed-type lists of every parameter against the concrete types
             tp_check_allowed(byte* fname, TemplateEntry* ce, TemplateEntry* te, PtrVec* specs, PtrVec* poss) -> void
             {
                 int i, j, cnt, line, col, first;
                 byte* pname;
                 TypeSpec** allowed;
-                PtrVec* texts;
                 TypeSpec* concrete;
                 Node* at;
                 Checker* k;
@@ -3753,6 +3875,7 @@ namespace flux
                                 }
                                     default
                                     {
+                                        this.reject_object_args(fname, names, specs);
                                         ce = this.tp_constraint_entry(fname, te, false);
                                         this.tp_check_allowed(fname, ce, te, specs, poss);
                                         switch (this.failed)
@@ -4438,7 +4561,6 @@ namespace flux
                 TypeSpec* at;
                 byte* ctn;
                 byte* key;
-                byte* sep;
                 TemplateEntry* ce;
                 PtrVec* cargs;
                 int i, j, kl, cl, st0, pos;
@@ -5606,7 +5728,7 @@ namespace flux
                                                                             case (true) { this.advance(); -> g"!`>\0"; }
                                                                             default
                                                                             {
-                                                                                this.error(g"Unknown constraint operator after '!`'\0");
+                                                                                this.error_exp(g"Unknown constraint operator after '!`'\0", TokenType.GREATER_THAN);
                                                                                 -> (byte*)0;
                                                                             };
                                                                         };
@@ -5933,7 +6055,7 @@ namespace flux
             constra_merge(Node* d, int m0, PtrVec* rename) -> void
             {
                 PtrVec* srcs = pv_new();
-                int m, i, j, k, base, nsrc, nrel, rn;
+                int m, i, j, k, base, nrel, rn;
                 byte* sname;
                 byte* mapped;
                 byte* mx;
@@ -6583,7 +6705,6 @@ namespace flux
 
             type_func_def_inner() -> Node*
             {
-                int m = this.mark();
                 Node* d = this.mk(NodeKind.TYPE_FUNC_DEF, this.cur_line(), this.cur_col());
                 switch (this.failed)
                 {
@@ -6607,7 +6728,7 @@ namespace flux
                         switch (tn == (byte*)0)
                         {
                             case (true) {
-                            this.error(g"Expected a type keyword, literal, or struct name as type function receiver\0");
+                            this.error_exp(g"Expected a type keyword, literal, or struct name as type function receiver\0", TokenType.IDENTIFIER);
                             -> this.done(d);
                         }
                             default
@@ -7265,6 +7386,8 @@ namespace flux
                                             this.err_got = sp.err_got;
                                             this.err_line = sp.err_line;
                                             this.err_col = sp.err_col;
+                                            this.err_prev_line = sp.err_prev_line;
+                                            this.err_got_len = sp.err_got_len;
                                             this.err_msg = sp.err_msg;
                                             -> (Node*)0;
                                         }
@@ -7314,7 +7437,7 @@ namespace flux
                     };
                 }
                                     default {
-                    this.error(g"~$: expected identifier, string literal, f-string, or i-string after codify operator\0");
+                    this.error_exp(g"~$: expected identifier, string literal, f-string, or i-string after codify operator\0", TokenType.IDENTIFIER);
                 };
                                 };
                             };
@@ -7360,6 +7483,61 @@ namespace flux
             };
 
             // Owned a + b
+                                    // f"{n}": plain decimal digits
+            int_str(int v) -> byte*
+            {
+                byte* r = (byte*)fmalloc((u64)24);
+                byte* tmp = (byte*)fmalloc((u64)24);
+                int n = 0;
+                int o = 0;
+                int u = v;
+                switch (u == 0) { case (true) { tmp[0] = '0'; n = 1; } default {}; };
+                while (u > 0)
+                {
+                    tmp[n] = (byte)(48 + (u % 10));
+                    n++;
+                    u = u / 10;
+                };
+                while (n > 0)
+                {
+                    n--;
+                    r[o] = tmp[n];
+                    o++;
+                };
+                r[o] = (byte)0;
+                ffree(tmp);
+                -> r;
+            };
+
+            // f"{n:,.0f}": decimal digits with a comma between thousands
+            int_commas(int v) -> byte*
+            {
+                byte* r = (byte*)fmalloc((u64)40);
+                byte* tmp = (byte*)fmalloc((u64)24);
+                int n = 0;
+                int k = 0;
+                int o = 0;
+                int u = v;
+                switch (u == 0) { case (true) { tmp[0] = '0'; n = 1; } default {}; };
+                while (u > 0)
+                {
+                    tmp[n] = (byte)(48 + (u % 10));
+                    n++;
+                    u = u / 10;
+                };
+                k = n;
+                while (k > 0)
+                {
+                    k--;
+                    r[o] = tmp[k];
+                    o++;
+                    switch (k > 0 & k % 3 == 0) { case (true) { r[o] = ','; o++; } default {}; };
+                };
+                r[o] = (byte)0;
+                ffree(tmp);
+                -> r;
+            };
+
             cat2(byte* a, byte* b) -> byte*
             {
                 int la = pp_cstrlen(a);
@@ -8146,6 +8324,7 @@ namespace flux
                                 }
                                     default
                                     {
+                                        this.reject_object_args(key, names, specs);
                                         this.sb.len = 0;
                                         this.sb.mem[0] = (byte)0;
                                         this.sb.put_str(f"{key}__\0");
@@ -8524,7 +8703,7 @@ namespace flux
                                                                                                                                                         }
                                                                                                                                                             default
                                                                                                                                                             {
-                                                                                                                                                                this.error(g"Expected type specifier\0");
+                                                                                                                                                                this.error_exp(g"Expected type specifier\0", TokenType.IDENTIFIER);
                                                                                                                                                                 -> 0;
                                                                                                                                                             };
                                                                                                                                                         };
@@ -9421,12 +9600,7 @@ namespace flux
                                 case (true) { -> expr; }
                                 default {};
                             };
-                            switch (!this.consume(TokenType.COLON))
-                            {
-                                case (true) { -> expr; }
-                                default {};
-                            };
-                            Node* f = this.ternary_expression();
+                            switch (!this.consume_msg(TokenType.COLON, g"Expected ':' in ternary expression\0")) { case (true) { -> expr; } default {}; }; Node* f = this.ternary_expression();
                             switch (this.failed)
                             {
                                 case (true) { -> expr; }
@@ -10496,14 +10670,7 @@ namespace flux
                                                             case (true) {}
                                                             default
                                                             {
-                                                                switch (!this.consume(TokenType.RIGHT_BRACE))
-                                                                {
-                                                                    case (true) { -> expr; }
-                                                                    default {};
-                                                                };
-                                                            };
-                                                        };
-                                                        n = this.mk(NodeKind.RANGE_ASSIGNMENT, line, col);
+                                                                switch (!this.consume_msg(TokenType.RIGHT_BRACE, g"Expected '}' after fill value in range assignment\0")) { case (true) { -> expr; } default {}; }; }; }; n = this.mk(NodeKind.RANGE_ASSIGNMENT, line, col);
                                                         switch (this.failed)
                                                         {
                                                             case (true) { -> expr; }
@@ -10925,7 +11092,7 @@ namespace flux
                                 switch (expr.kind != NodeKind.IDENTIFIER)
                                 {
                                     case (true) {
-                                    this.error(g"Expected struct type name before 'from' keyword\0");
+                                    this.error_exp(g"Expected struct type name before 'from' keyword\0", TokenType.IDENTIFIER);
                                     -> expr;
                                 }
                                     default
@@ -10951,19 +11118,10 @@ namespace flux
                                                                             switch (this.expect(TokenType.IF))
                                                                             {
                                                                                 case (true) {
-                        this.advance();
-                        switch (!this.consume(TokenType.LEFT_PAREN))
-                        {
-                            case (true) { -> expr; }
+                        this.advance(); switch (!this.consume_msg(TokenType.LEFT_PAREN, g"Expected '(' after 'if' in if-expression\0")) { case (true) { -> expr; }
                             default
                             {
-                                cond = this.expression();
-                                switch (this.failed)
-                                {
-                                    case (true) { -> expr; }
-                                    default
-                                    {
-                                        switch (!this.consume(TokenType.RIGHT_PAREN))
+                                cond = this.expression(); switch (this.failed) { case (true) { -> expr; } default { switch (!this.consume_msg(TokenType.RIGHT_PAREN, g"Expected ')' after condition in if-expression\0"))
                                         {
                                             case (true) { -> expr; }
                                             default
@@ -11176,13 +11334,7 @@ namespace flux
             {
                 int line = this.cur_line();
                 int col = this.cur_col();
-                this.advance();
-                switch (!this.consume(TokenType.LEFT_PAREN))
-                {
-                    case (true) { -> (Node*)0; }
-                    default
-                    {
-                        bool type_first;
+                this.advance(); switch (kind == NodeKind.ENDIAN_OF) { case (true) { this.consume_msg(TokenType.LEFT_PAREN, g"Expected '(' after endianof\0"); } default { this.consume(TokenType.LEFT_PAREN); }; }; switch (this.failed) { case (true) { -> (Node*)0; } default { bool type_first;
                         switch (kind)
                         {
                             case (NodeKind.ALIGN_OF) { type_first = true; }
@@ -11562,12 +11714,7 @@ namespace flux
                 bool valid = nx == TokenType.IDENTIFIER | nx == TokenType.CODIFY | nx == TokenType.DOT | nx == TokenType.TAG |
                              nx == TokenType.SINT | nx == TokenType.UINT | nx == TokenType.SLONG | nx == TokenType.ULONG |
                              nx == TokenType.FLOAT_KW | nx == TokenType.DOUBLE_KW | nx == TokenType.BOOL_KW | nx == TokenType.BYTE;
-                switch (!valid)
-                {
-                    case (true) {
-                    this.error_unexpected();
-                    -> (Node*)0;
-                }
+                switch (!valid) { case (true) { this.advance(); switch (this.in_fn_stringify != 0) { case (true) { this.error_exp(g"Expected identifier after '$' in function name\0", TokenType.IDENTIFIER); } default { this.error_exp(g"Expected identifier after '$'\0", TokenType.IDENTIFIER); }; }; -> (Node*)0; }
                     default
                     {
                         this.advance();
@@ -11658,7 +11805,7 @@ namespace flux
                                                                 n.text2 = g"#\0";
                                                             }
                                                                         default {
-                                                                this.error(g"Expected member name after '.' in stringify expression\0");
+                                                                switch (this.in_fn_stringify != 0) { case (true) { this.error_exp(g"Expected member name after '.' in stringify function name\0", TokenType.IDENTIFIER); } default { this.error_exp(g"Expected member name after '.' in stringify expression\0", TokenType.IDENTIFIER); }; };
                                                                 -> n;
                                                             };
                                                                     };
@@ -12219,7 +12366,6 @@ namespace flux
                     {
                         int line, col;
                         Node* ix;
-                        Node* lv;
                         Node* rv;
                         Node* acc;
                         while (!this.expect(TokenType.RIGHT_BRACE))
@@ -12227,7 +12373,7 @@ namespace flux
                             switch (!this.expect(TokenType.LEFT_BRACKET))
                             {
                                 case (true) {
-                                this.error(g"only index-assignment items '[idx] = val;' are legal inside an array-assign block; expected '[' or '}'\0");
+                                this.error_exp(g"only index-assignment items '[idx] = val;' are legal inside an array-assign block; expected '[' or '}'\0", TokenType.LEFT_BRACKET);
                                 ->;
                             }
                                 default
@@ -12310,7 +12456,7 @@ namespace flux
                             switch (!this.expect(TokenType.DOT))
                             {
                                 case (true) {
-                                this.error(g"declarations and non-member statements are illegal inside a member-assign block; expected '.' or '}'\0");
+                                this.error_exp(g"declarations and non-member statements are illegal inside a member-assign block; expected '.' or '}'\0", TokenType.DOT);
                                 ->;
                             }
                                 default
@@ -12560,6 +12706,24 @@ namespace flux
                 };
             };
 
+                        // consume(IDENTIFIER, message).value
+            ident_msg(byte* msg) -> byte*
+            {
+                switch (!this.expect(TokenType.IDENTIFIER))
+                {
+                    case (true) {
+                    this.fail_expected_msg(msg, TokenType.IDENTIFIER);
+                    -> (byte*)0;
+                }
+                    default
+                    {
+                        byte* v = this.cur_value();
+                        this.advance();
+                        -> v;
+                    };
+                };
+            };
+
             define_var(byte* name, TypeSpec* ts) -> void
             {
                 switch (this.st != (FXC_SYMTABLE*)0)
@@ -12589,66 +12753,19 @@ namespace flux
                 ->;
             };
 
-            // Prints "Warning: msg at line:col", the source line with tabs expanded to 4
-            // spaces, and a caret line, as ferrors.emit_warning renders a warning
+            // ferrors.emit_warning: "Warning: msg at line:col", the source line and a caret
             warn_here(byte* msg) -> void
             {
-                int wl = this.cur_line();
-                int wc = this.cur_col();
-                int p = 0;
-                int ln = 1;
-                int e;
-                int d;
-                byte* src = this.lx.src;
-                int n = this.lx.length;
                 Buf wb;
                 wb.__init();
                 defer wb.__exit();
-                print(g"Warning: \0");
-                print(msg);
-                print(g" at \0");
-                print(wl);
-                print(g":\0");
-                println(wc);
-                while (p < n & ln < wl)
-                {
-                    switch (src[p] == 10)
-                    {
-                        case (true) { ln++; }
-                        default {};
-                    };
-                    p++;
-                };
-                switch (ln != wl)
-                {
-                    case (true) { ->; }
-                    default
-                    {
-                        e = p;
-                        while (e < n & src[e] != 10 & src[e] != 13) { e++; };
-                        while (p < e)
-                        {
-                            switch (src[p] == 9)
-                            {
-                                case (true) { wb.put_str(g"    \0"); }
-                                default { wb.put((int)src[p]); };
-                            };
-                            p++;
-                        };
-                        wb.put(0);
-                        println(wb.mem);
-                        wb.clear();
-                        d = 1;
-                        while (d < wc)
-                        {
-                            wb.put(45);
-                            d++;
-                        };
-                        wb.put(94);
-                        wb.put(0);
-                        -> println(wb.mem);
-                    };
-                };
+                Buf mb;
+                mb.__init();
+                defer mb.__exit();
+                mb.put_str(g"Warning: \0");
+                mb.put_str(msg);
+                flux::errors::render(@wb, this.diag_color, flux::errors::SEV_WARNING, mb.mem, this.cur_line(), this.cur_col(), this.lx.src, this.lx.length, this.lmap, this.lmapn, this.lfiles, -1, 0, 0, 0, (byte*)0);
+                -> println(wb.mem);
             };
 
             // Warns about a declaration in a loop body unless it is a singinit
@@ -13291,7 +13408,7 @@ namespace flux
                                                     switch (ts.base_type != DataType.DICT)
                                                     {
                                                         case (true) {
-                                                        this.fail_expected(TokenType.ASSIGN);
+                                                        this.fail_expected_msg(g"Expected ASSIGN, got LEFT_BRACE\0", TokenType.ASSIGN);
                                                         pv_free(names);
                                                         -> this.decl_abort(ts, inits, (NodeVec*)0);
                                                     }
@@ -13717,9 +13834,7 @@ namespace flux
                     case (true) { typespec_free(ok_ts); -> (Node*)0; }
                     default
                     {
-                        switch (!this.consume(TokenType.XOR_OP))
-                        {
-                            case (true) { typespec_free(ok_ts); -> (Node*)0; }
+                        switch (!this.consume_msg(TokenType.XOR_OP, g"Expected '^|' in dual-assign declaration\0")) { case (true) { typespec_free(ok_ts); -> (Node*)0; }
                             default
                             {
                                 TypeSpec* err_ts = this.type_spec();
@@ -13728,15 +13843,13 @@ namespace flux
                                     case (true) { typespec_free(ok_ts); typespec_free(err_ts); -> (Node*)0; }
                                     default
                                     {
-                                        byte* ok_name = this.ident();
+                                        byte* ok_name = this.ident_msg(g"Expected success variable name\0");
                                         byte* err_name = (byte*)0;
                                         Node* call;
                                         switch (!this.failed)
                                         {
                                             case (true) {
-                                            switch (this.consume(TokenType.COMMA))
-                                            {
-                                                case (true) { err_name = this.ident(); }
+                                            switch (this.consume_msg(TokenType.COMMA, g"Expected ',' between variable names in dual-assign declaration\0")) { case (true) { err_name = this.ident_msg(g"Expected error variable name\0"); }
                                                 default {};
                                             };
                                         }
@@ -13744,13 +13857,7 @@ namespace flux
                                         };
                                         switch (!this.failed)
                                         {
-                                            case (true) { this.consume(TokenType.ASSIGN); }
-                                            default {};
-                                        };
-                                        switch (!this.failed)
-                                        {
-                                            case (true) {
-                                            call = this.expression();
+                                            case (true) { this.consume_msg(TokenType.ASSIGN, g"Expected '=' in dual-assign declaration\0"); } default {}; }; switch (!this.failed) { case (true) { call = this.expression();
                                             switch (!this.failed)
                                             {
                                                 case (true) { this.consume(TokenType.SEMICOLON); }
@@ -14054,15 +14161,13 @@ namespace flux
             };
 
             // Statements up to the closing '}' of an already opened body go to holder.l0
-            statements_until_brace(Node* holder) -> void
-            {
-                Node* s;
+            statements_until_brace(Node* holder) -> void { Node* s; byte* em = this.eof_msg; this.eof_msg = (byte*)0;
                 while (!this.failed & !this.expect(TokenType.RIGHT_BRACE))
                 {
                     switch (this.expect(TokenType.EOF))
                     {
                         case (true) {
-                        -> this.fail_expected(TokenType.RIGHT_BRACE);
+                        switch (em != (byte*)0) { case (true) { -> this.error(em); } default { -> this.error_unexpected(); }; };
                     }
                         default
                         {
@@ -14146,8 +14251,7 @@ namespace flux
                                 case (true) { node_free(body); -> n; }
                                 default {};
                             };
-                            n.b = body;
-                            this.consume(TokenType.LEFT_PAREN);
+                            n.b = body; this.consume_msg(TokenType.LEFT_PAREN, g"Expected '(' after 'if' in block-if statement\0");
                             switch (!this.failed)
                             {
                                 case (true) { n.a = this.expression(); }
@@ -14155,10 +14259,7 @@ namespace flux
                             };
                             switch (!this.failed)
                             {
-                                case (true) { this.consume(TokenType.RIGHT_PAREN); }
-                                default {};
-                            };
-                            switch (!this.failed & this.expect(TokenType.ELSE))
+                                case (true) { this.consume_msg(TokenType.RIGHT_PAREN, g"Expected ')' after condition in block-if statement\0"); } default {}; }; switch (!this.failed & this.expect(TokenType.ELSE))
                             {
                                 case (true) {
                                 this.advance();
@@ -14179,7 +14280,7 @@ namespace flux
                                 {
                                     case (true) {
                                     node_free(body);
-                                    this.error(g"Unexpected block after block statement. Did you mean '{ ... } if (cond);'?\0");
+                                    this.error_exp(g"Unexpected block after block statement. Did you mean '{ ... } if (cond);'?\0", TokenType.LEFT_BRACE);
                                     -> (Node*)0;
                                 }
                                     default
@@ -14448,7 +14549,7 @@ namespace flux
                                             default
                                             {
                                                 node_free(body);
-                                                this.error(g"Expected 'while' or ';' after do block\0");
+                                                this.error_exp(g"Expected 'while' or ';' after do block\0", TokenType.SEMICOLON);
                                                 -> (Node*)0;
                                             };
                                         };
@@ -14882,7 +14983,7 @@ namespace flux
                             };
                         }
                                     default {
-                            this.error(g"Expected 'case' or 'default'\0");
+                            this.error_exp(g"Expected 'case' or 'default'\0", TokenType.IDENTIFIER);
                         };
                                 };
                             };
@@ -14929,12 +15030,7 @@ namespace flux
                             switch (this.expect(TokenType.EOF))
                             {
                                 case (true) {
-                                this.fail_expected(TokenType.RIGHT_BRACE);
-                                break;
-                            }
-                                default
-                                {
-                                    c = this.switch_case();
+                                this.error_exp(g"Expected 'case' or 'default'\0", TokenType.IDENTIFIER); break; } default { c = this.switch_case();
                                     switch (this.failed)
                                     {
                                         case (true) { break; }
@@ -14998,7 +15094,7 @@ namespace flux
                                         case (true) {
                                         int here = this.mark();
                                         this.reset(start);
-                                        this.error(g"Switch statement requires a default case\0");
+                                        this.error_exp(g"Switch statement requires a default case\0", TokenType.DEFAULT);
                                         this.reset(here);
                                         -> this.done(n);
                                     }
@@ -16335,7 +16431,7 @@ namespace flux
                     if (this.val_is(g"build\0", 5))
                     {
                         this.advance();
-                        this.build_block(m, 2);
+                        this.build_block(m, 2, false);
                     }
                     else
                     {
@@ -16347,12 +16443,12 @@ namespace flux
             };
 
             // '{' entry (',' entry)* ','? '}' : the entries are pushed into list li of owner
-            build_block(Node* owner, int li) -> void
+            build_block(Node* owner, int li, bool test) -> void
             {
                 this.consume(TokenType.LEFT_BRACE);
                 while (!this.failed & !this.expect(TokenType.RIGHT_BRACE))
                 {
-                    this.build_entry(owner, li);
+                    this.build_entry(owner, li, test);
                     if (this.failed) { break; };
                     if (this.expect(TokenType.COMMA))
                     {
@@ -16372,7 +16468,8 @@ namespace flux
 
             // entry -> ['!' '+'] '#' '[' tag ']' '=' value
             //       |  '#' '[' 'override' 'for' names ']' '=' build_block
-            build_entry(Node* owner, int li) -> void
+            //       |  '#' '[' 'test' ']' '=' '{' subtag (',' subtag)* '}'    subtag -> '#' '[' tag ']' ['=' value]
+            build_entry(Node* owner, int li, bool test) -> void
             {
                 Node* e = this.mk(NodeKind.BUILD_ENTRY, this.cur_line(), this.cur_col());
                 if (this.failed) { ->; };
@@ -16395,6 +16492,7 @@ namespace flux
                 if (this.failed) { ->; };
                 e.text = this.cur_value();
                 bool is_override = this.val_is(g"override\0", 8);
+                bool is_test = !test & this.val_is(g"test\0", 4);
                 this.advance();
                 Node* n;
                 if (is_override)
@@ -16421,8 +16519,20 @@ namespace flux
                     };
                 };
                 this.consume(TokenType.RIGHT_BRACKET);
+                if (test & !this.failed & !this.expect(TokenType.ASSIGN))
+                {
+                    // a bare '#[subtag]' inside '#[test]' switches the subtag on
+                    e.ival = 1;
+                    e.op = 1;
+                    ->;
+                };
                 this.consume(TokenType.ASSIGN);
                 if (this.failed) { ->; };
+                if (is_test)
+                {
+                    e.ival = 4;
+                    -> this.build_block(e, 1, true);
+                };
                 if (is_override)
                 {
                     if (locked)
@@ -16431,7 +16541,7 @@ namespace flux
                         ->;
                     };
                     e.ival = 3;
-                    -> this.build_block(e, 1);
+                    -> this.build_block(e, 1, false);
                 };
                 if (this.expect(TokenType.LEFT_BRACE))
                 {
@@ -17267,9 +17377,7 @@ namespace flux
                             default {
                                 switch (this.expect(TokenType.STRINGIFY))
                                 {
-                                    case (true) {
-                    f.d = this.stringify_expr();
-                }
+                                    case (true) { this.in_fn_stringify = 1; f.d = this.stringify_expr(); this.in_fn_stringify = 0; }
                                     default {
                                         switch (this.expect(TokenType.IDENTIFIER))
                                         {
@@ -17278,7 +17386,7 @@ namespace flux
                     this.advance();
                 }
                                             default {
-                    this.fail_expected(TokenType.IDENTIFIER);
+                    this.error_exp(g"Expected function name (identifier or string literal)\0", TokenType.IDENTIFIER);
                 };
                                         };
                                     };
@@ -17951,7 +18059,7 @@ namespace flux
                                                                                         switch (this.in_trait != 0 & !this.expect(TokenType.LEFT_BRACE))
                                                                                         {
                                                                                             case (true) {
-                                                                                            this.fail_expected(TokenType.SEMICOLON);
+                                                                                            this.fail_expected_msg(this.cat2(g"Expected SEMICOLON, got \0", token_name(this.cur())), TokenType.SEMICOLON);
                                                                                             -> this.done(f);
                                                                                         }
                                                                                             default
@@ -18270,9 +18378,7 @@ namespace flux
             // ===== USING, STRUCTS AND NAMESPACES =====
 
             // IDENTIFIER ('::' IDENTIFIER)* joined with "__"
-            namespace_path() -> byte*
-            {
-                byte* path = this.ident();
+            namespace_path() -> byte* { byte* path = this.ident(); byte* part;
                 switch (this.failed)
                 {
                     case (true) { -> (byte*)0; }
@@ -18280,13 +18386,7 @@ namespace flux
                     {
                         while (this.expect(TokenType.SCOPE))
                         {
-                            this.advance();
-                            path = this.cat2(this.cat2(path, g"__\0"), this.ident());
-                            switch (this.failed)
-                            {
-                                case (true) { -> (byte*)0; }
-                                default {};
-                            };
+                            this.advance(); part = this.ident(); switch (this.failed) { case (true) { -> (byte*)0; } default { path = this.cat2(this.cat2(path, g"__\0"), part); }; };
                         };
                         -> path;
                     };
@@ -18683,7 +18783,6 @@ namespace flux
             // Extra names of a prototype list go to the pending queue.
             struct_def() -> Node*
             {
-                int m = this.mark();
                 Node* n = this.mk(NodeKind.STRUCT_DEF, this.cur_line(), this.cur_col());
                 switch (this.failed)
                 {
@@ -19433,7 +19532,7 @@ namespace flux
                                             };
                                         }
                                             default {
-                                            this.error(g"Expected function, struct, object, namespace, enum, union, or variable declaration\0");
+                                            this.error_exp(g"Expected function, struct, object, namespace, enum, union, or variable declaration\0", TokenType.DEF);
                                         };
                                         };
                                     };
@@ -19619,12 +19718,7 @@ namespace flux
                                     case (true) { -> this.done(s); }
                                     default
                                     {
-                                        switch (!this.consume(TokenType.ENUM))
-                                        {
-                                            case (true) { -> this.done(s); }
-                                            default
-                                            {
-                                                d.text = this.ident();
+                                        switch (!this.consume(TokenType.ENUM)) { case (true) { -> this.done(s); } default { d.text = this.ident_msg(this.cat2(this.cat2(this.cat2(this.cat2(g"Expected: enumurated list name after enum keyword at Line \0", this.int_commas(this.cur_line())), g":\0"), this.int_str(this.cur_col())), g" in build\\tmp.fx\0"));
                                                 switch (this.failed)
                                                 {
                                                     case (true) { -> this.done(s); }
@@ -19741,7 +19835,7 @@ namespace flux
                                                                                                                     switch (!this.expect(TokenType.RIGHT_BRACE))
                                                                                                                     {
                                                                                                                         case (true) {
-                                                                                                                this.error(g"Expected ',' or '}' in enum definition\0");
+                                                                                                                this.error_exp(g"Expected ',' or '}' in enum definition\0", TokenType.COMMA);
                                                                                                             }
                                                                                                                         default {};
                                                                                                                     };
@@ -19914,6 +20008,8 @@ namespace flux
             // ===== OBJECTS AND TRAITS =====
 
             error3(byte* a, byte* b, byte* c) -> void -> this.error(this.cat2(this.cat2(a, b), c));
+
+            error3_exp(byte* a, byte* b, byte* c, int t) -> void -> this.error_exp(this.cat2(this.cat2(a, b), c), t);
 
             // TRAIT_DEF registered by trait_def, or null
             find_trait(byte* name) -> Node*
@@ -21225,7 +21321,6 @@ namespace flux
                 int i;
                 int c = node_count(m, 0);
                 Node* p;
-                bool first = true;
                 byte* t;
                 PtrVec* parts = pv_new();
                 while (i < c)
@@ -21355,7 +21450,7 @@ namespace flux
                 byte* prev;
                 byte* msg;
                 int i, j, c, nb, idx;
-                bool dup, wins;
+                bool dup;
                 nb = node_count(o, 2);
                 i = 0;
                 while (i < nb & !this.failed)
@@ -21858,7 +21953,7 @@ namespace flux
                                                                 };
                                                             }
                                                                 default {
-                                                                this.error3(g"Expected 'def' inside trait '\0", t.text, g"'\0");
+                                                                this.error3_exp(g"Expected 'def' inside trait '\0", t.text, g"'\0", TokenType.DEF);
                                                             };
                                                             };
                                                         };
@@ -22224,7 +22319,7 @@ namespace flux
                                         s.v[i] = (byte*)0;
                                     }
                                                 default {
-                                        this.error3(g"Token '\0", this.cur_value(), g"' cannot be part of an operator symbol\0");
+                                        this.error3_exp(g"Token '\0", this.cur_value(), g"' cannot be part of an operator symbol\0", TokenType.IDENTIFIER);
                                         -> s;
                                     };
                                             };
@@ -22674,9 +22769,7 @@ namespace flux
                                 Node* call;
                                 Node* mid;
                                 Node* right;
-                                Node* cnt;
-                                int line, col, count;
-                                bool more;
+                                int line, col;
                                 while (true)
                                 {
                                     line = this.cur_line();
@@ -23163,11 +23256,32 @@ namespace flux
                                             case (true) { -> this.done(f); }
                                             default
                                             {
+                                                int bl = this.cur_line();
+                                                int bc = this.cur_col();
                                                 OpSym* l = this.op_bracket();
                                                 OpSym* r = (OpSym*)0;
                                                 switch (!this.failed & this.expect(TokenType.LEFT_BRACKET))
                                                 {
                                                     case (true) { r = this.op_bracket(); }
+                                                    default {};
+                                                };
+                                                bool vsent = false;
+                                                int vi;
+                                                while (vi < this.param_count(f))
+                                                {
+                                                    switch (f.l0.items[vi].ival == 1) { case (true) { vsent = true; } default {}; };
+                                                    vi++;
+                                                };
+                                                switch (!this.failed & r == (OpSym*)0 & vsent)
+                                                {
+                                                    case (true)
+                                                    {
+                                                        switch (this.is_builtin_op(this.opsym_text(l)))
+                                                        {
+                                                            case (true) { this.error_at(this.cat2(this.cat2(g"Built-in operator '\0", this.opsym_text(l)), g"' cannot be variadic\0"), bl, bc); }
+                                                            default {};
+                                                        };
+                                                    }
                                                     default {};
                                                 };
                                                 switch (this.failed)
@@ -24206,9 +24320,7 @@ namespace flux
                             case (true) { -> this.done(n); }
                             default
                             {
-                                this.in_comptime++;
-                                this.statements_until_brace(n);
-                                this.in_comptime--;
+                                this.in_comptime++; this.eof_msg = g"Unexpected EOF inside 'comptime' block\0"; this.statements_until_brace(n); this.eof_msg = (byte*)0; this.in_comptime--;
                                 switch (!this.failed)
                                 {
                                     case (true) { this.consume(TokenType.RIGHT_BRACE); }
@@ -24352,6 +24464,9 @@ namespace flux
                                     {
                                         this.flush_text(n, line, col);
                                         e = this.sub_expr(v + i + 1, j - i - 1);
+                                        // Parsing the expression may use the shared scratch buffer (template names)
+                                        this.sb.len = 0;
+                                        this.sb.mem[0] = (byte)0;
                                         switch (this.failed)
                                         {
                                             case (true) { -> this.done(n); }
@@ -24783,7 +24898,7 @@ namespace flux
                     default {};
                 };
                 int total = npre + npost;
-                int ci, k, i, j, last, found, ni;
+                int ci, k, i, j, last, found;
                 Node* ct;
                 Node* bd;
                 Node* x;
@@ -25663,7 +25778,19 @@ namespace flux
             //   - the tag must exist and the target count must match its parameter count
             //   - every target other than 'this' must name an async function
             //   - a target with a signature must match one of that function's overloads
-            validate_async(Node* prog) -> void
+            // fparser._validate_async err(): prints the diagnostic now and keeps checking, so every violation is reported
+   async_err(byte* msg, int line, int col) -> void
+   {
+       Buf eb;
+       eb.__init();
+       flux::errors::render(@eb, this.diag_color, flux::errors::SEV_ERROR, msg, line, col, this.lx.src, this.lx.length, this.lmap, this.lmapn, this.lfiles, -1, 0, 0, 0, (byte*)0);
+       println(eb.mem);
+       eb.__exit();
+       this.async_errs++;
+       ->;
+   };
+
+   validate_async(Node* prog) -> void
             {
                 PtrVec* tags = pv_new();
                 PtrVec* funcs = pv_new();
@@ -25671,7 +25798,7 @@ namespace flux
                 int fi, ui, ti, oi;
                 Node* f, use, tag, t;
                 bool ok;
-                while (fi < funcs.len & !this.failed)
+                while (fi < funcs.len)
                 {
                     f = (Node*)funcs.items[fi];
                     fi++;
@@ -25684,13 +25811,17 @@ namespace flux
                             switch (!this.async_is_async(funcs, f.text))
                             {
                                 case (true) {
-                                    use = f.l1.items[0];
-                                    this.error_at(this.cat2(this.cat2(this.cat2(this.cat2(g"'#<\0", use.text), g">' can only be applied to an async function, but '\0"), f.text), g"' is not async\0"), use.line, use.col);
-                                    ui = f.l1.len;
+                                    while (ui < f.l1.len)
+                           {
+                               use = f.l1.items[ui];
+                               this.async_err(this.cat2(this.cat2(this.cat2(this.cat2(g"'#<\0", use.text), g">' can only be applied to an async function, but '\0"), f.text), g"' is not async\0"), use.line, use.col);
+                               ui++;
+                           };
+                           ui = f.l1.len;
                                 }
                                 default {};
                             };
-                            while (ui < f.l1.len & !this.failed)
+                            while (ui < f.l1.len)
                             {
                                 use = f.l1.items[ui];
                                 ui++;
@@ -25698,7 +25829,7 @@ namespace flux
                                 switch (tag == (Node*)0)
                                 {
                                     case (true) {
-                                        this.error_at(this.cat2(this.cat2(g"unknown async tag '\0", use.text), g"'\0"), use.line, use.col);
+                                        this.async_err(this.cat2(this.cat2(g"unknown async tag '\0", use.text), g"'\0"), use.line, use.col);
                                         continue;
                                     }
                                     default
@@ -25706,13 +25837,13 @@ namespace flux
                                         switch (use.l0.len != tag.l0.len)
                                         {
                                             case (true) {
-                                                this.error_at(this.cat2(this.cat2(this.cat2(this.cat2(this.cat2(g"async tag '\0", use.text), g"' takes \0"), this.async_number_text(tag.l0.len)), g" target(s), got \0"), this.async_number_text(use.l0.len)), use.line, use.col);
+                                                this.async_err(this.cat2(this.cat2(this.cat2(this.cat2(this.cat2(g"async tag '\0", use.text), g"' takes \0"), this.async_number_text(tag.l0.len)), g" target(s), got \0"), this.async_number_text(use.l0.len)), use.line, use.col);
                                                 continue;
                                             }
                                             default
                                             {
                                                 ti = 0;
-                                                while (ti < use.l0.len & !this.failed)
+                                                while (ti < use.l0.len)
                                                 {
                                                     t = use.l0.items[ti];
                                                     ti++;
@@ -25724,7 +25855,7 @@ namespace flux
                                                             switch (!this.async_has_func(funcs, t.text))
                                                             {
                                                                 case (true) {
-                                                                    this.error_at(this.cat2(this.cat2(g"unknown async function '\0", t.text), g"'\0"), t.line, t.col);
+                                                                    this.async_err(this.cat2(this.cat2(g"unknown async function '\0", t.text), g"'\0"), t.line, t.col);
                                                                     continue;
                                                                 }
                                                                 default
@@ -25732,7 +25863,7 @@ namespace flux
                                                                     switch (!this.async_is_async(funcs, t.text))
                                                                     {
                                                                         case (true) {
-                                                                            this.error_at(this.cat2(this.cat2(this.cat2(this.cat2(g"'\0", t.text), g"' is not async and cannot be a target of '#<\0"), use.text), g">'\0"), t.line, t.col);
+                                                                            this.async_err(this.cat2(this.cat2(this.cat2(this.cat2(g"'\0", t.text), g"' is not async and cannot be a target of '#<\0"), use.text), g">'\0"), t.line, t.col);
                                                                             continue;
                                                                         }
                                                                         default
@@ -25754,7 +25885,7 @@ namespace flux
                                                                                     switch (!ok)
                                                                                     {
                                                                                         case (true) {
-                                                                                            this.error_at(this.cat2(this.cat2(g"no async overload matches '\0", t.text), g"(...)'\0"), t.line, t.col);
+                                                                                            this.async_err(this.cat2(this.cat2(g"no async overload matches '\0", t.text), g"(...)'\0"), t.line, t.col);
                                                                                         }
                                                                                         default {};
                                                                                     };
@@ -25870,8 +26001,7 @@ namespace flux
                                                 this.tinst_s.len = 0;
                                                 this.tinst_o.len = 0;
                                                 this.tinst_f.len = 0;
-                                                this.validate_async(prog);
-                                                -> prog;
+                                                this.validate_async(prog); switch (this.async_errs > 0) { case (true) { this.failed = true; this.err_kind = ParseErr.SILENT; } default {}; }; -> prog;
                                             };
                                         };
                                     };

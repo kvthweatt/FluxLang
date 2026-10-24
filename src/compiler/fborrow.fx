@@ -49,14 +49,14 @@ namespace flux
         def bc_len(byte* s) -> int
         {
             int n = 0;
-            while (s[n]!?) { n++; };
+            while (s[n] != 0) { n++; };
             return n;
         };
 
         def bc_starts(byte* s, byte* p) -> bool
         {
             int i = 0;
-            while (p[i]!?)
+            while (p[i] != 0)
             {
                 if (s[i] != p[i]) { return false; };
                 i++;
@@ -84,11 +84,11 @@ namespace flux
             int i = 0;
             int j;
             bool hit;
-            while (s[i]!?)
+            while (s[i] != 0)
             {
                 j = 0;
                 hit = true;
-                while (needle[j]!?)
+                while (needle[j] != 0)
                 {
                     if (bc_lower((int)s[i + j]) != (int)needle[j])
                     {
@@ -108,7 +108,7 @@ namespace flux
         {
             int i = 0;
             int start = 0;
-            while (s[i]!?)
+            while (s[i] != 0)
             {
                 if (s[i] == '_' & s[i + 1] == '_')
                 {
@@ -127,18 +127,16 @@ namespace flux
         // Mirrors the base name computation of CallGraph.collect.
         def bc_overload_base(byte* s) -> byte*
         {
-            int i = 0;
             int start = 0;
             int j;
             bool digits;
-            int n = bc_len(s);
             int pend;
             byte* r;
             // parts are s[start .. end) separated by "__"
             while (true)
             {
                 pend = start;
-                while (s[pend]!?)
+                while (s[pend] != 0)
                 {
                     if (s[pend] == '_' & s[pend + 1] == '_') { break; };
                     pend++;
@@ -169,6 +167,38 @@ namespace flux
             return ts_dup(s);
         };
 
+        // The number in the first all-digit "__" segment of a mangled name, -1 when absent
+        def bc_mangled_arity(byte* s) -> int
+        {
+            int start = 0;
+            int pend;
+            int j;
+            int v;
+            bool digits;
+            while (true)
+            {
+                pend = start;
+                while (s[pend] != 0)
+                {
+                    if (s[pend] == '_' & s[pend + 1] == '_') { break; };
+                    pend++;
+                };
+                digits = pend > start;
+                v = 0;
+                j = start;
+                while (j < pend)
+                {
+                    if (s[j] < '0' | s[j] > '9') { digits = false; };
+                    v = v * 10 + (int)(s[j] - '0');
+                    j++;
+                };
+                if (digits) { return v; };
+                if (s[pend] == 0) { break; };
+                start = pend + 2;
+            };
+            return -1;
+        };
+
         def bx_new(int v) -> int*
         {
             int* p = (int*)fmalloc((u64)((sizeof(int) + 7) / 8));
@@ -193,6 +223,16 @@ namespace flux
             m.ks = pv_new();
             m.vs = pv_new();
             return m;
+        };
+
+        // Frees the map. The keys and values belong to the caller.
+        def om_free(OMap* m) -> void
+        {
+            if (m == (OMap*)0) { return; };
+            pv_free(m.ks);
+            pv_free(m.vs);
+            ffree((byte*)m);
+            return;
         };
 
         def om_find(OMap* m, byte* key) -> int
@@ -542,7 +582,7 @@ namespace flux
                         info.mut = mutable;
                         info.file = file;
                         info.line = line;
-                        switch (old_site[0]!? & om_has(this.freed_sites, old_site) & !cstr_eq(site, old_site)
+                        switch (old_site[0] != 0 & om_has(this.freed_sites, old_site) & !cstr_eq(site, old_site)
                                 & !bc_starts(site, g"freed:\0"))
                         {
                             case (true) {
@@ -604,7 +644,7 @@ namespace flux
 
             mark_freed(byte* site, byte* file, int line) -> void
             {
-                switch (site[0]!? & !cstr_eq(site, g"unknown\0") & !bc_starts(site, g"derived:\0"))
+                switch (site[0] != 0 & !cstr_eq(site, g"unknown\0") & !bc_starts(site, g"derived:\0"))
                 {
                     case (true) { om_put(this.freed_sites, site, (void*)bpos_new(file, line)); }
                     default {};
@@ -668,7 +708,7 @@ namespace flux
 
             record_alloc_size(byte* site, int size) -> void
             {
-                switch (site[0]!? & !cstr_eq(site, g"unknown\0") & !bc_starts(site, g"derived:\0"))
+                switch (site[0] != 0 & !cstr_eq(site, g"unknown\0") & !bc_starts(site, g"derived:\0"))
                 {
                     case (true) { om_put(this.alloc_sizes, site, (void*)bx_new(size)); }
                     default {};
@@ -1062,11 +1102,11 @@ namespace flux
             int i = 0;
             int j;
             bool hit;
-            while (hay[i]!?)
+            while (hay[i] != 0)
             {
                 j = 0;
                 hit = true;
-                while (needle[j]!?)
+                while (needle[j] != 0)
                 {
                     if (hay[i + j] != needle[j])
                     {
@@ -1090,7 +1130,7 @@ namespace flux
         def bc_is_pointer_type(TypeSpec* t) -> bool
         {
             if (t == (TypeSpec*)0) { return false; };
-            if ((t.flags `& TS_POINTER)!?) { return true; };
+            if ((t.flags `& TS_POINTER) != 0) { return true; };
             return t.pointer_depth > 0;
         };
 
@@ -1165,7 +1205,7 @@ namespace flux
             return n;
         };
 
-        def bc_is_proto(Node* f) -> bool -> (f.flags `& NF_PROTOTYPE)!?;
+        def bc_is_proto(Node* f) -> bool -> (f.flags `& NF_PROTOTYPE) != 0;
 
         // ------------------------------------------------------------------
         // Call graph
@@ -1269,7 +1309,7 @@ namespace flux
                 int c = bc_count(f, 1);
                 int i;
                 AUse* u;
-                if ((f.flags `& NF_ASYNC)!?) { nm_put(this.async_names, key, (void*)1); };
+                if ((f.flags `& NF_ASYNC) != 0) { nm_put(this.async_names, key, (void*)1); };
                 while (i < c)
                 {
                     u = (AUse*)fmalloc((u64)((sizeof(AUse) + 7) / 8));
@@ -1294,7 +1334,6 @@ namespace flux
             {
                 int c = bc_count(program, 0);
                 int i;
-                int n;
                 byte* mangled;
                 byte* short_name;
                 byte* base;
@@ -1383,7 +1422,6 @@ namespace flux
                 int i;
                 int c;
                 Node* f;
-                Node* o;
                 byte* prefix;
                 switch (node == (Node*)0)
                 {
@@ -1545,7 +1583,7 @@ namespace flux
                                     switch (m.text != (byte*)0 & m.a != (Node*)0)
                                     {
                                         case (true) {
-                                        switch (m.text[0]!?)
+                                        switch (m.text[0] != 0)
                                         {
                                             case (true) {
                                             mangled = this.join_prefix(this.join_prefix(prefix, obj.text), m.text);
@@ -1896,7 +1934,7 @@ namespace flux
                     switch (p.text != (byte*)0 & bc_is_pointer_type(p.ts))
                     {
                         case (true) {
-                        switch (p.text[0]!?)
+                        switch (p.text[0] != 0)
                         {
                             case (true) { pv_push(r, (void*)p); }
                             default {};
@@ -1978,7 +2016,7 @@ namespace flux
                                     {
                                         case (true) {
                                         key = (byte*)call_ctx.items[idx];
-                                        switch (!cstr_eq(key, g"unknown\0") & key[0]!?)
+                                        switch (!cstr_eq(key, g"unknown\0") & key[0] != 0)
                                         {
                                             case (true) {
                                             site = key;
@@ -3273,7 +3311,6 @@ namespace flux
                 byte* spawned = (byte*)0;
                 byte* cand;
                 int i;
-                Node* a;
                 Node* sf;
                 PtrVec* ctx;
                 PtrVec* mp;
@@ -3291,7 +3328,7 @@ namespace flux
                     switch (cand != (byte*)0)
                     {
                         case (true) {
-                        switch (cand[0]!?)
+                        switch (cand[0] != 0)
                         {
                             case (true) {
                             switch (nm_has(this.cg.funcs, cand))
@@ -3321,7 +3358,7 @@ namespace flux
                     switch (cand != (byte*)0)
                     {
                         case (true) {
-                        switch (cand[0]!?) { case (true) { this.alias.check_thread_escape(cand, file, line); } default {}; };
+                        switch (cand[0] != 0) { case (true) { this.alias.check_thread_escape(cand, file, line); } default {}; };
                     }
                         default {};
                     };
@@ -3404,9 +3441,6 @@ namespace flux
                 PtrVec* names;
                 PtrVec* sites;
                 int i;
-                byte* m;
-                Node* f;
-                PtrVec* ctx;
                 switch (callee != (byte*)0)
                 {
                     case (true) { switch (callee[0] == 0) { case (true) { callee = (byte*)0; } default {}; }; }
@@ -3499,8 +3533,6 @@ namespace flux
                 int i;
                 PtrVec* names;
                 PtrVec* sites;
-                Node* f;
-                PtrVec* ctx;
                 this.walk_expr(node.a);
                 this.walk_args(node.l0);
                 switch (method == (byte*)0)
@@ -3523,7 +3555,7 @@ namespace flux
                                     switch (pass == 0)
                                     {
                                         case (true) {
-                                        switch (hint[0]!?) { case (true) { cand = join3(hint, g"__\0", method); } default {}; };
+                                        switch (hint[0] != 0) { case (true) { cand = join3(hint, g"__\0", method); } default {}; };
                                     }
                                         default { cand = method; };
                                     };
@@ -3674,7 +3706,6 @@ namespace flux
                 int k;
                 Node* fnode;
                 byte* site;
-                int size;
                 Node* arg;
                 byte* freed_site;
                 switch (node == (Node*)0)
@@ -3728,7 +3759,7 @@ namespace flux
                                 case (true) {
                                 arg = node_child(node, 0, 0);
                                 freed_site = this.resolve_ffree_arg(arg);
-                                switch (freed_site[0]!? & !cstr_eq(freed_site, g"unknown\0"))
+                                switch (freed_site[0] != 0 & !cstr_eq(freed_site, g"unknown\0"))
                                 {
                                     case (true) {
                                     this.alias.record_free(freed_site);
@@ -3887,7 +3918,7 @@ namespace flux
         def bc_str_lt(byte* a, byte* b) -> bool
         {
             int i = 0;
-            while (a[i]!? & b[i]!?)
+            while (a[i] != 0 & b[i] != 0)
             {
                 if (a[i] != b[i]) { return a[i] < b[i]; };
                 i++;
@@ -4001,6 +4032,14 @@ namespace flux
                 i++;
             };
             println(g"\0");
+            i = 0;
+            while (i < kinds.vs.len)
+            {
+                ffree((byte*)kinds.vs.items[i]);
+                i++;
+            };
+            om_free(kinds);
+            pv_free(order);
             return;
         };
 
@@ -4141,8 +4180,8 @@ namespace flux
         def lf_modes_conflict(LAcc* a, LAcc* b) -> bool
         {
             int bits = a.bits `| b.bits;
-            if ((bits `& LA_F)!?) { return true; };
-            if ((bits `& LA_W)!?) { return !(a.atomic & b.atomic); };
+            if ((bits `& LA_F) != 0) { return true; };
+            if ((bits `& LA_W) != 0) { return !(a.atomic & b.atomic); };
             return false;
         };
 
@@ -4164,8 +4203,8 @@ namespace flux
 
         def lf_mode_name(LAcc* m) -> byte*
         {
-            if ((m.bits `& LA_F)!?) { return g"free\0"; };
-            if ((m.bits `& LA_W)!?)
+            if ((m.bits `& LA_F) != 0) { return g"free\0"; };
+            if ((m.bits `& LA_W) != 0)
             {
                 if (m.atomic) { return g"atomic write\0"; };
                 return g"write\0";
@@ -4422,14 +4461,14 @@ namespace flux
             int i, seg, start, j;
             Buf k;
             byte* out;
-            while (r[i]!? & seg < n)
+            while (r[i] != 0 & seg < n)
             {
                 if (r[i] == '|') { seg++; start = i + 1; };
                 i++;
             };
             j = start;
             k.__init();
-            while (r[j]!? & r[j] != '|')
+            while (r[j] != 0 & r[j] != '|')
             {
                 k.put((int)r[j]);
                 j++;
@@ -4443,7 +4482,7 @@ namespace flux
         def lf_after(byte* r, int n) -> byte*
         {
             int i, seen;
-            while (r[i]!?)
+            while (r[i] != 0)
             {
                 if (r[i] == '|')
                 {
@@ -4486,6 +4525,18 @@ namespace flux
             {
                 k.put_str(f"|{inner}\0");
             };
+            out = ts_dup(k.mem);
+            k.__exit();
+            return out;
+        };
+
+        // mapped call site: the call column keeps two calls on one line apart
+        def lf_heap_c(byte* func, int line, int col, byte* inner) -> byte*
+        {
+            Buf k;
+            byte* out;
+            k.__init();
+            k.put_str(f"H|{func}|{line}@{col}|{inner}\0");
             out = ts_dup(k.mem);
             k.__exit();
             return out;
@@ -4906,7 +4957,7 @@ namespace flux
         def lf_pe_split(byte* e) -> int
         {
             int i;
-            while (e[i]!?)
+            while (e[i] != 0)
             {
                 if (e[i] == ':') { return i; };
                 i++;
@@ -4916,9 +4967,10 @@ namespace flux
 
         def lf_exclusive(PtrVec* a, PtrVec* b) -> bool
         {
-            bool same;
+            int i, j, ca, cb;
             byte* x, y;
-            int i, j, ca, cb, q;
+            int q;
+            bool same;
             while (i < a.len)
             {
                 x = (byte*)a.items[i];
@@ -4931,6 +4983,7 @@ namespace flux
                     if (ca == cb)
                     {
                         // same node when the text before ':' matches
+                        q = 0;
                         same = true;
                         while (q < ca)
                         {
@@ -5018,11 +5071,13 @@ namespace flux
             int funcs_checked;
             byte* fn;
             OMap* locals;           // var name to LocInfo*
+            OMap* heapvars;         // names of heap T x locals
             PtrVec* loops;          // LLoop*
             PtrVec* defers;         // PtrVec* of DEFER nodes
             PtrVec* returns;        // LRet*
             PtrVec* blks;           // Node* seen as block ids
             int cur_line;
+            int call_col;
             LAl* al;
             bool warn_mode;
             OMap* fp;               // footprint of the function being walked
@@ -5067,6 +5122,7 @@ namespace flux
                 this.funcs_checked = 0;
                 this.fn = (byte*)0;
                 this.locals = om_new();
+                this.heapvars = om_new();
                 this.loops = pv_new();
                 this.defers = pv_new();
                 this.returns = pv_new();
@@ -5203,7 +5259,7 @@ namespace flux
                 fd = (Node*)nm_get(this.cg.funcs, fname);
                 if (fd != (Node*)0)
                 {
-                    if ((fd.flags `& NF_ASYNC)!?) { -> true; };
+                    if ((fd.flags `& NF_ASYNC) != 0) { -> true; };
                 };
                 -> false;
             };
@@ -5291,7 +5347,6 @@ namespace flux
             term_of(Node* e, LState* st) -> LTerm*
             {
                 LTerm* l, r;
-                int v;
                 if (e == (Node*)0) { -> (LTerm*)0; };
                 if (e.kind == NodeKind.LITERAL)
                 {
@@ -5547,10 +5602,10 @@ namespace flux
                 i = 0;
                 while (i < names.ks.len)
                 {
-                    if (this.count_mods(body, (byte*)names.ks.items[i])!?) { -> (LPat*)0; };
+                    if (this.count_mods(body, (byte*)names.ks.items[i]) != 0) { -> (LPat*)0; };
                     if (update != (Node*)0)
                     {
-                        if (this.count_mods(update, (byte*)names.ks.items[i])!?) { -> (LPat*)0; };
+                        if (this.count_mods(update, (byte*)names.ks.items[i]) != 0) { -> (LPat*)0; };
                     };
                     i++;
                 };
@@ -5558,7 +5613,7 @@ namespace flux
                 c = bc_count(body, 0);
                 if (update != (Node*)0)
                 {
-                    if (mods!?) { -> (LPat*)0; };
+                    if (mods != 0) { -> (LPat*)0; };
                     if (!this.is_inc(update, name)) { -> (LPat*)0; };
                 }
                 else
@@ -5605,7 +5660,7 @@ namespace flux
                 {
                     this.xb.put_str(nm);
                 };
-                if (t.c!?)
+                if (t.c != 0)
                 {
                     if (t.c > 0) { this.xb.put_str(g"+\0"); };
                     this.xb.put_int(t.c);
@@ -5802,7 +5857,7 @@ namespace flux
                 int q, i, ops;
                 LTask* u;
                 PtrVec* ul, lst, det;
-                byte* r, what, a, b, msg, oc;
+                byte* r, what, a, b, oc;
                 LAcc* ma, mb2;
                 bool found;
                 while (q < st.tasks.vs.len)
@@ -5831,7 +5886,7 @@ namespace flux
                     ma = this.hit_a;
                     mb2 = this.hit_b;
                     ops = this.rel_bits(task.fn, u.fn);
-                    if ((ops `& (LA_OP_EXCL `| LA_OP_AFTER `| LA_OP_BEFORE))!?) { continue; };
+                    if ((ops `& (LA_OP_EXCL `| LA_OP_AFTER `| LA_OP_BEFORE)) != 0) { continue; };
                     om_put(this.async_seq, lf_addr_key((void*)task.node), (void*)1);
                     a = bc_last_seg(task.fn);
                     b = bc_last_seg(u.fn);
@@ -5840,7 +5895,7 @@ namespace flux
                     what = ts_dup(this.mb.mem);
                     det = pv_new();
                     pv_push(det, (void*)join3(g"first call launched at \0", this.where(u.line), g"\0"));
-                    if ((ops `& LA_OP_INDEP)!?)
+                    if ((ops `& LA_OP_INDEP) != 0)
                     {
                         pv_push(det, (void*)g"the derived footprint is the truth, the tag claim is wrong\0");
                         this.mb.clear();
@@ -5849,7 +5904,7 @@ namespace flux
                     }
                     else
                     {
-                        if ((ops `& LA_OP_COMMUTE)!?)
+                        if ((ops `& LA_OP_COMMUTE) != 0)
                         {
                             pv_push(det, (void*)g"the derived footprint is the truth, the tag claim is wrong\0");
                             this.mb.clear();
@@ -5871,11 +5926,13 @@ namespace flux
 
             // Apply a callee summary; its accesses are already covered by the translated
             // footprint, so they are not recorded or checked twice.
-            apply_quiet(byte* fname, PtrVec* arg_regs, LState* st) -> PtrVec*
+            apply_quiet(byte* fname, PtrVec* arg_regs, LState* st, Node* call) -> PtrVec*
             {
                 bool prev = this.no_access;
                 PtrVec* r;
                 this.no_access = true;
+                this.call_col = 0;
+                if (call != (Node*)0) { this.call_col = call.col; };
                 r = this.apply(fname, arg_regs, st);
                 this.no_access = prev;
                 -> r;
@@ -6073,7 +6130,7 @@ namespace flux
                     while (q < st.tasks.vs.len)
                     {
                         u = (LTask*)st.tasks.vs.items[q];
-                        if ((this.rel_bits(u.fn, resolved) `& LA_OP_AFTER)!?)
+                        if ((this.rel_bits(u.fn, resolved) `& LA_OP_AFTER) != 0)
                         {
                             w = (PtrVec*)om_get(this.async_waits, lf_addr_key((void*)e));
                             if (w == (PtrVec*)0)
@@ -6103,7 +6160,7 @@ namespace flux
                         };
                         i++;
                     };
-                    -> this.apply_quiet(resolved, arg_regs, st);
+                    -> this.apply_quiet(resolved, arg_regs, st, e);
                 };
                 tfp = this.translate_fp(summ, arg_regs, e, st);
                 if (launch)
@@ -6122,7 +6179,7 @@ namespace flux
                     om_put(this.async_launched, lf_addr_key((void*)e), (void*)1);
                     this.check_launch(task, st);
                     this.merge_fp_roots(tfp);
-                    ret = this.apply_quiet(resolved, arg_regs, st);
+                    ret = this.apply_quiet(resolved, arg_regs, st, e);
                     om_put(st.tasks, lf_addr_key((void*)e), (void*)task);
                     this.last_task = task;
                     -> ret;
@@ -6142,7 +6199,7 @@ namespace flux
                     };
                     i++;
                 };
-                -> this.apply_quiet(resolved, arg_regs, st);
+                -> this.apply_quiet(resolved, arg_regs, st, e);
             };
 
             // ----- driver -----
@@ -6173,12 +6230,31 @@ namespace flux
                 PtrVec* cands;
                 int i;
                 byte* c;
+                byte* base;
                 Node* f;
                 if (name == (byte*)0) { -> (byte*)0; };
                 if (name[0] == 0) { -> (byte*)0; };
                 if (nm_has(this.cg.funcs, name)) { -> name; };
                 if (nm_has(this.cg.short_names, name)) { -> (byte*)nm_get(this.cg.short_names, name); };
                 cands = (PtrVec*)nm_get(this.cg.overloads, name);
+                if (cands == (PtrVec*)0)
+                {
+                    // a mangled call target (main__0__ret_intE1): resolve its source name
+                    base = bc_overload_base(name);
+                    if (base[0] != 0)
+                    {
+                        cands = (PtrVec*)nm_get(this.cg.overloads, base);
+                        if (cands == (PtrVec*)0)
+                        {
+                            if (nm_has(this.cg.funcs, base))
+                            {
+                                cands = pv_new();
+                                pv_push(cands, (void*)base);
+                            };
+                        };
+                        nargs = bc_mangled_arity(name);
+                    };
+                };
                 if (cands == (PtrVec*)0) { -> (byte*)0; };
                 if (cands.len == 1) { -> (byte*)cands.items[0]; };
                 i = 0;
@@ -6236,23 +6312,21 @@ namespace flux
 
             summary(byte* name) -> LSumm*
             {
-                Node* func, p,
-                      s_async_node;
+                Node* func, p;
                 LState* st, exit_state;
-                int i, n, j, q, s_line;
-                byte* reg, pr, k, c,
-                      s_fn;
+                int i, n, j;
+                byte* reg, pr, k, c;
                 LSumm* sm;
-                PtrVec* ret, path, v,
-                        s_loops, s_defers, s_returns;
+                PtrVec* ret, path, v;
                 LRet* lr;
                 LHeld* lh;
                 // saved walk context
-                // s_line
-                // s_fn
-                // s_loops, s_defers, s_returns
-                OMap* s_locals, s_fp, s_ivars;
+                byte* s_fn;
+                OMap* s_locals, s_fp, s_ivars, s_heapvars;
+                PtrVec* s_loops, s_defers, s_returns;
+                int s_line;
                 LAl* s_al;
+                Node* s_async_node;
                 LTask* s_last_task;
 
                 if (nm_has(this.summaries, name)) { -> (LSumm*)nm_get(this.summaries, name); };
@@ -6273,6 +6347,7 @@ namespace flux
                 nm_put(this.active_summ, name, (void*)1);
                 s_fn = this.fn;
                 s_locals = this.locals;
+                s_heapvars = this.heapvars;
                 s_loops = this.loops;
                 s_defers = this.defers;
                 s_returns = this.returns;
@@ -6293,6 +6368,7 @@ namespace flux
                 this.index_function(func);
                 this.fn = name;
                 this.locals = om_new();
+                this.heapvars = om_new();
                 this.loops = pv_new();
                 this.defers = pv_new();
                 pv_push(this.defers, (void*)pv_new());
@@ -6308,7 +6384,7 @@ namespace flux
                     p = node_child(func, 0, i);
                     if (p.text != (byte*)0)
                     {
-                        if (p.text[0]!?)
+                        if (p.text[0] != 0)
                         {
                             reg = lf_stack(name, p.text, g"fn\0");
                             lf_loc_put(this.locals, p.text, 0, reg);
@@ -6374,6 +6450,9 @@ namespace flux
                 };
                 if (exit_state != (LState*)0)
                 {
+                    int q, along;
+                    int* fl;
+                    bool seen_any;
                     i = 0;
                     while (i < n)
                     {
@@ -6425,6 +6504,31 @@ namespace flux
                         if (k[0] == 'H') { om_put(sm.heap_status, k, exit_state.status.vs.items[j]); };
                         j++;
                     };
+                    // a returned region carries the status it had along the paths that return it
+                    j = 0;
+                    while (j < ret.len)
+                    {
+                        k = (byte*)ret.items[j];
+                        j++;
+                        if (k[0] != 'H') { continue; };
+                        along = 0;
+                        seen_any = false;
+                        q = 0;
+                        while (q < this.returns.len)
+                        {
+                            lr = (LRet*)this.returns.items[q];
+                            q++;
+                            if (!lf_rs_has(lr.regs, k)) { continue; };
+                            fl = (int*)om_get(lr.st.status, k);
+                            if (fl == (int*)0) { continue; };
+                            along = along `| fl[0];
+                            seen_any = true;
+                        };
+                        if (seen_any)
+                        {
+                            om_put(sm.heap_status, k, (void*)bx_new(along));
+                        };
+                    };
                     sm
                     {
                         .esc = om_copy(exit_state.esc);
@@ -6433,6 +6537,7 @@ namespace flux
                 };
                 this.fn = s_fn;
                 this.locals = s_locals;
+                this.heapvars = s_heapvars;
                 this.loops = s_loops;
                 this.defers = s_defers;
                 this.returns = s_returns;
@@ -6524,7 +6629,7 @@ namespace flux
             {
                 int c = bc_count(d, 0);
                 int i;
-                if ((d.flags `& NF_HAS_BODY)!?)
+                if ((d.flags `& NF_HAS_BODY) != 0)
                 {
                     while (i < c)
                     {
@@ -6546,7 +6651,7 @@ namespace flux
                 Node* cc;
                 LState* pre, s2, res;
                 int i, c;
-                if (ln!?) { this.cur_line = ln; };
+                if (ln != 0) { this.cur_line = ln; };
 
                 if (k == NodeKind.VARIABLE_DECLARATION) { -> this.decl(node, st, bid); };
                 if (k == NodeKind.EXPRESSION_STATEMENT)
@@ -6681,16 +6786,34 @@ namespace flux
                 PtrVec* v;
                 int c, i;
                 LTerm* tm;
-                if ((node.flags `& NF_GLOBAL)!?) { reg = lf_static(node.text); };
+                byte* hsite;
+                bool is_heap;
+                if ((node.flags `& NF_GLOBAL) != 0) { reg = lf_static(node.text); };
                 if (ts != (TypeSpec*)0)
                 {
-                    if ((ts.flags `& TS_ARRAY)!?) { is_arr = true; };
+                    if ((ts.flags `& TS_ARRAY) != 0) { is_arr = true; };
                 };
                 if (is_arr) { lf_loc_put(this.locals, node.text, 1, reg); }
                 else { lf_loc_put(this.locals, node.text, 0, reg); };
                 om_put(st.env, node.text, (void*)lf_rs_new());
                 om_del(st.terms, node.text);
                 if (bc_is_pointer_type(ts) & !is_arr) { om_put(this.al.ptr_vars, node.text, (void*)1); };
+                // heap T x: x is a T* into a fresh allocation (codegen _vardecl_heap)
+                if (ts != (TypeSpec*)0 & (node.flags `& NF_GLOBAL) == 0)
+                {
+                    if (ts.storage_class == StorageClass.HEAP)
+                    {
+                        hsite = lf_heap(this.fn, this.cur_line, (byte*)0);
+                        om_put(st.status, hsite, (void*)bx_new(LF_O));
+                        om_del(st.esc, hsite);
+                        om_del(st.free_at, hsite);
+                        om_put(this.heapvars, node.text, (void*)1);
+                        om_put(this.al.ptr_vars, node.text, (void*)1);
+                        om_put(st.env, node.text, (void*)lf_rs_one(hsite));
+                        is_heap = true;
+                    };
+                };
+                if (!is_heap) { om_del(this.heapvars, node.text); };
                 if (iv != (Node*)0) { this.add_deriv(node.text, iv); };
                 if (iv != (Node*)0)
                 {
@@ -6722,6 +6845,7 @@ namespace flux
                     };
                     if (!is_arr) { om_put(st.env, node.text, (void*)v); };
                 };
+                if (is_heap) { om_put(st.env, node.text, (void*)lf_rs_one(hsite)); };
                 ->;
             };
 
@@ -6862,7 +6986,7 @@ namespace flux
                 while (i < v.len)
                 {
                     r = (byte*)v.items[i];
-                    if (r[0] == 'H') { om_put(st.esc, r, (void*)1); };
+                    if (r[0] == 'H' | r[0] == 'P') { om_put(st.esc, r, (void*)1); };
                     i++;
                 };
                 ->;
@@ -6991,6 +7115,129 @@ namespace flux
 
             // ----- control flow -----
 
+            // ----- null narrowing -----
+
+            nf_bare(Node* e) -> Node*
+            {
+                while (e != (Node*)0 & bc_is_cast(e)) { e = e.a; };
+                return e;
+            };
+
+            nf_zero(Node* e) -> bool
+            {
+                if (e == (Node*)0) { return false; };
+                if (e.kind != NodeKind.LITERAL) { return false; };
+                if (e.op == DataType.SINT | e.op == DataType.UINT | e.op == DataType.SLONG | e.op == DataType.ULONG | e.op == DataType.BOOL)
+                {
+                    return e.ival == 0;
+                };
+                return false;
+            };
+
+            // variables known to be null when cond evaluates to truth
+            null_facts(Node* cond, bool truth, PtrVec* out) -> void
+            {
+                Node* c = this.nf_bare(cond);
+                Node* l, r, t;
+                bool is_eq;
+                if (c == (Node*)0) { ->; };
+                if (c.kind == NodeKind.UNARY_OP)
+                {
+                    if (c.op == Operator.NOT & ((c.flags `& 1) == 0))
+                    {
+                        this.null_facts(c.a, !truth, out);
+                    };
+                    ->;
+                };
+                if (c.kind == NodeKind.IDENTIFIER)
+                {
+                    if (!truth) { pv_push(out, (void*)c.text); };
+                    ->;
+                };
+                if (c.kind == NodeKind.BINARY_OP)
+                {
+                    if (c.op == Operator.EQUAL | c.op == Operator.NOT_EQUAL)
+                    {
+                        l = this.nf_bare(c.a);
+                        r = this.nf_bare(c.b);
+                        if (r != (Node*)0 & l != (Node*)0)
+                        {
+                            if (r.kind == NodeKind.IDENTIFIER & l.kind == NodeKind.LITERAL)
+                            {
+                                t = l;
+                                l = r;
+                                r = t;
+                            };
+                        };
+                        if (l != (Node*)0 & r != (Node*)0)
+                        {
+                            if (l.kind == NodeKind.IDENTIFIER & this.nf_zero(r))
+                            {
+                                is_eq = c.op == Operator.EQUAL;
+                                if (is_eq == truth) { pv_push(out, (void*)l.text); };
+                            };
+                        };
+                        ->;
+                    };
+                    if (c.op == Operator.AND & truth)
+                    {
+                        this.null_facts(c.a, true, out);
+                        this.null_facts(c.b, true, out);
+                        ->;
+                    };
+                    if (c.op == Operator.OR & !truth)
+                    {
+                        this.null_facts(c.a, false, out);
+                        this.null_facts(c.b, false, out);
+                    };
+                };
+                ->;
+            };
+
+            // on a branch where a pointer variable is null it owns no allocation
+            narrow(LState* st, Node* cond, bool truth) -> void
+            {
+                PtrVec* names = pv_new();
+                PtrVec* regs;
+                int i, j;
+                byte* r;
+                this.null_facts(cond, truth, names);
+                while (i < names.len)
+                {
+                    regs = (PtrVec*)om_get(st.env, (byte*)names.items[i]);
+                    if (regs != (PtrVec*)0)
+                    {
+                        if (regs.len > 0)
+                        {
+                            j = 0;
+                            while (j < regs.len)
+                            {
+                                r = (byte*)regs.items[j];
+                                if (r[0] == 'H') { om_del(st.status, r); };
+                                j++;
+                            };
+                            om_put(st.env, (byte*)names.items[i], (void*)lf_rs_new());
+                        };
+                    };
+                    i++;
+                };
+                pv_free(names);
+                ->;
+            };
+
+            // true or false for 'case (true)' / 'case (false)' of a boolean switch, else -1
+            case_truth(Node* c) -> int
+            {
+                Node* v = c.a;
+                if (v == (Node*)0) { return -1; };
+                if (v.kind == NodeKind.LITERAL & v.op == DataType.BOOL)
+                {
+                    if (v.ival != 0) { return 1; };
+                    return 0;
+                };
+                return -1;
+            };
+
             do_if(Node* node, LState* st) -> void
             {
                 PtrVec* outs = pv_new();
@@ -6998,17 +7245,21 @@ namespace flux
                 int c, i;
                 this.eval(node.a, st);
                 s1 = lf_state_copy(st);
+                this.narrow(s1, node.a, true);
                 this.block(node.b, s1, true);
                 pv_push(outs, (void*)s1);
                 rest = lf_state_copy(st);
+                this.narrow(rest, node.a, false);
                 c = bc_count(node, 0);
                 i = 0;
                 while (i < c)
                 {
                     this.eval(node_child(node, 0, i), rest);
                     s = lf_state_copy(rest);
+                    this.narrow(s, node_child(node, 0, i), true);
                     this.block(node_child(node, 1, i), s, true);
                     pv_push(outs, (void*)s);
+                    this.narrow(rest, node_child(node, 0, i), false);
                     i++;
                 };
                 if (node.c != (Node*)0)
@@ -7037,8 +7288,8 @@ namespace flux
                 PtrVec* outs = pv_new();
                 bool has_default;
                 int c = bc_count(node, 0);
-                int i;
-                Node* cs;
+                int i, tv, nseen, seen0, k;
+                Node* cs, o;
                 LState* s, res;
                 this.eval(node.a, st);
                 while (i < c)
@@ -7047,6 +7298,24 @@ namespace flux
                     if (cs.a == (Node*)0) { has_default = true; }
                     else { this.eval(cs.a, lf_state_copy(st)); };
                     s = lf_state_copy(st);
+                    tv = this.case_truth(cs);
+                    if ((tv < 0) & (cs.a == (Node*)0))
+                    {
+                        nseen = 0;
+                        k = 0;
+                        while (k < c)
+                        {
+                            o = node_child(node, 0, k);
+                            if (o.a != (Node*)0)
+                            {
+                                nseen++;
+                                seen0 = this.case_truth(o);
+                            };
+                            k++;
+                        };
+                        if ((nseen == 1) & (seen0 >= 0)) { tv = 1 - seen0; };
+                    };
+                    if (tv >= 0) { this.narrow(s, node.a, tv == 1); };
                     if (cs.b != (Node*)0)
                     {
                         if (cs.b.kind == NodeKind.BLOCK) { this.block(cs.b, s, true); }
@@ -7293,7 +7562,7 @@ namespace flux
                 PtrVec* hp = pv_new();
                 bool allf;
                 int i, fl;
-                byte* r, when;
+                byte* r;
                 int* wp;
                 PtrVec* det;
                 while (i < regs.len)
@@ -7325,7 +7594,7 @@ namespace flux
                         if (!allf) { continue; };
                         if (!lf_rs_has(hp, r)) { continue; };
                         fl = lf_flags(st.status, r);
-                        if ((fl `& LF_F)!?)
+                        if ((fl `& LF_F) != 0)
                         {
                             det = pv_new();
                             if (om_has(st.free_at, r))
@@ -7373,12 +7642,12 @@ namespace flux
 
             eval(Node* e, LState* st) -> PtrVec*
             {
-                int k, s, c, i;
+                int k;
                 LocInfo* info;
-                PtrVec* l, r, out, cells, dr;
+                PtrVec* l, r, cells, dr;
                 if (e == (Node*)0) { -> lf_rs_new(); };
                 k = e.kind;
-                if (e.line!?) { this.cur_line = e.line; };
+                if (e.line != 0) { this.cur_line = e.line; };
 
                 if (k == NodeKind.LITERAL | k == NodeKind.STRING_LITERAL) { -> lf_rs_new(); };
                 if (k == NodeKind.ASSIGNMENT)
@@ -7428,6 +7697,15 @@ namespace flux
                             // (void)~x releases the tied value
                             this.do_free(this.eval(e.a, st), st, true);
                             -> lf_rs_new();
+                        };
+                        if (e.a.kind == NodeKind.IDENTIFIER & e.ts.base_type == DataType.VOID & !bc_is_pointer_type(e.ts))
+                        {
+                            if (om_has(this.heapvars, e.a.text) | om_has(this.al.ptr_vars, e.a.text))
+                            {
+                                // (void)p on a heap variable or a pointer variable releases what it points to
+                                this.do_free(this.eval(e.a, st), st, true);
+                                -> lf_rs_new();
+                            };
                         };
                     };
                     -> this.eval(e.a, st);
@@ -7562,10 +7840,10 @@ namespace flux
                 int bt;
                 if (ts == (TypeSpec*)0) { -> false; };
                 if (bc_is_pointer_type(ts)) { -> true; };
-                if ((ts.flags `& TS_ARRAY)!?) { -> false; };
+                if ((ts.flags `& TS_ARRAY) != 0) { -> false; };
                 if (ts.custom_typename != (byte*)0)
                 {
-                    if (ts.custom_typename[0]!?) { -> false; };
+                    if (ts.custom_typename[0] != 0) { -> false; };
                 };
                 bt = ts.base_type;
                 if (bt == DataType.FLOAT | bt == DataType.DOUBLE | bt == DataType.STRUCT | bt == DataType.UNION
@@ -7973,9 +8251,10 @@ namespace flux
             {
                 OMap* anc = this.ancestors(p);
                 int i;
-                byte* y, site, msg;
+                byte* y, site;
                 PtrVec* yregs, both, d;
                 int n = st.env.ks.len;
+                byte* msg;
                 while (i < n)
                 {
                     y = (byte*)st.env.ks.items[i];
@@ -8020,14 +8299,14 @@ namespace flux
             // arguments that overlap while the callee may write through one
             check_call_alias(Node* call, PtrVec* arg_regs, OMap* wr, LState* st) -> void
             {
-                int n = arg_regs.len,
-                    i, j;
-                PtrVec* roots = pv_new(),
-                        both, d;
+                int n = arg_regs.len;
+                PtrVec* roots = pv_new();
                 OMap* names = om_new();
+                int i, j;
                 Node* r, a;
+                PtrVec* both, d;
                 bool wi, wj;
-                byte* site, msg2;
+                byte* site;
                 LPos* pos;
                 while (i < n)
                 {
@@ -8037,6 +8316,7 @@ namespace flux
                     i++;
                 };
                 i = 0;
+                byte* msg2;
                 while (i < n)
                 {
                     j = i + 1;
@@ -8171,7 +8451,6 @@ namespace flux
                 PtrVec* obj = this.eval(e.a, st);
                 int n = bc_count(e, 0);
                 int i;
-                PtrVec* v;
                 PtrVec* regs = pv_new();
                 while (i < n)
                 {
@@ -8234,7 +8513,7 @@ namespace flux
                         has_stat = om_has(st.status, r);
                         stat = lf_flags(st.status, r);
                         if (r[0] == 'P' & !has_stat) { stat = LF_O; has_stat = true; };
-                        if (has_stat & (stat `& LF_F)!? & allf)
+                        if (has_stat & (stat `& LF_F) != 0 & allf)
                         {
                             det = pv_new();
                             if (om_has(st.free_at, r))
@@ -8302,7 +8581,7 @@ namespace flux
                 {
                     if (r[0] == 'H')
                     {
-                        ns = lf_heap(this.fn, call_line, r);
+                        ns = lf_heap_c(this.fn, call_line, this.call_col, r);
                         // key text of a mapped site is H|func|line|<inner>
                         if (om_has(sm.heap_status, r))
                         {
@@ -8362,7 +8641,7 @@ namespace flux
                     if (om_has(sm.param_status, key))
                     {
                         fl = lf_flags(sm.param_status, key);
-                        if ((fl `& LF_F)!? & i < arg_regs.len)
+                        if ((fl `& LF_F) != 0 & i < arg_regs.len)
                         {
                             this.cur_line = call_line;
                             this.do_free((PtrVec*)arg_regs.items[i], st, fl == LF_F);
@@ -8401,6 +8680,19 @@ namespace flux
                     };
                     this.mark_esc(mapped, st);
                 };
+                // arguments the callee stored away are handed off
+                i = 0;
+                while (i < sm.esc.ks.len)
+                {
+                    c = (byte*)sm.esc.ks.items[i];
+                    i++;
+                    if (c[0] != 'P') { continue; };
+                    if (!cstr_eq(lf_seg(c, 1), fname)) { continue; };
+                    if (lf_atoi(lf_seg(c, 2)) < arg_regs.len)
+                    {
+                        this.mark_esc((PtrVec*)arg_regs.items[lf_atoi(lf_seg(c, 2))], st);
+                    };
+                };
                 -> this.map_set(sm.ret, fname, sm, arg_regs, call_line, cache, st);
             };
         };
@@ -8419,8 +8711,10 @@ namespace flux
             if (fn[0] == 0) { return (byte*)0; };
             if (nm_has(o.full, fn)) { return (byte*)nm_get(o.full, fn); };
             byte* b = bc_last_seg(fn);
-            if (nm_has(o.bare, b)) { return (byte*)nm_get(o.bare, b); };
-            return (byte*)0;
+            byte* r = (byte*)0;
+            if (nm_has(o.bare, b)) { r = (byte*)nm_get(o.bare, b); };
+            ffree(b);
+            return r;
         };
 
         // True when a violation in function fn is kept: its module is in 'on', or unknown
@@ -8435,13 +8729,16 @@ namespace flux
         {
             CallGraph cg;
             cg.__init();
+            defer cg.__exit();
             cg.collect(prog);
             BorrowChecker bc;
             bc.__init(@cg, entry, true, true, pp);
+            defer bc.__exit();
             bc.run();
             // lifetime kinds come from the lifetime analysis, not the alias walk
             LifeChecker lc;
             lc.__init(@cg, entry, pp, warn);
+            defer lc.__exit();
             lc.run();
             PtrVec* all = pv_new();
             int vi;
@@ -8468,11 +8765,13 @@ namespace flux
                     if (bc_owner_on(owners, on, vv.func)) { pv_push(kept, (void*)vv); };
                     vi++;
                 };
+                pv_free(all);
                 all = kept;
             };
             bc_print_violations(all, warn);
             bc_print_summary(all, 1, bc.funcs_checked);
             int n = all.len;
+            pv_free(all);
             return n;
         };
 

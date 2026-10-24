@@ -175,25 +175,24 @@ namespace flux
                 case (6) { -> g"char\0"; }
                 case (7) { -> g"void\0"; }
                 case (8) { -> g"str\0"; }
-                case (9) { -> g"string\0"; }
-                case (10) { -> g"i8\0"; }
-                case (11) { -> g"i16\0"; }
-                case (12) { -> g"i32\0"; }
-                case (13) { -> g"i64\0"; }
-                case (14) { -> g"i128\0"; }
-                case (15) { -> g"u8\0"; }
-                case (16) { -> g"u16\0"; }
-                case (17) { -> g"u32\0"; }
-                case (18) { -> g"u64\0"; }
-                case (19) { -> g"u128\0"; }
-                case (20) { -> g"f32\0"; }
-                case (21) { -> g"f64\0"; }
-                case (22) { -> g"ptr\0"; }
-                case (23) { -> g"ref\0"; }
-                case (24) { -> g"null\0"; }
-                case (25) { -> g"nullptr\0"; }
-                case (26) { -> g"true\0"; }
-                case (27) { -> g"false\0"; }
+                case (9) { -> g"i8\0"; }
+                case (10) { -> g"i16\0"; }
+                case (11) { -> g"i32\0"; }
+                case (12) { -> g"i64\0"; }
+                case (13) { -> g"i128\0"; }
+                case (14) { -> g"u8\0"; }
+                case (15) { -> g"u16\0"; }
+                case (16) { -> g"u32\0"; }
+                case (17) { -> g"u64\0"; }
+                case (18) { -> g"u128\0"; }
+                case (19) { -> g"f32\0"; }
+                case (20) { -> g"f64\0"; }
+                case (21) { -> g"ptr\0"; }
+                case (22) { -> g"ref\0"; }
+                case (23) { -> g"null\0"; }
+                case (24) { -> g"nullptr\0"; }
+                case (25) { -> g"true\0"; }
+                case (26) { -> g"false\0"; }
                 default { -> (byte*)0; };
             };
             -> (byte*)0;

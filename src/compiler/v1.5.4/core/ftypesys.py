@@ -833,7 +833,12 @@ class TypeResolver:
 
                 types_match = True
                 for i, (pt, at) in enumerate(zip(param_types, arg_types)):
-                    if pt != at:
+                    # A pointer-to-array argument (a string literal, [N x i8]*) is
+                    # compatible with a pointer-to-element parameter (i8*).
+                    _arr_decay = (isinstance(pt, ir.PointerType) and isinstance(at, ir.PointerType)
+                                  and isinstance(at.pointee, ir.ArrayType)
+                                  and pt.pointee == at.pointee.element)
+                    if pt != at and not _arr_decay:
                         types_match = False
                         break
                     if isinstance(pt, ir.IntType) and isinstance(at, ir.IntType):
@@ -888,7 +893,15 @@ class TypeResolver:
         Returns:
             ir.Function object if found, None otherwise
         """
-        # Step 1: Try direct lookup in module.globals
+        # Step 1: Try direct lookup in module.globals.  When several overloads share
+        # this name, the plain-named global is only the first one registered, so
+        # let argument-based overload resolution choose among them first.
+        if (arg_vals is not None and hasattr(module, '_function_overloads')
+                and len(module._function_overloads.get(func_name, ())) > 1):
+            result = TypeResolver._resolve_from_overloads(
+                module._function_overloads[func_name], arg_vals)
+            if result is not None:
+                return result
         if func_name in module.globals:
             obj = module.globals[func_name]
             if isinstance(obj, ir.Function):
@@ -1592,7 +1605,24 @@ class TypeSystem:
             type_spec = array_val._flux_type_spec
             if hasattr(type_spec, 'array_element_type') and type_spec.array_element_type:
                 return type_spec.array_element_type
-        
+            # Pointer subscript: p[i] has p's type with one less level of indirection,
+            # so a byte* element keeps byte's unsignedness through casts.
+            depth = getattr(type_spec, 'pointer_depth', 0) or 0
+            if depth > 0 and not getattr(type_spec, 'is_array', False) and hasattr(type_spec, 'base_type'):
+                return TypeSystem(
+                    base_type=type_spec.base_type,
+                    is_signed=type_spec.is_signed,
+                    is_const=type_spec.is_const,
+                    is_volatile=type_spec.is_volatile,
+                    is_local=type_spec.is_local,
+                    bit_width=type_spec.bit_width,
+                    alignment=type_spec.alignment,
+                    endianness=type_spec.endianness,
+                    is_pointer=depth - 1 > 0,
+                    pointer_depth=depth - 1,
+                    custom_typename=type_spec.custom_typename,
+                    no_functions=type_spec.no_functions)
+
         return None
 
 

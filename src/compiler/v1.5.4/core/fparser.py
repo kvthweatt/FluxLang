@@ -44,7 +44,7 @@ except ImportError:
 import sys
 from contextlib import contextmanager
 from typing import List, Optional, Union, Any
-from flexer import FluxLexer, TokenType, Token
+from flexer import FluxLexer, TokenType, Token, LexError
 from fast import *
 
 # Calling-convention tokens that may appear in place of 'def'
@@ -546,7 +546,13 @@ class FluxParser:
         # Step 2: Lex
         print(f"[INFO] [lexer] ► Lexical analysis")
         lexer = FluxLexer(preprocessed_source)
-        tokens = lexer.tokenize()
+        try:
+            tokens = lexer.tokenize()
+        except LexError as e:
+            # Report with the file and file local line, the source line and a caret
+            raise FluxParseError(e.message, Token(TokenType.EOF, '', e.line, e.column),
+                                 preprocessed_source.splitlines(keepends=True), None, None,
+                                 preprocessor.line_map)
 
         # Step 3: Create parser
         print(f"[INFO] [parser] ► Parsing")
@@ -913,6 +919,7 @@ class FluxParser:
             self.consume(TokenType.RIGHT_BRACKET)
             return tt_list, tv_list
 
+        op_bracket_tok = self.current_token
         op_token_types, op_token_values = _parse_op_bracket()
         symbol = self._tokens_to_op_key(op_token_types, op_token_values)
 
@@ -921,6 +928,15 @@ class FluxParser:
         if self.expect(TokenType.LEFT_BRACKET):
             op2_types, op2_values = _parse_op_bracket()
             symbol2 = self._tokens_to_op_key(op2_types, op2_values)
+
+        # A built-in operator cannot be made variadic on its own: [+] and [++] are rejected,
+        # while a symbol that is no built-in operator, such as [+++] or [+-], is allowed.
+        if symbol2 is None and any(getattr(p, '_is_variadic_sentinel', False) for p in params):
+            from ftypesys import Operator as _VOperator
+            if symbol in {op.value for op in _VOperator}:
+                raise FluxParseError(
+                    f"Built-in operator '{symbol}' cannot be variadic",
+                    op_bracket_tok, self._source_lines, None, None, self._line_map)
 
         if symbol2 is not None:
             if len(params) == 1:
@@ -1408,6 +1424,9 @@ class FluxParser:
         The lookahead never consumes tokens.
         """
         with self._lookahead():
+            # Function pointer declaration without 'def': {}* name(types) -> type
+            if self.expect(TokenType.FUNCTION_POINTER):
+                return self.peek().type == TokenType.IDENTIFIER
             if self.expect(TokenType.NO_MANGLE):
                 self.advance()
             if not self.expect(TokenType.IDENTIFIER):
@@ -4293,12 +4312,13 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
         return ModuleDef(name, body, froms, build).set_location(tok.line, tok.column)
 
-    def _build_block(self) -> list:
-        """'{' entry (',' entry)* ','? '}' where entry is [!+] '#' '[' tag ']' '=' value"""
+    def _build_block(self, test: bool = False) -> list:
+        """'{' entry (',' entry)* ','? '}' where entry is [!+] '#' '[' tag ']' '=' value
+        Inside '#[test]' (test=True) an entry is a subtag and its '= value' is optional."""
         self.consume(TokenType.LEFT_BRACE)
         entries = []
         while not self.expect(TokenType.RIGHT_BRACE):
-            entries.append(self._build_entry())
+            entries.append(self._build_entry(test))
             if self.expect(TokenType.COMMA):
                 self.advance()
             elif not self.expect(TokenType.RIGHT_BRACE):
@@ -4306,7 +4326,7 @@ class FluxParser:
         self.consume(TokenType.RIGHT_BRACE)
         return entries
 
-    def _build_entry(self) -> 'BuildEntry':
+    def _build_entry(self, test: bool = False) -> 'BuildEntry':
         tok = self.current_token
         locked = False
         if self.expect(TokenType.NOT):
@@ -4328,11 +4348,16 @@ class FluxParser:
         else:
             self.advance()
         self.consume(TokenType.RIGHT_BRACKET)
+        if test and not self.expect(TokenType.ASSIGN):
+            # a bare '#[subtag]' inside '#[test]' switches the subtag on
+            return BuildEntry(tag, True, locked, None).set_location(tok.line, tok.column)
         self.consume(TokenType.ASSIGN)
         if override_for is not None:
             if locked:
                 self.error("An override cannot be locked")
             value = self._build_block()
+        elif tag == 'test' and not test:
+            value = self._build_block(test=True)
         else:
             value = self._build_value()
         return BuildEntry(tag, value, locked, override_for).set_location(tok.line, tok.column)
@@ -9498,6 +9523,19 @@ class FluxParser:
                     mapping[param] = TypeSystem(base_type=DataType.DATA, custom_typename=tname)
         return mapping
 
+    def _reject_object_template_args(self, owner, type_names, type_specs):
+        """Templates may not be instantiated over object types (pointers to objects are fine)."""
+        for i, tn in enumerate(type_names):
+            ts = type_specs[i] if (type_specs is not None and i < len(type_specs)) else None
+            if ts is not None and getattr(ts, 'is_pointer', False):
+                continue
+            cname = getattr(ts, 'custom_typename', None) or tn
+            if cname in self._parsed_objects:
+                self.error(
+                    f"Template '{owner}' cannot be instantiated with object type '{cname}'; "
+                    f"templates do not accept objects"
+                )
+
     def _instantiate_template_node(self, kind, name, template_params, template_node,
                                    type_names, type_specs, usage_tok=None):
         """
@@ -9508,6 +9546,7 @@ class FluxParser:
         """
         mangled = name + '__' + '_'.join(type_names)
         if not self._templates.is_emitted(name, mangled):
+            self._reject_object_template_args(name, type_names, type_specs)
             self._templates.mark_emitted(name, mangled)
             mapping = self._build_template_mapping(template_params, type_names, type_specs)
             concrete = self._substitute_template(template_node, mapping)
@@ -9596,6 +9635,8 @@ class FluxParser:
                 f"Template function '{func_name}' expects {len(template_params)} "
                 f"type argument(s), got {len(arg_type_names)}"
             )
+
+        self._reject_object_template_args(func_name, arg_type_names, arg_type_specs)
 
         # Enforce template constraints if any were declared for this function.
         # Also check under qualified names (the entry may be keyed by a namespace-qualified variant).

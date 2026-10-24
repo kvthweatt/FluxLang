@@ -31,10 +31,16 @@ Settings (tag, default):
     dce          true            false keeps every declaration of the module alive
     using        {}              namespaces made visible to the module's code
     platform     {}              platforms the module builds for (empty = any)
+    requires     {}              modules this module uses; only these (plus the modules
+                                 its 'from' clauses pull in) are part of its build
+    test         {}              build test tags, '#[test] = { #[subtag], ... }':
+                                   expect_build_fail  the module is expected to fail to build
 
-A module's own entries set its settings. '#[override for {M}] = { ... }' in another
-module overrides M's settings as M is built into this target, unless M locked the tag
-with '!+'. The module closest to the entry wins when several override the same tag.
+A module's own entries set its settings. A module sees only the modules it requires or
+pulls in with 'from'; a sibling module of the same file is not part of its build until it
+is named in '#[requires] = {M}'. '#[override for {M}] = { ... }' overrides M's settings as
+M is built into this target, and needs M in the overriding module's 'requires' (or 'from'),
+unless M locked the tag with '!+'. The module closest to the entry wins when several override the same tag.
 The command line can only switch checks on: --borrowcheck and --effects force the
 check for every module, including modules that lock it to false.
 """
@@ -50,9 +56,11 @@ from fast import ModuleDef, NamespaceDef, FunctionDef, ObjectDef, UsingStatement
 TARGETS = ('bootloader', 'executable', 'compact', 'library', 'driver')
 _BOOL_TAGS = ('borrow_check', 'effect_check', 'dce', 'debug')
 _KNOWN_TAGS = ('entrypoint', 'name', 'target', 'debug', 'borrow_check', 'effect_check',
-               'dce', 'using', 'platform')
+               'dce', 'using', 'platform', 'requires', 'test')
+# Subtags of '#[test] = { ... }'
+_TEST_TAGS = ('expect_build_fail',)
 _DEFAULTS = {'borrow_check': False, 'effect_check': False, 'dce': True, 'debug': False,
-             'target': 'executable', 'using': [], 'platform': []}
+             'target': 'executable', 'using': [], 'platform': [], 'requires': [], 'test': {}}
 
 
 class ModuleError(Exception):
@@ -75,10 +83,12 @@ class ModuleInfo:
 
 @dataclass
 class ModuleUnit:
-    modules: dict                                   # name -> ModuleInfo
+    modules: dict                                   # name -> ModuleInfo, the modules of this build
     order: list                                     # names, dependencies first
     entry: str = ''
     programs: list = field(default_factory=list)    # root modules that can be built as programs
+    warnings: list = field(default_factory=list)    # non-fatal notes for the driver to print
+    declared: dict = field(default_factory=dict)    # name -> ModuleInfo, every module seen (built or not)
 
     def entry_settings(self):
         return self.modules[self.entry].settings
@@ -161,6 +171,19 @@ def load(ast, root_file, parse_file, select=None, entry_fn='main'):
                 if dep not in info.deps:
                     info.deps.append(dep)
                 visit(dep)
+        req = _tag_value(info.node.build, 'requires')
+        if req is not None:
+            if not isinstance(req.value, list):
+                raise ModuleError(f"module '{name}': '#[requires]' takes a list: {{A, B}}")
+            for dep in req.value:
+                if dep == name:
+                    raise ModuleError(f"module '{name}' cannot require itself")
+                if dep not in infos:
+                    raise ModuleError(f"module '{name}': '#[requires]' names module '{dep}', which is not "
+                                      f"declared in this file or pulled in with 'from'")
+                if dep not in info.deps:
+                    info.deps.append(dep)
+                visit(dep)
         loading.pop()
         order.append(name)
 
@@ -179,11 +202,8 @@ def load(ast, root_file, parse_file, select=None, entry_fn='main'):
     else:
         entry = (marked or programs)[0]
     infos[entry].entry = True
-    for m in root_mods:                      # modules of the same file are visible to each other
-        if m.name != entry:
-            visit(m.name)
-    visit(entry)
-    return ModuleUnit(infos, order, entry, programs)
+    visit(entry)                             # only what the entry requires or pulls in is built
+    return ModuleUnit({n: infos[n] for n in order}, order, entry, programs, declared=infos)
 
 
 def resolve_settings(unit, cli_borrow=False, cli_effects=False, platform=''):
@@ -192,6 +212,7 @@ def resolve_settings(unit, cli_borrow=False, cli_effects=False, platform=''):
         s = dict(_DEFAULTS)
         s['using'] = []
         s['platform'] = []
+        s['test'] = {}
         s['name'] = info.name
         for e in info.node.build:
             if e.override_for is not None:
@@ -218,14 +239,23 @@ def resolve_settings(unit, cli_borrow=False, cli_effects=False, platform=''):
             if e.override_for is None:
                 continue
             for target in e.override_for:
-                if target not in unit.modules:
+                if target not in unit.declared:
                     raise ModuleError(f"module '{cur}': '#[override for {{{target}}}]' names a module "
                                       f"that is not part of this build")
+                if target not in unit.modules[cur].deps:
+                    raise ModuleError(f"module '{cur}': cannot override module '{target}' because '{cur}' "
+                                      f"does not use it. Add '#[requires] = {{{target}}}' to the build "
+                                      f"settings of '{cur}' first")
                 t = unit.modules[target]
                 for oe in e.value:
                     if oe.tag not in _KNOWN_TAGS or oe.tag == 'entrypoint':
                         raise ModuleError(f"module '{cur}': cannot override '#[{oe.tag}]'")
-                    if oe.tag in t.locked or (target, oe.tag) in applied:
+                    if oe.tag in t.locked:
+                        unit.warnings.append(f"module '{cur}': '#[override for {{{target}}}]' sets "
+                                             f"'#[{oe.tag}]', but module '{target}' locked it with '!+'; "
+                                             f"the override is ignored")
+                        continue
+                    if (target, oe.tag) in applied:
                         continue
                     t.settings[oe.tag] = _coerce(target, oe.tag, oe.value)
                     applied[(target, oe.tag)] = cur
@@ -234,19 +264,8 @@ def resolve_settings(unit, cli_borrow=False, cli_effects=False, platform=''):
                 seen.add(d)
                 queue.append(d)
 
-    # Modules that are only visible because they share the entry's file are not part of
-    # this program's module graph: their checks do not run in this build.
-    members = {unit.entry}
-    stack = [unit.entry]
-    while stack:
-        for d in unit.modules[stack.pop()].deps:
-            if d not in members:
-                members.add(d)
-                stack.append(d)
-    for name, info in unit.modules.items():
-        if name not in members:
-            info.settings['borrow_check'] = False
-            info.settings['effect_check'] = False
+    # A sibling module is part of this build through the functions the entry uses: its checks
+    # run on the live functions it contributes (see _run_borrow_check), and on nothing else.
 
     for info in unit.modules.values():
         if cli_borrow:
@@ -259,6 +278,17 @@ def resolve_settings(unit, cli_borrow=False, cli_effects=False, platform=''):
                               f"but this build targets {platform}")
 
 
+_BOOL_TEST_TAGS = ('expect_build_fail',)
+
+
+def _coerce_flag(mod, tag, value):
+    if isinstance(value, str) and value in ('true', 'false'):
+        return value == 'true'
+    if not isinstance(value, bool):
+        raise ModuleError(f"module '{mod}': '#[test]' subtag '#[{tag}]' takes true or false")
+    return value
+
+
 def _coerce(mod, tag, value):
     if tag in _BOOL_TAGS:
         if isinstance(value, str) and value in ('true', 'false'):
@@ -266,7 +296,18 @@ def _coerce(mod, tag, value):
         if not isinstance(value, bool):
             raise ModuleError(f"module '{mod}': '#[{tag}]' takes true or false")
         return value
-    if tag in ('using', 'platform'):
+    if tag == 'test':
+        if not isinstance(value, list) or any(not isinstance(v, fast.BuildEntry) for v in value):
+            raise ModuleError(f"module '{mod}': '#[test]' takes a block: = {{ #[subtag] }}")
+        out = {}
+        for v in value:
+            if v.tag not in _TEST_TAGS:
+                raise ModuleError(f"module '{mod}': unknown test tag '#[{v.tag}]' in '#[test]' "
+                                  f"(known: {', '.join(_TEST_TAGS)})")
+            if v.tag in _BOOL_TEST_TAGS:
+                out[v.tag] = _coerce_flag(mod, v.tag, v.value)
+        return out
+    if tag in ('using', 'platform', 'requires'):
         if not isinstance(value, list):
             raise ModuleError(f"module '{mod}': '#[{tag}]' takes a list: {{A, B}}")
         return list(value)
@@ -297,6 +338,15 @@ def _tag_functions(stmts, module, out):
             _tag_functions([s.object_def], module, out)
 
 
+def _top_function_names(stmts):
+    names = []
+    for s in stmts:
+        fd = s if isinstance(s, FunctionDef) else getattr(s, 'function_def', None)
+        if isinstance(fd, FunctionDef):
+            names.append(fd.name)
+    return names
+
+
 def flatten(ast, unit, entry_fn='main'):
     """Replace the module declarations of the program by their contents, dependencies first.
 
@@ -319,6 +369,17 @@ def flatten(ast, unit, entry_fn='main'):
         body.extend(info.node.body)
     ast.statements = rest + body
     ast._modules = unit
+    # Functions of modules that are declared but not part of this build. A call to one of them
+    # that finds nothing is reported with the module to require (see fcodegen._funcall_not_found).
+    built = {f.name for f in funcs}
+    unbuilt = {}
+    for name, info in unit.declared.items():
+        if name in unit.modules:
+            continue
+        for fn in _top_function_names(info.node.body):
+            if fn not in built:
+                unbuilt.setdefault(fn, name)
+    ast._module_unbuilt = unbuilt
     return funcs
 
 

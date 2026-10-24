@@ -3,12 +3,14 @@
 
 IDEKA is a compiled, general purpose programming language formerly known as Flux.
 
-It provides power with ease of writing.
+It's easy to write as it does not require to use its higher level constructs. The learning curve is low, but the skill ceiling is high.  
 
 If you like IDEKA, please consider contributing to the language or joining the [IDEKA Discord server](https://discord.gg/RAHjbYuNUc) where you can ask questions, provide feedback, and talk with other IDEKA enjoyers!
 
-**Creator note** Everything in IDEKA is **stack allocated** unless specified.  
-- This means you are likely to introduce stack overflows if you perform stack allocations inside loops such as declaring a new variable each time a loop passes.
+**Creator note:** Everything in IDEKA is **stack allocated** unless specified.  
+- This means you are likely to introduce stack overflows if you perform stack allocations inside loops such as declaring a new variable each time a loop passes. Making the declaration a singleton is one way to solve this.
+
+IDEKA was designed primarily for reverse engineering and secondarily for general purpose software development.
 
 ---
 

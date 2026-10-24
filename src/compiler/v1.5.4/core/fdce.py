@@ -44,7 +44,7 @@ from typing import Any, Dict, List, Set
 
 _PRIMITIVE_TYPES: frozenset = frozenset({
     'int', 'uint', 'float', 'double', 'bool', 'byte', 'char',
-    'void', 'str', 'string', 'i8', 'i16', 'i32', 'i64', 'i128',
+    'void', 'str', 'i8', 'i16', 'i32', 'i64', 'i128',
     'u8', 'u16', 'u32', 'u64', 'u128', 'f32', 'f64',
     'ptr', 'ref', 'null', 'nullptr', 'true', 'false',
 })
@@ -152,6 +152,14 @@ class _RefCollector:
         self._visited.add(node_id)
 
         cls = type(node).__name__
+
+        # An object names the traits it implements; those trait declarations must
+        # stay alive for as long as the object does (templated objects are
+        # instantiated outside their namespace, after trait declarations are pruned).
+        if cls == 'ObjectDef':
+            for _t in (getattr(node, 'traits', None) or []):
+                if isinstance(_t, str) and _t:
+                    self._add(_t)
 
         # ── Identifier ───────────────────────────────────────────────────
         if cls == 'Identifier':
@@ -538,6 +546,12 @@ def _compute_live_functions(program, ns_func_index: Dict[str, List[Any]],
         for variant in _all_suffixes(stmt.name):
             if variant:
                 toplevel_func_index.setdefault(variant, []).append(stmt)
+        # A template instance ('name__tmpl__T') is reached by calls to the template's
+        # own name, so index it under that name as well.
+        if '__tmpl__' in stmt.name:
+            for variant in _all_suffixes(stmt.name.split('__tmpl__')[0]):
+                if variant:
+                    toplevel_func_index.setdefault(variant, []).append(stmt)
         nparams = len(getattr(stmt, 'parameters', []) or [])
         count_key = stmt.name + '__' + str(nparams)
         toplevel_func_index.setdefault(count_key, []).append(stmt)

@@ -371,6 +371,12 @@ def _object_def_codegen_type_only(node, module: ir.Module):
     struct_type = ObjectTypeHandler.create_struct_type(node.name, member_types, member_names, module)
     fields = ObjectTypeHandler.calculate_field_layout(node.members, member_types)
     ObjectTypeHandler.create_vtable(node.name, fields, module)
+    if not hasattr(module, '_struct_member_type_specs'):
+        module._struct_member_type_specs = {}
+    module._struct_member_type_specs.setdefault(node.name, {m.name: m.type_spec for m in node.members})
+    if not hasattr(module, '_struct_member_type_specs'):
+        module._struct_member_type_specs = {}
+    module._struct_member_type_specs.setdefault(node.name, {m.name: m.type_spec for m in node.members})
 
     if hasattr(module, 'symbol_table'):
         module.symbol_table.define(
@@ -2345,8 +2351,11 @@ class CodegenVisitor:
                     self._cast_ffree(builder, module, heap_ptr, var_name)
                     builder.store(ir.Constant(heap_ptr.type, None), var_ptr)
                 else:
-                    # Stack/pointer var: null the alloca to invalidate -- cannot free stack memory
+                    # Pointer var: free what it points to, then null the alloca to invalidate.
+                    # Other variables are only reset -- there is no heap memory to free.
                     if isinstance(var_ptr.type.pointee, ir.PointerType):
+                        held = builder.load(var_ptr, name=f"{var_name}_voidptr")
+                        self._cast_ffree(builder, module, held, var_name)
                         null = ir.Constant(var_ptr.type.pointee, None)
                     elif isinstance(var_ptr.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType, ir.ArrayType)):
                         # `this` is a function argument of type T* (not an alloca of T*),
@@ -5054,7 +5063,14 @@ class CodegenVisitor:
                     fp = field_ptr.type.pointee
                     if isinstance(fp, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType)):
                         return field_ptr
-                return builder.load(field_ptr, name=node.field_name)
+                loaded_field = builder.load(field_ptr, name=node.field_name)
+                # Stamp the declared member type so subscripts and casts of the loaded value
+                # (e.g. a byte* member) keep their signedness
+                _mspec = getattr(module, '_struct_member_type_specs', {}).get(
+                    getattr(struct_type, 'name', None), {}).get(node.field_name)
+                if _mspec is not None and not hasattr(loaded_field, '_flux_type_spec'):
+                    loaded_field._flux_type_spec = _mspec
+                return loaded_field
         if isinstance(instance_val.type, ir.PointerType):
             instance = builder.load(instance_val, name="struct_load")
         else:
@@ -8092,6 +8108,11 @@ class CodegenVisitor:
             struct_type = ObjectTypeHandler.create_struct_type(node.name, member_types, member_names, module)
             fields = ObjectTypeHandler.calculate_field_layout(node.members, member_types)
             ObjectTypeHandler.create_vtable(node.name, fields, module)
+            # Member type specs, so a load of an object member carries its declared type
+            # (a byte* member keeps byte's unsignedness when subscripted and cast)
+            if not hasattr(module, '_struct_member_type_specs'):
+                module._struct_member_type_specs = {}
+            module._struct_member_type_specs.setdefault(node.name, {m.name: m.type_spec for m in node.members})
             # Clear forward-decl marker now that the full definition is registered.
             if hasattr(module, '_forward_declared_objects'):
                 module._forward_declared_objects.discard(node.name)
@@ -9841,8 +9862,22 @@ class CodegenVisitor:
         # 'argparse::Parser.__init' match the mangled symbols actually registered in globals.
         constructor_name = func_call.name.replace('::', '__')
 
+        # Constructors may be overloaded by parameter count (the implicit 'this' is
+        # parameter 0).  Pick the overload whose arity matches the call before any
+        # lookup that would otherwise return the first one registered.
+        _ctor_nargs = len(func_call.arguments)
+        def _ctor_pick(_key):
+            _ovs = getattr(module, '_function_overloads', {}).get(_key)
+            if _ovs and len(_ovs) > 1:
+                for _o in _ovs:
+                    if _o['param_count'] == _ctor_nargs:
+                        return _o['function']
+            return None
+
         # Step 1: Try direct lookup
-        func = module.globals.get(constructor_name, None)
+        func = _ctor_pick(constructor_name)
+        if func is None:
+            func = module.globals.get(constructor_name, None)
         if func and isinstance(func, ir.Function):
             #print(f"[CONSTRUCTOR] Found via direct lookup: {constructor_name}", file=sys.stdout)
             pass  # Found it
@@ -9864,7 +9899,7 @@ class CodegenVisitor:
                 #print(f"[CONSTRUCTOR]   Mangled name: {mangled_name}", file=sys.stdout)
 
                 # Try direct lookup with namespace prefix
-                func = module.globals.get(mangled_name, None)
+                func = _ctor_pick(mangled_name) or module.globals.get(mangled_name, None)
                 if func and isinstance(func, ir.Function):
                     #print(f"[CONSTRUCTOR] Found via namespace direct lookup: {mangled_name}", file=sys.stdout)
                     break
@@ -9874,7 +9909,7 @@ class CodegenVisitor:
                     #print(f"[CONSTRUCTOR]   Checking overloads for: {mangled_name}", file=sys.stdout)
                     if mangled_name in module._function_overloads:
                         #print(f"[CONSTRUCTOR]   FOUND in overloads!", file=sys.stdout)
-                        func = TypeResolver.resolve_function(module, mangled_name)
+                        func = _ctor_pick(mangled_name) or TypeResolver.resolve_function(module, mangled_name)
                         if func:
                             #print(f"[CONSTRUCTOR] Found via namespace overload resolution: {mangled_name}", file=sys.stdout)
                             break
@@ -9885,7 +9920,7 @@ class CodegenVisitor:
                 mangled_prefix = namespace.replace("::", "__") + "__"
                 mangled_name = mangled_prefix + constructor_name
 
-                func = module.globals.get(mangled_name, None)
+                func = _ctor_pick(mangled_name) or module.globals.get(mangled_name, None)
                 if func and isinstance(func, ir.Function):
                     break
 
@@ -9900,7 +9935,7 @@ class CodegenVisitor:
             suffix = "__" + constructor_name
             for key, overloads in module._function_overloads.items():
                 if key.endswith(suffix) or key == constructor_name:
-                    func = TypeResolver.resolve_function(module, key)
+                    func = _ctor_pick(key) or TypeResolver.resolve_function(module, key)
                     if func:
                         break
 
@@ -10092,6 +10127,42 @@ class CodegenVisitor:
         #_sys.stderr.write(f'[DEBUG pass3] len(node.statements)={len(node.statements)} _tmpl_instances={[(s.name, getattr(s,"_source_namespace","MISSING")) for s in _tmpl_instances]}\n')
         #_sys.stderr.flush()
         _tmpl_emitted = set()
+        from fdce import _RefCollector as _RC
+        def _tmpl_deferred(_t):
+            if getattr(_t, '_source_namespace', None) != '' or _t.name.startswith('__'):
+                return False
+            _id = id(_t)
+            if _id not in _def_cache:
+                _nm = _t.name.split('__tmpl__')[0]
+                _def_cache[_id] = any(
+                    _tmpl_refs(_s2, _nm) and _ref_cache.get(id(_s2)) is not None and _s2 is not _t
+                    and not (isinstance(_s2, _FunctionDef) and hasattr(_s2, '_source_namespace'))
+                    for _s2 in node.statements if not _should_skip(_s2))
+            return _def_cache[_id]
+        _def_cache = {}
+        _ns_home = {}
+        def _ns_collect(_n, _pre, _i):
+            _full = (_pre + '__' + _n.name) if _pre else _n.name
+            _ns_home[_full] = max(_ns_home.get(_full, -1), _i)
+            for _c in getattr(_n, 'nested_namespaces', []):
+                _ns_collect(_c, _full, _i)
+        for _i, _s in enumerate(node.statements):
+            if isinstance(_s, NamespaceDefStatement):
+                _ns_collect(_s.namespace_def, '', _i)
+            elif isinstance(_s, NamespaceDef):
+                _ns_collect(_s, '', _i)
+        _ref_cache = {}
+        def _tmpl_refs(_st, _nm):
+            _k = id(_st)
+            if _k not in _ref_cache:
+                _c = _RC()
+                try:
+                    _c._walk(_st)
+                    _ref_cache[_k] = set(getattr(_c, 'refs', set()))
+                except Exception:
+                    _ref_cache[_k] = None
+            _r = _ref_cache[_k]
+            return _r is None or _nm in _r
         # Find the index of the last NamespaceDef in node.statements so we know
         # when it is safe to flush template instantiations (all namespace functions
         # registered) without disrupting the original interleaved source order.
@@ -10108,15 +10179,31 @@ class CodegenVisitor:
             # Flush template instantiations once all namespaces have been processed.
             if not _namespaces_done and (not isinstance(stmt, (NamespaceDef, NamespaceDefStatement))):
                 _namespaces_done = True
+            if not isinstance(stmt, (NamespaceDef, NamespaceDefStatement)):
+                # Emit an instance once the namespace statement that defines its
+                # template has been visited, so sibling functions of that namespace
+                # are already declared when the instance body is generated.
                 for _t in _tmpl_instances:
-                    if id(_t) not in _tmpl_emitted:
+                    if id(_t) not in _tmpl_emitted and not _tmpl_deferred(_t):
+                        _home = _ns_home.get(getattr(_t, '_source_namespace', ''))
+                        if _home is not None and _home >= _stmt_idx:
+                            continue
+                        _tmpl_emitted.add(id(_t))
+                        self.visit(_t, builder, module)
+            # Top-level (non-namespaced) free template instances are emitted just
+            # before the first statement that references them, so every function the
+            # template body calls and that precedes that statement is already declared.
+            if _namespaces_done:
+                for _t in _tmpl_instances:
+                    if id(_t) not in _tmpl_emitted and _tmpl_deferred(_t) \
+                            and _tmpl_refs(stmt, _t.name.split('__tmpl__')[0]):
                         _tmpl_emitted.add(id(_t))
                         self.visit(_t, builder, module)
             self.visit(stmt, builder, module)
             # Also flush after the last namespace in case all statements are namespaces.
             if _stmt_idx == _last_ns_idx:
                 for _t in _tmpl_instances:
-                    if id(_t) not in _tmpl_emitted:
+                    if id(_t) not in _tmpl_emitted and not _tmpl_deferred(_t):
                         _tmpl_emitted.add(id(_t))
                         self.visit(_t, builder, module)
 

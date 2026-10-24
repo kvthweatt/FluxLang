@@ -23,16 +23,14 @@ This means bitwise AND is `&, logical AND is just plain &, no doubling up logica
 
 All bitwise operators start with a backtick like this, making them visually distinct. You can immediately know which is which.
 
-## Example 2 - Address of  
-The address of operator is `@` so taking addresses looks like `@x` which immediately reads as "where x is at".
+## Example 2 - Address-of  
+The address-of operator is `@` so taking addresses looks like `@x` which immediately reads as "where x is at".
 
 In C you could never write `&=` to mean address-assignment, because that's bitwise AND assign.
 
 In IDEKA you can do address assignment like `int* px @= x;`
 
-## Example 3  
-The not-null operator `!?`
-
+## Example 3 - The not-null operator `!?`  
 `?` is used in null-related operators like null-assign or null-coalesce. Here, you have `!` not and `?` null.
 
 You use it like `if (pointer!?)` and reads like `if pointer not null`

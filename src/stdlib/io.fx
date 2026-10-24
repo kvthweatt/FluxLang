@@ -34,7 +34,7 @@ namespace standard
         // Console I/O
         namespace console
         {
-    		// INPUT FORWARD DECLARATIONS
+            // INPUT FORWARD DECLARATIONS
 #ifdef __WINDOWS__
             def win_input(byte[] buffer, int max_len) -> int # effect {~IO.Console.Input};
 #endif; // Windows
@@ -462,8 +462,8 @@ namespace standard
 #endif; // MACOS
 
             // GENERIC (noopstr)
-    		def print(noopstr s, int len) -> void
-    		{
+            def print(noopstr s, int len) -> void
+            {
 #ifdef __WINDOWS__
                 win_print(@s, len);
 #endif;
@@ -473,9 +473,8 @@ namespace standard
 #ifdef __MACOS__
                 mac_print(@s, len);
 #endif;
-    			(void)s;
-    			return;
-    		};
+                return;
+            };
 
             def print(noopstr s) -> void
             {
@@ -490,7 +489,6 @@ namespace standard
 #ifdef __MACOS__
                 mac_print(@s, len);
 #endif;
-                (void)s;
                 return;
             };
 

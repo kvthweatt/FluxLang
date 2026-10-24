@@ -276,10 +276,17 @@ def _render_diagnostic(
     use_color = _color_enabled()
     sev_color = _SEV_COLOR.get(severity, '')
 
-    def _head(msg, ln, cl):
+    # The file the line belongs to, from the merged-source line map
+    lm = line_map or []
+    def _file_of(merged_line):
+        if lm and 1 <= merged_line <= len(lm) and lm[merged_line - 1][0]:
+            return f"{lm[merged_line - 1][0]}:"
+        return ''
+
+    def _head(msg, ln, cl, fl=''):
         if not use_color:
-            return f"{msg} at {ln}:{cl}"
-        return f"{_BOLD}{sev_color}{msg}{_RESET} {_LOC_COLOR}at {ln}:{cl}{_RESET}"
+            return f"{msg} at {fl}{ln}:{cl}"
+        return f"{_BOLD}{sev_color}{msg}{_RESET} {_LOC_COLOR}at {fl}{ln}:{cl}{_RESET}"
 
     if token is None:
         return (f"{_BOLD}{sev_color}{message}{_RESET}" if use_color else message), None, None
@@ -288,7 +295,7 @@ def _render_diagnostic(
     col     = token.column  # 1-based
 
     if not source_lines:
-        return _head(message, line_no, col), line_no, col
+        return _head(message, line_no, col, _file_of(line_no)), line_no, col
 
     # ------------------------------------------------------------------
     # Determine the line/col to point at.
@@ -305,12 +312,11 @@ def _render_diagnostic(
         show_col = len(prev_src) + 1
 
     # Resolve to file-local line number via line_map.
-    lm = line_map or []
     display_line_no = lm[show_line_no - 1][1] if lm and 1 <= show_line_no <= len(lm) else show_line_no
     display_col     = show_col
 
     if not (1 <= show_line_no <= len(source_lines)):
-        return _head(message, display_line_no, display_col), display_line_no, display_col
+        return _head(message, display_line_no, display_col, _file_of(show_line_no)), display_line_no, display_col
 
     raw_line = source_lines[show_line_no - 1].rstrip('\n')
     src_line, expanded_col = _expand_tabs(raw_line, show_col)
@@ -344,7 +350,7 @@ def _render_diagnostic(
             expected_type, token, prev_token, src_line, raw_line, dash_count
         )
 
-    header = _head(message, display_line_no, display_col)
+    header = _head(message, display_line_no, display_col, _file_of(show_line_no))
     if use_color and suggestion:
         suggestion = f"{_HINT_COLOR}{suggestion}{_RESET}"
     if use_color and annotation:
@@ -495,6 +501,10 @@ ParseError = FluxParseError
 # Warning emitter (non-raising path)
 # ---------------------------------------------------------------------------
 
+# Warnings emitted so far, for --warn-as-error
+WARNING_COUNT = 0
+
+
 def emit_warning(
     message: str,
     token=None,
@@ -515,4 +525,6 @@ def emit_warning(
         source_lines = source_lines,
         line_map     = line_map,
     )
+    global WARNING_COUNT
+    WARNING_COUNT += 1
     print(formatted, file=sys.stderr)

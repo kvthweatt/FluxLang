@@ -26,7 +26,8 @@ It is not a C derivative, and it is not a safe language in the Rust sense. It is
 
 The language was previously called Flux. Some names in the compiler still carry it (`fxc.py`, `emitflux`, `FLUXC_SRCDIR`) and will follow the new name in an upcoming patch.
 
-As of 10/12/2026, **IDEKA is bootstrapped and can compile itself**. It is recommended you bootstrap your compiler by running `python fxc.py fxc.fx` for faster compile times.
+As of 10/12/2026, **IDEKA is bootstrapped and can compile itself**. It is recommended you bootstrap your compiler by running `python fxc.py fxc.fx` for faster compile times.  
+Alternatively you can now run a specialized setup script located at `repo_root\scripts\setup.py` which automates the process of setup, configuration, and bootstrap.
 
 ---
 
@@ -39,8 +40,8 @@ struct Pixel { byte r, g, b, a; };
 
 operator (int L, int R) [<=>] -> int
 {
-    if (L < R) { return -1; };
-    if (L > R) { return  1; };
+    if (L < R) return -1;
+    if (L > R) return  1;
     return 0;
 };
 
@@ -79,33 +80,31 @@ struct Vec2 { float x, y; };
 // A new operator made of punctuation
 operator (int L, int R) [<=>] -> int
 {
-    if (L < R) { return -1; };
-    if (L > R) { return  1; };
-    return 0;
+    if (L < R) return -1;
+    if (L > R) return  1;
+    -> 0;                   // the return arrow -> can substitute the return keyword.
 };
 
 // A new operator made of a word
 operator (int L, int R) [NAND] -> int
 {
-    return !(L & R);
+    -> L !& R;
 };
 
 // Operators take any type: here, two Vec2 pointers
-operator (Vec2* L, Vec2* R) [DOT] -> float
-{
-    return L.x * R.x + L.y * R.y;
-};
+// return-only functions can collapse and have their braces {} eliminated.
+operator (Vec2* L, Vec2* R) [DOT] -> float -> L.x * R.x + L.y * R.y;
 
 def main() -> int
 {
-    Vec2 a = {1.0, 2.0};
-    Vec2 b = {3.0, 4.0};
-    Vec2* pa = @a;
-    Vec2* pb = @b;
+    Vec2 a = {1.0, 2.0},
+         b = {3.0, 4.0};
+    Vec2* pa @= a,
+          pb @= b;
 
     println(f"{pa DOT pb}");                       // 11.0
     println(f"{7 <=> 3} {3 <=> 7} {5 <=> 5}");     // 1 -1 0
-    println(f"{6 NAND 1} {6 NAND 2}");             // -1 -3  (bitwise: ! is complement on integers)
+    println(f"{6 NAND 1} {6 NAND 2}");             // -1 -3  (bitwise: `! is complement on integers)
     return 0;
 };
 ```
@@ -164,13 +163,14 @@ def main() -> int
 
 ```
 struct Pair { int a, b; };
+
 def main() -> int
 {
     data{4} as u4;
     data{1} as bit;
     byte x = 0xA5;
-    u4 hi = x[0``3];
-    u4 lo = x[4``7];
+    u4 hi = x[0``3]
+       lo = x[4``7];
     println(f"{int(hi)} {int(lo)}");
 
     u32 packed = 0x12345678;
@@ -204,16 +204,16 @@ def main() -> int
 def main() -> int
 {
     byte flags = 0b10100000;
-    int a = flags[`0];
-    int b = flags[`1];
-    int c = flags[`2];
+    int a = flags[`0],
+        b = flags[`1],
+        c = flags[`2];
     println(f"{a} {b} {c}");
     flags[`7] = 1;
     flags[`0] = 0;
     println(f"{int(flags)}");
     u16 w = 0x8001;
-    int hi = w[`0];
-    int lo = w[`15];
+    int hi = w[`0],
+        lo = w[`15];
     println(f"{hi} {lo}");
     return 0;
 };
@@ -269,10 +269,10 @@ Success!
 ### Width, alignment, and endianness are part of the type
 
 ```
-signed   data{13:16} as strange13;   // 13-bit signed, 16-bit aligned
-unsigned data{3}     as tiny;        // 3-bit unsigned (0-7)
-unsigned data{7:8}   as aligned7;    // 7-bit with 8-bit alignment
-unsigned data{5}[10] as 5b_array;    // Array of ten 5-bit values
+signed data{13:16} as strange13;   // 13-bit signed, 16-bit aligned
+data{3}            as tiny;        // 3-bit unsigned (0-7)
+data{7:8}          as aligned7;    // 7-bit with 8-bit alignment
+data{5}[10]        as 5b_array;    // Array of ten 5-bit values
 
 data{16}    as be16;   // Big-endian 16-bit  (default)
 data{16::0} as le16;   // Little-endian 16-bit
@@ -358,21 +358,23 @@ object Client, Store;
 
 object Store
 {
-    def __init() -> this { return this; };
+    def __init() -> this -> this;
     def __exit() -> void {};
-    def __expr() -> int { return 0; };
-    def query(byte* sql) -> byte* { return sql; };
-    def connect() -> bool { return true; };
-    def disconnect() -> bool { return true; };
-} : Database(Client, this);
+    def __expr() -> Store* -> this;
+
+    def query(byte* sql) -> byte* -> sql;
+    def connect() -> bool -> true;
+    def disconnect() -> bool -> true;
+};
 
 object Client
 {
-    def __init() -> this { return this; };
+    def __init() -> this -> this;
     def __exit() -> void {};
-    def __expr() -> int { return 0; };
-    def connect() -> bool { return true; };
-    def disconnect() -> bool { return true; };
+    def __expr() -> Client* -> this;
+
+    def connect() -> bool -> true;
+    def disconnect() -> bool -> true;
 
     def go(Store* s) -> void
     {
@@ -405,21 +407,22 @@ IDEKA runs itself at compile time. A `comptime` block executes inside the compil
 comptime
 {
     // Runs inside the compiler. Nothing here exists in the binary.
-    int a = 0;
-    int b = 1;
-    int t, n;
-    while (n < 30)
+    int a,
+        b = 1,
+        t, n,
+        max = 30;
+    while (n < max)
     {
         t = a + b;
         a = b;
         b = t;
         n++;
     };
-    compiler.io.console.println(f"[comptime] fib(30) = {a}");
+    compiler.io.console.println(f"[comptime] fib({max}) = {a}");
 
     emitflux
     {
-        def fib30() -> int { return ~$f"{a}"; };
+        def ~$f"fib{max}"() -> int { return ~$f"{a}"; };
     };
 };
 
@@ -444,13 +447,13 @@ def main() -> int
 
 comptime
 {
-    byte*[NUM_OPS] op_names = ["add", "sub", "mul", "div"];
-    byte*[NUM_OPS] op_exprs = ["a + b", "a - b", "a * b", "a / b"];
+    byte*[NUM_OPS] op_names = ["add", "sub", "mul", "div"],
+         [NUM_OPS] op_exprs = ["a + b", "a - b", "a * b", "a / b"];
 
     // One function per operation: op_add, op_sub, op_mul, op_div
     int i;
-    byte* nm;
-    byte* expr;
+    byte* nm,
+          expr;
     while (i < NUM_OPS)
     {
         nm   = op_names[i];
@@ -639,10 +642,7 @@ contract NonZero(a, b)
     assert(b != 0, "b must be nonzero");
 };
 
-def divide(int a, int b) -> int : NonZero(a, b)
-{
-    return a / b;
-};
+def divide(int a, int b) -> int : NonZero(a, b) -> return a / b;
 
 operator (int L, BigInt R) [+] -> BigInt : NonZero(L, R)
 {
@@ -660,10 +660,7 @@ constraint NoNarrowing(A)
     A !`< A    // A must never be narrowed anywhere in this template body
 };
 
-def serialize<T: int, :{NoNarrowing}>(T x) -> byte
-{
-    return 5 + x;   // Compile error: narrowing T to byte violates NoNarrowing
-};
+def serialize<T: int, :{NoNarrowing}>(T x) -> byte -> return 5 + x;   // Compile error: narrowing T to byte violates NoNarrowing
 ```
 
 `!`<` is not a predicate on a concrete type. The compiler walks the instantiated function body and finds the actual narrowing. Template constraints express relationships between types, not just properties of a single type.
@@ -719,17 +716,11 @@ def exchange64(i64* ptr, i64 value, i64* out) -> void
 
 ```
 byte[] some_bytecode = [0x48, 0x31, 0xC0, 0xC3];  // xor rax,rax ; ret
-def{}* fp()->void = @some_bytecode;
+
+{}* fp()->void = @some_bytecode;
+
 fp();
 ```
-
----
-
-## What IDEKA is not
-
-- **Not a Rust alternative.** Rust's borrow checker is global and mandatory. IDEKA ownership is opt-in per type. If you want the compiler to enforce memory safety everywhere, use Rust.
-- **Not a Python-syntax language.** "C performance with Python readability" means the language is clean, not that it looks like Python. It is a C-family language.
-- **Not garbage collected.** Everything is stack allocated by default. Heap allocation is explicit with `heap`. Cleanup is explicit with `(void)ptr` or `defer`.
 
 ---
 

@@ -94,7 +94,7 @@ namespace flux
             byte* src = ts_dup(text);
             int n;
             Node* prog;
-            while (src[n]!?) { n++; };
+            while (src[n] != 0) { n++; };
             Lexer lx(src, n);
             if (!lx.tokenize())
             {
@@ -247,7 +247,7 @@ namespace flux
         def al_str_lt(byte* a, byte* b) -> bool
         {
             int i;
-            while (a[i]!? & b[i]!?)
+            while (a[i] != 0 & b[i] != 0)
             {
                 if (a[i] != b[i]) { return a[i] < b[i]; };
                 i++;
@@ -651,10 +651,10 @@ namespace flux
                 if (!cstr_eq(key, call.text)) { return (byte*)0; };
                 fd = (Node*)nm_get(this.cg.funcs, key);
                 if (fd == (Node*)0) { return (byte*)0; };
-                if ((fd.flags `& NF_VARIADIC)!?) { return (byte*)0; };
+                if ((fd.flags `& NF_VARIADIC) != 0) { return (byte*)0; };
                 if (fd.text2 != (byte*)0)
                 {
-                    if (fd.text2[0]!?) { return (byte*)0; };
+                    if (fd.text2[0] != 0) { return (byte*)0; };
                 };
                 if (fd.ts2 != (TypeSpec*)0) { return (byte*)0; };
                 if (node_count(call, 0) != node_count(fd, 0)) { return (byte*)0; };
@@ -685,8 +685,8 @@ namespace flux
                 PtrVec* fresh = pv_new();
                 PtrVec* pending = pv_new();
                 PtrVec* pre, calls, stmts, waits;
-                int si, i, j, kind, sl;
-                Node* s, call, c;
+                int si, i, j, kind;
+                Node* s, call;
                 byte* key;
                 AlTask* t, u;
                 while (si < old.len)
@@ -896,7 +896,7 @@ namespace flux
                     i++;
                     if ((bits[0] `& LA_OP_EXCL) == 0) { continue; };
                     sep = 0;
-                    while (key[sep]!? & key[sep] != 31) { sep++; };
+                    while (key[sep] != 0 & key[sep] != 31) { sep++; };
                     a = al_pair_half(key, 0, sep);
                     b = al_pair_half(key, 1, sep);
                     if (!nm_has(this.cg.funcs, a) | !nm_has(this.cg.funcs, b)) { continue; };
@@ -931,7 +931,7 @@ namespace flux
                 PtrVec* grps = this.groups();
                 PtrVec* decls = pv_new();
                 PtrVec* inits = pv_new();
-                PtrVec* members, lock, newbody, old;
+                PtrVec* members, lock;
                 int gi, at, i, k, c, pos, pass;
                 Node* s, fd, prog;
                 bool ok = true;
@@ -1069,13 +1069,17 @@ namespace flux
         {
             CallGraph cg;
             cg.__init();
+            defer cg.__exit();
             cg.collect(prog);
             if (cg.async_names.count == 0) { return 0; };
             LifeChecker lc;
             lc.__init(@cg, entry, pp, true);
+            defer lc.__exit();
             lc.run();
             PtrVec* mine = pv_new();
             PtrVec* fatal = pv_new();
+            defer pv_free(mine);
+            defer pv_free(fatal);
             int i;
             BVio* v;
             while (i < lc.violations.len)
@@ -1092,6 +1096,7 @@ namespace flux
                 return -1;
             };
             AsyncLowering al(prog, @cg, @lc);
+            defer al.__exit();
             return al.run();
         };
 

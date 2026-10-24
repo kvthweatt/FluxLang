@@ -238,7 +238,8 @@ namespace flux
             NONE,
             FSTRING_UNTERMINATED,
             ALLOC_FAILED,
-            EXPONENT_RANGE
+            EXPONENT_RANGE,
+            NON_ASCII
         };
 
         // type         one of TokenType
@@ -1043,6 +1044,7 @@ namespace flux
                 case (LexError.FSTRING_UNTERMINATED) { -> g"unterminated f-string interpolation, } expected\0"; }
                 case (LexError.ALLOC_FAILED)         { -> g"lexer allocation failed\0"; }
                 case (LexError.EXPONENT_RANGE)       { -> g"numeric literal exponent out of range\0"; }
+                case (LexError.NON_ASCII)            { -> g"non-ASCII character is only valid inside string literals\0"; }
                 default                              { -> g"no error\0"; };
             };
         };
@@ -1267,6 +1269,7 @@ namespace flux
             // Non-ASCII characters outside string literals are skipped with a
             // warning in flexer.py. The first occurrence is recorded here.
             int warn_count, warn_line, warn_col, warn_cp;
+            int err_cp, err_start, err_nbytes;   // the offending character of LexError.NON_ASCII
 
             __init(byte* source, int len) -> this
             {
@@ -1492,7 +1495,7 @@ namespace flux
                     case (true) { this.grow(); }
                     default {};
                 };
-                switch (this.err_code!?)
+                switch (this.err_code != 0)
                 {
                     case (true) { ->; }
                     default
@@ -1529,7 +1532,7 @@ namespace flux
 
             emit(int tt, int ln, int col, int voff, int vlen, int numeric) -> void
             {
-                switch (this.err_code!?)
+                switch (this.err_code != 0)
                 {
                     case (true) { ->; }
                     default
@@ -3074,12 +3077,12 @@ namespace flux
 
             tokenize() -> bool
             {
-                int c, ln, col, tt, vb, vl, cnt, i, oplen, optype, cp, extra;
+                int c, ln, col, tt, vb, vl, cnt, i, oplen, optype, cp, extra, wstart;
                 int saved_pos, saved_line, saved_col;
 
                 while (this.position < this.length)
                 {
-                    switch (this.err_code!?)
+                    switch (this.err_code != 0)
                     {
                         case (true) { -> false; }
                         default
@@ -3306,6 +3309,7 @@ namespace flux
                                                                                                                                     };
                                                                                                                                 };
 
+                                                                                                                                wstart = this.position;
                                                                                                                                 this.warn_count++;
                                                                                                                                 switch (this.warn_count == 1)
                                                                                                                                 {
@@ -3323,11 +3327,10 @@ namespace flux
                                                                                                                                     this.adv(1);
                                                                                                                                     extra--;
                                                                                                                                 };
-                                                                                                                                switch (this.warn_count == 1)
-                                                                                                                                {
-                                                                                                                                    case (true) { this.warn_cp = cp; }
-                                                                                                                                    default {};
-                                                                                                                                };
+                                                                                                                                this.fail(LexError.NON_ASCII, ln, col);
+ this.err_cp = cp;
+ this.err_start = wstart;
+ this.err_nbytes = this.position - wstart;
                                                                                                                             }
                                                                                                                                 default {
                                                                                                                                 this.adv(1);

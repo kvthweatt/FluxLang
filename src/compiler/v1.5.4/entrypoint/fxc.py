@@ -29,7 +29,7 @@ from pathlib import Path
 #from fconfig import *
 
 # Resolve compiler root: prefer FLUXC_SRCDIR env var, fall back to script location
-FLUXC_SRCDIR = Path(__file__).resolve().parent
+FLUXC_SRCDIR = Path(os.environ.get("FLUXC_SRCDIR", str(Path(__file__).resolve().parent)))
 
 # Write it back so fc.py and fconfig.py see the same root when they're imported
 os.environ["FLUXC_SRCDIR"] = str(FLUXC_SRCDIR)
@@ -39,7 +39,8 @@ sys.path.insert(0, str(FLUXC_SRCDIR / "src" / "compiler"))
 sys.path.insert(0, str(FLUXC_SRCDIR / "src" / "stdlib"))
 sys.path.insert(0, str(FLUXC_SRCDIR / "src" / "stdlib" / "runtime"))
 # Import compiler components
-from fc import *
+from fc import FluxCompiler # type: ignore
+from fc import config
 
 class TeeOutput:
     """Writes to both console and file simultaneously"""
@@ -101,6 +102,7 @@ def main():
             print("  --borrowcheck-warn  Run borrow checker in warning-only mode (never blocks)")
             print("  --effects           Enforce effect annotations -- violations are errors")
             print("  --effects-warn      Enforce effect annotations -- violations are warnings only")
+            print("  --warn-as-error     Treat every warning as an error")
             print("  --entrypoint        Set the entrypoint (default FRTStartup)")
             print("  -o <output>         Output binary name")
             print("  -v <level>          Legacy verbosity level (0-5)")
@@ -153,6 +155,7 @@ def main():
         borrow_check_warn = False
         effects_strict = False
         effects_warn = False
+        warn_as_error = False
         cli_entrypoint = None
         cli_module = None
         i = 0
@@ -216,6 +219,9 @@ def main():
                 borrow_check = True
                 borrow_check_warn = True
                 i += 1
+            elif arg == "--warn-as-error":
+                warn_as_error = True
+                i += 1
             elif arg == "--effects":
                 effects_strict = True
                 i += 1
@@ -268,6 +274,14 @@ def main():
         
             binary_path = ""
 
+            # --warn-as-error: the warning-only checks become errors too
+            if warn_as_error:
+                compiler.warn_as_error = True
+                borrow_check_warn = False
+                if effects_warn:
+                    effects_strict = True
+                    effects_warn = False
+
             # Pass borrow check flags to the compiler -- it runs inline after parsing
             if borrow_check:
                 compiler.borrow_check = True
@@ -294,8 +308,27 @@ def main():
             elif compile_as_library:
                 binary_path = compiler.compile_library(input_file, output_bin)
             else:
-                binary_path = compiler.compile_file(input_file, output_bin, extra_libs=extra_libs)
-        
+                def _expects_build_fail():
+                    unit = getattr(compiler, 'module_unit', None)
+                    if unit is None or not unit.entry:
+                        return False
+                    return bool(unit.entry_settings().get('test', {}).get('expect_build_fail'))
+                try:
+                    binary_path = compiler.compile_file(input_file, output_bin, extra_libs=extra_libs)
+                except SystemExit as e:
+                    # '#[test] = { #[expect_build_fail] }': a failing build is the expected result
+                    if e.code not in (0, None) and _expects_build_fail():
+                        _msg = "[BUILD] Failed as expected - #[expect_build_fail] in #[test]"
+                        if getattr(compiler.logger, 'colors', False):
+                            _msg = f"\033[92m{_msg}{compiler.logger.reset_code}"
+                        print(_msg)
+                        sys.exit(0)
+                    raise
+                if _expects_build_fail():
+                    print("[BUILD] Expected the build to fail (#[expect_build_fail] in #[test]), but it succeeded",
+                          file=sys.stderr)
+                    sys.exit(1)
+
             # Final success message
             if logger_config.get('level', 0) < 3:
                 if dos_mode:

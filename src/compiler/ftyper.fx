@@ -3177,7 +3177,6 @@ namespace flux
                 Node* an;
                 TypeSpec* pt;
                 TypeSpec* at;
-                TypeSpec* ra;
                 FXC_SYMENTRY* e;
                 int i, tgt, src;
                 int argc = node_count(n, 0);
@@ -3767,7 +3766,6 @@ namespace flux
                 TypeSpec* kt;
                 TypeSpec* vt;
                 int cnt;
-                int step = 1;
                 switch (n.kind)
                 {
                     case (NodeKind.DICT_LITERAL)
@@ -4527,7 +4525,6 @@ namespace flux
                 TypeSpec* ed;
                 TypeSpec* es;
                 int ld, ls;
-                bool agg_src;
                 switch (kd == TyKind.UNKNOWN | ks == TyKind.UNKNOWN)
                 {
                     case (true) { -> Conv.NONE; }
@@ -4979,7 +4976,6 @@ namespace flux
             {
                 int c = 1;
                 int i;
-                int n;
                 ConvRec* r;
                 while (c < 17)
                 {

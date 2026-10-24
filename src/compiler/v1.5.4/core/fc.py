@@ -21,6 +21,7 @@ from fmacros import build_compiler_macros
 import fdce as _fdce_mod
 import fbc as _fbc_mod
 import fmodules as _fmodules
+import funused as _funused
 
 # Resolve compiler root: prefer FLUXC_SRCDIR env var, fall back to script location
 FLUXC_SRCDIR = Path(os.environ.get("FLUXC_SRCDIR", Path(__file__).parent)).resolve()
@@ -164,6 +165,7 @@ class FluxCompiler:
         # Borrow checker flags -- set by fxc.py or CLI
         self.borrow_check = False
         self.borrow_check_warn = False
+        self.warn_as_error = False    # --warn-as-error
 
         # Effect system flags -- set by fxc.py or CLI
         self.effects_strict = False   # --effects
@@ -367,6 +369,8 @@ class FluxCompiler:
                                        platform=self.platform)
             if getattr(self, 'module_select', None) is None and len(unit.programs) > 1:
                 return unit                # the caller builds each program separately
+            for w in unit.warnings:
+                self.logger.warning(w, "modules")
             _fmodules.flatten(ast, unit)
         except _fmodules.ModuleError as e:
             self.logger.error(f"Module error: {e}", "modules")
@@ -455,7 +459,7 @@ class FluxCompiler:
             ast = parser.parse()
 
             if parser.parse_errors:
-                exit()
+                sys.exit(1)
 
             # Modules: pull every module reachable through 'from' into this compilation
             # unit, resolve each module's build settings and flatten the bodies.
@@ -492,6 +496,15 @@ class FluxCompiler:
                         keep=lambda vs: self._module_filter(vs, ast, unit, 'effect_check'))
             elif self.effects_strict or self.effects_warn:
                 self._run_effect_pass(ast)
+
+            # Warnings for unused local variables
+            _funused.warn_unused(ast, parser._line_map, parser._source_lines)
+            if self.warn_as_error:
+                import ferrors as _ferrors
+                if _ferrors.WARNING_COUNT > 0:
+                    self.logger.error(f"Compilation failed: {_ferrors.WARNING_COUNT} warning(s) "
+                                      f"treated as errors (--warn-as-error)", "compiler")
+                    sys.exit(1)
 
             # One DCE pass. Programs that use async keep the runtime declarations
             # the lowering will reference. The borrow check then analyses a copy of

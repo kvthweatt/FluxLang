@@ -72,7 +72,7 @@ namespace flux
             if (ex == (EEntry*)0)
             {
                 om_put(s, e.name, (void*)e);
-                ->;
+                return;
             };
             ex.impl = ex.impl | e.impl;
             ex.req = ex.req | e.req;
@@ -82,7 +82,7 @@ namespace flux
             ex.one = ex.one | e.one;
             ex.supp = ex.supp | e.supp;
             ex.cprop = ex.cprop | e.cprop;
-            ->;
+            return;
         };
 
         def es_copy(OMap* s) -> OMap*
@@ -110,6 +110,19 @@ namespace flux
 
         def es_has(OMap* s, byte* name) -> bool -> om_has(s, name);
 
+        // Frees a set together with its entries. Only for a set that owns every entry it holds.
+        def es_free(OMap* s) -> void
+        {
+            int i = 0;
+            while (i < s.vs.len)
+            {
+                ffree((byte*)s.vs.items[i]);
+                i++;
+            };
+            om_free(s);
+            return;
+        };
+
         // Union of the entries of b into a (by reference, as EffectSet.add does)
         def es_merge(OMap* a, OMap* b) -> void
         {
@@ -119,7 +132,7 @@ namespace flux
                 es_add(a, (EEntry*)b.vs.items[i]);
                 i++;
             };
-            ->;
+            return;
         };
 
         // ------------------------------------------------------------------
@@ -131,7 +144,7 @@ namespace flux
         def ss_add(OMap* s, byte* k) -> void
         {
             if (!om_has(s, k)) { om_put(s, k, (void*)1); };
-            ->;
+            return;
         };
 
         def ss_has(OMap* s, byte* k) -> bool -> om_has(s, k);
@@ -285,13 +298,13 @@ namespace flux
                 ss_add(r.builtins, (byte*)v.items[i]);
                 i++;
             };
-            ->;
+            return;
         };
 
         def er_impl(EReg* r, byte* name, byte* list) -> void
         {
             nm_put(r.implies, name, (void*)ef_split(list));
-            ->;
+            return;
         };
 
         def er_new() -> EReg*
@@ -330,8 +343,10 @@ namespace flux
             while (i < pv.len)
             {
                 nm_put(r.perm, (byte*)pv.items[i], (void*)1);
+                ffree((byte*)pv.items[i]);
                 i++;
             };
+            pv_free(pv);
             er_impl(r, g"Hook.Detour\0", g"Hook Unsafe Mem.Write.Exec\0");
             er_impl(r, g"Hook.IAT\0", g"Hook Mem.Write\0");
             er_impl(r, g"Hook.SSDT\0", g"Hook Privilege Mem.Write.Kernel Unsafe\0");
@@ -357,7 +372,7 @@ namespace flux
                 ss_add(s, p);
                 p = er_parent(r, p);
             };
-            ->;
+            return;
         };
 
         // True when any static ancestor of name is in s
@@ -428,8 +443,10 @@ namespace flux
                     {
                         res = er_resolve(r, ss_key(all, i));
                         es_merge(es, res);
+                        om_free(res);
                         i++;
                     };
+                    om_free(all);
                     return es;
                 };
                 len = bc_len(name);
@@ -455,13 +472,17 @@ namespace flux
                         {
                             res = er_resolve(r, ss_key(all, i));
                             es_merge(es, res);
+                            om_free(res);
                         };
                         i++;
                     };
+                    om_free(all);
+                    ffree(ns);
                     return es;
                 };
                 res = er_resolve(r, name);
                 es_merge(es, res);
+                om_free(res);
                 if (er_is_perm(r, name))
                 {
                     e = (EEntry*)om_get(es, name);
@@ -475,6 +496,7 @@ namespace flux
                 code = ef_unary_code(op);
                 if (code > 0)
                 {
+                    om_free(es);
                     inner = er_eval(r, n.a);
                     i = 0;
                     while (i < inner.ks.len)
@@ -496,10 +518,13 @@ namespace flux
                 };
                 if (cstr_eq(op, g"&\0") | cstr_eq(op, g"|\0") | cstr_eq(op, g">\0") | cstr_eq(op, g"->\0"))
                 {
+                    om_free(es);
                     left = er_eval(r, n.a);
                     right = er_eval(r, n.b);
                     res = es_copy(left);
                     es_merge(res, right);
+                    es_free(left);
+                    om_free(right);
                     return res;
                 };
                 // "^|" and "<->" are constraints only, anything else is unknown
@@ -531,7 +556,11 @@ namespace flux
             if (om_has(r.user, name))
             {
                 defn = (Node*)om_get(r.user, name);
-                if (defn.a != (Node*)0) { es = er_eval(r, defn.a); };
+                if (defn.a != (Node*)0)
+                {
+                    om_free(es);
+                    es = er_eval(r, defn.a);
+                };
                 es_add(es, ee_new(name, !perm));
             }
             else
@@ -545,6 +574,7 @@ namespace flux
                     {
                         impl_es = er_resolve(r, (byte*)imp.items[i]);
                         es_merge(es, impl_es);
+                        om_free(impl_es);
                         i++;
                     };
                 };
@@ -596,7 +626,7 @@ namespace flux
             if (v.kind == 0)
             {
                 print(g"Effect violation at \0");
-                if (v.line!?)
+                if (v.line != 0)
                 {
                     print(v.line);
                     print(g":\0");
@@ -610,7 +640,7 @@ namespace flux
                 print(g"' but calls '\0");
                 print(v.s2);
                 print(g"' which introduces it\0");
-                ->;
+                return;
             };
             if (v.kind == 1)
             {
@@ -621,7 +651,7 @@ namespace flux
                 print(g"' crosses boundary '\0");
                 print(v.s3);
                 print(g"' without attenuation\0");
-                ->;
+                return;
             };
             if (v.kind == 2)
             {
@@ -630,7 +660,7 @@ namespace flux
                 print(g"' at boundary '\0");
                 print(v.s2);
                 print(g"' (!@ prevents attenuation)\0");
-                ->;
+                return;
             };
             print(g"Effects '\0");
             print(v.s1);
@@ -639,7 +669,7 @@ namespace flux
             print(g"' conflict at '\0");
             print(v.s3);
             print(g"' with no priority resolution\0");
-            ->;
+            return;
         };
 
         // _violation_message(v) without colour
@@ -654,7 +684,7 @@ namespace flux
                 print(g" but calls function \0");
                 print(v.s2);
                 print(g" which introduces it\0");
-                ->;
+                return;
             };
             if (v.kind == 1)
             {
@@ -664,7 +694,7 @@ namespace flux
                 print(g" which crosses boundary \0");
                 print(v.s3);
                 print(g" without attenuation\0");
-                ->;
+                return;
             };
             if (v.kind == 2)
             {
@@ -673,7 +703,7 @@ namespace flux
                 print(g" at boundary \0");
                 print(v.s2);
                 print(g" -- !@ prevents attenuation\0");
-                ->;
+                return;
             };
             print(g"Effects \0");
             print(v.s1);
@@ -682,7 +712,7 @@ namespace flux
             print(g" conflict at \0");
             print(v.s3);
             print(g" with no priority resolution\0");
-            ->;
+            return;
         };
 
         // strict: raw violations; otherwise every violation is an EffectWarning wrapper
@@ -700,7 +730,7 @@ namespace flux
                 if (strict)
                 {
                     print(g"  \0");
-                    if (v.kind == 0 & v.line!?)
+                    if (v.kind == 0 & v.line != 0)
                     {
                         print(v.line);
                         print(g":\0");
@@ -742,7 +772,7 @@ namespace flux
                 println(g"\0");
                 i++;
             };
-            ->;
+            return;
         };
 
         def ef_print_summary(PtrVec* vs, bool strict) -> void
@@ -758,7 +788,7 @@ namespace flux
             if (n == 0)
             {
                 println(g"[Effects] OK -- no violations found.\0");
-                ->;
+                return;
             };
             while (i < n)
             {
@@ -803,7 +833,7 @@ namespace flux
                 print(n);
             };
             println(g"\0");
-            ->;
+            return;
         };
 
         // ------------------------------------------------------------------
@@ -820,6 +850,7 @@ namespace flux
             OMap* bare;            // bare or full name -> PtrVec* of effect sets
             PtrVec* xl;            // xor constraints: left, right, source (byte*) in triples
             PtrVec* ml;            // mutual constraints: left, right, negated flag, source in quads
+            PtrVec* own;           // texts the violations point into
             bool failed;
         };
 
@@ -838,11 +869,11 @@ namespace flux
             Node* s = ef_unwrap(s0);
             int c;
             int i;
-            if (s == (Node*)0) { ->; };
+            if (s == (Node*)0) { return; };
             if (s.kind == NodeKind.FUNCTION_DEF | s.kind == NodeKind.INTERFACE_DEF | s.kind == NodeKind.EFFECT_DEF)
             {
                 pv_push(out, (void*)s);
-                ->;
+                return;
             };
             if (s.kind == NodeKind.NAMESPACE_DEF)
             {
@@ -864,7 +895,7 @@ namespace flux
                     };
                 };
             };
-            ->;
+            return;
         };
 
         // All FUNCTION_CALL nodes below n, pre order
@@ -873,7 +904,7 @@ namespace flux
             int s;
             int c;
             int i;
-            if (n == (Node*)0) { ->; };
+            if (n == (Node*)0) { return; };
             if (n.kind == NodeKind.FUNCTION_CALL) { pv_push(out, (void*)n); };
             ef_collect_calls(n.a, out);
             ef_collect_calls(n.b, out);
@@ -892,7 +923,7 @@ namespace flux
                 };
                 s++;
             };
-            ->;
+            return;
         };
 
         def ef_has_asm(Node* n) -> bool
@@ -959,6 +990,7 @@ namespace flux
                                 er_add_parents(r, res, x.name);
                             };
                         };
+                        es_free(ex);
                     };
                 };
                 er_add_parents(r, res, e.name);
@@ -1030,10 +1062,11 @@ namespace flux
         };
 
         // _callee_requires_effects
-        def ep_callee_requires(EPass* p, byte* cname) -> OMap*
+        def ep_callee_requires(EPass* p, byte* cname, PtrVec* own) -> OMap*
         {
             EReg* r = p.reg;
             OMap* res = ss_new();
+            byte* pk;
             PtrVec* cands = (PtrVec*)om_get(p.bare, cname);
             OMap* es;
             EEntry* e;
@@ -1063,7 +1096,13 @@ namespace flux
                             j = ef_last_dot(e.name, len);
                             if (j < 0) { break; };
                             len = j;
-                            ss_add(res, ef_prefix_dup(e.name, len));
+                            pk = ef_prefix_dup(e.name, len);
+                            if (ss_has(res, pk)) { ffree(pk); }
+                            else
+                            {
+                                ss_add(res, pk);
+                                pv_push(own, (void*)pk);
+                            };
                         };
                         kids = er_kids(r, e.name);
                         if (kids != (PtrVec*)0)
@@ -1120,6 +1159,7 @@ namespace flux
                             if (ss_has(m, ((EEntry*)ex.vs.items[j]).name)) { has_child = true; };
                             j++;
                         };
+                        es_free(ex);
                     };
                 };
                 if (!has_child) { ss_add(res, eff); };
@@ -1138,7 +1178,7 @@ namespace flux
         def ep_report(EPass* p, EVio* v) -> void
         {
             pv_push(p.vios, (void*)v);
-            ->;
+            return;
         };
 
         def ef_matches(byte* excl, OMap* vis) -> bool
@@ -1153,6 +1193,36 @@ namespace flux
             return false;
         };
 
+        // The effects of a callee that are visible to its caller: its set without what the callee
+        // attenuates, and without the static children of the attenuated names
+        def ep_fill_visible(EReg* r, OMap* visible, OMap* ct, OMap* callee_att) -> void
+        {
+            PtrVec* kids;
+            int i = 0;
+            int j;
+            while (i < ct.ks.len)
+            {
+                if (!ss_has(callee_att, ss_key(ct, i))) { ss_add(visible, ss_key(ct, i)); };
+                i++;
+            };
+            i = 0;
+            while (i < callee_att.ks.len)
+            {
+                kids = er_kids(r, ss_key(callee_att, i));
+                if (kids != (PtrVec*)0)
+                {
+                    j = 0;
+                    while (j < kids.len)
+                    {
+                        om_del(visible, (byte*)kids.items[j]);
+                        j++;
+                    };
+                };
+                i++;
+            };
+            return;
+        };
+
         def ep_check_caller(EPass* p, Node* f) -> void
         {
             EReg* r = p.reg;
@@ -1163,49 +1233,64 @@ namespace flux
             OMap* ct;
             OMap* matching;
             OMap* ms;
+            OMap* req;
+            OMap* dir;
             PtrVec* calls;
-            PtrVec* kids;
+            PtrVec* own;
             Node* call;
             byte* eff;
             int ci;
             int i;
-            int j;
-            if (bc_is_proto(f)) { ->; };
+            if (bc_is_proto(f)) { return; };
             excluded = ep_excluded(p, f.text);
-            if (ss_len(excluded) == 0) { ->; };
-            if (f.a == (Node*)0) { ->; };
+            if (ss_len(excluded) == 0)
+            {
+                om_free(excluded);
+                return;
+            };
+            if (f.a == (Node*)0)
+            {
+                om_free(excluded);
+                return;
+            };
             calls = pv_new();
             ef_collect_calls(f.a, calls);
             reported = ss_new();
+            own = pv_new();
             ci = 0;
             while (ci < calls.len)
             {
                 call = (Node*)calls.items[ci];
                 ci++;
-                ct = ep_trans_of(p, call.text);
-                if (ss_len(ct) == 0) { ct = ep_callee_requires(p, call.text); };
+                // a transitive set of the pass is shared; a set built here is released in its own branch
                 callee_att = ep_att(p, call.text);
                 visible = ss_new();
-                i = 0;
-                while (i < ct.ks.len)
+                ct = (OMap*)om_get(p.transitive, call.text);
+                if (ct != (OMap*)0)
                 {
-                    if (!ss_has(callee_att, ss_key(ct, i))) { ss_add(visible, ss_key(ct, i)); };
-                    i++;
-                };
-                i = 0;
-                while (i < callee_att.ks.len)
-                {
-                    kids = er_kids(r, ss_key(callee_att, i));
-                    if (kids != (PtrVec*)0)
+                    if (ss_len(ct) == 0)
                     {
-                        j = 0;
-                        while (j < kids.len)
-                        {
-                            om_del(visible, (byte*)kids.items[j]);
-                            j++;
-                        };
+                        req = ep_callee_requires(p, call.text, own);
+                        ep_fill_visible(r, visible, req, callee_att);
+                        om_free(req);
+                    }
+                    else { ep_fill_visible(r, visible, ct, callee_att); };
+                }
+                else
+                {
+                    dir = ep_direct(p, call.text);
+                    if (ss_len(dir) == 0)
+                    {
+                        om_free(dir);
+                        req = ep_callee_requires(p, call.text, own);
+                        ep_fill_visible(r, visible, req, callee_att);
+                        om_free(req);
+                    }
+                    else
+                    {
+                        ep_fill_visible(r, visible, dir, callee_att);
+                        om_free(dir);
                     };
-                    i++;
                 };
                 matching = ss_new();
                 i = 0;
@@ -1218,7 +1303,13 @@ namespace flux
                         if (!ss_has(reported, eff)) { ss_add(matching, eff); };
                     };
                 };
-                if (ss_len(matching) == 0) { continue; };
+                if (ss_len(matching) == 0)
+                {
+                    om_free(matching);
+                    om_free(visible);
+                    om_free(callee_att);
+                    continue;
+                };
                 ms = ep_most_specific(p, matching);
                 i = 0;
                 while (i < ms.ks.len)
@@ -1228,8 +1319,22 @@ namespace flux
                     ss_add(reported, eff);
                     ep_report(p, ev_new(0, f.text, call.text, eff, call.line, call.col));
                 };
+                om_free(ms);
+                om_free(matching);
+                om_free(visible);
+                om_free(callee_att);
             };
-            ->;
+            om_free(reported);
+            pv_free(calls);
+            om_free(excluded);
+            i = 0;
+            while (i < own.len)
+            {
+                ffree((byte*)own.items[i]);
+                i++;
+            };
+            pv_free(own);
+            return;
         };
 
         def ep_check_pure(EPass* p, Node* f) -> void
@@ -1240,6 +1345,8 @@ namespace flux
             OMap* forb;
             OMap* impure;
             OMap* ms;
+            OMap* ct;
+            OMap* dir;
             EEntry* e;
             PtrVec* calls;
             PtrVec* kids;
@@ -1251,17 +1358,24 @@ namespace flux
             int line;
             int col;
             bool pure;
-            if (bc_is_proto(f)) { ->; };
-            if (es == (OMap*)0) { ->; };
+            bool trans_fresh;
+            bool hit;
+            if (bc_is_proto(f)) { return; };
+            if (es == (OMap*)0) { return; };
             pure = false;
             e = (EEntry*)om_get(es, g"Pure\0");
             if (e != (EEntry*)0)
             {
                 if (!e.excl) { pure = true; };
             };
-            if (!pure) { ->; };
+            if (!pure) { return; };
+            trans_fresh = false;
             trans = (OMap*)om_get(p.transitive, f.text);
-            if (trans == (OMap*)0) { trans = ss_new(); };
+            if (trans == (OMap*)0)
+            {
+                trans = ss_new();
+                trans_fresh = true;
+            };
             forb = ss_new();
             ss_add(forb, g"IO\0");
             ss_add(forb, g"Alloc\0");
@@ -1289,7 +1403,13 @@ namespace flux
                 if (ss_has(forb, ss_key(trans, i))) { ss_add(impure, ss_key(trans, i)); };
                 i++;
             };
-            if (ss_len(impure) == 0) { ->; };
+            if (ss_len(impure) == 0)
+            {
+                om_free(impure);
+                om_free(forb);
+                if (trans_fresh) { om_free(trans); };
+                return;
+            };
             ms = ep_most_specific(p, impure);
             i = 0;
             while (i < ms.ks.len)
@@ -1307,19 +1427,32 @@ namespace flux
                     {
                         call = (Node*)calls.items[k];
                         k++;
-                        if (ss_has(ep_trans_of(p, call.text), eff))
+                        ct = (OMap*)om_get(p.transitive, call.text);
+                        if (ct != (OMap*)0) { hit = ss_has(ct, eff); }
+                        else
+                        {
+                            dir = ep_direct(p, call.text);
+                            hit = ss_has(dir, eff);
+                            om_free(dir);
+                        };
+                        if (hit)
                         {
                             line = call.line;
                             col = call.col;
                             break;
                         };
                     };
+                    pv_free(calls);
                 };
                 if (line == 0) { line = f.line; };
                 if (col == 0) { col = f.col; };
                 ep_report(p, ev_new(0, f.text, g"(Pure violation)\0", eff, line, col));
             };
-            ->;
+            om_free(ms);
+            om_free(impure);
+            om_free(forb);
+            if (trans_fresh) { om_free(trans); };
+            return;
         };
 
         // _effect_name_str: name of an effect node, looking through unary operators
@@ -1364,8 +1497,8 @@ namespace flux
             byte* ln;
             byte* rn;
             int neg;
-            if (x == (Node*)0) { ->; };
-            if (x.kind != NodeKind.EFFECT_EXPR) { ->; };
+            if (x == (Node*)0) { return; };
+            if (x.kind != NodeKind.EFFECT_EXPR) { return; };
             if (cstr_eq(x.text, g"^|\0"))
             {
                 ln = ef_name_str(x.a);
@@ -1416,7 +1549,7 @@ namespace flux
             };
             ep_collect_constraints(p, x.a, src);
             ep_collect_constraints(p, x.b, src);
-            ->;
+            return;
         };
 
         // True when the effect or one of its static children is in trans
@@ -1453,10 +1586,10 @@ namespace flux
             bool lp;
             bool rp;
             bool conflict;
-            if (bc_is_proto(f)) { ->; };
+            if (bc_is_proto(f)) { return; };
             trans = (OMap*)om_get(p.transitive, f.text);
-            if (trans == (OMap*)0) { ->; };
-            if (ss_len(trans) == 0) { ->; };
+            if (trans == (OMap*)0) { return; };
+            if (ss_len(trans) == 0) { return; };
             fes = (OMap*)om_get(r.fe, f.text);
             done = ss_new();
             i = 0;
@@ -1472,8 +1605,12 @@ namespace flux
                 rp = ep_present(p, trans, rt);
                 if (lp & rp)
                 {
-                    key = join3(join3(g"xor\x1f\0", l, g"\x1f\0"), rt, g"\0");
-                    if (ss_has(done, key)) { continue; };
+                    key = join3_f(join3(g"xor\x1f\0", l, g"\x1f\0"), rt, g"\0", 1);
+                    if (ss_has(done, key))
+                    {
+                        ffree(key);
+                        continue;
+                    };
                     ss_add(done, key);
                     ep_report(p, ev_new(3, l, rt, f.text, 0, 0));
                 };
@@ -1489,14 +1626,18 @@ namespace flux
                 if (!es_has(fes, src)) { continue; };
                 lp = ep_present(p, trans, l);
                 rp = ep_present(p, trans, rt);
-                if (((int*)p.ml.items[i - 2])[0]!?) { conflict = lp & rp; }
+                if (((int*)p.ml.items[i - 2])[0] != 0) { conflict = lp & rp; }
                 else { conflict = lp != rp; };
                 if (conflict)
                 {
-                    key = join3(join3(g"mut\x1f\0", l, g"\x1f\0"), rt, g"\0");
-                    if (ss_has(done, key)) { continue; };
+                    key = join3_f(join3(g"mut\x1f\0", l, g"\x1f\0"), rt, g"\0", 1);
+                    if (ss_has(done, key))
+                    {
+                        ffree(key);
+                        continue;
+                    };
                     ss_add(done, key);
-                    if (((int*)p.ml.items[i - 2])[0]!?)
+                    if (((int*)p.ml.items[i - 2])[0] != 0)
                     {
                         missing = join3(g"(excludes \0", rt, g" via <->)\0");
                     }
@@ -1505,10 +1646,19 @@ namespace flux
                         if (lp & !rp) { missing = rt; } else { missing = l; };
                         missing = join3(g"(requires \0", missing, g" via <->)\0");
                     };
+                    // the violation keeps the text until the pass is released
+                    pv_push(p.own, (void*)missing);
                     ep_report(p, ev_new(3, l, missing, f.text, 0, 0));
                 };
             };
-            ->;
+            i = 0;
+            while (i < done.ks.len)
+            {
+                ffree(ss_key(done, i));
+                i++;
+            };
+            om_free(done);
+            return;
         };
 
         // registry.check_boundary
@@ -1539,7 +1689,7 @@ namespace flux
                 };
                 ep_report(p, ev_new(1, fname, e.name, bname, 0, 0));
             };
-            ->;
+            return;
         };
 
         def ep_add_bare(EPass* p, byte* key, OMap* es) -> void
@@ -1548,10 +1698,10 @@ namespace flux
             if (l == (PtrVec*)0)
             {
                 l = pv_new();
-                om_put(p.bare, key, (void*)l);
+                om_put(p.bare, ts_dup(key), (void*)l);
             };
             pv_push(l, (void*)es);
-            ->;
+            return;
         };
 
         def ep_call_name_ok(PtrVec* calls) -> bool
@@ -1565,6 +1715,73 @@ namespace flux
             return true;
         };
 
+        // Adds the effects of a callee to t, except those the caller attenuates
+        def ep_merge_visible(EReg* r, OMap* t, OMap* ce, OMap* att) -> void
+        {
+            byte* eff;
+            int k = 0;
+            while (k < ce.ks.len)
+            {
+                eff = ss_key(ce, k);
+                k++;
+                if (ss_has(att, eff)) { continue; };
+                if (er_parent_in(r, att, eff)) { continue; };
+                ss_add(t, eff);
+            };
+            return;
+        };
+
+        // Releases what the pass allocated: violations and their texts, the transitive and call
+        // sets, the bare name index and the constraint lists. The registry's sets stay with it.
+        def ep_free(EPass* p) -> void
+        {
+            int i = 0;
+            while (i < p.vios.len)
+            {
+                ffree((byte*)p.vios.items[i]);
+                i++;
+            };
+            pv_free(p.vios);
+            i = 0;
+            while (i < p.own.len)
+            {
+                ffree((byte*)p.own.items[i]);
+                i++;
+            };
+            pv_free(p.own);
+            i = 0;
+            while (i < p.transitive.vs.len)
+            {
+                om_free((OMap*)p.transitive.vs.items[i]);
+                i++;
+            };
+            om_free(p.transitive);
+            i = 0;
+            while (i < p.calls.vs.len)
+            {
+                om_free((OMap*)p.calls.vs.items[i]);
+                i++;
+            };
+            om_free(p.calls);
+            i = 0;
+            while (i < p.bare.ks.len)
+            {
+                ffree((byte*)p.bare.ks.items[i]);
+                pv_free((PtrVec*)p.bare.vs.items[i]);
+                i++;
+            };
+            om_free(p.bare);
+            pv_free(p.xl);
+            i = 2;
+            while (i < p.ml.len)
+            {
+                ffree((byte*)p.ml.items[i]);
+                i = i + 4;
+            };
+            pv_free(p.ml);
+            return;
+        };
+
         // Runs the whole pass. Returns the number of violations, or -1 when the pass
         // itself failed (the Python pass reports "Effect pass error" and goes on).
         // Violations in a function (kinds 0 and 1) are reported only when its module is in 'on'
@@ -1576,6 +1793,9 @@ namespace flux
             PtrVec* calls;
             OMap* proto_e = om_new();
             OMap* proto_a = om_new();
+            defer pv_free(items);
+            defer om_free(proto_e);
+            defer om_free(proto_a);
             OMap* es;
             OMap* cset;
             OMap* all_funcs;
@@ -1583,14 +1803,12 @@ namespace flux
             OMap* att;
             OMap* ce;
             OMap* ad;
-            OMap* pn;
             Node* it;
             Node* ann;
             Node* prot;
             Node* meth;
             EEntry* e;
             byte* nm;
-            byte* eff;
             byte* bare;
             int i;
             int j;
@@ -1599,8 +1817,6 @@ namespace flux
             int c;
             int old;
             bool changed;
-            bool have_ann;
-            bool bad;
             p.reg = r;
             p.vios = pv_new();
             p.strict = strict;
@@ -1609,7 +1825,9 @@ namespace flux
             p.bare = om_new();
             p.xl = pv_new();
             p.ml = pv_new();
+            p.own = pv_new();
             p.failed = false;
+            defer ep_free(@p);
 
             c = bc_count(prog, 0);
             i = 0;
@@ -1727,6 +1945,7 @@ namespace flux
                 bare = ef_rsplit_last(nm);
                 ep_add_bare(@p, bare, es);
                 ep_add_bare(@p, nm, es);
+                ffree(bare);
             };
 
             if (r.failed) { return -1; };
@@ -1745,7 +1964,11 @@ namespace flux
                         {
                             calls = pv_new();
                             ef_collect_calls(it.a, calls);
-                            if (!ep_call_name_ok(calls)) { return -1; };
+                            if (!ep_call_name_ok(calls))
+                            {
+                                pv_free(calls);
+                                return -1;
+                            };
                             cset = (OMap*)om_get(p.calls, it.text);
                             if (cset == (OMap*)0)
                             {
@@ -1758,6 +1981,7 @@ namespace flux
                                 ss_add(cset, ((Node*)calls.items[j]).text);
                                 j++;
                             };
+                            pv_free(calls);
                         };
                     };
                 };
@@ -1802,22 +2026,24 @@ namespace flux
                         j = 0;
                         while (j < cset.ks.len)
                         {
-                            ce = ep_trans_of(@p, ss_key(cset, j));
-                            j++;
-                            k = 0;
-                            while (k < ce.ks.len)
+                            // a callee with no transitive set of its own gets a fresh direct set
+                            ce = (OMap*)om_get(p.transitive, ss_key(cset, j));
+                            if (ce != (OMap*)0) { ep_merge_visible(r, t, ce, att); }
+                            else
                             {
-                                eff = ss_key(ce, k);
-                                k++;
-                                if (ss_has(att, eff)) { continue; };
-                                if (er_parent_in(r, att, eff)) { continue; };
-                                ss_add(t, eff);
+                                ce = ep_direct(@p, ss_key(cset, j));
+                                ep_merge_visible(r, t, ce, att);
+                                om_free(ce);
                             };
+                            j++;
                         };
                     };
+                    om_free(att);
                     if (ss_len(t) != old) { changed = true; };
                 };
             };
+
+            om_free(all_funcs);
 
             // Pass 6: exclusions
             i = 0;
@@ -1880,6 +2106,7 @@ namespace flux
                             if (ad != (OMap*)0) { ep_check_boundary(@p, meth.text, es, it.text, ad); };
                         };
                     };
+                    if (ad != (OMap*)0) { es_free(ad); };
                 };
             };
 
@@ -1895,10 +2122,15 @@ namespace flux
                     vi++;
                     if (ev.kind == 0 | ev.kind == 1)
                     {
-                        if (!bc_owner_on(owners, on, ev.s1)) { continue; };
+                        if (!bc_owner_on(owners, on, ev.s1))
+                        {
+                            ffree((byte*)ev);
+                            continue;
+                        };
                     };
                     pv_push(kept, (void*)ev);
                 };
+                pv_free(p.vios);
                 p.vios = kept;
             };
             ef_print_violations(p.vios, strict);

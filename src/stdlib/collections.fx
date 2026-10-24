@@ -3,16 +3,16 @@
 // Flux Collections Library
 // Provides dynamic, generic collection types for the reduced specification.
 
-#ifndef FLUX_STANDARD_TYPES
+#ifnFLUX_STANDARD_TYPES
 #import <types.fx>;
 #endif;
 
-#ifndef FLUX_STANDARD_MEMORY
+#ifnFLUX_STANDARD_MEMORY
 #import <memory.fx>;
 #endif;
 
-#ifndef FLUX_STANDARD_COLLECTIONS
-#def FLUX_STANDARD_COLLECTIONS 1;
+#ifnFLUX_STANDARD_COLLECTIONS
+#FLUX_STANDARD_COLLECTIONS 1;
 
 namespace standard
 {
@@ -33,21 +33,21 @@ namespace standard
         //   int val = *p;
         // ============================================================================
 
-        #def ARRAY_INITIAL_CAPACITY 8;
+        #ARRAY_INITIAL_CAPACITY 8;
 
         trait BaseSTDArrayTraits
         {
-            def _grow() -> bool,
-                _ptr(size_t) -> byte*,
-                len() -> size_t,
-                push(void* src) -> bool,
-                pop(void* dst) -> bool,
-                get(size_t i) -> void*,
-                set(size_t i, void* src) -> bool,
-                insert(size_t i, void* src) -> bool,
-                remove(size_t i) -> bool,
-                clear() -> void,
-                contains(void* src) -> bool;
+            _grow() -> bool,
+            _ptr(size_t) -> byte*,
+            len() -> size_t,
+            push(void* src) -> bool,
+            pop(void* dst) -> bool,
+            get(size_t i) -> void*,
+            set(size_t i, void* src) -> bool,
+            insert(size_t i, void* src) -> bool,
+            remove(size_t i) -> bool,
+            clear() -> void,
+            contains(void* src) -> bool;
         };
 
         BaseSTDArrayTraits
@@ -59,121 +59,121 @@ namespace standard
                    elem_size;
 
             // Construct an empty Array for elements of elem_size bytes.
-            def __init(size_t elem_size) -> this
+            __init(size_t elem_size) -> this
             {
                 this.elem_size = elem_size;
                 this.len       = 0;
                 this.capacity  = (size_t)ARRAY_INITIAL_CAPACITY;
                 this.buf       = (void*)fmalloc(this.capacity * elem_size);
-                return this;
+                -> this;
             };
 
             // Free the backing buffer.
-            def __exit() -> void
+            __exit() -> void
             {
                 if (this.buf != STDLIB_GVP)
                 {
                     ffree(this.buf);
                     this.buf = STDLIB_GVP;
                 };
-                return;
+                ->;
             };
 
-            def __expr() -> Array*
+            __expr() -> Array*
             {
-                return this;
+                -> this;
             };
 
             // ----------------------------------------------------------------
             // Internal: grow capacity by 2x. Returns false on alloc failure.
             // ----------------------------------------------------------------
-            def _grow() -> bool
+            _grow() -> bool
             {
                 size_t new_cap = this.capacity * 2;
                 void*  new_buf = realloc(this.buf, new_cap * this.elem_size);
                 if (new_buf == STDLIB_GVP)
                 {
-                    return false;
+                    -> false;
                 };
                 this.buf      = new_buf;
                 this.capacity = new_cap;
-                return true;
+                -> true;
             };
 
             // ----------------------------------------------------------------
-            // Internal: return byte pointer to element at index i (no bounds check).
+            // Internal: -> byte pointer to element at index i (no bounds check).
             // ----------------------------------------------------------------
-            def _ptr(size_t i) -> byte*
+            _ptr(size_t i) -> byte*
             {
-                return (byte*)this.buf + i * this.elem_size;
+                -> (byte*)this.buf + i * this.elem_size;
             };
 
             // ----------------------------------------------------------------
             // len() - number of elements currently stored.
             // ----------------------------------------------------------------
-            def len() -> size_t
+            len() -> size_t
             {
-                return this.len;
+                -> this.len;
             };
 
             // ----------------------------------------------------------------
             // push(src) - append a copy of the element pointed to by src.
             // Returns false if allocation fails.
             // ----------------------------------------------------------------
-            def push(void* src) -> bool
+            push(void* src) -> bool
             {
                 if (this.len >= this.capacity)
                 {
                     if (!this._grow())
                     {
-                        return false;
+                        -> false;
                     };
                 };
                 memcpy(this._ptr(this.len), src, this.elem_size);
                 this.len++;
-                return true;
+                -> true;
             };
 
             // ----------------------------------------------------------------
             // pop(dst) - copy the last element into dst and shrink len by 1.
             // Returns false if the array is empty.
             // ----------------------------------------------------------------
-            def pop(void* dst) -> bool
+            pop(void* dst) -> bool
             {
                 if (this.len == 0)
                 {
-                    return false;
+                    -> false;
                 };
                 this.len--;
                 memcpy(dst, this._ptr(this.len), this.elem_size);
-                return true;
+                -> true;
             };
 
             // ----------------------------------------------------------------
-            // get(i) - return a pointer to element i in the backing buffer.
+            // get(i) - -> a pointer to element i in the backing buffer.
             // Returns null if i is out of range. Caller casts to their type.
             // ----------------------------------------------------------------
-            def get(size_t i) -> void*
+            get(size_t i) -> void*
             {
                 if (i >= this.len)
                 {
-                    return STDLIB_GVP;
+                    -> STDLIB_GVP;
                 };
-                return (void*)this._ptr(i);
+                -> (void*)this._ptr(i);
             };
 
             // ----------------------------------------------------------------
             // set(i, src) - overwrite element i with a copy of the value at src.
             // Returns false if i is out of range.
             // ----------------------------------------------------------------
-            def set(size_t i, void* src) -> bool
+            set(size_t i, void* src) -> bool
             {
                 if (i >= this.len)
                 {
-                    return false;
+                    -> false;
                 };
                 memcpy(this._ptr(i), src, this.elem_size);
-                return true;
+                -> true;
             };
 
             // ----------------------------------------------------------------
@@ -181,17 +181,17 @@ namespace standard
             // from i onward one position to the right.
             // Returns false if i > len or allocation fails.
             // ----------------------------------------------------------------
-            def insert(size_t i, void* src) -> bool
+            insert(size_t i, void* src) -> bool
             {
                 if (i > this.len)
                 {
-                    return false;
+                    -> false;
                 };
                 if (this.len >= this.capacity)
                 {
                     if (!this._grow())
                     {
-                        return false;
+                        -> false;
                     };
                 };
                 // Shift elements [i .. len) one slot to the right.
@@ -202,7 +202,7 @@ namespace standard
                 };
                 memcpy(this._ptr(i), src, this.elem_size);
                 this.len++;
-                return true;
+                -> true;
             };
 
             // ----------------------------------------------------------------
@@ -210,11 +210,11 @@ namespace standard
             // after it one position to the left.
             // Returns false if i is out of range.
             // ----------------------------------------------------------------
-            def remove(size_t i) -> bool
+            remove(size_t i) -> bool
             {
                 if (i >= this.len)
                 {
-                    return false;
+                    -> false;
                 };
                 this.len--;
                 if (i < this.len)
@@ -222,34 +222,34 @@ namespace standard
                     size_t n = (this.len - i) * this.elem_size;
                     memmove(this._ptr(i), this._ptr(i + 1), n);
                 };
-                return true;
+                -> true;
             };
 
             // ----------------------------------------------------------------
             // clear() - reset length to zero. Does not free or shrink the buffer.
             // ----------------------------------------------------------------
-            def clear() -> void
+            clear() -> void
             {
                 this.len = 0;
-                return;
+                ->;
             };
 
             // ----------------------------------------------------------------
             // contains(src) - linear scan; returns true if any element compares
             // equal to the value pointed to by src (byte-for-byte comparison).
             // ----------------------------------------------------------------
-            def contains(void* src) -> bool
+            contains(void* src) -> bool
             {
                 size_t i;
                 while (i < this.len)
                 {
                     if (memcmp(this._ptr(i), (byte*)src, this.elem_size) == 0)
                     {
-                        return true;
+                        -> true;
                     };
                     i++;
                 };
-                return false;
+                -> false;
             };
         };
     };
@@ -280,7 +280,7 @@ namespace standard
         // -------------------------------------------------------------------------
 
         // FNV-1a 64-bit for string keys
-        def hm_hash_str(byte* key) -> u64
+        hm_hash_str(byte* key) -> u64
         {
             u64 hash = 14695981039346656037u,
                 prime = 1099511628211u;
@@ -297,11 +297,11 @@ namespace standard
             {
                 hash = 1;
             };
-            return hash;
+            -> hash;
         };
 
         // Murmur-inspired mix for integer keys
-        def hm_hash_u64(u64 key) -> u64
+        hm_hash_u64(u64 key) -> u64
         {
             u64 h = key;
             h = h xor (h >> 33);
@@ -313,36 +313,36 @@ namespace standard
             {
                 h = 1;
             };
-            return h;
+            -> h;
         };
 
         // -------------------------------------------------------------------------
         // String comparison helper
         // -------------------------------------------------------------------------
 
-        def hm_str_eq(byte* a, byte* b) -> bool
+        hm_str_eq(byte* a, byte* b) -> bool
         {
             int i;
             while (true)
             {
                 if (a[i] != b[i])
                 {
-                    return false;
+                    -> false;
                 };
                 if (a[i] == 0)
                 {
-                    return true;
+                    -> true;
                 };
                 i = i + 1;
             };
-            return false;
+            -> false;
         };
 
         // -------------------------------------------------------------------------
         // String key copy helper (allocates new buffer)
         // -------------------------------------------------------------------------
 
-        def hm_str_dup(byte* src) -> byte*
+        hm_str_dup(byte* src) -> byte*
         {
             int len, i;
             while (src[len] != 0)
@@ -356,19 +356,19 @@ namespace standard
                 i = i + 1;
             };
             dst[len] = 0;
-            return dst;
+            -> dst;
         };
 
         trait BaseSTDHashMapTraits
         {
-            def _insert_nocopy(u64 hash, byte* key, void* value) -> void,
-                _resize() -> void,
-                hm_get(byte* key) -> void*,
-                hm_set(byte* key, void* value) -> void,
-                hm_has(byte* key) -> bool,
-                hm_remove(byte* key) -> bool,
-                hm_count() -> u64,
-                hm_capacity() -> u64;
+            _insert_nocopy(u64 hash, byte* key, void* value) -> void,
+            _resize() -> void,
+            hm_get(byte* key) -> void*,
+            hm_set(byte* key, void* value) -> void,
+            hm_has(byte* key) -> bool,
+            hm_remove(byte* key) -> bool,
+            hm_count() -> u64,
+            hm_capacity() -> u64;
         };
 
         BaseSTDHashMapTraits
@@ -378,7 +378,7 @@ namespace standard
             u64       count,
                       cap;
 
-            def __init(u64 initial_cap) -> this
+            __init(u64 initial_cap) -> this
             {
                 // Round up to next power of two, minimum 16
                 u64 c = 16, i;
@@ -399,10 +399,10 @@ namespace standard
                     this.buckets[i].psl      = 0;
                     i = i + 1;
                 };
-                return this;
+                -> this;
             };
 
-            def __exit() -> void
+            __exit() -> void
             {
                 // Free all duplicated key strings
                 u64 i;
@@ -417,13 +417,13 @@ namespace standard
                 ffree((u64)this.buckets);
             };
 
-            def __expr() -> HashMap*
+            __expr() -> HashMap*
             {
-                return this;
+                -> this;
             };
 
             // Internal: insert without copying key (used during resize)
-            def _insert_nocopy(u64 hash, byte* key, void* value) -> void
+            _insert_nocopy(u64 hash, byte* key, void* value) -> void
             {
                 u64 mask = this.cap - 1;
                 u64 idx  = hash & mask,
@@ -449,7 +449,7 @@ namespace standard
                         slot.value    = insert_bkt.value;
                         slot.psl      = insert_bkt.psl;
                         this.count    = this.count + 1;
-                        return;
+                        ->;
                     };
 
                     // Same key: update value
@@ -458,7 +458,7 @@ namespace standard
                         if (hm_str_eq(slot.key, insert_bkt.key))
                         {
                             slot.value = insert_bkt.value;
-                            return;
+                            ->;
                         };
                     };
 
@@ -488,7 +488,7 @@ namespace standard
             };
 
             // Internal: grow and rehash
-            def _resize() -> void
+            _resize() -> void
             {
                 u64 old_cap   = this.cap,
                     new_cap   = old_cap * 2,
@@ -527,7 +527,7 @@ namespace standard
             };
 
             // Insert or update a key-value pair.
-            def hm_set(byte* key, void* value) -> void
+            hm_set(byte* key, void* value) -> void
             {
                 // Resize if load > 75%
                 // count * 4 > cap * 3  <=>  load > 0.75
@@ -559,7 +559,7 @@ namespace standard
                         slot.value    = insert_bkt.value;
                         slot.psl      = insert_bkt.psl;
                         this.count    = this.count + (u64)1;
-                        return;
+                        ->;
                     };
 
                     // Existing key: update, free the new dup
@@ -569,7 +569,7 @@ namespace standard
                         {
                             ffree((u64)insert_bkt.key);
                             slot.value = insert_bkt.value;
-                            return;
+                            ->;
                         };
                     };
 
@@ -598,7 +598,7 @@ namespace standard
             };
 
             // Retrieve value for key. Returns NULL if not found.
-            def hm_get(byte* key) -> void*
+            hm_get(byte* key) -> void*
             {
                 u64 hash = hm_hash_str(key),
                     mask = this.cap - 1,
@@ -612,37 +612,37 @@ namespace standard
 
                     if (slot.key_hash == 0)
                     {
-                        return (void*)0;
+                        -> (void*)0;
                     };
 
                     if (slot.psl < psl)
                     {
                         // Robin hood invariant: can't be further than this
-                        return (void*)0;
+                        -> (void*)0;
                     };
 
                     if (slot.key_hash == hash)
                     {
                         if (hm_str_eq(slot.key, key))
                         {
-                            return slot.value;
+                            -> slot.value;
                         };
                     };
 
                     idx = (idx + 1) & mask;
                     psl = psl + 1;
                 };
-                return (void*)0;
+                -> (void*)0;
             };
 
             // Check if a key exists.
-            def hm_has(byte* key) -> bool
+            hm_has(byte* key) -> bool
             {
-                return this.hm_get(key) != (void*)0;
+                -> this.hm_get(key) != (void*)0;
             };
 
             // Remove a key. Returns true if it was present.
-            def hm_remove(byte* key) -> bool
+            hm_remove(byte* key) -> bool
             {
                 u64 hash = hm_hash_str(key),
                     mask = this.cap - 1,
@@ -657,12 +657,12 @@ namespace standard
 
                     if (slot.key_hash == 0)
                     {
-                        return false;
+                        -> false;
                     };
 
                     if (slot.psl < psl)
                     {
-                        return false;
+                        -> false;
                     };
 
                     if (slot.key_hash == hash)
@@ -700,24 +700,24 @@ namespace standard
                                 next = (next + 1) & mask;
                             };
 
-                            return true;
+                            -> true;
                         };
                     };
 
                     idx = (idx + 1) & mask;
                     psl = psl + 1;
                 };
-                return false;
+                -> false;
             };
 
-            def hm_count() -> u64
+            hm_count() -> u64
             {
-                return this.count;
+                -> this.count;
             };
 
-            def hm_capacity() -> u64
+            hm_capacity() -> u64
             {
-                return this.cap;
+                -> this.cap;
             };
         };
 
@@ -727,14 +727,14 @@ namespace standard
 
         trait BaseSTDHashMapIntTraits
         {
-            def _insert_raw(u64 hash, u64 key, void* value) -> void,
-                _resize() -> void,
-                hmi_get(u64 key) -> void*,
-                hmi_set(u64 key, void* value) -> void,
-                hmi_has(u64 key) -> bool,
-                hmi_remove(u64 key) -> bool,
-                hmi_count() -> u64,
-                hmi_capacity() -> u64;
+            _insert_raw(u64 hash, u64 key, void* value) -> void,
+            _resize() -> void,
+            hmi_get(u64 key) -> void*,
+            hmi_set(u64 key, void* value) -> void,
+            hmi_has(u64 key) -> bool,
+            hmi_remove(u64 key) -> bool,
+            hmi_count() -> u64,
+            hmi_capacity() -> u64;
         };
 
         BaseSTDHashMapIntTraits
@@ -744,7 +744,7 @@ namespace standard
             u64        count,
                        cap;
 
-            def __init(u64 initial_cap) -> this
+            __init(u64 initial_cap) -> this
             {
                 u64 c = 16;
                 u64 nbytes = c * 32, // sizeof(HMIBucket) = 32
@@ -764,20 +764,20 @@ namespace standard
                     this.buckets[i].psl      = 0;
                     i = i + 1;
                 };
-                return this;
+                -> this;
             };
 
-            def __exit() -> void
+            __exit() -> void
             {
                 ffree((u64)this.buckets);
             };
 
-            def __expr() -> HashMapInt*
+            __expr() -> HashMapInt*
             {
-                return this;
+                -> this;
             };
 
-            def _insert_raw(u64 hash, u64 key, void* value) -> void
+            _insert_raw(u64 hash, u64 key, void* value) -> void
             {
                 u64 mask = this.cap - 1;
                 u64 idx  = hash & mask;
@@ -800,13 +800,13 @@ namespace standard
                         slot.value    = ins.value;
                         slot.psl      = ins.psl;
                         this.count    = this.count + 1;
-                        return;
+                        ->;
                     };
 
                     if (slot.key_hash == ins.key_hash & slot.key == ins.key)
                     {
                         slot.value = ins.value;
-                        return;
+                        ->;
                     };
 
                     if (slot.psl < ins.psl)
@@ -832,7 +832,7 @@ namespace standard
                 };
             };
 
-            def _resize() -> void
+            _resize() -> void
             {
                 u64 old_cap     = this.cap;
                 u64 new_cap   = old_cap * 2;
@@ -870,7 +870,7 @@ namespace standard
                 ffree((u64)old_buckets);
             };
 
-            def hmi_set(u64 key, void* value) -> void
+            hmi_set(u64 key, void* value) -> void
             {
                 if (this.count * (u64)4 > this.cap * (u64)3)
                 {
@@ -880,7 +880,7 @@ namespace standard
                 this._insert_raw(hash, key, value);
             };
 
-            def hmi_get(u64 key) -> void*
+            hmi_get(u64 key) -> void*
             {
                 u64 hash = hm_hash_u64(key),
                     mask = this.cap - 1,
@@ -894,31 +894,31 @@ namespace standard
 
                     if (slot.key_hash == 0)
                     {
-                        return (void*)0;
+                        -> (void*)0;
                     };
 
                     if (slot.psl < psl)
                     {
-                        return (void*)0;
+                        -> (void*)0;
                     };
 
                     if (slot.key_hash == hash & slot.key == key)
                     {
-                        return slot.value;
+                        -> slot.value;
                     };
 
                     idx = (idx + 1) & mask;
                     psl = psl + 1;
                 };
-                return (void*)0;
+                -> (void*)0;
             };
 
-            def hmi_has(u64 key) -> bool
+            hmi_has(u64 key) -> bool
             {
-                return this.hmi_get(key) != (void*)0;
+                -> this.hmi_get(key) != (void*)0;
             };
 
-            def hmi_remove(u64 key) -> bool
+            hmi_remove(u64 key) -> bool
             {
                 u64 hash = hm_hash_u64(key),
                     mask = this.cap - (u64)1,
@@ -934,12 +934,12 @@ namespace standard
 
                     if (slot.key_hash == 0)
                     {
-                        return false;
+                        -> false;
                     };
 
                     if (slot.psl < psl)
                     {
-                        return false;
+                        -> false;
                     };
 
                     if (slot.key_hash == hash & slot.key == key)
@@ -973,23 +973,23 @@ namespace standard
                             next = (next + 1) & mask;
                         };
 
-                        return true;
+                        -> true;
                     };
 
                     idx = (idx + 1) & mask;
                     psl = psl + 1;
                 };
-                return false;
+                -> false;
             };
 
-            def hmi_count() -> u64
+            hmi_count() -> u64
             {
-                return this.count;
+                -> this.count;
             };
 
-            def hmi_capacity() -> u64
+            hmi_capacity() -> u64
             {
-                return this.cap;
+                -> this.cap;
             };
         };
 
@@ -1018,15 +1018,15 @@ namespace standard
 
         trait BaseSTDLinkedListTraits
         {
-            def push_front(void* value) -> LLNode*,
-                push_back(void* value)  -> LLNode*,
-                pop_front()             -> void*,
-                pop_back()              -> void*,
-                peek_front()            -> void*,
-                peek_back()             -> void*,
-                remove_node(LLNode* n)  -> void*,
-                ll_len()                -> size_t,
-                ll_clear()              -> void;
+            push_front(void* value) -> LLNode*,
+            push_back(void* value)  -> LLNode*,
+            pop_front()             -> void*,
+            pop_back()              -> void*,
+            peek_front()            -> void*,
+            peek_back()             -> void*,
+            remove_node(LLNode* n)  -> void*,
+            ll_len()                -> size_t,
+            ll_clear()              -> void;
         };
 
         BaseSTDLinkedListTraits
@@ -1041,7 +1041,7 @@ namespace standard
 
             // Construct a list with a fixed node pool of pool_cap entries.
             // One fmalloc here; no further allocations ever.
-            def __init(size_t pool_cap) -> this
+            __init(size_t pool_cap) -> this
             {
                 this.pool_cap = pool_cap;
                 this.len      = 0;
@@ -1070,11 +1070,11 @@ namespace standard
                     i = i + 1;
                 };
                 this.freelist = this.pool;
-                return this;
+                -> this;
             };
 
             // Free the pool slab.  One ffree; no loop.
-            def __exit() -> void
+            __exit() -> void
             {
                 ffree((u64)this.pool);
                 this.pool     = (LLNode*)STDLIB_GVP;
@@ -1082,22 +1082,22 @@ namespace standard
                 this.head     = (LLNode*)STDLIB_GVP;
                 this.tail     = (LLNode*)STDLIB_GVP;
                 this.len      = 0;
-                return;
+                ->;
             };
 
-            def __expr() -> LinkedList*
+            __expr() -> LinkedList*
             {
-                return this;
+                -> this;
             };
 
             // ----------------------------------------------------------------
             // push_front(value) - prepend. Returns node ptr or STDLIB_GVP if full.
             // ----------------------------------------------------------------
-            def push_front(void* value) -> LLNode*
+            push_front(void* value) -> LLNode*
             {
                 if (this.freelist == (LLNode*)STDLIB_GVP)
                 {
-                    return (LLNode*)STDLIB_GVP;
+                    -> (LLNode*)STDLIB_GVP;
                 };
                 LLNode* n     = this.freelist;
                 this.freelist = n.next;
@@ -1114,17 +1114,17 @@ namespace standard
                 };
                 this.head = n;
                 this.len  = this.len + 1;
-                return n;
+                -> n;
             };
 
             // ----------------------------------------------------------------
             // push_back(value) - append. Returns node ptr or STDLIB_GVP if full.
             // ----------------------------------------------------------------
-            def push_back(void* value) -> LLNode*
+            push_back(void* value) -> LLNode*
             {
                 if (this.freelist == (LLNode*)STDLIB_GVP)
                 {
-                    return (LLNode*)STDLIB_GVP;
+                    -> (LLNode*)STDLIB_GVP;
                 };
                 LLNode* n     = this.freelist;
                 this.freelist = n.next;
@@ -1141,17 +1141,17 @@ namespace standard
                 };
                 this.tail = n;
                 this.len  = this.len + 1;
-                return n;
+                -> n;
             };
 
             // ----------------------------------------------------------------
-            // pop_front() - remove head, return its value. Returns STDLIB_GVP if empty.
+            // pop_front() - remove head, -> its value. Returns STDLIB_GVP if empty.
             // ----------------------------------------------------------------
-            def pop_front() -> void*
+            pop_front() -> void*
             {
                 if (this.head == (LLNode*)STDLIB_GVP)
                 {
-                    return STDLIB_GVP;
+                    -> STDLIB_GVP;
                 };
                 LLNode* n   = this.head;
                 void*   val = n.value;
@@ -1170,17 +1170,17 @@ namespace standard
                 n.value       = STDLIB_GVP;
                 this.freelist = n;
                 this.len      = this.len - 1;
-                return val;
+                -> val;
             };
 
             // ----------------------------------------------------------------
-            // pop_back() - remove tail, return its value. Returns STDLIB_GVP if empty.
+            // pop_back() - remove tail, -> its value. Returns STDLIB_GVP if empty.
             // ----------------------------------------------------------------
-            def pop_back() -> void*
+            pop_back() -> void*
             {
                 if (this.tail == (LLNode*)STDLIB_GVP)
                 {
-                    return STDLIB_GVP;
+                    -> STDLIB_GVP;
                 };
                 LLNode* n   = this.tail;
                 void*   val = n.value;
@@ -1199,38 +1199,38 @@ namespace standard
                 n.value       = STDLIB_GVP;
                 this.freelist = n;
                 this.len      = this.len - 1;
-                return val;
+                -> val;
             };
 
             // ----------------------------------------------------------------
             // peek_front() - head value without removal. STDLIB_GVP if empty.
             // ----------------------------------------------------------------
-            def peek_front() -> void*
+            peek_front() -> void*
             {
                 if (this.head == (LLNode*)STDLIB_GVP)
                 {
-                    return STDLIB_GVP;
+                    -> STDLIB_GVP;
                 };
-                return this.head.value;
+                -> this.head.value;
             };
 
             // ----------------------------------------------------------------
             // peek_back() - tail value without removal. STDLIB_GVP if empty.
             // ----------------------------------------------------------------
-            def peek_back() -> void*
+            peek_back() -> void*
             {
                 if (this.tail == (LLNode*)STDLIB_GVP)
                 {
-                    return STDLIB_GVP;
+                    -> STDLIB_GVP;
                 };
-                return this.tail.value;
+                -> this.tail.value;
             };
 
             // ----------------------------------------------------------------
-            // remove_node(n) - unlink a node and return to free-list.
+            // remove_node(n) - unlink a node and -> to free-list.
             // Returns the value stored in the node.
             // ----------------------------------------------------------------
-            def remove_node(LLNode* n) -> void*
+            remove_node(LLNode* n) -> void*
             {
                 void* val = n.value;
                 if (n.prev != (LLNode*)STDLIB_GVP)
@@ -1254,21 +1254,21 @@ namespace standard
                 n.value       = STDLIB_GVP;
                 this.freelist = n;
                 this.len      = this.len - 1;
-                return val;
+                -> val;
             };
 
             // ----------------------------------------------------------------
             // ll_len() - number of nodes currently in the list.
             // ----------------------------------------------------------------
-            def ll_len() -> size_t
+            ll_len() -> size_t
             {
-                return this.len;
+                -> this.len;
             };
 
             // ----------------------------------------------------------------
-            // ll_clear() - return all live nodes to free-list. No alloc/free.
+            // ll_clear() - -> all live nodes to free-list. No alloc/free.
             // ----------------------------------------------------------------
-            def ll_clear() -> void
+            ll_clear() -> void
             {
                 LLNode* cur = this.head, nxt;
                 while (cur != (LLNode*)STDLIB_GVP)
@@ -1283,7 +1283,7 @@ namespace standard
                 this.head = (LLNode*)STDLIB_GVP;
                 this.tail = (LLNode*)STDLIB_GVP;
                 this.len  = 0;
-                return;
+                ->;
             };
         };
 
@@ -1301,11 +1301,11 @@ namespace standard
 
         trait BaseSTDStackTraits
         {
-            def stack_push(void* value) -> bool,
-                stack_pop()             -> void*,
-                stack_peek()            -> void*,
-                stack_len()             -> size_t,
-                stack_empty()           -> bool;
+            stack_push(void* value) -> bool,
+            stack_pop()             -> void*,
+            stack_peek()            -> void*,
+            stack_len()             -> size_t,
+            stack_empty()           -> bool;
         };
 
         BaseSTDStackTraits
@@ -1313,47 +1313,47 @@ namespace standard
         {
             LinkedList ll;
 
-            def __init(size_t cap) -> this
+            __init(size_t cap) -> this
             {
                 this.ll.__init(cap);
-                return this;
+                -> this;
             };
 
-            def __exit() -> void
+            __exit() -> void
             {
                 this.ll.__exit();
-                return;
+                ->;
             };
 
-            def __expr() -> Stack*
+            __expr() -> Stack*
             {
-                return this;
+                -> this;
             };
 
-            def stack_push(void* value) -> bool
+            stack_push(void* value) -> bool
             {
                 LLNode* n = this.ll.push_back(value);
-                return n != (LLNode*)STDLIB_GVP;
+                -> n != (LLNode*)STDLIB_GVP;
             };
 
-            def stack_pop() -> void*
+            stack_pop() -> void*
             {
-                return this.ll.pop_back();
+                -> this.ll.pop_back();
             };
 
-            def stack_peek() -> void*
+            stack_peek() -> void*
             {
-                return this.ll.peek_back();
+                -> this.ll.peek_back();
             };
 
-            def stack_len() -> size_t
+            stack_len() -> size_t
             {
-                return this.ll.ll_len();
+                -> this.ll.ll_len();
             };
 
-            def stack_empty() -> bool
+            stack_empty() -> bool
             {
-                return this.ll.ll_len() == 0;
+                -> this.ll.ll_len() == 0;
             };
         };
 
@@ -1371,11 +1371,11 @@ namespace standard
 
         trait BaseSTDQueueTraits
         {
-            def enqueue(void* value) -> bool,
-                dequeue()            -> void*,
-                queue_peek()         -> void*,
-                queue_len()          -> size_t,
-                queue_empty()        -> bool;
+            enqueue(void* value) -> bool,
+            dequeue()            -> void*,
+            queue_peek()         -> void*,
+            queue_len()          -> size_t,
+            queue_empty()        -> bool;
         };
 
         BaseSTDQueueTraits
@@ -1383,47 +1383,47 @@ namespace standard
         {
             LinkedList ll;
 
-            def __init(size_t cap) -> this
+            __init(size_t cap) -> this
             {
                 this.ll.__init(cap);
-                return this;
+                -> this;
             };
 
-            def __exit() -> void
+            __exit() -> void
             {
                 this.ll.__exit();
-                return;
+                ->;
             };
 
-            def __expr() -> Queue*
+            __expr() -> Queue*
             {
-                return this;
+                -> this;
             };
 
-            def enqueue(void* value) -> bool
+            enqueue(void* value) -> bool
             {
                 LLNode* n = this.ll.push_back(value);
-                return n != (LLNode*)STDLIB_GVP;
+                -> n != (LLNode*)STDLIB_GVP;
             };
 
-            def dequeue() -> void*
+            dequeue() -> void*
             {
-                return this.ll.pop_front();
+                -> this.ll.pop_front();
             };
 
-            def queue_peek() -> void*
+            queue_peek() -> void*
             {
-                return this.ll.peek_front();
+                -> this.ll.peek_front();
             };
 
-            def queue_len() -> size_t
+            queue_len() -> size_t
             {
-                return this.ll.ll_len();
+                -> this.ll.ll_len();
             };
 
-            def queue_empty() -> bool
+            queue_empty() -> bool
             {
-                return this.ll.ll_len() == 0;
+                -> this.ll.ll_len() == 0;
             };
         };
 
@@ -1432,7 +1432,7 @@ namespace standard
         // Ring-buffer backed deque with fixed capacity set at construction time.
         // push_front, push_back, pop_front, pop_back are all O(1), no alloc.
         // The backing buffer holds void* pointers (one per slot).
-        // When the buffer is full, push operations return false.
+        // When the buffer is full, push operations -> false.
         //
         // Usage example:
         //   Deque dq((size_t)32);
@@ -1441,20 +1441,20 @@ namespace standard
         //   void* v = dq.dq_pop_front();
         // ============================================================================
 
-        #def DEQUE_DEFAULT_CAPACITY 16;
+        #DEQUE_DEFAULT_CAPACITY 16;
 
         trait BaseSTDDequeTraits
         {
-            def dq_push_front(void* value) -> bool,
-                dq_push_back(void* value)  -> bool,
-                dq_pop_front()             -> void*,
-                dq_pop_back()              -> void*,
-                dq_peek_front()            -> void*,
-                dq_peek_back()             -> void*,
-                dq_len()                   -> size_t,
-                dq_full()                  -> bool,
-                dq_empty()                 -> bool,
-                dq_clear()                 -> void;
+            dq_push_front(void* value) -> bool,
+            dq_push_back(void* value)  -> bool,
+            dq_pop_front()             -> void*,
+            dq_pop_back()              -> void*,
+            dq_peek_front()            -> void*,
+            dq_peek_back()             -> void*,
+            dq_len()                   -> size_t,
+            dq_full()                  -> bool,
+            dq_empty()                 -> bool,
+            dq_clear()                 -> void;
         };
 
         BaseSTDDequeTraits
@@ -1467,119 +1467,119 @@ namespace standard
                    len;
 
             // One fmalloc at init; no further alloc ever.
-            def __init(size_t cap) -> this
+            __init(size_t cap) -> this
             {
                 this.cap  = cap;
                 this.head = 0;
                 this.tail = 0;
                 this.len  = 0;
                 this.buf  = (void**)fmalloc(cap * 8);
-                return this;
+                -> this;
             };
 
-            def __exit() -> void
+            __exit() -> void
             {
                 if (this.buf != (void**)STDLIB_GVP)
                 {
                     ffree((u64)this.buf);
                     this.buf = (void**)STDLIB_GVP;
                 };
-                return;
+                ->;
             };
 
-            def __expr() -> Deque*
+            __expr() -> Deque*
             {
-                return this;
+                -> this;
             };
 
-            def dq_push_back(void* value) -> bool
+            dq_push_back(void* value) -> bool
             {
                 if (this.len == this.cap)
                 {
-                    return false;
+                    -> false;
                 };
                 this.buf[this.tail] = value;
                 this.tail = (this.tail + 1) % this.cap;
                 this.len  = this.len + 1;
-                return true;
+                -> true;
             };
 
-            def dq_push_front(void* value) -> bool
+            dq_push_front(void* value) -> bool
             {
                 if (this.len == this.cap)
                 {
-                    return false;
+                    -> false;
                 };
                 this.head           = (this.head + this.cap - 1) % this.cap;
                 this.buf[this.head] = value;
                 this.len            = this.len + 1;
-                return true;
+                -> true;
             };
 
-            def dq_pop_front() -> void*
+            dq_pop_front() -> void*
             {
                 if (this.len == 0)
                 {
-                    return STDLIB_GVP;
+                    -> STDLIB_GVP;
                 };
                 void* val = this.buf[this.head];
                 this.head = (this.head + 1) % this.cap;
                 this.len  = this.len - 1;
-                return val;
+                -> val;
             };
 
-            def dq_pop_back() -> void*
+            dq_pop_back() -> void*
             {
                 if (this.len == 0)
                 {
-                    return STDLIB_GVP;
+                    -> STDLIB_GVP;
                 };
                 this.tail = (this.tail + this.cap - 1) % this.cap;
                 void* val = this.buf[this.tail];
                 this.len  = this.len - 1;
-                return val;
+                -> val;
             };
 
-            def dq_peek_front() -> void*
+            dq_peek_front() -> void*
             {
                 if (this.len == 0)
                 {
-                    return STDLIB_GVP;
+                    -> STDLIB_GVP;
                 };
-                return (void*)this.buf[this.head];
+                -> (void*)this.buf[this.head];
             };
 
-            def dq_peek_back() -> void*
+            dq_peek_back() -> void*
             {
                 if (this.len == 0)
                 {
-                    return STDLIB_GVP;
+                    -> STDLIB_GVP;
                 };
                 size_t idx = (this.tail + this.cap - 1) % this.cap;
-                return (void*)this.buf[idx];
+                -> (void*)this.buf[idx];
             };
 
-            def dq_len() -> size_t
+            dq_len() -> size_t
             {
-                return this.len;
+                -> this.len;
             };
 
-            def dq_full() -> bool
+            dq_full() -> bool
             {
-                return this.len == this.cap;
+                -> this.len == this.cap;
             };
 
-            def dq_empty() -> bool
+            dq_empty() -> bool
             {
-                return this.len == 0;
+                -> this.len == 0;
             };
 
-            def dq_clear() -> void
+            dq_clear() -> void
             {
                 this.head = 0;
                 this.tail = 0;
                 this.len  = 0;
-                return;
+                ->;
             };
         };
 
@@ -1598,15 +1598,15 @@ namespace standard
 
         trait BaseSTDRingBufferTraits
         {
-            def rb_write(byte* src, size_t n) -> size_t,
-                rb_read(byte* dst, size_t n)  -> size_t,
-                rb_peek(byte* dst, size_t n)  -> size_t,
-                rb_skip(size_t n)             -> size_t,
-                rb_available()                -> size_t,
-                rb_free_space()               -> size_t,
-                rb_empty()                    -> bool,
-                rb_full()                     -> bool,
-                rb_clear()                    -> void;
+            rb_write(byte* src, size_t n) -> size_t,
+            rb_read(byte* dst, size_t n)  -> size_t,
+            rb_peek(byte* dst, size_t n)  -> size_t,
+            rb_skip(size_t n)             -> size_t,
+            rb_available()                -> size_t,
+            rb_free_space()               -> size_t,
+            rb_empty()                    -> bool,
+            rb_full()                     -> bool,
+            rb_clear()                    -> void;
         };
 
         BaseSTDRingBufferTraits
@@ -1618,32 +1618,32 @@ namespace standard
                    tail,
                    used;
 
-            def __init(size_t cap) -> this
+            __init(size_t cap) -> this
             {
                 this.cap  = cap;
                 this.head = 0;
                 this.tail = 0;
                 this.used = 0;
                 this.buf  = (byte*)fmalloc(cap);
-                return this;
+                -> this;
             };
 
-            def __exit() -> void
+            __exit() -> void
             {
                 if (this.buf != (byte*)STDLIB_GVP)
                 {
                     ffree((u64)this.buf);
                     this.buf = (byte*)STDLIB_GVP;
                 };
-                return;
+                ->;
             };
 
-            def __expr() -> RingBuffer*
+            __expr() -> RingBuffer*
             {
-                return this;
+                -> this;
             };
 
-            def rb_write(byte* src, size_t n) -> size_t
+            rb_write(byte* src, size_t n) -> size_t
             {
                 size_t space = this.cap - this.used,
                        i;
@@ -1658,10 +1658,10 @@ namespace standard
                     i = i + 1;
                 };
                 this.used = this.used + n;
-                return n;
+                -> n;
             };
 
-            def rb_read(byte* dst, size_t n) -> size_t
+            rb_read(byte* dst, size_t n) -> size_t
             {
                 size_t i;
                 if (n > this.used)
@@ -1675,10 +1675,10 @@ namespace standard
                     i = i + 1;
                 };
                 this.used = this.used - n;
-                return n;
+                -> n;
             };
 
-            def rb_peek(byte* dst, size_t n) -> size_t
+            rb_peek(byte* dst, size_t n) -> size_t
             {
                 size_t i, pos = this.head;
                 if (n > this.used)
@@ -1691,10 +1691,10 @@ namespace standard
                     pos = (pos + 1) % this.cap;
                     i   = i + 1;
                 };
-                return n;
+                -> n;
             };
 
-            def rb_skip(size_t n) -> size_t
+            rb_skip(size_t n) -> size_t
             {
                 if (n > this.used)
                 {
@@ -1702,35 +1702,35 @@ namespace standard
                 };
                 this.head = (this.head + n) % this.cap;
                 this.used = this.used - n;
-                return n;
+                -> n;
             };
 
-            def rb_available() -> size_t
+            rb_available() -> size_t
             {
-                return this.used;
+                -> this.used;
             };
 
-            def rb_free_space() -> size_t
+            rb_free_space() -> size_t
             {
-                return this.cap - this.used;
+                -> this.cap - this.used;
             };
 
-            def rb_empty() -> bool
+            rb_empty() -> bool
             {
-                return this.used == 0;
+                -> this.used == 0;
             };
 
-            def rb_full() -> bool
+            rb_full() -> bool
             {
-                return this.used == this.cap;
+                -> this.used == this.cap;
             };
 
-            def rb_clear() -> void
+            rb_clear() -> void
             {
                 this.head = 0;
                 this.tail = 0;
                 this.used = 0;
-                return;
+                ->;
             };
         };
 
@@ -1759,13 +1759,13 @@ namespace standard
 
         trait BaseSTDHashSetTraits
         {
-            def _hs_probe(u64 hash, byte* key)  -> void,
-                _hs_resize()                    -> void,
-                set_add(byte* key)              -> void,
-                set_has(byte* key)              -> bool,
-                set_remove(byte* key)           -> bool,
-                set_count()                     -> u64,
-                set_capacity()                  -> u64;
+            _hs_probe(u64 hash, byte* key)  -> void,
+            _hs_resize()                    -> void,
+            set_add(byte* key)              -> void,
+            set_has(byte* key)              -> bool,
+            set_remove(byte* key)           -> bool,
+            set_count()                     -> u64,
+            set_capacity()                  -> u64;
         };
 
         BaseSTDHashSetTraits
@@ -1779,7 +1779,7 @@ namespace standard
                       key_pool_used;
 
             // init: allocate bucket array and key pool in two fmallocs; no loops.
-            def __init(u64 initial_cap, u64 key_pool_bytes) -> this
+            __init(u64 initial_cap, u64 key_pool_bytes) -> this
             {
                 u64 c = 16, i;
                 while (c < initial_cap)
@@ -1799,27 +1799,27 @@ namespace standard
                     this.buckets[i].psl      = 0;
                     i = i + 1;
                 };
-                return this;
+                -> this;
             };
 
             // exit: two frees, no loop.
-            def __exit() -> void
+            __exit() -> void
             {
                 ffree((u64)this.buckets);
                 ffree((u64)this.key_pool);
                 this.buckets  = (HSBucket*)STDLIB_GVP;
                 this.key_pool = (byte*)STDLIB_GVP;
-                return;
+                ->;
             };
 
-            def __expr() -> HashSet*
+            __expr() -> HashSet*
             {
-                return this;
+                -> this;
             };
 
             // Internal: carve a copy of key from the pool (bump alloc, no malloc).
             // Returns pointer into pool, or STDLIB_GVP if pool is full.
-            def _hs_pool_dup(byte* src) -> byte*
+            _hs_pool_dup(byte* src) -> byte*
             {
                 u64   slen;
                 byte* p    = src;
@@ -1830,7 +1830,7 @@ namespace standard
                 slen = slen + 1; // include null terminator
                 if (this.key_pool_used + slen > this.key_pool_cap)
                 {
-                    return (byte*)STDLIB_GVP;
+                    -> (byte*)STDLIB_GVP;
                 };
                 byte* dst = this.key_pool + this.key_pool_used;
                 u64   i;
@@ -1840,12 +1840,12 @@ namespace standard
                     i = i + 1;
                 };
                 this.key_pool_used = this.key_pool_used + slen;
-                return dst;
+                -> dst;
             };
 
             // Internal: robin-hood insert of an already-pooled key.
             // No alloc/free anywhere in this function.
-            def _hs_probe(u64 hash, byte* key) -> void
+            _hs_probe(u64 hash, byte* key) -> void
             {
                 u64 mask = this.cap - 1;
                 u64 idx  = hash & mask,
@@ -1864,13 +1864,13 @@ namespace standard
                         slot.key      = ins.key;
                         slot.psl      = ins.psl;
                         this.count    = this.count + 1;
-                        return;
+                        ->;
                     };
                     if (slot.key_hash == ins.key_hash)
                     {
                         if (hm_str_eq(slot.key, ins.key))
                         {
-                            return;
+                            ->;
                         };
                     };
                     if (slot.psl < ins.psl)
@@ -1889,11 +1889,11 @@ namespace standard
                     ins.psl = ins.psl + 1;
                     psl     = psl + 1;
                 };
-                return;
+                ->;
             };
 
             // resize: one fmalloc before the loop, one ffree after. No alloc in loop.
-            def _hs_resize() -> void
+            _hs_resize() -> void
             {
                 u64 old_cap      = this.cap;
                 u64 new_cap      = old_cap * 2;
@@ -1919,10 +1919,10 @@ namespace standard
                     i = i + 1;
                 };
                 ffree((u64)old_bk);
-                return;
+                ->;
             };
 
-            def set_add(byte* key) -> void
+            set_add(byte* key) -> void
             {
                 u64   hash = hm_hash_str(key);
                 byte* pooled;
@@ -1933,13 +1933,13 @@ namespace standard
                 pooled = this._hs_pool_dup(key);
                 if (pooled == (byte*)STDLIB_GVP)
                 {
-                    return;
+                    ->;
                 };
                 this._hs_probe(hash, pooled);
-                return;
+                ->;
             };
 
-            def set_has(byte* key) -> bool
+            set_has(byte* key) -> bool
             {
                 u64 hash = hm_hash_str(key),
                     mask = this.cap - 1,
@@ -1951,28 +1951,28 @@ namespace standard
                     slot = this.buckets + idx;
                     if (slot.key_hash == 0)
                     {
-                        return false;
+                        -> false;
                     };
                     if (slot.psl < psl)
                     {
-                        return false;
+                        -> false;
                     };
                     if (slot.key_hash == hash)
                     {
                         if (hm_str_eq(slot.key, key))
                         {
-                            return true;
+                            -> true;
                         };
                     };
                     idx = (idx + 1) & mask;
                     psl = psl + 1;
                 };
-                return false;
+                -> false;
             };
 
             // remove: backward-shift deletion. No alloc/free anywhere.
             // Keys remain in the pool (pool is not compacted on remove).
-            def set_remove(byte* key) -> bool
+            set_remove(byte* key) -> bool
             {
                 u64 hash = hm_hash_str(key),
                     mask = this.cap - 1;
@@ -1985,11 +1985,11 @@ namespace standard
                     slot = this.buckets + idx;
                     if (slot.key_hash == 0)
                     {
-                        return false;
+                        -> false;
                     };
                     if (slot.psl < psl)
                     {
-                        return false;
+                        -> false;
                     };
                     if (slot.key_hash == hash)
                     {
@@ -2018,23 +2018,23 @@ namespace standard
                                 cur  = next;
                                 next = (next + 1) & mask;
                             };
-                            return true;
+                            -> true;
                         };
                     };
                     idx = (idx + 1) & mask;
                     psl = psl + 1;
                 };
-                return false;
+                -> false;
             };
 
-            def set_count() -> u64
+            set_count() -> u64
             {
-                return this.count;
+                -> this.count;
             };
 
-            def set_capacity() -> u64
+            set_capacity() -> u64
             {
-                return this.cap;
+                -> this.cap;
             };
         };
 
@@ -2057,13 +2057,13 @@ namespace standard
 
         trait BaseSTDHashSetIntTraits
         {
-            def _hsib_probe(u64 hash, u64 key) -> void,
-                _hsib_resize()                 -> void,
-                seti_add(u64 key)              -> void,
-                seti_has(u64 key)              -> bool,
-                seti_remove(u64 key)           -> bool,
-                seti_count()                   -> u64,
-                seti_capacity()                -> u64;
+            _hsib_probe(u64 hash, u64 key) -> void,
+            _hsib_resize()                 -> void,
+            seti_add(u64 key)              -> void,
+            seti_has(u64 key)              -> bool,
+            seti_remove(u64 key)           -> bool,
+            seti_count()                   -> u64,
+            seti_capacity()                -> u64;
         };
 
         BaseSTDHashSetIntTraits
@@ -2073,7 +2073,7 @@ namespace standard
             u64        count,
                        cap;
 
-            def __init(u64 initial_cap) -> this
+            __init(u64 initial_cap) -> this
             {
                 u64 c = 16, i;
                 while (c < initial_cap)
@@ -2090,23 +2090,23 @@ namespace standard
                     this.buckets[i].psl      = 0;
                     i = i + 1;
                 };
-                return this;
+                -> this;
             };
 
-            def __exit() -> void
+            __exit() -> void
             {
                 ffree((u64)this.buckets);
                 this.buckets = (HSIBucket*)STDLIB_GVP;
-                return;
+                ->;
             };
 
-            def __expr() -> HashSetInt*
+            __expr() -> HashSetInt*
             {
-                return this;
+                -> this;
             };
 
             // No alloc/free in this function.
-            def _hsib_probe(u64 hash, u64 key) -> void
+            _hsib_probe(u64 hash, u64 key) -> void
             {
                 u64 mask = this.cap - 1;
                 u64 idx  = hash & mask;
@@ -2124,11 +2124,11 @@ namespace standard
                         slot.key      = ins.key;
                         slot.psl      = ins.psl;
                         this.count    = this.count + 1;
-                        return;
+                        ->;
                     };
                     if (slot.key_hash == ins.key_hash & slot.key == ins.key)
                     {
-                        return;
+                        ->;
                     };
                     if (slot.psl < ins.psl)
                     {
@@ -2145,11 +2145,11 @@ namespace standard
                     idx     = (idx + 1) & mask;
                     ins.psl = ins.psl + 1;
                 };
-                return;
+                ->;
             };
 
             // One fmalloc before loops, one ffree after. No alloc in loops.
-            def _hsib_resize() -> void
+            _hsib_resize() -> void
             {
                 u64 old_cap       = this.cap;
                 u64 new_cap       = old_cap * 2,
@@ -2175,10 +2175,10 @@ namespace standard
                     i = i + 1;
                 };
                 ffree((u64)old_bk);
-                return;
+                ->;
             };
 
-            def seti_add(u64 key) -> void
+            seti_add(u64 key) -> void
             {
                 u64 hash = hm_hash_u64(key);
                 if (this.count * (u64)4 > this.cap * (u64)3)
@@ -2186,10 +2186,10 @@ namespace standard
                     this._hsib_resize();
                 };
                 this._hsib_probe(hash, key);
-                return;
+                ->;
             };
 
-            def seti_has(u64 key) -> bool
+            seti_has(u64 key) -> bool
             {
                 u64 hash = hm_hash_u64(key),
                     mask = this.cap - 1;
@@ -2201,23 +2201,23 @@ namespace standard
                     slot = this.buckets + idx;
                     if (slot.key_hash == 0)
                     {
-                        return false;
+                        -> false;
                     };
                     if (slot.psl < psl)
                     {
-                        return false;
+                        -> false;
                     };
                     if (slot.key_hash == hash & slot.key == key)
                     {
-                        return true;
+                        -> true;
                     };
                     idx = (idx + 1) & mask;
                     psl = psl + 1;
                 };
-                return false;
+                -> false;
             };
 
-            def seti_remove(u64 key) -> bool
+            seti_remove(u64 key) -> bool
             {
                 u64 hash = hm_hash_u64(key),
                     mask = this.cap - 1;
@@ -2230,11 +2230,11 @@ namespace standard
                     slot = this.buckets + idx;
                     if (slot.key_hash == 0)
                     {
-                        return false;
+                        -> false;
                     };
                     if (slot.psl < psl)
                     {
-                        return false;
+                        -> false;
                     };
                     if (slot.key_hash == hash & slot.key == key)
                     {
@@ -2261,22 +2261,22 @@ namespace standard
                             cur  = next;
                             next = (next + 1) & mask;
                         };
-                        return true;
+                        -> true;
                     };
                     idx = (idx + 1) & mask;
                     psl = psl + 1;
                 };
-                return false;
+                -> false;
             };
 
-            def seti_count() -> u64
+            seti_count() -> u64
             {
-                return this.count;
+                -> this.count;
             };
 
-            def seti_capacity() -> u64
+            seti_capacity() -> u64
             {
-                return this.cap;
+                -> this.cap;
             };
         };
 
@@ -2285,7 +2285,7 @@ namespace standard
         // Binary min-heap backed by a flat Array of void* pointers.
         // A user-supplied comparator determines ordering.
         //
-        // Comparator signature:  def my_cmp(void* a, void* b) -> int
+        // Comparator signature:  my_cmp(void* a, void* b) -> int
         //   Return < 0 if a has higher priority (comes before b).
         //   Return   0 if equal.
         //   Return > 0 if b has higher priority.
@@ -2294,7 +2294,7 @@ namespace standard
         // The function pointer local is declared at function top, outside all loops.
         //
         // Usage example:
-        //   def int_cmp(void* a, void* b) -> int { return *(int*)a - *(int*)b; };
+        //   int_cmp(void* a, void* b) -> int { -> *(int*)a - *(int*)b; };
         //   MinHeap h;
         //   h.__init(@int_cmp);
         //   int x = 3, y = 1;
@@ -2305,12 +2305,12 @@ namespace standard
 
         trait BaseSTDMinHeapTraits
         {
-            def heap_push(void* value) -> bool,
-                heap_pop()             -> void*,
-                heap_peek()            -> void*,
-                heap_len()             -> size_t,
-                heap_empty()           -> bool,
-                heap_clear()           -> void;
+            heap_push(void* value) -> bool,
+            heap_pop()             -> void*,
+            heap_peek()            -> void*,
+            heap_len()             -> size_t,
+            heap_empty()           -> bool,
+            heap_clear()           -> void;
         };
 
         BaseSTDMinHeapTraits
@@ -2319,29 +2319,29 @@ namespace standard
             Array  elems;   // stores void* pointers, elem_size = 8
             long   cmp_fn;  // comparator stored as raw address
 
-            def __init(void* cmp) -> this
+            __init(void* cmp) -> this
             {
                 this.elems.__init((size_t)8);
                 this.cmp_fn = long(cmp);
-                return this;
+                -> this;
             };
 
-            def __exit() -> void
+            __exit() -> void
             {
                 this.elems.__exit();
-                return;
+                ->;
             };
 
-            def __expr() -> MinHeap*
+            __expr() -> MinHeap*
             {
-                return this;
+                -> this;
             };
 
             // ----------------------------------------------------------------
             // heap_push(value) - insert and sift up.
             // fp declared at function top, outside the sift loop.
             // ----------------------------------------------------------------
-            def heap_push(void* value) -> bool
+            heap_push(void* value) -> bool
             {
                 // All locals at function top.
                 def{}* fn_cmp(void*, void*) -> int = this.cmp_fn;
@@ -2350,7 +2350,7 @@ namespace standard
                 void*  pval, ival, tmp;
                 if (!this.elems.push(@value))
                 {
-                    return false;
+                    -> false;
                 };
                 i = this.elems.len - 1;
                 while (i > 0)
@@ -2368,14 +2368,14 @@ namespace standard
                     *islot = pval;
                     i      = parent;
                 };
-                return true;
+                -> true;
             };
 
             // ----------------------------------------------------------------
-            // heap_pop() - remove and return minimum.
+            // heap_pop() - remove and -> minimum.
             // All fp locals and temporaries declared at function top.
             // ----------------------------------------------------------------
-            def heap_pop() -> void*
+            heap_pop() -> void*
             {
                 // All locals at function top.
                 def{}* fn_cmp(void*, void*) -> int = this.cmp_fn;
@@ -2390,7 +2390,7 @@ namespace standard
                 n = this.elems.len;
                 if (n == 0)
                 {
-                    return STDLIB_GVP;
+                    -> STDLIB_GVP;
                 };
                 root_slot        = (void**)this.elems.get(0);
                 res              = *root_slot;
@@ -2432,34 +2432,34 @@ namespace standard
                     *sslot   = tmp;
                     i        = smallest;
                 };
-                return res;
+                -> res;
             };
 
-            def heap_peek() -> void*
+            heap_peek() -> void*
             {
                 void** slot;
                 if (this.elems.len == 0)
                 {
-                    return STDLIB_GVP;
+                    -> STDLIB_GVP;
                 };
                 slot = (void**)this.elems.get(0);
-                return *slot;
+                -> *slot;
             };
 
-            def heap_len() -> size_t
+            heap_len() -> size_t
             {
-                return this.elems.len;
+                -> this.elems.len;
             };
 
-            def heap_empty() -> bool
+            heap_empty() -> bool
             {
-                return this.elems.len == 0;
+                -> this.elems.len == 0;
             };
 
-            def heap_clear() -> void
+            heap_clear() -> void
             {
                 this.elems.clear();
-                return;
+                ->;
             };
         };
 
@@ -2479,10 +2479,10 @@ namespace standard
 
         trait BaseSTDSmartPtrTraits
         {
-            def get<T>()   -> T*,
-                valid() -> bool,
-                reset() -> void,
-                take<T>()  -> T*;
+            get<T>()   -> T*,
+            valid() -> bool,
+            reset() -> void,
+            take<T>()  -> T*;
         };
 
         BaseSTDSmartPtrTraits
@@ -2491,73 +2491,73 @@ namespace standard
             T* raw;
 
             // Allocate a zeroed T on the heap.
-            def __init() -> this
+            __init() -> this
             {
                 this.raw = (T*)fmalloc(sizeof(T) / 8);
-                return this;
+                -> this;
             };
 
             // Adopt an existing heap pointer (must have been allocated with fmalloc).
-            def __init(T* existing) -> this
+            __init(T* existing) -> this
             {
                 this.raw = existing;
-                return this;
+                -> this;
             };
 
             // Free the owned allocation, if any.
-            def __exit() -> void
+            __exit() -> void
             {
                 if (this.raw != STDLIB_GVP)
                 {
                     ffree(ulong(this.raw));
                     this.raw = (T*)STDLIB_GVP;
                 };
-                return;
+                ->;
             };
 
-            def __expr() -> SmartPtr<T>*
+            __expr() -> SmartPtr<T>*
             {
-                return this;
+                -> this;
             };
 
             // ----------------------------------------------------------------
-            // get() - return the raw pointer. Null if not valid.
+            // get() - -> the raw pointer. Null if not valid.
             // ----------------------------------------------------------------
-            def get() -> T*
+            get() -> T*
             {
-                return this.raw;
+                -> this.raw;
             };
 
             // ----------------------------------------------------------------
             // valid() - true if the pointer is non-null.
             // ----------------------------------------------------------------
-            def valid() -> bool
+            valid() -> bool
             {
-                return this.raw != (T*)STDLIB_GVP;
+                -> this.raw != (T*)STDLIB_GVP;
             };
 
             // ----------------------------------------------------------------
             // reset() - free the owned allocation and null the pointer.
             // ----------------------------------------------------------------
-            def reset() -> void
+            reset() -> void
             {
                 if (this.raw != (T*)STDLIB_GVP)
                 {
                     ffree(ulong(this.raw));
                     this.raw = (T*)STDLIB_GVP;
                 };
-                return;
+                ->;
             };
 
             // ----------------------------------------------------------------
-            // take() - relinquish ownership and return the raw pointer.
+            // take() - relinquish ownership and -> the raw pointer.
             // The caller is responsible for freeing it. Ptr is left null.
             // ----------------------------------------------------------------
-            def take() -> T*
+            take() -> T*
             {
                 T* out  = this.raw;
                 this.raw = (T*)STDLIB_GVP;
-                return out;
+                -> out;
             };
         };
     };

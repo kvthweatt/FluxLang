@@ -373,9 +373,14 @@ namespace flux
             PtrVec* owned;
             byte* cur_ns;
             byte* cur_obj;
+            NameMap* ifc_call;      // "caller|callee" to method set (CALL_ON protocols)
+            NameMap* ifc_ret;       // "provider|consumer" to method set (RETURN_TO protocols)
+            NameMap* ifc_pass;      // "provider|consumer" to method set (PASS_INTO protocols)
             int byte_width;
             int nerrors;
             int err_line;
+            int err_col;            // column of the first error's node, 0 when unknown
+            int pend_col;           // column handed to the next fail() by fail_at
             byte* err_msg;
             IRType* t_i1;
             IRType* t_i8;
@@ -463,9 +468,14 @@ namespace flux
                 this.owned = pv_new();
                 this.cur_ns = ts_dup(g"\0");
                 this.cur_obj = (byte*)0;
+                this.ifc_call = nm_new();
+                this.ifc_ret = nm_new();
+                this.ifc_pass = nm_new();
                 this.byte_width = 8;
                 this.nerrors = 0;
                 this.err_line = 0;
+                this.err_col = 0;
+                this.pend_col = 0;
                 this.err_msg = (byte*)0;
                 this.t_i1 = this.mod.t_int(1);
                 this.t_i8 = this.mod.t_int(8);
@@ -548,6 +558,9 @@ namespace flux
                 nm_free(this.tf_ast);
                 pv_free(this.tf_pend);
                 nm_free(this.structs);
+                nm_free(this.ifc_call);
+                nm_free(this.ifc_ret);
+                nm_free(this.ifc_pass);
                 nm_free(this.unions);
                 nm_free(this.enums);
                 nm_free(this.aliases);
@@ -590,9 +603,19 @@ namespace flux
                     case (true) {
                     this.err_msg = this.mod.own(msg);
                     this.err_line = line;
+                    this.err_col = this.pend_col;
                 }
                     default {};
                 };
+                this.pend_col = 0;
+                ->;
+            };
+
+            // fail() for an error that belongs to a node: the report points at its line and column
+            fail_at(Node* n, byte* msg) -> void
+            {
+                this.pend_col = n.col;
+                this.fail(msg, n.line);
                 ->;
             };
 
@@ -1416,7 +1439,6 @@ namespace flux
                 SInfo* si;
                 SInfo* bi;
                 IRType* ft;
-                bool has_bits;
 
                 switch (sd.l4 != (NodeVec*)0)
                 {
@@ -1623,7 +1645,7 @@ namespace flux
                         {
                             case (true) {
                             si = (SInfo*)p;
-                            switch (n == 0 | si.n > 0)
+                            switch (si.n > 0 | (n == 0 & ((od.flags `& NF_PROTOTYPE) != 0 | si.ty.defined)))
                             {
                                 case (true) {
                                 -> ffree(name);
@@ -1642,6 +1664,17 @@ namespace flux
                                 case (true) {
                                 si = this.new_sinfo(name, 0, true);
                                 si.ty.defined = false;
+                            }
+                                default {};
+                            };
+                            // A defined object without data members is the empty struct {}; only a
+                            // forward declaration (prototype) stays opaque until its definition arrives
+                            switch ((od.flags `& NF_PROTOTYPE) == 0)
+                            {
+                                case (true) {
+                                si.is_object = true;
+                                si.total_bits = 0;
+                                this.mod.set_body(si.ty, si.ftys, 0);
                             }
                                 default {};
                             };
@@ -1747,7 +1780,6 @@ namespace flux
                 IRType* ty = this.t_i32;
                 int i, n;
                 byte* cn;
-                byte* nmx;
                 IRGlobal* g;
                 IRValue* v;
                 Node* item;
@@ -1759,6 +1791,7 @@ namespace flux
                 nm_put(this.enums, name, (void*)ty);
                 nm_put(this.enum_defs, name, (void*)ed);
                 n = node_count(ed, 0);
+                i64* eb;
                 while (i < n)
                 {
                     item = node_child(ed, 0, i);
@@ -1774,7 +1807,7 @@ namespace flux
                         g.constant = true;
                     };
                     };
-                    i64* eb = (i64*)fmalloc((u64)8);
+                    eb = (i64*)fmalloc((u64)8);
                     eb[0] = item.ival;
                     this.keep((void*)eb);
                     nm_put(this.enumvals, this.mod.own(cn), (void*)eb);
@@ -2280,7 +2313,6 @@ namespace flux
                 IRFunc* f;
                 byte* mn;
                 byte* full;
-                byte* mid;
                 int passes, pass, dd;
                 switch (m.text == (byte*)0)
                 {
@@ -4374,7 +4406,6 @@ namespace flux
                 int np;
                 int nn;
                 Node* e;
-                Node* fe;
                 byte* it;
                 byte* fv;
                 SInfo* si = this.sinfo_of(lt.elem);
@@ -4580,7 +4611,6 @@ namespace flux
                 int o;
                 Buf ab;
                 byte* r;
-                byte* zt;
                 switch (si.n > 64)
                 {
                     case (true) { -> (byte*)0; }
@@ -5952,6 +5982,8 @@ namespace flux
                 int c = node_count(ini, 0);
                 IRValue* ev;
                 IRValue* ep;
+                IRValue* stmp;
+                IRValue* sip;
                 while (i < c & i < lt.count)
                 {
                     switch (lt.elem.kind == LK.ARRAY & node_child(ini, 0, i).kind == NodeKind.ARRAY_LITERAL)
@@ -6038,9 +6070,9 @@ namespace flux
                                                         switch ((ev.ty.kind == LK.STRUCT | ev.ty.kind == LK.ISTRUCT) & this.struct_bits(ev.ty) == lt.elem.width)
                                                         {
                                                             case (true) {
-                                                            IRValue* stmp = this.mod.alloca(ev.ty, g"struct_tmp\0");
+                                                            stmp = this.mod.alloca(ev.ty, g"struct_tmp\0");
                                                             this.mod.store(ev, stmp);
-                                                            IRValue* sip = this.mod.cast(g"bitcast\0", stmp, this.mod.t_ptr(lt.elem), g"struct_as_int_ptr\0");
+                                                            sip = this.mod.cast(g"bitcast\0", stmp, this.mod.t_ptr(lt.elem), g"struct_as_int_ptr\0");
                                                             ev = this.mod.load(sip, g"struct_to_int\0");
                                                         }
                                                             default {};
@@ -7019,7 +7051,6 @@ namespace flux
             convert_assign(IRValue* v, IRType* target) -> IRValue*
             {
                 IRType* vt = v.ty;
-                IRValue* r;
                 switch (lt_eq(vt, target))
                 {
                     case (true) { -> v; }
@@ -7465,57 +7496,48 @@ namespace flux
                                     case (true) { -> (IRValue*)0; }
                                     default
                                     {
-                                        // The base resolves "<namespace>__<Type>.__expr" through its overload table,
-                                        // which never holds namespaced methods under that key, so no promotion happens
-                                        switch (this.has_ns_sep(st_ty.name))
+                                        key = join3(st_ty.name, g".__expr\0", g"\0");
+                                        list = st_overloads_of(this.st, key);
+                                        ffree(key);
+                                        switch (list == (PtrVec*)0)
                                         {
                                             case (true) { -> (IRValue*)0; }
                                             default
                                             {
-                                                key = join3(st_ty.name, g".__expr\0", g"\0");
-                                                list = st_overloads_of(this.st, key);
-                                                ffree(key);
-                                                switch (list == (PtrVec*)0)
+                                                o = (Overload*)0;
+                                                oi = 0;
+                                                while (oi < list.len)
+                                                {
+                                                    oc = (Overload*)list.items[oi];
+                                                    switch (oc.nparams == 0)
+                                                    {
+                                                        case (true) {
+                                                        o = oc;
+                                                        break;
+                                                    }
+                                                        default
+                                                        {
+                                                            oi++;
+                                                        };
+                                                    };
+                                                };
+                                                switch (o == (Overload*)0)
                                                 {
                                                     case (true) { -> (IRValue*)0; }
                                                     default
                                                     {
-                                                        o = (Overload*)0;
-                                                        oi = 0;
-                                                        while (oi < list.len)
-                                                        {
-                                                            oc = (Overload*)list.items[oi];
-                                                            switch (oc.nparams == 0)
-                                                            {
-                                                                case (true) {
-                                                                o = oc;
-                                                                break;
-                                                            }
-                                                                default
-                                                                {
-                                                                    oi++;
-                                                                };
-                                                            };
-                                                        };
-                                                        switch (o == (Overload*)0)
+                                                        f = this.mod.find_function(o.mangled);
+                                                        switch (f == (IRFunc*)0)
                                                         {
                                                             case (true) { -> (IRValue*)0; }
                                                             default
                                                             {
-                                                                f = this.mod.find_function(o.mangled);
-                                                                switch (f == (IRFunc*)0)
-                                                                {
-                                                                    case (true) { -> (IRValue*)0; }
-                                                                    default
-                                                                    {
-                                                                        this.sc.clear();
-                                                                        this.sc.put_str(f"{st_ty.name}_expr\0");
-                                                                        this.mod.ia[0] = this_ptr;
-                                                                        r = this.mod.call(f.self, this.mod.ia, 1, this.sc.mem);
-                                                                        r.flags = r.flags `| VF_FROM_EXPR;
-                                                                        -> r;
-                                                                    };
-                                                                };
+                                                                this.sc.clear();
+                                                                this.sc.put_str(f"{st_ty.name}_expr\0");
+                                                                this.mod.ia[0] = this_ptr;
+                                                                r = this.mod.call(f.self, this.mod.ia, 1, this.sc.mem);
+                                                                r.flags = r.flags `| VF_FROM_EXPR;
+                                                                -> r;
                                                             };
                                                         };
                                                     };
@@ -7528,24 +7550,6 @@ namespace flux
                         };
                     };
                 };
-            };
-
-            // True when name contains a double underscore namespace separator
-            has_ns_sep(byte* s) -> bool
-            {
-                int i;
-                while (s[i] != 0)
-                {
-                    switch (s[i] == '_' & s[i + 1] == '_')
-                    {
-                        case (true) { -> true; }
-                        default
-                        {
-                            i++;
-                        };
-                    };
-                };
-                -> false;
             };
 
             x_ident(Node* n) -> IRValue*
@@ -9906,7 +9910,7 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
 
             ptr_ovl_zero(byte* name) -> bool
             {
-                int i, j, kl, nl, pass, d;
+                int i, j, kl, nl, pass;
                 bool dotted;
                 byte* key;
                 PtrVec* list;
@@ -10030,7 +10034,6 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
             {
                 LVar* lv = this.find_var(target.text);
                 IRValue* v;
-                IRValue* st_v;
                 switch (lv == (LVar*)0)
                 {
                     case (true) {
@@ -10458,6 +10461,7 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                 };
                 // translate register letters of the outputs
                 i = 0;
+                byte* rn;
                 while (i < no)
                 {
                     c = ocs[i];
@@ -10470,7 +10474,7 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                     switch (c[a + 1] == 0)
                     {
                         case (true) {
-                        byte* rn = (byte*)0;
+                        rn = (byte*)0;
                         switch (c[a] == 'a')
                         {
                             case (true) { rn = g"rax\0"; }
@@ -11100,6 +11104,11 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                                                 };
                                             };
                                         };
+                                        switch (!this.ifc_check_call(n, thisp.ty.elem.name, n.text))
+                                        {
+                                            case (true) { -> (IRValue*)0; }
+                                            default {};
+                                        };
                                         f = this.mod.find_function(n.text3);
                                         switch (f == (IRFunc*)0)
                                         {
@@ -11116,6 +11125,11 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                                                 i = 0;
                                                 while (i < argc)
                                                 {
+                                                    switch (!this.ifc_check_pass(node_child(n, 0, i), thisp.ty.elem.name))
+                                                    {
+                                                        case (true) { -> (IRValue*)0; }
+                                                        default {};
+                                                    };
                                                     v = this.visit(node_child(n, 0, i));
                                                     switch (this.bad)
                                                     {
@@ -11309,8 +11323,6 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                 IRValue* fv;
                 IRValue* res;
                 IRType* ft;
-                IRValue* gz;
-                IRValue** gp;
                 Buf cb;
                 int nf;
                 int np;
@@ -12875,7 +12887,6 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                 IRValue* hc;
                 IRValue* ae;
                 IRValue* ni;
-                IRValue* hi;
                 IRValue* oi2;
                 IRValue* ni2;
                 IRValue* hi2;
@@ -13858,7 +13869,6 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                 IRValue* ev;
                 IRValue* base;
                 IRValue* tmp;
-                IRValue* i8p;
                 IRValue* wv;
                 IRValue* sh;
                 IRValue* bv;
@@ -14750,7 +14760,6 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                 TypeSpec* ts = n.ts;
                 IRType* lt;
                 IRValue* alloca;
-                IRValue* iv;
                 LVar* lv;
                 Node* dimn;
                 IRValue* cv;
@@ -15937,7 +15946,7 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                                                                                                                                                     this.sc.put_str((byte*)missing.items[i]);
                                                                                                                                                     i++;
                                                                                                                                                 };
-                                                                                                                                                this.fail(this.sc.mem, n.line);
+                                                                                                                                                this.fail_at(n, this.sc.mem);
                                                                                                                                                 this.unsup(n, g"switch exhaustiveness\0");
                                                                                                                                                 -> pv_free(missing);
                                                                                                                                             };
@@ -16154,7 +16163,6 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                 IRValue* ev;
                 IRValue* xv;
                 IRType* et;
-                LVar* lv;
                 int k;
                 flag = this.mod.alloca_here(this.t_i1, g"exception_flag\0");
                 evp = this.mod.alloca_here(this.t_i64, g"exception_value\0");
@@ -16387,7 +16395,6 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                 int i;
                 int c;
                 int k;
-                Node* ch;
                 switch (n == (Node*)0)
                 {
                     case (true) { ->; }
@@ -18000,6 +18007,17 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                     }
                         default {};
                     };
+                    // Pointer var: free what it points to, then null the slot. `this` is only reset.
+                    switch (pt.kind == LK.PTR & !cstr_eq(e.text, g"this\0"))
+                    {
+                        case (true) {
+                        this.sc.clear();
+                        this.sc.put_str(f"{e.text}_voidptr\0");
+                        ev = this.mod.load(lv.ptr, this.sc.mem);
+                        this.emit_ffree(ev, e.text);
+                    }
+                        default {};
+                    };
                     this.mod.store(this.mod.c_null(pt), lv.ptr);
                     i = this.scopes.len - 1;
                     while (i >= 0)
@@ -19275,7 +19293,7 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                                                                     case (true) {
                                                                     this.sc.clear();
                                                                     this.sc.put_str(f"typeof(): cannot determine a Flux type name for LLVM type {this.mod.type_str(v.ty)}\0");
-                                                                    this.fail(this.sc.mem, n.line);
+                                                                    this.fail_at(n, this.sc.mem);
                                                                     this.unsup(n, g"typeof llvm type name\0");
                                                                     -> (IRValue*)0;
                                                                 }
@@ -19774,6 +19792,27 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                         case (true) { es = src.spec.array_elem; }
                         default {};
                     };
+                    // Pointer subscript: p[i] is p's type one level down, so a byte* element
+                    // stays unsigned through casts (TypeSystem.get_array_element_type_spec)
+                    switch (es == (TypeSpec*)0 & src.spec != (TypeSpec*)0)
+                    {
+                        case (true) {
+                        switch (src.spec.pointer_depth > 0 & (src.spec.flags `& TS_ARRAY) == 0)
+                        {
+                            case (true) {
+                            es = typespec_clone(src.spec);
+                            es.pointer_depth = es.pointer_depth - 1;
+                            switch (es.pointer_depth == 0)
+                            {
+                                case (true) { es.flags = es.flags - (es.flags `& TS_POINTER); }
+                                default {};
+                            };
+                        }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
                 }
                     default {};
                 };
@@ -19978,7 +20017,13 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                                         case (true) { -> fp; }
                                         default {};
                                     };
-                                    -> this.mod.load(fp, field);
+                                    IRValue* sfld = this.mod.load(fp, field);
+                                    switch (si.specs[idx] != (TypeSpec*)0 & sfld.spec == (TypeSpec*)0)
+                                    {
+                                        case (true) { sfld.spec = si.specs[idx]; }
+                                        default {};
+                                    };
+                                    -> sfld;
                                 }
                                     default
                                     {
@@ -21073,7 +21118,12 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                                             {
                                                 switch (this.needs_ptr_load(arr))
                                                 {
-                                                    case (true) { arr = this.mod.load(arr, g"ptr_loaded_for_access\0"); }
+                                                    case (true) {
+                 IRValue* pl = arr;
+                 arr = this.mod.load(arr, g"ptr_loaded_for_access\0");
+                 switch (arr.spec == (TypeSpec*)0) { case (true) { arr.spec = pl.spec; } default {}; };
+                 switch (arr.espec == (TypeSpec*)0) { case (true) { arr.espec = pl.espec; } default {}; };
+             }
                                                     default {};
                                                 };
                                                 idx = this.visit(n.b);
@@ -22359,7 +22409,6 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                 byte* pname;
                 IRBlock* ebk;
                 int dd;
-                SInfo* osi;
                 bool plain;
                 IRValue* a;
                 IRValue* slot;
@@ -22559,9 +22608,10 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                     case (true) {
                     this.tf_drain = true;
                     i = 0;
+                    Node* sfd;
                     while (i < this.tf_pend.len)
                     {
-                        Node* sfd = (Node*)this.tf_pend.items[i];
+                        sfd = (Node*)this.tf_pend.items[i];
                         node_child(sfd, 0, 0).ts = (TypeSpec*)this.tf_pend.items[i + 2];
                         this.run_body(sfd, (IRFunc*)this.tf_pend.items[i + 1], g"\0", (byte*)0);
                         i = i + 3;
@@ -22791,6 +22841,253 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                 ->;
             };
 
+            // Method-name set stored under "a|b" in an interface whitelist table
+            ifc_set(NameMap* table, byte* a, byte* b) -> NameMap*
+            {
+                byte* key = this.mod.own(join3(a, g"|\0", b));
+                NameMap* set = (NameMap*)nm_get(table, key);
+                switch (set == (NameMap*)0)
+                {
+                    case (true) {
+                    set = nm_new();
+                    nm_put(table, key, (void*)set);
+                }
+                    default {};
+                };
+                -> set;
+            };
+
+            // Interface definition by name among the top level statements
+            ifc_find(Node* prog, byte* name) -> Node*
+            {
+                int i;
+                Node* s;
+                while (i < node_count(prog, 0))
+                {
+                    s = this.unwrap(node_child(prog, 0, i));
+                    switch (s.kind == NodeKind.INTERFACE_DEF)
+                    {
+                        case (true) {
+                        switch (cstr_eq(s.text, name))
+                        {
+                            case (true) { -> s; }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                    i++;
+                };
+                -> (Node*)0;
+            };
+
+            // Pass 3.6: whitelists of every protocol block of every interface attached to an object
+            // (CALL_ON, PASS_INTO and RETURN_TO), keyed by the concrete types bound to the roles
+            build_interfaces(Node* prog) -> void
+            {
+                int i, k, j, p, m;
+                Node* od;
+                Node* at;
+                Node* idef;
+                Node* pr;
+                Node* prm;
+                byte* caller;
+                byte* callee;
+                byte* arg;
+                NameMap* set;
+                NameMap* table;
+                while (i < node_count(prog, 0))
+                {
+                    od = this.unwrap(node_child(prog, 0, i));
+                    switch (od.kind == NodeKind.OBJECT_DEF & od.e != (Node*)0 & !this.is_template(od))
+                    {
+                        case (true) {
+                        k = 0;
+                        while (k < node_count(od.e, 0))
+                        {
+                            at = node_child(od.e, 0, k);
+                            idef = this.ifc_find(prog, at.text);
+                            switch (idef == (Node*)0)
+                            {
+                                case (true) {
+                                this.fail(join3(g"Interface '\0", at.text, g"' attached to an object is not defined\0"), od.line);
+                            }
+                                default
+                                {
+                                    switch (node_count(at, 0) != node_count(idef, 0))
+                                    {
+                                        case (true) {
+                                        this.fail(join3(g"Interface '\0", at.text, g"' is given the wrong number of arguments\0"), od.line);
+                                    }
+                                        default
+                                        {
+                                            // Pre-register governed pairs so that unlisted calls are blocked
+                                            p = 0;
+                                            while (p < node_count(idef, 1))
+                                            {
+                                                pr = node_child(idef, 1, p);
+                                                caller = (byte*)0;
+                                                callee = (byte*)0;
+                                                j = 0;
+                                                while (j < node_count(idef, 0))
+                                                {
+                                                    prm = node_child(idef, 0, j);
+                                                    arg = node_child(at, 0, j).text;
+                                                    switch (cstr_eq(arg, g"this\0"))
+                                                    {
+                                                        case (true) { arg = od.text; }
+                                                        default {};
+                                                    };
+                                                    switch (cstr_eq(prm.text, pr.text)) { case (true) { caller = arg; } default {}; };
+                                                    switch (cstr_eq(prm.text, pr.text2)) { case (true) { callee = arg; } default {}; };
+                                                    j++;
+                                                };
+                                                switch (caller != (byte*)0 & callee != (byte*)0)
+                                                {
+                                                    case (true) {
+                                                    switch (pr.op)
+                                                    {
+                                                        case (ProtocolKind.CALL_ON) { table = this.ifc_call; }
+                                                        case (ProtocolKind.PASS_INTO) { table = this.ifc_pass; }
+                                                        default { table = this.ifc_ret; };
+                                                    };
+                                                    set = this.ifc_set(table, caller, callee);
+                                                    m = 0;
+                                                    while (m < node_count(pr, 0))
+                                                    {
+                                                        nm_put(set, node_child(pr, 0, m).text, (void*)set);
+                                                        m++;
+                                                    };
+                                                }
+                                                    default {};
+                                                };
+                                                p++;
+                                            };
+                                        };
+                                    };
+                                };
+                            };
+                            k++;
+                        };
+                    }
+                        default {};
+                    };
+                    i++;
+                };
+                ->;
+            };
+
+            // PASS_INTO: the return value of a method called on an instance may only be passed into
+            // the listed consumers; arg is an argument of a call made on a 'consumer' instance
+            ifc_check_pass(Node* arg, byte* consumer) -> bool
+            {
+                LVar* lv;
+                IRType* t;
+                NameMap* set;
+                // The base compiler builds the whitelists after the free functions are emitted,
+                // so only bodies emitted inside an object are governed
+                switch (this.cur_obj == (byte*)0 | arg.kind != NodeKind.METHOD_CALL | arg.a == (Node*)0)
+                {
+                    case (true) { -> true; }
+                    default {};
+                };
+                switch (arg.a.kind != NodeKind.IDENTIFIER)
+                {
+                    case (true) { -> true; }
+                    default {};
+                };
+                lv = this.find_local(arg.a.text);
+                switch (lv == (LVar*)0 | lv.ptr == (IRValue*)0 | lv.ptr.ty.kind != LK.PTR)
+                {
+                    case (true) { -> true; }
+                    default {};
+                };
+                t = lv.ptr.ty.elem;
+                switch (t.kind == LK.PTR)
+                {
+                    case (true) { t = t.elem; }
+                    default {};
+                };
+                switch (t.kind != LK.ISTRUCT | t.name == (byte*)0)
+                {
+                    case (true) { -> true; }
+                    default {};
+                };
+                set = (NameMap*)nm_get(this.ifc_pass, join3(t.name, g"|\0", consumer));
+                switch (set != (NameMap*)0 & arg.text != (byte*)0)
+                {
+                    case (true) {
+                    switch (!nm_has(set, arg.text))
+                    {
+                        case (true) {
+                        this.sc.clear();
+                        this.sc.put_str(f"Interface violation: return value of '{t.name}.{arg.text}' is not permitted to be passed as an argument into '{consumer}' [{arg.line}:{arg.col}]\0");
+                        this.fail_at(arg, this.sc.mem);
+                        -> false;
+                    }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+                -> true;
+            };
+
+            // Enforces the interface whitelists on a call of 'meth' on a 'callee' instance made from inside 'cur_obj'
+            ifc_check_call(Node* n, byte* callee, byte* meth) -> bool
+            {
+                NameMap* rset;
+                NameMap* cset;
+                bool allowed;
+                switch (this.cur_obj == (byte*)0 | callee == (byte*)0)
+                {
+                    case (true) { -> true; }
+                    default {};
+                };
+                rset = (NameMap*)nm_get(this.ifc_ret, join3(callee, g"|\0", this.cur_obj));
+                switch (rset != (NameMap*)0)
+                {
+                    case (true) {
+                    allowed = nm_has(rset, meth);
+                    switch (!allowed)
+                    {
+                        case (true) {
+                        this.sc.clear();
+                        this.sc.put_str(f"Interface violation: '{callee}.{meth}' is not permitted to be called from inside '{this.cur_obj}' [{n.line}:{n.col}]\0");
+                        this.fail_at(n, this.sc.mem);
+                        -> false;
+                    }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+                switch (!allowed)
+                {
+                    case (true) {
+                    cset = (NameMap*)nm_get(this.ifc_call, join3(this.cur_obj, g"|\0", callee));
+                    switch (cset != (NameMap*)0)
+                    {
+                        case (true) {
+                        switch (!nm_has(cset, meth))
+                        {
+                            case (true) {
+                            this.sc.clear();
+                            this.sc.put_str(f"Interface violation: {this.cur_obj} is not permitted to call {meth} from {callee} [{n.line}:{n.col}]\0");
+                            this.fail_at(n, this.sc.mem);
+                            -> false;
+                        }
+                            default {};
+                        };
+                    }
+                        default {};
+                    };
+                }
+                    default {};
+                };
+                -> true;
+            };
+
             gen_program(Node* prog) -> void
             {
                 int i;
@@ -22859,6 +23156,7 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                 };
                 this.retry_mode = false;
                 this.fwd_hit = false;
+                this.build_interfaces(prog);
                 // Top level extern blocks are registered first, as the base pre-pass does
                 i = 0;
                 while (i < n)
@@ -22926,6 +23224,7 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                     i++;
                 };
                 ffree(root);
+                standard::io::console::println(g"[AST] Pass 4: Re-emitting pending bodies...\0");
                 -> this.main_stubs();
             };
 
@@ -23002,7 +23301,6 @@ has_op_overload(int op) -> bool -> this.op_overloads(op) != (PtrVec*)0;
                 IRFunc* m0 = this.mod.find_function(g"main__0__ret_intE1\0");
                 IRFunc* m2 = this.mod.find_function(g"main__2__intE1__byteE1_ptr2__ret_intE1\0");
                 IRBlock* eb;
-                IRValue* r;
                 switch (m0 == (IRFunc*)0 | m2 == (IRFunc*)0)
                 {
                     case (true) { ->; }

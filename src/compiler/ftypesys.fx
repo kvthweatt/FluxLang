@@ -127,17 +127,17 @@ namespace flux
 
         def ts_is_pointer(TypeSpec* t) -> bool
         {
-            return (t.flags `& TS_POINTER)!?;
+            return (t.flags `& TS_POINTER) != 0;
         };
 
         def ts_is_array(TypeSpec* t) -> bool
         {
-            return (t.flags `& TS_ARRAY)!?;
+            return (t.flags `& TS_ARRAY) != 0;
         };
 
         def ts_is_signed(TypeSpec* t) -> bool
         {
-            return (t.flags `& TS_SIGNED)!?;
+            return (t.flags `& TS_SIGNED) != 0;
         };
 
         // Effective width in bits of a scalar TypeSpec (not counting pointers/arrays).
@@ -199,7 +199,7 @@ namespace flux
             if (t.custom_typename != (byte*)0)
             {
                 i = 0;
-                while (t.custom_typename[i]!?)
+                while (t.custom_typename[i] != 0)
                 {
                     c = t.custom_typename[i];
                     if (c == ':' | c == '.') { c = '_'; };
@@ -285,6 +285,16 @@ namespace flux
                 k++;
             };
             r[la + lb + lc] = (byte)0;
+            return r;
+        };
+
+        // join3 that also frees the heap arguments named by mask: 1 for a, 2 for b, 4 for c
+        def join3_f(byte* a, byte* b, byte* c, int mask) -> byte*
+        {
+            byte* r = join3(a, b, c);
+            if ((mask `& 1) != 0) { ffree(a); };
+            if ((mask `& 2) != 0) { ffree(b); };
+            if ((mask `& 4) != 0) { ffree(c); };
             return r;
         };
 
@@ -439,7 +449,7 @@ namespace flux
         def nm_place(NameMap* m, int e) -> void
         {
             int idx = (int)(nm_hash(m.keys[e]) % (u64)m.slot_cap);
-            while (m.slots[idx]!?)
+            while (m.slots[idx] != 0)
             {
                 idx++;
                 if (idx >= m.slot_cap) { idx = 0; };
@@ -523,7 +533,7 @@ namespace flux
         def has_scope_sep(byte* s) -> bool
         {
             int i;
-            while (s[i]!?)
+            while (s[i] != 0)
             {
                 if (s[i] == ':' & s[i + 1] == ':') { return true; };
                 i++;
@@ -536,7 +546,7 @@ namespace flux
         {
             byte* r = ts_dup(s);
             int i;
-            while (r[i]!?)
+            while (r[i] != 0)
             {
                 if (r[i] == ':' & r[i + 1] == ':')
                 {
@@ -807,7 +817,7 @@ namespace flux
         {
             ffree(st.current_ns);
             st.current_ns = ts_dup(ns);
-            if (ns[0]!?) { sv_add(st.registered_ns, ns); };
+            if (ns[0] != 0) { sv_add(st.registered_ns, ns); };
             return;
         };
 
@@ -900,7 +910,7 @@ namespace flux
             if (r != (void*)0) { return (FXC_SYMENTRY*)r; };
 
             // 2. current namespace
-            if (cur[0]!?)
+            if (cur[0] != 0)
             {
                 m = mangle_namespace_name(cur, name);
                 r = nm_get(st.globals, m);

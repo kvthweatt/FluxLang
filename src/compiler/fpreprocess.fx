@@ -96,7 +96,7 @@ namespace flux
         pp_cstrlen(byte* s) -> int
         {
             int n;
-            while (s[n]!?) { n++; };
+            while (s[n] != 0) { n++; };
             -> n;
         };
 
@@ -413,7 +413,7 @@ namespace flux
                     while (p < hi)
                     {
                         w = pp_ws_fwd(t, hi, p);
-                        switch (w!?)
+                        switch (w != 0)
                         {
                             case (true) { break; }
                             default
@@ -1429,7 +1429,7 @@ namespace flux
                 int base = e * FLUX_PP_STRIDE;
                 u64 h = pp_hash(this.keys.mem + this.ents[base], this.ents[base + 1]);
                 int idx = (int)(h % (u64)this.slot_cap);
-                while (this.slots[idx]!?)
+                while (this.slots[idx] != 0)
                 {
                     idx++;
                     switch (idx >= this.slot_cap)
@@ -1744,6 +1744,20 @@ namespace flux
 
             // Resolved path of the file output line i came from
             map_path(int i) -> byte* -> this.pool.mem + this.files.arr[this.map_file.arr[i]];
+
+            // Path of the file of every output line, for diagnostics (caller owns the array)
+            line_files() -> byte**
+            {
+                int n = this.map_line.len;
+                int i;
+                byte** r = (byte**)fmalloc((u64)(n + 1) * (u64)8);
+                while (i < n)
+                {
+                    r[i] = this.map_path(i);
+                    i++;
+                };
+                -> r;
+            };
 
             // Local line number of output line i inside map_path(i)
             map_lineno(int i) -> int -> this.map_line.arr[i];
@@ -2465,7 +2479,7 @@ namespace flux
             {
                 Buf man();
                 defer man.__exit();
-                int pk, ep_off, en_off, ok2, w;
+                int pk, en_off, ok2, w;
 
                 // cwd/.fpm/packages/<name> into x1, packages dir length in w
                 byte* cwd = this.pool.mem + this.cwd_off;
@@ -2774,6 +2788,18 @@ namespace flux
                                                     switch (hi > lo)
                                                     {
                                                         case (true) {
+                                                        switch (pp_starts(content.mem, lo, hi, g"#endif;\0", 7) & hi - lo != 7)
+                                                        {
+                                                            case (true) {
+                                                            this.e_begin(PPError.SYNTAX);
+                                                            this.errb.put_str(g"[PREPROCESSOR] #endif directive has trailing content after semicolon in \0");
+                                                            this.errb.put_n(this.pool.mem + fp_off, fp_n);
+                                                            this.errb.put_str(g" at line \0");
+                                                            this.errb.put_int(q + 1);
+                                                            -> false;
+                                                        }
+                                                            default {};
+                                                        };
                                                         switch (pp_starts(content.mem, lo, hi, g"#import\0", 7) | pp_starts(content.mem, lo, hi, g"#package\0", 8)
                                                             | pp_starts(content.mem, lo, hi, g"#warn\0", 5) | pp_starts(content.mem, lo, hi, g"#stop\0", 5)
                                                             | pp_starts(content.mem, lo, hi, g"#def\0", 4) | pp_starts(content.mem, lo, hi, g"#dir\0", 4))
@@ -2840,7 +2866,7 @@ namespace flux
                 int hi = lo + ll.len[i];
                 int s = lo;
                 int e = hi;
-                int a, b, ts, te, nx, semi, q1, q2, j, k, np, w, pl, tcount;
+                int a, b, ts, te, nx, semi, q1, q2, j, k, np, w, tcount;
                 int name_off, name_len, paren_open, paren_close, body_off, body_len;
                 bool more, have;
                 int ent;
@@ -3995,7 +4021,7 @@ namespace flux
             // Returns 1 when a macro was expanded, 0 when not, -1 on error.
             macro_pass(byte* src, int n) -> int
             {
-                int i, j, k, c, depth, rs, re, ent, np, na, cstart, p, plen, a, b, d, ra, rb;
+                int i, j, k, c, depth, rs, re, ent, np, na, cstart, p, plen, d, ra, rb;
                 bool in_str, changed;
                 int str_char;
                 byte* ppar;
@@ -4454,7 +4480,7 @@ namespace flux
                 int pl, iteration, ls, le;
                 bool replaced, first;
 
-                switch (this.err_kind!?)
+                switch (this.err_kind != 0)
                 {
                     case (true) { -> false; }
                     default

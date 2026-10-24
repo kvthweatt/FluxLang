@@ -1279,12 +1279,11 @@ class FluxLexer:
                 self.advance()
                 continue
             
-            # Unknown character - warn if non-ASCII (UTF-8 is only valid inside strings)
+            # Unknown character: UTF-8 is only valid inside string literals
             if not char.isascii():
-                print(
-                    f"[LEXER] WARNING: non-ASCII character {char!r} (U+{ord(char):04X}) "
-                    f"at line {start_pos[0]}, col {start_pos[1]} is only valid inside string literals - skipped.",
-                    file=sys.stderr,
+                raise ValueError(
+                    f"non-ASCII character {char!r} (U+{ord(char):04X}) "
+                    f"at line {start_pos[0]}, col {start_pos[1]} is only valid inside string literals"
                 )
             self.advance()
         

@@ -31,6 +31,7 @@ from pathlib import Path
 
 # fbc modules
 from fbc_alias import AliasMap, Violation
+from ftypesys import StorageClass as _StorageClass
 from fbc_report import print_violations, print_summary
 
 # Flux compiler modules
@@ -1672,6 +1673,7 @@ class _LifetimeAnalysis:
         # per-function walk context
         self._fn = None
         self._locals = {}
+        self._heapvars = set()
         self._loops = []
         self._defers = []
         self._returns = []
@@ -1715,7 +1717,7 @@ class _LifetimeAnalysis:
     @staticmethod
     def _origin(r):
         """Innermost (func, line) of a heap region."""
-        while r[0] == 'heap' and len(r) == 4:
+        while r[0] == 'heap' and len(r) in (4, 5):
             r = r[3]
         return r
 
@@ -1753,6 +1755,17 @@ class _LifetimeAnalysis:
         if name in self.cg.short_names:
             return self.cg.short_names[name]
         cands = self.cg.overloads.get(name, [])
+        if not cands:
+            # a mangled call target (main__0__ret_intE1): resolve its source name
+            parts = name.split('__')
+            for idx, part in enumerate(parts):
+                if part.isdigit():
+                    base = '__'.join(parts[:idx])
+                    cands = self.cg.overloads.get(base, [])
+                    if base in self.cg.funcs and not cands:
+                        cands = [base]
+                    nargs = int(part)
+                    break
         if len(cands) == 1:
             return cands[0]
         for c in cands:
@@ -1772,7 +1785,7 @@ class _LifetimeAnalysis:
         self._active_summ.add(name)
         saved = (self._fn, self._locals, self._loops, self._defers,
                  self._returns, self._cur_line, self._al, self._fp,
-                 self._async_node, self._last_task, self._ivars)
+                 self._async_node, self._last_task, self._ivars, self._heapvars)
         func = self.cg.funcs[name]
         self.funcs_checked += 1
         self._al = _AliasCtx()
@@ -1783,6 +1796,7 @@ class _LifetimeAnalysis:
         self._index_function(func)
         self._fn = name
         self._locals = {}
+        self._heapvars = set()
         self._loops = []
         self._defers = [[]]
         self._returns = []
@@ -1836,6 +1850,17 @@ class _LifetimeAnalysis:
             for r, v in exit_state.status.items():
                 if r[0] == 'heap':
                     summ.heap_status[r] = v
+            # an allocation that is returned reaches the caller only along the paths that return it;
+            # a path that freed it and returned something else (a null error result) does not count
+            for r in ret:
+                if r[0] != 'heap':
+                    continue
+                along = frozenset()
+                for s, rv in self._returns:
+                    if r in rv and r in s.status:
+                        along = along | s.status[r]
+                if along:
+                    summ.heap_status[r] = along
             summ.esc = frozenset(exit_state.esc)
             summ.free_at = dict(exit_state.free_at)
             # held contents of static cells escape the function too
@@ -1844,7 +1869,7 @@ class _LifetimeAnalysis:
         summ.fp = {k: list(v) for k, v in self._fp.items()}
         (self._fn, self._locals, self._loops, self._defers,
          self._returns, self._cur_line, self._al, self._fp,
-         self._async_node, self._last_task, self._ivars) = saved
+         self._async_node, self._last_task, self._ivars, self._heapvars) = saved
         self._active_summ.discard(name)
         self.summaries[name] = summ
         return summ
@@ -1988,6 +2013,18 @@ class _LifetimeAnalysis:
         st.terms.pop(node.name, None)
         if getattr(ts, 'is_pointer', False) and not is_arr:
             self._al.ptr_vars.add(node.name)
+        # heap T x: x is a T* into a fresh allocation (codegen _vardecl_heap)
+        is_heap = (getattr(ts, 'storage_class', None) == _StorageClass.HEAP
+                   and not getattr(node, 'is_global', False))
+        if is_heap:
+            hsite = ('heap', self._fn, node.line if hasattr(node, 'line') else self._cur_line)
+            st.status[hsite] = frozenset('O')
+            st.esc.discard(hsite)
+            st.free_at.pop(hsite, None)
+            self._heapvars.add(node.name)
+            self._al.ptr_vars.add(node.name)
+        else:
+            self._heapvars.discard(node.name)
         iv = node.initial_value
         if iv is not None and not isinstance(iv, (list, tuple)):
             self._al.deriv.setdefault(node.name, set()).update(self._rhs_vars(iv, node.name))
@@ -2012,6 +2049,8 @@ class _LifetimeAnalysis:
                 self._last_task = None
             if not is_arr:
                 st.env[node.name] = v
+        if is_heap:
+            st.env[node.name] = frozenset([hsite])
 
     # -- assignment -------------------------------------------------------
     def _assign(self, target, value, st):
@@ -2384,8 +2423,10 @@ class _LifetimeAnalysis:
         self._mark_esc(v, st)
 
     def _mark_esc(self, v, st):
+        # a parameter's pointee that is stored away is recorded too, so the summary can tell
+        # the caller that the argument was handed off
         for r in v:
-            if r[0] == 'heap':
+            if r[0] in ('heap', 'param'):
                 st.esc.add(r)
 
     def _escape_check(self, cells, v, st, node):
@@ -2444,18 +2485,64 @@ class _LifetimeAnalysis:
                      f"never freed or handed off on the path ending at {self._where(line)}"])
 
     # -- control flow ---------------------------------------------------
+    # -- null tests -------------------------------------------------------
+    @staticmethod
+    def _bare(e):
+        while isinstance(e, (fast.CastExpression, fast.TypeConvertExpression)):
+            e = e.expression
+        return e
+
+    def _null_facts(self, cond, truth):
+        """Variables known to be null when cond evaluates to truth."""
+        c = self._bare(cond)
+        if isinstance(c, fast.UnaryOp) and c.operator == Operator.NOT and not c.is_postfix:
+            return self._null_facts(c.operand, not truth)
+        if isinstance(c, fast.Identifier):
+            return [c.name] if not truth else []
+        if isinstance(c, fast.BinaryOp):
+            if c.operator in (Operator.EQUAL, Operator.NOT_EQUAL):
+                l, r = self._bare(c.left), self._bare(c.right)
+                if isinstance(r, fast.Identifier) and isinstance(l, fast.Literal):
+                    l, r = r, l
+                if (isinstance(l, fast.Identifier) and isinstance(r, fast.Literal)
+                        and isinstance(r.value, int) and r.value == 0):
+                    is_eq = c.operator == Operator.EQUAL
+                    return [l.name] if is_eq == truth else []
+                return []
+            # '&' and '|' evaluate both sides: both hold when the whole is true / false
+            if c.operator == Operator.AND and truth:
+                return self._null_facts(c.left, True) + self._null_facts(c.right, True)
+            if c.operator == Operator.OR and not truth:
+                return self._null_facts(c.left, False) + self._null_facts(c.right, False)
+        return []
+
+    def _narrow(self, st, cond, truth):
+        """On a branch where a pointer variable is null it owns no allocation."""
+        for name in self._null_facts(cond, truth):
+            regs = st.env.get(name)
+            if not regs:
+                continue
+            for r in regs:
+                if r[0] == 'heap':
+                    st.status.pop(r, None)
+            st.env[name] = frozenset()
+
     def _if(self, node, st):
         self._eval(node.condition, st)
         outs = []
         s1 = st.copy()
+        self._narrow(s1, node.condition, True)
         self._block(node.then_block, s1)
         outs.append(s1)
         rest = st.copy()
+        self._narrow(rest, node.condition, False)
         for cond, blk in (node.elif_blocks or []):
             self._eval(cond, rest)
             s = rest.copy()
+            self._narrow(s, cond, True)
             self._block(blk, s)
             outs.append(s)
+            self._narrow(rest, cond, False)
         if node.else_block is not None:
             s = rest.copy()
             self._block(node.else_block, s)
@@ -2467,6 +2554,17 @@ class _LifetimeAnalysis:
             res = join(res, o)
         self._assign_state(st, res if res is not None else st)
 
+    @staticmethod
+    def _case_truth(c):
+        """True or False for 'case (true)' / 'case (false)' of a boolean switch, else None."""
+        v = c.value
+        if isinstance(v, fast.Literal):
+            if v.value is True:
+                return True
+            if v.value is False:
+                return False
+        return None
+
     def _switch(self, node, st):
         self._eval(node.expression, st)
         outs = []
@@ -2477,6 +2575,13 @@ class _LifetimeAnalysis:
             else:
                 self._eval(c.value, st.copy())
             s = st.copy()
+            tv = self._case_truth(c)
+            if tv is None and c.value is None:
+                seen = [self._case_truth(o) for o in node.cases if o.value is not None]
+                if len(seen) == 1 and seen[0] is not None:
+                    tv = not seen[0]
+            if tv is not None:
+                self._narrow(s, node.expression, tv)
             if c.body is not None:
                 if isinstance(c.body, fast.Block):
                     self._block(c.body, s)
@@ -2696,6 +2801,15 @@ class _LifetimeAnalysis:
                     and getattr(ts.base_type, 'name', '') == 'VOID'
                     and not getattr(ts, 'is_pointer', False)):
                 # (void)~x releases the tied value
+                self._do_free(self._eval(e.expression, st), st, definite=True)
+                return frozenset()
+            if (isinstance(e.expression, fast.Identifier)
+                    and (e.expression.name in self._heapvars
+                         or e.expression.name in self._al.ptr_vars)
+                    and getattr(ts, 'base_type', None) is not None
+                    and getattr(ts.base_type, 'name', '') == 'VOID'
+                    and not getattr(ts, 'is_pointer', False)):
+                # (void)p on a heap variable or a pointer variable releases what it points to
                 self._do_free(self._eval(e.expression, st), st, definite=True)
                 return frozenset()
             return self._eval(e.expression, st)
@@ -3131,11 +3245,12 @@ class _LifetimeAnalysis:
                     self._cur_line,
                     det + ["declare #<Tag>(...) with ! or > between them if that is intended"])
 
-    def _apply_quiet(self, fname, arg_regs, st):
+    def _apply_quiet(self, fname, arg_regs, st, call=None):
         """Apply a callee summary; its accesses are already covered by the
         translated footprint, so they are not recorded or checked twice."""
         prev = self._no_access
         self._no_access = True
+        self._call_col = getattr(call, 'source_col', 0)
         try:
             return self._apply(fname, arg_regs, st)
         finally:
@@ -3258,7 +3373,7 @@ class _LifetimeAnalysis:
                 if v:
                     self._access(frozenset(self._root(r) for r in v), A_R | A_W, st,
                                  atomic=True)
-            return self._apply_quiet(resolved, arg_regs, st)
+            return self._apply_quiet(resolved, arg_regs, st, e)
         tfp = self._translate_fp(summ, resolved, arg_regs, args, st)
         if launch:
             task = _Task(resolved, tfp, self._cur_line,
@@ -3266,7 +3381,7 @@ class _LifetimeAnalysis:
             self.async_launched.add(id(e))
             self._check_launch(task, st)
             self._merge_fp_roots(tfp)
-            ret = self._apply_quiet(resolved, arg_regs, st)
+            ret = self._apply_quiet(resolved, arg_regs, st, e)
             st.tasks[id(e)] = task
             self._last_task = task
             return ret
@@ -3274,7 +3389,7 @@ class _LifetimeAnalysis:
             for (b, at, rng) in lst:
                 self._access(frozenset([r]), b, st, atomic=at, rng=rng,
                              what=f"call to '{resolved.split('__')[-1]}'")
-        return self._apply_quiet(resolved, arg_regs, st)
+        return self._apply_quiet(resolved, arg_regs, st, e)
 
     def _method(self, e, st):
         obj = self._eval(e.object, st)
@@ -3330,6 +3445,8 @@ class _LifetimeAnalysis:
     def _apply(self, fname, arg_regs, st):
         summ = self._summary(fname)
         call_line = self._cur_line
+        # two calls on one line allocate different sites
+        call_col = getattr(self, '_call_col', 0)
         cache = {}
 
         def m(r):
@@ -3339,7 +3456,7 @@ class _LifetimeAnalysis:
                 i = r[2]
                 out = arg_regs[i] if i < len(arg_regs) and r[1] == fname else frozenset()
             elif r[0] == 'heap':
-                ns = ('heap', self._fn, call_line, r)
+                ns = ('heap', self._fn, call_line, r, call_col)
                 stat = summ.heap_status.get(r)
                 if stat is not None:
                     st.status[ns] = stat
@@ -3380,6 +3497,10 @@ class _LifetimeAnalysis:
                             c = ('fld', c, m_)
                         st.held[c] = st.held[c] | mapped if c in st.held else mapped
                     self._mark_esc(mapped, st)
+        # arguments the callee stored away are handed off
+        for r in (summ.esc or ()):
+            if r[0] == 'param' and r[1] == fname and r[2] < len(arg_regs):
+                self._mark_esc(arg_regs[r[2]], st)
         return mset(summ.ret)
 
     def _do_free_mapped(self, regs, st, definite, when, call_line):

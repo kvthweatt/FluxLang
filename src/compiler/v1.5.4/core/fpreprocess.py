@@ -318,6 +318,8 @@ class FXPreprocessor:
                 if not s.endswith(';'):
                     directive = s.split()[0]
                     raise SyntaxError(f"[PREPROCESSOR] {directive} directive missing semicolon in {filepath} at line {lineno}")
+            if s.startswith("#endif;") and s != "#endif;":
+                raise SyntaxError(f"[PREPROCESSOR] #endif directive has trailing content after semicolon in {filepath} at line {lineno}")
         
         # Process line by line, tracking current file and local line number
         lines = file_content.splitlines()
